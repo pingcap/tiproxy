@@ -2,9 +2,9 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/crc32"
-	"time"
 
 	"github.com/pingcap/parser"
 	"github.com/pingcap/parser/ast"
@@ -13,7 +13,7 @@ import (
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/util"
 	gomysql "github.com/siddontang/go-mysql/mysql"
-	"github.com/tidb-incubator/weir/pkg/proxy/server"
+	"github.com/tidb-incubator/weir/pkg/proxy/sessionmgr/backend"
 	wast "github.com/tidb-incubator/weir/pkg/util/ast"
 	cb "github.com/tidb-incubator/weir/pkg/util/rate_limit_breaker/circuit_breaker"
 )
@@ -41,8 +41,7 @@ type QueryCtxImpl struct {
 	currentDB   string
 	parser      *parser.Parser
 	sessionVars *SessionVarsWrapper
-
-	connMgr *BackendConnManager
+	connMgr     *backend.BackendConnManager
 }
 
 func NewQueryCtxImpl(nsmgr NamespaceManager, connId uint64) *QueryCtxImpl {
@@ -50,6 +49,7 @@ func NewQueryCtxImpl(nsmgr NamespaceManager, connId uint64) *QueryCtxImpl {
 		connId:      connId,
 		nsmgr:       nsmgr,
 		parser:      parser.New(),
+		connMgr:     backend.NewBackendConnManager(),
 		sessionVars: NewSessionVarsWrapper(variable.NewSessionVars()),
 	}
 }
@@ -80,26 +80,6 @@ func (*QueryCtxImpl) SetValue(key fmt.Stringer, value interface{}) {
 	return
 }
 
-// TODO(eastfisher): Does weir need to support this?
-func (*QueryCtxImpl) SetProcessInfo(sql string, t time.Time, command byte, maxExecutionTime uint64) {
-	return
-}
-
-// TODO(eastfisher): remove this function when Driver interface is changed
-func (*QueryCtxImpl) CommitTxn(ctx context.Context) error {
-	return nil
-}
-
-// TODO(eastfisher): remove this function when Driver interface is changed
-func (*QueryCtxImpl) RollbackTxn() {
-	return
-}
-
-// TODO(eastfisher): implement this function
-func (*QueryCtxImpl) WarningCount() uint16 {
-	return 0
-}
-
 func (q *QueryCtxImpl) CurrentDB() string {
 	return q.currentDB
 }
@@ -114,11 +94,8 @@ func (q *QueryCtxImpl) Execute(ctx context.Context, sql string) (*gomysql.Result
 	tableName := wast.ExtractFirstTableNameFromStmt(stmt)
 	ctx = wast.CtxWithAstTableName(ctx, tableName)
 
-	sqlParadigm, err := q.extractSqlParadigm(ctx, sql)
-	if err != nil {
-		return nil, err
-	}
-	sqlDigest := crc32.ChecksumIEEE([]byte(sqlParadigm))
+	_, digest := parser.NormalizeDigest(sql)
+	sqlDigest := crc32.ChecksumIEEE([]byte(digest))
 
 	if q.isStmtDenied(ctx, sqlDigest) {
 		q.recordDeniedQueryMetrics(ctx, stmt)
@@ -126,11 +103,11 @@ func (q *QueryCtxImpl) Execute(ctx context.Context, sql string) (*gomysql.Result
 	}
 
 	if q.isStmtAllowed(ctx, sqlDigest) {
-		return q.execute(ctx, sql, stmt)
+		return q.execute(ctx, sql)
 	}
 
 	if !q.isStmtNeedToCheckCircuitBreaking(stmt) {
-		return q.execute(ctx, sql, stmt)
+		return q.execute(ctx, sql)
 	}
 
 	if rateLimitKey, ok := q.getRateLimiterKey(ctx, q.ns.GetRateLimiter()); ok && rateLimitKey != "" {
@@ -150,7 +127,7 @@ func (q *QueryCtxImpl) executeWithBreakerInterceptor(ctx context.Context, stmtNo
 
 	brName, ok := q.getBreakerName(ctx, sql, breaker)
 	if !ok {
-		return q.execute(ctx, sql, stmtNode)
+		return q.execute(ctx, sql)
 	}
 
 	status, brNum := breaker.Status(brName)
@@ -172,7 +149,7 @@ func (q *QueryCtxImpl) executeWithBreakerInterceptor(ctx context.Context, stmtNo
 	// TODO: handle err
 	defer breaker.RemoveTimeWheelTask(connId)
 
-	ret, err := q.execute(ctx, sql, stmtNode)
+	ret, err := q.execute(ctx, sql)
 
 	if triggerFlag == -1 {
 		// TODO: handle err
@@ -182,60 +159,8 @@ func (q *QueryCtxImpl) executeWithBreakerInterceptor(ctx context.Context, stmtNo
 	return ret, err
 }
 
-func (q *QueryCtxImpl) execute(ctx context.Context, sql string, stmtNode ast.StmtNode) (*gomysql.Result, error) {
-	startTime := time.Now()
-	ret, err := q.executeStmt(ctx, sql, stmtNode)
-	durationMilliSecond := float64(time.Since(startTime)) / float64(time.Second)
-	q.recordQueryMetrics(ctx, stmtNode, err, durationMilliSecond)
-	return ret, err
-}
-
-// TODO(eastfisher): remove this function when Driver interface is changed
-func (*QueryCtxImpl) ExecuteInternal(ctx context.Context, sql string) ([]server.ResultSet, error) {
-	return nil, nil
-}
-
-func (q *QueryCtxImpl) SetClientCapability(capability uint32) {
-	q.sessionVars.SetClientCapability(capability)
-}
-
-func (q *QueryCtxImpl) Prepare(ctx context.Context, sql string) (stmtId int, columns, params []*server.ColumnInfo, err error) {
-	stmt, err := q.connMgr.StmtPrepare(ctx, q.currentDB, sql)
-	if err != nil {
-		return -1, nil, nil, err
-	}
-
-	columns = createBinaryPrepareColumns(stmt.ColumnNum())
-	params = createBinaryPrepareParams(stmt.ParamNum())
-	return stmt.ID(), columns, params, nil
-}
-
-func (q *QueryCtxImpl) StmtExecuteForward(ctx context.Context, stmtId int, data []byte) (*gomysql.Result, error) {
-	return q.connMgr.StmtExecuteForward(ctx, stmtId, data)
-}
-
-func (q *QueryCtxImpl) StmtClose(ctx context.Context, stmtId int) error {
-	return q.connMgr.StmtClose(ctx, stmtId)
-}
-
-func (q *QueryCtxImpl) FieldList(tableName string) ([]*server.ColumnInfo, error) {
-	conn, err := q.ns.GetPooledConn(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	defer conn.PutBack()
-
-	if err := conn.UseDB(q.currentDB); err != nil {
-		return nil, err
-	}
-
-	fields, err := conn.FieldList(tableName, "")
-	if err != nil {
-		return nil, err
-	}
-
-	columns := convertFieldsToColumnInfos(fields)
-	return columns, nil
+func (q *QueryCtxImpl) execute(ctx context.Context, sql string) (*gomysql.Result, error) {
+	return q.executeStmt(ctx, sql)
 }
 
 func (q *QueryCtxImpl) Close() error {
@@ -248,15 +173,19 @@ func (q *QueryCtxImpl) Close() error {
 	return nil
 }
 
-func (q *QueryCtxImpl) Auth(user *auth.UserIdentity, pwd []byte, salt []byte) bool {
-	ns, ok := q.nsmgr.Auth(user.Username, pwd, salt)
+func (q *QueryCtxImpl) Auth(user *auth.UserIdentity, authData []byte, salt []byte) error {
+	ns, ok := q.nsmgr.Auth(user.Username, authData, salt)
 	if !ok {
-		return false
+		return errors.New("Unrecognized user")
 	}
 	q.ns = ns
-	q.initAttachedConnHolder()
+	authInfo := &backend.AuthInfo{
+		Username: user.Username,
+		AuthData: authData,
+	}
+	q.connMgr.SetAuthInfo(authInfo)
 	q.ns.IncrConnCount()
-	return true
+	return nil
 }
 
 // TODO(eastfisher): does weir need to support show processlist?
@@ -270,16 +199,6 @@ func (q *QueryCtxImpl) GetSessionVars() *variable.SessionVars {
 
 func (q *QueryCtxImpl) SetCommandValue(command byte) {
 	q.sessionVars.SetCommandValue(command)
-}
-
-// TODO(eastfisher): remove this function when Driver interface is changed
-func (*QueryCtxImpl) SetSessionManager(util.SessionManager) {
-	return
-}
-
-func (q *QueryCtxImpl) initAttachedConnHolder() {
-	connMgr := NewBackendConnManager(getGlobalFSM(), q.ns)
-	q.connMgr = connMgr
 }
 
 func (q *QueryCtxImpl) isStmtNeedToCheckCircuitBreaking(stmt ast.StmtNode) bool {

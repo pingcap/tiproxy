@@ -32,7 +32,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package net
 
 import (
 	"bufio"
@@ -42,34 +42,43 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/parser/terror"
+	"github.com/pingcap/tidb/errno"
 )
 
 const defaultWriterSize = 16 * 1024
 
+var (
+	errInvalidSequence = terror.ClassServer.New(errno.ErrInvalidSequence, errno.MySQLErrName[errno.ErrInvalidSequence])
+)
+
 // packetIO is a helper to read and write data in packet format.
-type packetIO struct {
-	bufReadConn *bufferedReadConn
+type PacketIO struct {
+	bufReadConn *BufferedReadConn
 	bufWriter   *bufio.Writer
 	sequence    uint8
 	readTimeout time.Duration
 }
 
-func newPacketIO(bufReadConn *bufferedReadConn) *packetIO {
-	p := &packetIO{sequence: 0}
-	p.setBufferedReadConn(bufReadConn)
+func NewPacketIO(bufReadConn *BufferedReadConn) *PacketIO {
+	p := &PacketIO{sequence: 0}
+	p.SetBufferedReadConn(bufReadConn)
 	return p
 }
 
-func (p *packetIO) setBufferedReadConn(bufReadConn *bufferedReadConn) {
+func (p *PacketIO) SetBufferedReadConn(bufReadConn *BufferedReadConn) {
 	p.bufReadConn = bufReadConn
 	p.bufWriter = bufio.NewWriterSize(bufReadConn, defaultWriterSize)
 }
 
-func (p *packetIO) setReadTimeout(timeout time.Duration) {
+func (p *PacketIO) SetReadTimeout(timeout time.Duration) {
 	p.readTimeout = timeout
 }
 
-func (p *packetIO) readOnePacket() ([]byte, error) {
+func (p *PacketIO) ResetSequence() {
+	p.sequence = 0
+}
+
+func (p *PacketIO) ReadOnePacket() ([]byte, error) {
 	var header [4]byte
 
 	if _, err := io.ReadFull(p.bufReadConn, header[:]); err != nil {
@@ -92,8 +101,8 @@ func (p *packetIO) readOnePacket() ([]byte, error) {
 	return data, nil
 }
 
-func (p *packetIO) readPacket() ([]byte, error) {
-	data, err := p.readOnePacket()
+func (p *PacketIO) ReadPacket() ([]byte, error) {
+	data, err := p.ReadOnePacket()
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -104,7 +113,7 @@ func (p *packetIO) readPacket() ([]byte, error) {
 
 	// handle multi-packet
 	for {
-		buf, err := p.readOnePacket()
+		buf, err := p.ReadOnePacket()
 		if err != nil {
 			return nil, errors.Trace(err)
 		}
@@ -120,7 +129,7 @@ func (p *packetIO) readPacket() ([]byte, error) {
 }
 
 // writePacket writes data that already have header
-func (p *packetIO) writePacket(data []byte) error {
+func (p *PacketIO) WritePacket(data []byte) error {
 	length := len(data) - 4
 
 	for length >= mysql.MaxPayloadLen {
@@ -157,7 +166,7 @@ func (p *packetIO) writePacket(data []byte) error {
 	}
 }
 
-func (p *packetIO) flush() error {
+func (p *PacketIO) Flush() error {
 	err := p.bufWriter.Flush()
 	if err != nil {
 		return errors.Trace(err)

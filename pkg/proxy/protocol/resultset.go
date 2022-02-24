@@ -1,11 +1,10 @@
-package driver
+package protocol
 
 import (
 	"context"
 	"fmt"
 	"sync/atomic"
 
-	"github.com/tidb-incubator/weir/pkg/proxy/server"
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/chunk"
 	"github.com/pingcap/tidb/util/hack"
@@ -14,7 +13,7 @@ import (
 
 type weirResultSet struct {
 	result      *mysql.Result
-	columnInfos []*server.ColumnInfo
+	columnInfos []*ColumnInfo
 	closed      int32
 	readed      bool
 }
@@ -28,28 +27,28 @@ func wrapMySQLResult(result *mysql.Result) *weirResultSet {
 	return resultSet
 }
 
-func createBinaryPrepareColumns(cnt int) []*server.ColumnInfo {
-	info := &server.ColumnInfo{}
+func createBinaryPrepareColumns(cnt int) []*ColumnInfo {
+	info := &ColumnInfo{}
 	return copyColumnInfo(info, cnt)
 }
 
-func createBinaryPrepareParams(cnt int) []*server.ColumnInfo {
-	info := &server.ColumnInfo{Name: "?"}
+func createBinaryPrepareParams(cnt int) []*ColumnInfo {
+	info := &ColumnInfo{Name: "?"}
 	return copyColumnInfo(info, cnt)
 }
 
-func copyColumnInfo(info *server.ColumnInfo, cnt int) []*server.ColumnInfo {
-	ret := make([]*server.ColumnInfo, 0, cnt)
+func copyColumnInfo(info *ColumnInfo, cnt int) []*ColumnInfo {
+	ret := make([]*ColumnInfo, 0, cnt)
 	for i := 0; i < cnt; i++ {
 		ret = append(ret, info)
 	}
 	return ret
 }
 
-func convertFieldsToColumnInfos(fields []*mysql.Field) []*server.ColumnInfo {
-	var columnInfos []*server.ColumnInfo
+func convertFieldsToColumnInfos(fields []*mysql.Field) []*ColumnInfo {
+	var columnInfos []*ColumnInfo
 	for _, field := range fields {
-		columnInfo := &server.ColumnInfo{
+		columnInfo := &ColumnInfo{
 			Schema:             string(hack.String(field.Schema)),
 			Table:              string(hack.String(field.Table)),
 			OrgTable:           string(hack.String(field.OrgTable)),
@@ -99,7 +98,7 @@ func writeResultSetDataToTrunk(r *mysql.Resultset, c *chunk.Chunk) {
 	}
 }
 
-func (w *weirResultSet) Columns() []*server.ColumnInfo {
+func (w *weirResultSet) Columns() []*ColumnInfo {
 	return w.columnInfos
 }
 

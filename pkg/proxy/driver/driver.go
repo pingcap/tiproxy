@@ -2,20 +2,24 @@ package driver
 
 import (
 	"crypto/tls"
-
-	"github.com/tidb-incubator/weir/pkg/proxy/server"
+	"net"
 )
 
+type createClientConnFunc func(QueryCtx, net.Conn, uint64, *tls.Config, uint32) ClientConnection
+
 type DriverImpl struct {
-	nsmgr NamespaceManager
+	nsmgr                NamespaceManager
+	createClientConnFunc createClientConnFunc
 }
 
-func NewDriverImpl(nsmgr NamespaceManager) *DriverImpl {
+func NewDriverImpl(nsmgr NamespaceManager, createClientConnFunc createClientConnFunc) *DriverImpl {
 	return &DriverImpl{
-		nsmgr: nsmgr,
+		nsmgr:                nsmgr,
+		createClientConnFunc: createClientConnFunc,
 	}
 }
 
-func (d *DriverImpl) OpenCtx(connID uint64, capability uint32, collation uint8, dbname string, tlsState *tls.ConnectionState) (server.QueryCtx, error) {
-	return NewQueryCtxImpl(d.nsmgr, connID), nil
+func (d *DriverImpl) CreateClientConnection(conn net.Conn, connectionID uint64, tlsConfig *tls.Config, serverCapability uint32) ClientConnection {
+	queryCtx := NewQueryCtxImpl(d.nsmgr, connectionID)
+	return d.createClientConnFunc(queryCtx, conn, connectionID, tlsConfig, serverCapability)
 }

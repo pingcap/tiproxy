@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package client
 
 import (
 	"bytes"
@@ -19,18 +19,22 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"io"
-	"sync/atomic"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/auth"
 	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
 )
 
-func (cc *clientConn) handshake(ctx context.Context) error {
+var (
+	errSecureTransportRequired = terror.ClassServer.New(errno.ErrSecureTransportRequired, errno.MySQLErrName[errno.ErrSecureTransportRequired])
+)
+
+func (cc *ClientConnectionImpl) handshake(ctx context.Context) error {
 	if err := cc.writeInitialHandshake(); err != nil {
 		if errors.Cause(err) == io.EOF {
 			logutil.Logger(ctx).Debug("Could not send handshake due to connection has be closed by client-side")
@@ -55,7 +59,7 @@ func (cc *clientConn) handshake(ctx context.Context) error {
 	}
 
 	err := cc.writePacket(data)
-	cc.pkt.sequence = 0
+	cc.pkt.ResetSequence()
 	if err != nil {
 		err = errors.SuspendStack(err)
 		logutil.Logger(ctx).Debug("write response to client failed", zap.Error(err))
@@ -71,7 +75,7 @@ func (cc *clientConn) handshake(ctx context.Context) error {
 	return err
 }
 
-func (cc *clientConn) readOptionalSSLRequestAndHandshakeResponse(ctx context.Context) error {
+func (cc *ClientConnectionImpl) readOptionalSSLRequestAndHandshakeResponse(ctx context.Context) error {
 	// Read a packet. It may be a SSLRequest or HandshakeResponse.
 	data, err := cc.readPacket()
 	if err != nil {
@@ -108,10 +112,9 @@ func (cc *clientConn) readOptionalSSLRequestAndHandshakeResponse(ctx context.Con
 	}
 
 	if resp.Capability&mysql.ClientSSL > 0 {
-		tlsConfig := (*tls.Config)(atomic.LoadPointer(&cc.server.tlsConfig))
-		if tlsConfig != nil {
+		if cc.tlsConfig != nil {
 			// The packet is a SSLRequest, let's switch to TLS.
-			if err = cc.upgradeToTLS(tlsConfig); err != nil {
+			if err = cc.upgradeToTLS(cc.tlsConfig); err != nil {
 				return err
 			}
 			// Read the following HandshakeResponse packet.
@@ -147,7 +150,7 @@ func (cc *clientConn) readOptionalSSLRequestAndHandshakeResponse(ctx context.Con
 		return err
 	}
 
-	cc.capability = resp.Capability & cc.server.capability
+	cc.capability = resp.Capability & cc.serverCapability
 	cc.user = resp.User
 	cc.dbname = resp.DBName
 	cc.collation = resp.Collation
@@ -162,7 +165,7 @@ func (cc *clientConn) readOptionalSSLRequestAndHandshakeResponse(ctx context.Con
 
 // writeInitialHandshake sends server version, connection ID, server capability, collation, server status
 // and auth salt to the client.
-func (cc *clientConn) writeInitialHandshake() error {
+func (cc *ClientConnectionImpl) writeInitialHandshake() error {
 	data := make([]byte, 4, 128)
 
 	// min version 10
@@ -177,7 +180,7 @@ func (cc *clientConn) writeInitialHandshake() error {
 	// filler [00]
 	data = append(data, 0)
 	// capability flag lower 2 bytes, using default capability here
-	data = append(data, byte(cc.server.capability), byte(cc.server.capability>>8))
+	data = append(data, byte(cc.serverCapability), byte(cc.serverCapability>>8))
 	// charset
 	if cc.collation == 0 {
 		cc.collation = uint8(mysql.DefaultCollationID)
@@ -187,7 +190,7 @@ func (cc *clientConn) writeInitialHandshake() error {
 	data = dumpUint16(data, mysql.ServerStatusAutocommit)
 	// below 13 byte may not be used
 	// capability flag upper 2 bytes, using default capability here
-	data = append(data, byte(cc.server.capability>>16), byte(cc.server.capability>>24))
+	data = append(data, byte(cc.serverCapability>>16), byte(cc.serverCapability>>24))
 	// length of auth-plugin-data
 	data = append(data, byte(len(cc.salt)+1))
 	// reserved 10 [00]
@@ -324,7 +327,7 @@ func parseOldHandshakeResponseHeader(ctx context.Context, packet *handshakeRespo
 	return offset, nil
 }
 
-func (cc *clientConn) upgradeToTLS(tlsConfig *tls.Config) error {
+func (cc *ClientConnectionImpl) upgradeToTLS(tlsConfig *tls.Config) error {
 	// Important: read from buffered reader instead of the original net.Conn because it may contain data we need.
 	tlsConn := tls.Server(cc.bufReadConn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
@@ -364,21 +367,8 @@ func parseOldHandshakeResponseBody(ctx context.Context, packet *handshakeRespons
 	return nil
 }
 
-func (cc *clientConn) openSessionAndDoAuth(authData []byte) error {
-	var tlsStatePtr *tls.ConnectionState
-	if cc.tlsConn != nil {
-		tlsState := cc.tlsConn.ConnectionState()
-		tlsStatePtr = &tlsState
-	}
+func (cc *ClientConnectionImpl) openSessionAndDoAuth(authData []byte) error {
 	var err error
-	cc.ctx, err = cc.server.driver.OpenCtx(uint64(cc.connectionID), cc.capability, cc.collation, cc.dbname, tlsStatePtr)
-	if err != nil {
-		return err
-	}
-
-	if err = cc.server.checkConnectionCount(); err != nil {
-		return err
-	}
 	hasPassword := "YES"
 	if len(authData) == 0 {
 		hasPassword = "NO"
@@ -387,19 +377,14 @@ func (cc *clientConn) openSessionAndDoAuth(authData []byte) error {
 	if err != nil {
 		return err
 	}
-	if !cc.ctx.Auth(&auth.UserIdentity{Username: cc.user, Hostname: host}, authData, cc.salt) {
-		return errAccessDenied.FastGenByArgs(cc.user, host, hasPassword)
+	err = cc.queryCtx.Auth(&auth.UserIdentity{Username: cc.user, Hostname: host}, authData, cc.salt)
+	if err != nil {
+		return err
 	}
-	if cc.dbname != "" {
-		err = cc.useDB(context.Background(), cc.dbname)
-		if err != nil {
-			return err
-		}
-	}
-	//cc.ctx.SetSessionManager(cc.server)
 	return nil
 }
 
+// TODO: save the data and send it to TiDB
 func parseAttrs(data []byte) (map[string]string, error) {
 	attrs := make(map[string]string)
 	pos := 0

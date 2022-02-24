@@ -6,12 +6,12 @@ import (
 	"net/http/pprof"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/tidb/util/logutil"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tidb-incubator/weir/pkg/config"
 	"github.com/tidb-incubator/weir/pkg/configcenter"
 	"github.com/tidb-incubator/weir/pkg/proxy/namespace"
 	"github.com/tidb-incubator/weir/pkg/proxy/server"
-	"github.com/pingcap/tidb/util/logutil"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 

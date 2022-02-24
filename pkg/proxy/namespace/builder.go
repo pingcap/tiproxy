@@ -4,13 +4,14 @@ import (
 	"hash/crc32"
 	"time"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/parser"
 	"github.com/tidb-incubator/weir/pkg/config"
 	"github.com/tidb-incubator/weir/pkg/proxy/backend"
 	"github.com/tidb-incubator/weir/pkg/proxy/driver"
+	"github.com/tidb-incubator/weir/pkg/proxy/router"
 	wast "github.com/tidb-incubator/weir/pkg/util/ast"
 	"github.com/tidb-incubator/weir/pkg/util/datastructure"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/parser"
 )
 
 type NamespaceImpl struct {
@@ -18,6 +19,7 @@ type NamespaceImpl struct {
 	Br   driver.Breaker
 	Backend
 	Frontend
+	router      router.Router
 	rateLimiter *NamespaceRateLimiter
 }
 
@@ -30,10 +32,15 @@ func BuildNamespace(cfg *config.Namespace) (Namespace, error) {
 	if err != nil {
 		return nil, errors.WithMessage(err, "build frontend error")
 	}
+	rt, err := BuildRouter(&cfg.Backend)
+	if err != nil {
+		return nil, errors.WithMessage(err, "build router error")
+	}
 	wrapper := &NamespaceImpl{
 		name:     cfg.Namespace,
 		Backend:  be,
 		Frontend: fe,
+		router:   rt,
 	}
 	brm, err := NewBreaker(&cfg.Breaker)
 	if err != nil {
@@ -61,6 +68,19 @@ func (n *NamespaceImpl) GetBreaker() (driver.Breaker, error) {
 
 func (n *NamespaceImpl) GetRateLimiter() driver.RateLimiter {
 	return n.rateLimiter
+}
+
+func (n *NamespaceImpl) GetRouter() router.Router {
+	return n.router
+}
+
+func BuildRouter(cfg *config.BackendNamespace) (router.Router, error) {
+	if len(cfg.Instances) == 0 {
+		return nil, errors.New("no instances for the backend")
+	}
+	rt := router.NewRandomRouter()
+	rt.SetAddresses(cfg.Instances)
+	return rt, nil
 }
 
 func BuildBackend(ns string, cfg *config.BackendNamespace) (Backend, error) {

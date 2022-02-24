@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/tidb-incubator/weir/pkg/util/rand2"
 	"github.com/stretchr/testify/assert"
+	"github.com/tidb-incubator/weir/pkg/util/rand2"
 )
 
 type testSource struct {
