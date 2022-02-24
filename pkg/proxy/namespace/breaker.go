@@ -1,15 +1,16 @@
 package namespace
 
 import (
+	"sort"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/tidb-incubator/weir/pkg/config"
 	"github.com/tidb-incubator/weir/pkg/proxy/driver"
 	rb "github.com/tidb-incubator/weir/pkg/util/rate_limit_breaker"
 	cb "github.com/tidb-incubator/weir/pkg/util/rate_limit_breaker/circuit_breaker"
 	"github.com/tidb-incubator/weir/pkg/util/timer"
-	"sort"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 type strategyInfo struct {

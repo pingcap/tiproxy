@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tidb-incubator/weir/pkg/util/sync2"
 	"github.com/stretchr/testify/assert"
+	"github.com/tidb-incubator/weir/pkg/util/sync2"
 )
 
 const (

@@ -15,6 +15,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"math/rand"
 	"net"
 	"sync"
@@ -22,26 +23,20 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/tidb-incubator/weir/pkg/config"
-	"github.com/tidb-incubator/weir/pkg/util/timer"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/metrics"
-	"github.com/pingcap/tidb/util/fastrand"
 	"github.com/pingcap/tidb/util/logutil"
+	"github.com/tidb-incubator/weir/pkg/config"
+	"github.com/tidb-incubator/weir/pkg/proxy/driver"
+	"github.com/tidb-incubator/weir/pkg/util/timer"
 	"go.uber.org/zap"
 )
 
 var (
-	errUnknownFieldType        = terror.ClassServer.New(errno.ErrUnknownFieldType, errno.MySQLErrName[errno.ErrUnknownFieldType])
-	errInvalidSequence         = terror.ClassServer.New(errno.ErrInvalidSequence, errno.MySQLErrName[errno.ErrInvalidSequence])
-	errInvalidType             = terror.ClassServer.New(errno.ErrInvalidType, errno.MySQLErrName[errno.ErrInvalidType])
-	errNotAllowedCommand       = terror.ClassServer.New(errno.ErrNotAllowedCommand, errno.MySQLErrName[errno.ErrNotAllowedCommand])
-	errAccessDenied            = terror.ClassServer.New(errno.ErrAccessDenied, errno.MySQLErrName[errno.ErrAccessDenied])
-	errConCount                = terror.ClassServer.New(errno.ErrConCount, errno.MySQLErrName[errno.ErrConCount])
-	errSecureTransportRequired = terror.ClassServer.New(errno.ErrSecureTransportRequired, errno.MySQLErrName[errno.ErrSecureTransportRequired])
+	errConCount = terror.ClassServer.New(errno.ErrConCount, errno.MySQLErrName[errno.ErrConCount])
 
 	timeWheelUnit       = time.Second * 1
 	timeWheelBucketsNum = 3600
@@ -58,18 +53,18 @@ const defaultCapability = mysql.ClientLongPassword | mysql.ClientLongFlag |
 type Server struct {
 	cfg            *config.Proxy
 	tlsConfig      unsafe.Pointer // *tls.Config
-	driver         IDriver
+	driver         driver.IDriver
 	listener       net.Listener
 	rwlock         sync.RWMutex
-	clients        map[uint32]*clientConn
-	baseConnID     uint32
+	clients        map[uint64]driver.ClientConnection
+	baseConnID     uint64
 	capability     uint32
 	sessionTimeout time.Duration
 	tw             *timer.TimeWheel
 }
 
 // NewServer creates a new Server.
-func NewServer(cfg *config.Proxy, driver IDriver) (*Server, error) {
+func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 	tw, err := timer.NewTimeWheel(timeWheelUnit, timeWheelBucketsNum)
 	if err != nil {
 		return nil, err
@@ -79,8 +74,8 @@ func NewServer(cfg *config.Proxy, driver IDriver) (*Server, error) {
 
 	s := &Server{
 		cfg:            cfg,
-		driver:         driver,
-		clients:        make(map[uint32]*clientConn),
+		driver:         d,
+		clients:        make(map[uint64]driver.ClientConnection),
 		sessionTimeout: time.Duration(cfg.ProxyServer.SessionTimeout) * time.Second,
 		tw:             tw,
 	}
@@ -140,6 +135,9 @@ func (s *Server) Run() error {
 			return errors.Trace(err)
 		}
 
+		if err = s.checkConnectionCount(); err != nil {
+			return err
+		}
 		clientConn := s.newConn(conn)
 		go s.onConn(clientConn)
 	}
@@ -153,35 +151,24 @@ func (s *Server) ConnectionCount() int {
 	return cnt
 }
 
-func (s *Server) onConn(conn *clientConn) {
-	ctx := logutil.WithConnID(context.Background(), conn.connectionID)
-	if err := conn.handshake(ctx); err != nil {
-		// Some keep alive services will send request to TiDB and disconnect immediately.
-		// So we only record metrics.
-		metrics.HandShakeErrorCounter.Inc()
-		err = conn.Close()
-		terror.Log(errors.Trace(err))
-		return
-	}
-
-	logutil.Logger(ctx).Info("new connection", zap.String("remoteAddr", conn.bufReadConn.RemoteAddr().String()))
+func (s *Server) onConn(conn driver.ClientConnection) {
+	ctx := logutil.WithConnID(context.Background(), uint32(conn.ConnectionID()))
+	logutil.Logger(ctx).Info("new connection", zap.String("remoteAddr", conn.Addr()))
 
 	defer func() {
 		logutil.Logger(ctx).Info("connection closed")
 	}()
 
 	s.rwlock.Lock()
-	s.clients[conn.connectionID] = conn
+	s.clients[conn.ConnectionID()] = conn
 	connections := len(s.clients)
 	s.rwlock.Unlock()
 	metrics.ConnGauge.Set(float64(connections))
 
-	conn.setWaitTimeout(ctx)
 	conn.Run(ctx)
 }
 
-func (s *Server) newConn(conn net.Conn) *clientConn {
-	cc := newClientConn(s)
+func (s *Server) newConn(conn net.Conn) driver.ClientConnection {
 	if s.cfg.Performance.TCPKeepAlive {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
 			if err := tcpConn.SetKeepAlive(true); err != nil {
@@ -189,9 +176,9 @@ func (s *Server) newConn(conn net.Conn) *clientConn {
 			}
 		}
 	}
-	cc.setConn(conn)
-	cc.salt = fastrand.Buf(20)
-	return cc
+	connectionID := atomic.AddUint64(&s.baseConnID, 1)
+	tlsConfig := (*tls.Config)(atomic.LoadPointer(&s.tlsConfig))
+	return s.driver.CreateClientConnection(conn, connectionID, tlsConfig, s.capability)
 }
 
 func (s *Server) checkConnectionCount() error {
@@ -231,101 +218,12 @@ func (s *Server) Close() {
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventClose).Inc()
 }
 
-func killConn(conn *clientConn) {
-	sessVars := conn.ctx.GetSessionVars()
-	atomic.StoreUint32(&sessVars.Killed, 1)
-}
-
-// KillAllConnections kills all connections when server is not gracefully shutdown.
-func (s *Server) KillAllConnections() {
-	logutil.BgLogger().Info("[server] kill all connections.")
-
-	s.rwlock.RLock()
-	defer s.rwlock.RUnlock()
-	for _, conn := range s.clients {
-		atomic.StoreInt32(&conn.status, connStatusShutdown)
-		if err := conn.closeWithoutLock(); err != nil {
-			terror.Log(err)
-		}
-		killConn(conn)
-	}
-}
-
-// KillOneConnections kills one connections when server is not gracefully shutdown.
-func (s *Server) KillOneConnections(connectionID uint32) {
-	logutil.BgLogger().Info("[server] kill one connections.")
-
-	s.rwlock.RLock()
-	defer s.rwlock.RUnlock()
-	if conn, ok := s.clients[connectionID]; ok {
-		atomic.StoreInt32(&conn.status, connStatusShutdown)
-		if err := conn.closeWithoutLock(); err != nil {
-			terror.Log(err)
-		}
-		killConn(conn)
-	}
-}
-
-var gracefulCloseConnectionsTimeout = 15 * time.Second
-
 // TryGracefulDown will try to gracefully close all connection first with timeout. if timeout, will close all connection directly.
 func (s *Server) TryGracefulDown() {
-	ctx, cancel := context.WithTimeout(context.Background(), gracefulCloseConnectionsTimeout)
-	defer cancel()
-	done := make(chan struct{})
-	go func() {
-		s.GracefulDown(ctx, done)
-	}()
-	select {
-	case <-ctx.Done():
-		s.KillAllConnections()
-	case <-done:
-		return
-	}
+	return
 }
 
 // GracefulDown waits all clients to close.
 func (s *Server) GracefulDown(ctx context.Context, done chan struct{}) {
-	logutil.Logger(ctx).Info("[server] graceful shutdown.")
-	metrics.ServerEventCounter.WithLabelValues(metrics.EventGracefulDown).Inc()
-
-	count := s.ConnectionCount()
-	for i := 0; count > 0; i++ {
-		s.kickIdleConnection()
-
-		count = s.ConnectionCount()
-		if count == 0 {
-			break
-		}
-		// Print information for every 30s.
-		if i%30 == 0 {
-			logutil.Logger(ctx).Info("graceful shutdown...", zap.Int("conn count", count))
-		}
-		ticker := time.After(time.Second)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker:
-		}
-	}
-	close(done)
-}
-
-func (s *Server) kickIdleConnection() {
-	var conns []*clientConn
-	s.rwlock.RLock()
-	for _, cc := range s.clients {
-		if cc.ShutdownOrNotify() {
-			// Shutdowned conn will be closed by us, and notified conn will exist themselves.
-			conns = append(conns, cc)
-		}
-	}
-	s.rwlock.RUnlock()
-
-	for _, cc := range conns {
-		err := cc.Close()
-		if err != nil {
-			logutil.BgLogger().Error("close connection", zap.Error(err))
-		}
-	}
+	return
 }

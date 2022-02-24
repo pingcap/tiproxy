@@ -3,8 +3,8 @@ package namespace
 import (
 	"fmt"
 
-	"github.com/tidb-incubator/weir/pkg/config"
 	"github.com/pingcap/errors"
+	"github.com/tidb-incubator/weir/pkg/config"
 )
 
 type UserNamespaceMapper struct {

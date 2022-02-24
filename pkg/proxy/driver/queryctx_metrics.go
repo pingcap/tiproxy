@@ -3,9 +3,9 @@ package driver
 import (
 	"context"
 
+	"github.com/pingcap/parser/ast"
 	"github.com/tidb-incubator/weir/pkg/proxy/metrics"
 	wast "github.com/tidb-incubator/weir/pkg/util/ast"
-	"github.com/pingcap/parser/ast"
 )
 
 func (q *QueryCtxImpl) recordQueryMetrics(ctx context.Context, stmt ast.StmtNode, err error, durationMilliSecond float64) {

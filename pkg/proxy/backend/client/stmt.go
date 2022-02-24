@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/tidb-incubator/weir/pkg/proxy/driver"
 	"github.com/pingcap/errors"
 	. "github.com/siddontang/go-mysql/mysql"
+	"github.com/tidb-incubator/weir/pkg/proxy/driver"
 )
 
 type Stmt struct {

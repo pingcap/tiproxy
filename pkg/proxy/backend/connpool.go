@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/parser/ast"
+	"github.com/pingcap/parser/format"
+	"github.com/pingcap/tidb/util/logutil"
 	"github.com/tidb-incubator/weir/pkg/proxy/backend/client"
 	"github.com/tidb-incubator/weir/pkg/proxy/constant"
 	"github.com/tidb-incubator/weir/pkg/proxy/driver"
 	"github.com/tidb-incubator/weir/pkg/proxy/metrics"
 	"github.com/tidb-incubator/weir/pkg/util/pool"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/parser/ast"
-	"github.com/pingcap/parser/format"
-	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
 )
 

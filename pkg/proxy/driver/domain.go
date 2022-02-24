@@ -2,7 +2,13 @@ package driver
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
+	"net"
 
+	"github.com/pingcap/parser/auth"
+	"github.com/pingcap/tidb/sessionctx/variable"
+	"github.com/pingcap/tidb/util"
 	"github.com/siddontang/go-mysql/mysql"
 )
 
@@ -79,4 +85,53 @@ type Stmt interface {
 	ID() int
 	ParamNum() int
 	ColumnNum() int
+}
+
+type ClientConnection interface {
+	ConnectionID() uint64
+	Addr() string
+	Run(context.Context)
+	Close() error
+}
+
+type BackendConnManager interface {
+	SetAuthInfo(username string, authData []byte)
+	Connect(address string) error
+	Query(ctx context.Context, sql string) (*mysql.Result, error)
+}
+
+// QueryCtx is the interface to execute command.
+type QueryCtx interface {
+	// Status returns server status code.
+	Status() uint16
+
+	// AffectedRows returns affected rows of last executed command.
+	AffectedRows() uint64
+
+	// Value returns the value associated with this context for key.
+	Value(key fmt.Stringer) interface{}
+
+	// SetValue saves a value associated with this context for key.
+	SetValue(key fmt.Stringer, value interface{})
+
+	// Execute executes a SQL statement.
+	Execute(ctx context.Context, sql string) (*mysql.Result, error)
+
+	// Close closes the QueryCtx.
+	Close() error
+
+	// Auth verifies user's authentication.
+	Auth(user *auth.UserIdentity, auth []byte, salt []byte) error
+
+	// ShowProcess shows the information about the session.
+	ShowProcess() *util.ProcessInfo
+
+	// GetSessionVars return SessionVars.
+	GetSessionVars() *variable.SessionVars
+
+	SetCommandValue(command byte)
+}
+
+type IDriver interface {
+	CreateClientConnection(conn net.Conn, connectionID uint64, tlsConfig *tls.Config, serverCapability uint32) ClientConnection
 }
