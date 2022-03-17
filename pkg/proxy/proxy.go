@@ -9,6 +9,7 @@ import (
 	"github.com/tidb-incubator/weir/pkg/proxy/metrics"
 	"github.com/tidb-incubator/weir/pkg/proxy/namespace"
 	"github.com/tidb-incubator/weir/pkg/proxy/server"
+	"github.com/tidb-incubator/weir/pkg/proxy/sessionmgr/backend"
 	"github.com/tidb-incubator/weir/pkg/proxy/sessionmgr/client"
 )
 
@@ -53,7 +54,7 @@ func (p *Proxy) Init() error {
 		return err
 	}
 	p.nsmgr = nsmgr
-	driverImpl := driver.NewDriverImpl(nsmgr, client.NewClientConnectionImpl)
+	driverImpl := driver.NewDriverImpl(nsmgr, client.NewClientConnectionImpl, backend.NewBackendConnManager)
 	svr, err := server.NewServer(p.cfg, driverImpl)
 	if err != nil {
 		return err

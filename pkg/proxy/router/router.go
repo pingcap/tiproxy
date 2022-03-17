@@ -9,18 +9,12 @@ var (
 	ErrNoInstanceToSelect = errors.New("no instances to route")
 )
 
-type Router interface {
-	SetAddresses([]string)
-	Route() (string, error)
-	AddConnOnAddr(string, int)
-}
-
 type RandomRouter struct {
 	addresses  []string
 	addr2Conns map[string]int
 }
 
-func NewRandomRouter() Router {
+func NewRandomRouter() *RandomRouter {
 	return &RandomRouter{
 		addr2Conns: make(map[string]int, 0),
 	}

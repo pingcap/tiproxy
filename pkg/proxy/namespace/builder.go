@@ -19,7 +19,7 @@ type NamespaceImpl struct {
 	Br   driver.Breaker
 	Backend
 	Frontend
-	router      router.Router
+	router      driver.Router
 	rateLimiter *NamespaceRateLimiter
 }
 
@@ -70,11 +70,11 @@ func (n *NamespaceImpl) GetRateLimiter() driver.RateLimiter {
 	return n.rateLimiter
 }
 
-func (n *NamespaceImpl) GetRouter() router.Router {
+func (n *NamespaceImpl) GetRouter() driver.Router {
 	return n.router
 }
 
-func BuildRouter(cfg *config.BackendNamespace) (router.Router, error) {
+func BuildRouter(cfg *config.BackendNamespace) (driver.Router, error) {
 	if len(cfg.Instances) == 0 {
 		return nil, errors.New("no instances for the backend")
 	}

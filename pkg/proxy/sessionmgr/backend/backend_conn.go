@@ -2,6 +2,7 @@ package backend
 
 import (
 	"github.com/siddontang/go-mysql/packet"
+	"github.com/tidb-incubator/weir/pkg/util/auth"
 )
 
 type connectionPhase byte
@@ -15,7 +16,7 @@ const (
 )
 
 type BackendConnection interface {
-	Connect(username string, authData []byte) error
+	Connect(authInfo *auth.AuthInfo) error
 	Close() error
 }
 
@@ -24,17 +25,17 @@ type BackendConnectionImpl struct {
 
 	phase      connectionPhase
 	capability uint32
-	server     *BackendServer
+	address    string
 }
 
-func NewBackendConnectionImpl(backendServer *BackendServer) *BackendConnectionImpl {
+func NewBackendConnectionImpl(address string) *BackendConnectionImpl {
 	return &BackendConnectionImpl{
-		phase:  handshaking,
-		server: backendServer,
+		phase:   handshaking,
+		address: address,
 	}
 }
 
-func (conn *BackendConnectionImpl) Connect(username string, authData []byte) error {
+func (conn *BackendConnectionImpl) Connect(authInfo *auth.AuthInfo) error {
 	return nil
 }
 
