@@ -17,6 +17,7 @@ type Namespace interface {
 	Close()
 	GetBreaker() (driver.Breaker, error)
 	GetRateLimiter() driver.RateLimiter
+	GetRouter() driver.Router
 }
 
 type Frontend interface {

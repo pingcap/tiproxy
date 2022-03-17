@@ -108,6 +108,10 @@ func (n *NamespaceWrapper) GetRateLimiter() driver.RateLimiter {
 	return n.mustGetCurrentNamespace().GetRateLimiter()
 }
 
+func (n *NamespaceWrapper) GetRouter() driver.Router {
+	return n.mustGetCurrentNamespace().GetRouter()
+}
+
 func (n *NamespaceWrapper) mustGetCurrentNamespace() Namespace {
 	ns, ok := n.nsmgr.getCurrentNamespaces().Get(n.name)
 	if !ok {

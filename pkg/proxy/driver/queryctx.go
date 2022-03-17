@@ -13,8 +13,8 @@ import (
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/util"
 	gomysql "github.com/siddontang/go-mysql/mysql"
-	"github.com/tidb-incubator/weir/pkg/proxy/sessionmgr/backend"
 	wast "github.com/tidb-incubator/weir/pkg/util/ast"
+	wauth "github.com/tidb-incubator/weir/pkg/util/auth"
 	cb "github.com/tidb-incubator/weir/pkg/util/rate_limit_breaker/circuit_breaker"
 )
 
@@ -41,15 +41,15 @@ type QueryCtxImpl struct {
 	currentDB   string
 	parser      *parser.Parser
 	sessionVars *SessionVarsWrapper
-	connMgr     *backend.BackendConnManager
+	connMgr     BackendConnManager
 }
 
-func NewQueryCtxImpl(nsmgr NamespaceManager, connId uint64) *QueryCtxImpl {
+func NewQueryCtxImpl(nsmgr NamespaceManager, backendConnMgr BackendConnManager, connId uint64) *QueryCtxImpl {
 	return &QueryCtxImpl{
 		connId:      connId,
 		nsmgr:       nsmgr,
 		parser:      parser.New(),
-		connMgr:     backend.NewBackendConnManager(),
+		connMgr:     backendConnMgr,
 		sessionVars: NewSessionVarsWrapper(variable.NewSessionVars()),
 	}
 }
@@ -174,16 +174,24 @@ func (q *QueryCtxImpl) Close() error {
 }
 
 func (q *QueryCtxImpl) Auth(user *auth.UserIdentity, authData []byte, salt []byte) error {
+	// Looks up namespace.
 	ns, ok := q.nsmgr.Auth(user.Username, authData, salt)
 	if !ok {
 		return errors.New("Unrecognized user")
 	}
 	q.ns = ns
-	authInfo := &backend.AuthInfo{
-		Username: user.Username,
-		AuthData: authData,
+	authInfo := &wauth.AuthInfo{
+		Username:   user.Username,
+		AuthString: authData,
+	}
+	addr, err := ns.GetRouter().Route()
+	if err != nil {
+		return err
 	}
 	q.connMgr.SetAuthInfo(authInfo)
+	if err = q.connMgr.Connect(addr); err != nil {
+		return err
+	}
 	q.ns.IncrConnCount()
 	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 
 	gomysql "github.com/siddontang/go-mysql/mysql"
+	"github.com/tidb-incubator/weir/pkg/proxy/driver"
+	"github.com/tidb-incubator/weir/pkg/util/auth"
 )
 
 type ConnectionPhase byte
@@ -24,20 +26,14 @@ const (
 	StatusPrepareWaitFetch   uint32 = 0x08
 )
 
-type AuthInfo struct {
-	// user information obtained during authentication
-	Username string
-	AuthData []byte
-}
-
 type BackendConnManager struct {
 	backendConn     BackendConnection
 	connectionPhase ConnectionPhase
 	serverStatus    uint32
-	authInfo        *AuthInfo
+	authInfo        *auth.AuthInfo
 }
 
-func NewBackendConnManager() *BackendConnManager {
+func NewBackendConnManager() driver.BackendConnManager {
 	return &BackendConnManager{
 		connectionPhase: InitBackend,
 		serverStatus:    StatusAutoCommit,
@@ -56,18 +52,19 @@ func (mgr *BackendConnManager) Run(context context.Context) {
 	}
 }
 
-func (mgr *BackendConnManager) SetAuthInfo(authInfo *AuthInfo) {
+func (mgr *BackendConnManager) SetAuthInfo(authInfo *auth.AuthInfo) {
 	mgr.authInfo = authInfo
 }
 
-func (mgr *BackendConnManager) Connect(server *BackendServer) error {
+func (mgr *BackendConnManager) Connect(address string) error {
+	// It may be still connecting to the original backend server.
 	if mgr.backendConn != nil {
 		if err := mgr.backendConn.Close(); err != nil {
 			return err
 		}
 	}
-	mgr.backendConn = NewBackendConnectionImpl(server)
-	return mgr.backendConn.Connect(mgr.authInfo.Username, mgr.authInfo.AuthData)
+	mgr.backendConn = NewBackendConnectionImpl(address)
+	return mgr.backendConn.Connect(mgr.authInfo)
 }
 
 func (mgr *BackendConnManager) initSessionStates() error {

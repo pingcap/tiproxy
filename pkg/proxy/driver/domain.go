@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/util"
 	"github.com/siddontang/go-mysql/mysql"
+	wauth "github.com/tidb-incubator/weir/pkg/util/auth"
 )
 
 type NamespaceManager interface {
@@ -27,6 +28,7 @@ type Namespace interface {
 	DescConnCount()
 	GetBreaker() (Breaker, error)
 	GetRateLimiter() RateLimiter
+	GetRouter() Router
 }
 
 type Breaker interface {
@@ -43,6 +45,12 @@ type Breaker interface {
 type RateLimiter interface {
 	Scope() string
 	Limit(ctx context.Context, key string) error
+}
+
+type Router interface {
+	SetAddresses([]string)
+	Route() (string, error)
+	AddConnOnAddr(string, int)
 }
 
 type PooledBackendConn interface {
@@ -95,9 +103,10 @@ type ClientConnection interface {
 }
 
 type BackendConnManager interface {
-	SetAuthInfo(username string, authData []byte)
+	SetAuthInfo(authInfo *wauth.AuthInfo)
 	Connect(address string) error
 	Query(ctx context.Context, sql string) (*mysql.Result, error)
+	Close() error
 }
 
 // QueryCtx is the interface to execute command.
@@ -134,4 +143,5 @@ type QueryCtx interface {
 
 type IDriver interface {
 	CreateClientConnection(conn net.Conn, connectionID uint64, tlsConfig *tls.Config, serverCapability uint32) ClientConnection
+	CreateBackendConnManager() BackendConnManager
 }
