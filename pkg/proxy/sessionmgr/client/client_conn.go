@@ -6,10 +6,12 @@ import (
 	"net"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/parser/mysql"
 	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/util/arena"
 	"github.com/pingcap/tidb/util/fastrand"
+	"github.com/pingcap/tidb/util/hack"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/tidb-incubator/weir/pkg/proxy/driver"
 	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
@@ -64,16 +66,54 @@ func (cc *ClientConnectionImpl) Auth() error {
 }
 
 func (cc *ClientConnectionImpl) Run(ctx context.Context) {
-	if err := cc.handshake(ctx); err != nil {
-		// Some keep alive services will send request to TiDB and disconnect immediately.
-		// So we only record metrics.
+	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt); err != nil {
+		logutil.Logger(ctx).Info("new connection fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
 		metrics.HandShakeErrorCounter.Inc()
 		err = cc.Close()
 		terror.Log(errors.Trace(err))
 		return
 	}
-	logutil.Logger(ctx).Info("new connection", zap.String("remoteAddr", cc.bufReadConn.RemoteAddr().String()))
+	logutil.Logger(ctx).Info("new connection succeeds", zap.String("remoteAddr", cc.Addr()))
 
+	if err := cc.processMsg(ctx); err != nil {
+		logutil.Logger(ctx).Info("forward message fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
+	}
+}
+
+func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
+	for {
+		cc.pkt.ResetSequence()
+		clientPkt, err := cc.pkt.ReadPacket()
+		if err != nil {
+			return err
+		}
+		cmd := clientPkt[0]
+		cmdStr, ok := mysql.Command2Str[cmd]
+		if !ok {
+			cmdStr = "unknown"
+		}
+		switch cmd {
+		case mysql.ComQuery:
+			var data []byte
+			var dataStr string
+			if len(clientPkt) > 1 && clientPkt[len(clientPkt)-1] == 0 {
+				data = clientPkt[1 : len(clientPkt)-1]
+			} else {
+				data = clientPkt[1:]
+			}
+			dataStr = string(hack.String(data))
+			logutil.Logger(ctx).Info("receive cmd", zap.String("query", dataStr))
+		case mysql.ComQuit:
+			logutil.Logger(ctx).Info("quit")
+			return nil
+		default:
+			logutil.Logger(ctx).Info("receive cmd", zap.String("cmd", cmdStr))
+		}
+		err = cc.queryCtx.ExecuteCmd(ctx, clientPkt, cc.pkt)
+		if err != nil {
+			return err
+		}
+	}
 }
 
 func (cc *ClientConnectionImpl) Close() error {

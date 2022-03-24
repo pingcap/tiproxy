@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/util"
 	"github.com/siddontang/go-mysql/mysql"
+	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
 	wauth "github.com/tidb-incubator/weir/pkg/util/auth"
 )
 
@@ -104,7 +105,8 @@ type ClientConnection interface {
 
 type BackendConnManager interface {
 	SetAuthInfo(authInfo *wauth.AuthInfo)
-	Connect(address string) error
+	Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO) error
+	ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error
 	Query(ctx context.Context, sql string) (*mysql.Result, error)
 	Close() error
 }
@@ -126,8 +128,12 @@ type QueryCtx interface {
 	// Execute executes a SQL statement.
 	Execute(ctx context.Context, sql string) (*mysql.Result, error)
 
+	ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error
+
 	// Close closes the QueryCtx.
 	Close() error
+
+	ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO) error
 
 	// Auth verifies user's authentication.
 	Auth(user *auth.UserIdentity, auth []byte, salt []byte) error

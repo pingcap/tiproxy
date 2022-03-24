@@ -13,6 +13,7 @@ import (
 	"github.com/pingcap/tidb/sessionctx/variable"
 	"github.com/pingcap/tidb/util"
 	gomysql "github.com/siddontang/go-mysql/mysql"
+	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
 	wast "github.com/tidb-incubator/weir/pkg/util/ast"
 	wauth "github.com/tidb-incubator/weir/pkg/util/auth"
 	cb "github.com/tidb-incubator/weir/pkg/util/rate_limit_breaker/circuit_breaker"
@@ -163,6 +164,10 @@ func (q *QueryCtxImpl) execute(ctx context.Context, sql string) (*gomysql.Result
 	return q.executeStmt(ctx, sql)
 }
 
+func (q *QueryCtxImpl) ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error {
+	return q.connMgr.ExecuteCmd(ctx, request, clientIO)
+}
+
 func (q *QueryCtxImpl) Close() error {
 	if q.ns != nil {
 		q.ns.DescConnCount()
@@ -170,6 +175,23 @@ func (q *QueryCtxImpl) Close() error {
 	if q.connMgr != nil {
 		return q.connMgr.Close()
 	}
+	return nil
+}
+
+func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO) error {
+	ns, ok := q.nsmgr.Auth("", nil, nil)
+	if !ok {
+		return errors.New("failed to find a namespace")
+	}
+	q.ns = ns
+	addr, err := ns.GetRouter().Route()
+	if err != nil {
+		return err
+	}
+	if err = q.connMgr.Connect(ctx, addr, clientIO); err != nil {
+		return err
+	}
+	q.ns.IncrConnCount()
 	return nil
 }
 
@@ -189,7 +211,7 @@ func (q *QueryCtxImpl) Auth(user *auth.UserIdentity, authData []byte, salt []byt
 		return err
 	}
 	q.connMgr.SetAuthInfo(authInfo)
-	if err = q.connMgr.Connect(addr); err != nil {
+	if err = q.connMgr.Connect(nil, addr, nil); err != nil {
 		return err
 	}
 	q.ns.IncrConnCount()

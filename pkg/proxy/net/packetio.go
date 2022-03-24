@@ -101,6 +101,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, error) {
 	return data, nil
 }
 
+// ReadPacket reads data and removes the header
 func (p *PacketIO) ReadPacket() ([]byte, error) {
 	data, err := p.ReadOnePacket()
 	if err != nil {
@@ -128,20 +129,23 @@ func (p *PacketIO) ReadPacket() ([]byte, error) {
 	return data, nil
 }
 
-// writePacket writes data that already have header
+// writePacket writes data without a header
 func (p *PacketIO) WritePacket(data []byte) error {
-	length := len(data) - 4
+	length := len(data)
+	header := make([]byte, 4, 4)
 
 	for length >= mysql.MaxPayloadLen {
-		data[0] = 0xff
-		data[1] = 0xff
-		data[2] = 0xff
+		header[0] = 0xff
+		header[1] = 0xff
+		header[2] = 0xff
+		header[3] = p.sequence
 
-		data[3] = p.sequence
-
-		if n, err := p.bufWriter.Write(data[:4+mysql.MaxPayloadLen]); err != nil {
+		if n, err := p.bufWriter.Write(header); err != nil || n != 4 {
 			return errors.Trace(mysql.ErrBadConn)
-		} else if n != (4 + mysql.MaxPayloadLen) {
+		}
+		if n, err := p.bufWriter.Write(data[:mysql.MaxPayloadLen]); err != nil {
+			return errors.Trace(mysql.ErrBadConn)
+		} else if n != mysql.MaxPayloadLen {
 			return errors.Trace(mysql.ErrBadConn)
 		} else {
 			p.sequence++
@@ -150,11 +154,14 @@ func (p *PacketIO) WritePacket(data []byte) error {
 		}
 	}
 
-	data[0] = byte(length)
-	data[1] = byte(length >> 8)
-	data[2] = byte(length >> 16)
-	data[3] = p.sequence
+	header[0] = byte(length)
+	header[1] = byte(length >> 8)
+	header[2] = byte(length >> 16)
+	header[3] = p.sequence
 
+	if n, err := p.bufWriter.Write(header); err != nil || n != 4 {
+		return errors.Trace(mysql.ErrBadConn)
+	}
 	if n, err := p.bufWriter.Write(data); err != nil {
 		terror.Log(errors.Trace(err))
 		return errors.Trace(mysql.ErrBadConn)

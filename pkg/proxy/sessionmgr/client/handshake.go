@@ -35,6 +35,14 @@ var (
 )
 
 func (cc *ClientConnectionImpl) handshake(ctx context.Context) error {
+	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt); err != nil {
+		return err
+	}
+	cc.pkt.ResetSequence()
+	return nil
+}
+
+func (cc *ClientConnectionImpl) handshake1(ctx context.Context) error {
 	if err := cc.writeInitialHandshake(); err != nil {
 		if errors.Cause(err) == io.EOF {
 			logutil.Logger(ctx).Debug("Could not send handshake due to connection has be closed by client-side")

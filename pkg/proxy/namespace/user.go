@@ -30,6 +30,12 @@ func CreateUserNamespaceMapper(namespaces []*config.Namespace) (*UserNamespaceMa
 }
 
 func (u *UserNamespaceMapper) GetUserNamespace(username string) (string, bool) {
+	if username == "" {
+		for _, ns := range u.userToNamespace {
+			return ns, true
+		}
+	}
+
 	ns, ok := u.userToNamespace[username]
 	return ns, ok
 }
