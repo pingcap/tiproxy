@@ -4,10 +4,8 @@ import (
 	"context"
 
 	"github.com/pingcap/parser/mysql"
-	gomysql "github.com/siddontang/go-mysql/mysql"
 	"github.com/tidb-incubator/weir/pkg/proxy/driver"
 	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
-	"github.com/tidb-incubator/weir/pkg/util/auth"
 )
 
 type ConnectionPhase byte
@@ -32,7 +30,6 @@ type BackendConnManager struct {
 	backendConn     BackendConnection
 	connectionPhase ConnectionPhase
 	serverStatus    uint32
-	authInfo        *auth.AuthInfo
 }
 
 func NewBackendConnManager() driver.BackendConnManager {
@@ -40,22 +37,6 @@ func NewBackendConnManager() driver.BackendConnManager {
 		connectionPhase: InitBackend,
 		serverStatus:    StatusAutoCommit,
 	}
-}
-
-func (mgr *BackendConnManager) Run(context context.Context) {
-	for {
-		switch mgr.connectionPhase {
-		case InitBackend:
-		case InitStates:
-		case Command, WaitFinish:
-		case QueryStates:
-		case Disconnect:
-		}
-	}
-}
-
-func (mgr *BackendConnManager) SetAuthInfo(authInfo *auth.AuthInfo) {
-	mgr.authInfo = authInfo
 }
 
 func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO) error {
@@ -200,8 +181,4 @@ func (mgr *BackendConnManager) redirect() error {
 
 func (mgr *BackendConnManager) Close() error {
 	return nil
-}
-
-func (mgr *BackendConnManager) Query(ctx context.Context, sql string) (*gomysql.Result, error) {
-	return nil, nil
 }

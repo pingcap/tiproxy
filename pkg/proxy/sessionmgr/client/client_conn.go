@@ -10,7 +10,6 @@ import (
 	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/util/arena"
-	"github.com/pingcap/tidb/util/fastrand"
 	"github.com/pingcap/tidb/util/hack"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/tidb-incubator/weir/pkg/proxy/driver"
@@ -19,23 +18,19 @@ import (
 )
 
 type ClientConnectionImpl struct {
-	queryCtx         driver.QueryCtx
 	tlsConn          *tls.Conn // TLS connection, nil if not TLS.
 	tlsConfig        *tls.Config
-	collation        uint8
 	pkt              *pnet.PacketIO         // a helper to read and write data in packet format.
 	bufReadConn      *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
+	alloc            arena.Allocator
+	queryCtx         driver.QueryCtx
 	connectionID     uint64
+	user             string // user of the client.
+	dbname           string // default database name.
 	serverCapability uint32
 	capability       uint32 // final capability
-	status           int32
-	alloc            arena.Allocator
-	user             string            // user of the client.
-	dbname           string            // default database name.
-	salt             []byte            // random bytes used for authentication.
+	collation        uint8
 	attrs            map[string]string // attributes parsed from client handshake response, not used for now.
-	peerHost         string            // peer host
-	peerPort         string            // peer port
 }
 
 func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, tlsConfig *tls.Config, serverCapability uint32) driver.ClientConnection {
@@ -49,7 +44,6 @@ func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connection
 		bufReadConn:      bufReadConn,
 		pkt:              pkt,
 		connectionID:     connectionID,
-		salt:             fastrand.Buf(20),
 	}
 }
 

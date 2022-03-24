@@ -6,20 +6,15 @@ frontend:
   slow_sql_time: 50
   denied_sqls:
   denied_ips:
-  idle_timeout: 3600
-  users:
-    - username: "hello"
-      password: "world"
-    - username: "hello1"
-      password: "world1"
+  usernames:
+    - "hello"
+    - "hello1"
 backend:
   instances:
     - "127.0.0.1:4000"
   username: "root"
   password: ""
   selector_type: "random"
-  pool_size: 10
-  idle_timeout: 60
 breaker:
   scope: "sql"
   strategies:

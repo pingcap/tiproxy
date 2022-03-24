@@ -1,11 +1,5 @@
 package namespace
 
-import (
-	"bytes"
-
-	"github.com/tidb-incubator/weir/pkg/util/passwd"
-)
-
 type SQLInfo struct {
 	SQL string
 }
@@ -13,18 +7,9 @@ type SQLInfo struct {
 type FrontendNamespace struct {
 	allowedDBs   []string
 	allowedDBSet map[string]struct{}
-	userPasswd   map[string]string
+	usernames    []string
 	sqlBlacklist map[uint32]SQLInfo
 	sqlWhitelist map[uint32]SQLInfo
-}
-
-func (n *FrontendNamespace) Auth(username string, passwdBytes []byte, salt []byte) bool {
-	userPasswd, ok := n.userPasswd[username]
-	if !ok {
-		return false
-	}
-	userPasswdBytes := passwd.CalculatePassword(salt, []byte(userPasswd))
-	return bytes.Equal(userPasswdBytes, passwdBytes)
 }
 
 func (n *FrontendNamespace) IsDatabaseAllowed(db string) bool {

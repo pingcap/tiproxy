@@ -1,7 +1,6 @@
 package namespace
 
 import (
-	"context"
 	"fmt"
 	"sync/atomic"
 
@@ -79,10 +78,6 @@ func (n *NamespaceWrapper) IsDeniedSQL(sqlFeature uint32) bool {
 
 func (n *NamespaceWrapper) IsAllowedSQL(sqlFeature uint32) bool {
 	return n.mustGetCurrentNamespace().IsAllowedSQL(sqlFeature)
-}
-
-func (n *NamespaceWrapper) GetPooledConn(ctx context.Context) (driver.PooledBackendConn, error) {
-	return n.mustGetCurrentNamespace().GetPooledConn(ctx)
 }
 
 func (n *NamespaceWrapper) IncrConnCount() {

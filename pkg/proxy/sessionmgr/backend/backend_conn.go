@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/util/arena"
-	"github.com/siddontang/go-mysql/packet"
 	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
 )
 
@@ -27,14 +26,12 @@ type BackendConnection interface {
 }
 
 type BackendConnectionImpl struct {
-	*packet.Conn
 	pkt         *pnet.PacketIO         // a helper to read and write data in packet format.
 	bufReadConn *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
 	alloc       arena.Allocator
-
-	phase      connectionPhase
-	capability uint32
-	address    string
+	phase       connectionPhase
+	capability  uint32
+	address     string
 }
 
 func NewBackendConnectionImpl(address string) *BackendConnectionImpl {

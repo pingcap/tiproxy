@@ -10,18 +10,12 @@ type Namespace struct {
 }
 
 type FrontendNamespace struct {
-	AllowedDBs   []string           `yaml:"allowed_dbs"`
-	SlowSQLTime  int                `yaml:"slow_sql_time"`
-	DeniedIPs    []string           `yaml:"denied_ips"`
-	IdleTimeout  int                `yaml:"idle_timeout"`
-	Users        []FrontendUserInfo `yaml:"users"`
-	SQLBlackList []SQLInfo          `yaml:"sql_blacklist"`
-	SQLWhiteList []SQLInfo          `yaml:"sql_whitelist"`
-}
-
-type FrontendUserInfo struct {
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
+	AllowedDBs   []string  `yaml:"allowed_dbs"`
+	SlowSQLTime  int       `yaml:"slow_sql_time"`
+	DeniedIPs    []string  `yaml:"denied_ips"`
+	Usernames    []string  `yaml:"usernames"`
+	SQLBlackList []SQLInfo `yaml:"sql_blacklist"`
+	SQLWhiteList []SQLInfo `yaml:"sql_whitelist"`
 }
 
 type SQLInfo struct {
@@ -34,12 +28,8 @@ type RateLimiterInfo struct {
 }
 
 type BackendNamespace struct {
-	Username     string   `yaml:"username"`
-	Password     string   `yaml:"password"`
 	Instances    []string `yaml:"instances"`
 	SelectorType string   `yaml:"selector_type"`
-	PoolSize     int      `yaml:"pool_size"`
-	IdleTimeout  int      `yaml:"idle_timeout"`
 }
 
 type StrategyInfo struct {

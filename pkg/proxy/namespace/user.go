@@ -15,13 +15,13 @@ func CreateUserNamespaceMapper(namespaces []*config.Namespace) (*UserNamespaceMa
 	mapper := make(map[string]string)
 	for _, ns := range namespaces {
 		frontendNamespace := ns.Frontend
-		for _, user := range frontendNamespace.Users {
-			originNamespace, ok := mapper[user.Username]
+		for _, user := range frontendNamespace.Usernames {
+			originNamespace, ok := mapper[user]
 			if ok {
 				return nil, errors.WithMessage(ErrDuplicatedUser,
-					fmt.Sprintf("user: %s, namespace: %s, %s", user.Username, originNamespace, ns.Namespace))
+					fmt.Sprintf("user: %s, namespace: %s, %s", user, originNamespace, ns.Namespace))
 			}
-			mapper[user.Username] = ns.Namespace
+			mapper[user] = ns.Namespace
 		}
 	}
 
@@ -57,11 +57,11 @@ func (u *UserNamespaceMapper) RemoveNamespaceUsers(ns string) {
 }
 
 func (u *UserNamespaceMapper) AddNamespaceUsers(ns string, cfg *config.FrontendNamespace) error {
-	for _, userInfo := range cfg.Users {
-		if originNamespace, ok := u.userToNamespace[userInfo.Username]; ok {
+	for _, user := range cfg.Usernames {
+		if originNamespace, ok := u.userToNamespace[user]; ok {
 			return errors.WithMessage(ErrDuplicatedUser, fmt.Sprintf("namespace: %s", originNamespace))
 		}
-		u.userToNamespace[userInfo.Username] = ns
+		u.userToNamespace[user] = ns
 	}
 	return nil
 }
