@@ -3,8 +3,9 @@ package driver
 import (
 	"context"
 	"errors"
-	"github.com/pingcap/parser"
-	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
+
+	pnet "github.com/djshow832/weir/pkg/proxy/net"
+	"github.com/pingcap/tidb/parser"
 )
 
 // Server information.

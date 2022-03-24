@@ -40,15 +40,16 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/parser/mysql"
-	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/errno"
+	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tidb/parser/terror"
+	"github.com/pingcap/tidb/util/dbterror"
 )
 
 const defaultWriterSize = 16 * 1024
 
 var (
-	errInvalidSequence = terror.ClassServer.New(errno.ErrInvalidSequence, errno.MySQLErrName[errno.ErrInvalidSequence])
+	errInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
 )
 
 // packetIO is a helper to read and write data in packet format.

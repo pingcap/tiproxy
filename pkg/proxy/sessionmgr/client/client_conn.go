@@ -5,45 +5,38 @@ import (
 	"crypto/tls"
 	"net"
 
+	"github.com/djshow832/weir/pkg/proxy/driver"
+	pnet "github.com/djshow832/weir/pkg/proxy/net"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/parser/mysql"
-	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/metrics"
+	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tidb/parser/terror"
 	"github.com/pingcap/tidb/util/arena"
 	"github.com/pingcap/tidb/util/hack"
 	"github.com/pingcap/tidb/util/logutil"
-	"github.com/tidb-incubator/weir/pkg/proxy/driver"
-	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
 	"go.uber.org/zap"
 )
 
 type ClientConnectionImpl struct {
-	tlsConn          *tls.Conn // TLS connection, nil if not TLS.
-	tlsConfig        *tls.Config
-	pkt              *pnet.PacketIO         // a helper to read and write data in packet format.
-	bufReadConn      *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
-	alloc            arena.Allocator
-	queryCtx         driver.QueryCtx
-	connectionID     uint64
-	user             string // user of the client.
-	dbname           string // default database name.
-	serverCapability uint32
-	capability       uint32 // final capability
-	collation        uint8
-	attrs            map[string]string // attributes parsed from client handshake response, not used for now.
+	tlsConn      *tls.Conn // TLS connection, nil if not TLS.
+	tlsConfig    *tls.Config
+	pkt          *pnet.PacketIO         // a helper to read and write data in packet format.
+	bufReadConn  *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
+	alloc        arena.Allocator
+	queryCtx     driver.QueryCtx
+	connectionID uint64
 }
 
-func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, tlsConfig *tls.Config, serverCapability uint32) driver.ClientConnection {
+func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, tlsConfig *tls.Config) driver.ClientConnection {
 	bufReadConn := pnet.NewBufferedReadConn(conn)
 	pkt := pnet.NewPacketIO(bufReadConn)
 	return &ClientConnectionImpl{
-		queryCtx:         queryCtx,
-		tlsConfig:        tlsConfig,
-		serverCapability: serverCapability,
-		alloc:            arena.NewAllocator(32 * 1024),
-		bufReadConn:      bufReadConn,
-		pkt:              pkt,
-		connectionID:     connectionID,
+		queryCtx:     queryCtx,
+		tlsConfig:    tlsConfig,
+		alloc:        arena.NewAllocator(32 * 1024),
+		bufReadConn:  bufReadConn,
+		pkt:          pkt,
+		connectionID: connectionID,
 	}
 }
 

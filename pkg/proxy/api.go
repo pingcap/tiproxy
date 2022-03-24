@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"net/http/pprof"
 
+	"github.com/djshow832/weir/pkg/config"
+	"github.com/djshow832/weir/pkg/configcenter"
+	"github.com/djshow832/weir/pkg/proxy/namespace"
+	"github.com/djshow832/weir/pkg/proxy/server"
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/tidb-incubator/weir/pkg/config"
-	"github.com/tidb-incubator/weir/pkg/configcenter"
-	"github.com/tidb-incubator/weir/pkg/proxy/namespace"
-	"github.com/tidb-incubator/weir/pkg/proxy/server"
 	"go.uber.org/zap"
 )
 

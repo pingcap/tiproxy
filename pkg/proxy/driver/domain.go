@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"net"
 
-	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
+	pnet "github.com/djshow832/weir/pkg/proxy/net"
 )
 
 type NamespaceManager interface {
@@ -77,6 +77,6 @@ type QueryCtx interface {
 }
 
 type IDriver interface {
-	CreateClientConnection(conn net.Conn, connectionID uint64, tlsConfig *tls.Config, serverCapability uint32) ClientConnection
+	CreateClientConnection(conn net.Conn, connectionID uint64, tlsConfig *tls.Config) ClientConnection
 	CreateBackendConnManager() BackendConnManager
 }

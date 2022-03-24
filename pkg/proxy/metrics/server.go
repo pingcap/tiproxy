@@ -1,10 +1,6 @@
 package metrics
 
 import (
-	"strconv"
-
-	"github.com/pingcap/errors"
-	"github.com/pingcap/parser/terror"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -48,14 +44,3 @@ var (
 	EventKill  = "kill"
 	EventClose = "close"
 )
-
-// ExecuteErrorToLabel converts an execute error to label.
-func ExecuteErrorToLabel(err error) string {
-	err = errors.Cause(err)
-	switch x := err.(type) {
-	case *terror.Error:
-		return x.Class().String() + ":" + strconv.Itoa(int(x.Code()))
-	default:
-		return "unknown"
-	}
-}

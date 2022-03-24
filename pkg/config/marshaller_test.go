@@ -13,19 +13,11 @@ var testNamespaceConfig = Namespace{
 		AllowedDBs:  []string{"db0", "db1"},
 		SlowSQLTime: 10,
 		DeniedIPs:   []string{"127.0.0.0", "128.0.0.0"},
-		IdleTimeout: 10,
-		Users: []FrontendUserInfo{
-			{Username: "user0", Password: "pwd0"},
-			{Username: "user1", Password: "pwd1"},
-		},
+		Usernames:   []string{"user0", "user1"},
 	},
 	Backend: BackendNamespace{
-		Username:     "user0",
-		Password:     "pwd0",
 		Instances:    []string{"127.0.0.1:4000", "127.0.0.1:4001"},
 		SelectorType: "random",
-		PoolSize:     1,
-		IdleTimeout:  20,
 	},
 }
 

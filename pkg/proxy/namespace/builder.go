@@ -3,13 +3,13 @@ package namespace
 import (
 	"hash/crc32"
 
+	"github.com/djshow832/weir/pkg/config"
+	"github.com/djshow832/weir/pkg/proxy/driver"
+	"github.com/djshow832/weir/pkg/proxy/router"
+	wast "github.com/djshow832/weir/pkg/util/ast"
+	"github.com/djshow832/weir/pkg/util/datastructure"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/parser"
-	"github.com/tidb-incubator/weir/pkg/config"
-	"github.com/tidb-incubator/weir/pkg/proxy/driver"
-	"github.com/tidb-incubator/weir/pkg/proxy/router"
-	wast "github.com/tidb-incubator/weir/pkg/util/ast"
-	"github.com/tidb-incubator/weir/pkg/util/datastructure"
+	"github.com/pingcap/tidb/parser"
 )
 
 type NamespaceImpl struct {

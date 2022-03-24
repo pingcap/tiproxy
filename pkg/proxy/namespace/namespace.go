@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/djshow832/weir/pkg/config"
+	"github.com/djshow832/weir/pkg/proxy/driver"
+	"github.com/djshow832/weir/pkg/proxy/metrics"
 	"github.com/pingcap/errors"
-	"github.com/tidb-incubator/weir/pkg/config"
-	"github.com/tidb-incubator/weir/pkg/proxy/driver"
-	"github.com/tidb-incubator/weir/pkg/proxy/metrics"
 )
 
 type NamespaceHolder struct {

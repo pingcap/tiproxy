@@ -1,7 +1,7 @@
 package namespace
 
 import (
-	"github.com/tidb-incubator/weir/pkg/proxy/driver"
+	"github.com/djshow832/weir/pkg/proxy/driver"
 )
 
 type Namespace interface {

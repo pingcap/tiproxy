@@ -23,20 +23,21 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/djshow832/weir/pkg/config"
+	"github.com/djshow832/weir/pkg/proxy/driver"
+	"github.com/djshow832/weir/pkg/util/timer"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/parser/mysql"
-	"github.com/pingcap/parser/terror"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/metrics"
+	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tidb/parser/terror"
+	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tidb/util/logutil"
-	"github.com/tidb-incubator/weir/pkg/config"
-	"github.com/tidb-incubator/weir/pkg/proxy/driver"
-	"github.com/tidb-incubator/weir/pkg/util/timer"
 	"go.uber.org/zap"
 )
 
 var (
-	errConCount = terror.ClassServer.New(errno.ErrConCount, errno.MySQLErrName[errno.ErrConCount])
+	errConCount = dbterror.ClassServer.NewStd(errno.ErrConCount)
 
 	timeWheelUnit       = time.Second * 1
 	timeWheelBucketsNum = 3600
@@ -152,7 +153,7 @@ func (s *Server) ConnectionCount() int {
 }
 
 func (s *Server) onConn(conn driver.ClientConnection) {
-	ctx := logutil.WithConnID(context.Background(), uint32(conn.ConnectionID()))
+	ctx := logutil.WithConnID(context.Background(), conn.ConnectionID())
 	logutil.Logger(ctx).Info("new connection", zap.String("remoteAddr", conn.Addr()))
 
 	defer func() {
@@ -178,7 +179,7 @@ func (s *Server) newConn(conn net.Conn) driver.ClientConnection {
 	}
 	connectionID := atomic.AddUint64(&s.baseConnID, 1)
 	tlsConfig := (*tls.Config)(atomic.LoadPointer(&s.tlsConfig))
-	return s.driver.CreateClientConnection(conn, connectionID, tlsConfig, s.capability)
+	return s.driver.CreateClientConnection(conn, connectionID, tlsConfig)
 }
 
 func (s *Server) checkConnectionCount() error {

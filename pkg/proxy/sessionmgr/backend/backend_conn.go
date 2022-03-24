@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
+	pnet "github.com/djshow832/weir/pkg/proxy/net"
 	"github.com/pingcap/tidb/util/arena"
-	pnet "github.com/tidb-incubator/weir/pkg/proxy/net"
 )
 
 type connectionPhase byte

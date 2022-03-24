@@ -1,11 +1,12 @@
 package configcenter
 
 import (
-	"github.com/pingcap/errors"
-	"github.com/tidb-incubator/weir/pkg/config"
 	"io/ioutil"
 	"path"
 	"path/filepath"
+
+	"github.com/djshow832/weir/pkg/config"
+	"github.com/pingcap/errors"
 )
 
 var (

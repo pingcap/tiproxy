@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tidb-incubator/weir/pkg/util/sync2"
+	"github.com/djshow832/weir/pkg/util/sync2"
 )
 
 // Out-of-band messages

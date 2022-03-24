@@ -3,8 +3,8 @@ package circuit_breaker
 import (
 	"context"
 	"errors"
+	rateLimitBreaker "github.com/djshow832/weir/pkg/util/rate_limit_breaker"
 	"github.com/stretchr/testify/assert"
-	rateLimitBreaker "github.com/tidb-incubator/weir/pkg/util/rate_limit_breaker"
 	"testing"
 )
 

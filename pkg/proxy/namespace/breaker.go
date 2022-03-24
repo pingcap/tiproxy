@@ -6,11 +6,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tidb-incubator/weir/pkg/config"
-	"github.com/tidb-incubator/weir/pkg/proxy/driver"
-	rb "github.com/tidb-incubator/weir/pkg/util/rate_limit_breaker"
-	cb "github.com/tidb-incubator/weir/pkg/util/rate_limit_breaker/circuit_breaker"
-	"github.com/tidb-incubator/weir/pkg/util/timer"
+	"github.com/djshow832/weir/pkg/config"
+	"github.com/djshow832/weir/pkg/proxy/driver"
+	rb "github.com/djshow832/weir/pkg/util/rate_limit_breaker"
+	cb "github.com/djshow832/weir/pkg/util/rate_limit_breaker/circuit_breaker"
+	"github.com/djshow832/weir/pkg/util/timer"
 )
 
 type strategyInfo struct {

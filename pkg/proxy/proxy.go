@@ -3,14 +3,14 @@ package proxy
 import (
 	"time"
 
-	"github.com/tidb-incubator/weir/pkg/config"
-	"github.com/tidb-incubator/weir/pkg/configcenter"
-	"github.com/tidb-incubator/weir/pkg/proxy/driver"
-	"github.com/tidb-incubator/weir/pkg/proxy/metrics"
-	"github.com/tidb-incubator/weir/pkg/proxy/namespace"
-	"github.com/tidb-incubator/weir/pkg/proxy/server"
-	"github.com/tidb-incubator/weir/pkg/proxy/sessionmgr/backend"
-	"github.com/tidb-incubator/weir/pkg/proxy/sessionmgr/client"
+	"github.com/djshow832/weir/pkg/config"
+	"github.com/djshow832/weir/pkg/configcenter"
+	"github.com/djshow832/weir/pkg/proxy/driver"
+	"github.com/djshow832/weir/pkg/proxy/metrics"
+	"github.com/djshow832/weir/pkg/proxy/namespace"
+	"github.com/djshow832/weir/pkg/proxy/server"
+	"github.com/djshow832/weir/pkg/proxy/sessionmgr/backend"
+	"github.com/djshow832/weir/pkg/proxy/sessionmgr/client"
 )
 
 type Proxy struct {
