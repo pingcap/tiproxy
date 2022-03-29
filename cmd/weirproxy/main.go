@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/djshow832/weir/pkg/util/disk"
 	"io/ioutil"
 	"os"
 	"os/signal"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/djshow832/weir/pkg/config"
 	"github.com/djshow832/weir/pkg/proxy"
+	"github.com/djshow832/weir/pkg/util/disk"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
 )
