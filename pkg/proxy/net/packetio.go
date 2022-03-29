@@ -36,6 +36,7 @@ package net
 
 import (
 	"bufio"
+	"crypto/tls"
 	"io"
 	"time"
 
@@ -180,4 +181,24 @@ func (p *PacketIO) Flush() error {
 		return errors.Trace(err)
 	}
 	return err
+}
+
+func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) error {
+	tlsConn := tls.Server(p.bufReadConn, tlsConfig)
+	if err := tlsConn.Handshake(); err != nil {
+		return err
+	}
+	bufReadConn := NewBufferedReadConn(tlsConn)
+	p.SetBufferedReadConn(bufReadConn)
+	return nil
+}
+
+func (p *PacketIO) UpgradeToClientTLS(tlsConfig *tls.Config) error {
+	tlsConn := tls.Client(p.bufReadConn, tlsConfig)
+	if err := tlsConn.Handshake(); err != nil {
+		return err
+	}
+	bufReadConn := NewBufferedReadConn(tlsConn)
+	p.SetBufferedReadConn(bufReadConn)
+	return nil
 }

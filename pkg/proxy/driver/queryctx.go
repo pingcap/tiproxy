@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 
 	pnet "github.com/djshow832/weir/pkg/proxy/net"
@@ -55,7 +56,7 @@ func (q *QueryCtxImpl) Close() error {
 	return nil
 }
 
-func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO) error {
+func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO, tlsConfig *tls.Config) error {
 	ns, ok := q.nsmgr.Auth("", nil, nil)
 	if !ok {
 		return errors.New("failed to find a namespace")
@@ -65,7 +66,7 @@ func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.Packet
 	if err != nil {
 		return err
 	}
-	if err = q.connMgr.Connect(ctx, addr, clientIO); err != nil {
+	if err = q.connMgr.Connect(ctx, addr, clientIO, tlsConfig); err != nil {
 		return err
 	}
 	q.ns.IncrConnCount()

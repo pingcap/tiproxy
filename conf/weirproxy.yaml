@@ -3,6 +3,7 @@ proxy_server:
   addr: "0.0.0.0:6000"
   max_connections: 1000
   session_timeout: 600
+  storage_path: "/tmp/weir"
 admin_server:
   addr: "0.0.0.0:6001"
   enable_basic_auth: false
@@ -25,3 +26,5 @@ config_center:
     strict_parse: false
 performance:
   tcp_keep_alive: true
+security:
+  rsa-key-size: 4096

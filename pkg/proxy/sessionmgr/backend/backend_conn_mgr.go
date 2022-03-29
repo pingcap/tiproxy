@@ -2,10 +2,13 @@ package backend
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 
 	"github.com/djshow832/weir/pkg/proxy/driver"
 	pnet "github.com/djshow832/weir/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tidb/util/logutil"
 )
 
 type ConnectionPhase byte
@@ -27,25 +30,25 @@ const (
 )
 
 type BackendConnManager struct {
-	authenticator   *Authenticator
-	backendConn     BackendConnection
-	connectionPhase ConnectionPhase
-	serverStatus    uint32
+	authenticator *Authenticator
+	backendConn   BackendConnection
+	connPhase     ConnectionPhase
+	serverStatus  uint32
 }
 
 func NewBackendConnManager() driver.BackendConnManager {
 	return &BackendConnManager{
-		connectionPhase: InitBackend,
-		serverStatus:    StatusAutoCommit,
-		authenticator:   &Authenticator{},
+		connPhase:     InitBackend,
+		serverStatus:  StatusAutoCommit,
+		authenticator: &Authenticator{},
 	}
 }
 
-func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, tlsConfig *tls.Config) error {
 	// It may be still connecting to the original backend server.
 	if mgr.backendConn != nil {
 		if err := mgr.backendConn.Close(); err != nil {
-			return err
+			logutil.Logger(ctx).Info("close original backend failed")
 		}
 	}
 	mgr.backendConn = NewBackendConnectionImpl(serverAddr)
@@ -54,7 +57,13 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 		return err
 	}
 	backendIO := mgr.backendConn.PacketIO()
-	return mgr.authenticator.handshake(ctx, clientIO, backendIO)
+	succeed, err := mgr.authenticator.handshakeWithClient(ctx, clientIO, backendIO, tlsConfig)
+	if err != nil {
+		return err
+	} else if !succeed {
+		return errors.New("server returns auth failure")
+	}
+	return nil
 }
 
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error {

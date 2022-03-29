@@ -17,12 +17,14 @@ type Proxy struct {
 	Registry     Registry     `yaml:"registry"`
 	ConfigCenter ConfigCenter `yaml:"config_center"`
 	Performance  Performance  `yaml:"performance"`
+	Security     Security     `yaml:"security"`
 }
 
 type ProxyServer struct {
 	Addr           string `yaml:"addr"`
 	MaxConnections uint32 `yaml:"max_connections"`
 	SessionTimeout int    `yaml:"session_timeout"`
+	StoragePath    string `yaml:"storage_path"`
 }
 
 type AdminServer struct {
@@ -72,4 +74,16 @@ type ConfigEtcd struct {
 
 type Performance struct {
 	TCPKeepAlive bool `yaml:"tcp_keep_alive"`
+}
+
+type Security struct {
+	SSLCA           string   `toml:"ssl-ca" json:"ssl-ca"`
+	SSLCert         string   `toml:"ssl-cert" json:"ssl-cert"`
+	SSLKey          string   `toml:"ssl-key" json:"ssl-key"`
+	ClusterSSLCA    string   `toml:"cluster-ssl-ca" json:"cluster-ssl-ca"`
+	ClusterSSLCert  string   `toml:"cluster-ssl-cert" json:"cluster-ssl-cert"`
+	ClusterSSLKey   string   `toml:"cluster-ssl-key" json:"cluster-ssl-key"`
+	ClusterVerifyCN []string `toml:"cluster-verify-cn" json:"cluster-verify-cn"`
+	MinTLSVersion   string   `toml:"tls-version" json:"tls-version"`
+	RSAKeySize      int      `toml:"rsa-key-size" json:"rsa-key-size"`
 }

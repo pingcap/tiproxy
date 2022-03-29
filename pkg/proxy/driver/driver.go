@@ -27,7 +27,3 @@ func (d *DriverImpl) CreateClientConnection(conn net.Conn, connectionID uint64, 
 	queryCtx := NewQueryCtxImpl(d.nsmgr, backendConnMgr, connectionID)
 	return d.createClientConnFunc(queryCtx, conn, connectionID, tlsConfig)
 }
-
-func (d *DriverImpl) CreateBackendConnManager() BackendConnManager {
-	return d.createBackendConnMgrFunc()
-}

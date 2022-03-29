@@ -16,15 +16,9 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"math/rand"
-	"net"
-	"sync"
-	"sync/atomic"
-	"time"
-	"unsafe"
-
 	"github.com/djshow832/weir/pkg/config"
 	"github.com/djshow832/weir/pkg/proxy/driver"
+	"github.com/djshow832/weir/pkg/util/security"
 	"github.com/djshow832/weir/pkg/util/timer"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/errno"
@@ -34,6 +28,11 @@ import (
 	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
+	"math/rand"
+	"net"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 var (
@@ -53,7 +52,7 @@ const defaultCapability = mysql.ClientLongPassword | mysql.ClientLongFlag |
 
 type Server struct {
 	cfg            *config.Proxy
-	tlsConfig      unsafe.Pointer // *tls.Config
+	tlsConfig      *tls.Config // the tls used to connect to the client
 	driver         driver.IDriver
 	listener       net.Listener
 	rwlock         sync.RWMutex
@@ -81,7 +80,11 @@ func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 		tw:             tw,
 	}
 
-	// TODO(eastfisher): set tlsConfig
+	s.tlsConfig, err = security.CreateServerTLSConfig(cfg.Security.SSLCA, cfg.Security.SSLKey, cfg.Security.SSLCert,
+		cfg.Security.MinTLSVersion, cfg.ProxyServer.StoragePath, cfg.Security.RSAKeySize)
+	if err != nil {
+		return nil, err
+	}
 
 	setSystemTimeZoneVariable()
 
@@ -101,9 +104,6 @@ func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 
 func (s *Server) initCapability() {
 	s.capability = defaultCapability
-	if s.tlsConfig != nil {
-		s.capability |= mysql.ClientSSL
-	}
 }
 
 // TODO(eastfisher): support unix socket and proxy protocol
@@ -178,8 +178,7 @@ func (s *Server) newConn(conn net.Conn) driver.ClientConnection {
 		}
 	}
 	connectionID := atomic.AddUint64(&s.baseConnID, 1)
-	tlsConfig := (*tls.Config)(atomic.LoadPointer(&s.tlsConfig))
-	return s.driver.CreateClientConnection(conn, connectionID, tlsConfig)
+	return s.driver.CreateClientConnection(conn, connectionID, s.tlsConfig)
 }
 
 func (s *Server) checkConnectionCount() error {

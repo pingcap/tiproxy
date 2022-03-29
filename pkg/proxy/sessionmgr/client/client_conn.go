@@ -18,7 +18,6 @@ import (
 )
 
 type ClientConnectionImpl struct {
-	tlsConn      *tls.Conn // TLS connection, nil if not TLS.
 	tlsConfig    *tls.Config
 	pkt          *pnet.PacketIO         // a helper to read and write data in packet format.
 	bufReadConn  *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
@@ -53,7 +52,7 @@ func (cc *ClientConnectionImpl) Auth() error {
 }
 
 func (cc *ClientConnectionImpl) Run(ctx context.Context) {
-	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt); err != nil {
+	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt, cc.tlsConfig); err != nil {
 		logutil.Logger(ctx).Info("new connection fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
 		metrics.HandShakeErrorCounter.Inc()
 		err = cc.Close()

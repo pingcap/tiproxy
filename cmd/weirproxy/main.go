@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/djshow832/weir/pkg/util/disk"
 	"io/ioutil"
 	"os"
 	"os/signal"
@@ -30,6 +31,12 @@ func main() {
 	proxyCfg, err := config.UnmarshalProxyConfig(proxyConfigData)
 	if err != nil {
 		fmt.Printf("parse config file error: %v\n", err)
+		os.Exit(1)
+	}
+
+	err = disk.InitializeTempDir(proxyCfg.ProxyServer.StoragePath)
+	if err != nil {
+		fmt.Printf("initialize temporary path error: %v\n", err)
 		os.Exit(1)
 	}
 

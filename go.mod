@@ -3,6 +3,7 @@ module github.com/djshow832/weir
 go 1.16
 
 require (
+	github.com/danjacques/gofslock v0.0.0-20191023191349-0a45f885bc37
 	github.com/gin-gonic/gin v1.7.2
 	github.com/go-playground/validator/v10 v10.8.0 // indirect
 	github.com/goccy/go-yaml v1.8.2
