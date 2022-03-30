@@ -16,8 +16,6 @@ import (
 const ShaCommand = 1
 
 type Authenticator struct {
-	clientTLS  *tls.Config
-	serverTLS  *tls.Config
 	user       string
 	authData   []byte // password
 	authPlugin string
@@ -55,6 +53,7 @@ func (auth *Authenticator) handshakeWithClient(ctx context.Context, clientIO, ba
 	// A 2-bytes capability contains the ClientSSL flag, no matter ClientProtocol41 is set or not.
 	if capability&mysql.ClientSSL > 0 {
 		// Upgrade with the client.
+		serverTLSConfig = serverTLSConfig.Clone()
 		err = clientIO.UpgradeToServerTLS(serverTLSConfig)
 		if err != nil {
 			return false, err

@@ -47,11 +47,11 @@ func (q *QueryCtxImpl) ExecuteCmd(ctx context.Context, request []byte, clientIO 
 }
 
 func (q *QueryCtxImpl) Close() error {
-	if q.ns != nil {
-		q.ns.DescConnCount()
-	}
 	if q.connMgr != nil {
 		return q.connMgr.Close()
+	}
+	if q.ns != nil {
+		q.ns.DescConnCount()
 	}
 	return nil
 }
@@ -70,5 +70,16 @@ func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.Packet
 		return err
 	}
 	q.ns.IncrConnCount()
+	return nil
+}
+
+func (q *QueryCtxImpl) Redirect(tlsConfig *tls.Config) error {
+	addr, err := q.ns.GetRouter().Route()
+	if err != nil {
+		return err
+	}
+	if err = q.connMgr.Redirect(addr, tlsConfig); err != nil {
+		return err
+	}
 	return nil
 }

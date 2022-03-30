@@ -81,13 +81,12 @@ func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
 		switch cmd {
 		case mysql.ComQuery:
 			var data []byte
-			var dataStr string
 			if len(clientPkt) > 1 && clientPkt[len(clientPkt)-1] == 0 {
 				data = clientPkt[1 : len(clientPkt)-1]
 			} else {
 				data = clientPkt[1:]
 			}
-			dataStr = string(hack.String(data))
+			dataStr := string(hack.String(data))
 			logutil.Logger(ctx).Info("receive cmd", zap.String("query", dataStr))
 		case mysql.ComQuit:
 			logutil.Logger(ctx).Info("quit")
@@ -102,6 +101,10 @@ func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
 	}
 }
 
+func (cc *ClientConnectionImpl) Redirect() error {
+	return cc.queryCtx.Redirect(cc.tlsConfig)
+}
+
 func (cc *ClientConnectionImpl) Close() error {
-	return nil
+	return cc.queryCtx.Close()
 }

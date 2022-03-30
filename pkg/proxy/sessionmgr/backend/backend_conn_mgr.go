@@ -4,21 +4,20 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"sync"
 
 	"github.com/djshow832/weir/pkg/proxy/driver"
 	pnet "github.com/djshow832/weir/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/logutil"
+	"go.uber.org/zap"
 )
 
-type ConnectionPhase byte
-
 const (
-	InitBackend ConnectionPhase = iota
-	InitStates
+	InitBackend = iota
 	Command
 	WaitFinish
-	QueryStates
+	Redirect
 	Disconnect
 )
 
@@ -29,11 +28,20 @@ const (
 	StatusPrepareWaitFetch   uint32 = 0x08
 )
 
+type signalRedirect struct {
+	tlsConfig *tls.Config
+	newAddr   string
+}
+
 type BackendConnManager struct {
 	authenticator *Authenticator
 	backendConn   BackendConnection
-	connPhase     ConnectionPhase
+	connPhase     uint32
 	serverStatus  uint32
+	processLock   sync.Mutex
+	statusChanged chan int
+	signalLock    sync.Mutex
+	signal        *signalRedirect
 }
 
 func NewBackendConnManager() driver.BackendConnManager {
@@ -41,15 +49,13 @@ func NewBackendConnManager() driver.BackendConnManager {
 		connPhase:     InitBackend,
 		serverStatus:  StatusAutoCommit,
 		authenticator: &Authenticator{},
+		statusChanged: make(chan int),
 	}
 }
 
 func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, tlsConfig *tls.Config) error {
-	// It may be still connecting to the original backend server.
 	if mgr.backendConn != nil {
-		if err := mgr.backendConn.Close(); err != nil {
-			logutil.Logger(ctx).Info("close original backend failed")
-		}
+		return errors.New("a backend connection already exists before connecting")
 	}
 	mgr.backendConn = NewBackendConnectionImpl(serverAddr)
 	err := mgr.backendConn.Connect()
@@ -63,10 +69,14 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	} else if !succeed {
 		return errors.New("server returns auth failure")
 	}
+	mgr.connPhase = Command
+	go mgr.processSignals(ctx)
 	return nil
 }
 
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error {
+	mgr.processLock.Lock()
+	defer mgr.processLock.Unlock()
 	backendIO := mgr.backendConn.PacketIO()
 	backendIO.ResetSequence()
 	err := backendIO.WritePacket(request)
@@ -80,12 +90,14 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	cmd := request[0]
 	switch cmd {
 	case mysql.ComQuery:
-		return mgr.forwardCommand(ctx, clientIO, backendIO, 2)
+		err = mgr.forwardCommand(ctx, clientIO, backendIO, 2)
 	case mysql.ComQuit:
+		mgr.connPhase = Disconnect
 		return nil
 	default:
-		return mgr.forwardCommand(ctx, clientIO, backendIO, 1)
+		err = mgr.forwardCommand(ctx, clientIO, backendIO, 1)
 	}
+	return err
 }
 
 func (mgr *BackendConnManager) forwardCommand(ctx context.Context, clientIO, backendIO *pnet.PacketIO, expectedEOFNum int) error {
@@ -134,11 +146,73 @@ func (mgr *BackendConnManager) disconnect() error {
 	return nil
 }
 
-func (mgr *BackendConnManager) PrepareRedirect(newAddr string) error {
-	return nil
+func (mgr *BackendConnManager) processSignals(ctx context.Context) {
+	finished := false
+	for !finished {
+		select {
+		case <-mgr.statusChanged:
+			if err := mgr.tryProcessSignal(ctx); err != nil {
+				logutil.Logger(ctx).Info("redirect connection failed", zap.Error(err))
+			}
+		case <-ctx.Done():
+			finished = true
+		}
+	}
 }
 
-func (mgr *BackendConnManager) redirect() error {
+func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context) error {
+	mgr.signalLock.Lock()
+	signal := mgr.signal
+	mgr.signalLock.Unlock()
+	if signal == nil {
+		return nil
+	}
+
+	mgr.processLock.Lock()
+	defer mgr.processLock.Unlock()
+	switch mgr.connPhase {
+	case Disconnect:
+		return nil
+	case WaitFinish:
+		// wait for new status
+		return nil
+	case InitBackend, Redirect:
+		// not possible here
+		return nil
+	case Command:
+		if mgr.serverStatus&StatusInTrans > 0 || mgr.serverStatus&StatusPrepareWaitExecute > 0 || mgr.serverStatus&StatusPrepareWaitFetch > 0 {
+			mgr.connPhase = WaitFinish
+			return nil
+		}
+	}
+
+	backendIO := mgr.backendConn.PacketIO()
+	logutil.Logger(ctx).Info("trying to redirect connection ", zap.String("to", signal.newAddr))
+	// Retrial may be needed in the future.
+	err := mgr.authenticator.handshakeWithServer(context.Background(), backendIO)
+
+	mgr.signalLock.Lock()
+	// Check mgr.signal because it may be updated again.
+	if mgr.signal != nil && mgr.signal.newAddr == signal.newAddr {
+		mgr.signal = nil
+	}
+	mgr.signalLock.Unlock()
+
+	mgr.connPhase = Command
+	return err
+}
+
+func (mgr *BackendConnManager) Redirect(newAddr string, tlsConfig *tls.Config) error {
+	mgr.signalLock.Lock()
+	mgr.signal = &signalRedirect{
+		newAddr:   newAddr,
+		tlsConfig: tlsConfig,
+	}
+	mgr.signalLock.Unlock()
+	select {
+	case mgr.statusChanged <- 1:
+	default:
+	}
 	return nil
 }
 

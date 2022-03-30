@@ -57,12 +57,14 @@ type ClientConnection interface {
 	ConnectionID() uint64
 	Addr() string
 	Run(context.Context)
+	Redirect() error
 	Close() error
 }
 
 type BackendConnManager interface {
 	Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, tlsConfig *tls.Config) error
 	ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error
+	Redirect(newAddr string, tlsConfig *tls.Config) error
 	Close() error
 }
 
@@ -71,6 +73,8 @@ type QueryCtx interface {
 	ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO, tlsConfig *tls.Config) error
 
 	ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error
+
+	Redirect(tlsConfig *tls.Config) error
 
 	// Close closes the QueryCtx.
 	Close() error
