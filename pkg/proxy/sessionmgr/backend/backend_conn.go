@@ -26,12 +26,11 @@ type BackendConnection interface {
 }
 
 type BackendConnectionImpl struct {
-	pkt         *pnet.PacketIO         // a helper to read and write data in packet format.
-	bufReadConn *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
-	alloc       arena.Allocator
-	phase       connectionPhase
-	capability  uint32
-	address     string
+	pkt        *pnet.PacketIO // a helper to read and write data in packet format.
+	alloc      arena.Allocator
+	phase      connectionPhase
+	capability uint32
+	address    string
 }
 
 func NewBackendConnectionImpl(address string) *BackendConnectionImpl {
@@ -50,7 +49,6 @@ func (bc *BackendConnectionImpl) Connect() error {
 
 	bufReadConn := pnet.NewBufferedReadConn(cn)
 	pkt := pnet.NewPacketIO(bufReadConn)
-	bc.bufReadConn = bufReadConn
 	bc.pkt = pkt
 	return nil
 }
@@ -60,5 +58,5 @@ func (bc *BackendConnectionImpl) PacketIO() *pnet.PacketIO {
 }
 
 func (bc *BackendConnectionImpl) Close() error {
-	return nil
+	return bc.pkt.Close()
 }

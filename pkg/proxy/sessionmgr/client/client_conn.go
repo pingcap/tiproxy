@@ -18,7 +18,7 @@ import (
 )
 
 type ClientConnectionImpl struct {
-	tlsConfig    *tls.Config
+	tlsConfig    *tls.Config            // the tls config to connect to clients.
 	pkt          *pnet.PacketIO         // a helper to read and write data in packet format.
 	bufReadConn  *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
 	alloc        arena.Allocator
@@ -102,7 +102,7 @@ func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
 }
 
 func (cc *ClientConnectionImpl) Redirect() error {
-	return cc.queryCtx.Redirect(cc.tlsConfig)
+	return cc.queryCtx.Redirect()
 }
 
 func (cc *ClientConnectionImpl) Close() error {

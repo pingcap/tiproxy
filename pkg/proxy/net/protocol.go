@@ -1,7 +1,5 @@
 package net
 
-import "io"
-
 func ParseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	switch b[0] {
 	// 251: NULL
@@ -40,19 +38,37 @@ func ParseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	return
 }
 
-func ParseLengthEncodedBytes(b []byte) ([]byte, bool, int, error) {
-	// Get length
-	num, isNull, n := ParseLengthEncodedInt(b)
-	if num < 1 {
-		return nil, isNull, n, nil
+var tinyIntCache [251][]byte
+
+func init() {
+	for i := 0; i < len(tinyIntCache); i++ {
+		tinyIntCache[i] = []byte{byte(i)}
+	}
+}
+
+func DumpLengthEncodedInt(buffer []byte, n uint64) []byte {
+	switch {
+	case n <= 250:
+		return append(buffer, tinyIntCache[n]...)
+
+	case n <= 0xffff:
+		return append(buffer, 0xfc, byte(n), byte(n>>8))
+
+	case n <= 0xffffff:
+		return append(buffer, 0xfd, byte(n), byte(n>>8), byte(n>>16))
+
+	case n <= 0xffffffffffffffff:
+		return append(buffer, 0xfe, byte(n), byte(n>>8), byte(n>>16), byte(n>>24),
+			byte(n>>32), byte(n>>40), byte(n>>48), byte(n>>56))
 	}
 
-	n += int(num)
+	return buffer
+}
 
-	// Check data length
-	if len(b) >= n {
-		return b[n-int(num) : n], false, n, nil
-	}
-
-	return nil, false, n, io.EOF
+func DumpUint32(buffer []byte, n uint32) []byte {
+	buffer = append(buffer, byte(n))
+	buffer = append(buffer, byte(n>>8))
+	buffer = append(buffer, byte(n>>16))
+	buffer = append(buffer, byte(n>>24))
+	return buffer
 }

@@ -29,8 +29,7 @@ const (
 )
 
 type signalRedirect struct {
-	tlsConfig *tls.Config
-	newAddr   string
+	newAddr string
 }
 
 type BackendConnManager struct {
@@ -186,10 +185,23 @@ func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context) error {
 		}
 	}
 
-	backendIO := mgr.backendConn.PacketIO()
-	logutil.Logger(ctx).Info("trying to redirect connection ", zap.String("to", signal.newAddr))
+	logutil.Logger(ctx).Info("trying to redirect connection", zap.String("to", signal.newAddr))
+	backendConn := NewBackendConnectionImpl(signal.newAddr)
+	err := backendConn.Connect()
+	if err != nil {
+		mgr.connPhase = Command
+		return err
+	}
+	backendIO := backendConn.PacketIO()
 	// Retrial may be needed in the future.
-	err := mgr.authenticator.handshakeWithServer(context.Background(), backendIO)
+	err = mgr.authenticator.handshakeWithServer(ctx, backendIO)
+	if err == nil {
+		logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("to", signal.newAddr))
+		if err := mgr.backendConn.Close(); err != nil {
+			logutil.Logger(ctx).Warn("close old connection failed", zap.Error(err))
+		}
+		mgr.backendConn = backendConn
+	}
 
 	mgr.signalLock.Lock()
 	// Check mgr.signal because it may be updated again.
@@ -202,11 +214,10 @@ func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context) error {
 	return err
 }
 
-func (mgr *BackendConnManager) Redirect(newAddr string, tlsConfig *tls.Config) error {
+func (mgr *BackendConnManager) Redirect(newAddr string) error {
 	mgr.signalLock.Lock()
 	mgr.signal = &signalRedirect{
-		newAddr:   newAddr,
-		tlsConfig: tlsConfig,
+		newAddr: newAddr,
 	}
 	mgr.signalLock.Unlock()
 	select {
@@ -217,5 +228,5 @@ func (mgr *BackendConnManager) Redirect(newAddr string, tlsConfig *tls.Config) e
 }
 
 func (mgr *BackendConnManager) Close() error {
-	return nil
+	return mgr.backendConn.Close()
 }

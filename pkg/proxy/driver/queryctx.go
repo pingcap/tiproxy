@@ -73,12 +73,12 @@ func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.Packet
 	return nil
 }
 
-func (q *QueryCtxImpl) Redirect(tlsConfig *tls.Config) error {
+func (q *QueryCtxImpl) Redirect() error {
 	addr, err := q.ns.GetRouter().Route()
 	if err != nil {
 		return err
 	}
-	if err = q.connMgr.Redirect(addr, tlsConfig); err != nil {
+	if err = q.connMgr.Redirect(addr); err != nil {
 		return err
 	}
 	return nil
