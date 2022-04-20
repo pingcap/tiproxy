@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/djshow832/weir/pkg/proxy/driver"
@@ -28,12 +30,18 @@ const (
 	StatusPrepareWaitFetch   uint32 = 0x08
 )
 
+const (
+	SQLQueryState = "SHOW SESSION_STATES"
+	SQLSetState   = "SET SESSION_STATES '%s'"
+)
+
 type signalRedirect struct {
 	newAddr string
 }
 
 type BackendConnManager struct {
 	authenticator *Authenticator
+	querier       *Querier
 	backendConn   BackendConnection
 	connPhase     uint32
 	serverStatus  uint32
@@ -69,6 +77,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 		return errors.New("server returns auth failure")
 	}
 	mgr.connPhase = Command
+	mgr.querier = &Querier{
+		capability: mgr.authenticator.capability,
+	}
 	go mgr.processSignals(ctx)
 	return nil
 }
@@ -133,12 +144,25 @@ func (mgr *BackendConnManager) handleOKPacket(data []byte) {
 func (mgr *BackendConnManager) handleEOFPacket(data []byte) {
 }
 
-func (mgr *BackendConnManager) initSessionStates() error {
+func (mgr *BackendConnManager) initSessionStates(sessionStates string) error {
+	// Do not lock here because the caller already locks.
+	sessionStates = strings.ReplaceAll(sessionStates, "\\", "\\\\")
+	sessionStates = strings.ReplaceAll(sessionStates, "'", "\\'")
+	sql := fmt.Sprintf(SQLSetState, sessionStates)
+	_, err := mgr.querier.Query(mgr.backendConn.PacketIO(), sql)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (mgr *BackendConnManager) querySessionStates() error {
-	return nil
+func (mgr *BackendConnManager) querySessionStates() (string, error) {
+	// Do not lock here because the caller already locks.
+	result, err := mgr.querier.Query(mgr.backendConn.PacketIO(), SQLQueryState)
+	if err != nil {
+		return "", err
+	}
+	return result.GetString(0, 0)
 }
 
 func (mgr *BackendConnManager) disconnect() error {
@@ -150,68 +174,71 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 	for !finished {
 		select {
 		case <-mgr.statusChanged:
-			if err := mgr.tryProcessSignal(ctx); err != nil {
-				logutil.Logger(ctx).Info("redirect connection failed", zap.Error(err))
+			mgr.signalLock.Lock()
+			signal := mgr.signal
+			mgr.signalLock.Unlock()
+			if signal == nil {
+				break
 			}
+			if err := mgr.tryProcessSignal(ctx, signal); err != nil {
+				// TODO: retry / close the client connection
+				logutil.Logger(ctx).Error("redirect connection failed", zap.Error(err))
+			}
+			mgr.signalLock.Lock()
+			// Check mgr.signal because it may be updated again.
+			if mgr.signal != nil && mgr.signal.newAddr == signal.newAddr {
+				mgr.signal = nil
+			}
+			mgr.signalLock.Unlock()
 		case <-ctx.Done():
 			finished = true
 		}
 	}
 }
 
-func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context) error {
-	mgr.signalLock.Lock()
-	signal := mgr.signal
-	mgr.signalLock.Unlock()
-	if signal == nil {
-		return nil
-	}
-
+func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context, signal *signalRedirect) (err error) {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
+	var sessionStates string
 	switch mgr.connPhase {
 	case Disconnect:
-		return nil
+		return
 	case WaitFinish:
 		// wait for new status
-		return nil
+		return
 	case InitBackend, Redirect:
 		// not possible here
-		return nil
+		return
 	case Command:
 		if mgr.serverStatus&StatusInTrans > 0 || mgr.serverStatus&StatusPrepareWaitExecute > 0 || mgr.serverStatus&StatusPrepareWaitFetch > 0 {
 			mgr.connPhase = WaitFinish
-			return nil
+			return
+		}
+		mgr.connPhase = Redirect
+		if sessionStates, err = mgr.querySessionStates(); err != nil {
+			return
 		}
 	}
 
-	logutil.Logger(ctx).Info("trying to redirect connection", zap.String("to", signal.newAddr))
-	backendConn := NewBackendConnectionImpl(signal.newAddr)
-	err := backendConn.Connect()
-	if err != nil {
+	newConn := NewBackendConnectionImpl(signal.newAddr)
+	if err = newConn.Connect(); err != nil {
 		mgr.connPhase = Command
-		return err
+		return
 	}
-	backendIO := backendConn.PacketIO()
 	// Retrial may be needed in the future.
-	err = mgr.authenticator.handshakeWithServer(ctx, backendIO)
-	if err == nil {
-		logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("to", signal.newAddr))
-		if err := mgr.backendConn.Close(); err != nil {
-			logutil.Logger(ctx).Warn("close old connection failed", zap.Error(err))
-		}
-		mgr.backendConn = backendConn
+	if err = mgr.authenticator.handshakeWithServer(ctx, newConn.PacketIO()); err != nil {
+		return
 	}
-
-	mgr.signalLock.Lock()
-	// Check mgr.signal because it may be updated again.
-	if mgr.signal != nil && mgr.signal.newAddr == signal.newAddr {
-		mgr.signal = nil
+	if err := mgr.backendConn.Close(); err != nil {
+		logutil.Logger(ctx).Warn("close previous backend connection failed", zap.Error(err))
 	}
-	mgr.signalLock.Unlock()
-
+	mgr.backendConn = newConn
+	if err = mgr.initSessionStates(sessionStates); err != nil {
+		return
+	}
+	logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("to", signal.newAddr))
 	mgr.connPhase = Command
-	return err
+	return
 }
 
 func (mgr *BackendConnManager) Redirect(newAddr string) error {
