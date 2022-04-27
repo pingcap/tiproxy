@@ -51,16 +51,17 @@ const defaultCapability = mysql.ClientLongPassword | mysql.ClientLongFlag |
 	mysql.ClientConnectAtts | mysql.ClientPluginAuth | mysql.ClientInteractive
 
 type Server struct {
-	cfg            *config.Proxy
-	tlsConfig      *tls.Config // the tls used to connect to the client
-	driver         driver.IDriver
-	listener       net.Listener
-	rwlock         sync.RWMutex
-	clients        map[uint64]driver.ClientConnection
-	baseConnID     uint64
-	capability     uint32
-	sessionTimeout time.Duration
-	tw             *timer.TimeWheel
+	cfg              *config.Proxy
+	serverTLSConfig  *tls.Config // the TLS used to connect to the client
+	clusterTLSConfig *tls.Config // the TLS used to connect to PD and TiDB server
+	driver           driver.IDriver
+	listener         net.Listener
+	rwlock           sync.RWMutex
+	clients          map[uint64]driver.ClientConnection
+	baseConnID       uint64
+	capability       uint32
+	sessionTimeout   time.Duration
+	tw               *timer.TimeWheel
 }
 
 // NewServer creates a new Server.
@@ -80,9 +81,12 @@ func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 		tw:             tw,
 	}
 
-	s.tlsConfig, err = security.CreateServerTLSConfig(cfg.Security.SSLCA, cfg.Security.SSLKey, cfg.Security.SSLCert,
-		cfg.Security.MinTLSVersion, cfg.ProxyServer.StoragePath, cfg.Security.RSAKeySize)
-	if err != nil {
+	if s.serverTLSConfig, err = security.CreateServerTLSConfig(cfg.Security.SSLCA, cfg.Security.SSLKey, cfg.Security.SSLCert,
+		cfg.Security.MinTLSVersion, cfg.ProxyServer.StoragePath, cfg.Security.RSAKeySize); err != nil {
+		return nil, err
+	}
+	if s.clusterTLSConfig, err = security.CreateClusterTLSConfig(cfg.Security.ClusterSSLCA, cfg.Security.ClusterSSLKey,
+		cfg.Security.ClusterSSLCert); err != nil {
 		return nil, err
 	}
 
@@ -178,7 +182,7 @@ func (s *Server) newConn(conn net.Conn) driver.ClientConnection {
 		}
 	}
 	connectionID := atomic.AddUint64(&s.baseConnID, 1)
-	return s.driver.CreateClientConnection(conn, connectionID, s.tlsConfig)
+	return s.driver.CreateClientConnection(conn, connectionID, s.serverTLSConfig, s.clusterTLSConfig)
 }
 
 func (s *Server) checkConnectionCount() error {

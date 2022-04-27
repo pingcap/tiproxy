@@ -38,6 +38,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"io"
+	"net"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -184,6 +185,7 @@ func (p *PacketIO) Flush() error {
 }
 
 func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) error {
+	tlsConfig = tlsConfig.Clone()
 	tlsConn := tls.Server(p.bufReadConn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return errors.Trace(err)
@@ -194,6 +196,12 @@ func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) error {
 }
 
 func (p *PacketIO) UpgradeToClientTLS(tlsConfig *tls.Config) error {
+	host, _, err := net.SplitHostPort(p.bufReadConn.RemoteAddr().String())
+	if err != nil {
+		return err
+	}
+	tlsConfig = tlsConfig.Clone()
+	tlsConfig.ServerName = host
 	tlsConn := tls.Client(p.bufReadConn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return errors.Trace(err)

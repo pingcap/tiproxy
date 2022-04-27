@@ -62,7 +62,7 @@ type ClientConnection interface {
 }
 
 type BackendConnManager interface {
-	Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, tlsConfig *tls.Config) error
+	Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error
 	ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error
 	Redirect(newAddr string) error
 	Close() error
@@ -70,7 +70,7 @@ type BackendConnManager interface {
 
 // QueryCtx is the interface to execute command.
 type QueryCtx interface {
-	ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO, tlsConfig *tls.Config) error
+	ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error
 
 	ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error
 
@@ -81,5 +81,5 @@ type QueryCtx interface {
 }
 
 type IDriver interface {
-	CreateClientConnection(conn net.Conn, connectionID uint64, tlsConfig *tls.Config) ClientConnection
+	CreateClientConnection(conn net.Conn, connectionID uint64, serverTLSConfig, clusterTLSConfig *tls.Config) ClientConnection
 }

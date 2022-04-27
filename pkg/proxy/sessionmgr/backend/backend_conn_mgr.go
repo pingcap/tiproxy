@@ -12,6 +12,7 @@ import (
 	pnet "github.com/djshow832/weir/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/logutil"
+	gomysql "github.com/siddontang/go-mysql/mysql"
 	"go.uber.org/zap"
 )
 
@@ -60,7 +61,7 @@ func NewBackendConnManager() driver.BackendConnManager {
 	}
 }
 
-func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, tlsConfig *tls.Config) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
 	if mgr.backendConn != nil {
 		return errors.New("a backend connection already exists before connecting")
 	}
@@ -70,7 +71,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 		return err
 	}
 	backendIO := mgr.backendConn.PacketIO()
-	succeed, err := mgr.authenticator.handshakeWithClient(ctx, clientIO, backendIO, tlsConfig)
+	succeed, err := mgr.authenticator.handshakeFirstTime(clientIO, backendIO, serverTLSConfig, backendTLSConfig)
 	if err != nil {
 		return err
 	} else if !succeed {
@@ -156,13 +157,18 @@ func (mgr *BackendConnManager) initSessionStates(sessionStates string) error {
 	return nil
 }
 
-func (mgr *BackendConnManager) querySessionStates() (string, error) {
+func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken string, err error) {
 	// Do not lock here because the caller already locks.
-	result, err := mgr.querier.Query(mgr.backendConn.PacketIO(), SQLQueryState)
+	var result *gomysql.Result
+	result, err = mgr.querier.Query(mgr.backendConn.PacketIO(), SQLQueryState)
 	if err != nil {
-		return "", err
+		return
 	}
-	return result.GetString(0, 0)
+	if sessionStates, err = result.GetStringByName(0, "Session_states"); err != nil {
+		return
+	}
+	sessionToken, err = result.GetStringByName(0, "Session_token")
+	return
 }
 
 func (mgr *BackendConnManager) disconnect() error {
@@ -199,7 +205,7 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context, signal *signalRedirect) (err error) {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
-	var sessionStates string
+	var sessionStates, sessionToken string
 	switch mgr.connPhase {
 	case Disconnect:
 		return
@@ -215,7 +221,7 @@ func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context, signal *sig
 			return
 		}
 		mgr.connPhase = Redirect
-		if sessionStates, err = mgr.querySessionStates(); err != nil {
+		if sessionStates, sessionToken, err = mgr.querySessionStates(); err != nil {
 			return
 		}
 	}
@@ -226,7 +232,7 @@ func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context, signal *sig
 		return
 	}
 	// Retrial may be needed in the future.
-	if err = mgr.authenticator.handshakeWithServer(ctx, newConn.PacketIO()); err != nil {
+	if err = mgr.authenticator.handshakeSecondTime(newConn.PacketIO(), sessionToken); err != nil {
 		return
 	}
 	if err := mgr.backendConn.Close(); err != nil {

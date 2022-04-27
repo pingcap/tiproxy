@@ -18,24 +18,26 @@ import (
 )
 
 type ClientConnectionImpl struct {
-	tlsConfig    *tls.Config            // the tls config to connect to clients.
-	pkt          *pnet.PacketIO         // a helper to read and write data in packet format.
-	bufReadConn  *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
-	alloc        arena.Allocator
-	queryCtx     driver.QueryCtx
-	connectionID uint64
+	serverTLSConfig  *tls.Config            // the TLS config to connect to clients.
+	backendTLSConfig *tls.Config            // the TLS config to connect to TiDB server.
+	pkt              *pnet.PacketIO         // a helper to read and write data in packet format.
+	bufReadConn      *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
+	alloc            arena.Allocator
+	queryCtx         driver.QueryCtx
+	connectionID     uint64
 }
 
-func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, tlsConfig *tls.Config) driver.ClientConnection {
+func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, serverTLSConfig, backendTLSConfig *tls.Config) driver.ClientConnection {
 	bufReadConn := pnet.NewBufferedReadConn(conn)
 	pkt := pnet.NewPacketIO(bufReadConn)
 	return &ClientConnectionImpl{
-		queryCtx:     queryCtx,
-		tlsConfig:    tlsConfig,
-		alloc:        arena.NewAllocator(32 * 1024),
-		bufReadConn:  bufReadConn,
-		pkt:          pkt,
-		connectionID: connectionID,
+		queryCtx:         queryCtx,
+		serverTLSConfig:  serverTLSConfig,
+		backendTLSConfig: backendTLSConfig,
+		alloc:            arena.NewAllocator(32 * 1024),
+		bufReadConn:      bufReadConn,
+		pkt:              pkt,
+		connectionID:     connectionID,
 	}
 }
 
@@ -52,7 +54,7 @@ func (cc *ClientConnectionImpl) Auth() error {
 }
 
 func (cc *ClientConnectionImpl) Run(ctx context.Context) {
-	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt, cc.tlsConfig); err != nil {
+	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt, cc.serverTLSConfig, cc.backendTLSConfig); err != nil {
 		logutil.Logger(ctx).Info("new connection fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
 		metrics.HandShakeErrorCounter.Inc()
 		err = cc.Close()
@@ -87,12 +89,12 @@ func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
 				data = clientPkt[1:]
 			}
 			dataStr := string(hack.String(data))
-			logutil.Logger(ctx).Info("receive cmd", zap.String("query", dataStr))
+			logutil.Logger(ctx).Debug("receive cmd", zap.String("query", dataStr))
 		case mysql.ComQuit:
-			logutil.Logger(ctx).Info("quit")
+			logutil.Logger(ctx).Debug("quit")
 			return nil
 		default:
-			logutil.Logger(ctx).Info("receive cmd", zap.String("cmd", cmdStr))
+			logutil.Logger(ctx).Debug("receive cmd", zap.String("cmd", cmdStr))
 		}
 		err = cc.queryCtx.ExecuteCmd(ctx, clientPkt, cc.pkt)
 		if err != nil {

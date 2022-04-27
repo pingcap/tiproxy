@@ -2,15 +2,14 @@ package backend
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 
 	pnet "github.com/djshow832/weir/pkg/proxy/net"
-	"github.com/djshow832/weir/pkg/util/passwd"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tidb/util/hack"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
 )
@@ -23,21 +22,20 @@ const (
 )
 
 type Authenticator struct {
-	user       string
-	authData   []byte // password
-	authPlugin string
-	dbname     string // default database name
-	capability uint32 // client capability
-	collation  uint8
-	attrs      []byte // no need to parse
+	user             string
+	dbname           string // default database name
+	capability       uint32 // client capability
+	collation        uint8
+	attrs            []byte // no need to parse
+	backendTLSConfig *tls.Config
 }
 
 func (auth *Authenticator) String() string {
-	return fmt.Sprintf("user:%s, authData:%s, authPlugin:%s, dbname:%s, capability:%d, collation:%d",
-		auth.user, string(auth.authData), auth.authPlugin, auth.dbname, auth.capability, auth.collation)
+	return fmt.Sprintf("user:%s, dbname:%s, capability:%d, collation:%d",
+		auth.user, auth.dbname, auth.capability, auth.collation)
 }
 
-func (auth *Authenticator) handshakeWithClient(ctx context.Context, clientIO, backendIO *pnet.PacketIO, serverTLSConfig *tls.Config) (bool, error) {
+func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) (bool, error) {
 	backendIO.ResetSequence()
 	var serverPkt, clientPkt []byte
 	var err error
@@ -60,13 +58,13 @@ func (auth *Authenticator) handshakeWithClient(ctx context.Context, clientIO, ba
 	// A 2-bytes capability contains the ClientSSL flag, no matter ClientProtocol41 is set or not.
 	if capability&mysql.ClientSSL > 0 {
 		// Upgrade with the client.
-		serverTLSConfig = serverTLSConfig.Clone()
 		err = clientIO.UpgradeToServerTLS(serverTLSConfig)
 		if err != nil {
 			return false, err
 		}
 		// Upgrade with the server.
-		err = backendIO.UpgradeToClientTLS(&tls.Config{InsecureSkipVerify: true})
+		auth.backendTLSConfig = backendTLSConfig
+		err = backendIO.UpgradeToClientTLS(backendTLSConfig)
 		if err != nil {
 			return false, err
 		}
@@ -86,25 +84,15 @@ func (auth *Authenticator) handshakeWithClient(ctx context.Context, clientIO, ba
 		}
 		switch serverPkt[0] {
 		case mysql.OKHeader:
-			logutil.BgLogger().Info("parse client handshake response finished", zap.String("authInfo", auth.String()))
+			logutil.BgLogger().Debug("parse client handshake response finished", zap.String("authInfo", auth.String()))
 			return true, nil
 		case mysql.ErrHeader:
 			return false, nil
-		case mysql.AuthSwitchRequest:
+		default: // mysql.AuthSwitchRequest, ShaCommand
 			clientPkt, err = forwardMsg(clientIO, backendIO)
 			if err != nil {
 				return false, err
 			}
-			pluginEndIndex := bytes.IndexByte(serverPkt, 0x00)
-			auth.authPlugin = string(serverPkt[1:pluginEndIndex])
-			auth.authData = clientPkt
-		case ShaCommand:
-			clientPkt, err = forwardMsg(clientIO, backendIO)
-			if err != nil {
-				return false, err
-			}
-			auth.authPlugin = mysql.AuthCachingSha2Password
-			auth.authData = bytes.Trim(clientPkt, "\x00")
 		}
 	}
 }
@@ -154,17 +142,14 @@ func (auth *Authenticator) parseHandshakeResponse(data []byte) {
 		num, null, off := pnet.ParseLengthEncodedInt(data[offset:])
 		offset += off
 		if !null {
-			auth.authData = data[offset : offset+int(num)]
 			offset += int(num)
 		}
 	} else if auth.capability&mysql.ClientSecureConnection > 0 {
 		authLen := int(data[offset])
-		offset++
-		auth.authData = data[offset : offset+authLen]
-		offset += authLen
+		offset += authLen + 1
 	} else {
-		auth.authData = data[offset : offset+bytes.IndexByte(data[offset:], 0)]
-		offset += len(auth.authData) + 1
+		authLen := bytes.IndexByte(data[offset:], 0)
+		offset += authLen + 1
 	}
 
 	// dbname
@@ -179,11 +164,6 @@ func (auth *Authenticator) parseHandshakeResponse(data []byte) {
 	// auth plugin
 	if auth.capability&mysql.ClientPluginAuth > 0 {
 		idx := bytes.IndexByte(data[offset:], 0)
-		s := offset
-		f := offset + idx
-		if s < f {
-			auth.authPlugin = string(data[s:f])
-		}
 		offset += idx + 1
 	}
 
@@ -218,51 +198,48 @@ func (auth *Authenticator) parseOldHandshakeResponse(data []byte) {
 			offset = offset + idx + 1
 		}
 	}
-
-	// password
-	if len(data[offset:]) > 0 {
-		auth.authData = data[offset : offset+bytes.IndexByte(data[offset:], 0)]
-	}
-	auth.authPlugin = mysql.AuthNativePassword
+	// skip auth data
 }
 
-func (auth *Authenticator) handshakeWithServer(ctx context.Context, backendIO *pnet.PacketIO) error {
-	if auth.authPlugin != mysql.AuthCachingSha2Password {
-		return errors.New(fmt.Sprintf("only support %s now", mysql.AuthCachingSha2Password))
+func (auth *Authenticator) handshakeSecondTime(backendIO *pnet.PacketIO, sessionToken string) error {
+	if len(sessionToken) == 0 {
+		return errors.New("session token is empty")
 	}
 
-	salt, capability, authPlugin, err := auth.readInitialHandshake(backendIO)
+	_, capability, err := auth.readInitialHandshake(backendIO)
 	if err != nil {
 		return err
 	}
 
-	err = auth.writeAuthHandshake(backendIO, salt, capability, authPlugin)
+	tokenBytes := hack.Slice(sessionToken)
+	err = auth.writeAuthHandshake(backendIO, tokenBytes, capability)
 	if err != nil {
 		return err
 	}
 
-	return auth.handleAuthResult(backendIO)
+	return auth.handleSecondAuthResult(backendIO)
 }
 
-func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (salt []byte, capability uint32, authPlugin string, err error) {
+func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (salt []byte, capability uint32, err error) {
 	data, err := backendIO.ReadPacket()
 	if err != nil {
-		return nil, 0, "", errors.Trace(err)
+		err = errors.Trace(err)
+		return
 	}
 
 	if data[0] == mysql.ErrHeader {
-		return nil, 0, "", errors.New("read initial handshake error")
+		err = errors.New("read initial handshake error")
+		return
 	}
 
 	// Skip mysql version, mysql version end with 0x00.
 	pos := 1 + bytes.IndexByte(data[1:], 0x00) + 1
 
 	// skip connection id
-	pos += 4
-	salt = append(salt, data[pos:pos+8]...)
-
+	// skip salt first part
 	// skip filter
-	pos += 8 + 1
+	pos += 4 + 8 + 1
+
 	// capability lower 2 bytes
 	capability = uint32(binary.LittleEndian.Uint16(data[pos : pos+2]))
 	pos += 2
@@ -272,35 +249,30 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (salt 
 		pos += 1 + 2
 		// capability flags (upper 2 bytes)
 		capability = uint32(binary.LittleEndian.Uint16(data[pos:pos+2]))<<16 | capability
-		pos += 2
 
 		// skip auth data len or [00]
 		// skip reserved (all [00])
-		pos += 10 + 1
-		salt = append(salt, data[pos:pos+12]...)
-		pos += 13
-
-		// auth plugin
-		if end := bytes.IndexByte(data[pos:], 0x00); end != -1 {
-			authPlugin = string(data[pos : pos+end])
-		} else {
-			authPlugin = string(data[pos:])
-		}
+		// skip salt second part
+		// skip auth plugin
 	}
 	return
 }
 
-func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, salt []byte, serverCapability uint32, authPlugin string) error {
-	authData := passwd.CalculatePassword(salt, auth.authData, auth.authPlugin)
-
-	// encode length of the auth plugin data
-	var authRespBuf [9]byte
-	authResp := pnet.DumpLengthEncodedInt(authRespBuf[:0], uint64(len(authData)))
+func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte, serverCapability uint32) error {
+	// encode length of the auth data
+	var (
+		authRespBuf, attrRespBuf [9]byte
+		authResp, attrResp       []byte
+	)
+	authResp = pnet.DumpLengthEncodedInt(authRespBuf[:0], uint64(len(authData)))
 	capability := auth.capability
 	if len(authResp) > 1 {
 		capability |= mysql.ClientPluginAuthLenencClientData
 	} else {
 		capability &= ^mysql.ClientPluginAuthLenencClientData
+	}
+	if capability&mysql.ClientConnectAtts > 0 {
+		attrResp = pnet.DumpLengthEncodedInt(attrRespBuf[:0], uint64(len(auth.attrs)))
 	}
 
 	//packet length
@@ -311,7 +283,8 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, salt []b
 	//username
 	//auth
 	//mysql_native_password + null-terminated
-	length := 4 + 4 + 1 + 23 + len(auth.user) + 1 + len(authResp) + len(authData) + 21 + 1
+	//attrs
+	length := 4 + 4 + 1 + 23 + len(auth.user) + 1 + len(authResp) + len(authData) + 21 + 1 + len(attrResp) + len(auth.attrs)
 	// db name
 	if len(auth.dbname) > 0 {
 		length += len(auth.dbname) + 1
@@ -350,7 +323,7 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, salt []b
 		if err = backendIO.Flush(); err != nil {
 			return err
 		}
-		if err = backendIO.UpgradeToClientTLS(&tls.Config{InsecureSkipVerify: true}); err != nil {
+		if err = backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
 			return err
 		}
 	}
@@ -373,9 +346,16 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, salt []b
 		pos++
 	}
 
-	// Assume native client during response
-	pos += copy(data[pos:], auth.authPlugin)
+	// auth_plugin
+	pos += copy(data[pos:], mysql.AuthTiDBSessionToken)
 	data[pos] = 0x00
+	pos++
+
+	// attrs
+	if auth.capability&mysql.ClientConnectAtts > 0 {
+		pos += copy(data[pos:], attrResp)
+		pos += copy(data[pos:], auth.attrs)
+	}
 
 	if err = backendIO.WritePacket(data); err != nil {
 		return err
@@ -383,53 +363,18 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, salt []b
 	return backendIO.Flush()
 }
 
-func (auth *Authenticator) handleAuthResult(backendIO *pnet.PacketIO) error {
-	for {
-		data, err := backendIO.ReadPacket()
-		if err != nil {
-			return err
-		}
-
-		switch data[0] {
-		case mysql.OKHeader:
-			return nil
-		case ShaCommand:
-			switch data[1] {
-			case FastAuthOk:
-			case FastAuthFail:
-				if err = auth.writeAuthPacket(backendIO, auth.authData, true); err != nil {
-					return err
-				}
-			default:
-				return errors.New(fmt.Sprintf("do not support sha command %d now", data[1]))
-			}
-		case mysql.AuthSwitchRequest:
-			pluginEndIndex := bytes.IndexByte(data, 0x00)
-			plugin := string(data[1:pluginEndIndex])
-			salt := data[pluginEndIndex+1:]
-			authData := passwd.CalculatePassword(salt, auth.authData, plugin)
-			if err = auth.writeAuthPacket(backendIO, authData, false); err != nil {
-				return err
-			}
-		default: // mysql.ErrHeader
-			return errors.New("read auth result error")
-		}
-	}
-}
-
-func (auth *Authenticator) writeAuthPacket(backendIO *pnet.PacketIO, password []byte, addNul bool) error {
-	pktLen := len(password)
-	if addNul {
-		pktLen++
-	}
-
-	data := make([]byte, pktLen)
-	copy(data, password)
-	if addNul {
-		data[pktLen-1] = 0x00
-	}
-	if err := backendIO.WritePacket(data); err != nil {
+func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) error {
+	data, err := backendIO.ReadPacket()
+	if err != nil {
 		return err
 	}
-	return backendIO.Flush()
+
+	switch data[0] {
+	case mysql.OKHeader:
+		return nil
+	case mysql.ErrHeader:
+		return errors.New("auth failed")
+	default: // mysql.AuthSwitchRequest, ShaCommand:
+		return errors.Errorf("read unexpected command: %#x", data[0])
+	}
 }

@@ -166,7 +166,7 @@ func createTLSCertificates(certpath string, keypath string, rsaKeySize int) erro
 	return nil
 }
 
-// ToTLSConfig generates tls's config based on security section of the config.
+// CreateClusterTLSConfig generates tls's config based on security section of the config.
 func CreateClusterTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Config, err error) {
 	if len(sslCA) != 0 {
 		certPool := x509.NewCertPool()
@@ -207,10 +207,10 @@ func CreateClusterTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Confi
 				return getCert()
 			}
 		}
+	} else {
+		tlsConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
 	}
 	return
-}
-
-func CreateClientTLSConfig() *tls.Config {
-	return &tls.Config{}
 }
