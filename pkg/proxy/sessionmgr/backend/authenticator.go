@@ -14,13 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	ShaCommand       = 1
-	RequestRsaPubKey = 2
-	FastAuthOk       = 3
-	FastAuthFail     = 4
-)
-
+// Authenticator handshakes with the client and the backend.
 type Authenticator struct {
 	user             string
 	dbname           string // default database name
@@ -232,9 +226,8 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (salt 
 		return
 	}
 
-	// Skip mysql version, mysql version end with 0x00.
+	// skip mysql version
 	pos := 1 + bytes.IndexByte(data[1:], 0x00) + 1
-
 	// skip connection id
 	// skip salt first part
 	// skip filter

@@ -9,15 +9,11 @@ import (
 	"github.com/pingcap/tidb/util/arena"
 )
 
-type connectionPhase byte
-
 const (
-	handshaking connectionPhase = iota
-	authenticating
-	command
-	fail
-	disconnecting
+	DialTimeout = 5 * time.Second
 )
+
+type connectionPhase byte
 
 type BackendConnection interface {
 	Connect() error
@@ -35,14 +31,13 @@ type BackendConnectionImpl struct {
 
 func NewBackendConnectionImpl(address string) *BackendConnectionImpl {
 	return &BackendConnectionImpl{
-		phase:   handshaking,
 		address: address,
 		alloc:   arena.NewAllocator(32 * 1024),
 	}
 }
 
 func (bc *BackendConnectionImpl) Connect() error {
-	cn, err := net.DialTimeout("tcp", bc.address, time.Second*5)
+	cn, err := net.DialTimeout("tcp", bc.address, DialTimeout)
 	if err != nil {
 		return errors.New("dial backend error")
 	}

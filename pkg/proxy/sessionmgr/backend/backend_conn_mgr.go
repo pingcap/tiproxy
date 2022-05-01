@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"unsafe"
 
 	"github.com/djshow832/weir/pkg/proxy/driver"
 	pnet "github.com/djshow832/weir/pkg/proxy/net"
@@ -14,21 +16,6 @@ import (
 	"github.com/pingcap/tidb/util/logutil"
 	gomysql "github.com/siddontang/go-mysql/mysql"
 	"go.uber.org/zap"
-)
-
-const (
-	InitBackend = iota
-	Command
-	WaitFinish
-	Redirect
-	Disconnect
-)
-
-const (
-	StatusInTrans            uint32 = 0x01
-	StatusAutoCommit         uint32 = 0x02
-	StatusPrepareWaitExecute uint32 = 0x04
-	StatusPrepareWaitFetch   uint32 = 0x08
 )
 
 const (
@@ -41,33 +28,30 @@ type signalRedirect struct {
 }
 
 type BackendConnManager struct {
-	authenticator *Authenticator
-	querier       *Querier
-	backendConn   BackendConnection
-	connPhase     uint32
-	serverStatus  uint32
-	processLock   sync.Mutex
-	statusChanged chan int
-	signalLock    sync.Mutex
-	signal        *signalRedirect
+	authenticator  *Authenticator
+	cmdProcessor   *CmdProcessor
+	backendConn    BackendConnection
+	processLock    sync.Mutex // to make redirecting and command processing exclusive
+	signalReceived chan int
+	signal         unsafe.Pointer // type *signalRedirect
 }
 
 func NewBackendConnManager() driver.BackendConnManager {
 	return &BackendConnManager{
-		connPhase:     InitBackend,
-		serverStatus:  StatusAutoCommit,
-		authenticator: &Authenticator{},
-		statusChanged: make(chan int),
+		cmdProcessor:   NewCmdProcessor(),
+		authenticator:  &Authenticator{},
+		signalReceived: make(chan int),
 	}
 }
 
 func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
+	mgr.processLock.Lock()
+	defer mgr.processLock.Unlock()
 	if mgr.backendConn != nil {
 		return errors.New("a backend connection already exists before connecting")
 	}
 	mgr.backendConn = NewBackendConnectionImpl(serverAddr)
-	err := mgr.backendConn.Connect()
-	if err != nil {
+	if err := mgr.backendConn.Connect(); err != nil {
 		return err
 	}
 	backendIO := mgr.backendConn.PacketIO()
@@ -77,9 +61,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	} else if !succeed {
 		return errors.New("server returns auth failure")
 	}
-	mgr.connPhase = Command
-	mgr.querier = &Querier{
-		capability: mgr.authenticator.capability,
+	if mgr.authenticator.capability&mysql.ClientProtocol41 == 0 {
+		return errors.New("client must support CLIENT_PROTOCOL_41 capability")
 	}
 	go mgr.processSignals(ctx)
 	return nil
@@ -88,69 +71,28 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
-	backendIO := mgr.backendConn.PacketIO()
-	backendIO.ResetSequence()
-	err := backendIO.WritePacket(request)
-	if err != nil {
-		return nil
-	}
-	err = backendIO.Flush()
+	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
+	holdRequest, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), waitingRedirect)
 	if err != nil {
 		return err
 	}
-	cmd := request[0]
-	switch cmd {
-	case mysql.ComQuery:
-		err = mgr.forwardCommand(ctx, clientIO, backendIO, 2)
-	case mysql.ComQuit:
-		mgr.connPhase = Disconnect
-		return nil
-	default:
-		err = mgr.forwardCommand(ctx, clientIO, backendIO, 1)
+	if waitingRedirect && mgr.cmdProcessor.canRedirect() {
+		if err = mgr.tryRedirect(ctx); err != nil {
+			return err
+		}
+		if holdRequest {
+			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
+		}
 	}
 	return err
 }
 
-func (mgr *BackendConnManager) forwardCommand(ctx context.Context, clientIO, backendIO *pnet.PacketIO, expectedEOFNum int) error {
-	eofHeaders := 0
-	okOrErr := false
-	for eofHeaders < expectedEOFNum && !okOrErr {
-		data, err := backendIO.ReadPacket()
-		if err != nil {
-			return err
-		}
-		switch data[0] {
-		case mysql.OKHeader:
-			mgr.handleOKPacket(data)
-			okOrErr = true
-		case mysql.ErrHeader:
-			okOrErr = true
-		case mysql.EOFHeader:
-			if len(data) <= 5 {
-				mgr.handleEOFPacket(data)
-				eofHeaders += 1
-			}
-		}
-		err = clientIO.WritePacket(data)
-		if err != nil {
-			return err
-		}
-	}
-	return clientIO.Flush()
-}
-
-func (mgr *BackendConnManager) handleOKPacket(data []byte) {
-}
-
-func (mgr *BackendConnManager) handleEOFPacket(data []byte) {
-}
-
-func (mgr *BackendConnManager) initSessionStates(sessionStates string) error {
+func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessionStates string) error {
 	// Do not lock here because the caller already locks.
 	sessionStates = strings.ReplaceAll(sessionStates, "\\", "\\\\")
 	sessionStates = strings.ReplaceAll(sessionStates, "'", "\\'")
 	sql := fmt.Sprintf(SQLSetState, sessionStates)
-	_, err := mgr.querier.Query(mgr.backendConn.PacketIO(), sql)
+	_, err := mgr.cmdProcessor.query(backendIO, sql)
 	if err != nil {
 		return err
 	}
@@ -160,7 +102,7 @@ func (mgr *BackendConnManager) initSessionStates(sessionStates string) error {
 func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken string, err error) {
 	// Do not lock here because the caller already locks.
 	var result *gomysql.Result
-	result, err = mgr.querier.Query(mgr.backendConn.PacketIO(), SQLQueryState)
+	result, err = mgr.cmdProcessor.query(mgr.backendConn.PacketIO(), SQLQueryState)
 	if err != nil {
 		return
 	}
@@ -176,88 +118,87 @@ func (mgr *BackendConnManager) disconnect() error {
 }
 
 func (mgr *BackendConnManager) processSignals(ctx context.Context) {
-	finished := false
-	for !finished {
+	for {
 		select {
-		case <-mgr.statusChanged:
-			mgr.signalLock.Lock()
-			signal := mgr.signal
-			mgr.signalLock.Unlock()
-			if signal == nil {
-				break
-			}
-			if err := mgr.tryProcessSignal(ctx, signal); err != nil {
-				// TODO: retry / close the client connection
+		// Redirect the session immediately just in case the session is idle.
+		case <-mgr.signalReceived:
+			mgr.processLock.Lock()
+			if err := mgr.tryRedirect(ctx); err != nil {
 				logutil.Logger(ctx).Error("redirect connection failed", zap.Error(err))
 			}
-			mgr.signalLock.Lock()
-			// Check mgr.signal because it may be updated again.
-			if mgr.signal != nil && mgr.signal.newAddr == signal.newAddr {
-				mgr.signal = nil
-			}
-			mgr.signalLock.Unlock()
+			mgr.processLock.Unlock()
 		case <-ctx.Done():
-			finished = true
+			return
 		}
 	}
 }
 
-func (mgr *BackendConnManager) tryProcessSignal(ctx context.Context, signal *signalRedirect) (err error) {
-	mgr.processLock.Lock()
-	defer mgr.processLock.Unlock()
+// processLock must be held on this function.
+func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
+	signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
+	if signal == nil {
+		return nil
+	}
+
+	if !mgr.cmdProcessor.canRedirect() {
+		return
+	}
+
+	defer func() {
+		if err != nil {
+			logutil.Logger(ctx).Error("redirect connection failed", zap.String("to", signal.newAddr), zap.Error(err))
+		} else {
+			logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("to", signal.newAddr))
+		}
+	}()
+
 	var sessionStates, sessionToken string
-	switch mgr.connPhase {
-	case Disconnect:
+	if sessionStates, sessionToken, err = mgr.querySessionStates(); err != nil {
 		return
-	case WaitFinish:
-		// wait for new status
-		return
-	case InitBackend, Redirect:
-		// not possible here
-		return
-	case Command:
-		if mgr.serverStatus&StatusInTrans > 0 || mgr.serverStatus&StatusPrepareWaitExecute > 0 || mgr.serverStatus&StatusPrepareWaitFetch > 0 {
-			mgr.connPhase = WaitFinish
-			return
-		}
-		mgr.connPhase = Redirect
-		if sessionStates, sessionToken, err = mgr.querySessionStates(); err != nil {
-			return
-		}
 	}
 
 	newConn := NewBackendConnectionImpl(signal.newAddr)
 	if err = newConn.Connect(); err != nil {
-		mgr.connPhase = Command
 		return
 	}
 	// Retrial may be needed in the future.
 	if err = mgr.authenticator.handshakeSecondTime(newConn.PacketIO(), sessionToken); err != nil {
+		if ignoredErr := newConn.Close(); ignoredErr != nil {
+			logutil.Logger(ctx).Warn("close new backend connection failed", zap.Error(ignoredErr))
+		}
 		return
 	}
-	if err := mgr.backendConn.Close(); err != nil {
-		logutil.Logger(ctx).Warn("close previous backend connection failed", zap.Error(err))
+	if err = mgr.initSessionStates(newConn.PacketIO(), sessionStates); err != nil {
+		if ignoredErr := newConn.Close(); ignoredErr != nil {
+			logutil.Logger(ctx).Warn("close new backend connection failed", zap.Error(ignoredErr))
+		}
+		return
+	}
+	if ignoredErr := mgr.backendConn.Close(); ignoredErr != nil {
+		logutil.Logger(ctx).Warn("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
-	if err = mgr.initSessionStates(sessionStates); err != nil {
-		return
-	}
-	logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("to", signal.newAddr))
-	mgr.connPhase = Command
+	// Check mgr.signal because it may be updated again.
+	atomic.CompareAndSwapPointer(&mgr.signal, unsafe.Pointer(signal), nil)
 	return
 }
 
 func (mgr *BackendConnManager) Redirect(newAddr string) error {
-	mgr.signalLock.Lock()
-	mgr.signal = &signalRedirect{
+	// We do not use `chan signalRedirect` to avoid blocking. We cannot discard the signal when it blocks,
+	// because only the latest signal matters.
+	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
-	}
-	mgr.signalLock.Unlock()
+	}))
 	select {
-	case mgr.statusChanged <- 1:
+	case mgr.signalReceived <- 1:
 	default:
 	}
 	return nil
+}
+
+// RedirectIfNoWait redirects the session if it doesn't need to wait.
+func (mgr *BackendConnManager) RedirectIfNoWait(newAddr string) bool {
+	return false
 }
 
 func (mgr *BackendConnManager) Close() error {
