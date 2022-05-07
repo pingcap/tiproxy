@@ -72,3 +72,9 @@ func DumpUint32(buffer []byte, n uint32) []byte {
 	buffer = append(buffer, byte(n>>24))
 	return buffer
 }
+
+func DumpUint16(buffer []byte, n uint16) []byte {
+	buffer = append(buffer, byte(n))
+	buffer = append(buffer, byte(n>>8))
+	return buffer
+}

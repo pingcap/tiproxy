@@ -31,42 +31,74 @@ func (auth *Authenticator) String() string {
 
 func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) (bool, error) {
 	backendIO.ResetSequence()
-	var serverPkt, clientPkt []byte
-	var err error
+	var (
+		serverPkt, clientPkt []byte
+		err                  error
+		serverCapability     uint32
+	)
 
-	// initial handshake packet
-	serverPkt, err = forwardMsg(backendIO, clientIO)
-	if err != nil {
+	// Read initial handshake packet from the backend.
+	serverPkt, serverCapability, err = auth.readInitialHandshake(backendIO)
+	if serverPkt != nil {
+		writeErr := clientIO.WritePacket(serverPkt)
+		if writeErr != nil {
+			return false, writeErr
+		}
+		if writeErr = clientIO.Flush(); writeErr != nil {
+			return false, writeErr
+		}
+		if err != nil {
+			return false, nil
+		}
+	} else {
 		return false, err
 	}
-	if serverPkt[0] == mysql.ErrHeader {
-		return false, nil
+	if serverCapability&mysql.ClientSSL == 0 {
+		return false, errors.New("the TiDB server must enable TLS")
 	}
 
-	// ssl request + response
-	clientPkt, err = forwardMsg(clientIO, backendIO)
-	if err != nil {
+	// Read the response from the client.
+	if clientPkt, err = clientIO.ReadPacket(); err != nil {
 		return false, err
 	}
-	capability := uint32(binary.LittleEndian.Uint16(clientPkt[:2]))
+	capability := binary.LittleEndian.Uint16(clientPkt[:2])
 	// A 2-bytes capability contains the ClientSSL flag, no matter ClientProtocol41 is set or not.
-	if capability&mysql.ClientSSL > 0 {
-		// Upgrade with the client.
-		err = clientIO.UpgradeToServerTLS(serverTLSConfig)
-		if err != nil {
+	sslEnabled := uint32(capability)&mysql.ClientSSL > 0
+	if sslEnabled {
+		// Upgrade TLS with the client if SSL is enabled.
+		if err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
 			return false, err
 		}
-		// Upgrade with the server.
-		auth.backendTLSConfig = backendTLSConfig
-		err = backendIO.UpgradeToClientTLS(backendTLSConfig)
-		if err != nil {
+	} else {
+		// Rewrite the packet with ClientSSL enabled because we always connect to TiDB with TLS.
+		pktWithSSL := make([]byte, len(clientPkt))
+		pnet.DumpUint16(pktWithSSL[:0], capability|uint16(mysql.ClientSSL))
+		copy(pktWithSSL[2:], clientPkt[2:])
+		clientPkt = pktWithSSL
+	}
+	if err = backendIO.WritePacket(clientPkt); err != nil {
+		return false, err
+	}
+	if err = backendIO.Flush(); err != nil {
+		return false, err
+	}
+	// Always upgrade TLS with the server.
+	auth.backendTLSConfig = backendTLSConfig
+	if err = backendIO.UpgradeToClientTLS(backendTLSConfig); err != nil {
+		return false, err
+	}
+	if sslEnabled {
+		// Read from the client again, where the capability may not contain ClientSSL this time.
+		if clientPkt, err = clientIO.ReadPacket(); err != nil {
 			return false, err
 		}
-		// The client will send another response.
-		clientPkt, err = forwardMsg(clientIO, backendIO)
-		if err != nil {
-			return false, err
-		}
+	}
+	// Send the response again.
+	if err = backendIO.WritePacket(clientPkt); err != nil {
+		return false, err
+	}
+	if err = backendIO.Flush(); err != nil {
+		return false, err
 	}
 	auth.readHandshakeResponse(clientPkt)
 
@@ -200,13 +232,16 @@ func (auth *Authenticator) handshakeSecondTime(backendIO *pnet.PacketIO, session
 		return errors.New("session token is empty")
 	}
 
-	_, capability, err := auth.readInitialHandshake(backendIO)
+	_, serverCapability, err := auth.readInitialHandshake(backendIO)
 	if err != nil {
 		return err
 	}
+	if serverCapability&mysql.ClientSSL == 0 {
+		return errors.New("the TiDB server must enable TLS")
+	}
 
 	tokenBytes := hack.Slice(sessionToken)
-	err = auth.writeAuthHandshake(backendIO, tokenBytes, capability)
+	err = auth.writeAuthHandshake(backendIO, tokenBytes)
 	if err != nil {
 		return err
 	}
@@ -214,34 +249,33 @@ func (auth *Authenticator) handshakeSecondTime(backendIO *pnet.PacketIO, session
 	return auth.handleSecondAuthResult(backendIO)
 }
 
-func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (salt []byte, capability uint32, err error) {
-	data, err := backendIO.ReadPacket()
-	if err != nil {
+func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serverPkt []byte, capability uint32, err error) {
+	if serverPkt, err = backendIO.ReadPacket(); err != nil {
 		err = errors.Trace(err)
 		return
 	}
 
-	if data[0] == mysql.ErrHeader {
+	if serverPkt[0] == mysql.ErrHeader {
 		err = errors.New("read initial handshake error")
 		return
 	}
 
 	// skip mysql version
-	pos := 1 + bytes.IndexByte(data[1:], 0x00) + 1
+	pos := 1 + bytes.IndexByte(serverPkt[1:], 0x00) + 1
 	// skip connection id
 	// skip salt first part
 	// skip filter
 	pos += 4 + 8 + 1
 
 	// capability lower 2 bytes
-	capability = uint32(binary.LittleEndian.Uint16(data[pos : pos+2]))
+	capability = uint32(binary.LittleEndian.Uint16(serverPkt[pos : pos+2]))
 	pos += 2
 
-	if len(data) > pos {
+	if len(serverPkt) > pos {
 		// skip server charset + status
 		pos += 1 + 2
 		// capability flags (upper 2 bytes)
-		capability = uint32(binary.LittleEndian.Uint16(data[pos:pos+2]))<<16 | capability
+		capability = uint32(binary.LittleEndian.Uint16(serverPkt[pos:pos+2]))<<16 | capability
 
 		// skip auth data len or [00]
 		// skip reserved (all [00])
@@ -251,7 +285,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (salt 
 	return
 }
 
-func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte, serverCapability uint32) error {
+func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte) error {
 	// encode length of the auth data
 	var (
 		authRespBuf, attrRespBuf [9]byte
@@ -264,6 +298,8 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 	} else {
 		capability &= ^mysql.ClientPluginAuthLenencClientData
 	}
+	// Always handshake with SSL enabled.
+	capability |= mysql.ClientSSL
 	if capability&mysql.ClientConnectAtts > 0 {
 		attrResp = pnet.DumpLengthEncodedInt(attrRespBuf[:0], uint64(len(auth.attrs)))
 	}
@@ -306,19 +342,16 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 		pos++
 	}
 
-	var err error
-	// SSL Connection Request Packet
-	if serverCapability&mysql.ClientSSL > 0 {
-		// Send TLS / SSL request packet
-		if err = backendIO.WritePacket(data[:pos]); err != nil {
-			return err
-		}
-		if err = backendIO.Flush(); err != nil {
-			return err
-		}
-		if err = backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
-			return err
-		}
+	// Send TLS / SSL request packet. The server must have supported TLS.
+	err := backendIO.WritePacket(data[:pos])
+	if err != nil {
+		return err
+	}
+	if err = backendIO.Flush(); err != nil {
+		return err
+	}
+	if err = backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
+		return err
 	}
 
 	// User [null terminated string]
