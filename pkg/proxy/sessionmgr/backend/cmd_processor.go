@@ -62,10 +62,6 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 }
 
 func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) (err error) {
-	var (
-		response []byte
-	)
-
 	cmd := request[0]
 	switch cmd {
 	case mysql.ComStmtPrepare:
@@ -74,11 +70,14 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 		return cp.forwardFetchCmd(clientIO, backendIO, request)
 	case mysql.ComQuery, mysql.ComStmtExecute, mysql.ComProcessInfo:
 		return cp.forwardQueryCmd(clientIO, backendIO, request)
+	case mysql.ComStmtClose:
+		return cp.forwardCloseCmd(request)
 	}
 
 	for {
-		if response, err = forwardOnePacket(clientIO, backendIO); err != nil {
-			return
+		response, err := forwardOnePacket(clientIO, backendIO)
+		if err != nil {
+			return err
 		}
 		if response[0] == mysql.OKHeader {
 			cp.handleOKPacket(request, response)
@@ -185,6 +184,12 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 	return clientIO.Flush()
 }
 
+func (cp *CmdProcessor) forwardCloseCmd(request []byte) (err error) {
+	// No packet is sent to the client for COM_STMT_CLOSE.
+	cp.updatePrepStmtStatus(request, 0)
+	return nil
+}
+
 func (cp *CmdProcessor) handleOKPacket(request, response []byte) *gomysql.Result {
 	var n int
 	var pos = 1
@@ -206,6 +211,11 @@ func (cp *CmdProcessor) handleEOFPacket(request, response []byte) {
 }
 
 func (cp *CmdProcessor) updateServerStatus(request []byte, serverStatus uint16) {
+	cp.updateTxnStatus(serverStatus)
+	cp.updatePrepStmtStatus(request, serverStatus)
+}
+
+func (cp *CmdProcessor) updateTxnStatus(serverStatus uint16) {
 	if serverStatus&mysql.ServerStatusAutocommit > 0 {
 		cp.serverStatus |= StatusAutoCommit
 	} else {
@@ -216,7 +226,9 @@ func (cp *CmdProcessor) updateServerStatus(request []byte, serverStatus uint16) 
 	} else {
 		cp.serverStatus &^= StatusInTrans
 	}
+}
 
+func (cp *CmdProcessor) updatePrepStmtStatus(request []byte, serverStatus uint16) {
 	var (
 		stmtID         int
 		prepStmtStatus uint32
