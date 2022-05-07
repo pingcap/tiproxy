@@ -92,18 +92,14 @@ func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessi
 	sessionStates = strings.ReplaceAll(sessionStates, "\\", "\\\\")
 	sessionStates = strings.ReplaceAll(sessionStates, "'", "\\'")
 	sql := fmt.Sprintf(SQLSetState, sessionStates)
-	_, err := mgr.cmdProcessor.query(backendIO, sql)
-	if err != nil {
-		return err
-	}
-	return nil
+	_, _, err := mgr.cmdProcessor.query(backendIO, sql)
+	return err
 }
 
 func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken string, err error) {
 	// Do not lock here because the caller already locks.
 	var result *gomysql.Result
-	result, err = mgr.cmdProcessor.query(mgr.backendConn.PacketIO(), SQLQueryState)
-	if err != nil {
+	if result, _, err = mgr.cmdProcessor.query(mgr.backendConn.PacketIO(), SQLQueryState); err != nil {
 		return
 	}
 	if sessionStates, err = result.GetStringByName(0, "Session_states"); err != nil {
@@ -189,6 +185,7 @@ func (mgr *BackendConnManager) Redirect(newAddr string) error {
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
 	}))
+	logutil.BgLogger().Info("received redirect command", zap.String("to", newAddr))
 	select {
 	case mgr.signalReceived <- 1:
 	default:
