@@ -53,5 +53,8 @@ func (bc *BackendConnectionImpl) PacketIO() *pnet.PacketIO {
 }
 
 func (bc *BackendConnectionImpl) Close() error {
-	return bc.pkt.Close()
+	if bc.pkt != nil {
+		return bc.pkt.Close()
+	}
+	return nil
 }

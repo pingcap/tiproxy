@@ -171,6 +171,12 @@ func (s *Server) onConn(conn driver.ClientConnection) {
 	metrics.ConnGauge.Set(float64(connections))
 
 	conn.Run(ctx)
+
+	s.rwlock.Lock()
+	delete(s.clients, conn.ConnectionID())
+	connections = len(s.clients)
+	s.rwlock.Unlock()
+	metrics.ConnGauge.Set(float64(connections))
 }
 
 func (s *Server) newConn(conn net.Conn) driver.ClientConnection {

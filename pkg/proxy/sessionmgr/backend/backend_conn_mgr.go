@@ -76,6 +76,13 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	if err != nil {
 		return err
 	}
+	switch request[0] {
+	case mysql.ComQuit:
+		return nil
+	case mysql.ComChangeUser:
+		// TODO: auth again.
+		return nil
+	}
 	if waitingRedirect && mgr.cmdProcessor.canRedirect() {
 		if err = mgr.tryRedirect(ctx); err != nil {
 			return err
@@ -109,15 +116,14 @@ func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken
 	return
 }
 
-func (mgr *BackendConnManager) disconnect() error {
-	return nil
-}
-
 func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 	for {
 		select {
 		// Redirect the session immediately just in case the session is idle.
-		case <-mgr.signalReceived:
+		case _, ok := <-mgr.signalReceived:
+			if !ok { // the connection is closed
+				return
+			}
 			mgr.processLock.Lock()
 			if err := mgr.tryRedirect(ctx); err != nil {
 				logutil.Logger(ctx).Error("redirect connection failed", zap.Error(err))
@@ -199,5 +205,13 @@ func (mgr *BackendConnManager) RedirectIfNoWait(newAddr string) bool {
 }
 
 func (mgr *BackendConnManager) Close() error {
-	return mgr.backendConn.Close()
+	close(mgr.signalReceived)
+	mgr.processLock.Lock()
+	defer mgr.processLock.Unlock()
+	var err error
+	if mgr.backendConn != nil {
+		err = mgr.backendConn.Close()
+		mgr.backendConn = nil
+	}
+	return err
 }

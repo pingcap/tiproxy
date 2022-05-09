@@ -24,12 +24,14 @@ type CmdProcessor struct {
 	serverStatus uint32
 	// Each prepared statement has an independent status.
 	preparedStmtStatus map[int]uint32
+	disconnecting      bool
 }
 
 func NewCmdProcessor() *CmdProcessor {
 	return &CmdProcessor{
 		serverStatus:       StatusAutoCommit,
 		preparedStmtStatus: make(map[int]uint32),
+		disconnecting:      false,
 	}
 }
 
@@ -72,6 +74,9 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 		return cp.forwardQueryCmd(clientIO, backendIO, request)
 	case mysql.ComStmtClose:
 		return cp.forwardCloseCmd(request)
+	case mysql.ComQuit:
+		cp.disconnecting = true
+		return
 	}
 
 	for {
@@ -263,6 +268,9 @@ func (cp *CmdProcessor) updatePrepStmtStatus(request []byte, serverStatus uint16
 }
 
 func (cp *CmdProcessor) canRedirect() bool {
+	if cp.disconnecting {
+		return false
+	}
 	if cp.serverStatus&StatusInTrans > 0 {
 		return false
 	}
