@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	StatusInTrans            uint32 = 0x01
-	StatusAutoCommit         uint32 = 0x02
-	StatusPrepareWaitExecute uint32 = 0x04
-	StatusPrepareWaitFetch   uint32 = 0x08
+	StatusInTrans uint32 = 1 << iota
+	StatusAutoCommit
+	StatusPrepareWaitExecute
+	StatusPrepareWaitFetch
+	StatusQuit
 )
 
 // CmdProcessor maintains the transaction and prepared statement status and decides whether the session can be redirected.
@@ -24,18 +25,16 @@ type CmdProcessor struct {
 	serverStatus uint32
 	// Each prepared statement has an independent status.
 	preparedStmtStatus map[int]uint32
-	disconnecting      bool
 }
 
 func NewCmdProcessor() *CmdProcessor {
 	return &CmdProcessor{
 		serverStatus:       StatusAutoCommit,
 		preparedStmtStatus: make(map[int]uint32),
-		disconnecting:      false,
 	}
 }
 
-func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool) (holdRequest bool, err error) {
+func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool) (holdRequest, succeed bool, err error) {
 	backendIO.ResetSequence()
 	if waitingRedirect && cp.needHoldRequest(request) {
 		var response []byte
@@ -50,6 +49,7 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 			return
 		}
 		holdRequest = true
+		succeed = true
 		return
 	}
 
@@ -59,11 +59,11 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 	if err = backendIO.Flush(); err != nil {
 		return
 	}
-	err = cp.forwardCommand(clientIO, backendIO, request)
+	succeed, err = cp.forwardCommand(clientIO, backendIO, request)
 	return
 }
 
-func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) (err error) {
+func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
 	cmd := request[0]
 	switch cmd {
 	case mysql.ComStmtPrepare:
@@ -74,27 +74,31 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 		return cp.forwardQueryCmd(clientIO, backendIO, request)
 	case mysql.ComStmtClose:
 		return cp.forwardCloseCmd(request)
+	case mysql.ComChangeUser:
+		return cp.forwardChangeUserCmd(clientIO, backendIO, request)
 	case mysql.ComQuit:
-		cp.disconnecting = true
-		return
+		cp.serverStatus |= StatusQuit
+		return true, nil
 	}
 
+	succeed = true
 	for {
 		response, err := forwardOnePacket(clientIO, backendIO)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if response[0] == mysql.OKHeader {
 			cp.handleOKPacket(request, response)
 			break
 		} else if response[0] == mysql.ErrHeader {
+			succeed = false
 			break
 		} else if isEOFPacket(response) {
 			cp.handleEOFPacket(request, response)
 			break
 		}
 	}
-	return clientIO.Flush()
+	return succeed, clientIO.Flush()
 }
 
 func forwardOnePacket(clientIO, backendIO *pnet.PacketIO) (response []byte, err error) {
@@ -117,7 +121,7 @@ func forwardUntilEOF(clientIO, backendIO *pnet.PacketIO) (eofPacket []byte, err 
 	}
 }
 
-func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) (err error) {
+func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) (succeed bool, err error) {
 	var (
 		expectedEOFNum int
 		response       []byte
@@ -135,6 +139,7 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) (e
 		if numParams > 0 {
 			expectedEOFNum++
 		}
+		succeed = true
 	}
 	for i := 0; i < expectedEOFNum; i++ {
 		// The server status in EOF packets is always 0, so ignore it.
@@ -142,57 +147,87 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) (e
 			return
 		}
 	}
-	return clientIO.Flush()
+	return succeed, clientIO.Flush()
 }
 
-func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (err error) {
+func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
 	var response []byte
 	if response, err = forwardOnePacket(clientIO, backendIO); err != nil {
 		return
 	}
 	if response[0] == mysql.ErrHeader {
-		return clientIO.Flush()
+		return false, clientIO.Flush()
 	} else if !isEOFPacket(response) {
 		if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
 			return
 		}
 	}
 	cp.handleEOFPacket(request, response)
-	return clientIO.Flush()
+	return true, clientIO.Flush()
 }
 
-func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (err error) {
+func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
 	var response []byte
-	// The OK packet doesn't contain a server status, so skip all the OK packets.
-	if response, err = forwardOnePacket(clientIO, backendIO); err != nil {
-		return
-	}
-	if response[0] == mysql.OKHeader {
-		cp.handleOKPacket(request, response)
-		return clientIO.Flush()
-	} else if response[0] == mysql.ErrHeader {
-		return clientIO.Flush()
-	} else if !isEOFPacket(response) {
-		// read columns
-		if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
+	for {
+		if response, err = forwardOnePacket(clientIO, backendIO); err != nil {
 			return
 		}
-	}
-	serverStatus := binary.LittleEndian.Uint16(response[3:])
-	// read rows
-	if serverStatus&mysql.ServerStatusCursorExists == 0 {
-		if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
+		var serverStatus uint16
+		if response[0] == mysql.OKHeader {
+			rs := cp.handleOKPacket(request, response)
+			serverStatus = rs.Status
+		} else if response[0] == mysql.ErrHeader {
+			return false, clientIO.Flush()
+		} else {
+			if !isEOFPacket(response) {
+				// read columns
+				if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
+					return
+				}
+			}
+			serverStatus = binary.LittleEndian.Uint16(response[3:])
+			// read rows
+			if serverStatus&mysql.ServerStatusCursorExists == 0 {
+				if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
+					return
+				}
+				serverStatus = binary.LittleEndian.Uint16(response[3:])
+			}
+			cp.handleEOFPacket(request, response)
+		}
+		if err = clientIO.Flush(); err != nil {
 			return
 		}
+		if serverStatus&mysql.ServerMoreResultsExists == 0 {
+			break
+		}
 	}
-	cp.handleEOFPacket(request, response)
-	return clientIO.Flush()
+	return true, nil
 }
 
-func (cp *CmdProcessor) forwardCloseCmd(request []byte) (err error) {
+func (cp *CmdProcessor) forwardCloseCmd(request []byte) (succeed bool, err error) {
 	// No packet is sent to the client for COM_STMT_CLOSE.
 	cp.updatePrepStmtStatus(request, 0)
-	return nil
+	return true, nil
+}
+
+func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
+	// Currently, TiDB responses with an OK or Err packet. But according to the MySQL doc, the server may send a
+	// switch auth request.
+	for {
+		response, err := forwardOnePacket(clientIO, backendIO)
+		if err != nil {
+			return false, err
+		}
+		if response[0] == mysql.OKHeader {
+			cp.handleOKPacket(request, response)
+			succeed = true
+			break
+		} else if response[0] == mysql.ErrHeader {
+			break
+		}
+	}
+	return succeed, nil
 }
 
 func (cp *CmdProcessor) handleOKPacket(request, response []byte) *gomysql.Result {
@@ -242,7 +277,7 @@ func (cp *CmdProcessor) updatePrepStmtStatus(request []byte, serverStatus uint16
 	switch cmd {
 	case mysql.ComStmtSendLongData, mysql.ComStmtExecute, mysql.ComStmtFetch, mysql.ComStmtReset, mysql.ComStmtClose:
 		stmtID = int(binary.LittleEndian.Uint32(request[1:5]))
-	case mysql.ComResetConnection:
+	case mysql.ComResetConnection, mysql.ComChangeUser:
 		cp.preparedStmtStatus = make(map[int]uint32)
 		return
 	default:
@@ -268,10 +303,7 @@ func (cp *CmdProcessor) updatePrepStmtStatus(request []byte, serverStatus uint16
 }
 
 func (cp *CmdProcessor) canRedirect() bool {
-	if cp.disconnecting {
-		return false
-	}
-	if cp.serverStatus&StatusInTrans > 0 {
+	if cp.serverStatus&(StatusInTrans|StatusQuit) > 0 {
 		return false
 	}
 	// If any result of the prepared statements is not fetched, we should wait.

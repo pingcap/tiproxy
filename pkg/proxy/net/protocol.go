@@ -1,5 +1,7 @@
 package net
 
+import "bytes"
+
 func ParseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	switch b[0] {
 	// 251: NULL
@@ -36,6 +38,14 @@ func ParseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	num = uint64(b[0])
 	n = 1
 	return
+}
+
+func ParseNullTermString(b []byte) (str []byte, remain []byte) {
+	off := bytes.IndexByte(b, 0)
+	if off == -1 {
+		return nil, b
+	}
+	return b[:off], b[off+1:]
 }
 
 var tinyIntCache [251][]byte

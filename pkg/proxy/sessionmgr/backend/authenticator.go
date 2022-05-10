@@ -404,3 +404,13 @@ func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) erro
 		return errors.Errorf("read unexpected command: %#x", data[0])
 	}
 }
+
+func (auth *Authenticator) changeUser(request []byte) {
+	user, data := pnet.ParseNullTermString(request)
+	auth.user = string(hack.String(user))
+	passLen := int(data[0])
+	data = data[passLen+1:]
+	dbName, _ := pnet.ParseNullTermString(data)
+	auth.dbname = string(hack.String(dbName))
+	// TODO: attrs
+}

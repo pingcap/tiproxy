@@ -72,7 +72,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
-	holdRequest, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), waitingRedirect)
+	holdRequest, succeed, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), waitingRedirect)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,9 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	case mysql.ComQuit:
 		return nil
 	case mysql.ComChangeUser:
-		// TODO: auth again.
+		if succeed {
+			mgr.authenticator.changeUser(request)
+		}
 		return nil
 	}
 	if waitingRedirect && mgr.cmdProcessor.canRedirect() {
@@ -88,7 +90,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 			return err
 		}
 		if holdRequest {
-			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
+			_, _, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
 		}
 	}
 	return err
