@@ -67,15 +67,11 @@ func (n *NamespaceImpl) GetRouter() driver.Router {
 }
 
 func (n *NamespaceImpl) Close() {
+	n.router.Close()
 }
 
 func BuildRouter(cfg *config.BackendNamespace) (driver.Router, error) {
-	if len(cfg.Instances) == 0 {
-		return nil, errors.New("no instances for the backend")
-	}
-	rt := router.NewRandomRouter()
-	rt.SetAddresses(cfg.Instances)
-	return rt, nil
+	return router.NewRandomRouter(cfg)
 }
 
 func BuildFrontend(cfg *config.FrontendNamespace) (Frontend, error) {

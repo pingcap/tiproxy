@@ -25,6 +25,7 @@ type ProxyServer struct {
 	MaxConnections uint32 `yaml:"max_connections"`
 	SessionTimeout int    `yaml:"session_timeout"`
 	StoragePath    string `yaml:"storage_path"`
+	PDAddr         string `yaml:"pd_addrs"`
 }
 
 type AdminServer struct {

@@ -45,6 +45,7 @@ type Router interface {
 	SetAddresses([]string)
 	Route() (string, error)
 	AddConnOnAddr(string, int)
+	Close()
 }
 
 type Stmt interface {

@@ -207,10 +207,20 @@ func CreateClusterTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Confi
 				return getCert()
 			}
 		}
-	} else {
-		tlsConfig = &tls.Config{
-			InsecureSkipVerify: true,
-		}
+	}
+	return
+}
+
+func CreateClientTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Config, err error) {
+	tlsConfig, err = CreateClusterTLSConfig(sslCA, sslKey, sslCert)
+	if err != nil {
+		return nil, err
+	}
+	if tlsConfig != nil {
+		return tlsConfig, nil
+	}
+	tlsConfig = &tls.Config{
+		InsecureSkipVerify: true,
 	}
 	return
 }

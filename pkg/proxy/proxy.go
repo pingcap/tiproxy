@@ -8,6 +8,7 @@ import (
 	"github.com/djshow832/weir/pkg/proxy/driver"
 	"github.com/djshow832/weir/pkg/proxy/metrics"
 	"github.com/djshow832/weir/pkg/proxy/namespace"
+	"github.com/djshow832/weir/pkg/proxy/router"
 	"github.com/djshow832/weir/pkg/proxy/server"
 	"github.com/djshow832/weir/pkg/proxy/sessionmgr/backend"
 	"github.com/djshow832/weir/pkg/proxy/sessionmgr/client"
@@ -45,6 +46,9 @@ func (p *Proxy) Init() error {
 	}
 	p.configCenter = cc
 
+	if err = router.InitEtcdClient(p.cfg); err != nil {
+		return err
+	}
 	nss, err := cc.ListAllNamespace()
 	if err != nil {
 		return err

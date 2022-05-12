@@ -4,6 +4,7 @@ proxy_server:
   max_connections: 1000
   session_timeout: 600
   storage_path: "/tmp/weir"
+  pd_addrs: "127.0.0.1:2379"
 admin_server:
   addr: "0.0.0.0:6001"
   enable_basic_auth: false

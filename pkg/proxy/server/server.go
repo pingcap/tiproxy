@@ -85,7 +85,7 @@ func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 		cfg.Security.MinTLSVersion, cfg.ProxyServer.StoragePath, cfg.Security.RSAKeySize); err != nil {
 		return nil, err
 	}
-	if s.clusterTLSConfig, err = security.CreateClusterTLSConfig(cfg.Security.ClusterSSLCA, cfg.Security.ClusterSSLKey,
+	if s.clusterTLSConfig, err = security.CreateClientTLSConfig(cfg.Security.ClusterSSLCA, cfg.Security.ClusterSSLKey,
 		cfg.Security.ClusterSSLCert); err != nil {
 		return nil, err
 	}
