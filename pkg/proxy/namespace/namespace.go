@@ -20,11 +20,11 @@ type NamespaceWrapper struct {
 	connCounter int64
 }
 
-func CreateNamespaceHolder(cfgs []*config.Namespace, build NamespaceBuilder) (*NamespaceHolder, error) {
+func CreateNamespaceHolder(cfgs []*config.Namespace) (*NamespaceHolder, error) {
 	nss := make(map[string]Namespace, len(cfgs))
 
 	for _, cfg := range cfgs {
-		ns, err := build(cfg)
+		ns, err := BuildNamespace(cfg)
 		if err != nil {
 			return nil, errors.WithMessage(err, fmt.Sprintf("create namespace error, namespace: %s", cfg.Namespace))
 		}
@@ -58,6 +58,17 @@ func (n *NamespaceHolder) Clone() *NamespaceHolder {
 	return &NamespaceHolder{
 		nss: nss,
 	}
+}
+
+func (n *NamespaceHolder) RedirectConnections() error {
+	var err error
+	for _, ns := range n.nss {
+		err1 := ns.GetRouter().RedirectConnections()
+		if err == nil && err1 != nil {
+			err = err1
+		}
+	}
+	return err
 }
 
 func (n *NamespaceWrapper) Name() string {

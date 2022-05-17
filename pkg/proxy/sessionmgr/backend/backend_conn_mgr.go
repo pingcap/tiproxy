@@ -28,20 +28,27 @@ type signalRedirect struct {
 }
 
 type BackendConnManager struct {
+	connectionID   uint64
 	authenticator  *Authenticator
 	cmdProcessor   *CmdProcessor
+	eventReceiver  driver.ConnEventReceiver
 	backendConn    BackendConnection
 	processLock    sync.Mutex // to make redirecting and command processing exclusive
 	signalReceived chan int
 	signal         unsafe.Pointer // type *signalRedirect
 }
 
-func NewBackendConnManager() driver.BackendConnManager {
+func NewBackendConnManager(connectionID uint64) driver.BackendConnManager {
 	return &BackendConnManager{
+		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
 		authenticator:  &Authenticator{},
 		signalReceived: make(chan int),
 	}
+}
+
+func (mgr *BackendConnManager) ConnectionID() uint64 {
+	return mgr.connectionID
 }
 
 func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
@@ -63,6 +70,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	}
 	if mgr.authenticator.capability&mysql.ClientProtocol41 == 0 {
 		return errors.New("client must support CLIENT_PROTOCOL_41 capability")
+	}
+	if mgr.eventReceiver != nil {
+		mgr.eventReceiver.AddConn(serverAddr, mgr)
 	}
 	go mgr.processSignals(ctx)
 	return nil
@@ -94,6 +104,10 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		}
 	}
 	return err
+}
+
+func (mgr *BackendConnManager) SetEventReceiver(receiver driver.ConnEventReceiver) {
+	mgr.eventReceiver = receiver
 }
 
 func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessionStates string) error {
@@ -201,17 +215,15 @@ func (mgr *BackendConnManager) Redirect(newAddr string) error {
 	return nil
 }
 
-// RedirectIfNoWait redirects the session if it doesn't need to wait.
-func (mgr *BackendConnManager) RedirectIfNoWait(newAddr string) bool {
-	return false
-}
-
 func (mgr *BackendConnManager) Close() error {
 	close(mgr.signalReceived)
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 	var err error
 	if mgr.backendConn != nil {
+		if mgr.eventReceiver != nil {
+			mgr.eventReceiver.CloseConn(mgr.backendConn.Addr(), mgr)
+		}
 		err = mgr.backendConn.Close()
 		mgr.backendConn = nil
 	}

@@ -225,6 +225,10 @@ func (s *Server) Close() {
 		terror.Log(errors.Trace(err))
 		s.listener = nil
 	}
+	for _, conn := range s.clients {
+		err := conn.Close()
+		terror.Log(errors.Trace(err))
+	}
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventClose).Inc()
 }
 
@@ -236,16 +240,4 @@ func (s *Server) TryGracefulDown() {
 // GracefulDown waits all clients to close.
 func (s *Server) GracefulDown(ctx context.Context, done chan struct{}) {
 	return
-}
-
-func (s *Server) RedirectConnections() error {
-	s.rwlock.RLock()
-	defer s.rwlock.RUnlock()
-	for _, conn := range s.clients {
-		err := conn.Redirect()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }

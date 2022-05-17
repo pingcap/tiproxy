@@ -16,6 +16,7 @@ const (
 type connectionPhase byte
 
 type BackendConnection interface {
+	Addr() string
 	Connect() error
 	PacketIO() *pnet.PacketIO
 	Close() error
@@ -34,6 +35,10 @@ func NewBackendConnectionImpl(address string) *BackendConnectionImpl {
 		address: address,
 		alloc:   arena.NewAllocator(32 * 1024),
 	}
+}
+
+func (bc *BackendConnectionImpl) Addr() string {
+	return bc.address
 }
 
 func (bc *BackendConnectionImpl) Connect() error {

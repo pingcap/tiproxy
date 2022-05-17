@@ -53,7 +53,7 @@ func (p *Proxy) Init() error {
 	if err != nil {
 		return err
 	}
-	nsmgr, err := namespace.CreateNamespaceManager(nss, namespace.BuildNamespace, namespace.DefaultAsyncCloseNamespace)
+	nsmgr, err := namespace.CreateNamespaceManager(nss)
 	if err != nil {
 		return err
 	}

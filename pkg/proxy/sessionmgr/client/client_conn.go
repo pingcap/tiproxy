@@ -85,10 +85,6 @@ func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
 	}
 }
 
-func (cc *ClientConnectionImpl) Redirect() error {
-	return cc.queryCtx.Redirect()
-}
-
 func (cc *ClientConnectionImpl) Close() error {
 	if err := cc.pkt.Close(); err != nil {
 		terror.Log(err)

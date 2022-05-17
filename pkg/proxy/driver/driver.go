@@ -6,7 +6,7 @@ import (
 )
 
 type createClientConnFunc func(QueryCtx, net.Conn, uint64, *tls.Config, *tls.Config) ClientConnection
-type createBackendConnMgrFunc func() BackendConnManager
+type createBackendConnMgrFunc func(connectionID uint64) BackendConnManager
 
 type DriverImpl struct {
 	nsmgr                    NamespaceManager
@@ -23,7 +23,7 @@ func NewDriverImpl(nsmgr NamespaceManager, createClientConnFunc createClientConn
 }
 
 func (d *DriverImpl) CreateClientConnection(conn net.Conn, connectionID uint64, serverTLSConfig, clusterTLSConfig *tls.Config) ClientConnection {
-	backendConnMgr := d.createBackendConnMgrFunc()
+	backendConnMgr := d.createBackendConnMgrFunc(connectionID)
 	queryCtx := NewQueryCtxImpl(d.nsmgr, backendConnMgr, connectionID)
 	return d.createClientConnFunc(queryCtx, conn, connectionID, serverTLSConfig, clusterTLSConfig)
 }

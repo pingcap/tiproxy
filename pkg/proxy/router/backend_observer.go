@@ -192,7 +192,7 @@ func (bo *BackendObserver) fetchBackendList(ctx context.Context) (map[string]*Ba
 				zap.ByteString("value", kv.Value), zap.Error(err))
 			return nil, err
 		}
-		addr := key[len(infosync.TopologyInformationPath)+1 : len(key)-len("info")]
+		addr := key[len(infosync.TopologyInformationPath)+1 : len(key)-len("/info")]
 		backendInfo[addr] = &BackendInfo{
 			TopologyInfo: topo,
 			status:       StatusHealthy,
@@ -246,7 +246,7 @@ func (bo *BackendObserver) notifyIfChanged(backendInfo map[string]*BackendInfo) 
 		if newInfo.status == StatusHealthy {
 			originalInfo, ok := bo.backendInfo[addr]
 			if !ok || originalInfo.status != StatusHealthy {
-				addedBackends[addr] = originalInfo
+				addedBackends[addr] = newInfo
 			}
 		}
 	}

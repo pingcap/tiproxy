@@ -15,35 +15,28 @@ type NamespaceManager struct {
 	switchIndex sync2.BoolIndex
 	users       [2]*UserNamespaceMapper
 	nss         [2]*NamespaceHolder
-	build       NamespaceBuilder
-	close       NamespaceCloser
 
 	reloadLock     sync.Mutex
 	reloadPrepared map[string]bool
 }
 
-type NamespaceBuilder func(cfg *config.Namespace) (Namespace, error)
-type NamespaceCloser func(ns Namespace) error
-
-func CreateNamespaceManager(cfgs []*config.Namespace, builder NamespaceBuilder, closer NamespaceCloser) (*NamespaceManager, error) {
+func CreateNamespaceManager(cfgs []*config.Namespace) (*NamespaceManager, error) {
 	users, err := CreateUserNamespaceMapper(cfgs)
 	if err != nil {
 		return nil, errors.WithMessage(err, "create UserNamespaceMapper error")
 	}
 
-	nss, err := CreateNamespaceHolder(cfgs, builder)
+	nss, err := CreateNamespaceHolder(cfgs)
 	if err != nil {
 		return nil, errors.WithMessage(err, "create NamespaceHolder error")
 	}
 
-	mgr := NewNamespaceManager(users, nss, builder, closer)
+	mgr := NewNamespaceManager(users, nss)
 	return mgr, nil
 }
 
-func NewNamespaceManager(users *UserNamespaceMapper, nss *NamespaceHolder, builder NamespaceBuilder, closer NamespaceCloser) *NamespaceManager {
+func NewNamespaceManager(users *UserNamespaceMapper, nss *NamespaceHolder) *NamespaceManager {
 	mgr := &NamespaceManager{
-		build:          builder,
-		close:          closer,
 		reloadPrepared: make(map[string]bool),
 	}
 	mgr.users[0] = users
@@ -65,6 +58,10 @@ func (n *NamespaceManager) Auth(username string, pwd, salt []byte) (driver.Names
 	return wrapper, true
 }
 
+func (n *NamespaceManager) RedirectConnections() error {
+	return n.getCurrentNamespaces().RedirectConnections()
+}
+
 func (n *NamespaceManager) PrepareReloadNamespace(namespace string, cfg *config.Namespace) error {
 	n.reloadLock.Lock()
 	defer n.reloadLock.Unlock()
@@ -75,7 +72,7 @@ func (n *NamespaceManager) PrepareReloadNamespace(namespace string, cfg *config.
 		return errors.WithMessage(err, "add namespace users error")
 	}
 
-	newNs, err := n.build(cfg)
+	newNs, err := BuildNamespace(cfg)
 	if err != nil {
 		return errors.WithMessage(err, "build namespace error")
 	}
@@ -114,7 +111,7 @@ func (n *NamespaceManager) RemoveNamespace(name string) {
 		return
 	}
 
-	if err := n.close(ns); err != nil {
+	if err := n.closeNamespace(ns); err != nil {
 		logutil.BgLogger().Error("remove namespace error", zap.Error(err), zap.String("namespace", name))
 		return
 	}
@@ -150,4 +147,12 @@ func (n *NamespaceManager) setOther(users *UserNamespaceMapper, nss *NamespaceHo
 func (n *NamespaceManager) toggle() {
 	_, _, currentFlag := n.switchIndex.Get()
 	n.switchIndex.Set(!currentFlag)
+}
+
+func (n *NamespaceManager) closeNamespace(ns Namespace) error {
+	return nil
+}
+
+func (n *NamespaceManager) Close() error {
+	return nil
 }

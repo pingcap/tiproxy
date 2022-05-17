@@ -62,24 +62,15 @@ func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.Packet
 		return errors.New("failed to find a namespace")
 	}
 	q.ns = ns
-	addr, err := ns.GetRouter().Route()
+	router := ns.GetRouter()
+	addr, err := router.Route()
 	if err != nil {
 		return err
 	}
+	q.connMgr.SetEventReceiver(router)
 	if err = q.connMgr.Connect(ctx, addr, clientIO, serverTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}
 	q.ns.IncrConnCount()
-	return nil
-}
-
-func (q *QueryCtxImpl) Redirect() error {
-	addr, err := q.ns.GetRouter().Route()
-	if err != nil {
-		return err
-	}
-	if err = q.connMgr.Redirect(addr); err != nil {
-		return err
-	}
 	return nil
 }

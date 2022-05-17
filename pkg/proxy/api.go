@@ -90,7 +90,7 @@ func CreateHttpApiServer(proxyServer *server.Server, nsmgr *namespace.NamespaceM
 	pprofRouteGroup.Any("/allocs", gin.WrapF(pprof.Handler("allocs").ServeHTTP))
 
 	testRouteGroup := engine.Group("/test")
-	testHttpHandler := &TestHttpHandler{proxyServer: proxyServer}
+	testHttpHandler := &TestHttpHandler{nsmgr: apiServer.nsmgr}
 	testRouteGroup.POST("/redirect", testHttpHandler.Redirect)
 
 	apiServer.engine = engine
@@ -208,11 +208,11 @@ func CreateSuccessJsonResp() CommonJsonResp {
 }
 
 type TestHttpHandler struct {
-	proxyServer *server.Server
+	nsmgr *namespace.NamespaceManager
 }
 
 func (t *TestHttpHandler) Redirect(c *gin.Context) {
-	err := t.proxyServer.RedirectConnections()
+	err := t.nsmgr.RedirectConnections()
 	if err != nil {
 		errMsg := "redirect connections error"
 		logutil.BgLogger().Error(errMsg, zap.Error(err))

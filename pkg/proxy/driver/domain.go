@@ -10,6 +10,7 @@ import (
 
 type NamespaceManager interface {
 	Auth(username string, pwd, salt []byte) (Namespace, bool)
+	Close() error
 }
 
 type Namespace interface {
@@ -42,10 +43,23 @@ type RateLimiter interface {
 }
 
 type Router interface {
-	SetAddresses([]string)
+	ConnEventReceiver
 	Route() (string, error)
-	AddConnOnAddr(string, int)
+	RedirectConnections() error
 	Close()
+}
+
+type RedirectableConn interface {
+	SetEventReceiver(receiver ConnEventReceiver)
+	Redirect(addr string) error
+	ConnectionID() uint64
+}
+
+type ConnEventReceiver interface {
+	AddConn(addr string, conn RedirectableConn)
+	BeginRedirect(from, to string, conn RedirectableConn)
+	FinishRedirect(from, to string, conn RedirectableConn)
+	CloseConn(addr string, conn RedirectableConn)
 }
 
 type Stmt interface {
@@ -58,14 +72,13 @@ type ClientConnection interface {
 	ConnectionID() uint64
 	Addr() string
 	Run(context.Context)
-	Redirect() error
 	Close() error
 }
 
 type BackendConnManager interface {
+	RedirectableConn
 	Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error
 	ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error
-	Redirect(newAddr string) error
 	Close() error
 }
 
@@ -74,8 +87,6 @@ type QueryCtx interface {
 	ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error
 
 	ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error
-
-	Redirect() error
 
 	// Close closes the QueryCtx.
 	Close() error
