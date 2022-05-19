@@ -51,15 +51,16 @@ type Router interface {
 
 type RedirectableConn interface {
 	SetEventReceiver(receiver ConnEventReceiver)
-	Redirect(addr string) error
+	Redirect(addr string)
 	ConnectionID() uint64
 }
 
 type ConnEventReceiver interface {
-	AddConn(addr string, conn RedirectableConn)
-	BeginRedirect(from, to string, conn RedirectableConn)
-	FinishRedirect(from, to string, conn RedirectableConn)
-	CloseConn(addr string, conn RedirectableConn)
+	OnConnCreated(addr string, conn RedirectableConn)
+	OnRedirectBegin(from, to string, conn RedirectableConn)
+	OnRedirectSucceed(from, to string, conn RedirectableConn)
+	OnRedirectFail(from, to string, conn RedirectableConn)
+	OnConnClosed(addr string, conn RedirectableConn)
 }
 
 type Stmt interface {

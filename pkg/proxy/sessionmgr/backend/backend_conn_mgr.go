@@ -34,8 +34,9 @@ type BackendConnManager struct {
 	eventReceiver  driver.ConnEventReceiver
 	backendConn    BackendConnection
 	processLock    sync.Mutex // to make redirecting and command processing exclusive
-	signalReceived chan int
+	signalReceived chan struct{}
 	signal         unsafe.Pointer // type *signalRedirect
+	cancelFunc     context.CancelFunc
 }
 
 func NewBackendConnManager(connectionID uint64) driver.BackendConnManager {
@@ -43,7 +44,7 @@ func NewBackendConnManager(connectionID uint64) driver.BackendConnManager {
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
 		authenticator:  &Authenticator{},
-		signalReceived: make(chan int),
+		signalReceived: make(chan struct{}),
 	}
 }
 
@@ -72,9 +73,11 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 		return errors.New("client must support CLIENT_PROTOCOL_41 capability")
 	}
 	if mgr.eventReceiver != nil {
-		mgr.eventReceiver.AddConn(serverAddr, mgr)
+		mgr.eventReceiver.OnConnCreated(serverAddr, mgr)
 	}
-	go mgr.processSignals(ctx)
+	childCtx, cancelFunc := context.WithCancel(ctx)
+	go mgr.processSignals(childCtx)
+	mgr.cancelFunc = cancelFunc
 	return nil
 }
 
@@ -137,7 +140,7 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 		select {
 		// Redirect the session immediately just in case the session is idle.
 		case _, ok := <-mgr.signalReceived:
-			if !ok { // the connection is closed
+			if !ok {
 				return
 			}
 			mgr.processLock.Lock()
@@ -161,21 +164,26 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
 	if !mgr.cmdProcessor.canRedirect() {
 		return
 	}
+	from := mgr.backendConn.Addr()
+	to := signal.newAddr
 
 	defer func() {
 		if err != nil {
+			mgr.eventReceiver.OnRedirectFail(from, to, mgr)
 			logutil.Logger(ctx).Error("redirect connection failed", zap.String("to", signal.newAddr), zap.Error(err))
 		} else {
+			mgr.eventReceiver.OnRedirectSucceed(from, to, mgr)
 			logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("to", signal.newAddr))
 		}
 	}()
 
+	mgr.eventReceiver.OnRedirectBegin(from, to, mgr)
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, err = mgr.querySessionStates(); err != nil {
 		return
 	}
 
-	newConn := NewBackendConnectionImpl(signal.newAddr)
+	newConn := NewBackendConnectionImpl(to)
 	if err = newConn.Connect(); err != nil {
 		return
 	}
@@ -201,7 +209,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
 	return
 }
 
-func (mgr *BackendConnManager) Redirect(newAddr string) error {
+func (mgr *BackendConnManager) Redirect(newAddr string) {
 	// We do not use `chan signalRedirect` to avoid blocking. We cannot discard the signal when it blocks,
 	// because only the latest signal matters.
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
@@ -209,20 +217,22 @@ func (mgr *BackendConnManager) Redirect(newAddr string) error {
 	}))
 	logutil.BgLogger().Info("received redirect command", zap.String("to", newAddr))
 	select {
-	case mgr.signalReceived <- 1:
+	case mgr.signalReceived <- struct{}{}:
 	default:
 	}
-	return nil
 }
 
 func (mgr *BackendConnManager) Close() error {
-	close(mgr.signalReceived)
+	if mgr.cancelFunc != nil {
+		mgr.cancelFunc()
+		mgr.cancelFunc = nil
+	}
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 	var err error
 	if mgr.backendConn != nil {
 		if mgr.eventReceiver != nil {
-			mgr.eventReceiver.CloseConn(mgr.backendConn.Addr(), mgr)
+			mgr.eventReceiver.OnConnClosed(mgr.backendConn.Addr(), mgr)
 		}
 		err = mgr.backendConn.Close()
 		mgr.backendConn = nil

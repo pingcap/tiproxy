@@ -53,7 +53,6 @@ func (cc *ClientConnectionImpl) Run(ctx context.Context) {
 		terror.Log(errors.Trace(err))
 		return
 	}
-	logutil.Logger(ctx).Info("new connection succeeds", zap.Uint64("connID", cc.connectionID), zap.String("remoteAddr", cc.Addr()))
 
 	if err := cc.processMsg(ctx); err != nil {
 		logutil.Logger(ctx).Info("process message fails", zap.Uint64("connID", cc.connectionID), zap.String("remoteAddr", cc.Addr()), zap.Error(err))

@@ -56,7 +56,9 @@ const (
 	healthCheckTimeout       = 1 * time.Second
 )
 
-type onBackendChanged func(removed, added map[string]*BackendInfo)
+type BackendEventReceiver interface {
+	OnBackendChanged(removed, added map[string]*BackendInfo)
+}
 
 type BackendInfo struct {
 	*infosync.TopologyInfo
@@ -64,9 +66,9 @@ type BackendInfo struct {
 }
 
 type BackendObserver struct {
-	backendInfo      map[string]*BackendInfo
-	onBackendChanged onBackendChanged
-	cancelFunc       context.CancelFunc
+	backendInfo   map[string]*BackendInfo
+	eventReceiver BackendEventReceiver
+	cancelFunc    context.CancelFunc
 }
 
 var globalEtcdClient atomic.Value
@@ -124,16 +126,17 @@ func GetEtcdClient() *clientv3.Client {
 	return etcdClient.(*clientv3.Client)
 }
 
-func NewBackendObserver(onBackendChanged onBackendChanged) (*BackendObserver, error) {
+func NewBackendObserver(eventReceiver BackendEventReceiver) (*BackendObserver, error) {
+	if GetEtcdClient() == nil {
+		return nil, nil
+	}
 	bo := &BackendObserver{
-		backendInfo:      make(map[string]*BackendInfo),
-		onBackendChanged: onBackendChanged,
+		backendInfo:   make(map[string]*BackendInfo),
+		eventReceiver: eventReceiver,
 	}
-	if GetEtcdClient() != nil {
-		childCtx, cancelFunc := context.WithCancel(context.Background())
-		bo.cancelFunc = cancelFunc
-		go bo.observe(childCtx)
-	}
+	childCtx, cancelFunc := context.WithCancel(context.Background())
+	bo.cancelFunc = cancelFunc
+	go bo.observe(childCtx)
 	return bo, nil
 }
 
@@ -251,7 +254,7 @@ func (bo *BackendObserver) notifyIfChanged(backendInfo map[string]*BackendInfo) 
 		}
 	}
 	if len(removedBackends) > 0 || len(addedBackends) > 0 {
-		bo.onBackendChanged(removedBackends, addedBackends)
+		bo.eventReceiver.OnBackendChanged(removedBackends, addedBackends)
 	}
 	bo.backendInfo = backendInfo
 }
