@@ -55,9 +55,6 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
-	if mgr.backendConn != nil {
-		return errors.New("a backend connection already exists before connecting")
-	}
 	mgr.backendConn = NewBackendConnectionImpl(serverAddr)
 	if err := mgr.backendConn.Connect(); err != nil {
 		return err
@@ -71,9 +68,6 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	}
 	if mgr.authenticator.capability&mysql.ClientProtocol41 == 0 {
 		return errors.New("client must support CLIENT_PROTOCOL_41 capability")
-	}
-	if mgr.eventReceiver != nil {
-		mgr.eventReceiver.OnConnCreated(serverAddr, mgr)
 	}
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	go mgr.processSignals(childCtx)
@@ -177,7 +171,6 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
 		}
 	}()
 
-	mgr.eventReceiver.OnRedirectBegin(from, to, mgr)
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, err = mgr.querySessionStates(); err != nil {
 		return
@@ -204,7 +197,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
 		logutil.Logger(ctx).Warn("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
-	// Check mgr.signal because it may be updated again.
+	// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
 	atomic.CompareAndSwapPointer(&mgr.signal, unsafe.Pointer(signal), nil)
 	return
 }
@@ -230,10 +223,16 @@ func (mgr *BackendConnManager) Close() error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 	var err error
-	if mgr.backendConn != nil {
-		if mgr.eventReceiver != nil {
+	if mgr.eventReceiver != nil {
+		// Always notify the eventReceiver with the latest address.
+		signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
+		if signal != nil {
+			mgr.eventReceiver.OnConnClosed(signal.newAddr, mgr)
+		} else if mgr.backendConn != nil {
 			mgr.eventReceiver.OnConnClosed(mgr.backendConn.Addr(), mgr)
 		}
+	}
+	if mgr.backendConn != nil {
 		err = mgr.backendConn.Close()
 		mgr.backendConn = nil
 	}

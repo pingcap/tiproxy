@@ -63,11 +63,10 @@ func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.Packet
 	}
 	q.ns = ns
 	router := ns.GetRouter()
-	addr, err := router.Route()
+	addr, err := router.Route(q.connMgr)
 	if err != nil {
 		return err
 	}
-	q.connMgr.SetEventReceiver(router)
 	if err = q.connMgr.Connect(ctx, addr, clientIO, serverTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}

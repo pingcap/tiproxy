@@ -21,7 +21,6 @@ var (
 const (
 	phaseNotRedirected int = iota
 	phaseRedirectNotify
-	phaseRedirectBegin
 	phaseRedirectEnd
 	phaseRedirectFail
 )
@@ -93,7 +92,17 @@ func (router *RandomRouter) initConnections(addrs []string) error {
 	return nil
 }
 
-func (router *RandomRouter) Route() (string, error) {
+func (router *RandomRouter) Route(conn driver.RedirectableConn) (string, error) {
+	addr, err := router.getLeastConnBackend()
+	if err != nil {
+		return addr, err
+	}
+	router.addConn(addr, conn)
+	conn.SetEventReceiver(router)
+	return addr, nil
+}
+
+func (router *RandomRouter) getLeastConnBackend() (string, error) {
 	leastConnNum := math.MaxInt
 	var leastConnAddr string
 	router.mu.Lock()
@@ -113,19 +122,8 @@ func (router *RandomRouter) Route() (string, error) {
 	return leastConnAddr, nil
 }
 
-// ConnCount returns the overall connections on backend servers.
-// The result may be inaccurate during connection migration.
-func (router *RandomRouter) ConnCount() int {
-	connNum := 0
-	router.mu.Lock()
-	defer router.mu.Unlock()
-	for _, backend := range router.mu.backends {
-		connNum += len(backend.connMap)
-	}
-	return connNum
-}
-
-func (router *RandomRouter) OnConnCreated(addr string, conn driver.RedirectableConn) {
+func (router *RandomRouter) addConn(addr string, conn driver.RedirectableConn) {
+	connID := conn.ConnectionID()
 	router.mu.Lock()
 	defer router.mu.Unlock()
 	backend, ok := router.mu.backends[addr]
@@ -139,7 +137,7 @@ func (router *RandomRouter) OnConnCreated(addr string, conn driver.RedirectableC
 		phase:            phaseNotRedirected,
 	}
 	e := backend.connList.PushBack(connWrapper)
-	backend.connMap[conn.ConnectionID()] = e
+	backend.connMap[connID] = e
 }
 
 func (router *RandomRouter) RedirectConnections() error {
@@ -155,7 +153,7 @@ func (router *RandomRouter) RedirectConnections() error {
 	}
 	router.mu.Unlock()
 	for _, request := range requests {
-		to, err := router.Route()
+		to, err := router.getLeastConnBackend()
 		if err != nil {
 			logutil.BgLogger().Warn("redirecting encounters an error", zap.Error(err))
 			break
@@ -188,9 +186,8 @@ func (router *RandomRouter) notifyRedirect(from, to string, connID uint64) {
 		return
 	}
 	connWrapper := e.Value.(*ConnWrapper)
-	switch connWrapper.phase {
-	// We do not send concurrent signals.
-	case phaseRedirectNotify, phaseRedirectBegin:
+	if connWrapper.phase == phaseRedirectNotify {
+		// We do not send concurrent signals.
 		return
 	}
 	originalBackend.connList.Remove(e)
@@ -200,28 +197,6 @@ func (router *RandomRouter) notifyRedirect(from, to string, connID uint64) {
 	e = newBackend.connList.PushBack(connWrapper)
 	newBackend.connMap[connID] = e
 	connWrapper.Redirect(to)
-}
-
-func (router *RandomRouter) OnRedirectBegin(from, to string, conn driver.RedirectableConn) {
-	connID := conn.ConnectionID()
-	router.mu.Lock()
-	defer router.mu.Unlock()
-	newBackend, ok := router.mu.backends[to]
-	if !ok {
-		logutil.BgLogger().Error("no such address in backend info", zap.String("addr", to))
-		return
-	}
-	e, ok := newBackend.connMap[connID]
-	if !ok {
-		// Impossible here.
-		return
-	}
-	connWrapper := e.Value.(*ConnWrapper)
-	if connWrapper.phase != phaseRedirectNotify {
-		// Impossible here.
-		return
-	}
-	connWrapper.phase = phaseRedirectBegin
 }
 
 func (router *RandomRouter) OnRedirectSucceed(from, to string, conn driver.RedirectableConn) {
@@ -239,7 +214,7 @@ func (router *RandomRouter) OnRedirectSucceed(from, to string, conn driver.Redir
 		return
 	}
 	connWrapper := e.Value.(*ConnWrapper)
-	if connWrapper.phase != phaseRedirectBegin {
+	if connWrapper.phase != phaseRedirectNotify {
 		// Impossible here.
 		return
 	}
@@ -261,7 +236,7 @@ func (router *RandomRouter) OnRedirectFail(from, to string, conn driver.Redirect
 		return
 	}
 	connWrapper := e.Value.(*ConnWrapper)
-	if connWrapper.phase != phaseRedirectBegin {
+	if connWrapper.phase != phaseRedirectNotify {
 		// Impossible here.
 		return
 	}
@@ -270,7 +245,7 @@ func (router *RandomRouter) OnRedirectFail(from, to string, conn driver.Redirect
 	delete(newBackend.connMap, connID)
 	originalBackend, ok := router.mu.backends[from]
 	if !ok {
-		// The backend may be removed already, then the connection is discarded from the router.
+		// The backend may have been removed already, then the connection is discarded from the router.
 		return
 	}
 	e = originalBackend.connList.PushBack(connWrapper)
@@ -411,7 +386,7 @@ func (router *RandomRouter) getUnbalancedConns(maxNum int) []*RedirectRequest {
 
 func (router *RandomRouter) redirectConns(requests []*RedirectRequest) {
 	for _, request := range requests {
-		to, err := router.Route()
+		to, err := router.getLeastConnBackend()
 		if err != nil {
 			// All instances are down. We don't log here because the logs will be too many.
 			break

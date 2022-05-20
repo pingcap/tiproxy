@@ -44,7 +44,7 @@ type RateLimiter interface {
 
 type Router interface {
 	ConnEventReceiver
-	Route() (string, error)
+	Route(RedirectableConn) (string, error)
 	RedirectConnections() error
 	Close()
 }
@@ -56,8 +56,6 @@ type RedirectableConn interface {
 }
 
 type ConnEventReceiver interface {
-	OnConnCreated(addr string, conn RedirectableConn)
-	OnRedirectBegin(from, to string, conn RedirectableConn)
 	OnRedirectSucceed(from, to string, conn RedirectableConn)
 	OnRedirectFail(from, to string, conn RedirectableConn)
 	OnConnClosed(addr string, conn RedirectableConn)
