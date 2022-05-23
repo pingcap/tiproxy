@@ -202,6 +202,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
 	return
 }
 
+// Redirect redirects the current session to the newAddr. Note that the function should be very quick,
+// so it cannot wait for any events.
 func (mgr *BackendConnManager) Redirect(newAddr string) {
 	// We do not use `chan signalRedirect` to avoid blocking. We cannot discard the signal when it blocks,
 	// because only the latest signal matters.

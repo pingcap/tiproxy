@@ -43,7 +43,6 @@ type RateLimiter interface {
 }
 
 type Router interface {
-	ConnEventReceiver
 	Route(RedirectableConn) (string, error)
 	RedirectConnections() error
 	Close()

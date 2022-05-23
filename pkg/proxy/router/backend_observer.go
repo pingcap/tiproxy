@@ -23,6 +23,10 @@ import (
 
 type BackendStatus int
 
+func (bs *BackendStatus) ToScore() int {
+	return statusScores[*bs]
+}
+
 func (bs *BackendStatus) String() string {
 	status, ok := statusNames[*bs]
 	if !ok {
@@ -49,6 +53,15 @@ var statusNames = map[BackendStatus]string{
 	StatusSchemaOutdated: "schema outdated",
 }
 
+var statusScores = map[BackendStatus]int{
+	StatusHealthy:        0,
+	StatusCannotConnect:  10000000,
+	StatusServerDown:     10000000,
+	StatusMemoryHigh:     5000,
+	StatusRunSlow:        5000,
+	StatusSchemaOutdated: 10000000,
+}
+
 const (
 	healthCheckInterval      = 5 * time.Second
 	healthCheckMaxRetries    = 3
@@ -57,7 +70,7 @@ const (
 )
 
 type BackendEventReceiver interface {
-	OnBackendChanged(removed, added map[string]*BackendInfo)
+	OnBackendChanged(backends map[string]*BackendInfo)
 }
 
 type BackendInfo struct {
@@ -67,6 +80,7 @@ type BackendInfo struct {
 
 type BackendObserver struct {
 	backendInfo   map[string]*BackendInfo
+	staticAddrs   []string
 	eventReceiver BackendEventReceiver
 	cancelFunc    context.CancelFunc
 }
@@ -126,12 +140,15 @@ func GetEtcdClient() *clientv3.Client {
 	return etcdClient.(*clientv3.Client)
 }
 
-func NewBackendObserver(eventReceiver BackendEventReceiver) (*BackendObserver, error) {
+func NewBackendObserver(eventReceiver BackendEventReceiver, staticAddrs []string) (*BackendObserver, error) {
 	if GetEtcdClient() == nil {
-		return nil, nil
+		if len(staticAddrs) == 0 {
+			return nil, ErrNoInstanceToSelect
+		}
 	}
 	bo := &BackendObserver{
 		backendInfo:   make(map[string]*BackendInfo),
+		staticAddrs:   staticAddrs,
 		eventReceiver: eventReceiver,
 	}
 	childCtx, cancelFunc := context.WithCancel(context.Background())
@@ -141,6 +158,36 @@ func NewBackendObserver(eventReceiver BackendEventReceiver) (*BackendObserver, e
 }
 
 func (bo *BackendObserver) observe(ctx context.Context) {
+	if GetEtcdClient() == nil {
+		logutil.BgLogger().Info("pd addr is not configured, use static backend instances instead.")
+		bo.observeStaticAddrs(ctx)
+	} else {
+		bo.observeDynamicAddrs(ctx)
+	}
+}
+
+// If the PD address is not configured, we use static TiDB addresses in the configuration.
+// This is only for test. For a production cluster, the PD address should always be configured.
+func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
+	for ctx.Err() == nil {
+		select {
+		case <-time.After(healthCheckInterval):
+		case <-ctx.Done():
+			return
+		}
+		backendInfo := make(map[string]*BackendInfo)
+		for _, addr := range bo.staticAddrs {
+			backendInfo[addr] = &BackendInfo{
+				status: StatusHealthy,
+			}
+		}
+		bo.checkHealth(ctx, backendInfo)
+		bo.notifyIfChanged(backendInfo)
+	}
+}
+
+// If the PD address is configured, we watch the TiDB addresses on the ETCD.
+func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
 	watchCh := GetEtcdClient().Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix())
 	for ctx.Err() == nil {
 		select {
@@ -235,13 +282,12 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backendInfo map[stri
 }
 
 func (bo *BackendObserver) notifyIfChanged(backendInfo map[string]*BackendInfo) {
-	removedBackends := make(map[string]*BackendInfo)
-	addedBackends := make(map[string]*BackendInfo)
+	backends := make(map[string]*BackendInfo)
 	for addr, originalInfo := range bo.backendInfo {
 		if originalInfo.status == StatusHealthy {
 			newInfo, ok := backendInfo[addr]
 			if !ok || newInfo.status != StatusHealthy {
-				removedBackends[addr] = newInfo
+				backends[addr] = newInfo
 			}
 		}
 	}
@@ -249,12 +295,12 @@ func (bo *BackendObserver) notifyIfChanged(backendInfo map[string]*BackendInfo) 
 		if newInfo.status == StatusHealthy {
 			originalInfo, ok := bo.backendInfo[addr]
 			if !ok || originalInfo.status != StatusHealthy {
-				addedBackends[addr] = newInfo
+				backends[addr] = newInfo
 			}
 		}
 	}
-	if len(removedBackends) > 0 || len(addedBackends) > 0 {
-		bo.eventReceiver.OnBackendChanged(removedBackends, addedBackends)
+	if len(backends) > 0 {
+		bo.eventReceiver.OnBackendChanged(backends)
 	}
 	bo.backendInfo = backendInfo
 }
