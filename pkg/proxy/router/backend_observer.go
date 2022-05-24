@@ -181,7 +181,8 @@ func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
 				status: StatusHealthy,
 			}
 		}
-		bo.checkHealth(ctx, backendInfo)
+		// The status port is not configured, so we skip checking health now.
+		//bo.checkHealth(ctx, backendInfo)
 		bo.notifyIfChanged(backendInfo)
 	}
 }
