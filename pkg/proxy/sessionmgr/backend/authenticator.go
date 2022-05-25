@@ -414,3 +414,7 @@ func (auth *Authenticator) changeUser(request []byte) {
 	auth.dbname = string(hack.String(dbName))
 	// TODO: attrs
 }
+
+func (auth *Authenticator) updateCurrentDB(db string) {
+	auth.dbname = db
+}

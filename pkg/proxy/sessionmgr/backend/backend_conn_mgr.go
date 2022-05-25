@@ -3,7 +3,7 @@ package backend
 import (
 	"context"
 	"crypto/tls"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/djshow832/weir/pkg/proxy/driver"
 	pnet "github.com/djshow832/weir/pkg/proxy/net"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/logutil"
 	gomysql "github.com/siddontang/go-mysql/mysql"
@@ -19,8 +20,9 @@ import (
 )
 
 const (
-	SQLQueryState = "SHOW SESSION_STATES"
-	SQLSetState   = "SET SESSION_STATES '%s'"
+	sqlQueryState = "SHOW SESSION_STATES"
+	sqlSetState   = "SET SESSION_STATES '%s'"
+	currentDBKey  = "current-db"
 )
 
 type signalRedirect struct {
@@ -111,7 +113,7 @@ func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessi
 	// Do not lock here because the caller already locks.
 	sessionStates = strings.ReplaceAll(sessionStates, "\\", "\\\\")
 	sessionStates = strings.ReplaceAll(sessionStates, "'", "\\'")
-	sql := fmt.Sprintf(SQLSetState, sessionStates)
+	sql := fmt.Sprintf(sqlSetState, sessionStates)
 	_, _, err := mgr.cmdProcessor.query(backendIO, sql)
 	return err
 }
@@ -119,7 +121,7 @@ func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessi
 func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken string, err error) {
 	// Do not lock here because the caller already locks.
 	var result *gomysql.Result
-	if result, _, err = mgr.cmdProcessor.query(mgr.backendConn.PacketIO(), SQLQueryState); err != nil {
+	if result, _, err = mgr.cmdProcessor.query(mgr.backendConn.PacketIO(), sqlQueryState); err != nil {
 		return
 	}
 	if sessionStates, err = result.GetStringByName(0, "Session_states"); err != nil {
@@ -200,6 +202,20 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
 	// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
 	atomic.CompareAndSwapPointer(&mgr.signal, unsafe.Pointer(signal), nil)
 	return
+}
+
+// The original db in the auth info may be dropped during the session, so we need to authenticate with the current db.
+// The user may be renamed during the session, but the session cannot detect it, so this will affect the user.
+// TODO: this may be a security problem: a different new user may just be renamed to this user name.
+func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []byte) error {
+	var statesMap map[string]string
+	if err := json.Unmarshal(sessionStates, &statesMap); err != nil {
+		return errors.Annotate(err, "unmarshal session states error")
+	}
+	// The currentDBKey may be omitted if it's empty. I this case, we still need to update it.
+	currentDB := statesMap[currentDBKey]
+	mgr.authenticator.updateCurrentDB(currentDB)
+	return nil
 }
 
 // Redirect redirects the current session to the newAddr. Note that the function should be very quick,
