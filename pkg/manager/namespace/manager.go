@@ -22,6 +22,7 @@ import (
 	"github.com/djshow832/weir/pkg/proxy/driver"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/util/logutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -32,30 +33,33 @@ type NamespaceManager struct {
 	users          [2]*UserNamespaceMapper
 	nss            [2]*NamespaceHolder
 	reloadPrepared map[string]bool
+
+	client *clientv3.Client
 }
 
-func CreateNamespaceManager(cfgs []*config.Namespace) (*NamespaceManager, error) {
+func NewNamespaceManager() *NamespaceManager {
+	return &NamespaceManager{}
+}
+
+func (mgr *NamespaceManager) Init(cfgs []*config.Namespace, client *clientv3.Client) error {
+	mgr.Lock()
+	defer mgr.Unlock()
+
 	users, err := CreateUserNamespaceMapper(cfgs)
 	if err != nil {
-		return nil, errors.WithMessage(err, "create UserNamespaceMapper error")
+		return errors.WithMessage(err, "create UserNamespaceMapper error")
 	}
 
-	nss, err := CreateNamespaceHolder(cfgs)
+	nss, err := CreateNamespaceHolder(cfgs, client)
 	if err != nil {
-		return nil, errors.WithMessage(err, "create NamespaceHolder error")
+		return errors.WithMessage(err, "create NamespaceHolder error")
 	}
 
-	mgr := NewNamespaceManager(users, nss)
-	return mgr, nil
-}
-
-func NewNamespaceManager(users *UserNamespaceMapper, nss *NamespaceHolder) *NamespaceManager {
-	mgr := &NamespaceManager{
-		reloadPrepared: make(map[string]bool),
-	}
+	mgr.reloadPrepared = make(map[string]bool)
+	mgr.client = client
 	mgr.users[0] = users
 	mgr.nss[0] = nss
-	return mgr
+	return nil
 }
 
 func (n *NamespaceManager) Auth(username string, pwd, salt []byte) (driver.Namespace, bool) {
@@ -86,7 +90,7 @@ func (n *NamespaceManager) PrepareReloadNamespace(namespace string, cfg *config.
 		return errors.WithMessage(err, "add namespace users error")
 	}
 
-	newNs, err := BuildNamespace(cfg)
+	newNs, err := BuildNamespace(cfg, n.client)
 	if err != nil {
 		return errors.WithMessage(err, "build namespace error")
 	}
@@ -138,20 +142,14 @@ func (n *NamespaceManager) getNamespaceByUsername(username string) (string, bool
 }
 
 func (n *NamespaceManager) getCurrent() (*UserNamespaceMapper, *NamespaceHolder) {
-	n.RLock()
-	defer n.RUnlock()
 	return n.users[n.switchIndex], n.nss[n.switchIndex]
 }
 
 func (n *NamespaceManager) getCurrentUsers() *UserNamespaceMapper {
-	n.RLock()
-	defer n.RUnlock()
 	return n.users[n.switchIndex]
 }
 
 func (n *NamespaceManager) getCurrentNamespaces() *NamespaceHolder {
-	n.RLock()
-	defer n.RUnlock()
 	return n.nss[n.switchIndex]
 }
 
@@ -164,15 +162,11 @@ func (n *NamespaceManager) getOtherIndex() int {
 }
 
 func (n *NamespaceManager) setOther(users *UserNamespaceMapper, nss *NamespaceHolder) {
-	n.RLock()
-	defer n.RUnlock()
 	other := n.getOtherIndex()
 	n.users[other], n.nss[other] = users, nss
 }
 
 func (n *NamespaceManager) toggle() {
-	n.Lock()
-	defer n.Unlock()
 	n.switchIndex = n.getOtherIndex()
 }
 

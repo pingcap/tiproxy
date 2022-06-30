@@ -13,14 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package configcenter
+package config
 
 import (
 	"io/ioutil"
 	"path"
 	"path/filepath"
 
-	"github.com/djshow832/weir/pkg/config"
 	"github.com/pingcap/errors"
 )
 
@@ -28,43 +27,40 @@ var (
 	ErrNamespaceNotFound = errors.New("namespace not found")
 )
 
-// FileConfigCenter is only for test use,
+// NamespaceDir is only for test use,
 // please do not use it in production environment.
-type FileConfigCenter struct {
+type NamespaceDir struct {
 	dir    string
-	cfgs   map[string]*config.Namespace // key: namespace
-	nspath map[string]string            // key: namespace, value: config file path
+	cfgs   map[string]*Namespace // key: namespace
+	nspath map[string]string     // key: namespace, value: config file path
 }
 
-func CreateFileConfigCenter(nsdir string) (*FileConfigCenter, error) {
-	yamlFiles, err := listAllYamlFiles(nsdir)
+func NewNamespacesFromDir(nsdir string) (*NamespaceDir, error) {
+	c := &NamespaceDir{
+		dir:    nsdir,
+		cfgs:   make(map[string]*Namespace),
+		nspath: make(map[string]string),
+	}
+
+	yamlFiles, err := listAllYamlFiles(c.dir)
 	if err != nil {
 		return nil, err
 	}
-
-	c := newFileConfigCenter(nsdir)
 
 	for _, yamlFile := range yamlFiles {
 		fileData, err := ioutil.ReadFile(yamlFile)
 		if err != nil {
 			return nil, err
 		}
-		cfg, err := config.NewNamespaceConfig(fileData)
+		cfg, err := NewNamespaceConfig(fileData)
 		if err != nil {
 			return nil, err
 		}
 		c.cfgs[cfg.Namespace] = cfg
 		c.nspath[cfg.Namespace] = yamlFile
 	}
-	return c, nil
-}
 
-func newFileConfigCenter(dir string) *FileConfigCenter {
-	return &FileConfigCenter{
-		dir:    dir,
-		cfgs:   make(map[string]*config.Namespace),
-		nspath: make(map[string]string),
-	}
+	return c, nil
 }
 
 func listAllYamlFiles(dir string) ([]string, error) {
@@ -84,7 +80,7 @@ func listAllYamlFiles(dir string) ([]string, error) {
 	return ret, nil
 }
 
-func (f *FileConfigCenter) GetNamespace(ns string) (*config.Namespace, error) {
+func (f *NamespaceDir) GetNamespace(ns string) (*Namespace, error) {
 	cfg, ok := f.cfgs[ns]
 	if !ok {
 		return nil, ErrNamespaceNotFound
@@ -92,8 +88,8 @@ func (f *FileConfigCenter) GetNamespace(ns string) (*config.Namespace, error) {
 	return cfg, nil
 }
 
-func (f *FileConfigCenter) ListAllNamespace() ([]*config.Namespace, error) {
-	var ret []*config.Namespace
+func (f *NamespaceDir) ListAllNamespace() ([]*Namespace, error) {
+	var ret []*Namespace
 	for _, cfg := range f.cfgs {
 		ret = append(ret, cfg)
 	}

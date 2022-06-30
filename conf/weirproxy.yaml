@@ -4,7 +4,7 @@ proxy_server:
   tcp_keep_alive: true
   max_connections: 1000
   session_timeout: 600
-  storage_path: "/tmp/weir"
+  storage_path: "./weir"
   pd_addrs: "127.0.0.1:2379"
 admin_server:
   addr: "0.0.0.0:6001"
@@ -12,19 +12,15 @@ admin_server:
   user: ""
   password: ""
 log:
-  level: "debug"
-  format: "console"
+  level: "info"
+  encoder: "tidb"
   log_file:
     filename: ""
     max_size: 300
     max_days: 1
     max_backups: 1
 config_center:
-  type: "file"
-  config_file:
-    path: "./conf/namespace"
-    strict_parse: false
-performance:
-  tcp_keep_alive: true
+  ignore_wrong_namespace: true
+  config_file: "./conf/namespace"
 security:
   rsa-key-size: 4096

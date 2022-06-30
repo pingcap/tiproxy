@@ -20,9 +20,10 @@ import (
 	"sync/atomic"
 
 	"github.com/djshow832/weir/pkg/config"
+	"github.com/djshow832/weir/pkg/metrics"
 	"github.com/djshow832/weir/pkg/proxy/driver"
-	"github.com/djshow832/weir/pkg/proxy/metrics"
 	"github.com/pingcap/errors"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type NamespaceHolder struct {
@@ -35,11 +36,11 @@ type NamespaceWrapper struct {
 	connCounter int64
 }
 
-func CreateNamespaceHolder(cfgs []*config.Namespace) (*NamespaceHolder, error) {
+func CreateNamespaceHolder(cfgs []*config.Namespace, client *clientv3.Client) (*NamespaceHolder, error) {
 	nss := make(map[string]Namespace, len(cfgs))
 
 	for _, cfg := range cfgs {
-		ns, err := BuildNamespace(cfg)
+		ns, err := BuildNamespace(cfg, client)
 		if err != nil {
 			return nil, errors.WithMessage(err, fmt.Sprintf("create namespace error, namespace: %s", cfg.Namespace))
 		}

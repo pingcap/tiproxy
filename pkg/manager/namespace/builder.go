@@ -19,12 +19,13 @@ import (
 	"hash/crc32"
 
 	"github.com/djshow832/weir/pkg/config"
+	"github.com/djshow832/weir/pkg/manager/router"
 	"github.com/djshow832/weir/pkg/proxy/driver"
-	"github.com/djshow832/weir/pkg/proxy/router"
 	wast "github.com/djshow832/weir/pkg/util/ast"
 	"github.com/djshow832/weir/pkg/util/datastructure"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type NamespaceImpl struct {
@@ -35,12 +36,12 @@ type NamespaceImpl struct {
 	rateLimiter *NamespaceRateLimiter
 }
 
-func BuildNamespace(cfg *config.Namespace) (Namespace, error) {
+func BuildNamespace(cfg *config.Namespace, client *clientv3.Client) (Namespace, error) {
 	fe, err := BuildFrontend(&cfg.Frontend)
 	if err != nil {
 		return nil, errors.WithMessage(err, "build frontend error")
 	}
-	rt, err := BuildRouter(&cfg.Backend)
+	rt, err := BuildRouter(&cfg.Backend, client)
 	if err != nil {
 		return nil, errors.WithMessage(err, "build router error")
 	}
@@ -85,8 +86,8 @@ func (n *NamespaceImpl) Close() {
 	n.router.Close()
 }
 
-func BuildRouter(cfg *config.BackendNamespace) (driver.Router, error) {
-	return router.NewRandomRouter(cfg)
+func BuildRouter(cfg *config.BackendNamespace, client *clientv3.Client) (driver.Router, error) {
+	return router.NewRandomRouter(cfg, client)
 }
 
 func BuildFrontend(cfg *config.FrontendNamespace) (Frontend, error) {
