@@ -15,7 +15,11 @@
 
 package config
 
-import "github.com/goccy/go-yaml"
+import (
+	"io/ioutil"
+
+	"github.com/goccy/go-yaml"
+)
 
 type Namespace struct {
 	Version     string            `yaml:"version"`
@@ -70,6 +74,14 @@ func NewNamespaceConfig(data []byte) (*Namespace, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+func NewNamespaceConfigFile(path string) (*Namespace, error) {
+	fileData, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return NewNamespaceConfig(fileData)
 }
 
 func (cfg *Namespace) ToBytes() ([]byte, error) {

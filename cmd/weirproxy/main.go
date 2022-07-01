@@ -16,82 +16,92 @@
 package main
 
 import (
-	"flag"
-	"fmt"
 	"io/ioutil"
-	"os"
-	"os/signal"
-	"sync"
-	"syscall"
+	"time"
 
 	"github.com/djshow832/weir/pkg/config"
-	"github.com/djshow832/weir/pkg/proxy"
-	"github.com/djshow832/weir/pkg/util/disk"
-	"github.com/pingcap/tidb/util/logutil"
+	"github.com/djshow832/weir/pkg/server"
+	"github.com/djshow832/weir/pkg/util/cmd"
+	"github.com/djshow832/weir/pkg/util/waitgroup"
+	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-)
-
-var (
-	configFilePath = flag.String("config", "conf/weirproxy.yaml", "weir proxy config file path")
+	"go.uber.org/zap/zapcore"
 )
 
 func main() {
-	flag.Parse()
-	proxyConfigData, err := ioutil.ReadFile(*configFilePath)
-	if err != nil {
-		fmt.Printf("read config file error: %v\n", err)
-		os.Exit(1)
+	rootCmd := &cobra.Command{
+		Use:   "weirproxy",
+		Short: "start the proxy server",
 	}
 
-	proxyCfg, err := config.NewProxyConfig(proxyConfigData)
-	if err != nil {
-		fmt.Printf("parse config file error: %v\n", err)
-		os.Exit(1)
-	}
+	configFile := rootCmd.PersistentFlags().String("config", "conf/weirproxy.yaml", "weir proxy config file path")
+	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "", "log in format of tidb, console, or json")
+	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
+	namespaceFiles := rootCmd.PersistentFlags().String("namespaces", "", "import namespace from dir")
 
-	err = disk.InitializeTempDir(proxyCfg.ProxyServer.StoragePath)
-	if err != nil {
-		fmt.Printf("initialize temporary path error: %v\n", err)
-		os.Exit(1)
-	}
-
-	p := proxy.NewProxy(proxyCfg)
-
-	if err = p.Init(); err != nil {
-		fmt.Printf("proxy init error: %v\n", err)
-		p.Close()
-		os.Exit(1)
-	}
-
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT,
-		syscall.SIGPIPE,
-		syscall.SIGUSR1,
-	)
-
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			sig := <-sc
-			if sig == syscall.SIGINT || sig == syscall.SIGTERM || sig == syscall.SIGQUIT {
-				logutil.BgLogger().Warn("get os signal, close proxy server", zap.String("signal", sig.String()))
-				p.Close()
-				break
-			} else {
-				logutil.BgLogger().Warn("ignore os signal", zap.String("signal", sig.String()))
-			}
+	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		proxyConfigData, err := ioutil.ReadFile(*configFile)
+		if err != nil {
+			return err
 		}
-	}()
 
-	if err := p.Run(); err != nil {
-		logutil.BgLogger().Error("proxy run error, exit", zap.Error(err))
+		cfg, err := config.NewProxyConfig(proxyConfigData)
+		if err != nil {
+			return err
+		}
+
+		if *logEncoder != "" {
+			cfg.Log.Encoder = *logEncoder
+		}
+		if *logLevel != "" {
+			cfg.Log.Level = *logLevel
+		}
+
+		zapcfg := zap.NewDevelopmentConfig()
+		zapcfg.EncoderConfig.EncodeTime = func(t time.Time, pae zapcore.PrimitiveArrayEncoder) {
+			s := t.Format("2006/01/02 15:04:05.000 -07:00")
+			pae.AppendString(s)
+		}
+		zapcfg.Encoding = cfg.Log.Encoder
+		if level, err := zap.ParseAtomicLevel(cfg.Log.Level); err == nil {
+			zapcfg.Level = level
+		}
+		logger, err := zapcfg.Build()
+		if err != nil {
+			return err
+		}
+		logger = logger.Named("main")
+
+		srv, err := server.NewServer(cmd.Context(), cfg, logger, *namespaceFiles)
+		if err != nil {
+			logger.Error("fail to create server", zap.Error(err))
+			return err
+		}
+
+		<-cmd.Context().Done()
+
+		var wg waitgroup.WaitGroup
+		var errs []zap.Field
+		wg.Run(func() {
+			for {
+				err, ok := <-srv.ErrChan()
+				if !ok {
+					break
+				}
+				errs = append(errs, zap.Error(err))
+			}
+		})
+		srv.Close()
+		wg.Wait()
+
+		if len(errs) > 0 {
+			logger.Error("shutdown with errors", errs...)
+		} else {
+			logger.Info("gracefully shutdown")
+		}
+
+		return nil
 	}
 
-	wg.Wait()
+	cmd.RunRootCommand(rootCmd)
 }

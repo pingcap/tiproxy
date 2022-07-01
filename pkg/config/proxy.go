@@ -15,7 +15,12 @@
 
 package config
 
-import "github.com/goccy/go-yaml"
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/goccy/go-yaml"
+)
 
 const (
 	DefaultClusterName = "default"
@@ -24,14 +29,20 @@ const (
 )
 
 type Proxy struct {
-	Version      string       `yaml:"version"`
-	Cluster      string       `yaml:"cluster"`
-	ProxyServer  ProxyServer  `yaml:"proxy_server"`
-	AdminServer  AdminServer  `yaml:"admin_server"`
-	Log          Log          `yaml:"log"`
-	Registry     Registry     `yaml:"registry"`
-	ConfigCenter ConfigCenter `yaml:"config_center"`
-	Security     Security     `yaml:"security"`
+	Version       string        `yaml:"version"`
+	Cluster       string        `yaml:"cluster"`
+	EtcdDir       string        `yaml:"etcd_dir"`
+	ConfigManager ConfigManager `yaml:"config_center"`
+	ProxyServer   ProxyServer   `yaml:"proxy_server"`
+	AdminServer   AdminServer   `yaml:"admin_server"`
+	Log           Log           `yaml:"log"`
+	Registry      Registry      `yaml:"registry"`
+	Security      Security      `yaml:"security"`
+}
+
+type ConfigManager struct {
+	IgnoreWrongNamespace bool   `yaml:"ignore_wrong_namespace"`
+	ConfigFile           string `yaml:"config_file"`
 }
 
 type ProxyServer struct {
@@ -52,7 +63,7 @@ type AdminServer struct {
 
 type Log struct {
 	Level   string  `yaml:"level"`
-	Format  string  `yaml:"format"`
+	Encoder string  `yaml:"encoder"`
 	LogFile LogFile `yaml:"log_file"`
 }
 
@@ -67,25 +78,6 @@ type Registry struct {
 	Enable bool     `yaml:"enable"`
 	Type   string   `yaml:"type"`
 	Addrs  []string `yaml:"addrs"`
-}
-
-type ConfigCenter struct {
-	Type       string     `yaml:"type"`
-	ConfigFile ConfigFile `yaml:"config_file"`
-	ConfigEtcd ConfigEtcd `yaml:"config_etcd"`
-}
-
-type ConfigFile struct {
-	Path string `yaml:"path"`
-}
-
-type ConfigEtcd struct {
-	Addrs    []string `yaml:"addrs"`
-	BasePath string   `yaml:"base_path"`
-	Username string   `yaml:"username"`
-	Password string   `yaml:"password"`
-	// If strictParse is disabled, parsing namespace error will be ignored when list all namespaces.
-	StrictParse bool `yaml:"strict_parse"`
 }
 
 type Security struct {
@@ -117,6 +109,13 @@ func (cfg *Proxy) Check() error {
 	}
 	if cfg.Cluster == "" {
 		cfg.Cluster = DefaultClusterName
+	}
+	if cfg.EtcdDir == "" {
+		d, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		cfg.EtcdDir = filepath.Join(d, "etcd")
 	}
 	return nil
 }
