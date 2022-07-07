@@ -35,7 +35,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/djshow832/weir/pkg/util/sync2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -45,47 +44,47 @@ const (
 	tenth   = 10 * time.Millisecond
 )
 
-var numcalls sync2.AtomicInt64
-
-func f() {
-	numcalls.Add(1)
-}
-
 func TestWait(t *testing.T) {
-	numcalls.Set(0)
+	numcalls := 0
 	timer := NewTimer(quarter)
 	assert.False(t, timer.Running())
-	timer.Start(f)
+	timer.Start(func() {
+		numcalls++
+	})
 	defer timer.Stop()
 	assert.True(t, timer.Running())
 	time.Sleep(tenth)
-	assert.Equal(t, int64(0), numcalls.Get())
+	assert.Equal(t, int64(0), numcalls)
 	time.Sleep(quarter)
-	assert.Equal(t, int64(1), numcalls.Get())
+	assert.Equal(t, int64(1), numcalls)
 	time.Sleep(quarter)
-	assert.Equal(t, int64(2), numcalls.Get())
+	assert.Equal(t, int64(2), numcalls)
 }
 
 func TestReset(t *testing.T) {
-	numcalls.Set(0)
+	numcalls := 0
 	timer := NewTimer(half)
-	timer.Start(f)
+	timer.Start(func() {
+		numcalls++
+	})
 	defer timer.Stop()
 	timer.SetInterval(quarter)
 	time.Sleep(tenth)
-	assert.Equal(t, int64(0), numcalls.Get())
+	assert.Equal(t, int64(0), numcalls)
 	time.Sleep(quarter)
-	assert.Equal(t, int64(1), numcalls.Get())
+	assert.Equal(t, int64(1), numcalls)
 }
 
 func TestIndefinite(t *testing.T) {
-	numcalls.Set(0)
+	numcalls := 0
 	timer := NewTimer(0)
-	timer.Start(f)
+	timer.Start(func() {
+		numcalls++
+	})
 	defer timer.Stop()
 	timer.TriggerAfter(quarter)
 	time.Sleep(tenth)
-	assert.Equal(t, int64(0), numcalls.Get())
+	assert.Equal(t, int64(0), numcalls)
 	time.Sleep(quarter)
-	assert.Equal(t, int64(1), numcalls.Get())
+	assert.Equal(t, int64(1), numcalls)
 }

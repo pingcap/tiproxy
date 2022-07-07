@@ -92,7 +92,7 @@ func (e *EtcdConfigCenter) GetNamespace(ns string) (*config.Namespace, error) {
 		return nil, err
 	}
 
-	return config.UnmarshalNamespaceConfig(etcdKeyValue.Value)
+	return config.NewNamespaceConfig(etcdKeyValue.Value)
 }
 
 func (e *EtcdConfigCenter) ListAllNamespace() ([]*config.Namespace, error) {
@@ -104,7 +104,7 @@ func (e *EtcdConfigCenter) ListAllNamespace() ([]*config.Namespace, error) {
 
 	var ret []*config.Namespace
 	for _, kv := range etcdKeyValues {
-		nsCfg, err := config.UnmarshalNamespaceConfig(kv.Value)
+		nsCfg, err := config.NewNamespaceConfig(kv.Value)
 		if err != nil {
 			if e.strictParse {
 				return nil, err

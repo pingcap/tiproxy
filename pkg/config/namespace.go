@@ -15,6 +15,8 @@
 
 package config
 
+import "github.com/goccy/go-yaml"
+
 type Namespace struct {
 	Version     string            `yaml:"version"`
 	Namespace   string            `yaml:"namespace"`
@@ -60,4 +62,16 @@ type StrategyInfo struct {
 type BreakerInfo struct {
 	Scope      string         `yaml:"scope"`
 	Strategies []StrategyInfo `yaml:"strategies"`
+}
+
+func NewNamespaceConfig(data []byte) (*Namespace, error) {
+	var cfg Namespace
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func (cfg *Namespace) ToBytes() ([]byte, error) {
+	return yaml.Marshal(cfg)
 }

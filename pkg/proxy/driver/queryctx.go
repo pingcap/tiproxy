@@ -21,7 +21,6 @@ import (
 	"errors"
 
 	pnet "github.com/djshow832/weir/pkg/proxy/net"
-	"github.com/pingcap/tidb/parser"
 )
 
 // Server information.
@@ -44,7 +43,6 @@ type QueryCtxImpl struct {
 	connId  uint64
 	nsmgr   NamespaceManager
 	ns      Namespace
-	parser  *parser.Parser
 	connMgr BackendConnManager
 }
 
@@ -52,7 +50,6 @@ func NewQueryCtxImpl(nsmgr NamespaceManager, backendConnMgr BackendConnManager, 
 	return &QueryCtxImpl{
 		connId:  connId,
 		nsmgr:   nsmgr,
-		parser:  parser.New(),
 		connMgr: backendConnMgr,
 	}
 }

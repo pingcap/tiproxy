@@ -15,12 +15,12 @@
 
 package config
 
-import "github.com/goccy/go-yaml"
+const (
+	MIN_SESSION_TIMEOUT = 600
+)
 
 const (
 	DefaultClusterName = "default"
-
-	MIN_SESSION_TIMEOUT = 600
 )
 
 type Proxy struct {
@@ -98,29 +98,4 @@ type Security struct {
 	ClusterVerifyCN []string `toml:"cluster-verify-cn" json:"cluster-verify-cn"`
 	MinTLSVersion   string   `toml:"tls-version" json:"tls-version"`
 	RSAKeySize      int      `toml:"rsa-key-size" json:"rsa-key-size"`
-}
-
-func NewProxyConfig(data []byte) (*Proxy, error) {
-	var cfg Proxy
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-	if err := cfg.Check(); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
-func (cfg *Proxy) Check() error {
-	if cfg.ProxyServer.SessionTimeout <= MIN_SESSION_TIMEOUT {
-		cfg.ProxyServer.SessionTimeout = MIN_SESSION_TIMEOUT
-	}
-	if cfg.Cluster == "" {
-		cfg.Cluster = DefaultClusterName
-	}
-	return nil
-}
-
-func (cfg *Proxy) ToBytes() ([]byte, error) {
-	return yaml.Marshal(cfg)
 }

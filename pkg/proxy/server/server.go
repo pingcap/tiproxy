@@ -20,11 +20,9 @@ import (
 	"github.com/djshow832/weir/pkg/config"
 	"github.com/djshow832/weir/pkg/proxy/driver"
 	"github.com/djshow832/weir/pkg/util/security"
-	"github.com/djshow832/weir/pkg/util/timer"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/metrics"
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/parser/terror"
 	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tidb/util/logutil"
@@ -43,14 +41,6 @@ var (
 	timeWheelBucketsNum = 3600
 )
 
-// DefaultCapability is the capability of the server when it is created using the default configuration.
-// When server is configured with SSL, the server will have extra capabilities compared to DefaultCapability.
-const defaultCapability = mysql.ClientLongPassword | mysql.ClientLongFlag |
-	mysql.ClientConnectWithDB | mysql.ClientProtocol41 |
-	mysql.ClientTransactions | mysql.ClientSecureConnection | mysql.ClientFoundRows |
-	mysql.ClientMultiStatements | mysql.ClientMultiResults | mysql.ClientLocalFiles |
-	mysql.ClientConnectAtts | mysql.ClientPluginAuth | mysql.ClientInteractive
-
 type Server struct {
 	cfg              *config.Proxy
 	serverTLSConfig  *tls.Config // the TLS used to connect to the client
@@ -60,26 +50,16 @@ type Server struct {
 	rwlock           sync.RWMutex
 	clients          map[uint64]driver.ClientConnection
 	baseConnID       uint64
-	capability       uint32
-	sessionTimeout   time.Duration
-	tw               *timer.TimeWheel
 }
 
 // NewServer creates a new Server.
 func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
-	tw, err := timer.NewTimeWheel(timeWheelUnit, timeWheelBucketsNum)
-	if err != nil {
-		return nil, err
-	}
-
-	tw.Start()
+	var err error
 
 	s := &Server{
 		cfg:            cfg,
 		driver:         d,
 		clients:        make(map[uint64]driver.ClientConnection),
-		sessionTimeout: time.Duration(cfg.ProxyServer.SessionTimeout) * time.Second,
-		tw:             tw,
 	}
 
 	if s.serverTLSConfig, err = security.CreateServerTLSConfig(cfg.Security.SSLCA, cfg.Security.SSLKey, cfg.Security.SSLCert,
@@ -91,10 +71,6 @@ func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 		return nil, err
 	}
 
-	setSystemTimeZoneVariable()
-
-	s.initCapability()
-
 	if err := s.initListener(); err != nil {
 		return nil, err
 	}
@@ -105,10 +81,6 @@ func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 	rand.Seed(time.Now().UTC().UnixNano())
 
 	return s, nil
-}
-
-func (s *Server) initCapability() {
-	s.capability = defaultCapability
 }
 
 // TODO(eastfisher): support unix socket and proxy protocol
@@ -181,7 +153,7 @@ func (s *Server) onConn(conn driver.ClientConnection) {
 }
 
 func (s *Server) newConn(conn net.Conn) driver.ClientConnection {
-	if s.cfg.Performance.TCPKeepAlive {
+	if s.cfg.ProxyServer.TCPKeepAlive {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
 			if err := tcpConn.SetKeepAlive(true); err != nil {
 				logutil.BgLogger().Error("failed to set tcp keep alive option", zap.Error(err))
@@ -231,14 +203,4 @@ func (s *Server) Close() {
 		terror.Log(errors.Trace(err))
 	}
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventClose).Inc()
-}
-
-// TryGracefulDown will try to gracefully close all connection first with timeout. if timeout, will close all connection directly.
-func (s *Server) TryGracefulDown() {
-	return
-}
-
-// GracefulDown waits all clients to close.
-func (s *Server) GracefulDown(ctx context.Context, done chan struct{}) {
-	return
 }

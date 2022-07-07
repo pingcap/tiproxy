@@ -35,8 +35,6 @@ package timer
 import (
 	"sync"
 	"time"
-
-	"github.com/djshow832/weir/pkg/util/sync2"
 )
 
 // Out-of-band messages
@@ -71,11 +69,11 @@ A zero value interval will cause the timer to wait indefinitely, and it
 will react only to an explicit Trigger or Stop.
 */
 type Timer struct {
-	interval sync2.AtomicDuration
-
 	// state management
-	mu      sync.Mutex
-	running bool
+	mu sync.RWMutex
+
+	interval time.Duration
+	running  bool
 
 	// msg is used for out-of-band messages
 	msg chan typeAction
@@ -83,11 +81,10 @@ type Timer struct {
 
 // NewTimer creates a new Timer object
 func NewTimer(interval time.Duration) *Timer {
-	tm := &Timer{
-		msg: make(chan typeAction),
+	return &Timer{
+		msg:      make(chan typeAction),
+		interval: interval,
 	}
-	tm.interval.Set(interval)
-	return tm
 }
 
 // Start starts the timer.
@@ -98,42 +95,43 @@ func (tm *Timer) Start(keephouse func()) {
 		return
 	}
 	tm.running = true
-	go tm.run(keephouse)
-}
+	go func() {
+		var timer *time.Timer
+		for {
+			tm.mu.RLock()
+			interval := tm.interval
+			tm.mu.RUnlock()
 
-func (tm *Timer) run(keephouse func()) {
-	var timer *time.Timer
-	for {
-		var ch <-chan time.Time
-		interval := tm.interval.Get()
-		if interval > 0 {
-			timer = time.NewTimer(interval)
-			ch = timer.C
-		}
-		select {
-		case action := <-tm.msg:
-			if timer != nil {
-				timer.Stop()
-				timer = nil
+			var ch <-chan time.Time
+			if interval > 0 {
+				timer = time.NewTimer(interval)
+				ch = timer.C
 			}
-			switch action {
-			case timerStop:
-				return
-			case timerReset:
-				continue
+			select {
+			case action := <-tm.msg:
+				if timer != nil {
+					timer.Stop()
+					timer = nil
+				}
+				switch action {
+				case timerStop:
+					return
+				case timerReset:
+					continue
+				}
+			case <-ch:
 			}
-		case <-ch:
+			keephouse()
 		}
-		keephouse()
-	}
+	}()
 }
 
 // SetInterval changes the wait interval.
 // It will cause the timer to restart the wait.
 func (tm *Timer) SetInterval(ns time.Duration) {
-	tm.interval.Set(ns)
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	tm.interval = ns
 	if tm.running {
 		tm.msg <- timerReset
 	}
@@ -170,11 +168,13 @@ func (tm *Timer) Stop() {
 
 // Interval returns the current interval.
 func (tm *Timer) Interval() time.Duration {
-	return tm.interval.Get()
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return tm.interval
 }
 
 func (tm *Timer) Running() bool {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
 	return tm.running
 }

@@ -37,19 +37,9 @@ type Proxy struct {
 	configCenter configcenter.ConfigCenter
 }
 
-func supplementProxyConfig(cfg *config.Proxy) *config.Proxy {
-	if cfg.ProxyServer.SessionTimeout <= config.MIN_SESSION_TIMEOUT {
-		cfg.ProxyServer.SessionTimeout = config.MIN_SESSION_TIMEOUT
-	}
-	if cfg.Cluster == "" {
-		cfg.Cluster = config.DefaultClusterName
-	}
-	return cfg
-}
-
 func NewProxy(cfg *config.Proxy) *Proxy {
 	return &Proxy{
-		cfg: supplementProxyConfig(cfg),
+		cfg: cfg,
 	}
 }
 

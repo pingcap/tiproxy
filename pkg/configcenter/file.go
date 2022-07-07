@@ -49,7 +49,7 @@ func CreateFileConfigCenter(nsdir string) (*FileConfigCenter, error) {
 		if err != nil {
 			return nil, err
 		}
-		cfg, err := config.UnmarshalNamespaceConfig(fileData)
+		cfg, err := config.NewNamespaceConfig(fileData)
 		if err != nil {
 			return nil, err
 		}

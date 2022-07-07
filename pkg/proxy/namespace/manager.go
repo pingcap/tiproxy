@@ -20,18 +20,17 @@ import (
 
 	"github.com/djshow832/weir/pkg/config"
 	"github.com/djshow832/weir/pkg/proxy/driver"
-	"github.com/djshow832/weir/pkg/util/sync2"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
 )
 
 type NamespaceManager struct {
-	switchIndex sync2.BoolIndex
-	users       [2]*UserNamespaceMapper
-	nss         [2]*NamespaceHolder
+	sync.RWMutex
 
-	reloadLock     sync.Mutex
+	switchIndex    int
+	users          [2]*UserNamespaceMapper
+	nss            [2]*NamespaceHolder
 	reloadPrepared map[string]bool
 }
 
@@ -78,8 +77,8 @@ func (n *NamespaceManager) RedirectConnections() error {
 }
 
 func (n *NamespaceManager) PrepareReloadNamespace(namespace string, cfg *config.Namespace) error {
-	n.reloadLock.Lock()
-	defer n.reloadLock.Unlock()
+	n.Lock()
+	defer n.Unlock()
 
 	newUsers := n.getCurrentUsers().Clone()
 	newUsers.RemoveNamespaceUsers(namespace)
@@ -102,8 +101,8 @@ func (n *NamespaceManager) PrepareReloadNamespace(namespace string, cfg *config.
 }
 
 func (n *NamespaceManager) CommitReloadNamespaces(namespaces []string) error {
-	n.reloadLock.Lock()
-	defer n.reloadLock.Unlock()
+	n.Lock()
+	defer n.Unlock()
 
 	for _, namespace := range namespaces {
 		if !n.reloadPrepared[namespace] {
@@ -116,8 +115,8 @@ func (n *NamespaceManager) CommitReloadNamespaces(namespaces []string) error {
 }
 
 func (n *NamespaceManager) RemoveNamespace(name string) {
-	n.reloadLock.Lock()
-	defer n.reloadLock.Unlock()
+	n.Lock()
+	defer n.Unlock()
 
 	n.getCurrentUsers().RemoveNamespaceUsers(name)
 	nss := n.getCurrentNamespaces()
@@ -139,29 +138,42 @@ func (n *NamespaceManager) getNamespaceByUsername(username string) (string, bool
 }
 
 func (n *NamespaceManager) getCurrent() (*UserNamespaceMapper, *NamespaceHolder) {
-	current, _, _ := n.switchIndex.Get()
-	return n.users[current], n.nss[current]
+	n.RLock()
+	defer n.RUnlock()
+	return n.users[n.switchIndex], n.nss[n.switchIndex]
 }
 
 func (n *NamespaceManager) getCurrentUsers() *UserNamespaceMapper {
-	current, _, _ := n.switchIndex.Get()
-	return n.users[current]
+	n.RLock()
+	defer n.RUnlock()
+	return n.users[n.switchIndex]
 }
 
 func (n *NamespaceManager) getCurrentNamespaces() *NamespaceHolder {
-	current, _, _ := n.switchIndex.Get()
-	return n.nss[current]
+	n.RLock()
+	defer n.RUnlock()
+	return n.nss[n.switchIndex]
+}
+
+func (n *NamespaceManager) getOtherIndex() int {
+	if n.switchIndex == 0 {
+		return 1
+	} else {
+		return 0
+	}
 }
 
 func (n *NamespaceManager) setOther(users *UserNamespaceMapper, nss *NamespaceHolder) {
-	_, other, _ := n.switchIndex.Get()
-	n.users[other] = users
-	n.nss[other] = nss
+	n.RLock()
+	defer n.RUnlock()
+	other := n.getOtherIndex()
+	n.users[other], n.nss[other] = users, nss
 }
 
 func (n *NamespaceManager) toggle() {
-	_, _, currentFlag := n.switchIndex.Get()
-	n.switchIndex.Set(!currentFlag)
+	n.Lock()
+	defer n.Unlock()
+	n.switchIndex = n.getOtherIndex()
 }
 
 func (n *NamespaceManager) closeNamespace(ns Namespace) error {

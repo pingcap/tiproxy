@@ -43,7 +43,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	proxyCfg, err := config.UnmarshalProxyConfig(proxyConfigData)
+	proxyCfg, err := config.NewProxyConfig(proxyConfigData)
 	if err != nil {
 		fmt.Printf("parse config file error: %v\n", err)
 		os.Exit(1)
@@ -73,8 +73,8 @@ func main() {
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
 
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for {
