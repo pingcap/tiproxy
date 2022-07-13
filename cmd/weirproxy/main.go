@@ -17,7 +17,6 @@ package main
 
 import (
 	"io/ioutil"
-	"time"
 
 	"github.com/djshow832/weir/pkg/config"
 	"github.com/djshow832/weir/pkg/server"
@@ -25,7 +24,6 @@ import (
 	"github.com/djshow832/weir/pkg/util/waitgroup"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 func main() {
@@ -58,10 +56,6 @@ func main() {
 		}
 
 		zapcfg := zap.NewDevelopmentConfig()
-		zapcfg.EncoderConfig.EncodeTime = func(t time.Time, pae zapcore.PrimitiveArrayEncoder) {
-			s := t.Format("2006/01/02 15:04:05.000 -07:00")
-			pae.AppendString(s)
-		}
 		zapcfg.Encoding = cfg.Log.Encoder
 		if level, err := zap.ParseAtomicLevel(cfg.Log.Level); err == nil {
 			zapcfg.Level = level

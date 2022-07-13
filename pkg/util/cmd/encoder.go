@@ -78,9 +78,13 @@ func (c *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 	c.line.Free()
 	c.line = _pool.Get()
 
-	if c.TimeKey != "" && c.EncodeTime != nil {
+	if c.TimeKey != "" {
 		c.beginQuoteFiled()
-		c.EncodeTime(ent.Time, c)
+		if c.EncodeTime != nil {
+			c.EncodeTime(ent.Time, c)
+		} else {
+			c.AppendString(ent.Time.Format("2006/01/02 15:04:05.000 -07:00"))
+		}
 		c.endQuoteFiled()
 	}
 	if c.LevelKey != "" && c.EncodeLevel != nil {
