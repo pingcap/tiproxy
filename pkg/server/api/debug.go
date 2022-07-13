@@ -19,9 +19,9 @@ func (h *debugHttpHandler) Redirect(c *gin.Context) {
 	if err != nil {
 		errMsg := "redirect connections error"
 		h.logger.Error(errMsg, zap.Error(err))
-		c.JSON(http.StatusOK, CreateJsonResp(http.StatusInternalServerError, errMsg))
+		c.JSON(http.StatusInternalServerError, errMsg)
 	} else {
-		c.JSON(http.StatusOK, CreateSuccessJsonResp())
+		c.JSON(http.StatusOK, "")
 	}
 }
 

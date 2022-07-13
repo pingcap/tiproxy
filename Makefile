@@ -21,13 +21,20 @@ LDFLAGS ?=
 export GOBIN := $(TOOL_BIN_PATH)
 export PATH := $(TOOL_BIN_PATH):$(PATH)
 
-default: weirproxy
+default: weirproxy weirctl
 
 weirproxy:
 ifeq ("$(WITH_RACE)", "1")
 	go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}' -o bin/weirproxy cmd/weirproxy/main.go
 else
 	go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}' -o bin/weirproxy cmd/weirproxy/main.go
+endif
+
+weirctl:
+ifeq ("$(WITH_RACE)", "1")
+	go build -race -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}' -o bin/weirctl cmd/weirctl/main.go
+else
+	go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}' -o bin/weirctl cmd/weirctl/main.go
 endif
 
 go-test:
