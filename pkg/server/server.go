@@ -29,10 +29,6 @@ type Server struct {
 	// err chan
 	errch chan error
 
-	// config
-	Config *config.Proxy
-	Logger *zap.Logger
-
 	// managers
 	ConfigManager    *mgrcfg.ConfigManager
 	NamespaceManager *mgrns.NamespaceManager
@@ -47,8 +43,6 @@ type Server struct {
 
 func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, namespaceFiles string) (srv *Server, err error) {
 	srv = &Server{
-		Config:           cfg,
-		Logger:           logger,
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
 		errch:            make(chan error, 4),
@@ -57,7 +51,7 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 	ready := atomic.NewBool(false)
 
 	// setup metrics
-	metrics.RegisterProxyMetrics(srv.Config.Cluster)
+	metrics.RegisterProxyMetrics(cfg.Cluster)
 
 	// setup gin and etcd
 	{
@@ -66,7 +60,7 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 		engine := gin.New()
 		engine.Use(
 			gin.Recovery(),
-			ginzap.Ginzap(srv.Logger.Named("gin"), "", true),
+			ginzap.Ginzap(logger.Named("gin"), "", true),
 			func(c *gin.Context) {
 				if !ready.Load() {
 					c.AbortWithStatusJSON(http.StatusInternalServerError, "service not ready")
@@ -84,15 +78,15 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 		// We have some alternative solution, for example:
 		// 1. globally lazily creation of managers. It introduced racing/chaos-management/hard-code-reading as in TiDB.
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
-		api.Register(engine.Group("/api"), ready, srv.Config, srv.Logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
+		api.Register(engine.Group("/api"), ready, cfg, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		cfg := embed.NewConfig()
-		cfg.Dir = srv.Config.EtcdDir
-		cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(srv.Logger.Named("etcd"))
-		cfg.UserHandlers = map[string]http.Handler{
+		etcd_cfg := embed.NewConfig()
+		etcd_cfg.Dir = cfg.EtcdDir
+		etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
+		etcd_cfg.UserHandlers = map[string]http.Handler{
 			"/api/": engine,
 		}
-		srv.Etcd, err = embed.StartEtcd(cfg)
+		srv.Etcd, err = embed.StartEtcd(etcd_cfg)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -113,7 +107,7 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 		for i := range addrs {
 			addrs[i] = srv.Etcd.Clients[i].Addr().String()
 		}
-		err = srv.ConfigManager.Init(addrs, srv.Config.ConfigManager, srv.Logger.Named("config"))
+		err = srv.ConfigManager.Init(addrs, cfg.ConfigManager, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -129,7 +123,7 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 
 	// setup namespace manager
 	{
-		srv.ObserverClient, err = router.InitEtcdClient(srv.Config)
+		srv.ObserverClient, err = router.InitEtcdClient(cfg)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -152,7 +146,7 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 	// setup proxy server
 	{
 		driverImpl := driver.NewDriverImpl(srv.NamespaceManager, client.NewClientConnectionImpl, backend.NewBackendConnManager)
-		srv.Proxy, err = server.NewServer(srv.Config, driverImpl)
+		srv.Proxy, err = server.NewServer(cfg, driverImpl)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
