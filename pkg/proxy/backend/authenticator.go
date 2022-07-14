@@ -80,7 +80,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	sslEnabled := uint32(capability)&mysql.ClientSSL > 0
 	if sslEnabled {
 		// Upgrade TLS with the client if SSL is enabled.
-		if err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
+		if _, err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
 			return false, err
 		}
 	} else {

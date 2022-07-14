@@ -30,22 +30,19 @@ import (
 )
 
 type ClientConnectionImpl struct {
-	serverTLSConfig  *tls.Config            // the TLS config to connect to clients.
-	backendTLSConfig *tls.Config            // the TLS config to connect to TiDB server.
-	pkt              *pnet.PacketIO         // a helper to read and write data in packet format.
-	bufReadConn      *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
+	serverTLSConfig  *tls.Config    // the TLS config to connect to clients.
+	backendTLSConfig *tls.Config    // the TLS config to connect to TiDB server.
+	pkt              *pnet.PacketIO // a helper to read and write data in packet format.
 	queryCtx         driver.QueryCtx
 	connectionID     uint64
 }
 
-func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, serverTLSConfig, backendTLSConfig *tls.Config) driver.ClientConnection {
-	bufReadConn := pnet.NewBufferedReadConn(conn)
-	pkt := pnet.NewPacketIO(bufReadConn)
+func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, serverTLSConfig *tls.Config, backendTLSConfig *tls.Config) driver.ClientConnection {
+	pkt := pnet.NewPacketIO(conn)
 	return &ClientConnectionImpl{
 		queryCtx:         queryCtx,
 		serverTLSConfig:  serverTLSConfig,
 		backendTLSConfig: backendTLSConfig,
-		bufReadConn:      bufReadConn,
 		pkt:              pkt,
 		connectionID:     connectionID,
 	}
@@ -56,7 +53,7 @@ func (cc *ClientConnectionImpl) ConnectionID() uint64 {
 }
 
 func (cc *ClientConnectionImpl) Addr() string {
-	return cc.bufReadConn.RemoteAddr().String()
+	return cc.pkt.RemoteAddr().String()
 }
 
 func (cc *ClientConnectionImpl) Run(ctx context.Context) {
