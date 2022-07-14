@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/proxy/client"
 	"github.com/pingcap/TiProxy/pkg/proxy/driver"
 	"github.com/pingcap/TiProxy/pkg/util/security"
 	"github.com/pingcap/errors"
@@ -46,21 +47,21 @@ type SQLServer struct {
 	cfg              *config.Config
 	serverTLSConfig  *tls.Config // the TLS used to connect to the client
 	clusterTLSConfig *tls.Config // the TLS used to connect to PD and TiDB server
-	driver           driver.IDriver
+	driver           *driver.Driver
 	listener         net.Listener
 	rwlock           sync.RWMutex
-	clients          map[uint64]driver.ClientConnection
+	clients          map[uint64]*client.ClientConnection
 	baseConnID       uint64
 }
 
 // NewSQLServer creates a new Server.
-func NewSQLServer(cfg *config.Config, d driver.IDriver) (*SQLServer, error) {
+func NewSQLServer(cfg *config.Config, d *driver.Driver) (*SQLServer, error) {
 	var err error
 
 	s := &SQLServer{
 		cfg:     cfg,
 		driver:  d,
-		clients: make(map[uint64]driver.ClientConnection),
+		clients: make(map[uint64]*client.ClientConnection),
 	}
 
 	if s.serverTLSConfig, err = security.CreateServerTLSConfig(cfg.Security.Server.CA, cfg.Security.Server.Key, cfg.Security.Server.Cert); err != nil {
@@ -131,7 +132,7 @@ func (s *SQLServer) ConnectionCount() int {
 	return cnt
 }
 
-func (s *SQLServer) onConn(ctx context.Context, conn driver.ClientConnection) {
+func (s *SQLServer) onConn(ctx context.Context, conn *client.ClientConnection) {
 	ctx = logutil.WithConnID(ctx, conn.ConnectionID())
 	logutil.Logger(ctx).Info("new connection", zap.String("remoteAddr", conn.Addr()))
 
@@ -154,7 +155,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn driver.ClientConnection) {
 	metrics.ConnGauge.Set(float64(connections))
 }
 
-func (s *SQLServer) newConn(conn net.Conn) driver.ClientConnection {
+func (s *SQLServer) newConn(conn net.Conn) *client.ClientConnection {
 	if s.cfg.Proxy.TCPKeepAlive {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
 			if err := tcpConn.SetKeepAlive(true); err != nil {

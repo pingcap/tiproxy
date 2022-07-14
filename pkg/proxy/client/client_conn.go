@@ -19,7 +19,6 @@ import (
 	"crypto/tls"
 	"net"
 
-	"github.com/pingcap/TiProxy/pkg/proxy/driver"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/metrics"
@@ -29,19 +28,19 @@ import (
 	"go.uber.org/zap"
 )
 
-type ClientConnectionImpl struct {
+type ClientConnection struct {
 	serverTLSConfig  *tls.Config            // the TLS config to connect to clients.
 	backendTLSConfig *tls.Config            // the TLS config to connect to TiDB server.
 	pkt              *pnet.PacketIO         // a helper to read and write data in packet format.
 	bufReadConn      *pnet.BufferedReadConn // a buffered-read net.Conn or buffered-read tls.Conn.
-	queryCtx         driver.QueryCtx
+	queryCtx         *QueryCtxImpl
 	connectionID     uint64
 }
 
-func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, serverTLSConfig, backendTLSConfig *tls.Config) driver.ClientConnection {
+func NewClientConnectionImpl(queryCtx *QueryCtxImpl, conn net.Conn, connectionID uint64, serverTLSConfig, backendTLSConfig *tls.Config) *ClientConnection {
 	bufReadConn := pnet.NewBufferedReadConn(conn)
 	pkt := pnet.NewPacketIO(bufReadConn)
-	return &ClientConnectionImpl{
+	return &ClientConnection{
 		queryCtx:         queryCtx,
 		serverTLSConfig:  serverTLSConfig,
 		backendTLSConfig: backendTLSConfig,
@@ -51,15 +50,15 @@ func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connection
 	}
 }
 
-func (cc *ClientConnectionImpl) ConnectionID() uint64 {
+func (cc *ClientConnection) ConnectionID() uint64 {
 	return cc.connectionID
 }
 
-func (cc *ClientConnectionImpl) Addr() string {
+func (cc *ClientConnection) Addr() string {
 	return cc.bufReadConn.RemoteAddr().String()
 }
 
-func (cc *ClientConnectionImpl) Run(ctx context.Context) {
+func (cc *ClientConnection) Run(ctx context.Context) {
 	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt, cc.serverTLSConfig, cc.backendTLSConfig); err != nil {
 		logutil.Logger(ctx).Info("new connection fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
 		metrics.HandShakeErrorCounter.Inc()
@@ -75,7 +74,7 @@ func (cc *ClientConnectionImpl) Run(ctx context.Context) {
 	}
 }
 
-func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
+func (cc *ClientConnection) processMsg(ctx context.Context) error {
 	defer func() {
 		err := cc.Close()
 		terror.Log(errors.Trace(err))
@@ -98,7 +97,7 @@ func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
 	}
 }
 
-func (cc *ClientConnectionImpl) Close() error {
+func (cc *ClientConnection) Close() error {
 	if err := cc.pkt.Close(); err != nil {
 		terror.Log(err)
 	}
