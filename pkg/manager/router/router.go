@@ -25,6 +25,7 @@ import (
 	"github.com/djshow832/weir/pkg/config"
 	"github.com/djshow832/weir/pkg/proxy/driver"
 	"github.com/pingcap/tidb/util/logutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -70,13 +71,13 @@ type RandomRouter struct {
 	backends *list.List
 }
 
-func NewRandomRouter(cfg *config.BackendNamespace) (*RandomRouter, error) {
+func NewRandomRouter(cfg *config.BackendNamespace, client *clientv3.Client) (*RandomRouter, error) {
 	router := &RandomRouter{
 		backends: list.New(),
 	}
 	router.Lock()
 	defer router.Unlock()
-	observer, err := NewBackendObserver(router, cfg.Instances)
+	observer, err := NewBackendObserver(router, client, cfg.Instances)
 	if err != nil {
 		return nil, err
 	}

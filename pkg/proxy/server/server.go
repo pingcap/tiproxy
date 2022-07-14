@@ -93,31 +93,34 @@ func (s *Server) initListener() error {
 	return nil
 }
 
-func (s *Server) Run() error {
+func (s *Server) Run(ctx context.Context) error {
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
 
 	// TODO(eastfisher): startStatusHTTP()
 
 	for {
-		conn, err := s.listener.Accept()
-		if err != nil {
-			if opErr, ok := err.(*net.OpError); ok {
-				if opErr.Err.Error() == "use of closed network connection" {
-					return nil
+		select {
+		case <-ctx.Done():
+		default:
+			conn, err := s.listener.Accept()
+			if err != nil {
+				if opErr, ok := err.(*net.OpError); ok {
+					if opErr.Err.Error() == "use of closed network connection" {
+						return nil
+					}
 				}
+
+				// TODO(eastfisher): support PROXY protocol
+				logutil.BgLogger().Error("accept failed", zap.Error(err))
+				return errors.Trace(err)
 			}
 
-			// TODO(eastfisher): support PROXY protocol
-
-			logutil.BgLogger().Error("accept failed", zap.Error(err))
-			return errors.Trace(err)
+			if err = s.checkConnectionCount(); err != nil {
+				return err
+			}
+			clientConn := s.newConn(conn)
+			go s.onConn(ctx, clientConn)
 		}
-
-		if err = s.checkConnectionCount(); err != nil {
-			return err
-		}
-		clientConn := s.newConn(conn)
-		go s.onConn(clientConn)
 	}
 }
 
@@ -129,8 +132,8 @@ func (s *Server) ConnectionCount() int {
 	return cnt
 }
 
-func (s *Server) onConn(conn driver.ClientConnection) {
-	ctx := logutil.WithConnID(context.Background(), conn.ConnectionID())
+func (s *Server) onConn(ctx context.Context, conn driver.ClientConnection) {
+	ctx = logutil.WithConnID(ctx, conn.ConnectionID())
 	logutil.Logger(ctx).Info("new connection", zap.String("remoteAddr", conn.Addr()))
 
 	defer func() {

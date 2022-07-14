@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/djshow832/weir/pkg/config"
@@ -95,18 +94,17 @@ type BackendInfo struct {
 
 type BackendObserver struct {
 	backendInfo   map[string]*BackendInfo
+	client        *clientv3.Client
 	staticAddrs   []string
 	eventReceiver BackendEventReceiver
 	cancelFunc    context.CancelFunc
 }
 
-var globalEtcdClient atomic.Value
-
-func InitEtcdClient(cfg *config.Proxy) error {
+func InitEtcdClient(cfg *config.Proxy) (*clientv3.Client, error) {
 	pdAddr := cfg.ProxyServer.PDAddr
 	if len(pdAddr) == 0 {
 		// use tidb server addresses directly
-		return nil
+		return nil, nil
 	}
 	pdEndpoints := strings.Split(pdAddr, ",")
 	logConfig := zap.NewProductionConfig()
@@ -114,7 +112,7 @@ func InitEtcdClient(cfg *config.Proxy) error {
 	tlsConfig, err := security.CreateClusterTLSConfig(cfg.Security.ClusterSSLCA, cfg.Security.ClusterSSLKey,
 		cfg.Security.ClusterSSLCert)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var etcdClient *clientv3.Client
 	etcdClient, err = clientv3.New(clientv3.Config{
@@ -141,28 +139,16 @@ func InitEtcdClient(cfg *config.Proxy) error {
 			}),
 		},
 	})
-	if err == nil {
-		globalEtcdClient.Store(etcdClient)
-	}
-	return errors.Annotate(err, "init etcd client failed")
+	return etcdClient, errors.Annotate(err, "init etcd client failed")
 }
 
-func GetEtcdClient() *clientv3.Client {
-	etcdClient := globalEtcdClient.Load()
-	if etcdClient == nil {
-		return nil
-	}
-	return etcdClient.(*clientv3.Client)
-}
-
-func NewBackendObserver(eventReceiver BackendEventReceiver, staticAddrs []string) (*BackendObserver, error) {
-	if GetEtcdClient() == nil {
-		if len(staticAddrs) == 0 {
-			return nil, ErrNoInstanceToSelect
-		}
+func NewBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, staticAddrs []string) (*BackendObserver, error) {
+	if client == nil && len(staticAddrs) == 0 {
+		return nil, ErrNoInstanceToSelect
 	}
 	bo := &BackendObserver{
 		backendInfo:   make(map[string]*BackendInfo),
+		client:        client,
 		staticAddrs:   staticAddrs,
 		eventReceiver: eventReceiver,
 	}
@@ -173,7 +159,7 @@ func NewBackendObserver(eventReceiver BackendEventReceiver, staticAddrs []string
 }
 
 func (bo *BackendObserver) observe(ctx context.Context) {
-	if GetEtcdClient() == nil {
+	if bo.client == nil {
 		logutil.BgLogger().Info("pd addr is not configured, use static backend instances instead.")
 		bo.observeStaticAddrs(ctx)
 	} else {
@@ -204,7 +190,7 @@ func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
 
 // If the PD address is configured, we watch the TiDB addresses on the ETCD.
 func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
-	watchCh := GetEtcdClient().Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix())
+	watchCh := bo.client.Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix())
 	for ctx.Err() == nil {
 		select {
 		case _, ok := <-watchCh:
@@ -234,7 +220,7 @@ func (bo *BackendObserver) fetchBackendList(ctx context.Context) (map[string]*Ba
 			return nil, ctx.Err()
 		}
 		childCtx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
-		response, err = GetEtcdClient().Get(childCtx, infosync.TopologyInformationPath, clientv3.WithPrefix())
+		response, err = bo.client.Get(childCtx, infosync.TopologyInformationPath, clientv3.WithPrefix())
 		cancel()
 		if err == nil {
 			break
