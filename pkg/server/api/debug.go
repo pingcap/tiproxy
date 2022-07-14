@@ -29,10 +29,16 @@ type debugHttpHandler struct {
 }
 
 func (h *debugHttpHandler) Redirect(c *gin.Context) {
-	err := h.nsmgr.RedirectConnections()
-	if err != nil {
+	errs := h.nsmgr.RedirectConnections()
+	if len(errs) != 0 {
 		errMsg := "redirect connections error"
-		h.logger.Error(errMsg, zap.Error(err))
+
+		var err_fields []zap.Field
+		for _, err := range errs {
+			err_fields = append(err_fields, zap.Error(err))
+		}
+		h.logger.Error(errMsg, err_fields...)
+
 		c.JSON(http.StatusInternalServerError, errMsg)
 	} else {
 		c.JSON(http.StatusOK, "")

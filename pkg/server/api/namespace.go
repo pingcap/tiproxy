@@ -66,13 +66,6 @@ func (h *namespaceHttpHandler) HandleUpsertNamesapce(c *gin.Context) {
 		return
 	}
 
-	if err := h.nsmgr.PrepareReloadNamespace(ns, nsc); err != nil {
-		errMsg := "reload namespace error"
-		h.logger.Error(errMsg, zap.Error(err), zap.String("namespace", ns))
-		c.YAML(http.StatusOK, errMsg)
-		return
-	}
-
 	c.YAML(http.StatusOK, "")
 }
 
@@ -88,21 +81,36 @@ func (h *namespaceHttpHandler) HandleRemoveNamespace(c *gin.Context) {
 		return
 	}
 
-	h.nsmgr.RemoveNamespace(ns)
-
 	c.YAML(http.StatusOK, "")
 }
 
 func (h *namespaceHttpHandler) HandleCommit(c *gin.Context) {
-	nss := c.QueryArray("namespace")
+	ns_names := c.QueryArray("namespace")
 
-	if len(nss) > 0 {
-		if err := h.nsmgr.CommitReloadNamespaces(nss); err != nil {
-			errMsg := "commit reload namespace error"
-			h.logger.Error(errMsg, zap.Error(err), zap.Strings("namespaces", nss))
-			c.YAML(http.StatusInternalServerError, errMsg)
-			return
+	var nss []*config.Namespace
+	var nss_delete []bool
+	var err error
+	if len(ns_names) == 0 {
+		nss, err = h.cfgmgr.ListAllNamespace(c)
+		if err != nil {
 		}
+	} else {
+		nss = make([]*config.Namespace, len(ns_names))
+		nss_delete = make([]bool, len(ns_names))
+		for i, ns_name := range ns_names {
+			ns, err := h.cfgmgr.GetNamespace(c, ns_name)
+			if err != nil {
+			}
+			nss[i] = ns
+			nss_delete[i] = false
+		}
+	}
+
+	if err := h.nsmgr.CommitNamespaces(nss, nss_delete); err != nil {
+		errMsg := "commit reload namespace error"
+		h.logger.Error(errMsg, zap.Error(err), zap.Any("namespaces", nss))
+		c.YAML(http.StatusInternalServerError, errMsg)
+		return
 	}
 
 	c.YAML(http.StatusOK, "")
