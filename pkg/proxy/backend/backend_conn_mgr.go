@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/pingcap/TiProxy/pkg/proxy/driver"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -47,7 +47,7 @@ type BackendConnManager struct {
 	connectionID   uint64
 	authenticator  *Authenticator
 	cmdProcessor   *CmdProcessor
-	eventReceiver  driver.ConnEventReceiver
+	eventReceiver  router.ConnEventReceiver
 	backendConn    BackendConnection
 	processLock    sync.Mutex // to make redirecting and command processing exclusive
 	signalReceived chan struct{}
@@ -55,7 +55,7 @@ type BackendConnManager struct {
 	cancelFunc     context.CancelFunc
 }
 
-func NewBackendConnManager(connectionID uint64) driver.BackendConnManager {
+func NewBackendConnManager(connectionID uint64) *BackendConnManager {
 	return &BackendConnManager{
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
@@ -120,7 +120,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	return err
 }
 
-func (mgr *BackendConnManager) SetEventReceiver(receiver driver.ConnEventReceiver) {
+func (mgr *BackendConnManager) SetEventReceiver(receiver router.ConnEventReceiver) {
 	mgr.eventReceiver = receiver
 }
 

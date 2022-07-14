@@ -18,27 +18,31 @@ package driver
 import (
 	"crypto/tls"
 	"net"
+
+	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/proxy/backend"
+	"github.com/pingcap/TiProxy/pkg/proxy/client"
 )
 
-type createClientConnFunc func(QueryCtx, net.Conn, uint64, *tls.Config, *tls.Config) ClientConnection
-type createBackendConnMgrFunc func(connectionID uint64) BackendConnManager
+type createClientConnFunc func(*client.QueryCtxImpl, net.Conn, uint64, *tls.Config, *tls.Config) *client.ClientConnection
+type createBackendConnMgrFunc func(connectionID uint64) *backend.BackendConnManager
 
-type DriverImpl struct {
-	nsmgr                    NamespaceManager
+type Driver struct {
+	nsmgr                    *mgrns.NamespaceManager
 	createClientConnFunc     createClientConnFunc
 	createBackendConnMgrFunc createBackendConnMgrFunc
 }
 
-func NewDriverImpl(nsmgr NamespaceManager, createClientConnFunc createClientConnFunc, createBackendConnMgrFunc createBackendConnMgrFunc) *DriverImpl {
-	return &DriverImpl{
+func NewDriverImpl(nsmgr *mgrns.NamespaceManager, createClientConnFunc createClientConnFunc, createBackendConnMgrFunc createBackendConnMgrFunc) *Driver {
+	return &Driver{
 		nsmgr:                    nsmgr,
 		createClientConnFunc:     createClientConnFunc,
 		createBackendConnMgrFunc: createBackendConnMgrFunc,
 	}
 }
 
-func (d *DriverImpl) CreateClientConnection(conn net.Conn, connectionID uint64, serverTLSConfig, clusterTLSConfig *tls.Config) ClientConnection {
+func (d *Driver) CreateClientConnection(conn net.Conn, connectionID uint64, serverTLSConfig, clusterTLSConfig *tls.Config) *client.ClientConnection {
 	backendConnMgr := d.createBackendConnMgrFunc(connectionID)
-	queryCtx := NewQueryCtxImpl(d.nsmgr, backendConnMgr, connectionID)
+	queryCtx := client.NewQueryCtxImpl(d.nsmgr, backendConnMgr, connectionID)
 	return d.createClientConnFunc(queryCtx, conn, connectionID, serverTLSConfig, clusterTLSConfig)
 }

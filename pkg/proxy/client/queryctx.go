@@ -13,13 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package driver
+package client
 
 import (
 	"context"
 	"crypto/tls"
 	"errors"
 
+	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
@@ -41,12 +43,12 @@ const (
 
 type QueryCtxImpl struct {
 	connId  uint64
-	nsmgr   NamespaceManager
-	ns      Namespace
-	connMgr BackendConnManager
+	nsmgr   *mgrns.NamespaceManager
+	ns      *mgrns.Namespace
+	connMgr *backend.BackendConnManager
 }
 
-func NewQueryCtxImpl(nsmgr NamespaceManager, backendConnMgr BackendConnManager, connId uint64) *QueryCtxImpl {
+func NewQueryCtxImpl(nsmgr *mgrns.NamespaceManager, backendConnMgr *backend.BackendConnManager, connId uint64) *QueryCtxImpl {
 	return &QueryCtxImpl{
 		connId:  connId,
 		nsmgr:   nsmgr,

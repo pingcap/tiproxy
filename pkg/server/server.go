@@ -164,7 +164,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 
 	// setup proxy server
 	{
-		driverImpl := driver.NewDriverImpl(srv.NamespaceManager, client.NewClientConnectionImpl, backend.NewBackendConnManager)
+		driverImpl := driver.NewDriverImpl(srv.NamespaceManager, client.NewClientConnection, backend.NewBackendConnManager)
 		srv.Proxy, err = sqlserver.NewSQLServer(cfg, driverImpl)
 		if err != nil {
 			err = errors.WithStack(err)
