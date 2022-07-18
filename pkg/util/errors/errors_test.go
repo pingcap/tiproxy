@@ -1,4 +1,3 @@
-// Copyright 2020 Ipalfish, Inc.
 // Copyright 2022 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,46 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errors_test
 
 import (
-	stderrors "errors"
+	gerr "errors"
+	"fmt"
 	"testing"
 
-	"github.com/pingcap/errors"
-	"github.com/siddontang/go-mysql/mysql"
-	"github.com/stretchr/testify/assert"
+	serr "github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/stretchr/testify/require"
 )
 
-func TestIs(t *testing.T) {
-	badConn := mysql.ErrBadConn
-	err := errors.Wrapf(badConn, "same error type")
-	assert.True(t, Is(err, badConn))
+func TestOfficialAPI(t *testing.T) {
+	e1 := gerr.New("t")
+	e2 := fmt.Errorf("%w: f", e1)
+
+	require.True(t, e1 == serr.Unwrap(e2))
+	require.True(t, serr.Is(e2, e1))
+	require.True(t, serr.As(e2, &e1))
 }
 
-func TestStdIs(t *testing.T) {
-	badConn := mysql.ErrBadConn
-	err := errors.Wrapf(badConn, "another error type")
-	assert.False(t, stderrors.Is(err, badConn))
+func TestStacktrace(t *testing.T) {
+	e := serr.New("tt").WithStack()
+	require.Equal(t, fmt.Sprintf("%s", e), "tt")
+	require.Contains(t, fmt.Sprintf("%+v", e), t.Name(), "stacktrace must contain test name")
+	require.Contains(t, fmt.Sprintf("%v", e), t.Name(), "stacktrace must contain test name")
+	require.Contains(t, fmt.Sprintf("%+s", e), t.Name(), "stacktrace must contain test name")
 }
 
-func TestCheckAndGetMyError_True(t *testing.T) {
-	myErr := mysql.NewError(1105, "unknown")
-	err, is := CheckAndGetMyError(myErr)
-	assert.True(t, is)
-	assert.NotNil(t, err)
-}
+func TestUnwrap(t *testing.T) {
+	e1 := gerr.New("t")
+	e2 := serr.WithStack(e1)
+	require.Equal(t, e1, gerr.Unwrap(e2), "unwrapped error should be identical")
+	require.ErrorIs(t, e2, e1, "stacktrace does not affect Is")
+	require.ErrorAs(t, e2, &e1, "stacktrace does not affect As")
 
-func TestCheckAndGetMyError_False(t *testing.T) {
-	myErr := errors.New("not a myError")
-	err, is := CheckAndGetMyError(myErr)
-	assert.False(t, is)
-	assert.Nil(t, err)
-}
-
-func TestCheckAndGetMyError_Cause_True(t *testing.T) {
-	myErr := errors.Wrapf(mysql.NewError(1105, "unknown"), "wrap error")
-	err, is := CheckAndGetMyError(myErr)
-	assert.True(t, is)
-	assert.NotNil(t, err)
+	e3 := serr.Errorf("%w: f", e1)
+	require.Equal(t, e1, gerr.Unwrap(e3), "unwrapped error should be identical")
+	require.ErrorIs(t, e3, e1, "stacktrace does not affect Is")
+	require.ErrorAs(t, e3, &e1, "stacktrace does not affect As")
 }
