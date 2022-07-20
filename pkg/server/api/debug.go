@@ -17,9 +17,9 @@ package api
 import (
 	"net/http"
 
-	mgrns "github.com/djshow832/weir/pkg/manager/namespace"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"go.uber.org/zap"
 )
 

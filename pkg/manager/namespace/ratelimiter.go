@@ -19,7 +19,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/djshow832/weir/pkg/util/rate_limit_breaker/rate_limit"
+	"github.com/pingcap/TiProxy/pkg/util/rate_limit_breaker/rate_limit"
 )
 
 type NamespaceRateLimiter struct {

@@ -1,4 +1,4 @@
-module github.com/djshow832/weir
+module github.com/pingcap/TiProxy
 
 go 1.18
 

@@ -19,7 +19,7 @@ import (
 	"encoding/binary"
 	"strings"
 
-	pnet "github.com/djshow832/weir/pkg/proxy/net"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/mysql"

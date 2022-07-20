@@ -19,7 +19,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 
-	"github.com/djshow832/weir/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/config"
 	"go.uber.org/zap"
 )
 

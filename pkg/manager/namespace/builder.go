@@ -18,11 +18,11 @@ package namespace
 import (
 	"hash/crc32"
 
-	"github.com/djshow832/weir/pkg/config"
-	"github.com/djshow832/weir/pkg/manager/router"
-	"github.com/djshow832/weir/pkg/proxy/driver"
-	wast "github.com/djshow832/weir/pkg/util/ast"
-	"github.com/djshow832/weir/pkg/util/datastructure"
+	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
+	"github.com/pingcap/TiProxy/pkg/proxy/driver"
+	wast "github.com/pingcap/TiProxy/pkg/util/ast"
+	"github.com/pingcap/TiProxy/pkg/util/datastructure"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser"
 	clientv3 "go.etcd.io/etcd/client/v3"

@@ -18,8 +18,9 @@ package circuit_breaker
 import (
 	"context"
 	"errors"
-	. "github.com/djshow832/weir/pkg/util/rate_limit_breaker"
 	"sync"
+
+	. "github.com/pingcap/TiProxy/pkg/util/rate_limit_breaker"
 )
 
 const (

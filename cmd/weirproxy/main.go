@@ -18,10 +18,10 @@ package main
 import (
 	"io/ioutil"
 
-	"github.com/djshow832/weir/pkg/config"
-	"github.com/djshow832/weir/pkg/server"
-	"github.com/djshow832/weir/pkg/util/cmd"
-	"github.com/djshow832/weir/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/server"
+	"github.com/pingcap/TiProxy/pkg/util/cmd"
+	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
