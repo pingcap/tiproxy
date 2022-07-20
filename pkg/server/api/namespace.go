@@ -123,7 +123,7 @@ func (h *namespaceHttpHandler) HandleList(c *gin.Context) {
 func registerNamespace(group *gin.RouterGroup, logger *zap.Logger, mgrcfg *mgrcfg.ConfigManager, mgrns *mgrns.NamespaceManager) {
 	h := &namespaceHttpHandler{logger, mgrcfg, mgrns}
 	group.GET("/", h.HandleList)
-	group.POST("/commits", h.HandleCommit)
+	group.POST("/commit", h.HandleCommit)
 	group.GET("/:namespace", h.HandleGetNamespace)
 	group.PUT("/:namespace", h.HandleUpsertNamesapce)
 	group.DELETE("/:namespace", h.HandleRemoveNamespace)
