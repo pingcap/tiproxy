@@ -20,7 +20,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/djshow832/weir/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/config"
 	"github.com/pingcap/errors"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"

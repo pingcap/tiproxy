@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/djshow832/weir/pkg/config"
-	"github.com/djshow832/weir/pkg/proxy/driver"
+	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/proxy/driver"
 	"github.com/pingcap/tidb/util/logutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"

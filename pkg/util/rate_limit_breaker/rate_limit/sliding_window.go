@@ -17,9 +17,10 @@ package rate_limit
 
 import (
 	"errors"
-	. "github.com/djshow832/weir/pkg/util/rate_limit_breaker"
 	"sync"
 	"sync/atomic"
+
+	. "github.com/pingcap/TiProxy/pkg/util/rate_limit_breaker"
 )
 
 var ErrRateLimited error = errors.New("rate limited")

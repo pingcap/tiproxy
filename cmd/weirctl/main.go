@@ -17,9 +17,9 @@ package main
 import (
 	"net/http"
 
-	"github.com/djshow832/weir/cmd/weirctl/namespace"
-	"github.com/djshow832/weir/cmd/weirctl/util"
-	"github.com/djshow832/weir/pkg/util/cmd"
+	"github.com/pingcap/TiProxy/cmd/weirctl/namespace"
+	"github.com/pingcap/TiProxy/cmd/weirctl/util"
+	"github.com/pingcap/TiProxy/pkg/util/cmd"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )

@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/djshow832/weir/pkg/config"
-	"github.com/djshow832/weir/pkg/util/security"
+	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/util/security"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tidb/util/logutil"
