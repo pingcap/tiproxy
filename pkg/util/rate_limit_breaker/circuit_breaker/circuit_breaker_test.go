@@ -18,9 +18,10 @@ package circuit_breaker
 import (
 	"context"
 	"errors"
-	rateLimitBreaker "github.com/djshow832/weir/pkg/util/rate_limit_breaker"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	rateLimitBreaker "github.com/pingcap/TiProxy/pkg/util/rate_limit_breaker"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCircuitBreaker_Do_NoError(t *testing.T) {

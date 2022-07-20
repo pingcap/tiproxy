@@ -15,10 +15,10 @@
 package api
 
 import (
-	"github.com/djshow832/weir/pkg/config"
-	mgrcfg "github.com/djshow832/weir/pkg/manager/config"
-	mgrns "github.com/djshow832/weir/pkg/manager/namespace"
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/TiProxy/pkg/config"
+	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
+	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )

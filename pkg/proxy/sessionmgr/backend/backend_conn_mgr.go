@@ -25,8 +25,8 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/djshow832/weir/pkg/proxy/driver"
-	pnet "github.com/djshow832/weir/pkg/proxy/net"
+	"github.com/pingcap/TiProxy/pkg/proxy/driver"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/logutil"

@@ -20,7 +20,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/djshow832/weir/cmd/weirctl/util"
+	"github.com/pingcap/TiProxy/cmd/weirctl/util"
 	"github.com/spf13/cobra"
 )
 

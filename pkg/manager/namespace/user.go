@@ -18,7 +18,7 @@ package namespace
 import (
 	"fmt"
 
-	"github.com/djshow832/weir/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/config"
 	"github.com/pingcap/errors"
 )
 

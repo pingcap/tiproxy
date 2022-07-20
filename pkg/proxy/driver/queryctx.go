@@ -20,7 +20,7 @@ import (
 	"crypto/tls"
 	"errors"
 
-	pnet "github.com/djshow832/weir/pkg/proxy/net"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
 // Server information.

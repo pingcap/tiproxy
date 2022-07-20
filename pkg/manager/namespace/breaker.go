@@ -21,11 +21,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/djshow832/weir/pkg/config"
-	"github.com/djshow832/weir/pkg/proxy/driver"
-	rb "github.com/djshow832/weir/pkg/util/rate_limit_breaker"
-	cb "github.com/djshow832/weir/pkg/util/rate_limit_breaker/circuit_breaker"
-	"github.com/djshow832/weir/pkg/util/timer"
+	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/proxy/driver"
+	rb "github.com/pingcap/TiProxy/pkg/util/rate_limit_breaker"
+	cb "github.com/pingcap/TiProxy/pkg/util/rate_limit_breaker/circuit_breaker"
+	"github.com/pingcap/TiProxy/pkg/util/timer"
 )
 
 type strategyInfo struct {

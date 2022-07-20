@@ -17,9 +17,15 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"github.com/djshow832/weir/pkg/config"
-	"github.com/djshow832/weir/pkg/proxy/driver"
-	"github.com/djshow832/weir/pkg/util/security"
+	"math/rand"
+	"net"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/proxy/driver"
+	"github.com/pingcap/TiProxy/pkg/util/security"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/metrics"
@@ -27,11 +33,6 @@ import (
 	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
-	"math/rand"
-	"net"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 var (
@@ -57,9 +58,9 @@ func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 	var err error
 
 	s := &Server{
-		cfg:            cfg,
-		driver:         d,
-		clients:        make(map[uint64]driver.ClientConnection),
+		cfg:     cfg,
+		driver:  d,
+		clients: make(map[uint64]driver.ClientConnection),
 	}
 
 	if s.serverTLSConfig, err = security.CreateServerTLSConfig(cfg.Security.SSLCA, cfg.Security.SSLKey, cfg.Security.SSLCert,
