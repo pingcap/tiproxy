@@ -29,7 +29,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
 	"github.com/pingcap/TiProxy/pkg/proxy/driver"
-	"github.com/pingcap/TiProxy/pkg/proxy/server"
+	"github.com/pingcap/TiProxy/pkg/proxy/sqlserver"
 	"github.com/pingcap/TiProxy/pkg/server/api"
 	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"github.com/pingcap/errors"
@@ -52,7 +52,7 @@ type Server struct {
 	Etcd *embed.Etcd
 
 	// L7 proxy
-	Proxy *server.Server
+	Proxy *sqlserver.SQLServer
 }
 
 func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, namespaceFiles string) (srv *Server, err error) {
@@ -160,7 +160,7 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 	// setup proxy server
 	{
 		driverImpl := driver.NewDriverImpl(srv.NamespaceManager, client.NewClientConnectionImpl, backend.NewBackendConnManager)
-		srv.Proxy, err = server.NewServer(cfg, driverImpl)
+		srv.Proxy, err = sqlserver.NewSQLServer(cfg, driverImpl)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
