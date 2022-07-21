@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package sqlserver
 
 import (
 	"context"
@@ -42,7 +42,7 @@ var (
 	timeWheelBucketsNum = 3600
 )
 
-type Server struct {
+type SQLServer struct {
 	cfg              *config.Proxy
 	serverTLSConfig  *tls.Config // the TLS used to connect to the client
 	clusterTLSConfig *tls.Config // the TLS used to connect to PD and TiDB server
@@ -53,11 +53,11 @@ type Server struct {
 	baseConnID       uint64
 }
 
-// NewServer creates a new Server.
-func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
+// NewSQLServer creates a new Server.
+func NewSQLServer(cfg *config.Proxy, d driver.IDriver) (*SQLServer, error) {
 	var err error
 
-	s := &Server{
+	s := &SQLServer{
 		cfg:     cfg,
 		driver:  d,
 		clients: make(map[uint64]driver.ClientConnection),
@@ -85,7 +85,7 @@ func NewServer(cfg *config.Proxy, d driver.IDriver) (*Server, error) {
 }
 
 // TODO(eastfisher): support unix socket and proxy protocol
-func (s *Server) initListener() error {
+func (s *SQLServer) initListener() error {
 	listener, err := net.Listen("tcp", s.cfg.ProxyServer.Addr)
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func (s *Server) initListener() error {
 	return nil
 }
 
-func (s *Server) Run(ctx context.Context) error {
+func (s *SQLServer) Run(ctx context.Context) error {
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
 
 	// TODO(eastfisher): startStatusHTTP()
@@ -126,14 +126,14 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 // ConnectionCount gets current connection count.
-func (s *Server) ConnectionCount() int {
+func (s *SQLServer) ConnectionCount() int {
 	s.rwlock.RLock()
 	cnt := len(s.clients)
 	s.rwlock.RUnlock()
 	return cnt
 }
 
-func (s *Server) onConn(ctx context.Context, conn driver.ClientConnection) {
+func (s *SQLServer) onConn(ctx context.Context, conn driver.ClientConnection) {
 	ctx = logutil.WithConnID(ctx, conn.ConnectionID())
 	logutil.Logger(ctx).Info("new connection", zap.String("remoteAddr", conn.Addr()))
 
@@ -156,7 +156,7 @@ func (s *Server) onConn(ctx context.Context, conn driver.ClientConnection) {
 	metrics.ConnGauge.Set(float64(connections))
 }
 
-func (s *Server) newConn(conn net.Conn) driver.ClientConnection {
+func (s *SQLServer) newConn(conn net.Conn) driver.ClientConnection {
 	if s.cfg.ProxyServer.TCPKeepAlive {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
 			if err := tcpConn.SetKeepAlive(true); err != nil {
@@ -168,7 +168,7 @@ func (s *Server) newConn(conn net.Conn) driver.ClientConnection {
 	return s.driver.CreateClientConnection(conn, connectionID, s.serverTLSConfig, s.clusterTLSConfig)
 }
 
-func (s *Server) checkConnectionCount() error {
+func (s *SQLServer) checkConnectionCount() error {
 	// When the value of MaxConnections is 0, the number of connections is unlimited.
 	if int(s.cfg.ProxyServer.MaxConnections) == 0 {
 		return nil
@@ -187,13 +187,13 @@ func (s *Server) checkConnectionCount() error {
 }
 
 // TODO(eastfisher): implement this function
-func (s *Server) isUnixSocket() bool {
+func (s *SQLServer) isUnixSocket() bool {
 	return false
 }
 
 // Close closes the server.
 // TODO(eastfisher): implement this function, close unix socket, status server, and gRPC server.
-func (s *Server) Close() {
+func (s *SQLServer) Close() {
 	s.rwlock.Lock()
 	defer s.rwlock.Unlock()
 
