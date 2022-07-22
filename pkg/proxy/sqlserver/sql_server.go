@@ -63,12 +63,10 @@ func NewSQLServer(cfg *config.Config, d driver.IDriver) (*SQLServer, error) {
 		clients: make(map[uint64]driver.ClientConnection),
 	}
 
-	if s.serverTLSConfig, err = security.CreateServerTLSConfig(cfg.Security.SSLCA, cfg.Security.SSLKey, cfg.Security.SSLCert,
-		cfg.Security.MinTLSVersion, cfg.Workdir, cfg.Security.RSAKeySize); err != nil {
+	if s.serverTLSConfig, err = security.CreateServerTLSConfig(cfg.Security.Server.CA, cfg.Security.Server.Key, cfg.Security.Server.Cert); err != nil {
 		return nil, err
 	}
-	if s.clusterTLSConfig, err = security.CreateClientTLSConfig(cfg.Security.ClusterSSLCA, cfg.Security.ClusterSSLKey,
-		cfg.Security.ClusterSSLCert); err != nil {
+	if s.clusterTLSConfig, err = security.CreateClientTLSConfig(cfg.Security.Cluster.CA, cfg.Security.Cluster.Key, cfg.Security.Cluster.Cert); err != nil {
 		return nil, err
 	}
 

@@ -31,15 +31,10 @@ import (
 	"github.com/pingcap/tidb/util/logutil"
 )
 
-func CreateServerTLSConfig(ca, key, cert, minTLSVer, path string, rsaKeySize int) (tlsConfig *tls.Config, err error) {
+func CreateServerTLSConfig(ca, key, cert string) (tlsConfig *tls.Config, err error) {
 	if len(cert) == 0 || len(key) == 0 {
-		cert = filepath.Join(path, "/cert.pem")
-		key = filepath.Join(path, "/key.pem")
-		err = createTLSCertificates(cert, key, rsaKeySize)
-		if err != nil {
-			logutil.BgLogger().Warn("TLS Certificate creation failed", zap.Error(err))
-			return
-		}
+		cert = filepath.Join(cert, "cert.pem")
+		key = filepath.Join(key, "key.pem")
 	}
 
 	var tlsCert tls.Certificate
@@ -48,29 +43,6 @@ func CreateServerTLSConfig(ca, key, cert, minTLSVer, path string, rsaKeySize int
 		logutil.BgLogger().Warn("load x509 failed", zap.Error(err))
 		err = errors.Trace(err)
 		return
-	}
-
-	var minTLSVersion uint16 = tls.VersionTLS11
-	switch minTLSVer {
-	case "TLSv1.0":
-		minTLSVersion = tls.VersionTLS10
-	case "TLSv1.1":
-		minTLSVersion = tls.VersionTLS11
-	case "TLSv1.2":
-		minTLSVersion = tls.VersionTLS12
-	case "TLSv1.3":
-		minTLSVersion = tls.VersionTLS13
-	case "":
-	default:
-		logutil.BgLogger().Warn(
-			"Invalid TLS version, using default instead",
-			zap.String("tls-version", minTLSVer),
-		)
-	}
-	if minTLSVersion < tls.VersionTLS12 {
-		logutil.BgLogger().Warn(
-			"Minimum TLS version allows pre-TLSv1.2 protocols, this is not recommended",
-		)
 	}
 
 	// Try loading CA cert.
@@ -90,28 +62,10 @@ func CreateServerTLSConfig(ca, key, cert, minTLSVer, path string, rsaKeySize int
 		}
 	}
 
-	// This excludes ciphers listed in tls.InsecureCipherSuites() and can be used to filter out more
-	var cipherSuites []uint16
-	var cipherNames []string
-	for _, sc := range tls.CipherSuites() {
-		switch sc.ID {
-		case tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA, tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA:
-			logutil.BgLogger().Info("Disabling weak cipherSuite", zap.String("cipherSuite", sc.Name))
-		default:
-			cipherNames = append(cipherNames, sc.Name)
-			cipherSuites = append(cipherSuites, sc.ID)
-		}
-
-	}
-	logutil.BgLogger().Info("Enabled ciphersuites", zap.Strings("cipherNames", cipherNames))
-
-	/* #nosec G402 */
 	tlsConfig = &tls.Config{
 		Certificates: []tls.Certificate{tlsCert},
 		ClientCAs:    certPool,
 		ClientAuth:   clientAuthPolicy,
-		MinVersion:   minTLSVersion,
-		CipherSuites: cipherSuites,
 	}
 	return
 }

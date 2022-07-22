@@ -43,7 +43,7 @@ func main() {
 			return err
 		}
 
-		cfg, err := config.NewProxyConfig(proxyConfigData)
+		cfg, err := config.NewConfig(proxyConfigData)
 		if err != nil {
 			return err
 		}
