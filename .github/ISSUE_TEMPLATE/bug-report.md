@@ -1,19 +1,24 @@
 ---
 name: "🐛 Bug Report"
-about: Something isn't working as expected
-labels: 'type/bug'
+about: As a User, I want to report a Bug.
+labels: type/bug
 ---
 
 ## Bug Report
 
-<!-- Please answer these questions before submitting your issue. Thanks! -->
+Please answer these questions before submitting your issue. Thanks!
 
-### What did you do?
+### 1. Minimal reproduce step (Required)
 
-<!-- If possible, provide a recipe for reproducing the error. -->
+<!-- a step by step guide for reproducing the bug. -->
 
-### What did you expect to see?
+### 2. What did you expect to see? (Required)
 
-### What did you see instead?
+### 3. What did you see instead (Required)
 
-### What version of Weir are you using (`weir-proxy -V`)?
+### 4. What is your version? (Required)
+
+<!-- Paste the output of weirproxy -V -->
+<!-- Paste the output of weirctl -V if related -->
+<!-- Paste the output of SELECT tidb_version()  if related -->
+
