@@ -1,13 +1,16 @@
-version: "v1"
-proxy_server:
+workdir: "./work"
+listen-urls:
+  - "0.0.0.0:2379"
+config:
+  ignore_wrong_namespace: true
+proxy:
   addr: "0.0.0.0:6000"
   tcp_keep_alive: true
   max_connections: 1000
-  session_timeout: 600
-  storage_path: "./weir"
   pd_addrs: "127.0.0.1:2379"
-admin_server:
-  addr: "0.0.0.0:6001"
+metrics:
+  prom_cluster: "default"
+api:
   enable_basic_auth: false
   user: ""
   password: ""
@@ -19,8 +22,5 @@ log:
     max_size: 300
     max_days: 1
     max_backups: 1
-config_center:
-  ignore_wrong_namespace: true
-  config_file: "./conf/namespace"
 security:
   rsa-key-size: 4096

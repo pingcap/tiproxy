@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path/filepath"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
@@ -55,7 +56,7 @@ type Server struct {
 	Proxy *sqlserver.SQLServer
 }
 
-func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, namespaceFiles string) (srv *Server, err error) {
+func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, namespaceFiles string) (srv *Server, err error) {
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
@@ -65,7 +66,7 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 	ready := atomic.NewBool(false)
 
 	// setup metrics
-	metrics.RegisterProxyMetrics(cfg.Cluster)
+	metrics.RegisterProxyMetrics(cfg.Metrics.PromCluster)
 
 	// setup gin and etcd
 	{
@@ -92,10 +93,14 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 		// We have some alternative solution, for example:
 		// 1. globally lazily creation of managers. It introduced racing/chaos-management/hard-code-reading as in TiDB.
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
-		api.Register(engine.Group("/api"), ready, cfg, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
+		api.Register(engine.Group("/api"), ready, cfg.API, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
 		etcd_cfg := embed.NewConfig()
-		etcd_cfg.Dir = cfg.EtcdDir
+		etcd_cfg.LCUrls = cfg.LCUrls
+		etcd_cfg.ACUrls = cfg.ACUrls
+		etcd_cfg.LPUrls = cfg.LPUrls
+		etcd_cfg.APUrls = cfg.APUrls
+		etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
 		etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
 		etcd_cfg.UserHandlers = map[string]http.Handler{
 			"/api/": engine,
@@ -121,7 +126,7 @@ func NewServer(ctx context.Context, cfg *config.Proxy, logger *zap.Logger, names
 		for i := range addrs {
 			addrs[i] = srv.Etcd.Clients[i].Addr().String()
 		}
-		err = srv.ConfigManager.Init(addrs, cfg.ConfigManager, logger.Named("config"))
+		err = srv.ConfigManager.Init(addrs, cfg.Config, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return

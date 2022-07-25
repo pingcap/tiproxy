@@ -43,7 +43,7 @@ var (
 )
 
 type SQLServer struct {
-	cfg              *config.Proxy
+	cfg              *config.Config
 	serverTLSConfig  *tls.Config // the TLS used to connect to the client
 	clusterTLSConfig *tls.Config // the TLS used to connect to PD and TiDB server
 	driver           driver.IDriver
@@ -54,7 +54,7 @@ type SQLServer struct {
 }
 
 // NewSQLServer creates a new Server.
-func NewSQLServer(cfg *config.Proxy, d driver.IDriver) (*SQLServer, error) {
+func NewSQLServer(cfg *config.Config, d driver.IDriver) (*SQLServer, error) {
 	var err error
 
 	s := &SQLServer{
@@ -64,7 +64,7 @@ func NewSQLServer(cfg *config.Proxy, d driver.IDriver) (*SQLServer, error) {
 	}
 
 	if s.serverTLSConfig, err = security.CreateServerTLSConfig(cfg.Security.SSLCA, cfg.Security.SSLKey, cfg.Security.SSLCert,
-		cfg.Security.MinTLSVersion, cfg.ProxyServer.StoragePath, cfg.Security.RSAKeySize); err != nil {
+		cfg.Security.MinTLSVersion, cfg.Workdir, cfg.Security.RSAKeySize); err != nil {
 		return nil, err
 	}
 	if s.clusterTLSConfig, err = security.CreateClientTLSConfig(cfg.Security.ClusterSSLCA, cfg.Security.ClusterSSLKey,
@@ -86,7 +86,7 @@ func NewSQLServer(cfg *config.Proxy, d driver.IDriver) (*SQLServer, error) {
 
 // TODO(eastfisher): support unix socket and proxy protocol
 func (s *SQLServer) initListener() error {
-	listener, err := net.Listen("tcp", s.cfg.ProxyServer.Addr)
+	listener, err := net.Listen("tcp", s.cfg.Proxy.Addr)
 	if err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn driver.ClientConnection) {
 }
 
 func (s *SQLServer) newConn(conn net.Conn) driver.ClientConnection {
-	if s.cfg.ProxyServer.TCPKeepAlive {
+	if s.cfg.Proxy.TCPKeepAlive {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
 			if err := tcpConn.SetKeepAlive(true); err != nil {
 				logutil.BgLogger().Error("failed to set tcp keep alive option", zap.Error(err))
@@ -170,7 +170,7 @@ func (s *SQLServer) newConn(conn net.Conn) driver.ClientConnection {
 
 func (s *SQLServer) checkConnectionCount() error {
 	// When the value of MaxConnections is 0, the number of connections is unlimited.
-	if int(s.cfg.ProxyServer.MaxConnections) == 0 {
+	if int(s.cfg.Proxy.MaxConnections) == 0 {
 		return nil
 	}
 
@@ -178,9 +178,9 @@ func (s *SQLServer) checkConnectionCount() error {
 	conns := len(s.clients)
 	s.rwlock.RUnlock()
 
-	if conns >= int(s.cfg.ProxyServer.MaxConnections) {
+	if conns >= int(s.cfg.Proxy.MaxConnections) {
 		logutil.BgLogger().Error("too many connections",
-			zap.Uint32("max connections", s.cfg.ProxyServer.MaxConnections), zap.Error(errConCount))
+			zap.Uint32("max connections", s.cfg.Proxy.MaxConnections), zap.Error(errConCount))
 		return errConCount
 	}
 	return nil
