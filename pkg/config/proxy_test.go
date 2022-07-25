@@ -1,26 +1,38 @@
 package config
 
 import (
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-var testProxyConfig = Proxy{
-	Version: "v1",
-	ProxyServer: ProxyServer{
+var testProxyConfig = Config{
+	Workdir: "./wd",
+	LCUrls:  []url.URL{},
+	ACUrls:  []url.URL{},
+	LPUrls:  []url.URL{},
+	APUrls:  []url.URL{},
+	Config: ConfigManager{
+		IgnoreWrongNamespace: true,
+	},
+	Proxy: ProxyServer{
 		Addr:           "0.0.0.0:4000",
 		MaxConnections: 1,
+		TCPKeepAlive:   true,
+		PDAddrs:        "127.0.0.1:4089",
 	},
-	AdminServer: AdminServer{
-		Addr:            "0.0.0.0:4001",
+	API: API{
 		EnableBasicAuth: false,
 		User:            "user",
 		Password:        "pwd",
 	},
+	Metrics: Metrics{
+		PromCluster: "ffgfg",
+	},
 	Log: Log{
-		Level:  "info",
-		Format: "console",
+		Level:   "info",
+		Encoder: "tidb",
 		LogFile: LogFile{
 			Filename:   ".",
 			MaxSize:    10,
@@ -28,25 +40,16 @@ var testProxyConfig = Proxy{
 			MaxBackups: 1,
 		},
 	},
-	Registry: Registry{
-		Enable: false,
-		Type:   "etcd",
-		Addrs:  []string{"127.0.0.1:4000", "127.0.0.1:4001"},
-	},
-	ConfigCenter: ConfigCenter{
-		Type: "file",
-		ConfigFile: ConfigFile{
-			Path: ".",
-		},
-		ConfigEtcd: ConfigEtcd{
-			Addrs: []string{},
-		},
-	},
-	Performance: Performance{
-		TCPKeepAlive: true,
-	},
 	Security: Security{
+		SSLCA:           "a",
+		SSLCert:         "b",
+		SSLKey:          "c",
+		ClusterSSLCA:    "d",
+		ClusterSSLCert:  "e",
+		ClusterSSLKey:   "f",
 		ClusterVerifyCN: []string{},
+		MinTLSVersion:   "g",
+		RSAKeySize:      0,
 	},
 }
 

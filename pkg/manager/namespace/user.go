@@ -16,10 +16,7 @@
 package namespace
 
 import (
-	"fmt"
-
 	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/errors"
 )
 
 type UserNamespaceMapper struct {
@@ -28,18 +25,6 @@ type UserNamespaceMapper struct {
 
 func CreateUserNamespaceMapper(namespaces []*config.Namespace) (*UserNamespaceMapper, error) {
 	mapper := make(map[string]string)
-	for _, ns := range namespaces {
-		frontendNamespace := ns.Frontend
-		for _, user := range frontendNamespace.Usernames {
-			originNamespace, ok := mapper[user]
-			if ok {
-				return nil, errors.WithMessage(ErrDuplicatedUser,
-					fmt.Sprintf("user: %s, namespace: %s, %s", user, originNamespace, ns.Namespace))
-			}
-			mapper[user] = ns.Namespace
-		}
-	}
-
 	ret := &UserNamespaceMapper{userToNamespace: mapper}
 	return ret, nil
 }
@@ -72,11 +57,5 @@ func (u *UserNamespaceMapper) RemoveNamespaceUsers(ns string) {
 }
 
 func (u *UserNamespaceMapper) AddNamespaceUsers(ns string, cfg *config.FrontendNamespace) error {
-	for _, user := range cfg.Usernames {
-		if originNamespace, ok := u.userToNamespace[user]; ok {
-			return errors.WithMessage(ErrDuplicatedUser, fmt.Sprintf("namespace: %s", originNamespace))
-		}
-		u.userToNamespace[user] = ns
-	}
 	return nil
 }

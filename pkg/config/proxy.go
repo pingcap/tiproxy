@@ -16,6 +16,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -24,38 +25,39 @@ import (
 
 const (
 	DefaultClusterName = "default"
-
-	MIN_SESSION_TIMEOUT = 600
 )
 
-type Proxy struct {
-	Version       string        `yaml:"version"`
-	Cluster       string        `yaml:"cluster"`
-	EtcdDir       string        `yaml:"etcd_dir"`
-	ConfigManager ConfigManager `yaml:"config_center"`
-	ProxyServer   ProxyServer   `yaml:"proxy_server"`
-	AdminServer   AdminServer   `yaml:"admin_server"`
-	Log           Log           `yaml:"log"`
-	Registry      Registry      `yaml:"registry"`
-	Security      Security      `yaml:"security"`
+type Config struct {
+	Workdir string    `yaml:"workdir"`
+	LCUrls  []url.URL `yaml:"listen-urls"`
+	ACUrls  []url.URL `yaml:"advertise-urls"`
+	LPUrls  []url.URL `yaml:"listen-peer-urls"`
+	APUrls  []url.URL `yaml:"advertise-peer-urls"`
+
+	Config   ConfigManager `yaml:"config"`
+	Proxy    ProxyServer   `yaml:"proxy"`
+	API      API           `yaml:"api"`
+	Metrics  Metrics       `yaml:"metrics"`
+	Log      Log           `yaml:"log"`
+	Security Security      `yaml:"security"`
+}
+
+type Metrics struct {
+	PromCluster string `yaml:"prom_cluster"`
 }
 
 type ConfigManager struct {
-	IgnoreWrongNamespace bool   `yaml:"ignore_wrong_namespace"`
-	ConfigFile           string `yaml:"config_file"`
+	IgnoreWrongNamespace bool `yaml:"ignore_wrong_namespace"`
 }
 
 type ProxyServer struct {
 	Addr           string `yaml:"addr"`
 	MaxConnections uint32 `yaml:"max_connections"`
-	SessionTimeout int    `yaml:"session_timeout"`
-	StoragePath    string `yaml:"storage_path"`
 	TCPKeepAlive   bool   `yaml:"tcp_keep_alive"`
-	PDAddr         string `yaml:"pd_addrs"`
+	PDAddrs        string `yaml:"pd_addrs"`
 }
 
-type AdminServer struct {
-	Addr            string `yaml:"addr"`
+type API struct {
 	EnableBasicAuth bool   `yaml:"enable_basic_auth"`
 	User            string `yaml:"user"`
 	Password        string `yaml:"password"`
@@ -74,12 +76,6 @@ type LogFile struct {
 	MaxBackups int    `yaml:"max_backups"`
 }
 
-type Registry struct {
-	Enable bool     `yaml:"enable"`
-	Type   string   `yaml:"type"`
-	Addrs  []string `yaml:"addrs"`
-}
-
 type Security struct {
 	SSLCA           string   `toml:"ssl-ca" json:"ssl-ca"`
 	SSLCert         string   `toml:"ssl-cert" json:"ssl-cert"`
@@ -92,8 +88,8 @@ type Security struct {
 	RSAKeySize      int      `toml:"rsa-key-size" json:"rsa-key-size"`
 }
 
-func NewProxyConfig(data []byte) (*Proxy, error) {
-	var cfg Proxy
+func NewProxyConfig(data []byte) (*Config, error) {
+	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
@@ -103,23 +99,20 @@ func NewProxyConfig(data []byte) (*Proxy, error) {
 	return &cfg, nil
 }
 
-func (cfg *Proxy) Check() error {
-	if cfg.ProxyServer.SessionTimeout <= MIN_SESSION_TIMEOUT {
-		cfg.ProxyServer.SessionTimeout = MIN_SESSION_TIMEOUT
+func (cfg *Config) Check() error {
+	if cfg.Metrics.PromCluster == "" {
+		cfg.Metrics.PromCluster = DefaultClusterName
 	}
-	if cfg.Cluster == "" {
-		cfg.Cluster = DefaultClusterName
-	}
-	if cfg.EtcdDir == "" {
+	if cfg.Workdir == "" {
 		d, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		cfg.EtcdDir = filepath.Join(d, "etcd")
+		cfg.Workdir = filepath.Clean(d)
 	}
 	return nil
 }
 
-func (cfg *Proxy) ToBytes() ([]byte, error) {
+func (cfg *Config) ToBytes() ([]byte, error) {
 	return yaml.Marshal(cfg)
 }

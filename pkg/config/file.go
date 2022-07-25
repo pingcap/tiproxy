@@ -20,19 +20,18 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/pingcap/errors"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 )
 
 var (
 	ErrNamespaceNotFound = errors.New("namespace not found")
 )
 
-// NamespaceDir is only for test use,
-// please do not use it in production environment.
+// NamespaceDir is used by weirctl to import namespaces from a directory.
 type NamespaceDir struct {
 	dir    string
-	cfgs   map[string]*Namespace // key: namespace
-	nspath map[string]string     // key: namespace, value: config file path
+	cfgs   map[string]*Namespace
+	nspath map[string]string
 }
 
 func NewNamespacesFromDir(nsdir string) (*NamespaceDir, error) {

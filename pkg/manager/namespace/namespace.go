@@ -91,22 +91,6 @@ func (n *NamespaceWrapper) Name() string {
 	return n.name
 }
 
-func (n *NamespaceWrapper) IsDatabaseAllowed(db string) bool {
-	return n.mustGetCurrentNamespace().IsDatabaseAllowed(db)
-}
-
-func (n *NamespaceWrapper) ListDatabases() []string {
-	return n.mustGetCurrentNamespace().ListDatabases()
-}
-
-func (n *NamespaceWrapper) IsDeniedSQL(sqlFeature uint32) bool {
-	return n.mustGetCurrentNamespace().IsDeniedSQL(sqlFeature)
-}
-
-func (n *NamespaceWrapper) IsAllowedSQL(sqlFeature uint32) bool {
-	return n.mustGetCurrentNamespace().IsAllowedSQL(sqlFeature)
-}
-
 func (n *NamespaceWrapper) IncrConnCount() {
 	currCnt := atomic.AddInt64(&n.connCounter, 1)
 	metrics.QueryCtxGauge.WithLabelValues(n.name).Set(float64(currCnt))
@@ -120,14 +104,6 @@ func (n *NamespaceWrapper) DescConnCount() {
 func (n *NamespaceWrapper) Closed() bool {
 	_, ok := n.nsmgr.getCurrentNamespaces().Get(n.name)
 	return !ok
-}
-
-func (n *NamespaceWrapper) GetBreaker() (driver.Breaker, error) {
-	return n.mustGetCurrentNamespace().GetBreaker()
-}
-
-func (n *NamespaceWrapper) GetRateLimiter() driver.RateLimiter {
-	return n.mustGetCurrentNamespace().GetRateLimiter()
 }
 
 func (n *NamespaceWrapper) GetRouter() driver.Router {

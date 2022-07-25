@@ -100,8 +100,8 @@ type BackendObserver struct {
 	cancelFunc    context.CancelFunc
 }
 
-func InitEtcdClient(cfg *config.Proxy) (*clientv3.Client, error) {
-	pdAddr := cfg.ProxyServer.PDAddr
+func InitEtcdClient(cfg *config.Config) (*clientv3.Client, error) {
+	pdAddr := cfg.Proxy.PDAddrs
 	if len(pdAddr) == 0 {
 		// use tidb server addresses directly
 		return nil, nil

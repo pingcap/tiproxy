@@ -23,16 +23,14 @@ import (
 	"go.uber.org/zap"
 )
 
-func Register(group *gin.RouterGroup, ready *atomic.Bool, cfg *config.Proxy, logger *zap.Logger, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
+func Register(group *gin.RouterGroup, ready *atomic.Bool, cfg config.API, logger *zap.Logger, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
 	{
 		adminGroup := group.Group("admin")
-		if cfg.AdminServer.EnableBasicAuth {
-			adminGroup.Use(gin.BasicAuth(gin.Accounts{cfg.AdminServer.User: cfg.AdminServer.Password}))
+		if cfg.EnableBasicAuth {
+			adminGroup.Use(gin.BasicAuth(gin.Accounts{cfg.User: cfg.Password}))
 		}
-
 		registerNamespace(adminGroup.Group("namespace"), logger, cfgmgr, nsmgr)
 	}
-
 	registerMetrics(group.Group("metrics"))
 	registerDebug(group.Group("debug"), logger, nsmgr)
 }
