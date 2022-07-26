@@ -155,7 +155,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 			return
 		}
 
-		err = srv.NamespaceManager.Init(nss, srv.ObserverClient)
+		err = srv.NamespaceManager.Init(logger.Named("nsmgr"), nss, srv.ObserverClient)
 		if err != nil {
 			err = errors.WithStack(err)
 			return

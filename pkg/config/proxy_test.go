@@ -41,22 +41,23 @@ var testProxyConfig = Config{
 		},
 	},
 	Security: Security{
-		SSLCA:           "a",
-		SSLCert:         "b",
-		SSLKey:          "c",
-		ClusterSSLCA:    "d",
-		ClusterSSLCert:  "e",
-		ClusterSSLKey:   "f",
-		ClusterVerifyCN: []string{},
-		MinTLSVersion:   "g",
-		RSAKeySize:      0,
+		Server: TLSCert{
+			CA:   "a",
+			Cert: "b",
+			Key:  "c",
+		},
+		Cluster: TLSCert{
+			CA:   "a",
+			Cert: "b",
+			Key:  "c",
+		},
 	},
 }
 
 func TestProxyConfig(t *testing.T) {
 	data, err := testProxyConfig.ToBytes()
 	require.NoError(t, err)
-	cfg, err := NewProxyConfig(data)
+	cfg, err := NewConfig(data)
 	require.NoError(t, err)
 	require.Equal(t, testProxyConfig, *cfg)
 }

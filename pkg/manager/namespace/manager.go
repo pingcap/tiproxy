@@ -16,162 +16,156 @@
 package namespace
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io/ioutil"
 	"sync"
 
 	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	"github.com/pingcap/TiProxy/pkg/proxy/driver"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/tidb/util/logutil"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
 type NamespaceManager struct {
 	sync.RWMutex
-
-	switchIndex    int
-	users          [2]*UserNamespaceMapper
-	nss            [2]*NamespaceHolder
-	reloadPrepared map[string]bool
-
 	client *clientv3.Client
+	logger *zap.Logger
+	nsm    map[string]*Namespace
 }
 
 func NewNamespaceManager() *NamespaceManager {
 	return &NamespaceManager{}
 }
-
-func (mgr *NamespaceManager) Init(cfgs []*config.Namespace, client *clientv3.Client) error {
-	mgr.Lock()
-	defer mgr.Unlock()
-
-	users, err := CreateUserNamespaceMapper(cfgs)
+func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clientv3.Client) (*Namespace, error) {
+	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
+	rt, err := router.NewRandomRouter(&cfg.Backend, client)
 	if err != nil {
-		return errors.WithMessage(err, "create UserNamespaceMapper error")
+		return nil, errors.Errorf("build router error: %w", err)
+	}
+	r := &Namespace{
+		name:   cfg.Namespace,
+		router: rt,
 	}
 
-	nss, err := CreateNamespaceHolder(cfgs, client)
-	if err != nil {
-		return errors.WithMessage(err, "create NamespaceHolder error")
-	}
+	// frontend tls configuration
+	{
+		r.frontendTLS = &tls.Config{}
 
-	mgr.reloadPrepared = make(map[string]bool)
-	mgr.client = client
-	mgr.users[0] = users
-	mgr.nss[0] = nss
-	return nil
-}
+		if !cfg.Frontend.Security.HasCert() {
+			return nil, errors.Errorf("require certificates to secure frontend tls connections")
+		} else {
+			cert, err := tls.LoadX509KeyPair(cfg.Frontend.Security.Cert, cfg.Frontend.Security.Key)
+			if err != nil {
+				return nil, errors.Errorf("failed to load server certs: %w", err)
+			}
+			r.frontendTLS.Certificates = append(r.frontendTLS.Certificates, cert)
+		}
 
-func (n *NamespaceManager) Auth(username string, pwd, salt []byte) (driver.Namespace, bool) {
-	nsName, ok := n.getNamespaceByUsername(username)
-	if !ok {
-		return nil, false
-	}
-
-	wrapper := &NamespaceWrapper{
-		nsmgr: n,
-		name:  nsName,
-	}
-
-	return wrapper, true
-}
-
-func (n *NamespaceManager) RedirectConnections() error {
-	return n.getCurrentNamespaces().RedirectConnections()
-}
-
-func (n *NamespaceManager) PrepareReloadNamespace(namespace string, cfg *config.Namespace) error {
-	n.Lock()
-	defer n.Unlock()
-
-	newUsers := n.getCurrentUsers().Clone()
-	newUsers.RemoveNamespaceUsers(namespace)
-	if err := newUsers.AddNamespaceUsers(namespace, &cfg.Frontend); err != nil {
-		return errors.WithMessage(err, "add namespace users error")
-	}
-
-	newNs, err := BuildNamespace(cfg, n.client)
-	if err != nil {
-		return errors.WithMessage(err, "build namespace error")
-	}
-
-	newNss := n.getCurrentNamespaces().Clone()
-	newNss.Set(namespace, newNs)
-
-	n.setOther(newUsers, newNss)
-	n.reloadPrepared[namespace] = true
-
-	return nil
-}
-
-func (n *NamespaceManager) CommitReloadNamespaces(namespaces []string) error {
-	n.Lock()
-	defer n.Unlock()
-
-	for _, namespace := range namespaces {
-		if !n.reloadPrepared[namespace] {
-			return errors.Errorf("namespace is not prepared: %s", namespace)
+		if cfg.Frontend.Security.HasCA() {
+			r.frontendTLS.ClientAuth = tls.RequireAndVerifyClientCert
+			r.frontendTLS.ClientCAs = x509.NewCertPool()
+			certBytes, err := ioutil.ReadFile(cfg.Frontend.Security.CA)
+			if err != nil {
+				return nil, errors.Errorf("failed to read server signed certs from disk: %w", err)
+			}
+			if !r.frontendTLS.ClientCAs.AppendCertsFromPEM(certBytes) {
+				return nil, errors.Errorf("failed to load server signed certs")
+			}
+		} else {
+			logger.Warn("no signed certs for frontend, proxy will not authenticate clients (connection is still secured)")
 		}
 	}
 
-	n.toggle()
+	{
+		r.backendTLS = &tls.Config{}
+		// backend tls configuration
+		if !cfg.Backend.Security.HasCA() {
+			return nil, errors.Errorf("require signed certs to verify backend tls connections")
+		} else {
+			r.backendTLS.RootCAs = x509.NewCertPool()
+			certBytes, err := ioutil.ReadFile(cfg.Backend.Security.CA)
+			if err != nil {
+				return nil, errors.Errorf("failed to read server signed certs from disk: %w", err)
+			}
+			if !r.backendTLS.RootCAs.AppendCertsFromPEM(certBytes) {
+				return nil, errors.Errorf("failed to load server signed certs")
+			}
+		}
+
+		if cfg.Backend.Security.HasCert() {
+			cert, err := tls.LoadX509KeyPair(cfg.Backend.Security.Cert, cfg.Backend.Security.Key)
+			if err != nil {
+				return nil, errors.Errorf("failed to load cluster certs: %w", err)
+			}
+			r.backendTLS.Certificates = append(r.backendTLS.Certificates, cert)
+		} else {
+			logger.Warn("no certs for backend authentication, backend may reject proxy connections (connection is still secured)")
+		}
+	}
+
+	return r, nil
+}
+
+func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delete []bool) error {
+	nsm := make(map[string]*Namespace)
+	mgr.RLock()
+	for k, v := range mgr.nsm {
+		nsm[k] = v
+	}
+	mgr.RUnlock()
+
+	for i, nsc := range nss {
+		if nss_delete != nil && nss_delete[i] {
+			delete(nsm, nsc.Namespace)
+			continue
+		}
+
+		ns, err := mgr.buildNamespace(nsc, mgr.client)
+		if err != nil {
+			return fmt.Errorf("%w: create namespace error, namespace: %s", err, nsc.Namespace)
+		}
+		nsm[ns.Name()] = ns
+	}
+
+	mgr.Lock()
+	mgr.nsm = nsm
+	mgr.Unlock()
 	return nil
 }
 
-func (n *NamespaceManager) RemoveNamespace(name string) {
-	n.Lock()
-	defer n.Unlock()
+func (mgr *NamespaceManager) Init(logger *zap.Logger, nss []*config.Namespace, client *clientv3.Client) error {
+	mgr.Lock()
+	mgr.client = client
+	mgr.logger = logger
+	mgr.Unlock()
 
-	n.getCurrentUsers().RemoveNamespaceUsers(name)
-	nss := n.getCurrentNamespaces()
-	ns, ok := nss.Get(name)
-	if !ok {
-		return
+	return mgr.CommitNamespaces(nss, nil)
+}
+
+func (n *NamespaceManager) GetNamespace(nm string) (driver.Namespace, bool) {
+	n.RLock()
+	defer n.RUnlock()
+
+	ns, ok := n.nsm[nm]
+	return ns, ok
+}
+
+func (n *NamespaceManager) RedirectConnections() []error {
+	n.RLock()
+	defer n.RUnlock()
+
+	var errs []error
+	for _, ns := range n.nsm {
+		err1 := ns.GetRouter().RedirectConnections()
+		if err1 != nil {
+			errs = append(errs, err1)
+		}
 	}
-
-	if err := n.closeNamespace(ns); err != nil {
-		logutil.BgLogger().Error("remove namespace error", zap.Error(err), zap.String("namespace", name))
-		return
-	}
-
-	nss.Delete(name)
-}
-
-func (n *NamespaceManager) getNamespaceByUsername(username string) (string, bool) {
-	return n.getCurrentUsers().GetUserNamespace(username)
-}
-
-func (n *NamespaceManager) getCurrent() (*UserNamespaceMapper, *NamespaceHolder) {
-	return n.users[n.switchIndex], n.nss[n.switchIndex]
-}
-
-func (n *NamespaceManager) getCurrentUsers() *UserNamespaceMapper {
-	return n.users[n.switchIndex]
-}
-
-func (n *NamespaceManager) getCurrentNamespaces() *NamespaceHolder {
-	return n.nss[n.switchIndex]
-}
-
-func (n *NamespaceManager) getOtherIndex() int {
-	if n.switchIndex == 0 {
-		return 1
-	} else {
-		return 0
-	}
-}
-
-func (n *NamespaceManager) setOther(users *UserNamespaceMapper, nss *NamespaceHolder) {
-	other := n.getOtherIndex()
-	n.users[other], n.nss[other] = users, nss
-}
-
-func (n *NamespaceManager) toggle() {
-	n.switchIndex = n.getOtherIndex()
-}
-
-func (n *NamespaceManager) closeNamespace(ns Namespace) error {
-	return nil
+	return errs
 }
 
 func (n *NamespaceManager) Close() error {

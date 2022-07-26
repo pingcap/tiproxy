@@ -76,19 +76,26 @@ type LogFile struct {
 	MaxBackups int    `yaml:"max_backups"`
 }
 
-type Security struct {
-	SSLCA           string   `toml:"ssl-ca" json:"ssl-ca"`
-	SSLCert         string   `toml:"ssl-cert" json:"ssl-cert"`
-	SSLKey          string   `toml:"ssl-key" json:"ssl-key"`
-	ClusterSSLCA    string   `toml:"cluster-ssl-ca" json:"cluster-ssl-ca"`
-	ClusterSSLCert  string   `toml:"cluster-ssl-cert" json:"cluster-ssl-cert"`
-	ClusterSSLKey   string   `toml:"cluster-ssl-key" json:"cluster-ssl-key"`
-	ClusterVerifyCN []string `toml:"cluster-verify-cn" json:"cluster-verify-cn"`
-	MinTLSVersion   string   `toml:"tls-version" json:"tls-version"`
-	RSAKeySize      int      `toml:"rsa-key-size" json:"rsa-key-size"`
+type TLSCert struct {
+	CA   string `toml:"ca" json:"ca"`
+	Cert string `toml:"cert" json:"cert"`
+	Key  string `toml:"key" json:"key"`
 }
 
-func NewProxyConfig(data []byte) (*Config, error) {
+func (c TLSCert) HasCert() bool {
+	return !(c.Cert == "" && c.Key == "")
+}
+
+func (c TLSCert) HasCA() bool {
+	return c.CA != ""
+}
+
+type Security struct {
+	Server  TLSCert `toml:"server" json:"server"`
+	Cluster TLSCert `toml:"cluster" json:"cluster"`
+}
+
+func NewConfig(data []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err

@@ -24,14 +24,12 @@ import (
 )
 
 type NamespaceManager interface {
-	Auth(username string, pwd, salt []byte) (Namespace, bool)
+	GetNamespace(string) (Namespace, bool)
 	Close() error
 }
 
 type Namespace interface {
 	Name() string
-	IncrConnCount()
-	DescConnCount()
 	GetRouter() Router
 }
 

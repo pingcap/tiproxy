@@ -40,8 +40,6 @@ type ConfigManager struct {
 	kv         clientv3.KV
 	basePath   string
 	cfg        config.ConfigManager
-
-	// TODO: remove namespace manager based on files
 }
 
 func NewConfigManager() *ConfigManager {

@@ -28,11 +28,13 @@ type Namespace struct {
 }
 
 type FrontendNamespace struct {
+	Security TLSCert `yaml:"security"`
 }
 
 type BackendNamespace struct {
 	Instances    []string `yaml:"instances"`
 	SelectorType string   `yaml:"selector_type"`
+	Security     TLSCert  `yaml:"security"`
 }
 
 func NewNamespaceConfig(data []byte) (*Namespace, error) {

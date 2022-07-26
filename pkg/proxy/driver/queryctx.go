@@ -62,14 +62,11 @@ func (q *QueryCtxImpl) Close() error {
 	if q.connMgr != nil {
 		return q.connMgr.Close()
 	}
-	if q.ns != nil {
-		q.ns.DescConnCount()
-	}
 	return nil
 }
 
 func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
-	ns, ok := q.nsmgr.Auth("", nil, nil)
+	ns, ok := q.nsmgr.GetNamespace("")
 	if !ok {
 		return errors.New("failed to find a namespace")
 	}
@@ -82,6 +79,5 @@ func (q *QueryCtxImpl) ConnectBackend(ctx context.Context, clientIO *pnet.Packet
 	if err = q.connMgr.Connect(ctx, addr, clientIO, serverTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}
-	q.ns.IncrConnCount()
 	return nil
 }
