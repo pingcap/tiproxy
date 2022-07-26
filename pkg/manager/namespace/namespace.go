@@ -22,32 +22,26 @@ import (
 )
 
 type Namespace struct {
-	name             string
-	allowedUsernames []string
-	allowedDBSet     map[string]struct{}
-	router           driver.Router
-	frontTLS         *tls.Config
-	backTLS          *tls.Config
+	name        string
+	router      driver.Router
+	frontendTLS *tls.Config
+	backendTLS  *tls.Config
 }
 
 func (n *Namespace) Name() string {
 	return n.name
 }
 
-func (n *Namespace) FrontTLSConfig() *tls.Config {
-	return n.frontTLS
+func (n *Namespace) FrontendTLSConfig() *tls.Config {
+	return n.frontendTLS
 }
 
-func (n *Namespace) BackTLSConfig() *tls.Config {
-	return n.backTLS
+func (n *Namespace) BackendTLSConfig() *tls.Config {
+	return n.backendTLS
 }
 
 func (n *Namespace) GetRouter() driver.Router {
 	return n.router
-}
-
-func (n *Namespace) AllowedUsernames() []string {
-	return n.allowedUsernames
 }
 
 func (n *Namespace) Close() {

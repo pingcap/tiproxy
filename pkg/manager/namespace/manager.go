@@ -53,7 +53,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clien
 
 	// frontend tls configuration
 	{
-		r.frontTLS = &tls.Config{}
+		r.frontendTLS = &tls.Config{}
 
 		if !cfg.Frontend.Security.HasCert() {
 			return nil, errors.Errorf("require certificates to secure frontend tls connections")
@@ -62,17 +62,17 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clien
 			if err != nil {
 				return nil, errors.Errorf("failed to load server certs: %w", err)
 			}
-			r.frontTLS.Certificates = append(r.frontTLS.Certificates, cert)
+			r.frontendTLS.Certificates = append(r.frontendTLS.Certificates, cert)
 		}
 
 		if cfg.Frontend.Security.HasCA() {
-			r.frontTLS.ClientAuth = tls.RequireAndVerifyClientCert
-			r.frontTLS.ClientCAs = x509.NewCertPool()
+			r.frontendTLS.ClientAuth = tls.RequireAndVerifyClientCert
+			r.frontendTLS.ClientCAs = x509.NewCertPool()
 			certBytes, err := ioutil.ReadFile(cfg.Frontend.Security.CA)
 			if err != nil {
 				return nil, errors.Errorf("failed to read server signed certs from disk: %w", err)
 			}
-			if !r.frontTLS.ClientCAs.AppendCertsFromPEM(certBytes) {
+			if !r.frontendTLS.ClientCAs.AppendCertsFromPEM(certBytes) {
 				return nil, errors.Errorf("failed to load server signed certs")
 			}
 		} else {
@@ -81,17 +81,17 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clien
 	}
 
 	{
-		r.backTLS = &tls.Config{}
+		r.backendTLS = &tls.Config{}
 		// backend tls configuration
 		if !cfg.Backend.Security.HasCA() {
 			return nil, errors.Errorf("require signed certs to verify backend tls connections")
 		} else {
-			r.backTLS.RootCAs = x509.NewCertPool()
+			r.backendTLS.RootCAs = x509.NewCertPool()
 			certBytes, err := ioutil.ReadFile(cfg.Backend.Security.CA)
 			if err != nil {
 				return nil, errors.Errorf("failed to read server signed certs from disk: %w", err)
 			}
-			if !r.backTLS.RootCAs.AppendCertsFromPEM(certBytes) {
+			if !r.backendTLS.RootCAs.AppendCertsFromPEM(certBytes) {
 				return nil, errors.Errorf("failed to load server signed certs")
 			}
 		}
@@ -101,7 +101,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clien
 			if err != nil {
 				return nil, errors.Errorf("failed to load cluster certs: %w", err)
 			}
-			r.backTLS.Certificates = append(r.backTLS.Certificates, cert)
+			r.backendTLS.Certificates = append(r.backendTLS.Certificates, cert)
 		} else {
 			logger.Warn("no certs for backend authentication, backend may reject proxy connections (connection is still secured)")
 		}
