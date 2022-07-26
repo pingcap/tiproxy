@@ -12,29 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errors_test
 
 import (
-	"errors"
-	"fmt"
+	"testing"
+
+	serr "github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/stretchr/testify/require"
 )
 
-func New(text string) error {
-	return errors.New(text)
+func TestWrap(t *testing.T) {
+	e1 := serr.New("tt")
+	e2 := serr.New("dd")
+	e := serr.Wrap(e1, e2)
+	require.ErrorIsf(t, e, e1, "equal to the external error")
+	require.ErrorAsf(t, e, &e2, "unwrapping to the internal error")
 }
 
-func Errorf(format string, args ...any) error {
-	return fmt.Errorf(format, args...)
-}
-
-func Is(err, target error) bool {
-	return errors.Is(err, target)
-}
-
-func As(err error, target any) bool {
-	return errors.As(err, target)
-}
-
-func Unwrap(err error) error {
-	return errors.Unwrap(err)
+func TestWrapf(t *testing.T) {
+	e1 := serr.New("tt")
+	e2 := serr.New("dd")
+	e := serr.Wrapf(e1, "%w: 4", e2)
+	require.ErrorIsf(t, e, e1, "equal to the external error")
+	require.ErrorAsf(t, e, &e2, "unwrapping to the internal error")
 }

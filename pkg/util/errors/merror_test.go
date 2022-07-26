@@ -12,29 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package errors_test
 
 import (
-	"errors"
-	"fmt"
+	"testing"
+
+	serr "github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/stretchr/testify/require"
 )
 
-func New(text string) error {
-	return errors.New(text)
-}
+func TestCollect(t *testing.T) {
+	e1 := serr.New("tt")
+	e2 := serr.New("dd")
+	e3 := serr.New("dd")
+	e := serr.Collect(e1, e2, e3)
 
-func Errorf(format string, args ...any) error {
-	return fmt.Errorf(format, args...)
-}
-
-func Is(err, target error) bool {
-	return errors.Is(err, target)
-}
-
-func As(err error, target any) bool {
-	return errors.As(err, target)
-}
-
-func Unwrap(err error) error {
-	return errors.Unwrap(err)
+	require.ErrorIsf(t, e, e1, "equal to the external error")
+	require.Equal(t, serr.Unwrap(e), e, "unwrapping is noop")
+	require.Equal(t, e.(*serr.MError).Cause(), []error{e2, e3}, "get underlying errors")
+	require.NoError(t, serr.Collect(e3), "nil if there is no underlying error")
 }
