@@ -23,7 +23,7 @@ import (
 
 type Namespace struct {
 	name        string
-	router      driver.Router
+	router      router.Router
 	frontendTLS *tls.Config
 	backendTLS  *tls.Config
 }

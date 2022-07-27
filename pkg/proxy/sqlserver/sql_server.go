@@ -24,8 +24,9 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
-	"github.com/pingcap/TiProxy/pkg/proxy/driver"
 	"github.com/pingcap/TiProxy/pkg/util/security"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/errno"
@@ -47,7 +48,7 @@ type SQLServer struct {
 	cfg              *config.Config
 	serverTLSConfig  *tls.Config // the TLS used to connect to the client
 	clusterTLSConfig *tls.Config // the TLS used to connect to PD and TiDB server
-	driver           *driver.Driver
+	nsmgr            *namespace.NamespaceManager
 	listener         net.Listener
 	rwlock           sync.RWMutex
 	clients          map[uint64]*client.ClientConnection
@@ -55,12 +56,12 @@ type SQLServer struct {
 }
 
 // NewSQLServer creates a new Server.
-func NewSQLServer(cfg *config.Config, d *driver.Driver) (*SQLServer, error) {
+func NewSQLServer(cfg *config.Config, nsmgr *namespace.NamespaceManager) (*SQLServer, error) {
 	var err error
 
 	s := &SQLServer{
 		cfg:     cfg,
-		driver:  d,
+		nsmgr:   nsmgr,
 		clients: make(map[uint64]*client.ClientConnection),
 	}
 
@@ -164,7 +165,8 @@ func (s *SQLServer) newConn(conn net.Conn) *client.ClientConnection {
 		}
 	}
 	connectionID := atomic.AddUint64(&s.baseConnID, 1)
-	return s.driver.CreateClientConnection(conn, connectionID, s.serverTLSConfig, s.clusterTLSConfig)
+	bemgr := backend.NewBackendConnManager(connectionID)
+	return client.NewClientConnection(conn, connectionID, s.serverTLSConfig, s.clusterTLSConfig, s.nsmgr, bemgr)
 }
 
 func (s *SQLServer) checkConnectionCount() error {

@@ -19,6 +19,8 @@ import (
 	"crypto/tls"
 	"net"
 
+	"github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/metrics"
@@ -32,18 +34,21 @@ type ClientConnection struct {
 	serverTLSConfig  *tls.Config    // the TLS config to connect to clients.
 	backendTLSConfig *tls.Config    // the TLS config to connect to TiDB server.
 	pkt              *pnet.PacketIO // a helper to read and write data in packet format.
-	queryCtx         *QueryCtxImpl
 	connectionID     uint64
+	nsmgr            *namespace.NamespaceManager
+	ns               *namespace.Namespace
+	connMgr          *backend.BackendConnManager
 }
 
-func NewClientConnectionImpl(queryCtx *QueryCtxImpl, conn net.Conn, connectionID uint64, serverTLSConfig *tls.Config, backendTLSConfig *tls.Config) *ClientConnection {
+func NewClientConnection(conn net.Conn, connectionID uint64, serverTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager) *ClientConnection {
 	pkt := pnet.NewPacketIO(conn)
 	return &ClientConnection{
-		queryCtx:         queryCtx,
 		serverTLSConfig:  serverTLSConfig,
 		backendTLSConfig: backendTLSConfig,
 		pkt:              pkt,
 		connectionID:     connectionID,
+		nsmgr:            nsmgr,
+		connMgr:          bemgr,
 	}
 }
 
@@ -55,8 +60,25 @@ func (cc *ClientConnection) Addr() string {
 	return cc.pkt.RemoteAddr().String()
 }
 
+func (cc *ClientConnection) ConnectBackend(ctx context.Context) error {
+	ns, ok := cc.nsmgr.GetNamespace("")
+	if !ok {
+		return errors.New("failed to find a namespace")
+	}
+	cc.ns = ns
+	router := ns.GetRouter()
+	addr, err := router.Route(cc.connMgr)
+	if err != nil {
+		return err
+	}
+	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.serverTLSConfig, cc.backendTLSConfig); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (cc *ClientConnection) Run(ctx context.Context) {
-	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt, cc.serverTLSConfig, cc.backendTLSConfig); err != nil {
+	if err := cc.ConnectBackend(ctx); err != nil {
 		logutil.Logger(ctx).Info("new connection fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
 		metrics.HandShakeErrorCounter.Inc()
 		err = cc.Close()
@@ -82,7 +104,7 @@ func (cc *ClientConnection) processMsg(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = cc.queryCtx.ExecuteCmd(ctx, clientPkt, cc.pkt)
+		err = cc.connMgr.ExecuteCmd(ctx, clientPkt, cc.pkt)
 		if err != nil {
 			return err
 		}
@@ -98,5 +120,8 @@ func (cc *ClientConnection) Close() error {
 	if err := cc.pkt.Close(); err != nil {
 		terror.Log(err)
 	}
-	return cc.queryCtx.Close()
+	if err := cc.connMgr.Close(); err != nil {
+		terror.Log(err)
+	}
+	return nil
 }

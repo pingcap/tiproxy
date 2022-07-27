@@ -48,7 +48,7 @@ type BackendConnManager struct {
 	authenticator  *Authenticator
 	cmdProcessor   *CmdProcessor
 	eventReceiver  router.ConnEventReceiver
-	backendConn    BackendConnection
+	backendConn    *BackendConnection
 	processLock    sync.Mutex // to make redirecting and command processing exclusive
 	signalReceived chan struct{}
 	signal         unsafe.Pointer // type *signalRedirect
@@ -71,7 +71,7 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
-	mgr.backendConn = NewBackendConnectionImpl(serverAddr)
+	mgr.backendConn = NewBackendConnection(serverAddr)
 	if err := mgr.backendConn.Connect(); err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
 		return
 	}
 
-	newConn := NewBackendConnectionImpl(to)
+	newConn := NewBackendConnection(to)
 	if err = newConn.Connect(); err != nil {
 		return
 	}
