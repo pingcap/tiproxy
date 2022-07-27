@@ -44,6 +44,7 @@ import (
 
 	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/tidb/errno"
+	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/dbterror"
 )
 
@@ -136,7 +137,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	if _, err := io.ReadFull(p.buf, data); err != nil {
 		return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
-	return data, length == 0xffffff, nil
+	return data, length == mysql.MaxPayloadLen, nil
 }
 
 // ReadPacket reads data and removes the header
@@ -159,8 +160,8 @@ func (p *PacketIO) ReadPacket() ([]byte, error) {
 
 func (p *PacketIO) WriteOnePacket(data []byte) (int, error) {
 	length := len(data)
-	if length >= 0xffffff {
-		length = 0xffffff
+	if length >= mysql.MaxPayloadLen {
+		length = mysql.MaxPayloadLen
 	}
 
 	var header [4]byte
@@ -206,10 +207,10 @@ func (p *PacketIO) Flush() error {
 func (p *PacketIO) Close() error {
 	var errs []error
 	/*
-	TODO: flush when we want to smoothly exit
-	if err := p.Flush(); err != nil {
-		errs = append(errs, err)
-	}
+		TODO: flush when we want to smoothly exit
+		if err := p.Flush(); err != nil {
+			errs = append(errs, err)
+		}
 	*/
 	if p.tlsConn != nil {
 		if err := p.tlsConn.Close(); err != nil {
