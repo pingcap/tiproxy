@@ -76,6 +76,9 @@ func NewPacketIO(conn net.Conn) *PacketIO {
 	p := &PacketIO{
 		conn:     conn,
 		sequence: 0,
+		// TODO: enable proxy probe for clients only
+		// disable it by default now
+		proxyInited: true,
 		buf: bufio.NewReadWriter(
 			bufio.NewReaderSize(conn, defaultReaderSize),
 			bufio.NewWriterSize(conn, defaultWriterSize),
