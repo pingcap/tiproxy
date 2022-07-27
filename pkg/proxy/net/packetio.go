@@ -158,10 +158,12 @@ func (p *PacketIO) ReadPacket() ([]byte, error) {
 	return data, nil
 }
 
-func (p *PacketIO) WriteOnePacket(data []byte) (int, error) {
+func (p *PacketIO) WriteOnePacket(data []byte) (int, bool, error) {
+	more := false
 	length := len(data)
 	if length >= mysql.MaxPayloadLen {
 		length = mysql.MaxPayloadLen
+		more = true
 	}
 
 	var header [4]byte
@@ -172,24 +174,31 @@ func (p *PacketIO) WriteOnePacket(data []byte) (int, error) {
 	p.sequence++
 
 	if _, err := io.Copy(p.buf, bytes.NewReader(header[:])); err != nil {
-		return 0, errors.WithStack(errors.Wrap(ErrWriteConn, err))
+		return 0, more, errors.WithStack(errors.Wrap(ErrWriteConn, err))
 	}
 
-	if _, err := io.Copy(p.buf, bytes.NewReader(data)); err != nil {
-		return 0, errors.WithStack(errors.Wrap(ErrWriteConn, err))
+	if _, err := io.Copy(p.buf, bytes.NewReader(data[:length])); err != nil {
+		return 0, more, errors.WithStack(errors.Wrap(ErrWriteConn, err))
 	}
 
-	return length, nil
+	return length, more, nil
 }
 
 // WritePacket writes data without a header
 func (p *PacketIO) WritePacket(data []byte, flush bool) error {
 	for len(data) > 0 {
-		n, err := p.WriteOnePacket(data)
+		n, more, err := p.WriteOnePacket(data)
 		if err != nil {
 			return err
 		}
 		data = data[n:]
+		// if the last packet ends with a length of MaxPayloadLen exactly
+		// we need another zero-length packet to end it
+		if len(data) == 0 && more {
+			if _, _, err := p.WriteOnePacket(nil); err != nil {
+				return err
+			}
+		}
 	}
 	if flush {
 		return p.Flush()

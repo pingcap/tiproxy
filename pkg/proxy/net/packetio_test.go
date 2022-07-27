@@ -48,6 +48,11 @@ func TestPacketIO(t *testing.T) {
 			// send anything
 			require.NoError(t, cli.WritePacket(expectMsg, true))
 
+			// send more than max payload
+			require.NoError(t, cli.WritePacket(make([]byte, mysql.MaxPayloadLen+212), true))
+			require.NoError(t, cli.WritePacket(make([]byte, mysql.MaxPayloadLen), true))
+			require.NoError(t, cli.WritePacket(make([]byte, mysql.MaxPayloadLen*2), true))
+
 			// skip handshake
 			_, err = cli.ReadPacket()
 			require.NoError(t, err)
@@ -71,6 +76,14 @@ func TestPacketIO(t *testing.T) {
 			msg, err = srv.ReadPacket()
 			require.NoError(t, err)
 			require.Equal(t, msg, expectMsg)
+
+			// receive more than max payload
+			_, err = srv.ReadPacket()
+			require.NoError(t, err)
+			_, err = srv.ReadPacket()
+			require.NoError(t, err)
+			_, err = srv.ReadPacket()
+			require.NoError(t, err)
 
 			// send handshake
 			require.NoError(t, srv.WriteInitialHandshake(0, 0, salt[:]))
