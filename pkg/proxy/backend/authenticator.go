@@ -54,7 +54,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	// Read initial handshake packet from the backend.
 	serverPkt, serverCapability, err = auth.readInitialHandshake(backendIO)
 	if serverPkt != nil {
-		writeErr := clientIO.WritePacket(serverPkt)
+		writeErr := clientIO.WritePacket(serverPkt, false)
 		if writeErr != nil {
 			return false, writeErr
 		}
@@ -80,7 +80,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	sslEnabled := uint32(capability)&mysql.ClientSSL > 0
 	if sslEnabled {
 		// Upgrade TLS with the client if SSL is enabled.
-		if err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
+		if _, err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
 			return false, err
 		}
 	} else {
@@ -90,7 +90,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 		copy(pktWithSSL[2:], clientPkt[2:])
 		clientPkt = pktWithSSL
 	}
-	if err = backendIO.WritePacket(clientPkt); err != nil {
+	if err = backendIO.WritePacket(clientPkt, false); err != nil {
 		return false, err
 	}
 	if err = backendIO.Flush(); err != nil {
@@ -108,7 +108,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 		}
 	}
 	// Send the response again.
-	if err = backendIO.WritePacket(clientPkt); err != nil {
+	if err = backendIO.WritePacket(clientPkt, false); err != nil {
 		return false, err
 	}
 	if err = backendIO.Flush(); err != nil {
@@ -142,7 +142,7 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 	if err != nil {
 		return
 	}
-	err = destIO.WritePacket(data)
+	err = destIO.WritePacket(data, false)
 	if err != nil {
 		return
 	}
@@ -357,7 +357,7 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 	}
 
 	// Send TLS / SSL request packet. The server must have supported TLS.
-	err := backendIO.WritePacket(data[:pos])
+	err := backendIO.WritePacket(data[:pos], false)
 	if err != nil {
 		return err
 	}
@@ -397,7 +397,7 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 		pos += copy(data[pos:], auth.attrs)
 	}
 
-	if err = backendIO.WritePacket(data); err != nil {
+	if err = backendIO.WritePacket(data, false); err != nil {
 		return err
 	}
 	return backendIO.Flush()

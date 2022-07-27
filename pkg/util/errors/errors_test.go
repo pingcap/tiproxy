@@ -15,7 +15,6 @@
 package errors_test
 
 import (
-	gerr "errors"
 	"fmt"
 	"testing"
 
@@ -24,31 +23,10 @@ import (
 )
 
 func TestOfficialAPI(t *testing.T) {
-	e1 := gerr.New("t")
+	e1 := serr.New("t")
 	e2 := fmt.Errorf("%w: f", e1)
 
 	require.True(t, e1 == serr.Unwrap(e2))
 	require.True(t, serr.Is(e2, e1))
 	require.True(t, serr.As(e2, &e1))
-}
-
-func TestStacktrace(t *testing.T) {
-	e := serr.New("tt").WithStack()
-	require.Equal(t, fmt.Sprintf("%s", e), "tt")
-	require.Contains(t, fmt.Sprintf("%+v", e), t.Name(), "stacktrace must contain test name")
-	require.Contains(t, fmt.Sprintf("%v", e), t.Name(), "stacktrace must contain test name")
-	require.Contains(t, fmt.Sprintf("%+s", e), t.Name(), "stacktrace must contain test name")
-}
-
-func TestUnwrap(t *testing.T) {
-	e1 := gerr.New("t")
-	e2 := serr.WithStack(e1)
-	require.Equal(t, e1, gerr.Unwrap(e2), "unwrapped error should be identical")
-	require.ErrorIs(t, e2, e1, "stacktrace does not affect Is")
-	require.ErrorAs(t, e2, &e1, "stacktrace does not affect As")
-
-	e3 := serr.Errorf("%w: f", e1)
-	require.Equal(t, e1, gerr.Unwrap(e3), "unwrapped error should be identical")
-	require.ErrorIs(t, e3, e1, "stacktrace does not affect Is")
-	require.ErrorAs(t, e3, &e1, "stacktrace does not affect As")
 }

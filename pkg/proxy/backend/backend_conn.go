@@ -61,8 +61,7 @@ func (bc *BackendConnectionImpl) Connect() error {
 		return errors.New("dial backend error")
 	}
 
-	bufReadConn := pnet.NewBufferedReadConn(cn)
-	pkt := pnet.NewPacketIO(bufReadConn)
+	pkt := pnet.NewPacketIO(cn)
 	bc.pkt = pkt
 	return nil
 }

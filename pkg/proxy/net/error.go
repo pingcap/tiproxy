@@ -12,29 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package errors
+package net
 
-import (
-	"errors"
-	"fmt"
+import "github.com/pingcap/TiProxy/pkg/util/errors"
+
+var (
+	ErrExpectSSLRequest = errors.New("expect a SSLRequest packet")
+	ErrReadConn         = errors.New("failed to read the connection")
+	ErrWriteConn        = errors.New("failed to write the connection")
+	ErrFlushConn        = errors.New("failed to flush the connection")
+	ErrCloseConn        = errors.New("failed to close the connection")
+	ErrHandshakeTLS     = errors.New("failed to complete tls handshake")
 )
-
-func New(text string) error {
-	return errors.New(text)
-}
-
-func Errorf(format string, args ...any) error {
-	return fmt.Errorf(format, args...)
-}
-
-func Is(err, target error) bool {
-	return errors.Is(err, target)
-}
-
-func As(err error, target any) bool {
-	return errors.As(err, target)
-}
-
-func Unwrap(err error) error {
-	return errors.Unwrap(err)
-}
