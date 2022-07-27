@@ -182,7 +182,7 @@ func (p *PacketIO) WriteOnePacket(data []byte) (int, error) {
 }
 
 // WritePacket writes data without a header
-func (p *PacketIO) WritePacket(data []byte) error {
+func (p *PacketIO) WritePacket(data []byte, flush bool) error {
 	for len(data) > 0 {
 		n, err := p.WriteOnePacket(data)
 		if err != nil {
@@ -190,7 +190,10 @@ func (p *PacketIO) WritePacket(data []byte) error {
 		}
 		data = data[n:]
 	}
-	return p.Flush()
+	if flush {
+		return p.Flush()
+	}
+	return nil
 }
 
 func (p *PacketIO) Flush() error {

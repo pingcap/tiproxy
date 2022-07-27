@@ -46,28 +46,23 @@ func TestProxy(t *testing.T) {
 			}))
 		},
 		func(t *testing.T, srv *PacketIO) {
-			var ok bool
-			var err error
-
-
 			// skip 4 bytes of magic
 			var hdr [4]byte
-			_, err = io.ReadFull(srv.buf, hdr[:])
+			_, err := io.ReadFull(srv.buf, hdr[:])
 			require.NoError(t, err)
 
 			// try to parse V2
-			ok, err = srv.parseProxyV2()
+			p, err := srv.parseProxyV2()
 			require.NoError(t, err)
-			require.True(t, ok)
-			require.NotNil(t, srv.proxy)
-			require.Equal(t, tcpaddr, srv.proxy.SrcAddress)
-			require.Equal(t, tcpaddr, srv.proxy.DstAddress)
-			require.Equal(t, ProxyVersion2, srv.proxy.Version)
-			require.Equal(t, ProxyCommandLocal, srv.proxy.Command)
-			require.Len(t, srv.proxy.TLV, 2)
-			require.Equal(t, ProxyTlvALPN, srv.proxy.TLV[0].typ)
-			require.Equal(t, ProxyTlvUniqueID, srv.proxy.TLV[1].typ)
-			require.Equal(t, []byte("test"), srv.proxy.TLV[1].content)
+			require.NotNil(t, p)
+			require.Equal(t, tcpaddr, p.SrcAddress)
+			require.Equal(t, tcpaddr, p.DstAddress)
+			require.Equal(t, ProxyVersion2, p.Version)
+			require.Equal(t, ProxyCommandLocal, p.Command)
+			require.Len(t, p.TLV, 2)
+			require.Equal(t, ProxyTlvALPN, p.TLV[0].typ)
+			require.Equal(t, ProxyTlvUniqueID, p.TLV[1].typ)
+			require.Equal(t, []byte("test"), p.TLV[1].content)
 		},
 	)
 }

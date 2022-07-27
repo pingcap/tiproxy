@@ -55,7 +55,7 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 		if _, response, err = cp.query(backendIO, "COMMIT"); err != nil {
 			// If commit fails, forward the response to the client.
 			if _, ok := err.(*gomysql.MyError); ok {
-				if err = clientIO.WritePacket(response); err == nil {
+				if err = clientIO.WritePacket(response, false); err == nil {
 					err = clientIO.Flush()
 				}
 			}
@@ -67,7 +67,7 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 		return
 	}
 
-	if err = backendIO.WritePacket(request); err != nil {
+	if err = backendIO.WritePacket(request, false); err != nil {
 		return
 	}
 	if err = backendIO.Flush(); err != nil {
@@ -119,7 +119,7 @@ func forwardOnePacket(clientIO, backendIO *pnet.PacketIO) (response []byte, err 
 	if response, err = backendIO.ReadPacket(); err != nil {
 		return
 	}
-	err = clientIO.WritePacket(response)
+	err = clientIO.WritePacket(response, false)
 	return
 }
 
@@ -358,7 +358,7 @@ func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *gomy
 	request := make([]byte, 0, 1+len(data))
 	request = append(request, mysql.ComQuery)
 	request = append(request, data...)
-	if err = packetIO.WritePacket(request); err != nil {
+	if err = packetIO.WritePacket(request, false); err != nil {
 		return
 	}
 	if err = packetIO.Flush(); err != nil {

@@ -46,7 +46,7 @@ func TestPacketIO(t *testing.T) {
 			var err error
 
 			// send anything
-			require.NoError(t, cli.WritePacket(expectMsg))
+			require.NoError(t, cli.WritePacket(expectMsg, true))
 
 			// skip handshake
 			_, err = cli.ReadPacket()
@@ -55,11 +55,11 @@ func TestPacketIO(t *testing.T) {
 			// send correct and wrong capability flags
 			var hdr [4]byte
 			binary.LittleEndian.PutUint16(hdr[:], uint16(mysql.ClientSSL))
-			err = cli.WritePacket(hdr[:])
+			err = cli.WritePacket(hdr[:], true)
 			require.NoError(t, err)
 
 			binary.LittleEndian.PutUint16(hdr[:], 0)
-			err = cli.WritePacket(hdr[:])
+			err = cli.WritePacket(hdr[:], true)
 			require.NoError(t, err)
 		},
 		func(t *testing.T, srv *PacketIO) {

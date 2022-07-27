@@ -54,7 +54,7 @@ func (p *PacketIO) WriteInitialHandshake(capability uint32, status uint16, salt 
 	data = append(data, []byte("mysql_native_password")...)
 	data = append(data, 0)
 
-	if err := p.WritePacket(data); err != nil {
+	if err := p.WritePacket(data, true); err != nil {
 		return err
 	}
 
@@ -87,7 +87,7 @@ func (p *PacketIO) WriteErrPacket(code uint16, msg string) error {
 	data = append(data, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20)
 	data = append(data, msg...)
 
-	if err := p.WritePacket(data); err != nil {
+	if err := p.WritePacket(data, true); err != nil {
 		return err
 	}
 
