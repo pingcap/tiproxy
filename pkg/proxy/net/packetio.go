@@ -63,11 +63,12 @@ const (
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
-	conn     net.Conn
-	tlsConn  net.Conn
-	buf      *bufio.ReadWriter
-	sequence uint8
-	proxy    *Proxy
+	conn        net.Conn
+	tlsConn     net.Conn
+	buf         *bufio.ReadWriter
+	sequence    uint8
+	proxyInited bool
+	proxy       *Proxy
 }
 
 func NewPacketIO(conn net.Conn) *PacketIO {
@@ -96,7 +97,6 @@ func (p *PacketIO) ResetSequence() {
 
 func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	var header [4]byte
-	var err error
 
 	if _, err := io.ReadFull(p.buf, header[:]); err != nil {
 		return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
@@ -104,11 +104,18 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 
 	// probe proxy V2
 	refill := false
-	if p.proxy == nil && bytes.Compare(header[:], proxyV2Magic[:4]) == 0 {
-		refill, err = p.parseProxyV2()
-		if err != nil {
-			return nil, false, errors.Wrap(ErrReadConn, err)
+	if !p.proxyInited {
+		if bytes.Compare(header[:], proxyV2Magic[:4]) == 0 {
+			proxyHeader, err := p.parseProxyV2()
+			if err != nil {
+				return nil, false, errors.Wrap(ErrReadConn, err)
+			}
+			if proxyHeader != nil {
+				p.proxy = proxyHeader
+				refill = true
+			}
 		}
+		p.proxyInited = true
 	}
 
 	// refill mysql headers

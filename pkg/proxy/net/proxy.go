@@ -146,25 +146,25 @@ func (p *Proxy) ToBytes() []byte {
 	return buf
 }
 
-func (p *PacketIO) parseProxyV2() (bool, error) {
+func (p *PacketIO) parseProxyV2() (*Proxy, error) {
 	rem, err := p.buf.Peek(8)
 	if err != nil {
-		return false, errors.WithStack(errors.Wrap(ErrReadConn, err))
+		return nil, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
 	if bytes.Compare(rem, proxyV2Magic[4:]) != 0 {
-		return false, nil
+		return nil, nil
 	}
 
 	// yes, it is proxyV2
 	_, err = p.buf.Discard(8)
 	if err != nil {
-		return false, errors.WithStack(errors.Wrap(ErrReadConn, err))
+		return nil, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
 
 	var hdr [4]byte
 
 	if _, err := io.ReadFull(p.buf, hdr[:]); err != nil {
-		return true, errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
 
 	m := &Proxy{}
@@ -173,7 +173,7 @@ func (p *PacketIO) parseProxyV2() (bool, error) {
 
 	buf := make([]byte, int(hdr[2])<<8|int(hdr[3]))
 	if _, err := io.ReadFull(p.buf, buf); err != nil {
-		return true, errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
 
 	addressFamily := ProxyAddressFamily(hdr[1] >> 4)
@@ -264,8 +264,7 @@ func (p *PacketIO) parseProxyV2() (bool, error) {
 		buf = buf[3+length:]
 	}
 
-	p.proxy = m
-	return true, nil
+	return m, nil
 }
 
 func (p *PacketIO) writeProxyV2(m *Proxy) error {
