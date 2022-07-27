@@ -205,9 +205,12 @@ func (p *PacketIO) Flush() error {
 
 func (p *PacketIO) Close() error {
 	var errs []error
+	/*
+	TODO: flush when we want to smoothly exit
 	if err := p.Flush(); err != nil {
 		errs = append(errs, err)
 	}
+	*/
 	if p.tlsConn != nil {
 		if err := p.tlsConn.Close(); err != nil {
 			errs = append(errs, err)
