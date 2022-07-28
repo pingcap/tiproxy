@@ -62,24 +62,39 @@ const (
 	defaultReaderSize = 16 * 1024
 )
 
+type rdbufConn struct {
+	net.Conn
+	*bufio.Reader
+}
+
+func (f *rdbufConn) Read(b []byte) (int, error) {
+	return f.Reader.Read(b)
+}
+
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
 	conn        net.Conn
 	buf         *bufio.ReadWriter
-	rdwt        io.ReadWriter
 	sequence    uint8
 	proxyInited bool
 	proxy       *Proxy
 }
 
 func NewPacketIO(conn net.Conn) *PacketIO {
+	buf := bufio.NewReadWriter(
+		bufio.NewReaderSize(conn, defaultReaderSize),
+		bufio.NewWriterSize(conn, defaultWriterSize),
+	)
 	p := &PacketIO{
-		conn:     conn,
+		conn: &rdbufConn{
+			conn,
+			buf.Reader,
+		},
 		sequence: 0,
 		// TODO: enable proxy probe for clients only
 		// disable it by default now
 		proxyInited: true,
-		rdwt:        conn,
+		buf:         buf,
 	}
 	return p
 }
@@ -96,21 +111,10 @@ func (p *PacketIO) ResetSequence() {
 	p.sequence = 0
 }
 
-// Buffering will enable connection buffer to improve throughput.
-// **WARN**: Require to enable buffer after TLS, or no TLS at all.
-//   Otherwise, TLS states may be messed by buffering.
-func (p *PacketIO) Buffering() {
-	p.buf = bufio.NewReadWriter(
-		bufio.NewReaderSize(p.conn, defaultReaderSize),
-		bufio.NewWriterSize(p.conn, defaultWriterSize),
-	)
-	p.rdwt = p.buf
-}
-
 func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	var header [4]byte
 
-	if _, err := io.ReadFull(p.rdwt, header[:]); err != nil {
+	if _, err := io.ReadFull(p.conn, header[:]); err != nil {
 		return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
 
@@ -132,7 +136,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 
 	// refill mysql headers
 	if refill {
-		if _, err := io.ReadFull(p.rdwt, header[:]); err != nil {
+		if _, err := io.ReadFull(p.conn, header[:]); err != nil {
 			return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
 		}
 	}
@@ -145,7 +149,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	length := int(uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16)
 
 	data := make([]byte, length)
-	if _, err := io.ReadFull(p.rdwt, data); err != nil {
+	if _, err := io.ReadFull(p.conn, data); err != nil {
 		return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
 	return data, length == mysql.MaxPayloadLen, nil
@@ -184,11 +188,11 @@ func (p *PacketIO) WriteOnePacket(data []byte) (int, bool, error) {
 	header[3] = p.sequence
 	p.sequence++
 
-	if _, err := io.Copy(p.rdwt, bytes.NewReader(header[:])); err != nil {
+	if _, err := io.Copy(p.buf, bytes.NewReader(header[:])); err != nil {
 		return 0, more, errors.WithStack(errors.Wrap(ErrWriteConn, err))
 	}
 
-	if _, err := io.Copy(p.rdwt, bytes.NewReader(data[:length])); err != nil {
+	if _, err := io.Copy(p.buf, bytes.NewReader(data[:length])); err != nil {
 		return 0, more, errors.WithStack(errors.Wrap(ErrWriteConn, err))
 	}
 
@@ -218,10 +222,8 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) error {
 }
 
 func (p *PacketIO) Flush() error {
-	if p.buf != nil {
-		if err := p.buf.Flush(); err != nil {
-			return errors.WithStack(errors.Wrap(ErrFlushConn, err))
-		}
+	if err := p.buf.Flush(); err != nil {
+		return errors.WithStack(errors.Wrap(ErrFlushConn, err))
 	}
 	return nil
 }
