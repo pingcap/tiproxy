@@ -26,7 +26,7 @@ func TestProxy(t *testing.T) {
 	tcpaddr, err := net.ResolveTCPAddr("tcp", "192.168.1.1:34")
 	require.NoError(t, err)
 
-	testConn(t,
+	testPipeConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			require.NoError(t, cli.writeProxyV2(&Proxy{
 				Version:    ProxyVersion2,
