@@ -62,6 +62,10 @@ const (
 	defaultReaderSize = 16 * 1024
 )
 
+// rdbufConn will buffering read of connection. It will buffering read for non-TLS connections.
+// While TLS connections has internal buffering, we still need to pass *rdbufConn to `tls.XXX()`.
+// Because TLS handshake date may already be buffered in `*rdbufConn`.
+// TODO: only enable writer buffering for TLS connections and enable rw buffering for normal connections.
 type rdbufConn struct {
 	net.Conn
 	*bufio.Reader
@@ -74,27 +78,23 @@ func (f *rdbufConn) Read(b []byte) (int, error) {
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
 	conn        net.Conn
-	buf         *bufio.ReadWriter
+	buf         *bufio.Writer
 	sequence    uint8
 	proxyInited bool
 	proxy       *Proxy
 }
 
 func NewPacketIO(conn net.Conn) *PacketIO {
-	buf := bufio.NewReadWriter(
-		bufio.NewReaderSize(conn, defaultReaderSize),
-		bufio.NewWriterSize(conn, defaultWriterSize),
-	)
 	p := &PacketIO{
 		conn: &rdbufConn{
 			conn,
-			buf.Reader,
+			bufio.NewReaderSize(conn, defaultReaderSize),
 		},
 		sequence: 0,
 		// TODO: enable proxy probe for clients only
 		// disable it by default now
 		proxyInited: true,
-		buf:         buf,
+		buf:         bufio.NewWriterSize(conn, defaultWriterSize),
 	}
 	return p
 }

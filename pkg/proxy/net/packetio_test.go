@@ -163,6 +163,6 @@ func TestTLS(t *testing.T) {
 			err = srv.WritePacket(message, true)
 			require.NoError(t, err)
 		},
-		500,
+		500, // unable to reproduce stably, loop 500 times
 	)
 }

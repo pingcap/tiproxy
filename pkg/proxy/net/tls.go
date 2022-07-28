@@ -28,7 +28,7 @@ func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) (tls.ConnectionStat
 		return tlsConn.ConnectionState(), errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
 	}
 	p.conn = tlsConn
-	p.buf.Writer.Reset(p.conn)
+	p.buf.Reset(p.conn)
 	return tlsConn.ConnectionState(), nil
 }
 
@@ -43,6 +43,6 @@ func (p *PacketIO) UpgradeToClientTLS(tlsConfig *tls.Config) error {
 		return errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
 	}
 	p.conn = tlsConn
-	p.buf.Writer.Reset(p.conn)
+	p.buf.Reset(p.conn)
 	return nil
 }
