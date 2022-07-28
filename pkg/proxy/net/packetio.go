@@ -62,11 +62,23 @@ const (
 	defaultReaderSize = 16 * 1024
 )
 
+// rdbufConn will buffer read for non-TLS connections.
+// While TLS connections have internal buffering, we still need to pass *rdbufConn to `tls.XXX()`.
+// Because TLS handshake data may already be buffered in `*rdbufConn`.
+// TODO: only enable writer buffering for TLS connections, otherwise enable read/write buffering.
+type rdbufConn struct {
+	net.Conn
+	*bufio.Reader
+}
+
+func (f *rdbufConn) Read(b []byte) (int, error) {
+	return f.Reader.Read(b)
+}
+
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
 	conn        net.Conn
-	tlsConn     net.Conn
-	buf         *bufio.ReadWriter
+	buf         *bufio.Writer
 	sequence    uint8
 	proxyInited bool
 	proxy       *Proxy
@@ -74,15 +86,15 @@ type PacketIO struct {
 
 func NewPacketIO(conn net.Conn) *PacketIO {
 	p := &PacketIO{
-		conn:     conn,
+		conn: &rdbufConn{
+			conn,
+			bufio.NewReaderSize(conn, defaultReaderSize),
+		},
 		sequence: 0,
 		// TODO: enable proxy probe for clients only
 		// disable it by default now
 		proxyInited: true,
-		buf: bufio.NewReadWriter(
-			bufio.NewReaderSize(conn, defaultReaderSize),
-			bufio.NewWriterSize(conn, defaultWriterSize),
-		),
+		buf:         bufio.NewWriterSize(conn, defaultWriterSize),
 	}
 	return p
 }
@@ -102,7 +114,7 @@ func (p *PacketIO) ResetSequence() {
 func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	var header [4]byte
 
-	if _, err := io.ReadFull(p.buf, header[:]); err != nil {
+	if _, err := io.ReadFull(p.conn, header[:]); err != nil {
 		return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
 
@@ -124,7 +136,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 
 	// refill mysql headers
 	if refill {
-		if _, err := io.ReadFull(p.buf, header[:]); err != nil {
+		if _, err := io.ReadFull(p.conn, header[:]); err != nil {
 			return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
 		}
 	}
@@ -137,7 +149,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	length := int(uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16)
 
 	data := make([]byte, length)
-	if _, err := io.ReadFull(p.buf, data); err != nil {
+	if _, err := io.ReadFull(p.conn, data); err != nil {
 		return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
 	return data, length == mysql.MaxPayloadLen, nil
@@ -224,11 +236,6 @@ func (p *PacketIO) Close() error {
 			errs = append(errs, err)
 		}
 	*/
-	if p.tlsConn != nil {
-		if err := p.tlsConn.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	if p.conn != nil {
 		if err := p.conn.Close(); err != nil {
 			errs = append(errs, err)

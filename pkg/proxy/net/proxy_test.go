@@ -26,7 +26,7 @@ func TestProxy(t *testing.T) {
 	tcpaddr, err := net.ResolveTCPAddr("tcp", "192.168.1.1:34")
 	require.NoError(t, err)
 
-	testConn(t,
+	testPipeConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			require.NoError(t, cli.writeProxyV2(&Proxy{
 				Version:    ProxyVersion2,
@@ -48,7 +48,7 @@ func TestProxy(t *testing.T) {
 		func(t *testing.T, srv *PacketIO) {
 			// skip 4 bytes of magic
 			var hdr [4]byte
-			_, err := io.ReadFull(srv.buf, hdr[:])
+			_, err := io.ReadFull(srv.conn, hdr[:])
 			require.NoError(t, err)
 
 			// try to parse V2
@@ -64,5 +64,6 @@ func TestProxy(t *testing.T) {
 			require.Equal(t, ProxyTlvUniqueID, p.TLV[1].typ)
 			require.Equal(t, []byte("test"), p.TLV[1].content)
 		},
+		1,
 	)
 }
