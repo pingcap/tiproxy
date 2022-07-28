@@ -22,6 +22,7 @@ import (
 )
 
 func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) (tls.ConnectionState, error) {
+	tlsConfig = tlsConfig.Clone()
 	tlsConn := tls.Server(p.conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return tlsConn.ConnectionState(), errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
