@@ -28,10 +28,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/util/logutil"
+	"go.uber.org/zap"
 )
 
 func CreateServerTLSConfig(ca, key, cert string) (tlsConfig *tls.Config, err error) {
