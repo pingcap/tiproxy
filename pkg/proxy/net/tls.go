@@ -26,23 +26,22 @@ func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) (tls.ConnectionStat
 	if err := tlsConn.Handshake(); err != nil {
 		return tlsConn.ConnectionState(), errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
 	}
-	p.buf.Reader.Reset(tlsConn)
-	p.buf.Writer.Reset(tlsConn)
+	p.conn = tlsConn
+	p.rdwt = p.conn
 	return tlsConn.ConnectionState(), nil
 }
 
 func (p *PacketIO) UpgradeToClientTLS(tlsConfig *tls.Config) error {
-	host, _, err := net.SplitHostPort(p.conn.RemoteAddr().String())
-	if err != nil {
-		return errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
-	}
 	tlsConfig = tlsConfig.Clone()
-	tlsConfig.ServerName = host
+	host, _, err := net.SplitHostPort(p.conn.RemoteAddr().String())
+	if err == nil {
+		tlsConfig.ServerName = host
+	}
 	tlsConn := tls.Client(p.conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
 	}
-	p.buf.Reader.Reset(tlsConn)
-	p.buf.Writer.Reset(tlsConn)
+	p.conn = tlsConn
+	p.rdwt = p.conn
 	return nil
 }
