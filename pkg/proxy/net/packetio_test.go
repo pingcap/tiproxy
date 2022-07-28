@@ -220,7 +220,7 @@ func TestTLS(t *testing.T) {
 
 	var wg waitgroup.WaitGroup
 	stls, ctls, err := certsetup()
-			require.NoError(t, err)
+	require.NoError(t, err)
 	for i := 0; i < 500; i++ {
 		wg.Run(func() {
 			srv, err := listener.Accept()
