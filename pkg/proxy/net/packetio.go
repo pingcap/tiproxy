@@ -64,8 +64,8 @@ const (
 
 // rdbufConn will buffering read of connection. It will buffering read for non-TLS connections.
 // While TLS connections has internal buffering, we still need to pass *rdbufConn to `tls.XXX()`.
-// Because TLS handshake date may already be buffered in `*rdbufConn`.
-// TODO: only enable writer buffering for TLS connections and enable rw buffering for normal connections.
+// Because TLS handshake data may already be buffered in `*rdbufConn`.
+// TODO: only enable writer buffering for TLS connections, otherwise enable read/write buffering.
 type rdbufConn struct {
 	net.Conn
 	*bufio.Reader
