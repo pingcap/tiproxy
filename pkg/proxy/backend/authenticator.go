@@ -90,7 +90,6 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 		copy(pktWithSSL[2:], clientPkt[2:])
 		clientPkt = pktWithSSL
 	}
-	clientIO.Buffering()
 	if err = backendIO.WritePacket(clientPkt, false); err != nil {
 		return false, err
 	}
@@ -102,7 +101,6 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	if err = backendIO.UpgradeToClientTLS(backendTLSConfig); err != nil {
 		return false, err
 	}
-	backendIO.Buffering()
 	if sslEnabled {
 		// Read from the client again, where the capability may not contain ClientSSL this time.
 		if clientPkt, err = clientIO.ReadPacket(); err != nil {
@@ -369,7 +367,6 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 	if err = backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
 		return err
 	}
-	backendIO.Buffering()
 
 	// User [null terminated string]
 	if len(auth.user) > 0 {
