@@ -130,27 +130,38 @@ func TestPacketIO(t *testing.T) {
 func TestTLS(t *testing.T) {
 	stls, ctls, err := security.CreateTLSConfigForTest()
 	require.NoError(t, err)
+	message := []byte("hello wolrd")
 	testTCPConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			data, err := cli.ReadPacket()
 			require.NoError(t, err)
-			require.Equal(t, []byte("hello"), data)
+			require.Equal(t, message, data)
+			err = cli.WritePacket(message, true)
+			require.NoError(t, err)
 
 			require.NoError(t, cli.UpgradeToClientTLS(ctls))
 
-			err = cli.WritePacket([]byte("world"), true)
+			err = cli.WritePacket(message, true)
 			require.NoError(t, err)
+			data, err = cli.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, message, data)
 		},
 		func(t *testing.T, srv *PacketIO) {
-			err = srv.WritePacket([]byte("hello"), true)
+			err = srv.WritePacket(message, true)
 			require.NoError(t, err)
+			data, err := srv.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, message, data)
 
 			_, err = srv.UpgradeToServerTLS(stls)
 			require.NoError(t, err)
 
-			data, err := srv.ReadPacket()
+			data, err = srv.ReadPacket()
 			require.NoError(t, err)
-			require.Equal(t, []byte("world"), data)
+			require.Equal(t, message, data)
+			err = srv.WritePacket(message, true)
+			require.NoError(t, err)
 		},
 		500,
 	)

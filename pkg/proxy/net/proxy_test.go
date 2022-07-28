@@ -64,5 +64,6 @@ func TestProxy(t *testing.T) {
 			require.Equal(t, ProxyTlvUniqueID, p.TLV[1].typ)
 			require.Equal(t, []byte("test"), p.TLV[1].content)
 		},
+		1,
 	)
 }
