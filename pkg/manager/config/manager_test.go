@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"testing"
@@ -72,7 +71,6 @@ func testConfigManager(t *testing.T, cfg config.ConfigManager) (*ConfigManager, 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())
 		etcd.Close()
-		os.RemoveAll(testDir)
 	})
 
 	ctx := context.Background()
