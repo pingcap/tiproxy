@@ -15,16 +15,23 @@
 package config
 
 import (
+	"bytes"
+	"context"
+	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
 	"github.com/pingcap/TiProxy/pkg/config"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/exp/slices"
 )
 
 type testingLog struct {
@@ -36,24 +43,24 @@ func (t *testingLog) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func testConfigManager(t *testing.T) {
+func testConfigManager(t *testing.T, cfg config.ConfigManager) *ConfigManager {
 	addr, err := url.Parse("http://127.0.0.1:0")
+	require.NoError(t, err)
+
+	testDir, err := ioutil.TempDir(os.TempDir(), fmt.Sprintf("%s-*", t.Name()))
 	require.NoError(t, err)
 
 	logger := zap.New(zapcore.NewCore(
 		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
 		zapcore.AddSync(&testingLog{t}),
 		zap.InfoLevel,
-	))
-	logger.With(zap.String("testName", t.Name()))
+	)).Named(t.Name())
 
 	etcd_cfg := embed.NewConfig()
 	etcd_cfg.LCUrls = []url.URL{*addr}
 	etcd_cfg.LPUrls = []url.URL{*addr}
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	etcd_cfg.WalDir = filepath.Join(cwd, "etcd")
-	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger)
+	etcd_cfg.Dir = filepath.Join(testDir, "etcd")
+	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
 	etcd, err := embed.StartEtcd(etcd_cfg)
 	require.NoError(t, err)
 
@@ -63,11 +70,87 @@ func testConfigManager(t *testing.T) {
 	}
 
 	cfgmgr := NewConfigManager()
-	require.NoError(t, cfgmgr.Init(ends, config.ConfigManager{}, logger))
+	require.NoError(t, cfgmgr.Init(ends, cfg, logger))
 
-	require.NoError(t, cfgmgr.Close())
+	t.Cleanup(func() {
+		require.NoError(t, cfgmgr.Close())
+		etcd.Close()
+		os.RemoveAll(testDir)
+	})
+
+	return cfgmgr
 }
 
-func TestConfig(t *testing.T) {
-	testConfigManager(t)
+func TestBase(t *testing.T) {
+	cfgmgr := testConfigManager(t, config.ConfigManager{
+		IgnoreWrongNamespace: true,
+	})
+
+	ctx := context.Background()
+	if ddl, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, ddl)
+		t.Cleanup(cancel)
+	}
+
+	nsNum := 10
+	valNum := 30
+	getNs := func(i int) string {
+		return fmt.Sprintf("ns-%d", i)
+	}
+	getKey := func(i int) string {
+		return fmt.Sprintf("%02d", i)
+	}
+
+	// test .set
+	for i := 0; i < nsNum; i++ {
+		ns := getNs(i)
+		for j := 0; j < valNum; j++ {
+			k := getKey(j)
+			_, err := cfgmgr.set(ctx, ns, k, k)
+			require.NoError(t, err)
+		}
+	}
+
+	// test .get
+	for i := 0; i < nsNum; i++ {
+		ns := getNs(i)
+		for j := 0; j < valNum; j++ {
+			k := getKey(j)
+			v, err := cfgmgr.get(ctx, ns, k)
+			require.NoError(t, err)
+			require.Equal(t, string(v.Key), path.Join(DefaultEtcdPath, ns, k))
+			require.Equal(t, string(v.Value), k)
+		}
+	}
+
+	// test .list
+	for i := 0; i < nsNum; i++ {
+		ns := getNs(i)
+		vals, err := cfgmgr.list(ctx, ns)
+		require.NoError(t, err)
+		require.Len(t, vals, valNum)
+		slices.SortFunc(vals, func(a, b *mvccpb.KeyValue) bool {
+			return bytes.Compare(a.Key, b.Key) < 0
+		})
+		for j := 0; j < valNum; j++ {
+			k := getKey(j)
+			require.Equal(t, string(vals[j].Value), k)
+		}
+	}
+
+	// test .del
+	for i := 0; i < nsNum; i++ {
+		ns := getNs(i)
+		for j := 0; j < valNum; j++ {
+			k := getKey(j)
+			_, err := cfgmgr.set(ctx, ns, k, k)
+			require.NoError(t, err)
+
+			require.NoError(t, cfgmgr.del(ctx, ns, k))
+		}
+		vals, err := cfgmgr.list(ctx, ns)
+		require.NoError(t, err)
+		require.Len(t, vals, 0)
+	}
 }

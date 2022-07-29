@@ -68,26 +68,21 @@ func (srv *ConfigManager) Init(addrs []string, cfg config.ConfigManager, logger 
 }
 
 func (e *ConfigManager) get(ctx context.Context, ns, key string) (*mvccpb.KeyValue, error) {
-	resp, err := e.getMul(ctx, ns, key)
-	if err != nil {
-		return nil, err
-	}
-	if len(resp) != 1 {
-		return nil, fmt.Errorf("has no results or multiple results")
-	}
-	return resp[0], nil
-}
-
-func (e *ConfigManager) getMul(ctx context.Context, ns, key string) ([]*mvccpb.KeyValue, error) {
 	resp, err := e.kv.Get(ctx, path.Join(e.basePath, ns, key))
 	if err != nil {
 		return nil, err
 	}
-	return resp.Kvs, nil
+	if len(resp.Kvs) != 1 {
+		return nil, fmt.Errorf("has no results or multiple results")
+	}
+	return resp.Kvs[0], nil
 }
 
-func (e *ConfigManager) list(ctx context.Context, ns string) ([]*mvccpb.KeyValue, error) {
-	resp, err := e.kv.Get(ctx, path.Join(e.basePath, ns), clientv3.WithPrefix())
+func (e *ConfigManager) list(ctx context.Context, ns string, ops ...clientv3.OpOption) ([]*mvccpb.KeyValue, error) {
+	options := make([]clientv3.OpOption, 1, 1+len(ops))
+	options[0] = clientv3.WithPrefix()
+	options = append(options, ops...)
+	resp, err := e.kv.Get(ctx, path.Join(e.basePath, ns), options...)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +97,12 @@ func (e *ConfigManager) set(ctx context.Context, ns, key, val string) (*mvccpb.K
 	return resp.PrevKv, nil
 }
 
-func (e *ConfigManager) del(ctx context.Context, ns, key string) ([]*mvccpb.KeyValue, error) {
-	resp, err := e.kv.Delete(ctx, path.Join(e.basePath, ns, key))
+func (e *ConfigManager) del(ctx context.Context, ns, key string) error {
+	_, err := e.kv.Delete(ctx, path.Join(e.basePath, ns, key))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return resp.PrevKvs, nil
+	return nil
 }
 
 func (e *ConfigManager) Close() error {
