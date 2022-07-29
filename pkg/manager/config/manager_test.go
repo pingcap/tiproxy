@@ -17,7 +17,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path"
@@ -25,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -45,8 +45,7 @@ func testConfigManager(t *testing.T, cfg config.ConfigManager) *ConfigManager {
 	addr, err := url.Parse("http://127.0.0.1:0")
 	require.NoError(t, err)
 
-	testDir, err := ioutil.TempDir(os.TempDir(), fmt.Sprintf("%s-*", t.Name()))
-	require.NoError(t, err)
+	testDir := t.TempDir()
 
 	logger := zap.New(zapcore.NewCore(
 		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
@@ -148,4 +147,55 @@ func TestBase(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, vals, 0)
 	}
+}
+
+func TestBaseConcurrency(t *testing.T) {
+	cfgmgr := testConfigManager(t, config.ConfigManager{
+		IgnoreWrongNamespace: true,
+	})
+
+	ctx := context.Background()
+	if ddl, ok := t.Deadline(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, ddl)
+		t.Cleanup(cancel)
+	}
+
+	var wg waitgroup.WaitGroup
+	batchNum := 16
+	for i := 0; i < batchNum; i++ {
+		k := fmt.Sprint(i)
+		wg.Run(func() {
+			_, err := cfgmgr.set(ctx, k, "1", "1")
+			require.NoError(t, err)
+		})
+
+		wg.Run(func() {
+			err := cfgmgr.del(ctx, k, "1")
+			require.NoError(t, err)
+		})
+	}
+	wg.Wait()
+
+	for i := 0; i < batchNum; i++ {
+		k := fmt.Sprint(i)
+
+		_, err := cfgmgr.set(ctx, k, "1", "1")
+		require.NoError(t, err)
+	}
+
+	for i := 0; i < batchNum; i++ {
+		k := fmt.Sprint(i)
+
+		wg.Run(func() {
+			_, err := cfgmgr.set(ctx, k, "1", "1")
+			require.NoError(t, err)
+		})
+
+		wg.Run(func() {
+			_, err := cfgmgr.get(ctx, k, "1")
+			require.NoError(t, err)
+		})
+	}
+	wg.Wait()
 }
