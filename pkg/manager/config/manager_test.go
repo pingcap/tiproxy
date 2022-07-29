@@ -41,7 +41,7 @@ func (t *testingLog) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func testConfigManager(t *testing.T, cfg config.ConfigManager) *ConfigManager {
+func testConfigManager(t *testing.T, cfg config.ConfigManager) (*ConfigManager, context.Context) {
 	addr, err := url.Parse("http://127.0.0.1:0")
 	require.NoError(t, err)
 
@@ -75,20 +75,20 @@ func testConfigManager(t *testing.T, cfg config.ConfigManager) *ConfigManager {
 		os.RemoveAll(testDir)
 	})
 
-	return cfgmgr
-}
-
-func TestBase(t *testing.T) {
-	cfgmgr := testConfigManager(t, config.ConfigManager{
-		IgnoreWrongNamespace: true,
-	})
-
 	ctx := context.Background()
 	if ddl, ok := t.Deadline(); ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, ddl)
 		t.Cleanup(cancel)
 	}
+
+	return cfgmgr, ctx
+}
+
+func TestBase(t *testing.T) {
+	cfgmgr, ctx := testConfigManager(t, config.ConfigManager{
+		IgnoreWrongNamespace: true,
+	})
 
 	nsNum := 10
 	valNum := 30
@@ -150,16 +150,9 @@ func TestBase(t *testing.T) {
 }
 
 func TestBaseConcurrency(t *testing.T) {
-	cfgmgr := testConfigManager(t, config.ConfigManager{
+	cfgmgr, ctx := testConfigManager(t, config.ConfigManager{
 		IgnoreWrongNamespace: true,
 	})
-
-	ctx := context.Background()
-	if ddl, ok := t.Deadline(); ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, ddl)
-		t.Cleanup(cancel)
-	}
 
 	var wg waitgroup.WaitGroup
 	batchNum := 16
