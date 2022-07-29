@@ -15,7 +15,6 @@
 package config
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -27,11 +26,10 @@ import (
 
 	"github.com/pingcap/TiProxy/pkg/config"
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/exp/slices"
 )
 
 type testingLog struct {
@@ -127,12 +125,9 @@ func TestBase(t *testing.T) {
 	// test .list
 	for i := 0; i < nsNum; i++ {
 		ns := getNs(i)
-		vals, err := cfgmgr.list(ctx, ns)
+		vals, err := cfgmgr.list(ctx, ns, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 		require.NoError(t, err)
 		require.Len(t, vals, valNum)
-		slices.SortFunc(vals, func(a, b *mvccpb.KeyValue) bool {
-			return bytes.Compare(a.Key, b.Key) < 0
-		})
 		for j := 0; j < valNum; j++ {
 			k := getKey(j)
 			require.Equal(t, string(vals[j].Value), k)
