@@ -33,6 +33,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// CreateServerTLSConfig creates a tlsConfig that is used to connect to the client.
 func CreateServerTLSConfig(ca, key, cert string) (tlsConfig *tls.Config, err error) {
 	if len(cert) == 0 || len(key) == 0 {
 		cert = filepath.Join(cert, "cert.pem")
@@ -137,6 +138,7 @@ func createTLSCertificates(certpath string, keypath string, rsaKeySize int) erro
 }
 
 // CreateClusterTLSConfig generates tls's config based on security section of the config.
+// It's used to connect to PD.
 func CreateClusterTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Config, err error) {
 	if len(sslCA) != 0 {
 		certPool := x509.NewCertPool()
@@ -181,6 +183,7 @@ func CreateClusterTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Confi
 	return
 }
 
+// CreateClientTLSConfig creates a tlsConfig that is used to connect to the backend server.
 func CreateClientTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Config, err error) {
 	tlsConfig, err = CreateClusterTLSConfig(sslCA, sslKey, sslCert)
 	if err != nil {

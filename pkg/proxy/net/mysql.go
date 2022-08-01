@@ -15,32 +15,46 @@
 package net
 
 import (
+	"bytes"
 	"encoding/binary"
 
 	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 )
 
-func (p *PacketIO) WriteInitialHandshake(capability uint32, status uint16, salt []byte) error {
+const (
+	ShaCommand   = 1
+	FastAuthFail = 4
+)
+
+var (
+	testServerVersion = mysql.ServerVersion
+	testCollation     = uint8(mysql.DefaultCollationID)
+	testConnID        = 100
+	testStatus        = mysql.ServerStatusAutocommit
+)
+
+// WriteInitialHandshake mocks an initial handshake as a server. It's only for testing.
+func (p *PacketIO) WriteInitialHandshake(capability uint32, salt []byte, authPlugin string) error {
 	data := make([]byte, 0, 128)
 
 	// min version 10
 	data = append(data, 10)
 	// server version[NUL]
-	data = append(data, serverVersion...)
+	data = append(data, testServerVersion...)
 	data = append(data, 0)
 	// connection id
-	data = append(data, byte(capability), byte(capability>>8), byte(capability>>16), byte(capability>>24))
+	data = append(data, byte(testConnID), byte(testConnID>>8), byte(testConnID>>16), byte(testConnID>>24))
 	// auth-plugin-data-part-1
-	data = append(data, salt[:]...)
+	data = append(data, salt[0:8]...)
 	// filler [00]
 	data = append(data, 0)
 	// capability flag lower 2 bytes, using default capability here
 	data = append(data, byte(capability), byte(capability>>8))
 	// charset
-	data = append(data, utf8mb4BinID)
+	data = append(data, testCollation)
 	// status
-	data = append(data, byte(status), byte(status>>8))
+	data = DumpUint16(data, testStatus)
 	// capability flag upper 2 bytes, using default capability here
 	data = append(data, byte(capability>>16), byte(capability>>24))
 	// length of auth-plugin-data
@@ -51,14 +65,276 @@ func (p *PacketIO) WriteInitialHandshake(capability uint32, status uint16, salt 
 	data = append(data, salt[8:]...)
 	data = append(data, 0)
 	// auth-plugin name
-	data = append(data, []byte("mysql_native_password")...)
+	data = append(data, []byte(authPlugin)...)
 	data = append(data, 0)
 
-	if err := p.WritePacket(data, true); err != nil {
-		return err
+	return p.WritePacket(data, true)
+}
+
+// ParseInitialHandshake parses the initial handshake received from the server.
+func ParseInitialHandshake(data []byte) uint32 {
+	// skip mysql version
+	pos := 1 + bytes.IndexByte(data[1:], 0x00) + 1
+	// skip connection id
+	// skip salt first part
+	// skip filter
+	pos += 4 + 8 + 1
+
+	// capability lower 2 bytes
+	capability := uint32(binary.LittleEndian.Uint16(data[pos : pos+2]))
+	pos += 2
+
+	if len(data) > pos {
+		// skip server charset + status
+		pos += 1 + 2
+		// capability flags (upper 2 bytes)
+		capability = uint32(binary.LittleEndian.Uint16(data[pos:pos+2]))<<16 | capability
+
+		// skip auth data len or [00]
+		// skip reserved (all [00])
+		// skip salt second part
+		// skip auth plugin
+	}
+	return capability
+}
+
+// ParseHandshakeResponse reads the handshake response from the client.
+func ParseHandshakeResponse(data []byte) *HandshakeResp {
+	capability := uint32(binary.LittleEndian.Uint16(data[:2]))
+	if capability&mysql.ClientProtocol41 > 0 {
+		return parseNewVersionHandshakeResponse(data)
+	} else {
+		return parseOldVersionHandshakeResponse(data)
+	}
+}
+
+// HandshakeResp indicates the response read from the client.
+type HandshakeResp struct {
+	Capability uint32
+	Collation  uint8
+	User       string
+	DB         string
+	AuthData   []byte
+	AuthPlugin string
+	Attrs      []byte
+}
+
+func parseOldVersionHandshakeResponse(data []byte) *HandshakeResp {
+	resp := new(HandshakeResp)
+	pos := 0
+	// capability
+	resp.Capability = uint32(binary.LittleEndian.Uint16(data[:2]))
+	//collation
+	pos += 5
+	resp.Collation = mysql.CollationNames["utf8mb4_general_ci"]
+	// user name
+	resp.User = string(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
+	pos += len(resp.User) + 1
+	// db name
+	if resp.Capability&mysql.ClientConnectWithDB > 0 {
+		if len(data[pos:]) > 0 {
+			idx := bytes.IndexByte(data[pos:], 0)
+			resp.DB = string(data[pos : pos+idx])
+			pos = pos + idx + 1
+		}
+		// auth data
+		if len(data[pos:]) > 0 {
+			resp.AuthData = data[pos : pos+bytes.IndexByte(data[pos:], 0)]
+		}
+	} else {
+		resp.AuthData = data[pos : pos+bytes.IndexByte(data[pos:], 0)]
+	}
+	return resp
+}
+
+func parseNewVersionHandshakeResponse(data []byte) *HandshakeResp {
+	resp := new(HandshakeResp)
+	pos := 0
+	// capability
+	resp.Capability = binary.LittleEndian.Uint32(data[:4])
+	pos += 4
+	// skip max packet size
+	pos += 4
+	// charset
+	resp.Collation = data[pos]
+	pos++
+	// skip reserved 23[00]
+	pos += 23
+
+	// user name
+	resp.User = string(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
+	pos += len(resp.User) + 1
+
+	// password
+	if resp.Capability&mysql.ClientPluginAuthLenencClientData > 0 {
+		if data[pos] == 0x1 { // No auth data
+			pos += 2
+		} else {
+			num, null, off := ParseLengthEncodedInt(data[pos:])
+			pos += off
+			if !null {
+				resp.AuthData = data[pos : pos+int(num)]
+				pos += int(num)
+			}
+		}
+	} else if resp.Capability&mysql.ClientSecureConnection > 0 {
+		authLen := int(data[pos])
+		pos++
+		resp.AuthData = data[pos : pos+authLen]
+		pos += authLen
+	} else {
+		resp.AuthData = data[pos : pos+bytes.IndexByte(data[pos:], 0)]
+		pos += len(resp.AuthData) + 1
 	}
 
-	return p.Flush()
+	// dbname
+	if resp.Capability&mysql.ClientConnectWithDB > 0 {
+		if len(data[pos:]) > 0 {
+			idx := bytes.IndexByte(data[pos:], 0)
+			resp.DB = string(data[pos : pos+idx])
+			pos = pos + idx + 1
+		}
+	}
+
+	// auth plugin
+	if resp.Capability&mysql.ClientPluginAuth > 0 {
+		idx := bytes.IndexByte(data[pos:], 0)
+		s := pos
+		f := pos + idx
+		if s < f { // handle unexpected bad packets
+			resp.AuthPlugin = string(data[s:f])
+		}
+		pos += idx + 1
+	}
+
+	// attrs
+	if resp.Capability&mysql.ClientConnectAtts > 0 {
+		if num, null, off := ParseLengthEncodedInt(data[pos:]); !null {
+			pos += off
+			resp.Attrs = data[pos : pos+int(num)]
+		}
+	}
+	return resp
+}
+
+// WriteSwitchRequest writes a switch request to the client. It's only for testing.
+func (p *PacketIO) WriteSwitchRequest(authPlugin string, salt []byte) error {
+	length := 1 + len(authPlugin) + 1 + len(salt) + 1
+	data := make([]byte, 0, length)
+	data = append(data, mysql.AuthSwitchRequest)
+	data = append(data, []byte(authPlugin)...)
+	data = append(data, 0x00)
+	data = append(data, salt...)
+	data = append(data, 0x00)
+	return p.WritePacket(data, true)
+}
+
+func (p *PacketIO) WriteShaCommand() error {
+	return p.WritePacket([]byte{ShaCommand, FastAuthFail}, true)
+}
+
+func GetOldVersionHandshakeResponse(username, db string, authData []byte, capability uint32) (data []byte, headerPos int) {
+	length := 2 + 3 + 1 + len(username) + 1 + len(db) + 1 + len(authData) + 1
+	data = make([]byte, length)
+	pos := 0
+	// capability [16 bit]
+	DumpUint16(data[:0], uint16(capability))
+	pos += 2
+	// MaxPacketSize [24 bit]
+	pos += 3
+	// Charset [1 byte]
+	data[pos] = testCollation
+	pos++
+	headerPos = pos
+	// User [null terminated string]
+	if len(username) > 0 {
+		pos += copy(data[pos:], username)
+	}
+	data[pos] = 0x00
+	pos++
+	// db [null terminated string]
+	if capability&mysql.ClientConnectWithDB > 0 {
+		pos += copy(data[pos:], db)
+		data[pos] = 0x00
+		pos++
+	}
+	// auth data [null terminated string]
+	pos += copy(data[pos:], authData)
+	data[pos] = 0x00
+	pos++
+	return data[:pos], headerPos
+}
+
+func GetNewVersionHandshakeResponse(username, db, authPlugin string, collation uint8, authData, attrs []byte, capability uint32) (data []byte, headerPos int) {
+	// encode length of the auth data
+	var (
+		authRespBuf, attrRespBuf [9]byte
+		authResp, attrResp       []byte
+	)
+	authResp = DumpLengthEncodedInt(authRespBuf[:0], uint64(len(authData)))
+	if len(authResp) > 1 {
+		capability |= mysql.ClientPluginAuthLenencClientData
+	} else {
+		capability &= ^mysql.ClientPluginAuthLenencClientData
+	}
+	if capability&mysql.ClientConnectAtts > 0 {
+		attrResp = DumpLengthEncodedInt(attrRespBuf[:0], uint64(len(attrs)))
+	}
+
+	length := 4 + 4 + 1 + 23 + len(username) + 1 + len(authResp) + len(authData) + len(db) + 1 + len(authPlugin) + 1 + len(attrResp) + len(attrs)
+	data = make([]byte, length)
+	pos := 0
+	// capability [32 bit]
+	DumpUint32(data[:0], capability)
+	pos += 4
+	// MaxPacketSize [32 bit]
+	pos += 4
+	// Charset [1 byte]
+	data[pos] = collation
+	pos++
+	// Filler [23 bytes] (all 0x00)
+	pos += 23
+	headerPos = pos
+
+	// User [null terminated string]
+	pos += copy(data[pos:], username)
+	data[pos] = 0x00
+	pos++
+
+	// auth data
+	if capability&mysql.ClientPluginAuthLenencClientData > 0 {
+		pos += copy(data[pos:], authResp)
+		pos += copy(data[pos:], authData)
+	} else if capability&mysql.ClientSecureConnection > 0 {
+		data[pos] = byte(len(authData))
+		pos++
+		pos += copy(data[pos:], authData)
+	} else {
+		pos += copy(data[pos:], authData)
+		data[pos] = 0x00
+		pos++
+	}
+
+	// db [null terminated string]
+	if capability&mysql.ClientConnectWithDB > 0 {
+		pos += copy(data[pos:], db)
+		data[pos] = 0x00
+		pos++
+	}
+
+	// auth_plugin [null terminated string]
+	if capability&mysql.ClientPluginAuth > 0 {
+		pos += copy(data[pos:], authPlugin)
+		data[pos] = 0x00
+		pos++
+	}
+
+	// attrs
+	if capability&mysql.ClientConnectAtts > 0 {
+		pos += copy(data[pos:], attrResp)
+		pos += copy(data[pos:], attrs)
+	}
+	return data[:pos], headerPos
 }
 
 func (p *PacketIO) ReadSSLRequest() ([]byte, error) {
@@ -79,17 +355,37 @@ func (p *PacketIO) ReadSSLRequest() ([]byte, error) {
 	return pkt, nil
 }
 
-func (p *PacketIO) WriteErrPacket(code uint16, msg string) error {
-	data := make([]byte, 0, 64)
-	data = append(data, 0xff)
-	data = append(data, byte(code), byte(code>>8))
-	// fill spaces for 421 protocol for compatibility
-	data = append(data, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20)
-	data = append(data, msg...)
+// WriteErrPacket writes an Error packet. It's only for testing.
+func (p *PacketIO) WriteErrPacket(merr *mysql.SQLError) error {
+	data := make([]byte, 0, 4+len(merr.Message)+len(merr.State))
+	data = append(data, mysql.ErrHeader)
+	data = append(data, byte(merr.Code), byte(merr.Code>>8))
+	// It's compatible with both ClientProtocol41 enabled and disabled.
+	data = append(data, '#')
+	data = append(data, merr.State...)
+	data = append(data, merr.Message...)
+	return p.WritePacket(data, true)
+}
 
-	if err := p.WritePacket(data, true); err != nil {
-		return err
-	}
+// WriteOKPacket writes an OK packet. It's only for testing.
+func (p *PacketIO) WriteOKPacket() error {
+	data := make([]byte, 0, 7)
+	data = append(data, mysql.OKHeader)
+	data = append(data, 0, 0)
+	// It's compatible with both ClientProtocol41 enabled and disabled.
+	data = DumpUint16(data, mysql.ServerStatusAutocommit)
+	data = append(data, 0, 0)
+	return p.WritePacket(data, true)
+}
 
-	return p.Flush()
+// ParseChangeUser parses the data of COM_CHANGE_USER.
+func ParseChangeUser(data []byte) (username, db string) {
+	user, data := ParseNullTermString(data)
+	username = string(user)
+	passLen := int(data[0])
+	data = data[passLen+1:]
+	dbName, _ := ParseNullTermString(data)
+	db = string(dbName)
+	// TODO: attrs
+	return
 }

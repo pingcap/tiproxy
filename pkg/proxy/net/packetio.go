@@ -38,7 +38,6 @@ package net
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"net"
 
@@ -49,9 +48,6 @@ import (
 )
 
 var (
-	serverVersion      = fmt.Sprintf("5.7.25-WEIR")
-	utf8mb4BinID  byte = 46
-
 	errInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
 
 	proxyV2Magic = []byte{0xD, 0xA, 0xD, 0xA, 0x0, 0xD, 0xA, 0x51, 0x55, 0x49, 0x54, 0xA}

@@ -104,7 +104,8 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		return nil
 	case mysql.ComChangeUser:
 		if succeed {
-			mgr.authenticator.changeUser(request)
+			username, db := pnet.ParseChangeUser(request)
+			mgr.authenticator.changeUser(username, db)
 		}
 		return nil
 	}
