@@ -186,7 +186,7 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 	// Always enable auth_plugin.
 	capability |= mysql.ClientPluginAuth
 	// Always use the new version.
-	data, headerPos := pnet.GetNewVersionHandshakeResponse(auth.user, auth.dbname, mysql.AuthTiDBSessionToken,
+	data, headerPos := pnet.MakeNewVersionHandshakeResponse(auth.user, auth.dbname, mysql.AuthTiDBSessionToken,
 		auth.collation, authData, auth.attrs, capability)
 
 	// write header
