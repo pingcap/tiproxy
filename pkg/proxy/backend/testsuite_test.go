@@ -87,8 +87,11 @@ type backendConfig struct {
 
 type cfgOverrider func(config *testConfig)
 
-// Get a combination of M^N configurations to test.
+// Get a combination of M^N configurations from [N][M]cfgOverrider to test.
 func getCfgCombinations(cfgs [][]cfgOverrider) [][]cfgOverrider {
+	if len(cfgs) == 0 {
+		return nil
+	}
 	cfgOverriders := make([][]cfgOverrider, 0, len(cfgs[0]))
 	for _, cfg := range cfgs[0] {
 		cfgOverriders = append(cfgOverriders, []cfgOverrider{cfg})
@@ -161,26 +164,41 @@ func newTestSuite(t *testing.T, cfg *testConfig) *testSuite {
 	}
 }
 
+// setup opens listeners. It's called only once for each test case.
+func (ts *testSuite) setup() {
+	require.NoError(ts.t, ts.mb.listen())
+	require.NoError(ts.t, ts.mp.listen())
+}
+
+// reset closes connections but keep listeners opening. It's called for each handshake.
+func (ts *testSuite) reset(cfg *testConfig) {
+	require.NoError(ts.t, ts.mc.cleanup())
+	require.NoError(ts.t, ts.mp.cleanup())
+	require.NoError(ts.t, ts.mb.cleanup())
+	ts.mc.clientConfig = &cfg.clientConfig
+	ts.mp.proxyConfig = &cfg.proxyConfig
+	ts.mb.backendConfig = &cfg.backendConfig
+}
+
 func (ts *testSuite) authenticateFirstTime() (clientErr, proxyErr, backendErr error) {
 	var wg util.WaitGroupWrapper
-	clientErrCh, proxyErrCh, backendErrCh := make(chan error, 1), make(chan error, 1), make(chan error, 1)
-	ts.mb.authenticate(&wg, backendErrCh)
-	ts.mp.authenticateFirstTime(&wg, ts.mb.serverAddr(), proxyErrCh)
-	ts.mc.authenticate(&wg, ts.mp.serverAddr(), clientErrCh)
-	// When any of the processes completes, its connection will be closed and thus other processes will quit.
+	wg.Run(func() {
+		require.NoError(ts.t, ts.mb.accept())
+		backendErr = ts.mb.authenticate()
+		require.NoError(ts.t, ts.mb.cleanup())
+	})
+	wg.Run(func() {
+		require.NoError(ts.t, ts.mp.connect(ts.mb.serverAddr()))
+		require.NoError(ts.t, ts.mp.accept())
+		proxyErr = ts.mp.authenticateFirstTime()
+		require.NoError(ts.t, ts.mp.cleanup())
+	})
+	wg.Run(func() {
+		require.NoError(ts.t, ts.mc.connect(ts.mp.serverAddr()))
+		clientErr = ts.mc.authenticate()
+		require.NoError(ts.t, ts.mc.cleanup())
+	})
 	wg.Wait()
-	select {
-	case clientErr = <-clientErrCh:
-	default:
-	}
-	select {
-	case proxyErr = <-proxyErrCh:
-	default:
-	}
-	select {
-	case backendErr = <-backendErrCh:
-	default:
-	}
 	// Check the data received by client equals to the data sent from the server and vice versa.
 	if proxyErr == nil {
 		require.Equal(ts.t, ts.mb.authSucceed, ts.mc.authSucceed)
@@ -194,26 +212,22 @@ func (ts *testSuite) authenticateFirstTime() (clientErr, proxyErr, backendErr er
 
 // This must be called after authenticateFirstTime.
 func (ts *testSuite) authenticateSecondTime() (proxyErr, backendErr error) {
-	// Get a clone of the config for the backend.
-	backendConfig := *ts.mb.backendConfig
-	backendConfig.switchAuth = false
-	backendConfig.authSucceed = true
-	// The previous ts.mb should be closed after it's finished.
-	ts.mb = newMockBackend(&backendConfig)
+	// The server won't request switching auth-plugin this time.
+	ts.mb.backendConfig.switchAuth = false
+	ts.mb.backendConfig.authSucceed = true
+	// Only connect to the backend.
 	var wg util.WaitGroupWrapper
-	proxyErrCh, backendErrCh := make(chan error, 1), make(chan error, 1)
-	ts.mb.authenticate(&wg, backendErrCh)
-	ts.mp.authenticateSecondTime(&wg, ts.mb.serverAddr(), proxyErrCh)
-	// When any of the processes completes, its connection will be closed and thus other processes will quit.
+	wg.Run(func() {
+		require.NoError(ts.t, ts.mb.accept())
+		backendErr = ts.mb.authenticate()
+		require.NoError(ts.t, ts.mb.cleanup())
+	})
+	wg.Run(func() {
+		require.NoError(ts.t, ts.mp.connect(ts.mb.serverAddr()))
+		proxyErr = ts.mp.authenticateSecondTime()
+		require.NoError(ts.t, ts.mp.cleanup())
+	})
 	wg.Wait()
-	select {
-	case proxyErr = <-proxyErrCh:
-	default:
-	}
-	select {
-	case backendErr = <-backendErrCh:
-	default:
-	}
 	// Check the data of the proxy equals to the data received by the server.
 	if proxyErr == nil {
 		require.Equal(ts.t, ts.mc.username, ts.mb.username)
@@ -253,13 +267,17 @@ func (c *tcpClient) connect(addr string) error {
 	return nil
 }
 
-func (c *tcpClient) close() error {
+func (c *tcpClient) cleanup() error {
 	if c.PacketIO != nil {
 		err := c.PacketIO.Close()
 		c.PacketIO = nil
 		return err
 	}
 	return nil
+}
+
+func (c *tcpClient) close() error {
+	return c.cleanup()
 }
 
 type tcpServer struct {
@@ -289,12 +307,18 @@ func (s *tcpServer) serverAddr() string {
 	return s.listener.Addr().String()
 }
 
-func (s *tcpServer) close() error {
-	var err1, err2 error
+func (s *tcpServer) cleanup() error {
+	var err error
 	if s.PacketIO != nil {
-		err1 = s.PacketIO.Close()
+		err = s.PacketIO.Close()
 		s.PacketIO = nil
 	}
+	return err
+}
+
+func (s *tcpServer) close() error {
+	var err1, err2 error
+	err1 = s.cleanup()
 	if s.listener != nil {
 		err2 = s.listener.Close()
 		s.listener = nil
@@ -319,42 +343,30 @@ func newMockClient(cfg *clientConfig) *mockClient {
 	}
 }
 
-func (mc *mockClient) authenticate(wg *util.WaitGroupWrapper, addr string, errCh chan error) {
-	wg.Run(func() {
-		var err error
-		defer func() {
-			if err != nil {
-				errCh <- err
-			}
-			_ = mc.close()
-		}()
-		if err = mc.connect(addr); err != nil {
-			return
-		}
-		if _, err = mc.ReadPacket(); err != nil {
-			return
-		}
+func (mc *mockClient) authenticate() error {
+	if _, err := mc.ReadPacket(); err != nil {
+		return err
+	}
 
-		var resp []byte
-		var headerPos int
-		if mc.capability&mysql.ClientProtocol41 > 0 {
-			resp, headerPos = pnet.MakeNewVersionHandshakeResponse(mc.username, mc.dbName, mc.authPlugin, mc.collation, mc.authData, mc.attrs, mc.capability)
-		} else {
-			resp, headerPos = pnet.MakeOldVersionHandshakeResponse(mc.username, mc.dbName, mc.authData, mc.capability)
+	var resp []byte
+	var headerPos int
+	if mc.capability&mysql.ClientProtocol41 > 0 {
+		resp, headerPos = pnet.MakeNewVersionHandshakeResponse(mc.username, mc.dbName, mc.authPlugin, mc.collation, mc.authData, mc.attrs, mc.capability)
+	} else {
+		resp, headerPos = pnet.MakeOldVersionHandshakeResponse(mc.username, mc.dbName, mc.authData, mc.capability)
+	}
+	if mc.capability&mysql.ClientSSL > 0 {
+		if err := mc.WritePacket(resp[:headerPos], true); err != nil {
+			return err
 		}
-		if mc.capability&mysql.ClientSSL > 0 {
-			if err = mc.WritePacket(resp[:headerPos], true); err != nil {
-				return
-			}
-			if err = mc.UpgradeToClientTLS(mc.tlsConfig); err != nil {
-				return
-			}
+		if err := mc.UpgradeToClientTLS(mc.tlsConfig); err != nil {
+			return err
 		}
-		if err = mc.WritePacket(resp, true); err != nil {
-			return
-		}
-		err = mc.writePassword()
-	})
+	}
+	if err := mc.WritePacket(resp, true); err != nil {
+		return err
+	}
+	return mc.writePassword()
 }
 
 func (mc *mockClient) writePassword() error {
@@ -392,46 +404,22 @@ func newMockProxy(cfg *testConfig) *mockProxy {
 	}
 }
 
-func (mp *mockProxy) authenticateFirstTime(wg *util.WaitGroupWrapper, addr string, errCh chan error) {
-	// Listen synchronously so that we can know the actual address immediately after calling this function.
-	if err := mp.listen(); err != nil {
-		errCh <- err
-		return
-	}
-	wg.Run(func() {
-		var err error
-		defer func() {
-			if err != nil {
-				errCh <- err
-			}
-			_ = mp.close()
-		}()
-		if err = mp.connect(addr); err != nil {
-			return
-		}
-		if err = mp.accept(); err != nil {
-			return
-		}
-		if _, err = mp.auth.handshakeFirstTime(mp.tcpServer.PacketIO, mp.tcpClient.PacketIO, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
-			return
-		}
-	})
+func (mp *mockProxy) authenticateFirstTime() error {
+	_, err := mp.auth.handshakeFirstTime(mp.tcpServer.PacketIO, mp.tcpClient.PacketIO, mp.frontendTLSConfig, mp.backendTLSConfig)
+	return err
 }
 
-func (mp *mockProxy) authenticateSecondTime(wg *util.WaitGroupWrapper, addr string, errCh chan error) {
-	wg.Run(func() {
-		var err error
-		defer func() {
-			if err != nil {
-				errCh <- err
-			}
-			_ = mp.close()
-		}()
-		if err = mp.connect(addr); err != nil {
-			return
-		}
-		err = mp.auth.handshakeSecondTime(mp.tcpClient.PacketIO, mp.sessionToken)
-	})
+func (mp *mockProxy) authenticateSecondTime() error {
+	return mp.auth.handshakeSecondTime(mp.tcpClient.PacketIO, mp.sessionToken)
+}
+
+func (mp *mockProxy) cleanup() error {
+	err1 := mp.tcpClient.cleanup()
+	err2 := mp.tcpServer.cleanup()
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
 
 func (mp *mockProxy) close() error {
@@ -460,52 +448,36 @@ func newMockBackend(cfg *backendConfig) *mockBackend {
 	}
 }
 
-func (mb *mockBackend) authenticate(wg *util.WaitGroupWrapper, errCh chan error) {
-	// Listen synchronously so that we can know the actual address immediately after calling this function.
-	if err := mb.listen(); err != nil {
-		errCh <- err
-		return
+func (mb *mockBackend) authenticate() error {
+	var err error
+	// write initial handshake
+	if err = mb.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin); err != nil {
+		return err
 	}
-	wg.Run(func() {
-		var err error
-		defer func() {
-			if err != nil {
-				errCh <- err
-			}
-			_ = mb.close()
-		}()
-		if err = mb.accept(); err != nil {
-			return
+	// read the response
+	var clientPkt []byte
+	if clientPkt, err = mb.ReadPacket(); err != nil {
+		return err
+	}
+	// upgrade to TLS
+	capability := binary.LittleEndian.Uint16(clientPkt[:2])
+	sslEnabled := uint32(capability)&mysql.ClientSSL > 0 && mb.capability&mysql.ClientSSL > 0
+	if sslEnabled {
+		if _, err = mb.UpgradeToServerTLS(mb.tlsConfig); err != nil {
+			return err
 		}
-		// write initial handshake
-		if err = mb.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin); err != nil {
-			return
-		}
-		// read the response
-		var clientPkt []byte
+		// read the response again
 		if clientPkt, err = mb.ReadPacket(); err != nil {
-			return
+			return err
 		}
-		// upgrade to TLS
-		capability := binary.LittleEndian.Uint16(clientPkt[:2])
-		sslEnabled := uint32(capability)&mysql.ClientSSL > 0 && mb.capability&mysql.ClientSSL > 0
-		if sslEnabled {
-			if _, err = mb.UpgradeToServerTLS(mb.tlsConfig); err != nil {
-				return
-			}
-			// read the response again
-			if clientPkt, err = mb.ReadPacket(); err != nil {
-				return
-			}
-		}
-		resp := pnet.ParseHandshakeResponse(clientPkt)
-		mb.username = resp.User
-		mb.db = resp.DB
-		mb.authData = resp.AuthData
-		mb.attrs = resp.Attrs
-		// verify password
-		err = mb.verifyPassword()
-	})
+	}
+	resp := pnet.ParseHandshakeResponse(clientPkt)
+	mb.username = resp.User
+	mb.db = resp.DB
+	mb.authData = resp.AuthData
+	mb.attrs = resp.Attrs
+	// verify password
+	return mb.verifyPassword()
 }
 
 func (mb *mockBackend) verifyPassword() error {

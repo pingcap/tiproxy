@@ -21,7 +21,8 @@ import (
 	"github.com/pingcap/tidb/parser/mysql"
 )
 
-// WriteInitialHandshake mocks an initial handshake as a server. It's only for testing.
+// WriteInitialHandshake mocks an initial handshake as a server.
+// It's used for testing and will be used for tenant-aware routing.
 func (p *PacketIO) WriteInitialHandshake(capability uint32, salt []byte, authPlugin string) error {
 	data := make([]byte, 0, 128)
 
