@@ -15,7 +15,6 @@
 package backend
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
@@ -54,11 +53,8 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	// Read initial handshake packet from the backend.
 	serverPkt, serverCapability, err = auth.readInitialHandshake(backendIO)
 	if serverPkt != nil {
-		writeErr := clientIO.WritePacket(serverPkt, false)
+		writeErr := clientIO.WritePacket(serverPkt, true)
 		if writeErr != nil {
-			return false, writeErr
-		}
-		if writeErr = clientIO.Flush(); writeErr != nil {
 			return false, writeErr
 		}
 		if err != nil {
@@ -90,10 +86,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 		copy(pktWithSSL[2:], clientPkt[2:])
 		clientPkt = pktWithSSL
 	}
-	if err = backendIO.WritePacket(clientPkt, false); err != nil {
-		return false, err
-	}
-	if err = backendIO.Flush(); err != nil {
+	if err = backendIO.WritePacket(clientPkt, true); err != nil {
 		return false, err
 	}
 	// Always upgrade TLS with the server.
@@ -108,10 +101,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 		}
 	}
 	// Send the response again.
-	if err = backendIO.WritePacket(clientPkt, false); err != nil {
-		return false, err
-	}
-	if err = backendIO.Flush(); err != nil {
+	if err = backendIO.WritePacket(clientPkt, true); err != nil {
 		return false, err
 	}
 	auth.readHandshakeResponse(clientPkt)
@@ -142,103 +132,17 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 	if err != nil {
 		return
 	}
-	err = destIO.WritePacket(data, false)
-	if err != nil {
-		return
-	}
-	err = destIO.Flush()
-	if err != nil {
-		return
-	}
+	err = destIO.WritePacket(data, true)
 	return
 }
 
 func (auth *Authenticator) readHandshakeResponse(data []byte) {
-	capability := uint32(binary.LittleEndian.Uint16(data[:2]))
-	if capability&mysql.ClientProtocol41 > 0 {
-		auth.parseHandshakeResponse(data)
-	} else {
-		auth.parseOldHandshakeResponse(data)
-	}
-}
-
-func (auth *Authenticator) parseHandshakeResponse(data []byte) {
-	offset := 0
-
-	// capability
-	auth.capability = binary.LittleEndian.Uint32(data[:4])
-
-	// collation
-	offset += 8
-	auth.collation = data[offset]
-	offset += 24
-
-	// user name
-	auth.user = string(data[offset : offset+bytes.IndexByte(data[offset:], 0)])
-	offset += len(auth.user) + 1
-
-	// password
-	if auth.capability&mysql.ClientPluginAuthLenencClientData > 0 {
-		num, null, off := pnet.ParseLengthEncodedInt(data[offset:])
-		offset += off
-		if !null {
-			offset += int(num)
-		}
-	} else if auth.capability&mysql.ClientSecureConnection > 0 {
-		authLen := int(data[offset])
-		offset += authLen + 1
-	} else {
-		authLen := bytes.IndexByte(data[offset:], 0)
-		offset += authLen + 1
-	}
-
-	// dbname
-	if auth.capability&mysql.ClientConnectWithDB > 0 {
-		if len(data[offset:]) > 0 {
-			idx := bytes.IndexByte(data[offset:], 0)
-			auth.dbname = string(data[offset : offset+idx])
-			offset = offset + idx + 1
-		}
-	}
-
-	// auth plugin
-	if auth.capability&mysql.ClientPluginAuth > 0 {
-		idx := bytes.IndexByte(data[offset:], 0)
-		offset += idx + 1
-	}
-
-	// attrs
-	if auth.capability&mysql.ClientConnectAtts > 0 {
-		if num, null, off := pnet.ParseLengthEncodedInt(data[offset:]); !null {
-			offset += off
-			auth.attrs = data[offset : offset+int(num)]
-		}
-	}
-}
-
-func (auth *Authenticator) parseOldHandshakeResponse(data []byte) {
-	offset := 0
-	// capability
-	auth.capability = uint32(binary.LittleEndian.Uint16(data[:2]))
-	auth.capability |= mysql.ClientProtocol41
-
-	//collation
-	offset += 5
-	auth.collation = mysql.CollationNames["utf8mb4_general_ci"]
-
-	// user name
-	auth.user = string(data[offset : offset+bytes.IndexByte(data[offset:], 0)])
-	offset += len(auth.user) + 1
-
-	// db name
-	if auth.capability&mysql.ClientConnectWithDB > 0 {
-		if len(data[offset:]) > 0 {
-			idx := bytes.IndexByte(data[offset:], 0)
-			auth.dbname = string(data[offset : offset+idx])
-			offset = offset + idx + 1
-		}
-	}
-	// skip auth data
+	resp := pnet.ParseHandshakeResponse(data)
+	auth.capability = resp.Capability
+	auth.user = resp.User
+	auth.dbname = resp.DB
+	auth.collation = resp.Collation
+	auth.attrs = resp.Attrs
 }
 
 func (auth *Authenticator) handshakeSecondTime(backendIO *pnet.PacketIO, sessionToken string) error {
@@ -268,139 +172,33 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 		err = errors.Trace(err)
 		return
 	}
-
 	if serverPkt[0] == mysql.ErrHeader {
 		err = errors.New("read initial handshake error")
 		return
 	}
-
-	// skip mysql version
-	pos := 1 + bytes.IndexByte(serverPkt[1:], 0x00) + 1
-	// skip connection id
-	// skip salt first part
-	// skip filter
-	pos += 4 + 8 + 1
-
-	// capability lower 2 bytes
-	capability = uint32(binary.LittleEndian.Uint16(serverPkt[pos : pos+2]))
-	pos += 2
-
-	if len(serverPkt) > pos {
-		// skip server charset + status
-		pos += 1 + 2
-		// capability flags (upper 2 bytes)
-		capability = uint32(binary.LittleEndian.Uint16(serverPkt[pos:pos+2]))<<16 | capability
-
-		// skip auth data len or [00]
-		// skip reserved (all [00])
-		// skip salt second part
-		// skip auth plugin
-	}
+	capability = pnet.ParseInitialHandshake(serverPkt)
 	return
 }
 
 func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte) error {
-	// encode length of the auth data
-	var (
-		authRespBuf, attrRespBuf [9]byte
-		authResp, attrResp       []byte
-	)
-	authResp = pnet.DumpLengthEncodedInt(authRespBuf[:0], uint64(len(authData)))
-	capability := auth.capability
-	if len(authResp) > 1 {
-		capability |= mysql.ClientPluginAuthLenencClientData
-	} else {
-		capability &= ^mysql.ClientPluginAuthLenencClientData
-	}
 	// Always handshake with SSL enabled.
-	capability |= mysql.ClientSSL
-	if capability&mysql.ClientConnectAtts > 0 {
-		attrResp = pnet.DumpLengthEncodedInt(attrRespBuf[:0], uint64(len(auth.attrs)))
+	capability := auth.capability | mysql.ClientSSL
+	// Always enable auth_plugin.
+	capability |= mysql.ClientPluginAuth
+	// Always use the new version.
+	data, headerPos := pnet.MakeNewVersionHandshakeResponse(auth.user, auth.dbname, mysql.AuthTiDBSessionToken,
+		auth.collation, authData, auth.attrs, capability)
+
+	// write header
+	if err := backendIO.WritePacket(data[:headerPos], true); err != nil {
+		return err
 	}
-
-	//packet length
-	//capability 4
-	//max-packet size 4
-	//charset 1
-	//reserved all[0] 23
-	//username
-	//auth
-	//mysql_native_password + null-terminated
-	//attrs
-	length := 4 + 4 + 1 + 23 + len(auth.user) + 1 + len(authResp) + len(authData) + 21 + 1 + len(attrResp) + len(auth.attrs)
-	// db name
-	if len(auth.dbname) > 0 {
-		length += len(auth.dbname) + 1
-	}
-
-	data := make([]byte, length)
-	pos := 0
-
-	// capability [32 bit]
-	pnet.DumpUint32(data[:0], capability)
-	pos += 4
-
-	// MaxPacketSize [32 bit] (none)
-	for i := 0; i < 4; i++ {
-		data[pos] = 0x00
-		pos++
-	}
-
-	// Charset [1 byte]
-	data[pos] = auth.collation
-	pos++
-
-	// Filler [23 bytes] (all 0x00)
-	for i := 0; i < 23; i++ {
-		data[pos] = 0
-		pos++
-	}
-
 	// Send TLS / SSL request packet. The server must have supported TLS.
-	err := backendIO.WritePacket(data[:pos], false)
-	if err != nil {
+	if err := backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
 		return err
 	}
-	if err = backendIO.Flush(); err != nil {
-		return err
-	}
-	if err = backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
-		return err
-	}
-
-	// User [null terminated string]
-	if len(auth.user) > 0 {
-		pos += copy(data[pos:], auth.user)
-	}
-	data[pos] = 0x00
-	pos++
-
-	// auth [length encoded integer]
-	pos += copy(data[pos:], authResp)
-	pos += copy(data[pos:], authData)
-
-	// db [null terminated string]
-	if len(auth.dbname) > 0 {
-		pos += copy(data[pos:], auth.dbname)
-		data[pos] = 0x00
-		pos++
-	}
-
-	// auth_plugin
-	pos += copy(data[pos:], mysql.AuthTiDBSessionToken)
-	data[pos] = 0x00
-	pos++
-
-	// attrs
-	if auth.capability&mysql.ClientConnectAtts > 0 {
-		pos += copy(data[pos:], attrResp)
-		pos += copy(data[pos:], auth.attrs)
-	}
-
-	if err = backendIO.WritePacket(data, false); err != nil {
-		return err
-	}
-	return backendIO.Flush()
+	// write body
+	return backendIO.WritePacket(data, true)
 }
 
 func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) error {
@@ -419,16 +217,15 @@ func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) erro
 	}
 }
 
-func (auth *Authenticator) changeUser(request []byte) {
-	user, data := pnet.ParseNullTermString(request)
-	auth.user = string(hack.String(user))
-	passLen := int(data[0])
-	data = data[passLen+1:]
-	dbName, _ := pnet.ParseNullTermString(data)
-	auth.dbname = string(hack.String(dbName))
+// changeUser is called once the client sends COM_CHANGE_USER.
+func (auth *Authenticator) changeUser(username, db string) {
+	auth.user = username
+	auth.dbname = db
 	// TODO: attrs
 }
 
+// updateCurrentDB is called once the client sends COM_INIT_DB or `use db`.
+// The proxy cannot send the original dbname to TiDB in the second handshake because the original db may be dropped.
 func (auth *Authenticator) updateCurrentDB(db string) {
 	auth.dbname = db
 }

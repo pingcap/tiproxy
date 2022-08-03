@@ -115,7 +115,7 @@ func TestPacketIO(t *testing.T) {
 			require.NoError(t, err)
 
 			// send handshake
-			require.NoError(t, srv.WriteInitialHandshake(0, 0, salt[:]))
+			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], mysql.AuthNativePassword))
 
 			// expect correct and wrong capability flags
 			_, err = srv.ReadSSLRequest()
