@@ -52,9 +52,10 @@ type ConfigManager struct {
 
 type ProxyServer struct {
 	Addr           string `yaml:"addr"`
-	MaxConnections uint32 `yaml:"max_connections"`
+	MaxConnections uint64 `yaml:"max_connections"`
 	TCPKeepAlive   bool   `yaml:"tcp_keep_alive"`
 	PDAddrs        string `yaml:"pd_addrs"`
+	ProxyProtocol  string `yaml:"proxy_protocol"`
 }
 
 type API struct {
