@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/pingcap/TiProxy/pkg/util/security"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util"
 	"github.com/stretchr/testify/require"
@@ -52,6 +52,28 @@ var (
 	mockAuthData = []byte("123456")
 	mockToken    = strings.Repeat("t", 512)
 )
+
+func createListener(t *testing.T) net.Listener {
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	require.NoError(t, err)
+	return listener
+}
+
+func connectToListener(t *testing.T, listener net.Listener) net.Conn {
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	require.NoError(t, err)
+	return conn
+}
+
+// runTest creates listeners and tlsConfigs and runs the functions passed in.
+func runTest(t *testing.T, runnable func(backendListener, proxyListener net.Listener, clientTLSConfig, backendTLSConfig *tls.Config)) {
+	backendTLSConfig, clientTLSConfig, err := security.CreateTLSConfigForTest()
+	require.NoError(t, err)
+	backendListener, proxyListener := createListener(t), createListener(t)
+	runnable(backendListener, proxyListener, clientTLSConfig, backendTLSConfig)
+	require.NoError(t, backendListener.Close())
+	require.NoError(t, proxyListener.Close())
+}
 
 type testConfig struct {
 	clientConfig  clientConfig
@@ -164,41 +186,41 @@ func newTestSuite(t *testing.T, cfg *testConfig) *testSuite {
 	}
 }
 
-// setup opens listeners. It's called only once for each test case.
-func (ts *testSuite) setup() {
-	require.NoError(ts.t, ts.mb.listen())
-	require.NoError(ts.t, ts.mp.listen())
-}
-
-// reset closes connections but keep listeners opening. It's called for each handshake.
-func (ts *testSuite) reset(cfg *testConfig) {
-	require.NoError(ts.t, ts.mc.cleanup())
-	require.NoError(ts.t, ts.mp.cleanup())
-	require.NoError(ts.t, ts.mb.cleanup())
-	ts.mc.clientConfig = &cfg.clientConfig
-	ts.mp.proxyConfig = &cfg.proxyConfig
-	ts.mb.backendConfig = &cfg.backendConfig
-}
-
-func (ts *testSuite) authenticateFirstTime() (clientErr, proxyErr, backendErr error) {
+// run starts a mockClient, a mockProxy, and a mockBackend to run the functions passed in.
+func (ts *testSuite) run(backendListener, proxyListener net.Listener,
+	clientRunner, backendRunner func(*pnet.PacketIO) error,
+	proxyRunner func(_, _ *pnet.PacketIO) error) (clientErr, proxyErr, backendErr error) {
 	var wg util.WaitGroupWrapper
 	wg.Run(func() {
-		require.NoError(ts.t, ts.mb.accept())
-		backendErr = ts.mb.authenticate()
-		require.NoError(ts.t, ts.mb.cleanup())
+		conn, err := backendListener.Accept()
+		require.NoError(ts.t, err)
+		packetIO := pnet.NewPacketIO(conn)
+		backendErr = backendRunner(packetIO)
+		require.NoError(ts.t, packetIO.Close())
 	})
 	wg.Run(func() {
-		require.NoError(ts.t, ts.mp.connect(ts.mb.serverAddr()))
-		require.NoError(ts.t, ts.mp.accept())
-		proxyErr = ts.mp.authenticateFirstTime()
-		require.NoError(ts.t, ts.mp.cleanup())
+		clientConn, err := proxyListener.Accept()
+		require.NoError(ts.t, err)
+		clientIO := pnet.NewPacketIO(clientConn)
+		backendConn := connectToListener(ts.t, backendListener)
+		backendIO := pnet.NewPacketIO(backendConn)
+		proxyErr = proxyRunner(clientIO, backendIO)
+		require.NoError(ts.t, backendIO.Close())
+		require.NoError(ts.t, clientIO.Close())
 	})
 	wg.Run(func() {
-		require.NoError(ts.t, ts.mc.connect(ts.mp.serverAddr()))
-		clientErr = ts.mc.authenticate()
-		require.NoError(ts.t, ts.mc.cleanup())
+		conn := connectToListener(ts.t, proxyListener)
+		packetIO := pnet.NewPacketIO(conn)
+		clientErr = clientRunner(packetIO)
+		require.NoError(ts.t, packetIO.Close())
 	})
 	wg.Wait()
+	return
+}
+
+// The client connects to the backend through the proxy.
+func (ts *testSuite) authenticateFirstTime(backendListener, proxyListener net.Listener) (clientErr, proxyErr, backendErr error) {
+	clientErr, proxyErr, backendErr = ts.run(backendListener, proxyListener, ts.mc.authenticate, ts.mb.authenticate, ts.mp.authenticateFirstTime)
 	// Check the data received by client equals to the data sent from the server and vice versa.
 	if proxyErr == nil {
 		require.Equal(ts.t, ts.mb.authSucceed, ts.mc.authSucceed)
@@ -210,24 +232,17 @@ func (ts *testSuite) authenticateFirstTime() (clientErr, proxyErr, backendErr er
 	return
 }
 
+// The proxy reconnects to the proxy using preserved client data.
 // This must be called after authenticateFirstTime.
-func (ts *testSuite) authenticateSecondTime() (proxyErr, backendErr error) {
+func (ts *testSuite) authenticateSecondTime(backendListener, proxyListener net.Listener) (proxyErr, backendErr error) {
 	// The server won't request switching auth-plugin this time.
 	ts.mb.backendConfig.switchAuth = false
 	ts.mb.backendConfig.authSucceed = true
-	// Only connect to the backend.
-	var wg util.WaitGroupWrapper
-	wg.Run(func() {
-		require.NoError(ts.t, ts.mb.accept())
-		backendErr = ts.mb.authenticate()
-		require.NoError(ts.t, ts.mb.cleanup())
-	})
-	wg.Run(func() {
-		require.NoError(ts.t, ts.mp.connect(ts.mb.serverAddr()))
-		proxyErr = ts.mp.authenticateSecondTime()
-		require.NoError(ts.t, ts.mp.cleanup())
-	})
-	wg.Wait()
+	// The client doesn't do anything in the second handshake.
+	emptyClientRunner := func(*pnet.PacketIO) error {
+		return nil
+	}
+	_, proxyErr, backendErr = ts.run(backendListener, proxyListener, emptyClientRunner, ts.mb.authenticate, ts.mp.authenticateSecondTime)
 	// Check the data of the proxy equals to the data received by the server.
 	if proxyErr == nil {
 		require.Equal(ts.t, ts.mc.username, ts.mb.username)
@@ -248,89 +263,7 @@ func (ts *testSuite) changeUser(username, db string) {
 	ts.mp.auth.changeUser(username, db)
 }
 
-func (ts *testSuite) close() {
-	require.NoError(ts.t, ts.mc.close())
-	require.NoError(ts.t, ts.mp.close())
-	require.NoError(ts.t, ts.mb.close())
-}
-
-type tcpClient struct {
-	*pnet.PacketIO
-}
-
-func (c *tcpClient) connect(addr string) error {
-	cn, err := net.Dial("tcp", addr)
-	if err != nil {
-		return errors.New("dial error")
-	}
-	c.PacketIO = pnet.NewPacketIO(cn)
-	return nil
-}
-
-func (c *tcpClient) cleanup() error {
-	if c.PacketIO != nil {
-		err := c.PacketIO.Close()
-		c.PacketIO = nil
-		return err
-	}
-	return nil
-}
-
-func (c *tcpClient) close() error {
-	return c.cleanup()
-}
-
-type tcpServer struct {
-	*pnet.PacketIO
-	listener net.Listener
-}
-
-func (s *tcpServer) listen() error {
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
-	if err != nil {
-		return err
-	}
-	s.listener = listener
-	return nil
-}
-
-func (s *tcpServer) accept() error {
-	conn, err := s.listener.Accept()
-	if err != nil {
-		return err
-	}
-	s.PacketIO = pnet.NewPacketIO(conn)
-	return nil
-}
-
-func (s *tcpServer) serverAddr() string {
-	return s.listener.Addr().String()
-}
-
-func (s *tcpServer) cleanup() error {
-	var err error
-	if s.PacketIO != nil {
-		err = s.PacketIO.Close()
-		s.PacketIO = nil
-	}
-	return err
-}
-
-func (s *tcpServer) close() error {
-	var err1, err2 error
-	err1 = s.cleanup()
-	if s.listener != nil {
-		err2 = s.listener.Close()
-		s.listener = nil
-	}
-	if err1 != nil {
-		return err1
-	}
-	return err2
-}
-
 type mockClient struct {
-	tcpClient
 	// Inputs that assigned by the test and will be sent to the server.
 	*clientConfig
 	// Outputs that received from the server and will be checked by the test.
@@ -343,8 +276,8 @@ func newMockClient(cfg *clientConfig) *mockClient {
 	}
 }
 
-func (mc *mockClient) authenticate() error {
-	if _, err := mc.ReadPacket(); err != nil {
+func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
+	if _, err := packetIO.ReadPacket(); err != nil {
 		return err
 	}
 
@@ -356,22 +289,22 @@ func (mc *mockClient) authenticate() error {
 		resp, headerPos = pnet.MakeOldVersionHandshakeResponse(mc.username, mc.dbName, mc.authData, mc.capability)
 	}
 	if mc.capability&mysql.ClientSSL > 0 {
-		if err := mc.WritePacket(resp[:headerPos], true); err != nil {
+		if err := packetIO.WritePacket(resp[:headerPos], true); err != nil {
 			return err
 		}
-		if err := mc.UpgradeToClientTLS(mc.tlsConfig); err != nil {
+		if err := packetIO.UpgradeToClientTLS(mc.tlsConfig); err != nil {
 			return err
 		}
 	}
-	if err := mc.WritePacket(resp, true); err != nil {
+	if err := packetIO.WritePacket(resp, true); err != nil {
 		return err
 	}
-	return mc.writePassword()
+	return mc.writePassword(packetIO)
 }
 
-func (mc *mockClient) writePassword() error {
+func (mc *mockClient) writePassword(packetIO *pnet.PacketIO) error {
 	for {
-		serverPkt, err := mc.ReadPacket()
+		serverPkt, err := packetIO.ReadPacket()
 		if err != nil {
 			return err
 		}
@@ -383,7 +316,7 @@ func (mc *mockClient) writePassword() error {
 			mc.authSucceed = false
 			return nil
 		case mysql.AuthSwitchRequest, pnet.ShaCommand:
-			if err := mc.WritePacket(mc.authData, true); err != nil {
+			if err := packetIO.WritePacket(mc.authData, true); err != nil {
 				return err
 			}
 		}
@@ -391,8 +324,6 @@ func (mc *mockClient) writePassword() error {
 }
 
 type mockProxy struct {
-	tcpServer
-	tcpClient
 	*proxyConfig
 	auth *Authenticator
 }
@@ -404,35 +335,16 @@ func newMockProxy(cfg *testConfig) *mockProxy {
 	}
 }
 
-func (mp *mockProxy) authenticateFirstTime() error {
-	_, err := mp.auth.handshakeFirstTime(mp.tcpServer.PacketIO, mp.tcpClient.PacketIO, mp.frontendTLSConfig, mp.backendTLSConfig)
+func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
+	_, err := mp.auth.handshakeFirstTime(clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig)
 	return err
 }
 
-func (mp *mockProxy) authenticateSecondTime() error {
-	return mp.auth.handshakeSecondTime(mp.tcpClient.PacketIO, mp.sessionToken)
-}
-
-func (mp *mockProxy) cleanup() error {
-	err1 := mp.tcpClient.cleanup()
-	err2 := mp.tcpServer.cleanup()
-	if err1 != nil {
-		return err1
-	}
-	return err2
-}
-
-func (mp *mockProxy) close() error {
-	err1 := mp.tcpClient.close()
-	err2 := mp.tcpServer.close()
-	if err1 != nil {
-		return err1
-	}
-	return err2
+func (mp *mockProxy) authenticateSecondTime(_, backendIO *pnet.PacketIO) error {
+	return mp.auth.handshakeSecondTime(backendIO, mp.sessionToken)
 }
 
 type mockBackend struct {
-	tcpServer
 	// Inputs that assigned by the test and will be sent to the client.
 	*backendConfig
 	// Outputs that received from the client and will be checked by the test.
@@ -448,26 +360,26 @@ func newMockBackend(cfg *backendConfig) *mockBackend {
 	}
 }
 
-func (mb *mockBackend) authenticate() error {
+func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	var err error
 	// write initial handshake
-	if err = mb.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin); err != nil {
+	if err = packetIO.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin); err != nil {
 		return err
 	}
 	// read the response
 	var clientPkt []byte
-	if clientPkt, err = mb.ReadPacket(); err != nil {
+	if clientPkt, err = packetIO.ReadPacket(); err != nil {
 		return err
 	}
 	// upgrade to TLS
 	capability := binary.LittleEndian.Uint16(clientPkt[:2])
 	sslEnabled := uint32(capability)&mysql.ClientSSL > 0 && mb.capability&mysql.ClientSSL > 0
 	if sslEnabled {
-		if _, err = mb.UpgradeToServerTLS(mb.tlsConfig); err != nil {
+		if _, err = packetIO.UpgradeToServerTLS(mb.tlsConfig); err != nil {
 			return err
 		}
 		// read the response again
-		if clientPkt, err = mb.ReadPacket(); err != nil {
+		if clientPkt, err = packetIO.ReadPacket(); err != nil {
 			return err
 		}
 	}
@@ -477,34 +389,34 @@ func (mb *mockBackend) authenticate() error {
 	mb.authData = resp.AuthData
 	mb.attrs = resp.Attrs
 	// verify password
-	return mb.verifyPassword()
+	return mb.verifyPassword(packetIO)
 }
 
-func (mb *mockBackend) verifyPassword() error {
+func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO) error {
 	if mb.switchAuth {
 		var err error
-		if err = mb.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
+		if err = packetIO.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
 			return err
 		}
-		if mb.authData, err = mb.ReadPacket(); err != nil {
+		if mb.authData, err = packetIO.ReadPacket(); err != nil {
 			return err
 		}
 		switch mb.authPlugin {
 		case mysql.AuthCachingSha2Password:
-			if err = mb.WriteShaCommand(); err != nil {
+			if err = packetIO.WriteShaCommand(); err != nil {
 				return err
 			}
-			if mb.authData, err = mb.ReadPacket(); err != nil {
+			if mb.authData, err = packetIO.ReadPacket(); err != nil {
 				return err
 			}
 		}
 	}
 	if mb.authSucceed {
-		if err := mb.WriteOKPacket(); err != nil {
+		if err := packetIO.WriteOKPacket(); err != nil {
 			return err
 		}
 	} else {
-		if err := mb.WriteErrPacket(mysql.NewErr(mysql.ErrAccessDenied)); err != nil {
+		if err := packetIO.WriteErrPacket(mysql.NewErr(mysql.ErrAccessDenied)); err != nil {
 			return err
 		}
 	}
