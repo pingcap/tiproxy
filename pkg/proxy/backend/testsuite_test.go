@@ -203,9 +203,9 @@ type mockProxy struct {
 	auth *Authenticator
 }
 
-func newMockProxy(cfg *testConfig) *mockProxy {
+func newMockProxy(cfg *proxyConfig) *mockProxy {
 	return &mockProxy{
-		proxyConfig: &cfg.proxyConfig,
+		proxyConfig: cfg,
 		auth:        new(Authenticator),
 	}
 }
@@ -316,7 +316,7 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 		config.clientConfig.tlsConfig = tc.clientTLSConfig
 	})...)
 	ts.mb = newMockBackend(&cfg.backendConfig)
-	ts.mp = newMockProxy(cfg)
+	ts.mp = newMockProxy(&cfg.proxyConfig)
 	ts.mc = newMockClient(&cfg.clientConfig)
 	ts.tc = tc
 	clean := tc.newConn(t)

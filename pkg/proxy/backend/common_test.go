@@ -88,31 +88,31 @@ func (tc *tcpConnSuite) newConn(t *testing.T) func() {
 
 func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(*pnet.PacketIO) error, proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) (cerr, berr, perr error) {
 	var wg util.WaitGroupWrapper
-	wg.Run(func() {
-		if clientRunner != nil {
+	if clientRunner != nil {
+		wg.Run(func() {
 			cerr = clientRunner(tc.clientIO)
 			if cerr != nil {
 				require.NoError(t, tc.clientIO.Close())
 			}
-		}
-	})
-	wg.Run(func() {
-		if backendRunner != nil {
+		})
+	}
+	if backendRunner != nil {
+		wg.Run(func() {
 			berr = backendRunner(tc.backendIO)
 			if berr != nil {
 				require.NoError(t, tc.backendIO.Close())
 			}
-		}
-	})
-	wg.Run(func() {
-		if proxyRunner != nil {
+		})
+	}
+	if proxyRunner != nil {
+		wg.Run(func() {
 			perr = proxyRunner(tc.proxyCIO, tc.proxyBIO)
 			if perr != nil {
 				require.NoError(t, tc.proxyCIO.Close())
 				require.NoError(t, tc.proxyBIO.Close())
 			}
-		}
-	})
+		})
+	}
 	wg.Wait()
 	return
 }
