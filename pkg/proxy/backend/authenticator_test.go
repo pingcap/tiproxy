@@ -15,8 +15,6 @@
 package backend
 
 import (
-	"crypto/tls"
-	"net"
 	"strings"
 	"testing"
 
@@ -44,22 +42,17 @@ func TestTLSConnection(t *testing.T) {
 		},
 	}
 
+	tc := newTCPConnSuite(t)
 	cfgOverriders := getCfgCombinations(cfgs)
-	runTest(t, func(backendListener, proxyListener net.Listener, clientTLSConfig, backendTLSConfig *tls.Config) {
-		for _, cfgs := range cfgOverriders {
-			cfg := newTestConfig(cfgs...)
-			cfg.setTLSConfig(clientTLSConfig, backendTLSConfig)
-			ts := newTestSuite(t, cfg)
-			clientErr, proxyErr, backendErr := ts.authenticateFirstTime(backendListener, proxyListener)
-			if cfg.backendConfig.capability&mysql.ClientSSL == 0 {
-				require.ErrorContains(t, proxyErr, "must enable TLS")
-			} else {
-				require.NoError(t, clientErr)
-				require.NoError(t, proxyErr)
-				require.NoError(t, backendErr)
+	for _, cfgs := range cfgOverriders {
+		ts, clean := newTestSuite(t, tc, cfgs...)
+		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite, _, _, perr error) {
+			if ts.mb.backendConfig.capability&mysql.ClientSSL == 0 {
+				require.ErrorContains(t, perr, "must enable TLS")
 			}
-		}
-	})
+		})
+		clean()
+	}
 }
 
 func TestAuthPlugin(t *testing.T) {
@@ -114,18 +107,13 @@ func TestAuthPlugin(t *testing.T) {
 		},
 	}
 
+	tc := newTCPConnSuite(t)
 	cfgOverriders := getCfgCombinations(cfgs)
-	runTest(t, func(backendListener, proxyListener net.Listener, clientTLSConfig, backendTLSConfig *tls.Config) {
-		for _, cfgs := range cfgOverriders {
-			cfg := newTestConfig(cfgs...)
-			cfg.setTLSConfig(clientTLSConfig, backendTLSConfig)
-			ts := newTestSuite(t, cfg)
-			clientErr, proxyErr, backendErr := ts.authenticateFirstTime(backendListener, proxyListener)
-			require.NoError(t, clientErr)
-			require.NoError(t, proxyErr)
-			require.NoError(t, backendErr)
-		}
-	})
+	for _, cfgs := range cfgOverriders {
+		ts, clean := newTestSuite(t, tc, cfgs...)
+		ts.authenticateFirstTime(t, nil)
+		clean()
+	}
 }
 
 func TestCapability(t *testing.T) {
@@ -165,18 +153,13 @@ func TestCapability(t *testing.T) {
 		},
 	}
 
+	tc := newTCPConnSuite(t)
 	cfgOverriders := getCfgCombinations(cfgs)
-	runTest(t, func(backendListener, proxyListener net.Listener, clientTLSConfig, backendTLSConfig *tls.Config) {
-		for _, cfgs := range cfgOverriders {
-			cfg := newTestConfig(cfgs...)
-			cfg.setTLSConfig(clientTLSConfig, backendTLSConfig)
-			ts := newTestSuite(t, cfg)
-			clientErr, proxyErr, backendErr := ts.authenticateFirstTime(backendListener, proxyListener)
-			require.NoError(t, clientErr)
-			require.NoError(t, proxyErr)
-			require.NoError(t, backendErr)
-		}
-	})
+	for _, cfgs := range cfgOverriders {
+		ts, clean := newTestSuite(t, tc, cfgs...)
+		ts.authenticateFirstTime(t, nil)
+		clean()
+	}
 }
 
 func TestSecondHandshake(t *testing.T) {
@@ -193,20 +176,12 @@ func TestSecondHandshake(t *testing.T) {
 		},
 	}
 
-	runTest(t, func(backendListener, proxyListener net.Listener, clientTLSConfig, backendTLSConfig *tls.Config) {
-		for _, hook := range hooks {
-			cfg := newTestConfig()
-			cfg.setTLSConfig(clientTLSConfig, backendTLSConfig)
-			ts := newTestSuite(t, cfg)
-			clientErr, proxyErr, backendErr := ts.authenticateFirstTime(backendListener, proxyListener)
-			require.NoError(t, clientErr)
-			require.NoError(t, proxyErr)
-			require.NoError(t, backendErr)
-			// Call the hook after first handshake.
-			hook(ts)
-			proxyErr, backendErr = ts.authenticateSecondTime(backendListener, proxyListener)
-			require.NoError(t, proxyErr)
-			require.NoError(t, backendErr)
-		}
-	})
+	tc := newTCPConnSuite(t)
+	for _, hook := range hooks {
+		ts, clean := newTestSuite(t, tc)
+		ts.authenticateFirstTime(t, nil)
+		hook(ts)
+		ts.authenticateSecondTime(t, nil)
+		clean()
+	}
 }

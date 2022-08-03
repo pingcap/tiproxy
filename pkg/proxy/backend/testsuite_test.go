@@ -17,14 +17,11 @@ package backend
 import (
 	"crypto/tls"
 	"encoding/binary"
-	"net"
 	"strings"
 	"testing"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/TiProxy/pkg/util/security"
 	"github.com/pingcap/tidb/parser/mysql"
-	"github.com/pingcap/tidb/util"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,28 +49,6 @@ var (
 	mockAuthData = []byte("123456")
 	mockToken    = strings.Repeat("t", 512)
 )
-
-func createListener(t *testing.T) net.Listener {
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
-	require.NoError(t, err)
-	return listener
-}
-
-func connectToListener(t *testing.T, listener net.Listener) net.Conn {
-	conn, err := net.Dial("tcp", listener.Addr().String())
-	require.NoError(t, err)
-	return conn
-}
-
-// runTest creates listeners and tlsConfigs and runs the functions passed in.
-func runTest(t *testing.T, runnable func(backendListener, proxyListener net.Listener, clientTLSConfig, backendTLSConfig *tls.Config)) {
-	backendTLSConfig, clientTLSConfig, err := security.CreateTLSConfigForTest()
-	require.NoError(t, err)
-	backendListener, proxyListener := createListener(t), createListener(t)
-	runnable(backendListener, proxyListener, clientTLSConfig, backendTLSConfig)
-	require.NoError(t, backendListener.Close())
-	require.NoError(t, proxyListener.Close())
-}
 
 type testConfig struct {
 	clientConfig  clientConfig
@@ -163,106 +138,6 @@ func newTestConfig(overriders ...cfgOverrider) *testConfig {
 	return cfg
 }
 
-func (cfg *testConfig) setTLSConfig(clientTLSConfig, backendTLSConfig *tls.Config) {
-	cfg.clientConfig.tlsConfig = clientTLSConfig
-	cfg.proxyConfig.frontendTLSConfig = backendTLSConfig
-	cfg.proxyConfig.backendTLSConfig = clientTLSConfig
-	cfg.backendConfig.tlsConfig = backendTLSConfig
-}
-
-type testSuite struct {
-	t  *testing.T
-	mb *mockBackend
-	mp *mockProxy
-	mc *mockClient
-}
-
-func newTestSuite(t *testing.T, cfg *testConfig) *testSuite {
-	return &testSuite{
-		t:  t,
-		mb: newMockBackend(&cfg.backendConfig),
-		mp: newMockProxy(cfg),
-		mc: newMockClient(&cfg.clientConfig),
-	}
-}
-
-// run starts a mockClient, a mockProxy, and a mockBackend to run the functions passed in.
-func (ts *testSuite) run(backendListener, proxyListener net.Listener,
-	clientRunner, backendRunner func(*pnet.PacketIO) error,
-	proxyRunner func(_, _ *pnet.PacketIO) error) (clientErr, proxyErr, backendErr error) {
-	var wg util.WaitGroupWrapper
-	wg.Run(func() {
-		conn, err := backendListener.Accept()
-		require.NoError(ts.t, err)
-		packetIO := pnet.NewPacketIO(conn)
-		backendErr = backendRunner(packetIO)
-		require.NoError(ts.t, packetIO.Close())
-	})
-	wg.Run(func() {
-		clientConn, err := proxyListener.Accept()
-		require.NoError(ts.t, err)
-		clientIO := pnet.NewPacketIO(clientConn)
-		backendConn := connectToListener(ts.t, backendListener)
-		backendIO := pnet.NewPacketIO(backendConn)
-		proxyErr = proxyRunner(clientIO, backendIO)
-		require.NoError(ts.t, backendIO.Close())
-		require.NoError(ts.t, clientIO.Close())
-	})
-	wg.Run(func() {
-		conn := connectToListener(ts.t, proxyListener)
-		packetIO := pnet.NewPacketIO(conn)
-		clientErr = clientRunner(packetIO)
-		require.NoError(ts.t, packetIO.Close())
-	})
-	wg.Wait()
-	return
-}
-
-// The client connects to the backend through the proxy.
-func (ts *testSuite) authenticateFirstTime(backendListener, proxyListener net.Listener) (clientErr, proxyErr, backendErr error) {
-	clientErr, proxyErr, backendErr = ts.run(backendListener, proxyListener, ts.mc.authenticate, ts.mb.authenticate, ts.mp.authenticateFirstTime)
-	// Check the data received by client equals to the data sent from the server and vice versa.
-	if proxyErr == nil {
-		require.Equal(ts.t, ts.mb.authSucceed, ts.mc.authSucceed)
-		require.Equal(ts.t, ts.mc.username, ts.mb.username)
-		require.Equal(ts.t, ts.mc.dbName, ts.mb.db)
-		require.Equal(ts.t, ts.mc.authData, ts.mb.authData)
-		require.Equal(ts.t, ts.mc.attrs, ts.mb.attrs)
-	}
-	return
-}
-
-// The proxy reconnects to the proxy using preserved client data.
-// This must be called after authenticateFirstTime.
-func (ts *testSuite) authenticateSecondTime(backendListener, proxyListener net.Listener) (proxyErr, backendErr error) {
-	// The server won't request switching auth-plugin this time.
-	ts.mb.backendConfig.switchAuth = false
-	ts.mb.backendConfig.authSucceed = true
-	// The client doesn't do anything in the second handshake.
-	emptyClientRunner := func(*pnet.PacketIO) error {
-		return nil
-	}
-	_, proxyErr, backendErr = ts.run(backendListener, proxyListener, emptyClientRunner, ts.mb.authenticate, ts.mp.authenticateSecondTime)
-	// Check the data of the proxy equals to the data received by the server.
-	if proxyErr == nil {
-		require.Equal(ts.t, ts.mc.username, ts.mb.username)
-		require.Equal(ts.t, ts.mc.dbName, ts.mb.db)
-		require.Equal(ts.t, []byte(ts.mp.sessionToken), ts.mb.authData)
-	}
-	return
-}
-
-func (ts *testSuite) changeDB(db string) {
-	ts.mc.dbName = db
-	ts.mp.auth.updateCurrentDB(db)
-}
-
-func (ts *testSuite) changeUser(username, db string) {
-	ts.mc.username = username
-	ts.mc.dbName = db
-	ts.mp.auth.changeUser(username, db)
-}
-
 type mockClient struct {
 	// Inputs that assigned by the test and will be sent to the server.
 	*clientConfig
@@ -328,9 +203,9 @@ type mockProxy struct {
 	auth *Authenticator
 }
 
-func newMockProxy(cfg *testConfig) *mockProxy {
+func newMockProxy(cfg *proxyConfig) *mockProxy {
 	return &mockProxy{
-		proxyConfig: &cfg.proxyConfig,
+		proxyConfig: cfg,
 		auth:        new(Authenticator),
 	}
 }
@@ -421,4 +296,77 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO) error {
 		}
 	}
 	return nil
+}
+
+type testSuite struct {
+	tc *tcpConnSuite
+	mb *mockBackend
+	mp *mockProxy
+	mc *mockClient
+}
+
+type errChecker func(t *testing.T, ts *testSuite, cerr, berr, perr error)
+
+func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*testSuite, func()) {
+	ts := &testSuite{}
+	cfg := newTestConfig(append(overriders, func(config *testConfig) {
+		config.backendConfig.tlsConfig = tc.backendTLSConfig
+		config.proxyConfig.backendTLSConfig = tc.clientTLSConfig
+		config.proxyConfig.frontendTLSConfig = tc.backendTLSConfig
+		config.clientConfig.tlsConfig = tc.clientTLSConfig
+	})...)
+	ts.mb = newMockBackend(&cfg.backendConfig)
+	ts.mp = newMockProxy(&cfg.proxyConfig)
+	ts.mc = newMockClient(&cfg.clientConfig)
+	ts.tc = tc
+	clean := tc.newConn(t)
+	return ts, clean
+}
+
+func (ts *testSuite) changeDB(db string) {
+	ts.mc.dbName = db
+	ts.mp.auth.updateCurrentDB(db)
+}
+
+func (ts *testSuite) changeUser(username, db string) {
+	ts.mc.username = username
+	ts.mc.dbName = db
+	ts.mp.auth.changeUser(username, db)
+}
+
+// The client connects to the backend through the proxy.
+func (ts *testSuite) authenticateFirstTime(t *testing.T, ce errChecker) {
+	cerr, berr, perr := ts.tc.run(t, ts.mc.authenticate, ts.mb.authenticate, ts.mp.authenticateFirstTime)
+	if ce == nil {
+		require.NoError(t, berr)
+		require.NoError(t, cerr)
+		require.NoError(t, perr)
+		// Check the data received by client equals to the data sent from the server and vice versa.
+		require.Equal(t, ts.mb.authSucceed, ts.mc.authSucceed)
+		require.Equal(t, ts.mc.username, ts.mb.username)
+		require.Equal(t, ts.mc.dbName, ts.mb.db)
+		require.Equal(t, ts.mc.authData, ts.mb.authData)
+		require.Equal(t, ts.mc.attrs, ts.mb.attrs)
+	} else {
+		ce(t, ts, cerr, berr, perr)
+	}
+}
+
+// The proxy reconnects to the proxy using preserved client data.
+// This must be called after authenticateFirstTime.
+func (ts *testSuite) authenticateSecondTime(t *testing.T, ce errChecker) {
+	// The server won't request switching auth-plugin this time.
+	ts.mb.backendConfig.switchAuth = false
+	ts.mb.backendConfig.authSucceed = true
+	cerr, berr, perr := ts.tc.run(t, nil, ts.mb.authenticate, ts.mp.authenticateSecondTime)
+	if ce == nil {
+		require.NoError(t, berr)
+		require.NoError(t, cerr)
+		require.NoError(t, perr)
+		require.Equal(t, ts.mc.username, ts.mb.username)
+		require.Equal(t, ts.mc.dbName, ts.mb.db)
+		require.Equal(t, []byte(ts.mp.sessionToken), ts.mb.authData)
+	} else {
+		ce(t, ts, cerr, berr, perr)
+	}
 }
