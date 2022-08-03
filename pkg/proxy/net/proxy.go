@@ -267,9 +267,11 @@ func (p *PacketIO) parseProxyV2() (*Proxy, error) {
 	return m, nil
 }
 
-func (p *PacketIO) writeProxyV2(m *Proxy) error {
+// WriteProxyV2 should only be called at the beginning of connection, before any write operations.
+func (p *PacketIO) WriteProxyV2(m *Proxy) error {
 	if _, err := io.Copy(p.buf, bytes.NewReader(m.ToBytes())); err != nil {
 		return errors.WithStack(errors.Wrap(ErrWriteConn, err))
 	}
+	// according to the spec, we better flush to avoid server hanging
 	return p.Flush()
 }

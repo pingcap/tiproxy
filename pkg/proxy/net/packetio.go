@@ -45,6 +45,7 @@ import (
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/dbterror"
+	"go.uber.org/atomic"
 )
 
 var (
@@ -76,7 +77,7 @@ type PacketIO struct {
 	conn        net.Conn
 	buf         *bufio.ReadWriter
 	sequence    uint8
-	proxyInited bool
+	proxyInited *atomic.Bool
 	proxy       *Proxy
 }
 
@@ -91,12 +92,19 @@ func NewPacketIO(conn net.Conn) *PacketIO {
 			buf.Reader,
 		},
 		sequence: 0,
-		// TODO: enable proxy probe for clients only
-		// disable it by default now
-		proxyInited: true,
+		// TODO: disable it by default now
+		proxyInited: atomic.NewBool(true),
 		buf:         buf,
 	}
 	return p
+}
+
+// Proxy returned parsed proxy header from clients if any.
+func (p *PacketIO) Proxy() *Proxy {
+	if p.proxyInited.Load() {
+		return p.proxy
+	}
+	return nil
 }
 
 func (p *PacketIO) LocalAddr() net.Addr {
@@ -120,7 +128,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 
 	// probe proxy V2
 	refill := false
-	if !p.proxyInited {
+	if !p.proxyInited.Load() {
 		if bytes.Compare(header[:], proxyV2Magic[:4]) == 0 {
 			proxyHeader, err := p.parseProxyV2()
 			if err != nil {
@@ -131,7 +139,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 				refill = true
 			}
 		}
-		p.proxyInited = true
+		p.proxyInited.Store(true)
 	}
 
 	// refill mysql headers
