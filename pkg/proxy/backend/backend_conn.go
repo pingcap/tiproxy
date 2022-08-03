@@ -29,14 +29,7 @@ const (
 
 type connectionPhase byte
 
-type BackendConnection interface {
-	Addr() string
-	Connect() error
-	PacketIO() *pnet.PacketIO
-	Close() error
-}
-
-type BackendConnectionImpl struct {
+type BackendConnection struct {
 	pkt        *pnet.PacketIO // a helper to read and write data in packet format.
 	alloc      arena.Allocator
 	phase      connectionPhase
@@ -44,18 +37,18 @@ type BackendConnectionImpl struct {
 	address    string
 }
 
-func NewBackendConnectionImpl(address string) *BackendConnectionImpl {
-	return &BackendConnectionImpl{
+func NewBackendConnection(address string) *BackendConnection {
+	return &BackendConnection{
 		address: address,
 		alloc:   arena.NewAllocator(32 * 1024),
 	}
 }
 
-func (bc *BackendConnectionImpl) Addr() string {
+func (bc *BackendConnection) Addr() string {
 	return bc.address
 }
 
-func (bc *BackendConnectionImpl) Connect() error {
+func (bc *BackendConnection) Connect() error {
 	cn, err := net.DialTimeout("tcp", bc.address, DialTimeout)
 	if err != nil {
 		return errors.New("dial backend error")
@@ -66,11 +59,11 @@ func (bc *BackendConnectionImpl) Connect() error {
 	return nil
 }
 
-func (bc *BackendConnectionImpl) PacketIO() *pnet.PacketIO {
+func (bc *BackendConnection) PacketIO() *pnet.PacketIO {
 	return bc.pkt
 }
 
-func (bc *BackendConnectionImpl) Close() error {
+func (bc *BackendConnection) Close() error {
 	if bc.pkt != nil {
 		return bc.pkt.Close()
 	}

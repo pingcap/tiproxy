@@ -24,7 +24,6 @@ import (
 
 	"github.com/pingcap/TiProxy/pkg/config"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
-	"github.com/pingcap/TiProxy/pkg/proxy/driver"
 	"github.com/pingcap/TiProxy/pkg/util/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -146,7 +145,7 @@ func (mgr *NamespaceManager) Init(logger *zap.Logger, nss []*config.Namespace, c
 	return mgr.CommitNamespaces(nss, nil)
 }
 
-func (n *NamespaceManager) GetNamespace(nm string) (driver.Namespace, bool) {
+func (n *NamespaceManager) GetNamespace(nm string) (*Namespace, bool) {
 	n.RLock()
 	defer n.RUnlock()
 

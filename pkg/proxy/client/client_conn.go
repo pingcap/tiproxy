@@ -19,7 +19,8 @@ import (
 	"crypto/tls"
 	"net"
 
-	"github.com/pingcap/TiProxy/pkg/proxy/driver"
+	"github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/metrics"
@@ -29,35 +30,55 @@ import (
 	"go.uber.org/zap"
 )
 
-type ClientConnectionImpl struct {
+type ClientConnection struct {
 	serverTLSConfig  *tls.Config    // the TLS config to connect to clients.
 	backendTLSConfig *tls.Config    // the TLS config to connect to TiDB server.
 	pkt              *pnet.PacketIO // a helper to read and write data in packet format.
-	queryCtx         driver.QueryCtx
 	connectionID     uint64
+	nsmgr            *namespace.NamespaceManager
+	ns               *namespace.Namespace
+	connMgr          *backend.BackendConnManager
 }
 
-func NewClientConnectionImpl(queryCtx driver.QueryCtx, conn net.Conn, connectionID uint64, serverTLSConfig *tls.Config, backendTLSConfig *tls.Config) driver.ClientConnection {
+func NewClientConnection(conn net.Conn, connectionID uint64, serverTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager) *ClientConnection {
 	pkt := pnet.NewPacketIO(conn)
-	return &ClientConnectionImpl{
-		queryCtx:         queryCtx,
+	return &ClientConnection{
 		serverTLSConfig:  serverTLSConfig,
 		backendTLSConfig: backendTLSConfig,
 		pkt:              pkt,
 		connectionID:     connectionID,
+		nsmgr:            nsmgr,
+		connMgr:          bemgr,
 	}
 }
 
-func (cc *ClientConnectionImpl) ConnectionID() uint64 {
+func (cc *ClientConnection) ConnectionID() uint64 {
 	return cc.connectionID
 }
 
-func (cc *ClientConnectionImpl) Addr() string {
+func (cc *ClientConnection) Addr() string {
 	return cc.pkt.RemoteAddr().String()
 }
 
-func (cc *ClientConnectionImpl) Run(ctx context.Context) {
-	if err := cc.queryCtx.ConnectBackend(ctx, cc.pkt, cc.serverTLSConfig, cc.backendTLSConfig); err != nil {
+func (cc *ClientConnection) ConnectBackend(ctx context.Context) error {
+	ns, ok := cc.nsmgr.GetNamespace("")
+	if !ok {
+		return errors.New("failed to find a namespace")
+	}
+	cc.ns = ns
+	router := ns.GetRouter()
+	addr, err := router.Route(cc.connMgr)
+	if err != nil {
+		return err
+	}
+	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.serverTLSConfig, cc.backendTLSConfig); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cc *ClientConnection) Run(ctx context.Context) {
+	if err := cc.ConnectBackend(ctx); err != nil {
 		logutil.Logger(ctx).Info("new connection fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
 		metrics.HandShakeErrorCounter.Inc()
 		err = cc.Close()
@@ -72,7 +93,7 @@ func (cc *ClientConnectionImpl) Run(ctx context.Context) {
 	}
 }
 
-func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
+func (cc *ClientConnection) processMsg(ctx context.Context) error {
 	defer func() {
 		err := cc.Close()
 		terror.Log(errors.Trace(err))
@@ -83,7 +104,7 @@ func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = cc.queryCtx.ExecuteCmd(ctx, clientPkt, cc.pkt)
+		err = cc.connMgr.ExecuteCmd(ctx, clientPkt, cc.pkt)
 		if err != nil {
 			return err
 		}
@@ -95,9 +116,12 @@ func (cc *ClientConnectionImpl) processMsg(ctx context.Context) error {
 	}
 }
 
-func (cc *ClientConnectionImpl) Close() error {
+func (cc *ClientConnection) Close() error {
 	if err := cc.pkt.Close(); err != nil {
 		terror.Log(err)
 	}
-	return cc.queryCtx.Close()
+	if err := cc.connMgr.Close(); err != nil {
+		terror.Log(err)
+	}
+	return nil
 }

@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/pingcap/TiProxy/pkg/proxy/driver"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -47,15 +47,15 @@ type BackendConnManager struct {
 	connectionID   uint64
 	authenticator  *Authenticator
 	cmdProcessor   *CmdProcessor
-	eventReceiver  driver.ConnEventReceiver
-	backendConn    BackendConnection
+	eventReceiver  router.ConnEventReceiver
+	backendConn    *BackendConnection
 	processLock    sync.Mutex // to make redirecting and command processing exclusive
 	signalReceived chan struct{}
 	signal         unsafe.Pointer // type *signalRedirect
 	cancelFunc     context.CancelFunc
 }
 
-func NewBackendConnManager(connectionID uint64) driver.BackendConnManager {
+func NewBackendConnManager(connectionID uint64) *BackendConnManager {
 	return &BackendConnManager{
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
@@ -71,7 +71,7 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
-	mgr.backendConn = NewBackendConnectionImpl(serverAddr)
+	mgr.backendConn = NewBackendConnection(serverAddr)
 	if err := mgr.backendConn.Connect(); err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	return err
 }
 
-func (mgr *BackendConnManager) SetEventReceiver(receiver driver.ConnEventReceiver) {
+func (mgr *BackendConnManager) SetEventReceiver(receiver router.ConnEventReceiver) {
 	mgr.eventReceiver = receiver
 }
 
@@ -193,7 +193,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) (err error) {
 		return
 	}
 
-	newConn := NewBackendConnectionImpl(to)
+	newConn := NewBackendConnection(to)
 	if err = newConn.Connect(); err != nil {
 		return
 	}

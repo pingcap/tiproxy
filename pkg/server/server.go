@@ -27,9 +27,6 @@ import (
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	"github.com/pingcap/TiProxy/pkg/metrics"
-	"github.com/pingcap/TiProxy/pkg/proxy/backend"
-	"github.com/pingcap/TiProxy/pkg/proxy/client"
-	"github.com/pingcap/TiProxy/pkg/proxy/driver"
 	"github.com/pingcap/TiProxy/pkg/proxy/sqlserver"
 	"github.com/pingcap/TiProxy/pkg/server/api"
 	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
@@ -164,8 +161,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 
 	// setup proxy server
 	{
-		driverImpl := driver.NewDriverImpl(srv.NamespaceManager, client.NewClientConnectionImpl, backend.NewBackendConnManager)
-		srv.Proxy, err = sqlserver.NewSQLServer(cfg, driverImpl)
+		srv.Proxy, err = sqlserver.NewSQLServer(cfg, srv.NamespaceManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return

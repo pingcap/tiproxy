@@ -23,11 +23,16 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/TiProxy/pkg/proxy/driver"
 	"github.com/pingcap/tidb/util/logutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
+
+type Router interface {
+	Route(RedirectableConn) (string, error)
+	RedirectConnections() error
+	Close()
+}
 
 var (
 	ErrNoInstanceToSelect = errors.New("no instances to route")
@@ -46,6 +51,18 @@ const (
 	rebalanceMaxScoreRatio = 1.1
 )
 
+type ConnEventReceiver interface {
+	OnRedirectSucceed(from, to string, conn RedirectableConn)
+	OnRedirectFail(from, to string, conn RedirectableConn)
+	OnConnClosed(addr string, conn RedirectableConn)
+}
+
+type RedirectableConn interface {
+	SetEventReceiver(receiver ConnEventReceiver)
+	Redirect(addr string)
+	ConnectionID() uint64
+}
+
 type BackendWrapper struct {
 	BackendInfo
 	addr string
@@ -59,7 +76,7 @@ func (b *BackendWrapper) score() int {
 }
 
 type ConnWrapper struct {
-	driver.RedirectableConn
+	RedirectableConn
 	phase int
 }
 
@@ -88,7 +105,7 @@ func NewRandomRouter(cfg *config.BackendNamespace, client *clientv3.Client) (*Ra
 	return router, err
 }
 
-func (router *RandomRouter) Route(conn driver.RedirectableConn) (string, error) {
+func (router *RandomRouter) Route(conn RedirectableConn) (string, error) {
 	router.Lock()
 	defer router.Unlock()
 	be := router.backends.Back()
@@ -187,7 +204,7 @@ func (router *RandomRouter) lookupBackend(addr string, forward bool) *list.Eleme
 	return nil
 }
 
-func (router *RandomRouter) OnRedirectSucceed(from, to string, conn driver.RedirectableConn) {
+func (router *RandomRouter) OnRedirectSucceed(from, to string, conn RedirectableConn) {
 	router.Lock()
 	defer router.Unlock()
 	be := router.lookupBackend(to, false)
@@ -205,7 +222,7 @@ func (router *RandomRouter) OnRedirectSucceed(from, to string, conn driver.Redir
 	connWrapper.phase = phaseRedirectEnd
 }
 
-func (router *RandomRouter) OnRedirectFail(from, to string, conn driver.RedirectableConn) {
+func (router *RandomRouter) OnRedirectFail(from, to string, conn RedirectableConn) {
 	router.Lock()
 	defer router.Unlock()
 	be := router.lookupBackend(to, false)
@@ -231,7 +248,7 @@ func (router *RandomRouter) OnRedirectFail(from, to string, conn driver.Redirect
 	router.addConn(be, connWrapper)
 }
 
-func (router *RandomRouter) OnConnClosed(addr string, conn driver.RedirectableConn) {
+func (router *RandomRouter) OnConnClosed(addr string, conn RedirectableConn) {
 	connID := conn.ConnectionID()
 	router.Lock()
 	defer router.Unlock()
