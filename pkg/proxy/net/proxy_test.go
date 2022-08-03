@@ -28,7 +28,7 @@ func TestProxy(t *testing.T) {
 
 	testPipeConn(t,
 		func(t *testing.T, cli *PacketIO) {
-			require.NoError(t, cli.writeProxyV2(&Proxy{
+			require.NoError(t, cli.WriteProxyV2(&Proxy{
 				Version:    ProxyVersion2,
 				Command:    ProxyCommandLocal,
 				SrcAddress: tcpaddr,
