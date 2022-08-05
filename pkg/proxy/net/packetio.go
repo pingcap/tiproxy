@@ -209,7 +209,8 @@ func (p *PacketIO) WriteOnePacket(data []byte) (int, bool, error) {
 
 // WritePacket writes data without a header
 func (p *PacketIO) WritePacket(data []byte, flush bool) error {
-	for len(data) > 0 {
+	// The original data might be empty.
+	for {
 		n, more, err := p.WriteOnePacket(data)
 		if err != nil {
 			return err
@@ -217,10 +218,13 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) error {
 		data = data[n:]
 		// if the last packet ends with a length of MaxPayloadLen exactly
 		// we need another zero-length packet to end it
-		if len(data) == 0 && more {
-			if _, _, err := p.WriteOnePacket(nil); err != nil {
-				return err
+		if len(data) == 0 {
+			if more {
+				if _, _, err := p.WriteOnePacket(nil); err != nil {
+					return err
+				}
 			}
+			break
 		}
 	}
 	if flush {

@@ -18,7 +18,9 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/siddontang/go/hack"
 )
 
 const (
@@ -283,6 +285,20 @@ func MakeNewVersionHandshakeResponse(username, db, authPlugin string, collation 
 	return data[:pos], headerPos
 }
 
+// MakeChangeUser creates the data of COM_CHANGE_USER. It's only used for testing.
+func MakeChangeUser(username, db string, authData []byte) []byte {
+	length := 1 + len(username) + 1 + len(authData) + 1 + len(db) + 1
+	data := make([]byte, 0, length)
+	data = append(data, mysql.ComChangeUser)
+	data = append(data, []byte(username)...)
+	data = append(data, 0x00)
+	data = append(data, byte(len(authData)))
+	data = append(data, authData...)
+	data = append(data, []byte(db)...)
+	data = append(data, 0x00)
+	return data
+}
+
 // ParseChangeUser parses the data of COM_CHANGE_USER.
 func ParseChangeUser(data []byte) (username, db string) {
 	user, data := ParseNullTermString(data)
@@ -293,4 +309,35 @@ func ParseChangeUser(data []byte) (username, db string) {
 	db = string(dbName)
 	// TODO: attrs
 	return
+}
+
+// ParseOKPacket transforms an OK packet into a Result object.
+func ParseOKPacket(data []byte) *gomysql.Result {
+	var n int
+	var pos = 1
+	r := new(gomysql.Result)
+	r.AffectedRows, _, n = ParseLengthEncodedInt(data[pos:])
+	pos += n
+	r.InsertId, _, n = ParseLengthEncodedInt(data[pos:])
+	pos += n
+	r.Status = binary.LittleEndian.Uint16(data[pos:])
+	return r
+}
+
+// ParseErrorPacket transforms an error packet into a MyError object.
+func ParseErrorPacket(data []byte) error {
+	e := new(gomysql.MyError)
+	pos := 1
+	e.Code = binary.LittleEndian.Uint16(data[pos:])
+	pos += 2
+	pos++
+	e.State = hack.String(data[pos : pos+5])
+	pos += 5
+	e.Message = hack.String(data[pos:])
+	return e
+}
+
+// IsEOFPacket returns true if it's an EOF packet.
+func IsEOFPacket(data []byte) bool {
+	return data[0] == mysql.EOFHeader && len(data) <= 5
 }

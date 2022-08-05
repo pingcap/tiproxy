@@ -15,12 +15,9 @@
 package backend
 
 import (
-	"crypto/tls"
-	"encoding/binary"
 	"strings"
 	"testing"
 
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
@@ -48,38 +45,16 @@ var (
 	mockSalt     = []byte("01234567890123456789")
 	mockAuthData = []byte("123456")
 	mockToken    = strings.Repeat("t", 512)
+	mockCmdStr   = "str"
+	mockCmdInt   = 100
+	mockCmdByte  = byte(1)
+	mockCmdBytes = []byte("01234567890123456789")
 )
 
 type testConfig struct {
 	clientConfig  clientConfig
 	proxyConfig   proxyConfig
 	backendConfig backendConfig
-}
-
-type clientConfig struct {
-	tlsConfig  *tls.Config
-	capability uint32
-	username   string
-	dbName     string
-	collation  uint8
-	authPlugin string
-	authData   []byte
-	attrs      []byte
-}
-
-type proxyConfig struct {
-	frontendTLSConfig *tls.Config
-	backendTLSConfig  *tls.Config
-	sessionToken      string
-}
-
-type backendConfig struct {
-	tlsConfig   *tls.Config
-	capability  uint32
-	salt        []byte
-	authPlugin  string
-	switchAuth  bool
-	authSucceed bool
 }
 
 type cfgOverrider func(config *testConfig)
@@ -136,166 +111,6 @@ func newTestConfig(overriders ...cfgOverrider) *testConfig {
 		}
 	}
 	return cfg
-}
-
-type mockClient struct {
-	// Inputs that assigned by the test and will be sent to the server.
-	*clientConfig
-	// Outputs that received from the server and will be checked by the test.
-	authSucceed bool
-}
-
-func newMockClient(cfg *clientConfig) *mockClient {
-	return &mockClient{
-		clientConfig: cfg,
-	}
-}
-
-func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
-	if _, err := packetIO.ReadPacket(); err != nil {
-		return err
-	}
-
-	var resp []byte
-	var headerPos int
-	if mc.capability&mysql.ClientProtocol41 > 0 {
-		resp, headerPos = pnet.MakeNewVersionHandshakeResponse(mc.username, mc.dbName, mc.authPlugin, mc.collation, mc.authData, mc.attrs, mc.capability)
-	} else {
-		resp, headerPos = pnet.MakeOldVersionHandshakeResponse(mc.username, mc.dbName, mc.authData, mc.capability)
-	}
-	if mc.capability&mysql.ClientSSL > 0 {
-		if err := packetIO.WritePacket(resp[:headerPos], true); err != nil {
-			return err
-		}
-		if err := packetIO.UpgradeToClientTLS(mc.tlsConfig); err != nil {
-			return err
-		}
-	}
-	if err := packetIO.WritePacket(resp, true); err != nil {
-		return err
-	}
-	return mc.writePassword(packetIO)
-}
-
-func (mc *mockClient) writePassword(packetIO *pnet.PacketIO) error {
-	for {
-		serverPkt, err := packetIO.ReadPacket()
-		if err != nil {
-			return err
-		}
-		switch serverPkt[0] {
-		case mysql.OKHeader:
-			mc.authSucceed = true
-			return nil
-		case mysql.ErrHeader:
-			mc.authSucceed = false
-			return nil
-		case mysql.AuthSwitchRequest, pnet.ShaCommand:
-			if err := packetIO.WritePacket(mc.authData, true); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-type mockProxy struct {
-	*proxyConfig
-	auth *Authenticator
-}
-
-func newMockProxy(cfg *proxyConfig) *mockProxy {
-	return &mockProxy{
-		proxyConfig: cfg,
-		auth:        new(Authenticator),
-	}
-}
-
-func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	_, err := mp.auth.handshakeFirstTime(clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig)
-	return err
-}
-
-func (mp *mockProxy) authenticateSecondTime(_, backendIO *pnet.PacketIO) error {
-	return mp.auth.handshakeSecondTime(backendIO, mp.sessionToken)
-}
-
-type mockBackend struct {
-	// Inputs that assigned by the test and will be sent to the client.
-	*backendConfig
-	// Outputs that received from the client and will be checked by the test.
-	username string
-	authData []byte
-	db       string
-	attrs    []byte
-}
-
-func newMockBackend(cfg *backendConfig) *mockBackend {
-	return &mockBackend{
-		backendConfig: cfg,
-	}
-}
-
-func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
-	var err error
-	// write initial handshake
-	if err = packetIO.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin); err != nil {
-		return err
-	}
-	// read the response
-	var clientPkt []byte
-	if clientPkt, err = packetIO.ReadPacket(); err != nil {
-		return err
-	}
-	// upgrade to TLS
-	capability := binary.LittleEndian.Uint16(clientPkt[:2])
-	sslEnabled := uint32(capability)&mysql.ClientSSL > 0 && mb.capability&mysql.ClientSSL > 0
-	if sslEnabled {
-		if _, err = packetIO.UpgradeToServerTLS(mb.tlsConfig); err != nil {
-			return err
-		}
-		// read the response again
-		if clientPkt, err = packetIO.ReadPacket(); err != nil {
-			return err
-		}
-	}
-	resp := pnet.ParseHandshakeResponse(clientPkt)
-	mb.username = resp.User
-	mb.db = resp.DB
-	mb.authData = resp.AuthData
-	mb.attrs = resp.Attrs
-	// verify password
-	return mb.verifyPassword(packetIO)
-}
-
-func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO) error {
-	if mb.switchAuth {
-		var err error
-		if err = packetIO.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
-			return err
-		}
-		if mb.authData, err = packetIO.ReadPacket(); err != nil {
-			return err
-		}
-		switch mb.authPlugin {
-		case mysql.AuthCachingSha2Password:
-			if err = packetIO.WriteShaCommand(); err != nil {
-				return err
-			}
-			if mb.authData, err = packetIO.ReadPacket(); err != nil {
-				return err
-			}
-		}
-	}
-	if mb.authSucceed {
-		if err := packetIO.WriteOKPacket(); err != nil {
-			return err
-		}
-	} else {
-		if err := packetIO.WriteErrPacket(mysql.NewErr(mysql.ErrAccessDenied)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 type testSuite struct {
@@ -369,4 +184,11 @@ func (ts *testSuite) authenticateSecondTime(t *testing.T, ce errChecker) {
 	} else {
 		ce(t, ts, cerr, berr, perr)
 	}
+}
+
+func (ts *testSuite) executeCmd(t *testing.T) {
+	cerr, berr, perr := ts.tc.run(t, ts.mc.request, ts.mb.respond, ts.mp.processCmd)
+	require.NoError(t, berr)
+	require.NoError(t, cerr)
+	require.NoError(t, perr)
 }

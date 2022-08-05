@@ -77,6 +77,9 @@ func TestPacketIO(t *testing.T) {
 			// send anything
 			require.NoError(t, cli.WritePacket(expectMsg, true))
 
+			// send empty
+			require.NoError(t, cli.WritePacket([]byte{}, true))
+
 			// send more than max payload
 			require.NoError(t, cli.WritePacket(make([]byte, mysql.MaxPayloadLen+212), true))
 			require.NoError(t, cli.WritePacket(make([]byte, mysql.MaxPayloadLen), true))
@@ -104,15 +107,23 @@ func TestPacketIO(t *testing.T) {
 			// receive "test"
 			msg, err = srv.ReadPacket()
 			require.NoError(t, err)
-			require.Equal(t, msg, expectMsg)
+			require.Equal(t, expectMsg, msg)
+
+			// receive empty
+			msg, err = srv.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, []byte(nil), msg)
 
 			// receive more than max payload
-			_, err = srv.ReadPacket()
+			msg, err = srv.ReadPacket()
 			require.NoError(t, err)
-			_, err = srv.ReadPacket()
+			require.Equal(t, mysql.MaxPayloadLen+212, len(msg))
+			msg, err = srv.ReadPacket()
 			require.NoError(t, err)
-			_, err = srv.ReadPacket()
+			require.Equal(t, mysql.MaxPayloadLen, len(msg))
+			msg, err = srv.ReadPacket()
 			require.NoError(t, err)
+			require.Equal(t, mysql.MaxPayloadLen*2, len(msg))
 
 			// send handshake
 			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], mysql.AuthNativePassword))

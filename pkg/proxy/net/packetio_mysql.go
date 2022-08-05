@@ -115,3 +115,13 @@ func (p *PacketIO) WriteOKPacket() error {
 	data = append(data, 0, 0)
 	return p.WritePacket(data, true)
 }
+
+// WriteEOFPacket writes an EOF packet. It's only for testing.
+func (p *PacketIO) WriteEOFPacket() error {
+	data := make([]byte, 0, 5)
+	data = append(data, mysql.EOFHeader)
+	data = append(data, 0, 0)
+	// It's compatible with both ClientProtocol41 enabled and disabled.
+	data = DumpUint16(data, mysql.ServerStatusAutocommit)
+	return p.WritePacket(data, true)
+}
