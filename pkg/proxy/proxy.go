@@ -33,11 +33,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	timeWheelUnit       = time.Second * 1
-	timeWheelBucketsNum = 3600
-)
-
 type serverState struct {
 	sync.RWMutex
 	tcpKeepAlive   bool
@@ -117,8 +112,14 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	s.mu.Lock()
 	conns := uint64(len(s.mu.clients))
 	maxConns := s.mu.maxConnections
-
 	tcpKeepAlive := s.mu.tcpKeepAlive
+
+	// 'maxConns == 0' => unlimited connections
+	if maxConns != 0 && maxConns <= conns {
+		s.mu.Unlock()
+		s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+		return
+	}
 
 	var connID uint64
 	for {
@@ -128,6 +129,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 			break
 		}
 	}
+
 	logger := s.logger.With(zap.Uint64("connID", connID))
 	clientConn := client.NewClientConnection(logger, conn, s.serverTLSConfig, s.clusterTLSConfig, s.nsmgr, backend.NewBackendConnManager(connID))
 	s.mu.clients[connID] = clientConn
@@ -144,12 +146,6 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		logger.Info("connection closed", zap.Error(clientConn.Close()))
 		metrics.ConnGauge.Dec()
 	}()
-
-	// 'maxConns == 0' => unlimited connections
-	if maxConns != 0 && maxConns <= conns {
-		logger.Warn("too many connections", zap.Uint64("max connections", maxConns))
-		return
-	}
 
 	if tcpKeepAlive {
 		if tcpConn, ok := conn.(*net.TCPConn); ok {
