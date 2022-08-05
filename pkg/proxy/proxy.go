@@ -17,10 +17,8 @@ package proxy
 import (
 	"context"
 	"crypto/tls"
-	"math/rand"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/pingcap/TiProxy/pkg/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
@@ -36,6 +34,7 @@ import (
 type serverState struct {
 	sync.RWMutex
 	tcpKeepAlive   bool
+	connID         uint64
 	maxConnections uint64
 	clients        map[uint64]*client.ClientConnection
 }
@@ -44,7 +43,6 @@ type SQLServer struct {
 	listener         net.Listener
 	logger           *zap.Logger
 	nsmgr            *mgrns.NamespaceManager
-	connIDGen        *rand.Rand
 	serverTLSConfig  *tls.Config
 	clusterTLSConfig *tls.Config
 	wg               waitgroup.WaitGroup
@@ -62,9 +60,9 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Securi
 		mu: serverState{
 			tcpKeepAlive:   cfg.TCPKeepAlive,
 			maxConnections: cfg.MaxConnections,
+			connID:         0,
 			clients:        make(map[uint64]*client.ClientConnection),
 		},
-		connIDGen: rand.New(rand.NewSource(time.Now().Unix())),
 	}
 
 	if s.serverTLSConfig, err = security.CreateServerTLSConfig(scfg.Server.CA, scfg.Server.Key, scfg.Server.Cert); err != nil {
@@ -121,15 +119,8 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	var connID uint64
-	for {
-		connID = s.connIDGen.Uint64()
-		_, ok := s.mu.clients[connID]
-		if !ok {
-			break
-		}
-	}
-
+	connID := s.mu.connID
+	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID))
 	clientConn := client.NewClientConnection(logger, conn, s.serverTLSConfig, s.clusterTLSConfig, s.nsmgr, backend.NewBackendConnManager(connID))
 	s.mu.clients[connID] = clientConn
