@@ -75,7 +75,6 @@ func TestSimpleCommands(t *testing.T) {
 	tc := newTCPConnSuite(t)
 	runTest := func(cfgs ...cfgOverrider) {
 		ts, clean := newTestSuite(t, tc, cfgs...)
-		println(ts.mc.cmd, ts.mb.respondType, ts.mb.columns, ts.mb.rows)
 		// Only verify that it won't hang or report errors.
 		ts.executeCmd(t)
 		clean()
