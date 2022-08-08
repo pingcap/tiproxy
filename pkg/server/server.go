@@ -27,10 +27,10 @@ import (
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	"github.com/pingcap/TiProxy/pkg/metrics"
-	"github.com/pingcap/TiProxy/pkg/proxy/sqlserver"
+	"github.com/pingcap/TiProxy/pkg/proxy"
 	"github.com/pingcap/TiProxy/pkg/server/api"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
-	"github.com/pingcap/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/atomic"
@@ -38,9 +38,6 @@ import (
 )
 
 type Server struct {
-	// err chan
-	errch chan error
-
 	// managers
 	ConfigManager    *mgrcfg.ConfigManager
 	NamespaceManager *mgrns.NamespaceManager
@@ -50,14 +47,13 @@ type Server struct {
 	Etcd *embed.Etcd
 
 	// L7 proxy
-	Proxy *sqlserver.SQLServer
+	Proxy *proxy.SQLServer
 }
 
 func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, namespaceFiles string) (srv *Server, err error) {
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
-		errch:            make(chan error, 4),
 	}
 
 	ready := atomic.NewBool(false)
@@ -161,44 +157,42 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 
 	// setup proxy server
 	{
-		srv.Proxy, err = sqlserver.NewSQLServer(cfg, srv.NamespaceManager)
+		srv.Proxy, err = proxy.NewSQLServer(logger.Named("proxy"), cfg.Proxy, cfg.Security, srv.NamespaceManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
 		}
 
 		go func() {
-			if err := srv.Proxy.Run(ctx); err != nil {
-				srv.errch <- err
-			}
 		}()
 	}
 
 	ready.Toggle()
+
+	err = srv.Proxy.Run(ctx)
 	return
 }
 
-func (s *Server) ErrChan() <-chan error {
-	return s.errch
-}
-
-func (s *Server) Close() {
+func (s *Server) Close() error {
+	var errs []error
 	if s.Proxy != nil {
-		s.Proxy.Close()
+		if err := s.Proxy.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if s.NamespaceManager != nil {
 		if err := s.NamespaceManager.Close(); err != nil {
-			s.errch <- err
+			errs = append(errs, err)
 		}
 	}
 	if s.ConfigManager != nil {
 		if err := s.ConfigManager.Close(); err != nil {
-			s.errch <- err
+			errs = append(errs, err)
 		}
 	}
 	if s.ObserverClient != nil {
 		if err := s.ObserverClient.Close(); err != nil {
-			s.errch <- err
+			errs = append(errs, err)
 		}
 	}
 	if s.Etcd != nil {
@@ -209,12 +203,11 @@ func (s *Server) Close() {
 				if !ok {
 					break
 				}
-				s.errch <- err
+				errs = append(errs, err)
 			}
 		})
 		s.Etcd.Close()
 		wg.Wait()
 	}
-	close(s.errch)
-	return
+	return errors.Collect(ErrCloseServer, errs...)
 }

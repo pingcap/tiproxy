@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/TiProxy/pkg/config"
 	"github.com/pingcap/TiProxy/pkg/server"
 	"github.com/pingcap/TiProxy/pkg/util/cmd"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -74,22 +73,8 @@ func main() {
 
 		<-cmd.Context().Done()
 
-		var wg waitgroup.WaitGroup
-		var errs []zap.Field
-		wg.Run(func() {
-			for {
-				err, ok := <-srv.ErrChan()
-				if !ok {
-					break
-				}
-				errs = append(errs, zap.Error(err))
-			}
-		})
-		srv.Close()
-		wg.Wait()
-
-		if len(errs) > 0 {
-			logger.Error("shutdown with errors", errs...)
+		if err = srv.Close(); err != nil {
+			logger.Error("shutdown with errors", zap.Error(err))
 		} else {
 			logger.Info("gracefully shutdown")
 		}

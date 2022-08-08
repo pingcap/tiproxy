@@ -18,12 +18,12 @@ import (
 	"encoding/binary"
 	"strings"
 
+	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/hack"
-	gomysql "github.com/siddontang/go-mysql/mysql"
 )
 
 const (
