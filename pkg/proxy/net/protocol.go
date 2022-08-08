@@ -110,6 +110,13 @@ func DumpLengthEncodedInt(buffer []byte, n uint64) []byte {
 	return buffer
 }
 
+// DumpLengthEncodedString dumps string<int>.
+func DumpLengthEncodedString(buffer []byte, bytes []byte) []byte {
+	buffer = DumpLengthEncodedInt(buffer, uint64(len(bytes)))
+	buffer = append(buffer, bytes...)
+	return buffer
+}
+
 func DumpUint32(buffer []byte, n uint32) []byte {
 	buffer = append(buffer, byte(n))
 	buffer = append(buffer, byte(n>>8))
