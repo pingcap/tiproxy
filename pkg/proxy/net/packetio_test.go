@@ -70,6 +70,7 @@ func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T,
 
 func TestPacketIO(t *testing.T) {
 	expectMsg := []byte("test")
+	pktLengths := []int{0, mysql.MaxPayloadLen + 212, mysql.MaxPayloadLen, mysql.MaxPayloadLen * 2}
 	testPipeConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			var err error
@@ -77,13 +78,9 @@ func TestPacketIO(t *testing.T) {
 			// send anything
 			require.NoError(t, cli.WritePacket(expectMsg, true))
 
-			// send empty
-			require.NoError(t, cli.WritePacket([]byte{}, true))
-
-			// send more than max payload
-			require.NoError(t, cli.WritePacket(make([]byte, mysql.MaxPayloadLen+212), true))
-			require.NoError(t, cli.WritePacket(make([]byte, mysql.MaxPayloadLen), true))
-			require.NoError(t, cli.WritePacket(make([]byte, mysql.MaxPayloadLen*2), true))
+			for _, l := range pktLengths {
+				require.NoError(t, cli.WritePacket(make([]byte, l), true))
+			}
 
 			// skip handshake
 			_, err = cli.ReadPacket()
@@ -109,21 +106,11 @@ func TestPacketIO(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, expectMsg, msg)
 
-			// receive empty
-			msg, err = srv.ReadPacket()
-			require.NoError(t, err)
-			require.Equal(t, []byte(nil), msg)
-
-			// receive more than max payload
-			msg, err = srv.ReadPacket()
-			require.NoError(t, err)
-			require.Equal(t, mysql.MaxPayloadLen+212, len(msg))
-			msg, err = srv.ReadPacket()
-			require.NoError(t, err)
-			require.Equal(t, mysql.MaxPayloadLen, len(msg))
-			msg, err = srv.ReadPacket()
-			require.NoError(t, err)
-			require.Equal(t, mysql.MaxPayloadLen*2, len(msg))
+			for _, l := range pktLengths {
+				msg, err = srv.ReadPacket()
+				require.NoError(t, err)
+				require.Equal(t, l, len(msg))
+			}
 
 			// send handshake
 			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], mysql.AuthNativePassword))

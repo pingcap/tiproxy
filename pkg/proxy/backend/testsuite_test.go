@@ -186,6 +186,7 @@ func (ts *testSuite) authenticateSecondTime(t *testing.T, ce errChecker) {
 	}
 }
 
+// Test forwarding commands between the client and the server.
 func (ts *testSuite) executeCmd(t *testing.T) {
 	cerr, berr, perr := ts.tc.run(t, ts.mc.request, ts.mb.respond, ts.mp.processCmd)
 	require.NoError(t, berr)
