@@ -62,6 +62,8 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 		return cp.forwardQueryCmd(clientIO, backendIO, request)
 	case mysql.ComStmtClose:
 		return cp.forwardCloseCmd(request)
+	case mysql.ComStmtSendLongData:
+		return cp.forwardSendLongDataCmd(request)
 	case mysql.ComChangeUser:
 		return cp.forwardChangeUserCmd(clientIO, backendIO, request)
 	case mysql.ComStatistics:
@@ -131,7 +133,7 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) (s
 		succeed = true
 	}
 	for i := 0; i < expectedEOFNum; i++ {
-		// The server status in EOF packets is always 0, so ignore it.
+		// Ignore this status because PREPARE doesn't affect status.
 		if _, err = forwardUntilEOF(clientIO, backendIO); err != nil {
 			return
 		}
@@ -164,12 +166,8 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 		var serverStatus uint16
 		switch response[0] {
 		case mysql.OKHeader:
-			if err = clientIO.Flush(); err != nil {
-				return false, err
-			}
 			rs := cp.handleOKPacket(request, response)
-			serverStatus = rs.Status
-			succeed = true
+			serverStatus, succeed, err = rs.Status, true, clientIO.Flush()
 		case mysql.ErrHeader:
 			// Subsequent statements won't be executed even if it's a multi-statement.
 			return false, clientIO.Flush()
@@ -205,8 +203,7 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 		}
 	}
 	var response []byte
-	response, err = forwardOnePacket(clientIO, backendIO, true)
-	if err != nil {
+	if response, err = forwardOnePacket(clientIO, backendIO, true); err != nil {
 		return
 	}
 	if response[0] == mysql.OKHeader {
@@ -233,6 +230,7 @@ func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, req
 			if response, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
 				return
 			}
+			// An error may occur when the backend writes rows.
 			if response[0] == mysql.ErrHeader {
 				return 0, false, clientIO.Flush()
 			}
@@ -247,6 +245,12 @@ func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, req
 
 func (cp *CmdProcessor) forwardCloseCmd(request []byte) (succeed bool, err error) {
 	// No packet is sent to the client for COM_STMT_CLOSE.
+	cp.updatePrepStmtStatus(request, 0)
+	return true, nil
+}
+
+func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) (succeed bool, err error) {
+	// No packet is sent to the client for COM_STMT_SEND_LONG_DATA.
 	cp.updatePrepStmtStatus(request, 0)
 	return true, nil
 }

@@ -15,6 +15,7 @@
 package backend
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -120,7 +121,7 @@ type testSuite struct {
 	mc *mockClient
 }
 
-type errChecker func(t *testing.T, ts *testSuite, cerr, berr, perr error)
+type checker func(t *testing.T, ts *testSuite)
 
 func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*testSuite, func()) {
 	ts := &testSuite{}
@@ -138,6 +139,13 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 	return ts, clean
 }
 
+func (ts *testSuite) setConfig(overriders ...cfgOverrider) {
+	cfg := newTestConfig(overriders...)
+	ts.mb.backendConfig = &cfg.backendConfig
+	ts.mp.proxyConfig = &cfg.proxyConfig
+	ts.mc.clientConfig = &cfg.clientConfig
+}
+
 func (ts *testSuite) changeDB(db string) {
 	ts.mc.dbName = db
 	ts.mp.auth.updateCurrentDB(db)
@@ -150,12 +158,12 @@ func (ts *testSuite) changeUser(username, db string) {
 }
 
 // The client connects to the backend through the proxy.
-func (ts *testSuite) authenticateFirstTime(t *testing.T, ce errChecker) {
-	cerr, berr, perr := ts.tc.run(t, ts.mc.authenticate, ts.mb.authenticate, ts.mp.authenticateFirstTime)
-	if ce == nil {
-		require.NoError(t, berr)
-		require.NoError(t, cerr)
-		require.NoError(t, perr)
+func (ts *testSuite) authenticateFirstTime(t *testing.T, c checker) {
+	ts.mc.err, ts.mb.err, ts.mp.err = ts.tc.run(t, ts.mc.authenticate, ts.mb.authenticate, ts.mp.authenticateFirstTime)
+	if c == nil {
+		require.NoError(t, ts.mc.err)
+		require.NoError(t, ts.mb.err)
+		require.NoError(t, ts.mp.err)
 		// Check the data received by client equals to the data sent from the server and vice versa.
 		require.Equal(t, ts.mb.authSucceed, ts.mc.authSucceed)
 		require.Equal(t, ts.mc.username, ts.mb.username)
@@ -163,33 +171,73 @@ func (ts *testSuite) authenticateFirstTime(t *testing.T, ce errChecker) {
 		require.Equal(t, ts.mc.authData, ts.mb.authData)
 		require.Equal(t, ts.mc.attrs, ts.mb.attrs)
 	} else {
-		ce(t, ts, cerr, berr, perr)
+		c(t, ts)
 	}
 }
 
 // The proxy reconnects to the proxy using preserved client data.
 // This must be called after authenticateFirstTime.
-func (ts *testSuite) authenticateSecondTime(t *testing.T, ce errChecker) {
+func (ts *testSuite) authenticateSecondTime(t *testing.T, c checker) {
 	// The server won't request switching auth-plugin this time.
 	ts.mb.backendConfig.switchAuth = false
 	ts.mb.backendConfig.authSucceed = true
-	cerr, berr, perr := ts.tc.run(t, nil, ts.mb.authenticate, ts.mp.authenticateSecondTime)
-	if ce == nil {
-		require.NoError(t, berr)
-		require.NoError(t, cerr)
-		require.NoError(t, perr)
+	ts.mc.err, ts.mb.err, ts.mp.err = ts.tc.run(t, nil, ts.mb.authenticate, ts.mp.authenticateSecondTime)
+	if c == nil {
+		require.NoError(t, ts.mc.err)
+		require.NoError(t, ts.mb.err)
+		require.NoError(t, ts.mp.err)
 		require.Equal(t, ts.mc.username, ts.mb.username)
 		require.Equal(t, ts.mc.dbName, ts.mb.db)
 		require.Equal(t, []byte(ts.mp.sessionToken), ts.mb.authData)
 	} else {
-		ce(t, ts, cerr, berr, perr)
+		c(t, ts)
 	}
 }
 
 // Test forwarding commands between the client and the server.
-func (ts *testSuite) executeCmd(t *testing.T) {
-	cerr, berr, perr := ts.tc.run(t, ts.mc.request, ts.mb.respond, ts.mp.processCmd)
-	require.NoError(t, berr)
-	require.NoError(t, cerr)
-	require.NoError(t, perr)
+func (ts *testSuite) executeCmd(t *testing.T, c checker) {
+	ts.mc.err, ts.mb.err, ts.mp.err = ts.tc.run(t, ts.mc.request, ts.mb.respond, ts.mp.processCmd)
+	if c == nil {
+		require.NoError(t, ts.mc.err)
+		require.NoError(t, ts.mb.err)
+		require.NoError(t, ts.mp.err)
+		// Ensure all the packets are forwarded.
+		msg := fmt.Sprintf("cmd:%d responseType:%d", ts.mc.cmd, ts.mb.respondType)
+		require.Equal(t, ts.tc.backendIO.GetSequence(), ts.tc.clientIO.GetSequence(), msg)
+	} else {
+		c(t, ts)
+	}
+}
+
+// Execute multiple commands at once to reuse the same ComProcessor.
+func (ts *testSuite) executeMultiCmd(t *testing.T, cfgs []cfgOverrider, c checker) {
+	for _, cfg := range cfgs {
+		ts.setConfig(cfg)
+		ts.mc.err, ts.mb.err, ts.mp.err = ts.tc.run(t, ts.mc.request, ts.mb.respond, ts.mp.processCmd)
+		require.NoError(t, ts.mc.err)
+		require.NoError(t, ts.mb.err)
+		require.NoError(t, ts.mp.err)
+		// Ensure all the packets are forwarded.
+		msg := fmt.Sprintf("cmd:%d responseType:%d", ts.mc.cmd, ts.mb.respondType)
+		require.Equal(t, ts.tc.backendIO.GetSequence(), ts.tc.clientIO.GetSequence(), msg)
+	}
+	if c != nil {
+		c(t, ts)
+	}
+}
+
+// Test querying from the backend directly.
+func (ts *testSuite) query(t *testing.T, c checker) {
+	ts.mc.err, ts.mb.err, ts.mp.err = ts.tc.run(t, nil, ts.mb.respond, ts.mp.directQuery)
+	if c == nil {
+		require.NoError(t, ts.mc.err)
+		require.NoError(t, ts.mb.err)
+		require.NoError(t, ts.mp.err)
+		if ts.mb.respondType == responseTypeResultSet {
+			require.Equal(t, ts.mb.columns, len(ts.mp.rs.Fields))
+			require.Equal(t, ts.mb.rows, len(ts.mp.rs.RowDatas))
+		}
+	} else {
+		c(t, ts)
+	}
 }

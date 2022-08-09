@@ -35,6 +35,8 @@ type backendConfig struct {
 	respondType respondType
 	columns     int
 	rows        int
+	params      int
+	status      uint16
 }
 
 type mockBackend struct {
@@ -45,6 +47,7 @@ type mockBackend struct {
 	authData []byte
 	db       string
 	attrs    []byte
+	err      error
 }
 
 func newMockBackend(cfg *backendConfig) *mockBackend {
@@ -105,7 +108,7 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO) error {
 		}
 	}
 	if mb.authSucceed {
-		if err := packetIO.WriteOKPacket(); err != nil {
+		if err := packetIO.WriteOKPacket(mb.status); err != nil {
 			return err
 		}
 	} else {
@@ -117,12 +120,13 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO) error {
 }
 
 func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
+	packetIO.ResetSequence()
 	if _, err := packetIO.ReadPacket(); err != nil {
 		return err
 	}
 	switch mb.respondType {
 	case responseTypeOK:
-		return packetIO.WriteOKPacket()
+		return packetIO.WriteOKPacket(mb.status)
 	case responseTypeErr:
 		return packetIO.WriteErrPacket(mysql.NewErr(mysql.ErrUnknown))
 	case responseTypeResultSet:
@@ -134,7 +138,7 @@ func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
 	case responseTypeString:
 		return packetIO.WritePacket([]byte(mockCmdStr), true)
 	case responseTypeEOF:
-		return packetIO.WriteEOFPacket()
+		return packetIO.WriteEOFPacket(mb.status)
 	case responseTypeSwitchRequest:
 		if err := packetIO.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
 			return err
@@ -142,7 +146,11 @@ func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
 		if _, err := packetIO.ReadPacket(); err != nil {
 			return err
 		}
-		return packetIO.WriteOKPacket()
+		return packetIO.WriteOKPacket(mb.status)
+	case responseTypePrepareOK:
+		return mb.respondPrepare(packetIO)
+	case responseTypeRow:
+		return mb.respondRows(packetIO)
 	case responseTypeNone:
 		return nil
 	}
@@ -152,11 +160,21 @@ func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
 // respond to FieldList
 func (mb *mockBackend) respondColumns(packetIO *pnet.PacketIO) error {
 	for i := 0; i < mb.columns; i++ {
-		if err := packetIO.WritePacket(mockCmdBytes, true); err != nil {
+		if err := packetIO.WritePacket(mockCmdBytes, false); err != nil {
 			return err
 		}
 	}
-	return packetIO.WriteEOFPacket()
+	return packetIO.WriteEOFPacket(mb.status)
+}
+
+// respond to Fetch
+func (mb *mockBackend) respondRows(packetIO *pnet.PacketIO) error {
+	for i := 0; i < mb.rows; i++ {
+		if err := packetIO.WritePacket(mockCmdBytes, false); err != nil {
+			return err
+		}
+	}
+	return packetIO.WriteEOFPacket(mb.status)
 }
 
 // respond to Query
@@ -186,19 +204,22 @@ func (mb *mockBackend) respondResultSet(packetIO *pnet.PacketIO) error {
 			return err
 		}
 	}
-	if err := packetIO.WriteEOFPacket(); err != nil {
+	if err := packetIO.WriteEOFPacket(mb.status); err != nil {
 		return err
 	}
-	for _, row := range values {
-		var data []byte
-		for _, value := range row {
-			data = pnet.DumpLengthEncodedString(data, []byte(value.(string)))
+	if mb.status&mysql.ServerStatusCursorExists == 0 {
+		for _, row := range values {
+			var data []byte
+			for _, value := range row {
+				data = pnet.DumpLengthEncodedString(data, []byte(value.(string)))
+			}
+			if err := packetIO.WritePacket(data, false); err != nil {
+				return err
+			}
 		}
-		if err := packetIO.WritePacket(data, false); err != nil {
-			return err
-		}
+		return packetIO.WriteEOFPacket(mb.status)
 	}
-	return packetIO.WriteEOFPacket()
+	return nil
 }
 
 // respond to LoadInFile
@@ -220,5 +241,39 @@ func (mb *mockBackend) respondLoadFile(packetIO *pnet.PacketIO) error {
 			break
 		}
 	}
-	return packetIO.WriteOKPacket()
+	return packetIO.WriteOKPacket(mb.status)
+}
+
+// respond to Prepare
+func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
+	data := []byte{mysql.OKHeader}
+	data = pnet.DumpUint32(data, uint32(mockCmdInt))
+	data = pnet.DumpUint16(data, uint16(mb.columns))
+	data = pnet.DumpUint16(data, uint16(mb.params))
+	data = append(data, 0x00)
+	data = pnet.DumpUint16(data, uint16(mockCmdInt))
+	if err := packetIO.WritePacket(data, true); err != nil {
+		return err
+	}
+	if mb.params > 0 {
+		for i := 0; i < mb.params; i++ {
+			if err := packetIO.WritePacket(mockCmdBytes, false); err != nil {
+				return err
+			}
+		}
+		if err := packetIO.WriteEOFPacket(mb.status); err != nil {
+			return err
+		}
+	}
+	if mb.columns > 0 {
+		for i := 0; i < mb.columns; i++ {
+			if err := packetIO.WritePacket(mockCmdBytes, false); err != nil {
+				return err
+			}
+		}
+		if err := packetIO.WriteEOFPacket(mb.status); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -119,6 +119,11 @@ func (p *PacketIO) ResetSequence() {
 	p.sequence = 0
 }
 
+// GetSequence is used in tests to assert that the sequences on the client and server are equal.
+func (p *PacketIO) GetSequence() uint8 {
+	return p.sequence
+}
+
 func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	var header [4]byte
 

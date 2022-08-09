@@ -16,6 +16,7 @@ package backend
 
 import (
 	"crypto/tls"
+	"encoding/binary"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -32,8 +33,9 @@ type clientConfig struct {
 	authData   []byte
 	attrs      []byte
 	// for cmd
-	cmd      byte
-	filePkts int
+	cmd        byte
+	filePkts   int
+	prepStmtID int
 }
 
 type mockClient struct {
@@ -41,6 +43,7 @@ type mockClient struct {
 	*clientConfig
 	// Outputs that received from the server and will be checked by the test.
 	authSucceed bool
+	err         error
 }
 
 func newMockClient(cfg *clientConfig) *mockClient {
@@ -98,28 +101,40 @@ func (mc *mockClient) writePassword(packetIO *pnet.PacketIO) error {
 
 // request sends commands except prepared statements commands.
 func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
+	packetIO.ResetSequence()
 	data := []byte{mc.cmd}
 	switch mc.cmd {
 	case mysql.ComInitDB, mysql.ComCreateDB, mysql.ComDropDB:
 		data = append(data, []byte(mockCmdStr)...)
 	case mysql.ComQuery:
 		return mc.query(packetIO)
+	case mysql.ComProcessInfo:
+		return mc.requestProcessInfo(packetIO)
 	case mysql.ComFieldList:
-		data = append(data, []byte(mockCmdStr)...)
-		data = append(data, 0x00)
-		data = append(data, []byte(mockCmdStr)...)
+		return mc.requestFieldList(packetIO)
 	case mysql.ComRefresh, mysql.ComSetOption:
 		data = append(data, mockCmdByte)
 	case mysql.ComProcessKill:
-		data = append(data, byte(mockCmdInt), byte(mockCmdInt>>8), byte(mockCmdInt>>16), byte(mockCmdInt>>24))
+		data = pnet.DumpUint32(data, uint32(mockCmdInt))
 	case mysql.ComChangeUser:
 		return mc.requestChangeUser(packetIO)
+	case mysql.ComStmtPrepare:
+		return mc.requestPrepare(packetIO)
+	case mysql.ComStmtSendLongData:
+		data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
+		data = append(data, mockCmdBytes...)
+	case mysql.ComStmtExecute:
+		return mc.requestExecute(packetIO)
+	case mysql.ComStmtFetch:
+		return mc.requestFetch(packetIO)
+	case mysql.ComStmtClose, mysql.ComStmtReset:
+		data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
 	}
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
 	switch mc.cmd {
-	case mysql.ComQuit:
+	case mysql.ComQuit, mysql.ComStmtClose, mysql.ComStmtSendLongData:
 		return nil
 	}
 	_, err := packetIO.ReadPacket()
@@ -147,6 +162,101 @@ func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
 	}
 }
 
+func (mc *mockClient) requestPrepare(packetIO *pnet.PacketIO) error {
+	data := make([]byte, 0, len(mockCmdStr)+1)
+	data = append(data, mysql.ComStmtPrepare)
+	data = append(data, []byte(mockCmdStr)...)
+	if err := packetIO.WritePacket(data, true); err != nil {
+		return err
+	}
+	response, err := packetIO.ReadPacket()
+	if err != nil {
+		return err
+	}
+	expectedEOFNum := 0
+	if response[0] == mysql.OKHeader {
+		numColumns := binary.LittleEndian.Uint16(response[5:])
+		if numColumns > 0 {
+			expectedEOFNum++
+		}
+		numParams := binary.LittleEndian.Uint16(response[7:])
+		if numParams > 0 {
+			expectedEOFNum++
+		}
+	}
+	for i := 0; i < expectedEOFNum; i++ {
+		for {
+			if response, err = packetIO.ReadPacket(); err != nil {
+				return err
+			}
+			if pnet.IsEOFPacket(response) {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func (mc *mockClient) requestExecute(packetIO *pnet.PacketIO) error {
+	data := make([]byte, 0, len(mockCmdBytes)+5)
+	data = append(data, mysql.ComStmtExecute)
+	data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
+	data = append(data, mockCmdBytes...)
+	if err := packetIO.WritePacket(data, true); err != nil {
+		return err
+	}
+	return mc.readResultSet(packetIO)
+}
+
+func (mc *mockClient) requestFetch(packetIO *pnet.PacketIO) error {
+	data := make([]byte, 0, len(mockCmdBytes)+5)
+	data = append(data, mysql.ComStmtFetch)
+	data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
+	data = append(data, mockCmdBytes...)
+	if err := packetIO.WritePacket(data, true); err != nil {
+		return err
+	}
+	return mc.readErrOrEOF(packetIO)
+}
+
+func (mc *mockClient) requestFieldList(packetIO *pnet.PacketIO) error {
+	data := make([]byte, 0, len(mockCmdStr)+2)
+	data = append(data, mysql.ComFieldList)
+	data = append(data, []byte(mockCmdStr)...)
+	data = append(data, 0x00)
+	data = append(data, []byte(mockCmdStr)...)
+	if err := packetIO.WritePacket(data, true); err != nil {
+		return err
+	}
+	return mc.readErrOrEOF(packetIO)
+}
+
+func (mc *mockClient) readErrOrEOF(packetIO *pnet.PacketIO) error {
+	pkt, err := packetIO.ReadPacket()
+	if err != nil {
+		return err
+	}
+	if pkt[0] == mysql.ErrHeader || pnet.IsEOFPacket(pkt) {
+		return nil
+	}
+	for {
+		if pkt, err = packetIO.ReadPacket(); err != nil {
+			return err
+		}
+		if pnet.IsEOFPacket(pkt) {
+			break
+		}
+	}
+	return nil
+}
+
+func (mc *mockClient) requestProcessInfo(packetIO *pnet.PacketIO) error {
+	if err := packetIO.WritePacket([]byte{mysql.ComProcessInfo}, true); err != nil {
+		return err
+	}
+	return mc.readResultSet(packetIO)
+}
+
 func (mc *mockClient) query(packetIO *pnet.PacketIO) error {
 	data := make([]byte, 0, len(mockCmdStr)+1)
 	data = append(data, mysql.ComQuery)
@@ -154,6 +264,10 @@ func (mc *mockClient) query(packetIO *pnet.PacketIO) error {
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
+	return mc.readResultSet(packetIO)
+}
+
+func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 	pkt, err := packetIO.ReadPacket()
 	if err != nil {
 		return err
@@ -185,16 +299,9 @@ func (mc *mockClient) query(packetIO *pnet.PacketIO) error {
 				break
 			}
 		}
-		for {
-			if pkt, err = packetIO.ReadPacket(); err != nil {
-				return err
-			}
-			if pkt[0] == mysql.ErrHeader {
-				return nil
-			}
-			if pnet.IsEOFPacket(pkt) {
-				break
-			}
+		serverStatus := binary.LittleEndian.Uint16(pkt[3:])
+		if serverStatus&mysql.ServerStatusCursorExists == 0 {
+			return mc.readErrOrEOF(packetIO)
 		}
 	}
 	return nil
