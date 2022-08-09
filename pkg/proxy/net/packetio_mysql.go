@@ -106,22 +106,22 @@ func (p *PacketIO) WriteErrPacket(merr *mysql.SQLError) error {
 }
 
 // WriteOKPacket writes an OK packet. It's only for testing.
-func (p *PacketIO) WriteOKPacket() error {
+func (p *PacketIO) WriteOKPacket(status uint16) error {
 	data := make([]byte, 0, 7)
 	data = append(data, mysql.OKHeader)
 	data = append(data, 0, 0)
 	// It's compatible with both ClientProtocol41 enabled and disabled.
-	data = DumpUint16(data, mysql.ServerStatusAutocommit)
+	data = DumpUint16(data, status)
 	data = append(data, 0, 0)
 	return p.WritePacket(data, true)
 }
 
 // WriteEOFPacket writes an EOF packet. It's only for testing.
-func (p *PacketIO) WriteEOFPacket() error {
+func (p *PacketIO) WriteEOFPacket(status uint16) error {
 	data := make([]byte, 0, 5)
 	data = append(data, mysql.EOFHeader)
 	data = append(data, 0, 0)
 	// It's compatible with both ClientProtocol41 enabled and disabled.
-	data = DumpUint16(data, mysql.ServerStatusAutocommit)
+	data = DumpUint16(data, status)
 	return p.WritePacket(data, true)
 }

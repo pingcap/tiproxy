@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/stretchr/testify/require"
 )
 
 type respondType int
@@ -32,51 +33,53 @@ const (
 	responseTypeString
 	responseTypeEOF
 	responseTypeSwitchRequest
+	responseTypePrepareOK
+	responseTypeRow
 )
 
-// cmdResponseTypes lists simple commands and their responses.
+// cmdResponseTypes lists all commands and their responses.
 var cmdResponseTypes = map[byte][]respondType{
-	mysql.ComSleep:         {responseTypeErr},
-	mysql.ComQuit:          {responseTypeOK, responseTypeNone},
-	mysql.ComInitDB:        {responseTypeOK, responseTypeErr},
-	mysql.ComQuery:         {responseTypeOK, responseTypeErr, responseTypeResultSet, responseTypeLoadFile},
-	mysql.ComFieldList:     {responseTypeErr, responseTypeColumn},
-	mysql.ComCreateDB:      {responseTypeOK, responseTypeErr},
-	mysql.ComDropDB:        {responseTypeOK, responseTypeErr},
-	mysql.ComRefresh:       {responseTypeOK, responseTypeErr},
-	mysql.ComShutdown:      {responseTypeOK, responseTypeErr},
-	mysql.ComStatistics:    {responseTypeString},
-	mysql.ComProcessInfo:   {responseTypeErr, responseTypeResultSet},
-	mysql.ComConnect:       {responseTypeErr},
-	mysql.ComProcessKill:   {responseTypeOK, responseTypeErr},
-	mysql.ComDebug:         {responseTypeEOF, responseTypeErr},
-	mysql.ComPing:          {responseTypeOK},
-	mysql.ComTime:          {responseTypeErr},
-	mysql.ComDelayedInsert: {responseTypeErr},
-	mysql.ComChangeUser:    {responseTypeSwitchRequest, responseTypeOK, responseTypeErr},
-	mysql.ComBinlogDump:    {responseTypeErr},
-	mysql.ComTableDump:     {responseTypeErr},
-	mysql.ComConnectOut:    {responseTypeErr},
-	mysql.ComRegisterSlave: {responseTypeErr},
-	//mysql.ComStmtPrepare:      {responseTypeOK, responseTypeErr},
-	//mysql.ComStmtExecute:      {responseTypeOK, responseTypeErr},
-	//mysql.ComStmtSendLongData: {responseTypeOK, responseTypeErr},
-	//mysql.ComStmtClose:        {responseTypeOK, responseTypeErr},
-	//mysql.ComStmtReset:        {responseTypeOK, responseTypeErr},
-	mysql.ComSetOption: {responseTypeEOF, responseTypeErr},
-	//mysql.ComStmtFetch:        {responseTypeOK, responseTypeErr},
-	mysql.ComDaemon:          {responseTypeErr},
-	mysql.ComBinlogDumpGtid:  {responseTypeErr},
-	mysql.ComResetConnection: {responseTypeOK, responseTypeErr},
-	mysql.ComEnd:             {responseTypeErr},
+	mysql.ComSleep:            {responseTypeErr},
+	mysql.ComQuit:             {responseTypeNone},
+	mysql.ComInitDB:           {responseTypeOK, responseTypeErr},
+	mysql.ComQuery:            {responseTypeOK, responseTypeErr, responseTypeResultSet, responseTypeLoadFile},
+	mysql.ComFieldList:        {responseTypeErr, responseTypeColumn},
+	mysql.ComCreateDB:         {responseTypeOK, responseTypeErr},
+	mysql.ComDropDB:           {responseTypeOK, responseTypeErr},
+	mysql.ComRefresh:          {responseTypeOK, responseTypeErr},
+	mysql.ComShutdown:         {responseTypeOK, responseTypeErr},
+	mysql.ComStatistics:       {responseTypeString},
+	mysql.ComProcessInfo:      {responseTypeErr, responseTypeResultSet},
+	mysql.ComConnect:          {responseTypeErr},
+	mysql.ComProcessKill:      {responseTypeOK, responseTypeErr},
+	mysql.ComDebug:            {responseTypeEOF, responseTypeErr},
+	mysql.ComPing:             {responseTypeOK},
+	mysql.ComTime:             {responseTypeErr},
+	mysql.ComDelayedInsert:    {responseTypeErr},
+	mysql.ComChangeUser:       {responseTypeSwitchRequest, responseTypeOK, responseTypeErr},
+	mysql.ComBinlogDump:       {responseTypeErr},
+	mysql.ComTableDump:        {responseTypeErr},
+	mysql.ComConnectOut:       {responseTypeErr},
+	mysql.ComRegisterSlave:    {responseTypeErr},
+	mysql.ComStmtPrepare:      {responseTypePrepareOK, responseTypeErr},
+	mysql.ComStmtExecute:      {responseTypeOK, responseTypeErr, responseTypeResultSet},
+	mysql.ComStmtSendLongData: {responseTypeNone},
+	mysql.ComStmtClose:        {responseTypeNone},
+	mysql.ComStmtReset:        {responseTypeOK, responseTypeErr},
+	mysql.ComSetOption:        {responseTypeEOF, responseTypeErr},
+	mysql.ComStmtFetch:        {responseTypeRow, responseTypeErr},
+	mysql.ComDaemon:           {responseTypeErr},
+	mysql.ComBinlogDumpGtid:   {responseTypeErr},
+	mysql.ComResetConnection:  {responseTypeOK, responseTypeErr},
+	mysql.ComEnd:              {responseTypeErr},
 }
 
-func TestSimpleCommands(t *testing.T) {
+// Test forwarding packets between the client and the backend.
+func TestForwardCommands(t *testing.T) {
 	tc := newTCPConnSuite(t)
 	runTest := func(cfgs ...cfgOverrider) {
 		ts, clean := newTestSuite(t, tc, cfgs...)
-		// Only verify that it won't hang or report errors.
-		ts.executeCmd(t)
+		ts.executeCmd(t, nil)
 		clean()
 	}
 	// Test every respond type for every command.
@@ -89,14 +92,31 @@ func TestSimpleCommands(t *testing.T) {
 			// Test more variables for some special response types.
 			switch respondType {
 			case responseTypeColumn:
-				for _, columns := range []int{1, 3} {
+				for _, columns := range []int{1, 4096} {
 					extraCfgOvr := func(cfg *testConfig) {
 						cfg.backendConfig.columns = columns
 					}
 					runTest(cfgOvr, extraCfgOvr)
 				}
+			case responseTypeRow:
+				for _, rows := range []int{0, 1, 3} {
+					extraCfgOvr := func(cfg *testConfig) {
+						cfg.backendConfig.rows = rows
+					}
+					runTest(cfgOvr, extraCfgOvr)
+				}
+			case responseTypePrepareOK:
+				for _, columns := range []int{0, 1, 4096} {
+					for _, params := range []int{0, 1, 3} {
+						extraCfgOvr := func(cfg *testConfig) {
+							cfg.backendConfig.columns = columns
+							cfg.backendConfig.params = params
+						}
+						runTest(cfgOvr, extraCfgOvr)
+					}
+				}
 			case responseTypeResultSet:
-				for _, columns := range []int{1, 3} {
+				for _, columns := range []int{1, 4096} {
 					for _, rows := range []int{0, 1, 3} {
 						extraCfgOvr := func(cfg *testConfig) {
 							cfg.backendConfig.columns = columns
@@ -116,5 +136,466 @@ func TestSimpleCommands(t *testing.T) {
 				runTest(cfgOvr, cfgOvr)
 			}
 		}
+	}
+}
+
+// Test querying directly from the server.
+func TestDirectQuery(t *testing.T) {
+	tc := newTCPConnSuite(t)
+	tests := []struct {
+		cfg cfgOverrider
+		c   checker
+	}{
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.columns = 2
+				cfg.backendConfig.rows = 1
+				cfg.backendConfig.respondType = responseTypeResultSet
+			},
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.respondType = responseTypeErr
+			},
+			c: func(t *testing.T, ts *testSuite) {
+				require.Error(t, ts.mp.err)
+				require.NoError(t, ts.mb.err)
+			},
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.respondType = responseTypeOK
+			},
+		},
+	}
+	for _, test := range tests {
+		ts, clean := newTestSuite(t, tc, test.cfg)
+		ts.query(t, test.c)
+		clean()
+	}
+}
+
+func TestPreparedStmts(t *testing.T) {
+	tc := newTCPConnSuite(t)
+	tests := []struct {
+		cfgs        []cfgOverrider
+		canRedirect bool
+	}{
+		// prepare
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtPrepare
+					cfg.backendConfig.respondType = responseTypePrepareOK
+				},
+			},
+			canRedirect: true,
+		},
+		// send long data
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+			},
+			canRedirect: false,
+		},
+		// send long data and execute
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeErr
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+			},
+			canRedirect: false,
+		},
+		// execute and fetch
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtFetch
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeRow
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtFetch
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeRow
+					cfg.backendConfig.status = mysql.ServerStatusLastRowSend
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtFetch
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeErr
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtFetch
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeRow
+					cfg.backendConfig.status = mysql.ServerStatusLastRowSend
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtFetch
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeRow
+					cfg.backendConfig.status = mysql.ServerStatusLastRowSend
+				},
+			},
+			canRedirect: false,
+		},
+		// send long data and close/reset
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtClose
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtClose
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtReset
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtReset
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: false,
+		},
+		// execute and close/reset
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtClose
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtReset
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtClose
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtReset
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: false,
+		},
+		// reset connection and change user
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComResetConnection
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtSendLongData
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeNone
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComChangeUser
+					cfg.backendConfig.respondType = responseTypeOK
+				},
+			},
+			canRedirect: true,
+		},
+	}
+
+	for _, test := range tests {
+		ts, clean := newTestSuite(t, tc)
+		c := func(t *testing.T, ts *testSuite) {
+			require.Equal(t, test.canRedirect, ts.mp.cmdProcessor.canRedirect())
+		}
+		ts.executeMultiCmd(t, test.cfgs, c)
+		clean()
 	}
 }

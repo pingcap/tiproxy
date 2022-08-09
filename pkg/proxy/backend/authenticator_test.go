@@ -46,9 +46,9 @@ func TestTLSConnection(t *testing.T) {
 	cfgOverriders := getCfgCombinations(cfgs)
 	for _, cfgs := range cfgOverriders {
 		ts, clean := newTestSuite(t, tc, cfgs...)
-		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite, _, _, perr error) {
+		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
 			if ts.mb.backendConfig.capability&mysql.ClientSSL == 0 {
-				require.ErrorContains(t, perr, "must enable TLS")
+				require.ErrorContains(t, ts.mp.err, "must enable TLS")
 			}
 		})
 		clean()

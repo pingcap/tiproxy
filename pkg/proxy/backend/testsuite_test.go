@@ -15,9 +15,11 @@
 package backend
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
@@ -120,7 +122,7 @@ type testSuite struct {
 	mc *mockClient
 }
 
-type errChecker func(t *testing.T, ts *testSuite, cerr, berr, perr error)
+type checker func(t *testing.T, ts *testSuite)
 
 func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*testSuite, func()) {
 	ts := &testSuite{}
@@ -138,6 +140,13 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 	return ts, clean
 }
 
+func (ts *testSuite) setConfig(overriders ...cfgOverrider) {
+	cfg := newTestConfig(overriders...)
+	ts.mb.backendConfig = &cfg.backendConfig
+	ts.mp.proxyConfig = &cfg.proxyConfig
+	ts.mc.clientConfig = &cfg.clientConfig
+}
+
 func (ts *testSuite) changeDB(db string) {
 	ts.mc.dbName = db
 	ts.mp.auth.updateCurrentDB(db)
@@ -149,47 +158,76 @@ func (ts *testSuite) changeUser(username, db string) {
 	ts.mp.auth.changeUser(username, db)
 }
 
+func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendRunner func(*pnet.PacketIO) error,
+	proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) {
+	ts.mc.err, ts.mb.err, ts.mp.err = ts.tc.run(t, clientRunner, backendRunner, proxyRunner)
+	if c == nil {
+		require.NoError(t, ts.mc.err)
+		require.NoError(t, ts.mb.err)
+		require.NoError(t, ts.mp.err)
+		if clientRunner != nil && backendRunner != nil {
+			// Ensure all the packets are forwarded.
+			msg := fmt.Sprintf("cmd:%d responseType:%d", ts.mc.cmd, ts.mb.respondType)
+			require.Equal(t, ts.tc.backendIO.GetSequence(), ts.tc.clientIO.GetSequence(), msg)
+		}
+	} else {
+		c(t, ts)
+	}
+}
+
 // The client connects to the backend through the proxy.
-func (ts *testSuite) authenticateFirstTime(t *testing.T, ce errChecker) {
-	cerr, berr, perr := ts.tc.run(t, ts.mc.authenticate, ts.mb.authenticate, ts.mp.authenticateFirstTime)
-	if ce == nil {
-		require.NoError(t, berr)
-		require.NoError(t, cerr)
-		require.NoError(t, perr)
+func (ts *testSuite) authenticateFirstTime(t *testing.T, c checker) {
+	ts.runAndCheck(t, c, ts.mc.authenticate, ts.mb.authenticate, ts.mp.authenticateFirstTime)
+	if c == nil {
 		// Check the data received by client equals to the data sent from the server and vice versa.
 		require.Equal(t, ts.mb.authSucceed, ts.mc.authSucceed)
 		require.Equal(t, ts.mc.username, ts.mb.username)
 		require.Equal(t, ts.mc.dbName, ts.mb.db)
 		require.Equal(t, ts.mc.authData, ts.mb.authData)
 		require.Equal(t, ts.mc.attrs, ts.mb.attrs)
-	} else {
-		ce(t, ts, cerr, berr, perr)
 	}
 }
 
 // The proxy reconnects to the proxy using preserved client data.
 // This must be called after authenticateFirstTime.
-func (ts *testSuite) authenticateSecondTime(t *testing.T, ce errChecker) {
+func (ts *testSuite) authenticateSecondTime(t *testing.T, c checker) {
 	// The server won't request switching auth-plugin this time.
 	ts.mb.backendConfig.switchAuth = false
 	ts.mb.backendConfig.authSucceed = true
-	cerr, berr, perr := ts.tc.run(t, nil, ts.mb.authenticate, ts.mp.authenticateSecondTime)
-	if ce == nil {
-		require.NoError(t, berr)
-		require.NoError(t, cerr)
-		require.NoError(t, perr)
+	ts.runAndCheck(t, c, nil, ts.mb.authenticate, ts.mp.authenticateSecondTime)
+	if c == nil {
 		require.Equal(t, ts.mc.username, ts.mb.username)
 		require.Equal(t, ts.mc.dbName, ts.mb.db)
 		require.Equal(t, []byte(ts.mp.sessionToken), ts.mb.authData)
-	} else {
-		ce(t, ts, cerr, berr, perr)
 	}
 }
 
 // Test forwarding commands between the client and the server.
-func (ts *testSuite) executeCmd(t *testing.T) {
-	cerr, berr, perr := ts.tc.run(t, ts.mc.request, ts.mb.respond, ts.mp.processCmd)
-	require.NoError(t, berr)
-	require.NoError(t, cerr)
-	require.NoError(t, perr)
+// It verifies that it won't hang or report errors, and all the packets are forwarded.
+func (ts *testSuite) executeCmd(t *testing.T, c checker) {
+	ts.runAndCheck(t, c, ts.mc.request, ts.mb.respond, ts.mp.processCmd)
+}
+
+// Execute multiple commands at once to reuse the same ComProcessor.
+func (ts *testSuite) executeMultiCmd(t *testing.T, cfgs []cfgOverrider, c checker) {
+	for _, cfg := range cfgs {
+		ts.setConfig(cfg)
+		ts.runAndCheck(t, nil, ts.mc.request, ts.mb.respond, ts.mp.processCmd)
+	}
+	// Only check it at last.
+	if c != nil {
+		c(t, ts)
+	}
+}
+
+// Test querying from the backend directly.
+// It verifies that it won't hang or panic, and column / row counts match.
+func (ts *testSuite) query(t *testing.T, c checker) {
+	ts.runAndCheck(t, c, nil, ts.mb.respond, ts.mp.directQuery)
+	if c == nil {
+		if ts.mb.respondType == responseTypeResultSet {
+			require.Equal(t, ts.mb.columns, len(ts.mp.rs.Fields))
+			require.Equal(t, ts.mb.rows, len(ts.mp.rs.RowDatas))
+		}
+	}
 }

@@ -17,6 +17,7 @@ package backend
 import (
 	"crypto/tls"
 
+	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
@@ -28,8 +29,11 @@ type proxyConfig struct {
 
 type mockProxy struct {
 	*proxyConfig
+	err          error
 	auth         *Authenticator
 	cmdProcessor *CmdProcessor
+	// outputs that received from the server.
+	rs *gomysql.Result
 }
 
 func newMockProxy(cfg *proxyConfig) *mockProxy {
@@ -50,10 +54,17 @@ func (mp *mockProxy) authenticateSecondTime(_, backendIO *pnet.PacketIO) error {
 }
 
 func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {
+	clientIO.ResetSequence()
 	request, err := clientIO.ReadPacket()
 	if err != nil {
 		return err
 	}
 	_, _, err = mp.cmdProcessor.executeCmd(request, clientIO, backendIO, false)
+	return err
+}
+
+func (mp *mockProxy) directQuery(_, backendIO *pnet.PacketIO) error {
+	rs, _, err := mp.cmdProcessor.query(backendIO, mockCmdStr)
+	mp.rs = rs
 	return err
 }

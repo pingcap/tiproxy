@@ -57,6 +57,7 @@ func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *gomy
 	return
 }
 
+// readResultSet is only used for reading the results of `show session_states` currently.
 func (cp *CmdProcessor) readResultSet(packetIO *pnet.PacketIO, data []byte) (*gomysql.Result, error) {
 	columnCount, _, n := pnet.ParseLengthEncodedInt(data)
 	if n-len(data) != 0 {
@@ -114,6 +115,7 @@ func (cp *CmdProcessor) readResultRows(packetIO *pnet.PacketIO, result *gomysql.
 			result.Status = binary.LittleEndian.Uint16(data[3:])
 			break
 		}
+		// An error may occur when the backend writes rows.
 		if data[0] == mysql.ErrHeader {
 			return cp.handleErrorPacket(data)
 		}
