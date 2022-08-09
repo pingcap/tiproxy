@@ -216,7 +216,7 @@ func (mc *mockClient) requestFetch(packetIO *pnet.PacketIO) error {
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
-	return mc.readErrOrEOF(packetIO)
+	return mc.readErrOrUntilEOF(packetIO)
 }
 
 func (mc *mockClient) requestFieldList(packetIO *pnet.PacketIO) error {
@@ -228,10 +228,10 @@ func (mc *mockClient) requestFieldList(packetIO *pnet.PacketIO) error {
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
-	return mc.readErrOrEOF(packetIO)
+	return mc.readErrOrUntilEOF(packetIO)
 }
 
-func (mc *mockClient) readErrOrEOF(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) readErrOrUntilEOF(packetIO *pnet.PacketIO) error {
 	pkt, err := packetIO.ReadPacket()
 	if err != nil {
 		return err
@@ -301,7 +301,7 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 		}
 		serverStatus := binary.LittleEndian.Uint16(pkt[3:])
 		if serverStatus&mysql.ServerStatusCursorExists == 0 {
-			return mc.readErrOrEOF(packetIO)
+			return mc.readErrOrUntilEOF(packetIO)
 		}
 	}
 	return nil

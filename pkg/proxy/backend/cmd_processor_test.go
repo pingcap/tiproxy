@@ -37,7 +37,7 @@ const (
 	responseTypeRow
 )
 
-// cmdResponseTypes lists simple commands and their responses.
+// cmdResponseTypes lists all commands and their responses.
 var cmdResponseTypes = map[byte][]respondType{
 	mysql.ComSleep:            {responseTypeErr},
 	mysql.ComQuit:             {responseTypeNone},
@@ -74,11 +74,11 @@ var cmdResponseTypes = map[byte][]respondType{
 	mysql.ComEnd:              {responseTypeErr},
 }
 
+// Test forwarding packets between the client and the backend.
 func TestForwardCommands(t *testing.T) {
 	tc := newTCPConnSuite(t)
 	runTest := func(cfgs ...cfgOverrider) {
 		ts, clean := newTestSuite(t, tc, cfgs...)
-		// Verify that it won't hang or report errors, and all the packets are forwarded.
 		ts.executeCmd(t, nil)
 		clean()
 	}
@@ -170,7 +170,6 @@ func TestDirectQuery(t *testing.T) {
 	}
 	for _, test := range tests {
 		ts, clean := newTestSuite(t, tc, test.cfg)
-		// It verifies that it won't hang or panic, and column / row counts match.
 		ts.query(t, test.c)
 		clean()
 	}
