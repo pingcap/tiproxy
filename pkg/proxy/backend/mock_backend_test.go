@@ -37,6 +37,18 @@ type backendConfig struct {
 	rows        int
 	params      int
 	status      uint16
+	loops       int
+}
+
+func newBackendConfig() *backendConfig {
+	return &backendConfig{
+		capability:  defaultBackendCapability,
+		salt:        mockSalt,
+		authPlugin:  mysql.AuthCachingSha2Password,
+		switchAuth:  true,
+		authSucceed: true,
+		loops:       1,
+	}
 }
 
 type mockBackend struct {
@@ -120,6 +132,15 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO) error {
 }
 
 func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
+	for i := 0; i < mb.loops; i++ {
+		if err := mb.respondOnce(packetIO); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	packetIO.ResetSequence()
 	if _, err := packetIO.ReadPacket(); err != nil {
 		return err

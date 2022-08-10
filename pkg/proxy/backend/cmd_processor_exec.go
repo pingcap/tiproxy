@@ -314,11 +314,16 @@ func (cp *CmdProcessor) forwardQuitCmd() (succeed bool, err error) {
 // We can send a `COMMIT` statement to the current backend and then forward the `BEGIN` statement to the new backend.
 func (cp *CmdProcessor) needHoldRequest(request []byte) bool {
 	cmd, data := request[0], request[1:]
+	// BEGIN/START TRANSACTION statements cannot be prepared.
 	if cmd != mysql.ComQuery {
 		return false
 	}
-	// Skip checking prepared statements because the cursor will be discarded.
+	// Hold request only when it's waiting for the end of the transaction.
 	if cp.serverStatus&StatusInTrans == 0 {
+		return false
+	}
+	// Opening result sets can still be fetched after COMMIT/ROLLBACK, so don't hold.
+	if cp.hasPendingPreparedStmts() {
 		return false
 	}
 	if len(data) > 0 && data[len(data)-1] == 0 {
@@ -330,8 +335,5 @@ func (cp *CmdProcessor) needHoldRequest(request []byte) bool {
 
 func isBeginStmt(query string) bool {
 	normalized := parser.Normalize(query)
-	if strings.HasPrefix(normalized, "begin") || strings.HasPrefix(normalized, "start transaction") {
-		return true
-	}
-	return false
+	return strings.HasPrefix(normalized, "begin") || strings.HasPrefix(normalized, "start transaction")
 }

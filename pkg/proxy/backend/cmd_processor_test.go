@@ -599,3 +599,367 @@ func TestPreparedStmts(t *testing.T) {
 		clean()
 	}
 }
+
+// Test whether the session is redirect-able when it has an active transaction.
+func TestTxnStatus(t *testing.T) {
+	tc := newTCPConnSuite(t)
+	tests := []struct {
+		cfgs        []cfgOverrider
+		canRedirect bool
+	}{
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusInTrans
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = 0
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComChangeUser
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComResetConnection
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+				},
+			},
+			canRedirect: true,
+		},
+	}
+
+	for _, test := range tests {
+		ts, clean := newTestSuite(t, tc)
+		c := func(t *testing.T, ts *testSuite) {
+			require.Equal(t, test.canRedirect, ts.mp.cmdProcessor.canRedirect())
+		}
+		ts.executeMultiCmd(t, test.cfgs, c)
+		clean()
+	}
+}
+
+// Test whether the session is redirect-able for mixed prepared statement status and txn status.
+func TestMixPrepAndTxnStatus(t *testing.T) {
+	tc := newTCPConnSuite(t)
+	tests := []struct {
+		cfgs        []cfgOverrider
+		canRedirect bool
+	}{
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusInTrans
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtFetch
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeRow
+					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusLastRowSend
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = 0
+				},
+			},
+			canRedirect: false,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComResetConnection
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+				},
+			},
+			canRedirect: true,
+		},
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtFetch
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.respondType = responseTypeRow
+					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusLastRowSend
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 2
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = 0
+				},
+			},
+			canRedirect: true,
+		},
+	}
+
+	for _, test := range tests {
+		ts, clean := newTestSuite(t, tc)
+		c := func(t *testing.T, ts *testSuite) {
+			require.Equal(t, test.canRedirect, ts.mp.cmdProcessor.canRedirect())
+		}
+		ts.executeMultiCmd(t, test.cfgs, c)
+		clean()
+	}
+}
+
+// Test that the BEGIN statement will be held when the session is waiting for redirection.
+func TestHoldRequest(t *testing.T) {
+	tc := newTCPConnSuite(t)
+	tests := []struct {
+		cfgs        []cfgOverrider
+		holdRequest bool
+	}{
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.clientConfig.sql = "begin"
+					cfg.proxyConfig.waitRedirect = true
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+					cfg.backendConfig.loops = 2
+				},
+			},
+			holdRequest: true,
+		},
+		// not BEGIN
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.clientConfig.sql = "commit"
+					cfg.proxyConfig.waitRedirect = true
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+				},
+			},
+			holdRequest: false,
+		},
+		// not COM_QUERY
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+				},
+			},
+			holdRequest: false,
+		},
+		// cursor exists
+		{
+			cfgs: []cfgOverrider{
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComStmtExecute
+					cfg.clientConfig.prepStmtID = 1
+					cfg.backendConfig.columns = 1
+					cfg.backendConfig.respondType = responseTypeResultSet
+					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+				},
+				func(cfg *testConfig) {
+					cfg.clientConfig.cmd = mysql.ComQuery
+					cfg.clientConfig.sql = "begin"
+					cfg.proxyConfig.waitRedirect = true
+					cfg.backendConfig.respondType = responseTypeOK
+					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+				},
+			},
+			holdRequest: false,
+		},
+	}
+
+	for _, test := range tests {
+		ts, clean := newTestSuite(t, tc)
+		c := func(t *testing.T, ts *testSuite) {
+			require.Equal(t, test.holdRequest, ts.mp.holdRequest)
+		}
+		ts.executeMultiCmd(t, test.cfgs, c)
+		clean()
+	}
+}
+
+func TestBeginStmt(t *testing.T) {
+	tests := []struct {
+		stmt    string
+		isBegin bool
+	}{
+		{
+			stmt:    "begin",
+			isBegin: true,
+		},
+		{
+			stmt:    "BEGIN",
+			isBegin: true,
+		},
+		{
+			stmt:    "begin optimistic as of timestamp now()",
+			isBegin: true,
+		},
+		{
+			stmt:    "    begin",
+			isBegin: true,
+		},
+		{
+			stmt:    "start transaction",
+			isBegin: true,
+		},
+		{
+			stmt:    "START transaction",
+			isBegin: true,
+		},
+		{
+			stmt:    "start transaction with consistent snapshot",
+			isBegin: true,
+		},
+		{
+			stmt:    "begin; select 1",
+			isBegin: true,
+		},
+		{
+			stmt:    "/*+ some_hint */begin",
+			isBegin: true,
+		},
+		{
+			stmt:    "commit",
+			isBegin: false,
+		},
+		{
+			stmt:    "select 1; begin",
+			isBegin: false,
+		},
+	}
+	for _, test := range tests {
+		require.Equal(t, test.isBegin, isBeginStmt(test.stmt))
+	}
+}
