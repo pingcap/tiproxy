@@ -38,6 +38,7 @@ type backendConfig struct {
 	params      int
 	status      uint16
 	loops       int
+	stmtNum     int
 }
 
 func newBackendConfig() *backendConfig {
@@ -48,6 +49,7 @@ func newBackendConfig() *backendConfig {
 		switchAuth:  true,
 		authSucceed: true,
 		loops:       1,
+		stmtNum:     1,
 	}
 }
 
@@ -147,7 +149,7 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	}
 	switch mb.respondType {
 	case responseTypeOK:
-		return packetIO.WriteOKPacket(mb.status)
+		return mb.respondOK(packetIO)
 	case responseTypeErr:
 		return packetIO.WriteErrPacket(mysql.NewErr(mysql.ErrUnknown))
 	case responseTypeResultSet:
@@ -176,6 +178,21 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 		return nil
 	}
 	return packetIO.WriteErrPacket(mysql.NewErr(mysql.ErrUnknown))
+}
+
+func (mb *mockBackend) respondOK(packetIO *pnet.PacketIO) error {
+	for i := 0; i < mb.stmtNum; i++ {
+		status := mb.status
+		if i < mb.stmtNum-1 {
+			status |= mysql.ServerMoreResultsExists
+		} else {
+			status &= ^mysql.ServerMoreResultsExists
+		}
+		if err := packetIO.WriteOKPacket(status); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // respond to FieldList
@@ -216,53 +233,75 @@ func (mb *mockBackend) respondResultSet(packetIO *pnet.PacketIO) error {
 	if err != nil {
 		return err
 	}
-	data := pnet.DumpLengthEncodedInt(nil, uint64(mb.columns))
-	if err := packetIO.WritePacket(data, false); err != nil {
-		return err
-	}
-	for _, field := range rs.Fields {
-		if err := packetIO.WritePacket(field.Dump(), false); err != nil {
+	for i := 0; i < mb.stmtNum; i++ {
+		status := mb.status
+		if i < mb.stmtNum-1 {
+			status |= mysql.ServerMoreResultsExists
+		} else {
+			status &= ^mysql.ServerMoreResultsExists
+		}
+		data := pnet.DumpLengthEncodedInt(nil, uint64(mb.columns))
+		if err := packetIO.WritePacket(data, false); err != nil {
 			return err
 		}
-	}
-	if err := packetIO.WriteEOFPacket(mb.status); err != nil {
-		return err
-	}
-	if mb.status&mysql.ServerStatusCursorExists == 0 {
-		for _, row := range values {
-			var data []byte
-			for _, value := range row {
-				data = pnet.DumpLengthEncodedString(data, []byte(value.(string)))
-			}
-			if err := packetIO.WritePacket(data, false); err != nil {
+		for _, field := range rs.Fields {
+			if err := packetIO.WritePacket(field.Dump(), false); err != nil {
 				return err
 			}
 		}
-		return packetIO.WriteEOFPacket(mb.status)
+		if err := packetIO.WriteEOFPacket(status); err != nil {
+			return err
+		}
+
+		if status&mysql.ServerStatusCursorExists == 0 {
+			for _, row := range values {
+				var data []byte
+				for _, value := range row {
+					data = pnet.DumpLengthEncodedString(data, []byte(value.(string)))
+				}
+				if err := packetIO.WritePacket(data, false); err != nil {
+					return err
+				}
+			}
+			if err := packetIO.WriteEOFPacket(status); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
 // respond to LoadInFile
 func (mb *mockBackend) respondLoadFile(packetIO *pnet.PacketIO) error {
-	data := make([]byte, 0, 1+len(mockCmdStr))
-	data = append(data, mysql.LocalInFileHeader)
-	data = append(data, []byte(mockCmdStr)...)
-	if err := packetIO.WritePacket(data, true); err != nil {
-		return err
-	}
-	for {
-		// read file data
-		pkt, err := packetIO.ReadPacket()
-		if err != nil {
+	for i := 0; i < mb.stmtNum; i++ {
+		status := mb.status
+		if i < mb.stmtNum-1 {
+			status |= mysql.ServerMoreResultsExists
+		} else {
+			status &= ^mysql.ServerMoreResultsExists
+		}
+		data := make([]byte, 0, 1+len(mockCmdStr))
+		data = append(data, mysql.LocalInFileHeader)
+		data = append(data, []byte(mockCmdStr)...)
+		if err := packetIO.WritePacket(data, true); err != nil {
 			return err
 		}
-		// An empty packet indicates the end of file.
-		if len(pkt) == 0 {
-			break
+		for {
+			// read file data
+			pkt, err := packetIO.ReadPacket()
+			if err != nil {
+				return err
+			}
+			// An empty packet indicates the end of file.
+			if len(pkt) == 0 {
+				break
+			}
+		}
+		if err := packetIO.WriteOKPacket(status); err != nil {
+			return err
 		}
 	}
-	return packetIO.WriteOKPacket(mb.status)
+	return nil
 }
 
 // respond to Prepare
