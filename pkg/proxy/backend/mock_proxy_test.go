@@ -25,15 +25,24 @@ type proxyConfig struct {
 	frontendTLSConfig *tls.Config
 	backendTLSConfig  *tls.Config
 	sessionToken      string
+	waitRedirect      bool
+}
+
+func newProxyConfig() *proxyConfig {
+	return &proxyConfig{
+		sessionToken: mockToken,
+	}
 }
 
 type mockProxy struct {
 	*proxyConfig
-	err          error
 	auth         *Authenticator
 	cmdProcessor *CmdProcessor
 	// outputs that received from the server.
 	rs *gomysql.Result
+	// execution results
+	err         error
+	holdRequest bool
 }
 
 func newMockProxy(cfg *proxyConfig) *mockProxy {
@@ -59,7 +68,13 @@ func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = mp.cmdProcessor.executeCmd(request, clientIO, backendIO, false)
+	if mp.holdRequest, _, err = mp.cmdProcessor.executeCmd(request, clientIO, backendIO, mp.waitRedirect); err != nil {
+		return err
+	}
+	// Pretend to redirect the held request to the new backend. The backend must respond for another loop.
+	if mp.holdRequest {
+		_, _, err = mp.cmdProcessor.executeCmd(request, clientIO, backendIO, false)
+	}
 	return err
 }
 

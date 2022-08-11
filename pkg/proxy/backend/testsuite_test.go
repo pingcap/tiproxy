@@ -54,9 +54,9 @@ var (
 )
 
 type testConfig struct {
-	clientConfig  clientConfig
-	proxyConfig   proxyConfig
-	backendConfig backendConfig
+	clientConfig  *clientConfig
+	proxyConfig   *proxyConfig
+	backendConfig *backendConfig
 }
 
 type cfgOverrider func(config *testConfig)
@@ -88,24 +88,9 @@ func getCfgCombinations(cfgs [][]cfgOverrider) [][]cfgOverrider {
 
 func newTestConfig(overriders ...cfgOverrider) *testConfig {
 	cfg := &testConfig{
-		clientConfig: clientConfig{
-			capability: defaultClientCapability,
-			username:   mockUsername,
-			dbName:     mockDBName,
-			authPlugin: mysql.AuthCachingSha2Password,
-			authData:   mockAuthData,
-			attrs:      make([]byte, 0),
-		},
-		proxyConfig: proxyConfig{
-			sessionToken: mockToken,
-		},
-		backendConfig: backendConfig{
-			capability:  defaultBackendCapability,
-			salt:        mockSalt,
-			authPlugin:  mysql.AuthCachingSha2Password,
-			switchAuth:  true,
-			authSucceed: true,
-		},
+		clientConfig:  newClientConfig(),
+		proxyConfig:   newProxyConfig(),
+		backendConfig: newBackendConfig(),
 	}
 	for _, overrider := range overriders {
 		if overrider != nil {
@@ -132,9 +117,9 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 		config.proxyConfig.frontendTLSConfig = tc.backendTLSConfig
 		config.clientConfig.tlsConfig = tc.clientTLSConfig
 	})...)
-	ts.mb = newMockBackend(&cfg.backendConfig)
-	ts.mp = newMockProxy(&cfg.proxyConfig)
-	ts.mc = newMockClient(&cfg.clientConfig)
+	ts.mb = newMockBackend(cfg.backendConfig)
+	ts.mp = newMockProxy(cfg.proxyConfig)
+	ts.mc = newMockClient(cfg.clientConfig)
 	ts.tc = tc
 	clean := tc.newConn(t)
 	return ts, clean
@@ -142,9 +127,9 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 
 func (ts *testSuite) setConfig(overriders ...cfgOverrider) {
 	cfg := newTestConfig(overriders...)
-	ts.mb.backendConfig = &cfg.backendConfig
-	ts.mp.proxyConfig = &cfg.proxyConfig
-	ts.mc.clientConfig = &cfg.clientConfig
+	ts.mb.backendConfig = cfg.backendConfig
+	ts.mp.proxyConfig = cfg.proxyConfig
+	ts.mc.clientConfig = cfg.clientConfig
 }
 
 func (ts *testSuite) changeDB(db string) {

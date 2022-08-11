@@ -36,6 +36,19 @@ type clientConfig struct {
 	cmd        byte
 	filePkts   int
 	prepStmtID int
+	sql        string
+}
+
+func newClientConfig() *clientConfig {
+	return &clientConfig{
+		capability: defaultClientCapability,
+		username:   mockUsername,
+		dbName:     mockDBName,
+		authPlugin: mysql.AuthCachingSha2Password,
+		authData:   mockAuthData,
+		attrs:      make([]byte, 0),
+		sql:        mockCmdStr,
+	}
 }
 
 type mockClient struct {
@@ -163,9 +176,9 @@ func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
 }
 
 func (mc *mockClient) requestPrepare(packetIO *pnet.PacketIO) error {
-	data := make([]byte, 0, len(mockCmdStr)+1)
+	data := make([]byte, 0, len(mc.sql)+1)
 	data = append(data, mysql.ComStmtPrepare)
-	data = append(data, []byte(mockCmdStr)...)
+	data = append(data, []byte(mc.sql)...)
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
@@ -258,9 +271,9 @@ func (mc *mockClient) requestProcessInfo(packetIO *pnet.PacketIO) error {
 }
 
 func (mc *mockClient) query(packetIO *pnet.PacketIO) error {
-	data := make([]byte, 0, len(mockCmdStr)+1)
+	data := make([]byte, 0, len(mc.sql)+1)
 	data = append(data, mysql.ComQuery)
-	data = append(data, []byte(mockCmdStr)...)
+	data = append(data, []byte(mc.sql)...)
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}

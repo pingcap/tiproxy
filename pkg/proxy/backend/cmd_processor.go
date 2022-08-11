@@ -24,10 +24,9 @@ import (
 
 const (
 	StatusInTrans uint32 = 1 << iota
-	StatusAutoCommit
+	StatusQuit
 	StatusPrepareWaitExecute
 	StatusPrepareWaitFetch
-	StatusQuit
 )
 
 // CmdProcessor maintains the transaction and prepared statement status and decides whether the session can be redirected.
@@ -39,7 +38,7 @@ type CmdProcessor struct {
 
 func NewCmdProcessor() *CmdProcessor {
 	return &CmdProcessor{
-		serverStatus:       StatusAutoCommit,
+		serverStatus:       0,
 		preparedStmtStatus: make(map[int]uint32),
 	}
 }
@@ -66,11 +65,6 @@ func (cp *CmdProcessor) updateServerStatus(request []byte, serverStatus uint16) 
 }
 
 func (cp *CmdProcessor) updateTxnStatus(serverStatus uint16) {
-	if serverStatus&mysql.ServerStatusAutocommit > 0 {
-		cp.serverStatus |= StatusAutoCommit
-	} else {
-		cp.serverStatus &^= StatusAutoCommit
-	}
 	if serverStatus&mysql.ServerStatusInTrans > 0 {
 		cp.serverStatus |= StatusInTrans
 	} else {
@@ -117,10 +111,14 @@ func (cp *CmdProcessor) canRedirect() bool {
 		return false
 	}
 	// If any result of the prepared statements is not fetched, we should wait.
+	return !cp.hasPendingPreparedStmts()
+}
+
+func (cp *CmdProcessor) hasPendingPreparedStmts() bool {
 	for _, serverStatus := range cp.preparedStmtStatus {
 		if serverStatus > 0 {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
