@@ -963,3 +963,47 @@ func TestBeginStmt(t *testing.T) {
 		require.Equal(t, test.isBegin, isBeginStmt(test.stmt))
 	}
 }
+
+// Test forwarding multi-statements works well.
+func TestMultiStmt(t *testing.T) {
+	tc := newTCPConnSuite(t)
+
+	// COM_STMT_PREPARE don't support multiple statements, so we only test COM_QUERY.
+	cfgs := []cfgOverrider{
+		func(cfg *testConfig) {
+			cfg.clientConfig.cmd = mysql.ComQuery
+			cfg.backendConfig.respondType = responseTypeOK
+			cfg.backendConfig.stmtNum = 2
+		},
+		func(cfg *testConfig) {
+			cfg.clientConfig.cmd = mysql.ComQuery
+			cfg.backendConfig.respondType = responseTypeResultSet
+			cfg.backendConfig.columns = 1
+			cfg.backendConfig.stmtNum = 2
+		},
+		func(cfg *testConfig) {
+			cfg.clientConfig.cmd = mysql.ComQuery
+			cfg.backendConfig.respondType = responseTypeResultSet
+			cfg.backendConfig.columns = 1
+			cfg.backendConfig.rows = 1
+			cfg.backendConfig.stmtNum = 2
+		},
+		func(cfg *testConfig) {
+			cfg.clientConfig.cmd = mysql.ComQuery
+			cfg.backendConfig.respondType = responseTypeResultSet
+			cfg.backendConfig.columns = 1
+			cfg.backendConfig.stmtNum = 3
+		},
+		func(cfg *testConfig) {
+			cfg.clientConfig.cmd = mysql.ComQuery
+			cfg.backendConfig.respondType = responseTypeLoadFile
+			cfg.backendConfig.stmtNum = 2
+		},
+	}
+
+	for _, cfg := range cfgs {
+		ts, clean := newTestSuite(t, tc, cfg)
+		ts.executeCmd(t, nil)
+		clean()
+	}
+}

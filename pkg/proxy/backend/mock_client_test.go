@@ -281,40 +281,53 @@ func (mc *mockClient) query(packetIO *pnet.PacketIO) error {
 }
 
 func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
-	pkt, err := packetIO.ReadPacket()
-	if err != nil {
-		return err
-	}
-	switch pkt[0] {
-	case mysql.OKHeader:
-		// check status
-	case mysql.ErrHeader:
-		return nil
-	case mysql.LocalInFileHeader:
-		for i := 0; i < mc.filePkts; i++ {
-			if err = packetIO.WritePacket(mockCmdBytes, false); err != nil {
+	for {
+		var serverStatus uint16
+		pkt, err := packetIO.ReadPacket()
+		if err != nil {
+			return err
+		}
+		switch pkt[0] {
+		case mysql.OKHeader:
+			serverStatus = binary.LittleEndian.Uint16(pkt[3:])
+		case mysql.ErrHeader:
+			return nil
+		case mysql.LocalInFileHeader:
+			for i := 0; i < mc.filePkts; i++ {
+				if err = packetIO.WritePacket(mockCmdBytes, false); err != nil {
+					return err
+				}
+			}
+			if err = packetIO.WritePacket(nil, true); err != nil {
 				return err
 			}
-		}
-		if err = packetIO.WritePacket(nil, true); err != nil {
-			return err
-		}
-		if _, err = packetIO.ReadPacket(); err != nil {
-			return err
-		}
-	default:
-		// read result set
-		for {
 			if pkt, err = packetIO.ReadPacket(); err != nil {
 				return err
 			}
-			if pnet.IsEOFPacket(pkt) {
-				break
+			if pkt[0] == mysql.OKHeader {
+				serverStatus = binary.LittleEndian.Uint16(pkt[3:])
+			} else {
+				return nil
+			}
+		default:
+			// read result set
+			for {
+				if pkt, err = packetIO.ReadPacket(); err != nil {
+					return err
+				}
+				if pnet.IsEOFPacket(pkt) {
+					break
+				}
+			}
+			serverStatus = binary.LittleEndian.Uint16(pkt[3:])
+			if serverStatus&mysql.ServerStatusCursorExists == 0 {
+				if err = mc.readErrOrUntilEOF(packetIO); err != nil {
+					return err
+				}
 			}
 		}
-		serverStatus := binary.LittleEndian.Uint16(pkt[3:])
-		if serverStatus&mysql.ServerStatusCursorExists == 0 {
-			return mc.readErrOrUntilEOF(packetIO)
+		if serverStatus&mysql.ServerMoreResultsExists == 0 {
+			break
 		}
 	}
 	return nil
