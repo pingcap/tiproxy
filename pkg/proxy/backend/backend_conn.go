@@ -20,27 +20,20 @@ import (
 	"time"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/tidb/util/arena"
 )
 
 const (
 	DialTimeout = 5 * time.Second
 )
 
-type connectionPhase byte
-
 type BackendConnection struct {
-	pkt        *pnet.PacketIO // a helper to read and write data in packet format.
-	alloc      arena.Allocator
-	phase      connectionPhase
-	capability uint32
-	address    string
+	pkt     *pnet.PacketIO // a helper to read and write data in packet format.
+	address string
 }
 
 func NewBackendConnection(address string) *BackendConnection {
 	return &BackendConnection{
 		address: address,
-		alloc:   arena.NewAllocator(32 * 1024),
 	}
 }
 

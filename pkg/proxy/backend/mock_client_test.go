@@ -23,6 +23,8 @@ import (
 )
 
 type clientConfig struct {
+	// for all
+	abnormalExit bool
 	// for auth
 	tlsConfig  *tls.Config
 	capability uint32
@@ -47,6 +49,7 @@ func newClientConfig() *clientConfig {
 		authPlugin: mysql.AuthCachingSha2Password,
 		authData:   mockAuthData,
 		attrs:      make([]byte, 0),
+		cmd:        mysql.ComQuery,
 		sql:        mockCmdStr,
 	}
 }
@@ -66,6 +69,9 @@ func newMockClient(cfg *clientConfig) *mockClient {
 }
 
 func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
+	if mc.abnormalExit {
+		return packetIO.Close()
+	}
 	if _, err := packetIO.ReadPacket(); err != nil {
 		return err
 	}
@@ -114,6 +120,9 @@ func (mc *mockClient) writePassword(packetIO *pnet.PacketIO) error {
 
 // request sends commands except prepared statements commands.
 func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
+	if mc.abnormalExit {
+		return packetIO.Close()
+	}
 	packetIO.ResetSequence()
 	data := []byte{mc.cmd}
 	switch mc.cmd {

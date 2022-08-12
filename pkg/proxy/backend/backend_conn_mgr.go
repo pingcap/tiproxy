@@ -76,14 +76,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 		return err
 	}
 	backendIO := mgr.backendConn.PacketIO()
-	succeed, err := mgr.authenticator.handshakeFirstTime(clientIO, backendIO, serverTLSConfig, backendTLSConfig)
-	if err != nil {
+	if err := mgr.authenticator.handshakeFirstTime(clientIO, backendIO, serverTLSConfig, backendTLSConfig); err != nil {
 		return err
-	} else if !succeed {
-		return errors.New("server returns auth failure")
-	}
-	if mgr.authenticator.capability&mysql.ClientProtocol41 == 0 {
-		return errors.New("client must support CLIENT_PROTOCOL_41 capability")
 	}
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	go mgr.processSignals(childCtx)
@@ -95,29 +89,34 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
-	holdRequest, succeed, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), waitingRedirect)
-	if err != nil {
+	holdRequest, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), waitingRedirect)
+	if err != nil && !IsMySQLError(err) {
 		return err
 	}
-	switch request[0] {
-	case mysql.ComQuit:
-		return nil
-	case mysql.ComChangeUser:
-		if succeed {
+	if err == nil {
+		switch request[0] {
+		case mysql.ComQuit:
+			return nil
+		case mysql.ComChangeUser:
 			username, db := pnet.ParseChangeUser(request)
 			mgr.authenticator.changeUser(username, db)
+			return nil
 		}
-		return nil
 	}
+	// Even if it meets an MySQL error, it may have changed the status, such as when executing multi-statements.
 	if waitingRedirect && mgr.cmdProcessor.canRedirect() {
 		if err = mgr.tryRedirect(ctx); err != nil {
 			return err
 		}
 		if holdRequest {
-			_, _, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
+			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
+		}
+		if err != nil && !IsMySQLError(err) {
+			return err
 		}
 	}
-	return err
+	// Ignore MySQL errors, only return unexpected errors.
+	return nil
 }
 
 func (mgr *BackendConnManager) SetEventReceiver(receiver router.ConnEventReceiver) {

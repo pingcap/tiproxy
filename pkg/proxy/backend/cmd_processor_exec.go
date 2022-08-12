@@ -18,7 +18,6 @@ import (
 	"encoding/binary"
 	"strings"
 
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/tidb/parser"
@@ -27,31 +26,32 @@ import (
 )
 
 // executeCmd forwards requests and responses between the client and the backend.
-func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool) (holdRequest, succeed bool, err error) {
+// holdRequest: should the proxy send the request to the new backend.
+// err: unexpected errors or MySQL errors.
+func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool) (holdRequest bool, err error) {
 	backendIO.ResetSequence()
 	if waitingRedirect && cp.needHoldRequest(request) {
 		var response []byte
 		if _, response, err = cp.query(backendIO, "COMMIT"); err != nil {
 			// If commit fails, forward the response to the client.
-			if _, ok := err.(*gomysql.MyError); ok {
-				err = clientIO.WritePacket(response, true)
+			if IsMySQLError(err) {
+				if writeErr := clientIO.WritePacket(response, true); writeErr != nil {
+					return false, writeErr
+				}
 			}
 			// commit txn fails; read packet fails; write packet fails.
-			return
+			return false, err
 		}
-		holdRequest = true
-		succeed = true
-		return
+		return true, err
 	}
 
 	if err = backendIO.WritePacket(request, true); err != nil {
-		return
+		return false, err
 	}
-	succeed, err = cp.forwardCommand(clientIO, backendIO, request)
-	return
+	return false, cp.forwardCommand(clientIO, backendIO, request)
 }
 
-func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
+func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) error {
 	cmd := request[0]
 	switch cmd {
 	case mysql.ComStmtPrepare:
@@ -77,20 +77,20 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 	// For other commands, an OK / Error / EOF packet is expected.
 	response, err := forwardOnePacket(clientIO, backendIO, true)
 	if err != nil {
-		return false, err
+		return err
 	}
 	switch response[0] {
 	case mysql.OKHeader:
 		cp.handleOKPacket(request, response)
-		return true, nil
+		return nil
 	case mysql.ErrHeader:
-		return false, nil
+		return cp.handleErrorPacket(response)
 	case mysql.EOFHeader:
 		cp.handleEOFPacket(request, response)
-		return true, nil
+		return nil
 	}
 	// impossible here
-	return false, errors.Errorf("unexpected response, cmd:%d resp:%d", cmd, response[0])
+	return errors.Errorf("unexpected response, cmd:%d resp:%d", cmd, response[0])
 }
 
 func forwardOnePacket(destIO, srcIO *pnet.PacketIO, flush bool) (data []byte, err error) {
@@ -112,16 +112,15 @@ func forwardUntilEOF(clientIO, backendIO *pnet.PacketIO) (eofPacket []byte, err 
 	}
 }
 
-func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) (succeed bool, err error) {
-	var (
-		expectedEOFNum int
-		response       []byte
-	)
-	if response, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
-		return
+func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) error {
+	response, err := forwardOnePacket(clientIO, backendIO, false)
+	if err != nil {
+		return err
 	}
 	// The OK packet doesn't contain a server status.
-	if response[0] == mysql.OKHeader {
+	switch response[0] {
+	case mysql.OKHeader:
+		expectedEOFNum := 0
 		numColumns := binary.LittleEndian.Uint16(response[5:])
 		if numColumns > 0 {
 			expectedEOFNum++
@@ -130,72 +129,85 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) (s
 		if numParams > 0 {
 			expectedEOFNum++
 		}
-		succeed = true
-	}
-	for i := 0; i < expectedEOFNum; i++ {
-		// Ignore this status because PREPARE doesn't affect status.
-		if _, err = forwardUntilEOF(clientIO, backendIO); err != nil {
-			return
+		for i := 0; i < expectedEOFNum; i++ {
+			// Ignore this status because PREPARE doesn't affect status.
+			if _, err = forwardUntilEOF(clientIO, backendIO); err != nil {
+				return err
+			}
 		}
+		return clientIO.Flush()
+	case mysql.ErrHeader:
+		if err := clientIO.Flush(); err != nil {
+			return err
+		}
+		return cp.handleErrorPacket(response)
 	}
-	return succeed, clientIO.Flush()
+	// impossible here
+	return errors.Errorf("unexpected response, cmd:%d resp:%d", mysql.ComStmtPrepare, response[0])
 }
 
-func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
-	var response []byte
-	if response, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
-		return
+func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+	response, err := forwardOnePacket(clientIO, backendIO, false)
+	if err != nil {
+		return err
 	}
 	if response[0] == mysql.ErrHeader {
-		return false, clientIO.Flush()
-	} else if !pnet.IsEOFPacket(response) {
+		if err := clientIO.Flush(); err != nil {
+			return err
+		}
+		return cp.handleErrorPacket(response)
+	}
+	if !pnet.IsEOFPacket(response) {
 		if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
-			return
+			return err
 		}
 	}
 	cp.handleEOFPacket(request, response)
-	return true, clientIO.Flush()
+	return clientIO.Flush()
 }
 
-func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
-	var response []byte
+func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
 	for {
-		if response, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
-			return false, err
+		response, err := forwardOnePacket(clientIO, backendIO, false)
+		if err != nil {
+			return err
 		}
 		var serverStatus uint16
 		switch response[0] {
 		case mysql.OKHeader:
 			rs := cp.handleOKPacket(request, response)
-			serverStatus, succeed, err = rs.Status, true, clientIO.Flush()
+			serverStatus, err = rs.Status, clientIO.Flush()
 		case mysql.ErrHeader:
+			if err := clientIO.Flush(); err != nil {
+				return err
+			}
 			// Subsequent statements won't be executed even if it's a multi-statement.
-			return false, clientIO.Flush()
+			return cp.handleErrorPacket(response)
 		case mysql.LocalInFileHeader:
-			serverStatus, succeed, err = cp.forwardLoadInFile(clientIO, backendIO, request)
+			serverStatus, err = cp.forwardLoadInFile(clientIO, backendIO, request)
 		default:
-			serverStatus, succeed, err = cp.forwardResultSet(clientIO, backendIO, request, response)
+			serverStatus, err = cp.forwardResultSet(clientIO, backendIO, request, response)
 		}
-		if err != nil || !succeed {
-			return succeed, err
+		if err != nil {
+			return err
 		}
 		// If it's not the last statement in multi-statements, continue.
 		if serverStatus&mysql.ServerMoreResultsExists == 0 {
 			break
 		}
 	}
-	return true, nil
+	return nil
 }
 
-func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, request []byte) (serverStatus uint16, succeed bool, err error) {
+func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, request []byte) (serverStatus uint16, err error) {
 	if err = clientIO.Flush(); err != nil {
 		return
 	}
 	// The client sends file data until an empty packet.
 	for {
 		var data []byte
-		data, err = forwardOnePacket(backendIO, clientIO, true)
-		if err != nil {
+		// The file may be large, so always flush it.
+		if data, err = forwardOnePacket(backendIO, clientIO, true); err != nil {
 			return
 		}
 		if len(data) == 0 {
@@ -206,15 +218,18 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 	if response, err = forwardOnePacket(clientIO, backendIO, true); err != nil {
 		return
 	}
-	if response[0] == mysql.OKHeader {
+	switch response[0] {
+	case mysql.OKHeader:
 		rs := cp.handleOKPacket(request, response)
-		return rs.Status, true, nil
+		return rs.Status, nil
+	case mysql.ErrHeader:
+		return serverStatus, cp.handleErrorPacket(response)
 	}
-	// Error packet
-	return
+	// impossible here
+	return serverStatus, errors.Errorf("unexpected response, cmd:%d resp:%d", mysql.ComQuery, response[0])
 }
 
-func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request, response []byte) (serverStatus uint16, succeed bool, err error) {
+func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request, response []byte) (serverStatus uint16, err error) {
 	if !pnet.IsEOFPacket(response) {
 		// read columns
 		if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
@@ -232,7 +247,10 @@ func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, req
 			}
 			// An error may occur when the backend writes rows.
 			if response[0] == mysql.ErrHeader {
-				return 0, false, clientIO.Flush()
+				if err = clientIO.Flush(); err != nil {
+					return serverStatus, err
+				}
+				return serverStatus, cp.handleErrorPacket(response)
 			}
 			if pnet.IsEOFPacket(response) {
 				break
@@ -240,70 +258,73 @@ func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, req
 		}
 	}
 	serverStatus = cp.handleEOFPacket(request, response)
-	return serverStatus, true, clientIO.Flush()
+	return serverStatus, clientIO.Flush()
 }
 
-func (cp *CmdProcessor) forwardCloseCmd(request []byte) (succeed bool, err error) {
+func (cp *CmdProcessor) forwardCloseCmd(request []byte) error {
 	// No packet is sent to the client for COM_STMT_CLOSE.
 	cp.updatePrepStmtStatus(request, 0)
-	return true, nil
+	return nil
 }
 
-func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) (succeed bool, err error) {
+func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) error {
 	// No packet is sent to the client for COM_STMT_SEND_LONG_DATA.
 	cp.updatePrepStmtStatus(request, 0)
-	return true, nil
+	return nil
 }
 
-func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
+func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
 	// Currently, TiDB responses with an OK or Err packet. But according to the MySQL doc, the server may send a
 	// switch auth request.
 	for {
 		response, err := forwardOnePacket(clientIO, backendIO, true)
 		if err != nil {
-			return false, err
+			return err
 		}
 		switch response[0] {
 		case mysql.OKHeader:
 			cp.handleOKPacket(request, response)
-			return true, nil
+			return nil
 		case mysql.ErrHeader:
-			return false, nil
+			return cp.handleErrorPacket(response)
 		default:
 			// If the server sends a switch-auth request, the proxy forwards the auth data to the server.
 			if _, err = forwardOnePacket(backendIO, clientIO, true); err != nil {
-				return false, err
+				return err
 			}
 		}
 	}
 }
 
-func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO *pnet.PacketIO, request []byte) (succeed bool, err error) {
+func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
 	response, err := forwardOnePacket(clientIO, backendIO, false)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if response[0] == mysql.ErrHeader {
-		return false, clientIO.Flush()
+		if err = clientIO.Flush(); err != nil {
+			return err
+		}
+		return cp.handleErrorPacket(response)
 	}
 	// It sends some columns and an EOF packet.
 	if !pnet.IsEOFPacket(response) {
 		response, err = forwardUntilEOF(clientIO, backendIO)
 	}
 	cp.handleEOFPacket(request, response)
-	return true, clientIO.Flush()
+	return clientIO.Flush()
 }
 
-func (cp *CmdProcessor) forwardStatisticsCmd(clientIO, backendIO *pnet.PacketIO) (succeed bool, err error) {
+func (cp *CmdProcessor) forwardStatisticsCmd(clientIO, backendIO *pnet.PacketIO) error {
 	// It just sends a string.
-	_, err = forwardOnePacket(clientIO, backendIO, true)
-	return true, err
+	_, err := forwardOnePacket(clientIO, backendIO, true)
+	return err
 }
 
-func (cp *CmdProcessor) forwardQuitCmd() (succeed bool, err error) {
+func (cp *CmdProcessor) forwardQuitCmd() error {
 	// No returning, just disconnect.
 	cp.serverStatus |= StatusQuit
-	return true, nil
+	return nil
 }
 
 // When the following conditions are matched, we can hold the command after redirecting:

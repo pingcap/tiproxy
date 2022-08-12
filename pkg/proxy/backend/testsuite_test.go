@@ -149,7 +149,9 @@ func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendR
 	if c == nil {
 		require.NoError(t, ts.mc.err)
 		require.NoError(t, ts.mb.err)
-		require.NoError(t, ts.mp.err)
+		if ts.mb.err != nil {
+			require.True(t, IsMySQLError(ts.mp.err))
+		}
 		if clientRunner != nil && backendRunner != nil {
 			// Ensure all the packets are forwarded.
 			msg := fmt.Sprintf("cmd:%d responseType:%d", ts.mc.cmd, ts.mb.respondType)

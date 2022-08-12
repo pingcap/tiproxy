@@ -15,8 +15,10 @@
 package backend
 
 import (
+	"io"
 	"testing"
 
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
@@ -1006,4 +1008,51 @@ func TestMultiStmt(t *testing.T) {
 		ts.executeCmd(t, nil)
 		clean()
 	}
+}
+
+// Test that the proxy won't hang or panic when a network error happens.
+func TestNetworkError(t *testing.T) {
+	tc := newTCPConnSuite(t)
+
+	clientExitCfg := func(cfg *testConfig) {
+		cfg.clientConfig.abnormalExit = true
+	}
+	backendExitCfg := func(cfg *testConfig) {
+		cfg.backendConfig.abnormalExit = true
+	}
+	clientErrChecker := func(t *testing.T, ts *testSuite) {
+		require.True(t, errors.Is(ts.mp.err, io.EOF))
+		require.True(t, errors.Is(ts.mc.err, io.EOF))
+	}
+	backendErrChecker := func(t *testing.T, ts *testSuite) {
+		require.True(t, errors.Is(ts.mp.err, io.EOF))
+		require.True(t, errors.Is(ts.mb.err, io.EOF))
+	}
+	proxyErrChecker := func(t *testing.T, ts *testSuite) {
+		require.True(t, errors.Is(ts.mp.err, io.EOF))
+	}
+
+	ts, clean := newTestSuite(t, tc, clientExitCfg)
+	ts.authenticateFirstTime(t, backendErrChecker)
+	clean()
+
+	ts, clean = newTestSuite(t, tc, backendExitCfg)
+	ts.authenticateFirstTime(t, clientErrChecker)
+	clean()
+
+	ts, clean = newTestSuite(t, tc, backendExitCfg)
+	ts.authenticateSecondTime(t, proxyErrChecker)
+	clean()
+
+	ts, clean = newTestSuite(t, tc, clientExitCfg)
+	ts.executeCmd(t, backendErrChecker)
+	clean()
+
+	ts, clean = newTestSuite(t, tc, clientExitCfg)
+	ts.executeCmd(t, backendErrChecker)
+	clean()
+
+	ts, clean = newTestSuite(t, tc, backendExitCfg)
+	ts.query(t, proxyErrChecker)
+	clean()
 }
