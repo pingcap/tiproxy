@@ -16,6 +16,7 @@ package backend
 
 import (
 	"encoding/binary"
+
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
