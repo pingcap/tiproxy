@@ -23,7 +23,7 @@ import (
 )
 
 type clientConfig struct {
-	// for all
+	// for both auth and cmd
 	abnormalExit bool
 	// for auth
 	tlsConfig  *tls.Config
