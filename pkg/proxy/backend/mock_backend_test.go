@@ -24,6 +24,8 @@ import (
 )
 
 type backendConfig struct {
+	// for both auth and cmd
+	abnormalExit bool
 	// for auth
 	tlsConfig   *tls.Config
 	capability  uint32
@@ -71,6 +73,9 @@ func newMockBackend(cfg *backendConfig) *mockBackend {
 }
 
 func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
+	if mb.abnormalExit {
+		return packetIO.Close()
+	}
 	var err error
 	// write initial handshake
 	if err = packetIO.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin); err != nil {
@@ -134,6 +139,9 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO) error {
 }
 
 func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
+	if mb.abnormalExit {
+		return packetIO.Close()
+	}
 	for i := 0; i < mb.loops; i++ {
 		if err := mb.respondOnce(packetIO); err != nil {
 			return err

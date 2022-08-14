@@ -20,11 +20,9 @@ import (
 	"fmt"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/errors"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/hack"
-	"github.com/pingcap/tidb/util/logutil"
-	"go.uber.org/zap"
 )
 
 // Authenticator handshakes with the client and the backend.
@@ -42,34 +40,28 @@ func (auth *Authenticator) String() string {
 		auth.user, auth.dbname, auth.capability, auth.collation)
 }
 
-func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) (bool, error) {
+func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
 	backendIO.ResetSequence()
-	var (
-		serverPkt, clientPkt []byte
-		err                  error
-		serverCapability     uint32
-	)
-
 	// Read initial handshake packet from the backend.
-	serverPkt, serverCapability, err = auth.readInitialHandshake(backendIO)
+	serverPkt, serverCapability, err := auth.readInitialHandshake(backendIO)
 	if serverPkt != nil {
-		writeErr := clientIO.WritePacket(serverPkt, true)
-		if writeErr != nil {
-			return false, writeErr
+		if writeErr := clientIO.WritePacket(serverPkt, true); writeErr != nil {
+			return writeErr
 		}
-		if err != nil {
-			return false, nil
-		}
-	} else {
-		return false, err
+	}
+	if err != nil {
+		return err
 	}
 	if serverCapability&mysql.ClientSSL == 0 {
-		return false, errors.New("the TiDB server must enable TLS")
+		// The error cannot be sent to the client because the client only expects an initial handshake packet.
+		// The only way is to log it and disconnect.
+		return errors.New("the TiDB server must enable TLS")
 	}
 
 	// Read the response from the client.
-	if clientPkt, err = clientIO.ReadPacket(); err != nil {
-		return false, err
+	clientPkt, err := clientIO.ReadPacket()
+	if err != nil {
+		return err
 	}
 	capability := binary.LittleEndian.Uint16(clientPkt[:2])
 	// A 2-bytes capability contains the ClientSSL flag, no matter ClientProtocol41 is set or not.
@@ -77,7 +69,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	if sslEnabled {
 		// Upgrade TLS with the client if SSL is enabled.
 		if _, err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
-			return false, err
+			return err
 		}
 	} else {
 		// Rewrite the packet with ClientSSL enabled because we always connect to TiDB with TLS.
@@ -87,22 +79,22 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 		clientPkt = pktWithSSL
 	}
 	if err = backendIO.WritePacket(clientPkt, true); err != nil {
-		return false, err
+		return err
 	}
 	// Always upgrade TLS with the server.
 	auth.backendTLSConfig = backendTLSConfig
 	if err = backendIO.UpgradeToClientTLS(backendTLSConfig); err != nil {
-		return false, err
+		return err
 	}
 	if sslEnabled {
 		// Read from the client again, where the capability may not contain ClientSSL this time.
 		if clientPkt, err = clientIO.ReadPacket(); err != nil {
-			return false, err
+			return err
 		}
 	}
 	// Send the response again.
 	if err = backendIO.WritePacket(clientPkt, true); err != nil {
-		return false, err
+		return err
 	}
 	auth.readHandshakeResponse(clientPkt)
 
@@ -110,18 +102,16 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	for {
 		serverPkt, err = forwardMsg(backendIO, clientIO)
 		if err != nil {
-			return false, err
+			return err
 		}
 		switch serverPkt[0] {
 		case mysql.OKHeader:
-			logutil.BgLogger().Debug("parse client handshake response finished", zap.String("authInfo", auth.String()))
-			return true, nil
+			return nil
 		case mysql.ErrHeader:
-			return false, nil
+			return pnet.ParseErrorPacket(serverPkt)
 		default: // mysql.AuthSwitchRequest, ShaCommand
-			clientPkt, err = forwardMsg(clientIO, backendIO)
-			if err != nil {
-				return false, err
+			if _, err = forwardMsg(clientIO, backendIO); err != nil {
+				return err
 			}
 		}
 	}
@@ -159,8 +149,7 @@ func (auth *Authenticator) handshakeSecondTime(backendIO *pnet.PacketIO, session
 	}
 
 	tokenBytes := hack.Slice(sessionToken)
-	err = auth.writeAuthHandshake(backendIO, tokenBytes)
-	if err != nil {
+	if err = auth.writeAuthHandshake(backendIO, tokenBytes); err != nil {
 		return err
 	}
 
@@ -169,11 +158,10 @@ func (auth *Authenticator) handshakeSecondTime(backendIO *pnet.PacketIO, session
 
 func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serverPkt []byte, capability uint32, err error) {
 	if serverPkt, err = backendIO.ReadPacket(); err != nil {
-		err = errors.Trace(err)
 		return
 	}
 	if serverPkt[0] == mysql.ErrHeader {
-		err = errors.New("read initial handshake error")
+		err = pnet.ParseErrorPacket(serverPkt)
 		return
 	}
 	capability = pnet.ParseInitialHandshake(serverPkt)
@@ -211,7 +199,7 @@ func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) erro
 	case mysql.OKHeader:
 		return nil
 	case mysql.ErrHeader:
-		return errors.New("auth failed")
+		return pnet.ParseErrorPacket(data)
 	default: // mysql.AuthSwitchRequest, ShaCommand:
 		return errors.Errorf("read unexpected command: %#x", data[0])
 	}

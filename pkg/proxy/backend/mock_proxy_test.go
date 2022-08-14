@@ -54,8 +54,7 @@ func newMockProxy(cfg *proxyConfig) *mockProxy {
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	_, err := mp.auth.handshakeFirstTime(clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig)
-	return err
+	return mp.auth.handshakeFirstTime(clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig)
 }
 
 func (mp *mockProxy) authenticateSecondTime(_, backendIO *pnet.PacketIO) error {
@@ -68,12 +67,12 @@ func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {
 	if err != nil {
 		return err
 	}
-	if mp.holdRequest, _, err = mp.cmdProcessor.executeCmd(request, clientIO, backendIO, mp.waitRedirect); err != nil {
+	if mp.holdRequest, err = mp.cmdProcessor.executeCmd(request, clientIO, backendIO, mp.waitRedirect); err != nil {
 		return err
 	}
 	// Pretend to redirect the held request to the new backend. The backend must respond for another loop.
 	if mp.holdRequest {
-		_, _, err = mp.cmdProcessor.executeCmd(request, clientIO, backendIO, false)
+		_, err = mp.cmdProcessor.executeCmd(request, clientIO, backendIO, false)
 	}
 	return err
 }
