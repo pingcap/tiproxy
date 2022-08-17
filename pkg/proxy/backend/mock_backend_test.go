@@ -104,11 +104,11 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	mb.authData = resp.AuthData
 	mb.attrs = resp.Attrs
 	// verify password
-	return mb.verifyPassword(packetIO)
+	return mb.verifyPassword(packetIO, resp)
 }
 
-func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO) error {
-	if mb.switchAuth {
+func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.HandshakeResp) error {
+	if resp.AuthPlugin != mysql.AuthTiDBSessionToken && mb.switchAuth {
 		var err error
 		if err = packetIO.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
 			return err
@@ -152,7 +152,8 @@ func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
 
 func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	packetIO.ResetSequence()
-	if _, err := packetIO.ReadPacket(); err != nil {
+	pkt, err := packetIO.ReadPacket()
+	if err != nil {
 		return err
 	}
 	switch mb.respondType {
@@ -161,6 +162,9 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeErr:
 		return packetIO.WriteErrPacket(mysql.NewErr(mysql.ErrUnknown))
 	case responseTypeResultSet:
+		if pkt[0] == mysql.ComQuery && string(pkt[1:]) == sqlQueryState {
+			return mb.respondSessionStates(packetIO)
+		}
 		return mb.respondResultSet(packetIO)
 	case responseTypeColumn:
 		return mb.respondColumns(packetIO)
@@ -237,6 +241,10 @@ func (mb *mockBackend) respondResultSet(packetIO *pnet.PacketIO) error {
 		}
 		values = append(values, row)
 	}
+	return mb.writeResultSet(packetIO, names, values)
+}
+
+func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, values [][]any) error {
 	rs, err := gomysql.BuildSimpleTextResultset(names, values)
 	if err != nil {
 		return err
@@ -248,7 +256,7 @@ func (mb *mockBackend) respondResultSet(packetIO *pnet.PacketIO) error {
 		} else {
 			status &= ^mysql.ServerMoreResultsExists
 		}
-		data := pnet.DumpLengthEncodedInt(nil, uint64(mb.columns))
+		data := pnet.DumpLengthEncodedInt(nil, uint64(len(names)))
 		if err := packetIO.WritePacket(data, false); err != nil {
 			return err
 		}
@@ -344,4 +352,14 @@ func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
 		}
 	}
 	return nil
+}
+
+func (mb *mockBackend) respondSessionStates(packetIO *pnet.PacketIO) error {
+	names := []string{sessionStatesCol, sessionTokenCol}
+	values := [][]any{
+		{
+			mockSessionStates, mockCmdStr,
+		},
+	}
+	return mb.writeResultSet(packetIO, names, values)
 }

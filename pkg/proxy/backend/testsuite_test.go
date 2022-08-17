@@ -42,15 +42,16 @@ const (
 )
 
 var (
-	mockUsername = "test_user"
-	mockDBName   = "test_db"
-	mockSalt     = []byte("01234567890123456789")
-	mockAuthData = []byte("123456")
-	mockToken    = strings.Repeat("t", 512)
-	mockCmdStr   = "str"
-	mockCmdInt   = 100
-	mockCmdByte  = byte(1)
-	mockCmdBytes = []byte("01234567890123456789")
+	mockUsername      = "test_user"
+	mockDBName        = "test_db"
+	mockSalt          = []byte("01234567890123456789")
+	mockAuthData      = []byte("123456")
+	mockToken         = strings.Repeat("t", 512)
+	mockCmdStr        = "str"
+	mockCmdInt        = 100
+	mockCmdByte       = byte(1)
+	mockCmdBytes      = []byte("01234567890123456789")
+	mockSessionStates = "{\"current-db\":\"test_db\"}"
 )
 
 type testConfig struct {
@@ -110,6 +111,18 @@ type testSuite struct {
 type checker func(t *testing.T, ts *testSuite)
 
 func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*testSuite, func()) {
+	ts := createTestSuite(tc, overriders...)
+	clean := tc.newConn(t, true)
+	return ts, clean
+}
+
+func newTestSuiteWithoutBackendConn(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*testSuite, func()) {
+	ts := createTestSuite(tc, overriders...)
+	clean := tc.newConn(t, false)
+	return ts, clean
+}
+
+func createTestSuite(tc *tcpConnSuite, overriders ...cfgOverrider) *testSuite {
 	ts := &testSuite{}
 	cfg := newTestConfig(append(overriders, func(config *testConfig) {
 		config.backendConfig.tlsConfig = tc.backendTLSConfig
@@ -121,8 +134,7 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 	ts.mp = newMockProxy(cfg.proxyConfig)
 	ts.mc = newMockClient(cfg.clientConfig)
 	ts.tc = tc
-	clean := tc.newConn(t)
-	return ts, clean
+	return ts
 }
 
 func (ts *testSuite) setConfig(overriders ...cfgOverrider) {
@@ -134,13 +146,13 @@ func (ts *testSuite) setConfig(overriders ...cfgOverrider) {
 
 func (ts *testSuite) changeDB(db string) {
 	ts.mc.dbName = db
-	ts.mp.auth.updateCurrentDB(db)
+	ts.mp.authenticator.updateCurrentDB(db)
 }
 
 func (ts *testSuite) changeUser(username, db string) {
 	ts.mc.username = username
 	ts.mc.dbName = db
-	ts.mp.auth.changeUser(username, db)
+	ts.mp.authenticator.changeUser(username, db)
 }
 
 func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendRunner func(*pnet.PacketIO) error,

@@ -15,11 +15,11 @@
 package backend
 
 import (
-	"errors"
 	"net"
 	"time"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 )
 
 const (
@@ -44,7 +44,7 @@ func (bc *BackendConnection) Addr() string {
 func (bc *BackendConnection) Connect() error {
 	cn, err := net.DialTimeout("tcp", bc.address, DialTimeout)
 	if err != nil {
-		return errors.New("dial backend error")
+		return errors.Wrapf(err, "dial backend error")
 	}
 
 	pkt := pnet.NewPacketIO(cn)
