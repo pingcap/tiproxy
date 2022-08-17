@@ -219,6 +219,7 @@ func TestNormalRedirect(t *testing.T) {
 	ts.runTests(runners)
 }
 
+// Test redirection when the session has a transaction.
 func TestRedirectInTxn(t *testing.T) {
 	ts := newBackendMgrTester(t)
 	runners := []runner{
