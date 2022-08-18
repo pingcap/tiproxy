@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
@@ -93,6 +94,8 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 		etcd_cfg.ACUrls = cfg.ACUrls
 		etcd_cfg.LPUrls = cfg.LPUrls
 		etcd_cfg.APUrls = cfg.APUrls
+		etcd_cfg.Name = "proxy-" + fmt.Sprint(time.Now().UnixMicro())
+		etcd_cfg.InitialCluster = etcd_cfg.InitialClusterFromName(etcd_cfg.Name)
 		etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
 		etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
 		etcd_cfg.UserHandlers = map[string]http.Handler{
@@ -162,15 +165,14 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 			err = errors.WithStack(err)
 			return
 		}
-
-		go func() {
-		}()
 	}
 
 	ready.Toggle()
-
-	err = srv.Proxy.Run(ctx)
 	return
+}
+
+func (s *Server) Run(ctx context.Context) error {
+	return s.Proxy.Run(ctx)
 }
 
 func (s *Server) Close() error {

@@ -28,11 +28,16 @@ const (
 )
 
 type Config struct {
-	Workdir string    `yaml:"workdir"`
-	LCUrls  []url.URL `yaml:"listen-urls"`
-	ACUrls  []url.URL `yaml:"advertise-urls"`
-	LPUrls  []url.URL `yaml:"listen-peer-urls"`
-	APUrls  []url.URL `yaml:"advertise-peer-urls"`
+	Workdir string `yaml:"workdir"`
+
+	LCUrlsI []string  `yaml:"listen-urls"`
+	ACUrlsI []string  `yaml:"advertise-urls"`
+	LPUrlsI []string  `yaml:"listen-peer-urls"`
+	APUrlsI []string  `yaml:"advertise-peer-urls"`
+	LCUrls  []url.URL `yaml:"-"`
+	ACUrls  []url.URL `yaml:"-"`
+	LPUrls  []url.URL `yaml:"-"`
+	APUrls  []url.URL `yaml:"-"`
 
 	Config   ConfigManager `yaml:"config"`
 	Proxy    ProxyServer   `yaml:"proxy"`
@@ -108,6 +113,23 @@ func NewConfig(data []byte) (*Config, error) {
 }
 
 func (cfg *Config) Check() error {
+	var err error
+	cfg.LCUrls, err = str2url(cfg.LCUrlsI)
+	if err != nil {
+		return err
+	}
+	cfg.ACUrls, err = str2url(cfg.ACUrlsI)
+	if err != nil {
+		return err
+	}
+	cfg.LPUrls, err = str2url(cfg.LPUrlsI)
+	if err != nil {
+		return err
+	}
+	cfg.APUrls, err = str2url(cfg.APUrlsI)
+	if err != nil {
+		return err
+	}
 	if cfg.Metrics.PromCluster == "" {
 		cfg.Metrics.PromCluster = DefaultClusterName
 	}
@@ -122,5 +144,29 @@ func (cfg *Config) Check() error {
 }
 
 func (cfg *Config) ToBytes() ([]byte, error) {
+	cfg.LCUrlsI = url2str(cfg.LCUrls)
+	cfg.ACUrlsI = url2str(cfg.ACUrls)
+	cfg.LPUrlsI = url2str(cfg.LPUrls)
+	cfg.APUrlsI = url2str(cfg.APUrls)
 	return yaml.Marshal(cfg)
+}
+
+func str2url(us []string) ([]url.URL, error) {
+	r := make([]url.URL, len(us))
+	for i, ustr := range us {
+		url, err := url.Parse(ustr)
+		if err != nil {
+			return r, err
+		}
+		r[i] = *url
+	}
+	return r, nil
+}
+
+func url2str(us []url.URL) []string {
+	r := make([]string, len(us))
+	for i, u := range us {
+		r[i] = u.String()
+	}
+	return r
 }
