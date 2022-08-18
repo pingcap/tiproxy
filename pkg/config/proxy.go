@@ -97,8 +97,9 @@ func (c TLSCert) HasCA() bool {
 }
 
 type Security struct {
-	Server  TLSCert `toml:"server" json:"server"`
-	Cluster TLSCert `toml:"cluster" json:"cluster"`
+	RSAKeySize int     `toml:"rsa-key-size" json:"rsa-key-size"`
+	Server     TLSCert `toml:"server" json:"server"`
+	Cluster    TLSCert `toml:"cluster" json:"cluster"`
 }
 
 func NewConfig(data []byte) (*Config, error) {

@@ -65,7 +65,7 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Securi
 		},
 	}
 
-	if s.serverTLSConfig, err = security.CreateServerTLSConfig(scfg.Server.CA, scfg.Server.Key, scfg.Server.Cert); err != nil {
+	if s.serverTLSConfig, err = security.CreateServerTLSConfig(scfg.Server.CA, scfg.Server.Key, scfg.Server.Cert, scfg.RSAKeySize); err != nil {
 		return nil, err
 	}
 	if s.clusterTLSConfig, err = security.CreateClientTLSConfig(scfg.Cluster.CA, scfg.Cluster.Key, scfg.Cluster.Cert); err != nil {

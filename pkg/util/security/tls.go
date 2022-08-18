@@ -22,10 +22,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"io/ioutil"
 	"math/big"
 	"net"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -34,10 +34,25 @@ import (
 )
 
 // CreateServerTLSConfig creates a tlsConfig that is used to connect to the client.
-func CreateServerTLSConfig(ca, key, cert string) (tlsConfig *tls.Config, err error) {
+func CreateServerTLSConfig(ca, key, cert string, rsaKeySize int) (tlsConfig *tls.Config, err error) {
 	if len(cert) == 0 || len(key) == 0 {
-		cert = filepath.Join(cert, "cert.pem")
-		key = filepath.Join(key, "key.pem")
+		f, err := ioutil.TempFile(os.TempDir(), "tiproxy-tls-*.pem")
+		if err != nil {
+			return nil, err
+		}
+		_ = f.Close()
+		cert = f.Name()
+
+		f, err = ioutil.TempFile(os.TempDir(), "tiproxy-tls-*.pem")
+		if err != nil {
+			return nil, err
+		}
+		_ = f.Close()
+		key = f.Name()
+
+		if err := createTLSCertificates(cert, key, rsaKeySize); err != nil {
+			return nil, err
+		}
 	}
 
 	var tlsCert tls.Certificate

@@ -45,6 +45,7 @@ var testProxyConfig = Config{
 		},
 	},
 	Security: Security{
+		RSAKeySize: 64,
 		Server: TLSCert{
 			CA:   "a",
 			Cert: "b",
