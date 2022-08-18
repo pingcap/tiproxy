@@ -55,7 +55,8 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clien
 		r.frontendTLS = &tls.Config{}
 
 		if !cfg.Frontend.Security.HasCert() {
-			return nil, errors.Errorf("require certificates to secure frontend tls connections")
+			// TODO: require certs here
+			logger.Warn("require certificates to secure frontend tls connections")
 		} else {
 			cert, err := tls.LoadX509KeyPair(cfg.Frontend.Security.Cert, cfg.Frontend.Security.Key)
 			if err != nil {
@@ -83,7 +84,8 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clien
 		r.backendTLS = &tls.Config{}
 		// backend tls configuration
 		if !cfg.Backend.Security.HasCA() {
-			return nil, errors.Errorf("require signed certs to verify backend tls connections")
+			// TODO: require certs here
+			logger.Error("require signed certs to verify backend tls connections")
 		} else {
 			r.backendTLS.RootCAs = x509.NewCertPool()
 			certBytes, err := ioutil.ReadFile(cfg.Backend.Security.CA)
