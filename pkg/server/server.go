@@ -160,7 +160,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 
 	// setup proxy server
 	{
-		srv.Proxy, err = proxy.NewSQLServer(logger.Named("proxy"), cfg.Proxy, cfg.Security, srv.NamespaceManager)
+		srv.Proxy, err = proxy.NewSQLServer(logger.Named("proxy"), cfg.Workdir, cfg.Proxy, cfg.Security, srv.NamespaceManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return

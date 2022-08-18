@@ -34,10 +34,13 @@ import (
 )
 
 // CreateServerTLSConfig creates a tlsConfig that is used to connect to the client.
-func CreateServerTLSConfig(ca, key, cert string) (tlsConfig *tls.Config, err error) {
+func CreateServerTLSConfig(ca, key, cert string, rsaKeySize int, workdir string) (tlsConfig *tls.Config, err error) {
 	if len(cert) == 0 || len(key) == 0 {
-		cert = filepath.Join(cert, "cert.pem")
-		key = filepath.Join(key, "key.pem")
+		cert = filepath.Join(workdir, "cert.pem")
+		key = filepath.Join(workdir, "key.pem")
+		if err := createTLSCertificates(cert, key, rsaKeySize); err != nil {
+			return nil, err
+		}
 	}
 
 	var tlsCert tls.Certificate
