@@ -47,7 +47,6 @@ func RunRootCommand(rootCmd *cobra.Command) {
 
 		// wait for quit signals
 		<-sc
-
 		cancel()
 	}()
 

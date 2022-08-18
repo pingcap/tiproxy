@@ -1,6 +1,12 @@
 workdir: "./work"
 listen-urls:
-  - "0.0.0.0:2379"
+  - "http://0.0.0.0:3080"
+advertise-urls:
+  - "http://127.0.0.1:3080"
+listen-peer-urls:
+  - "http://0.0.0.0:3081"
+advertise-peer-urls:
+  - "http://127.0.0.1:3081"
 config:
   ignore_wrong_namespace: true
 proxy:

@@ -9,6 +9,10 @@ import (
 
 var testProxyConfig = Config{
 	Workdir: "./wd",
+	LCUrlsI: []string{"http://0.0.0.0:3080"},
+	ACUrlsI: []string{},
+	LPUrlsI: []string{"http://0.0.0.0:3081"},
+	APUrlsI: []string{},
 	LCUrls:  []url.URL{},
 	ACUrls:  []url.URL{},
 	LPUrls:  []url.URL{},
@@ -55,9 +59,11 @@ var testProxyConfig = Config{
 }
 
 func TestProxyConfig(t *testing.T) {
-	data, err := testProxyConfig.ToBytes()
+	data1, err := testProxyConfig.ToBytes()
 	require.NoError(t, err)
-	cfg, err := NewConfig(data)
+	cfg, err := NewConfig(data1)
 	require.NoError(t, err)
-	require.Equal(t, testProxyConfig, *cfg)
+	data2, err := cfg.ToBytes()
+	require.NoError(t, err)
+	require.Equal(t, data1, data2)
 }
