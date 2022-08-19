@@ -59,7 +59,7 @@ func (e *WError) Unwrap() error {
 
 // Wrap is used to wrapping unknown errors. A typical example is that:
 // 1. have a function `ReadMyConfig()`
-// 2. it got errors returnted from external libraries
+// 2. it got errors returned from external libraries
 // 3. you want to wrap these errors, expect `Unwrap(err) == ErrExternalErrors && Is(err, ErrReadMyConfig)`.
 // 4. then you are finding `err := Wrap(ErrReadMyConfig, ErrExternalErrors)`
 func Wrap(cerr error, uerr error) error {

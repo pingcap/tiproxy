@@ -15,10 +15,8 @@
 package backend
 
 import (
-	"io"
 	"testing"
 
-	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
@@ -1021,15 +1019,15 @@ func TestNetworkError(t *testing.T) {
 		cfg.backendConfig.abnormalExit = true
 	}
 	clientErrChecker := func(t *testing.T, ts *testSuite) {
-		require.True(t, errors.Is(ts.mp.err, io.EOF))
-		require.True(t, errors.Is(ts.mc.err, io.EOF))
+		require.True(t, isNetworkError(ts.mp.err))
+		require.True(t, isNetworkError(ts.mp.err))
 	}
 	backendErrChecker := func(t *testing.T, ts *testSuite) {
-		require.True(t, errors.Is(ts.mp.err, io.EOF))
-		require.True(t, errors.Is(ts.mb.err, io.EOF))
+		require.True(t, isNetworkError(ts.mp.err))
+		require.True(t, isNetworkError(ts.mp.err))
 	}
 	proxyErrChecker := func(t *testing.T, ts *testSuite) {
-		require.True(t, errors.Is(ts.mp.err, io.EOF))
+		require.True(t, isNetworkError(ts.mp.err))
 	}
 
 	ts, clean := newTestSuite(t, tc, clientExitCfg)

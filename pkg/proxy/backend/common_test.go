@@ -16,10 +16,12 @@ package backend
 
 import (
 	"crypto/tls"
+	"io"
 	"net"
 	"testing"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/TiProxy/pkg/util/security"
 	"github.com/pingcap/tidb/util"
 	"github.com/stretchr/testify/require"
@@ -122,4 +124,12 @@ func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(*pnet
 	}
 	wg.Wait()
 	return
+}
+
+func isNetworkError(err error) bool {
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	_, ok := errors.Unwrap(err).(*net.OpError)
+	return ok
 }

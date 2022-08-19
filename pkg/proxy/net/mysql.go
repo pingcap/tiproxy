@@ -62,16 +62,6 @@ func ParseInitialHandshake(data []byte) uint32 {
 	return capability
 }
 
-// ParseHandshakeResponse reads the handshake response from the client.
-func ParseHandshakeResponse(data []byte) *HandshakeResp {
-	capability := uint32(binary.LittleEndian.Uint16(data[:2]))
-	if capability&mysql.ClientProtocol41 > 0 {
-		return parseNewVersionHandshakeResponse(data)
-	} else {
-		return parseOldVersionHandshakeResponse(data)
-	}
-}
-
 // HandshakeResp indicates the response read from the client.
 type HandshakeResp struct {
 	Capability uint32
@@ -83,35 +73,7 @@ type HandshakeResp struct {
 	Attrs      []byte
 }
 
-func parseOldVersionHandshakeResponse(data []byte) *HandshakeResp {
-	resp := new(HandshakeResp)
-	pos := 0
-	// capability
-	resp.Capability = uint32(binary.LittleEndian.Uint16(data[:2]))
-	//collation
-	pos += 5
-	resp.Collation = mysql.CollationNames["utf8mb4_general_ci"]
-	// user name
-	resp.User = string(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
-	pos += len(resp.User) + 1
-	// db name
-	if resp.Capability&mysql.ClientConnectWithDB > 0 {
-		if len(data[pos:]) > 0 {
-			idx := bytes.IndexByte(data[pos:], 0)
-			resp.DB = string(data[pos : pos+idx])
-			pos = pos + idx + 1
-		}
-		// auth data
-		if len(data[pos:]) > 0 {
-			resp.AuthData = data[pos : pos+bytes.IndexByte(data[pos:], 0)]
-		}
-	} else {
-		resp.AuthData = data[pos : pos+bytes.IndexByte(data[pos:], 0)]
-	}
-	return resp
-}
-
-func parseNewVersionHandshakeResponse(data []byte) *HandshakeResp {
+func ParseHandshakeResponse(data []byte) *HandshakeResp {
 	resp := new(HandshakeResp)
 	pos := 0
 	// capability
@@ -181,39 +143,7 @@ func parseNewVersionHandshakeResponse(data []byte) *HandshakeResp {
 	return resp
 }
 
-func MakeOldVersionHandshakeResponse(username, db string, authData []byte, capability uint32) (data []byte, headerPos int) {
-	length := 2 + 3 + 1 + len(username) + 1 + len(db) + 1 + len(authData) + 1
-	data = make([]byte, length)
-	pos := 0
-	// capability [16 bit]
-	DumpUint16(data[:0], uint16(capability))
-	pos += 2
-	// MaxPacketSize [24 bit]
-	pos += 3
-	// Charset [1 byte]
-	data[pos] = testCollation
-	pos++
-	headerPos = pos
-	// User [null terminated string]
-	if len(username) > 0 {
-		pos += copy(data[pos:], username)
-	}
-	data[pos] = 0x00
-	pos++
-	// db [null terminated string]
-	if capability&mysql.ClientConnectWithDB > 0 {
-		pos += copy(data[pos:], db)
-		data[pos] = 0x00
-		pos++
-	}
-	// auth data [null terminated string]
-	pos += copy(data[pos:], authData)
-	data[pos] = 0x00
-	pos++
-	return data[:pos], headerPos
-}
-
-func MakeNewVersionHandshakeResponse(username, db, authPlugin string, collation uint8, authData, attrs []byte, capability uint32) (data []byte, headerPos int) {
+func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, authData, attrs []byte, capability uint32) (data []byte, headerPos int) {
 	// encode length of the auth data
 	var (
 		authRespBuf, attrRespBuf [9]byte

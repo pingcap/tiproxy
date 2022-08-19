@@ -96,7 +96,9 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	if err = backendIO.WritePacket(clientPkt, true); err != nil {
 		return err
 	}
-	auth.readHandshakeResponse(clientPkt)
+	if err = auth.readHandshakeResponse(clientPkt); err != nil {
+		return err
+	}
 
 	// verify password
 	for {
@@ -126,13 +128,19 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 	return
 }
 
-func (auth *Authenticator) readHandshakeResponse(data []byte) {
+func (auth *Authenticator) readHandshakeResponse(data []byte) error {
+	capability := uint32(binary.LittleEndian.Uint16(data[:2]))
+	if capability&mysql.ClientProtocol41 == 0 {
+		// TiDB doesn't support it now.
+		return errors.New("pre-4.1 MySQL client versions are not supported")
+	}
 	resp := pnet.ParseHandshakeResponse(data)
 	auth.capability = resp.Capability
 	auth.user = resp.User
 	auth.dbname = resp.DB
 	auth.collation = resp.Collation
 	auth.attrs = resp.Attrs
+	return nil
 }
 
 func (auth *Authenticator) handshakeSecondTime(backendIO *pnet.PacketIO, sessionToken string) error {
@@ -173,8 +181,7 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 	capability := auth.capability | mysql.ClientSSL
 	// Always enable auth_plugin.
 	capability |= mysql.ClientPluginAuth
-	// Always use the new version.
-	data, headerPos := pnet.MakeNewVersionHandshakeResponse(auth.user, auth.dbname, mysql.AuthTiDBSessionToken,
+	data, headerPos := pnet.MakeHandshakeResponse(auth.user, auth.dbname, mysql.AuthTiDBSessionToken,
 		auth.collation, authData, auth.attrs, capability)
 
 	// write header
