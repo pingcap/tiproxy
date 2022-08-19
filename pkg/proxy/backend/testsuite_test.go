@@ -42,21 +42,23 @@ const (
 )
 
 var (
-	mockUsername = "test_user"
-	mockDBName   = "test_db"
-	mockSalt     = []byte("01234567890123456789")
-	mockAuthData = []byte("123456")
-	mockToken    = strings.Repeat("t", 512)
-	mockCmdStr   = "str"
-	mockCmdInt   = 100
-	mockCmdByte  = byte(1)
-	mockCmdBytes = []byte("01234567890123456789")
+	mockUsername      = "test_user"
+	mockDBName        = "test_db"
+	mockSalt          = []byte("01234567890123456789")
+	mockAuthData      = []byte("123456")
+	mockToken         = strings.Repeat("t", 512)
+	mockCmdStr        = "str"
+	mockCmdInt        = 100
+	mockCmdByte       = byte(1)
+	mockCmdBytes      = []byte("01234567890123456789")
+	mockSessionStates = "{\"current-db\":\"test_db\"}"
 )
 
 type testConfig struct {
-	clientConfig  *clientConfig
-	proxyConfig   *proxyConfig
-	backendConfig *backendConfig
+	clientConfig    *clientConfig
+	proxyConfig     *proxyConfig
+	backendConfig   *backendConfig
+	testSuiteConfig *testSuiteConfig
 }
 
 type cfgOverrider func(config *testConfig)
@@ -88,9 +90,10 @@ func getCfgCombinations(cfgs [][]cfgOverrider) [][]cfgOverrider {
 
 func newTestConfig(overriders ...cfgOverrider) *testConfig {
 	cfg := &testConfig{
-		clientConfig:  newClientConfig(),
-		proxyConfig:   newProxyConfig(),
-		backendConfig: newBackendConfig(),
+		clientConfig:    newClientConfig(),
+		proxyConfig:     newProxyConfig(),
+		backendConfig:   newBackendConfig(),
+		testSuiteConfig: newTestSuiteConfig(),
 	}
 	for _, overrider := range overriders {
 		if overrider != nil {
@@ -101,10 +104,21 @@ func newTestConfig(overriders ...cfgOverrider) *testConfig {
 }
 
 type testSuite struct {
+	*testSuiteConfig
 	tc *tcpConnSuite
 	mb *mockBackend
 	mp *mockProxy
 	mc *mockClient
+}
+
+type testSuiteConfig struct {
+	initBackendConn bool
+}
+
+func newTestSuiteConfig() *testSuiteConfig {
+	return &testSuiteConfig{
+		initBackendConn: true,
+	}
 }
 
 type checker func(t *testing.T, ts *testSuite)
@@ -121,7 +135,8 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 	ts.mp = newMockProxy(cfg.proxyConfig)
 	ts.mc = newMockClient(cfg.clientConfig)
 	ts.tc = tc
-	clean := tc.newConn(t)
+	ts.testSuiteConfig = cfg.testSuiteConfig
+	clean := tc.newConn(t, ts.initBackendConn)
 	return ts, clean
 }
 
@@ -134,13 +149,13 @@ func (ts *testSuite) setConfig(overriders ...cfgOverrider) {
 
 func (ts *testSuite) changeDB(db string) {
 	ts.mc.dbName = db
-	ts.mp.auth.updateCurrentDB(db)
+	ts.mp.authenticator.updateCurrentDB(db)
 }
 
 func (ts *testSuite) changeUser(username, db string) {
 	ts.mc.username = username
 	ts.mc.dbName = db
-	ts.mp.auth.changeUser(username, db)
+	ts.mp.authenticator.changeUser(username, db)
 }
 
 func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendRunner func(*pnet.PacketIO) error,

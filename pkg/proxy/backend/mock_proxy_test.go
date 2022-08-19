@@ -36,8 +36,7 @@ func newProxyConfig() *proxyConfig {
 
 type mockProxy struct {
 	*proxyConfig
-	auth         *Authenticator
-	cmdProcessor *CmdProcessor
+	*BackendConnManager
 	// outputs that received from the server.
 	rs *gomysql.Result
 	// execution results
@@ -47,18 +46,17 @@ type mockProxy struct {
 
 func newMockProxy(cfg *proxyConfig) *mockProxy {
 	return &mockProxy{
-		proxyConfig:  cfg,
-		auth:         new(Authenticator),
-		cmdProcessor: NewCmdProcessor(),
+		proxyConfig:        cfg,
+		BackendConnManager: NewBackendConnManager(0),
 	}
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.auth.handshakeFirstTime(clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig)
+	return mp.authenticator.handshakeFirstTime(clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig)
 }
 
 func (mp *mockProxy) authenticateSecondTime(_, backendIO *pnet.PacketIO) error {
-	return mp.auth.handshakeSecondTime(backendIO, mp.sessionToken)
+	return mp.authenticator.handshakeSecondTime(backendIO, mp.sessionToken)
 }
 
 func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {

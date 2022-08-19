@@ -55,18 +55,21 @@ func newTCPConnSuite(t *testing.T) *tcpConnSuite {
 	return r
 }
 
-func (tc *tcpConnSuite) newConn(t *testing.T) func() {
+func (tc *tcpConnSuite) newConn(t *testing.T, withBackend bool) func() {
 	var wg util.WaitGroupWrapper
+	if withBackend {
+		wg.Run(func() {
+			conn, err := tc.backendListener.Accept()
+			require.NoError(t, err)
+			tc.backendIO = pnet.NewPacketIO(conn)
+		})
+	}
 	wg.Run(func() {
-		conn, err := tc.backendListener.Accept()
-		require.NoError(t, err)
-		tc.backendIO = pnet.NewPacketIO(conn)
-	})
-	wg.Run(func() {
-		backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
-		require.NoError(t, err)
-		tc.proxyBIO = pnet.NewPacketIO(backendConn)
-
+		if withBackend {
+			backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
+			require.NoError(t, err)
+			tc.proxyBIO = pnet.NewPacketIO(backendConn)
+		}
 		clientConn, err := tc.proxyListener.Accept()
 		require.NoError(t, err)
 		tc.proxyCIO = pnet.NewPacketIO(clientConn)
@@ -78,10 +81,12 @@ func (tc *tcpConnSuite) newConn(t *testing.T) func() {
 	})
 	wg.Wait()
 	return func() {
-		//  may  be closed twice
+		//  may be closed twice
 		_ = tc.clientIO.Close()
 		_ = tc.proxyCIO.Close()
-		_ = tc.proxyBIO.Close()
+		if tc.proxyBIO != nil {
+			_ = tc.proxyBIO.Close()
+		}
 		_ = tc.backendIO.Close()
 	}
 }
@@ -109,7 +114,9 @@ func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(*pnet
 			perr = proxyRunner(tc.proxyCIO, tc.proxyBIO)
 			if perr != nil {
 				require.NoError(t, tc.proxyCIO.Close())
-				require.NoError(t, tc.proxyBIO.Close())
+				if tc.proxyBIO != nil {
+					require.NoError(t, tc.proxyBIO.Close())
+				}
 			}
 		})
 	}
