@@ -85,16 +85,25 @@ type runner struct {
 // backendMgrTester encapsulates testSuite but is dedicated for BackendConnMgr.
 type backendMgrTester struct {
 	*testSuite
-	clean func()
-	t     *testing.T
+	t *testing.T
 }
 
 func newBackendMgrTester(t *testing.T) *backendMgrTester {
 	tc := newTCPConnSuite(t)
-	ts, clean := newTestSuiteWithoutBackendConn(t, tc)
+	cfg := func(cfg *testConfig) {
+		cfg.testSuiteConfig.initBackendConn = false
+	}
+	ts, clean := newTestSuite(t, tc, cfg)
+	t.Cleanup(func() {
+		clean()
+		err := ts.mp.Close()
+		require.NoError(t, err)
+		if ts.mp.eventReceiver != nil {
+			ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(t, eventClose)
+		}
+	})
 	return &backendMgrTester{
 		testSuite: ts,
-		clean:     clean,
 		t:         t,
 	}
 }
@@ -184,12 +193,6 @@ func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketI
 func (ts *backendMgrTester) runTests(runners []runner) {
 	for _, runner := range runners {
 		ts.runAndCheck(ts.t, nil, runner.client, runner.backend, runner.proxy)
-	}
-	ts.clean()
-	err := ts.mp.Close()
-	require.NoError(ts.t, err)
-	if ts.mp.eventReceiver != nil {
-		ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(ts.t, eventClose)
 	}
 }
 

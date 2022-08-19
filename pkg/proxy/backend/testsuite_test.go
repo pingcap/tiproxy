@@ -55,9 +55,10 @@ var (
 )
 
 type testConfig struct {
-	clientConfig  *clientConfig
-	proxyConfig   *proxyConfig
-	backendConfig *backendConfig
+	clientConfig    *clientConfig
+	proxyConfig     *proxyConfig
+	backendConfig   *backendConfig
+	testSuiteConfig *testSuiteConfig
 }
 
 type cfgOverrider func(config *testConfig)
@@ -89,9 +90,10 @@ func getCfgCombinations(cfgs [][]cfgOverrider) [][]cfgOverrider {
 
 func newTestConfig(overriders ...cfgOverrider) *testConfig {
 	cfg := &testConfig{
-		clientConfig:  newClientConfig(),
-		proxyConfig:   newProxyConfig(),
-		backendConfig: newBackendConfig(),
+		clientConfig:    newClientConfig(),
+		proxyConfig:     newProxyConfig(),
+		backendConfig:   newBackendConfig(),
+		testSuiteConfig: newTestSuiteConfig(),
 	}
 	for _, overrider := range overriders {
 		if overrider != nil {
@@ -102,27 +104,26 @@ func newTestConfig(overriders ...cfgOverrider) *testConfig {
 }
 
 type testSuite struct {
+	*testSuiteConfig
 	tc *tcpConnSuite
 	mb *mockBackend
 	mp *mockProxy
 	mc *mockClient
 }
 
+type testSuiteConfig struct {
+	initBackendConn bool
+}
+
+func newTestSuiteConfig() *testSuiteConfig {
+	return &testSuiteConfig{
+		initBackendConn: true,
+	}
+}
+
 type checker func(t *testing.T, ts *testSuite)
 
 func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*testSuite, func()) {
-	ts := createTestSuite(tc, overriders...)
-	clean := tc.newConn(t, true)
-	return ts, clean
-}
-
-func newTestSuiteWithoutBackendConn(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*testSuite, func()) {
-	ts := createTestSuite(tc, overriders...)
-	clean := tc.newConn(t, false)
-	return ts, clean
-}
-
-func createTestSuite(tc *tcpConnSuite, overriders ...cfgOverrider) *testSuite {
 	ts := &testSuite{}
 	cfg := newTestConfig(append(overriders, func(config *testConfig) {
 		config.backendConfig.tlsConfig = tc.backendTLSConfig
@@ -134,7 +135,9 @@ func createTestSuite(tc *tcpConnSuite, overriders ...cfgOverrider) *testSuite {
 	ts.mp = newMockProxy(cfg.proxyConfig)
 	ts.mc = newMockClient(cfg.clientConfig)
 	ts.tc = tc
-	return ts
+	ts.testSuiteConfig = cfg.testSuiteConfig
+	clean := tc.newConn(t, ts.initBackendConn)
+	return ts, clean
 }
 
 func (ts *testSuite) setConfig(overriders ...cfgOverrider) {
