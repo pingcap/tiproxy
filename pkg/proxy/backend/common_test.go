@@ -16,10 +16,12 @@ package backend
 
 import (
 	"crypto/tls"
+	"io"
 	"net"
 	"testing"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/TiProxy/pkg/util/security"
 	"github.com/pingcap/tidb/util"
 	"github.com/stretchr/testify/require"
@@ -91,13 +93,13 @@ func (tc *tcpConnSuite) newConn(t *testing.T, withBackend bool) func() {
 	}
 }
 
-func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(*pnet.PacketIO) error, proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) (cerr, berr, perr error) {
+func (tc *tcpConnSuite) run(clientRunner, backendRunner func(*pnet.PacketIO) error, proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) (cerr, berr, perr error) {
 	var wg util.WaitGroupWrapper
 	if clientRunner != nil {
 		wg.Run(func() {
 			cerr = clientRunner(tc.clientIO)
 			if cerr != nil {
-				require.NoError(t, tc.clientIO.Close())
+				_ = tc.clientIO.Close()
 			}
 		})
 	}
@@ -105,7 +107,7 @@ func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(*pnet
 		wg.Run(func() {
 			berr = backendRunner(tc.backendIO)
 			if berr != nil {
-				require.NoError(t, tc.backendIO.Close())
+				_ = tc.backendIO.Close()
 			}
 		})
 	}
@@ -113,13 +115,21 @@ func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(*pnet
 		wg.Run(func() {
 			perr = proxyRunner(tc.proxyCIO, tc.proxyBIO)
 			if perr != nil {
-				require.NoError(t, tc.proxyCIO.Close())
+				_ = tc.proxyCIO.Close()
 				if tc.proxyBIO != nil {
-					require.NoError(t, tc.proxyBIO.Close())
+					_ = tc.proxyBIO.Close()
 				}
 			}
 		})
 	}
 	wg.Wait()
 	return
+}
+
+func isNetworkError(err error) bool {
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	_, ok := errors.Unwrap(err).(*net.OpError)
+	return ok
 }

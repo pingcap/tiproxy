@@ -16,13 +16,11 @@ package backend
 
 import (
 	"context"
-	"io"
 	"sync/atomic"
 	"testing"
 
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
@@ -136,7 +134,7 @@ func (ts *backendMgrTester) redirectSucceed4Backend(packetIO *pnet.PacketIO) err
 	require.NoError(ts.t, err)
 	// previous connection is closed
 	_, err = packetIO.ReadPacket()
-	require.True(ts.t, errors.Is(err, io.EOF))
+	require.True(ts.t, isNetworkError(err))
 	return nil
 }
 
@@ -394,7 +392,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(t, err)
 				// the new connection is closed
 				_, err = tmpBackendIO.ReadPacket()
-				require.True(ts.t, errors.Is(err, io.EOF))
+				require.True(ts.t, isNetworkError(err))
 				return tmpBackendIO.Close()
 			},
 		},
@@ -418,7 +416,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(t, err)
 				// the new connection is closed
 				_, err = tmpBackendIO.ReadPacket()
-				require.True(ts.t, errors.Is(err, io.EOF))
+				require.True(ts.t, isNetworkError(err))
 				return tmpBackendIO.Close()
 			},
 		},

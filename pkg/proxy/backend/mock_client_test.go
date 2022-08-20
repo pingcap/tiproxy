@@ -76,13 +76,7 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 		return err
 	}
 
-	var resp []byte
-	var headerPos int
-	if mc.capability&mysql.ClientProtocol41 > 0 {
-		resp, headerPos = pnet.MakeNewVersionHandshakeResponse(mc.username, mc.dbName, mc.authPlugin, mc.collation, mc.authData, mc.attrs, mc.capability)
-	} else {
-		resp, headerPos = pnet.MakeOldVersionHandshakeResponse(mc.username, mc.dbName, mc.authData, mc.capability)
-	}
+	resp, headerPos := pnet.MakeHandshakeResponse(mc.username, mc.dbName, mc.authPlugin, mc.collation, mc.authData, mc.attrs, mc.capability)
 	if mc.capability&mysql.ClientSSL > 0 {
 		if err := packetIO.WritePacket(resp[:headerPos], true); err != nil {
 			return err

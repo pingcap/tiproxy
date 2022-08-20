@@ -98,7 +98,7 @@ func (p *PacketIO) WriteErrPacket(merr *mysql.SQLError) error {
 	data := make([]byte, 0, 4+len(merr.Message)+len(merr.State))
 	data = append(data, mysql.ErrHeader)
 	data = append(data, byte(merr.Code), byte(merr.Code>>8))
-	// It's compatible with both ClientProtocol41 enabled and disabled.
+	// ClientProtocol41 must be enabled.
 	data = append(data, '#')
 	data = append(data, merr.State...)
 	data = append(data, merr.Message...)
@@ -110,7 +110,7 @@ func (p *PacketIO) WriteOKPacket(status uint16) error {
 	data := make([]byte, 0, 7)
 	data = append(data, mysql.OKHeader)
 	data = append(data, 0, 0)
-	// It's compatible with both ClientProtocol41 enabled and disabled.
+	// ClientProtocol41 must be enabled.
 	data = DumpUint16(data, status)
 	data = append(data, 0, 0)
 	return p.WritePacket(data, true)
@@ -121,7 +121,7 @@ func (p *PacketIO) WriteEOFPacket(status uint16) error {
 	data := make([]byte, 0, 5)
 	data = append(data, mysql.EOFHeader)
 	data = append(data, 0, 0)
-	// It's compatible with both ClientProtocol41 enabled and disabled.
+	// ClientProtocol41 must be enabled.
 	data = DumpUint16(data, status)
 	return p.WritePacket(data, true)
 }

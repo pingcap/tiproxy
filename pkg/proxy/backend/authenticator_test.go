@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTLSConnection(t *testing.T) {
+func TestUnsupportedCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
@@ -40,6 +40,14 @@ func TestTLSConnection(t *testing.T) {
 				cfg.backendConfig.capability = defaultBackendCapability | mysql.ClientSSL
 			},
 		},
+		{
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientProtocol41
+			},
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientProtocol41
+			},
+		},
 	}
 
 	tc := newTCPConnSuite(t)
@@ -49,6 +57,8 @@ func TestTLSConnection(t *testing.T) {
 		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
 			if ts.mb.backendConfig.capability&mysql.ClientSSL == 0 {
 				require.ErrorContains(t, ts.mp.err, "must enable TLS")
+			} else if ts.mc.clientConfig.capability&mysql.ClientProtocol41 == 0 {
+				require.ErrorContains(t, ts.mp.err, "not supported")
 			}
 		})
 		clean()
@@ -118,14 +128,6 @@ func TestAuthPlugin(t *testing.T) {
 
 func TestCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
-		{
-			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientProtocol41
-			},
-			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientProtocol41
-			},
-		},
 		{
 			func(cfg *testConfig) {
 				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientConnectWithDB
