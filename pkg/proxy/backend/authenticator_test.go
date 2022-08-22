@@ -48,6 +48,22 @@ func TestUnsupportedCapability(t *testing.T) {
 				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientProtocol41
 			},
 		},
+		{
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability = defaultClientCapability & ^mysql.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability = defaultClientCapability | mysql.ClientPSMultiResults
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientPSMultiResults
+			},
+		},
 	}
 
 	tc := newTCPConnSuite(t)
@@ -59,6 +75,12 @@ func TestUnsupportedCapability(t *testing.T) {
 				require.ErrorContains(t, ts.mp.err, "must enable TLS")
 			} else if ts.mc.clientConfig.capability&mysql.ClientProtocol41 == 0 {
 				require.ErrorContains(t, ts.mp.err, "not supported")
+			} else if ts.mb.backendConfig.capability&ts.mc.capability&mysql.ClientPSMultiResults > 0 {
+				require.ErrorContains(t, ts.mp.err, "not supported")
+			} else {
+				require.NoError(t, ts.mc.err)
+				require.NoError(t, ts.mp.err)
+				require.NoError(t, ts.mb.err)
 			}
 		})
 		clean()

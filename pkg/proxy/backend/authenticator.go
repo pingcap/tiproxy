@@ -25,6 +25,13 @@ import (
 	"github.com/pingcap/tidb/util/hack"
 )
 
+// Other server capabilities are not supported.
+const supportedServerCapabilities = mysql.ClientLongPassword | mysql.ClientFoundRows | mysql.ClientLongFlag |
+	mysql.ClientConnectWithDB | mysql.ClientNoSchema | mysql.ClientODBC | mysql.ClientLocalFiles | mysql.ClientIgnoreSpace |
+	mysql.ClientProtocol41 | mysql.ClientInteractive | mysql.ClientSSL | mysql.ClientIgnoreSigpipe |
+	mysql.ClientTransactions | mysql.ClientReserved | mysql.ClientSecureConnection | mysql.ClientMultiStatements |
+	mysql.ClientMultiResults | mysql.ClientPluginAuth | mysql.ClientConnectAtts | mysql.ClientPluginAuthLenencClientData
+
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
 	user             string
@@ -63,9 +70,9 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	if err != nil {
 		return err
 	}
-	capability := binary.LittleEndian.Uint16(clientPkt[:2])
+	clientCapability := binary.LittleEndian.Uint16(clientPkt[:2])
 	// A 2-bytes capability contains the ClientSSL flag, no matter ClientProtocol41 is set or not.
-	sslEnabled := uint32(capability)&mysql.ClientSSL > 0
+	sslEnabled := uint32(clientCapability)&mysql.ClientSSL > 0
 	if sslEnabled {
 		// Upgrade TLS with the client if SSL is enabled.
 		if _, err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
@@ -74,7 +81,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	} else {
 		// Rewrite the packet with ClientSSL enabled because we always connect to TiDB with TLS.
 		pktWithSSL := make([]byte, len(clientPkt))
-		pnet.DumpUint16(pktWithSSL[:0], capability|uint16(mysql.ClientSSL))
+		pnet.DumpUint16(pktWithSSL[:0], clientCapability|uint16(mysql.ClientSSL))
 		copy(pktWithSSL[2:], clientPkt[2:])
 		clientPkt = pktWithSSL
 	}
@@ -98,6 +105,9 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	}
 	if err = auth.readHandshakeResponse(clientPkt); err != nil {
 		return err
+	}
+	if unsupported := serverCapability & auth.capability &^ supportedServerCapabilities; unsupported > 0 {
+		return errors.Errorf("server capability is not supported: %d", unsupported)
 	}
 
 	// verify password
