@@ -11,8 +11,6 @@ on:
     branches:
       - master
       - release-*
-    paths:
-      - "**"
 
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
@@ -49,6 +47,7 @@ jobs:
         uses: mxschmitt/action-tmate@v3
 
   build:
+    needs: build_cmd
     runs-on: ubuntu-latest
     steps:
       - name: "checkout repo"
