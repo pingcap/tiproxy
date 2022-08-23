@@ -1,0 +1,41 @@
+name: main
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        type: boolean
+        description: "Run the build with tmate debugging enabled"
+        required: false
+        default: false
+      ref:
+        type: string
+        description: "Checkout specific ref for the workflow"
+        required: false
+  pull_request:
+    branches:
+      - main
+      - release-*
+  # cache only shares from the same branch, we need to trigger an extra flow on pushing
+  # thus all PRs will share the cache from main/release-* branches
+  push:
+    branches:
+      - main
+      - release-*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+      ref: ${{ inputs.ref || github.ref }}
+
+  test:
+    needs: build
+    uses: ./.github/workflows/test.yml
+    with:
+      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+      ref: ${{ inputs.ref || github.ref }}
