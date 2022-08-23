@@ -1,0 +1,26 @@
+name: test
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        type: boolean
+        description: 'Run the build with tmate debugging enabled'
+        required: false
+        default: false
+  workflow_run:
+    workflows: ["build"]
+    branches:
+      - master
+      - release-*
+    types:
+      - completed
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    uses: ./.github/workflow_calls/common.yml@test
+    with:
+      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
