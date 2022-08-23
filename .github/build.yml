@@ -1,23 +1,18 @@
 name: build
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       debug:
         type: boolean
-        description: "Run the build with tmate debugging enabled"
-        required: false
-        default: false
-  pull_request:
-    branches:
-      - main
-      - release-*
-
-concurrency:
-  group: ${{ github.ref }}-${{ github.workflow }}
-  cancel-in-progress: true
+        description: "set tmate on failure"
+        required: true
+      ref:
+        type: string
+        description: "checkout specific ref"
+        required: true
 
 jobs:
-  build_cmd:
+  cmd:
     strategy:
       matrix:
         platform: [ubuntu-latest, macos-latest, windows-latest]
@@ -25,6 +20,8 @@ jobs:
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
       - name: "setup golang"
         uses: actions/setup-go@v3
         with:
@@ -43,15 +40,17 @@ jobs:
       - name: "build cmd"
         run: make
       - name: "set up tmate session if necessary"
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+        if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3
 
-  build:
+  all:
     needs: build_cmd
     runs-on: ubuntu-latest
     steps:
       - name: "checkout repo"
         uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
       - name: "setup golang"
         uses: actions/setup-go@v3
         with:
@@ -73,5 +72,5 @@ jobs:
         if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3
       - name: "set up tmate session if necessary"
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+        if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3

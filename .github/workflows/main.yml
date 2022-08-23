@@ -1,0 +1,36 @@
+name: main
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        type: boolean
+        description: "Run the build with tmate debugging enabled"
+        required: false
+        default: false
+      ref:
+        type: string
+        description: "Checkout specific ref for the workflow"
+        required: false
+        default: ${{ github.ref }}
+  pull_request:
+    branches:
+      - main
+      - release-*
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: ./.github/build.yml
+    with:
+      debug: ${{ failure() && inputs.debug }}
+      ref: ${{ inputs.ref }}
+
+  test:
+    needs: build
+    uses: ./.github/test.yml
+    with:
+      debug: ${{ failure() && inputs.debug }}
+      ref: ${{ inputs.ref }}
