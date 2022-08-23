@@ -18,12 +18,12 @@ concurrency:
 
 jobs:
   build_cmd:
-    uses: ./.github/workflow_calls/common.yml@test
+    uses: ./.github/workflows/common.yml@test
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
 
   build:
     needs: build_cmd
-    uses: ./.github/workflow_calls/common.yml@test
+    uses: ./.github/workflows/common.yml@test
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
