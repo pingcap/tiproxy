@@ -18,19 +18,19 @@ on:
       - release-*
 
 concurrency:
-  group: ${{ github.ref }}-${{ github.workflow }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    uses: ./.github/build.yml
+    uses: ./.github/workflows/build.yml
     with:
       debug: ${{ failure() && inputs.debug }}
       ref: ${{ inputs.ref }}
 
   test:
     needs: build
-    uses: ./.github/test.yml
+    uses: ./.github/workflows/test.yml
     with:
       debug: ${{ failure() && inputs.debug }}
       ref: ${{ inputs.ref }}
