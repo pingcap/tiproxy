@@ -43,7 +43,7 @@ jobs:
       - name: "build cmd"
         run: make
       - name: "set up tmate session if necessary"
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
         uses: mxschmitt/action-tmate@v3
 
   build:
@@ -73,5 +73,5 @@ jobs:
         if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3
       - name: "set up tmate session if necessary"
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
         uses: mxschmitt/action-tmate@v3

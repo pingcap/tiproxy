@@ -8,9 +8,8 @@ on:
         required: false
         default: false
   workflow_run:
-    workflows: ["build"]
-    types:
-      - completed
+    workflows: [build]
+    types: [completed]
 
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
@@ -41,5 +40,5 @@ jobs:
       - name: "test all"
         run: make test
       - name: "set up tmate session if necessary"
-        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
         uses: mxschmitt/action-tmate@v3
