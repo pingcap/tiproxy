@@ -1,0 +1,77 @@
+name: build
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        type: boolean
+        description: "Run the build with tmate debugging enabled"
+        required: false
+        default: false
+  pull_request:
+    branches:
+      - main
+      - release-*
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  build_cmd:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v3
+      - name: "setup golang"
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.18
+      - name: "try to use build cache"
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/Library/Caches/go-build
+            ~\AppData\Local\go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: "build cmd"
+        run: make
+      - name: "set up tmate session if necessary"
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
+
+  build:
+    needs: build_cmd
+    runs-on: ubuntu-latest
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v3
+      - name: "setup golang"
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.18
+      - name: "try to use build cache"
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/Library/Caches/go-build
+            ~\AppData\Local\go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: "build all"
+        run: make build
+      - name: "set up tmate session if necessary"
+        if: ${{ failure() && inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
+      - name: "set up tmate session if necessary"
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
