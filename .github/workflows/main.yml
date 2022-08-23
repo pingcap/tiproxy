@@ -11,7 +11,6 @@ on:
         type: string
         description: "Checkout specific ref for the workflow"
         required: false
-        default: "main"
   pull_request:
     branches:
       - main
@@ -25,12 +24,12 @@ jobs:
   build:
     uses: ./.github/workflows/build.yml
     with:
-      debug: ${{ failure() && inputs.debug }}
-      ref: ${{ inputs.ref }}
+      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+      ref: ${{ inputs.ref || github.ref }}
 
   test:
     needs: build
     uses: ./.github/workflows/test.yml
     with:
-      debug: ${{ failure() && inputs.debug }}
-      ref: ${{ inputs.ref }}
+      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+      ref: ${{ inputs.ref || github.ref }}
