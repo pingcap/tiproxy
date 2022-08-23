@@ -36,6 +36,7 @@ type clientConfig struct {
 	attrs      []byte
 	// for cmd
 	cmd        byte
+	dataBytes  []byte
 	filePkts   int
 	prepStmtID int
 	sql        string
@@ -50,6 +51,7 @@ func newClientConfig() *clientConfig {
 		authData:   mockAuthData,
 		attrs:      make([]byte, 0),
 		cmd:        mysql.ComQuery,
+		dataBytes:  mockCmdBytes,
 		sql:        mockCmdStr,
 	}
 }
@@ -129,7 +131,7 @@ func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
 	case mysql.ComFieldList:
 		return mc.requestFieldList(packetIO)
 	case mysql.ComRefresh, mysql.ComSetOption:
-		data = append(data, mockCmdByte)
+		data = append(data, mc.dataBytes...)
 	case mysql.ComProcessKill:
 		data = pnet.DumpUint32(data, uint32(mockCmdInt))
 	case mysql.ComChangeUser:
@@ -138,7 +140,7 @@ func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
 		return mc.requestPrepare(packetIO)
 	case mysql.ComStmtSendLongData:
 		data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
-		data = append(data, mockCmdBytes...)
+		data = append(data, mc.dataBytes...)
 	case mysql.ComStmtExecute:
 		return mc.requestExecute(packetIO)
 	case mysql.ComStmtFetch:
@@ -158,7 +160,7 @@ func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
 }
 
 func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
-	data := pnet.MakeChangeUser(mockUsername, mockDBName, mockAuthData)
+	data := pnet.MakeChangeUser(mc.username, mc.dbName, mc.authData)
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
@@ -189,35 +191,33 @@ func (mc *mockClient) requestPrepare(packetIO *pnet.PacketIO) error {
 	if err != nil {
 		return err
 	}
-	expectedEOFNum := 0
+	expectedPacketNum := 0
 	if response[0] == mysql.OKHeader {
 		numColumns := binary.LittleEndian.Uint16(response[5:])
-		if numColumns > 0 {
-			expectedEOFNum++
-		}
 		numParams := binary.LittleEndian.Uint16(response[7:])
-		if numParams > 0 {
-			expectedEOFNum++
+		expectedPacketNum = int(numColumns) + int(numParams)
+		if mc.capability&mysql.ClientDeprecateEOF == 0 {
+			if numColumns > 0 {
+				expectedPacketNum++
+			}
+			if numParams > 0 {
+				expectedPacketNum++
+			}
 		}
 	}
-	for i := 0; i < expectedEOFNum; i++ {
-		for {
-			if response, err = packetIO.ReadPacket(); err != nil {
-				return err
-			}
-			if pnet.IsEOFPacket(response) {
-				break
-			}
+	for i := 0; i < expectedPacketNum; i++ {
+		if response, err = packetIO.ReadPacket(); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
 func (mc *mockClient) requestExecute(packetIO *pnet.PacketIO) error {
-	data := make([]byte, 0, len(mockCmdBytes)+5)
+	data := make([]byte, 0, len(mc.dataBytes)+5)
 	data = append(data, mysql.ComStmtExecute)
 	data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
-	data = append(data, mockCmdBytes...)
+	data = append(data, mc.dataBytes...)
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
@@ -225,14 +225,15 @@ func (mc *mockClient) requestExecute(packetIO *pnet.PacketIO) error {
 }
 
 func (mc *mockClient) requestFetch(packetIO *pnet.PacketIO) error {
-	data := make([]byte, 0, len(mockCmdBytes)+5)
+	data := make([]byte, 0, len(mc.dataBytes)+5)
 	data = append(data, mysql.ComStmtFetch)
 	data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
-	data = append(data, mockCmdBytes...)
+	data = append(data, mc.dataBytes...)
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
-	return mc.readErrOrUntilEOF(packetIO)
+	_, err := mc.readUntilResultEnd(packetIO)
+	return err
 }
 
 func (mc *mockClient) requestFieldList(packetIO *pnet.PacketIO) error {
@@ -244,26 +245,30 @@ func (mc *mockClient) requestFieldList(packetIO *pnet.PacketIO) error {
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}
-	return mc.readErrOrUntilEOF(packetIO)
+	_, err := mc.readUntilResultEnd(packetIO)
+	return err
 }
 
-func (mc *mockClient) readErrOrUntilEOF(packetIO *pnet.PacketIO) error {
-	pkt, err := packetIO.ReadPacket()
-	if err != nil {
-		return err
-	}
-	if pkt[0] == mysql.ErrHeader || pnet.IsEOFPacket(pkt) {
-		return nil
-	}
+func (mc *mockClient) readUntilResultEnd(packetIO *pnet.PacketIO) (pkt []byte, err error) {
 	for {
-		if pkt, err = packetIO.ReadPacket(); err != nil {
-			return err
+		pkt, err = packetIO.ReadPacket()
+		if err != nil {
+			return
 		}
-		if pnet.IsEOFPacket(pkt) {
-			break
+		if pkt[0] == mysql.ErrHeader {
+			return
+		}
+		if mc.capability&mysql.ClientDeprecateEOF == 0 {
+			if pnet.IsEOFPacket(pkt) {
+				break
+			}
+		} else {
+			if pnet.IsResultSetOKPacket(pkt) {
+				break
+			}
 		}
 	}
-	return nil
+	return
 }
 
 func (mc *mockClient) requestProcessInfo(packetIO *pnet.PacketIO) error {
@@ -297,7 +302,7 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 			return nil
 		case mysql.LocalInFileHeader:
 			for i := 0; i < mc.filePkts; i++ {
-				if err = packetIO.WritePacket(mockCmdBytes, false); err != nil {
+				if err = packetIO.WritePacket(mc.dataBytes, false); err != nil {
 					return err
 				}
 			}
@@ -314,19 +319,29 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 			}
 		default:
 			// read result set
-			for {
-				if pkt, err = packetIO.ReadPacket(); err != nil {
+			if mc.capability&mysql.ClientDeprecateEOF == 0 {
+				if pkt, err = mc.readUntilResultEnd(packetIO); err != nil {
 					return err
 				}
-				if pnet.IsEOFPacket(pkt) {
+				if pkt[0] == mysql.ErrHeader {
+					return nil
+				}
+				serverStatus = binary.LittleEndian.Uint16(pkt[3:])
+				if serverStatus&mysql.ServerStatusCursorExists > 0 {
 					break
 				}
 			}
-			serverStatus = binary.LittleEndian.Uint16(pkt[3:])
-			if serverStatus&mysql.ServerStatusCursorExists == 0 {
-				if err = mc.readErrOrUntilEOF(packetIO); err != nil {
-					return err
-				}
+			if pkt, err = mc.readUntilResultEnd(packetIO); err != nil {
+				return err
+			}
+			if pkt[0] == mysql.ErrHeader {
+				return nil
+			}
+			if mc.capability&mysql.ClientDeprecateEOF == 0 {
+				serverStatus = binary.LittleEndian.Uint16(pkt[3:])
+			} else {
+				rs := pnet.ParseOKPacket(pkt)
+				serverStatus = rs.Status
 			}
 		}
 		if serverStatus&mysql.ServerMoreResultsExists == 0 {

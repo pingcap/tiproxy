@@ -59,11 +59,12 @@ type mockBackend struct {
 	// Inputs that assigned by the test and will be sent to the client.
 	*backendConfig
 	// Outputs that received from the client and will be checked by the test.
-	username string
-	authData []byte
-	db       string
-	attrs    []byte
-	err      error
+	username         string
+	authData         []byte
+	db               string
+	attrs            []byte
+	clientCapability uint32
+	err              error
 }
 
 func newMockBackend(cfg *backendConfig) *mockBackend {
@@ -103,6 +104,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	mb.db = resp.DB
 	mb.authData = resp.AuthData
 	mb.attrs = resp.Attrs
+	mb.clientCapability = resp.Capability
 	// verify password
 	return mb.verifyPassword(packetIO, resp)
 }
@@ -127,7 +129,7 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.Handsh
 		}
 	}
 	if mb.authSucceed {
-		if err := packetIO.WriteOKPacket(mb.status); err != nil {
+		if err := packetIO.WriteOKPacket(mb.status, mysql.OKHeader); err != nil {
 			return err
 		}
 	} else {
@@ -181,7 +183,7 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 		if _, err := packetIO.ReadPacket(); err != nil {
 			return err
 		}
-		return packetIO.WriteOKPacket(mb.status)
+		return packetIO.WriteOKPacket(mb.status, mysql.OKHeader)
 	case responseTypePrepareOK:
 		return mb.respondPrepare(packetIO)
 	case responseTypeRow:
@@ -200,7 +202,7 @@ func (mb *mockBackend) respondOK(packetIO *pnet.PacketIO) error {
 		} else {
 			status &= ^mysql.ServerMoreResultsExists
 		}
-		if err := packetIO.WriteOKPacket(status); err != nil {
+		if err := packetIO.WriteOKPacket(status, mysql.OKHeader); err != nil {
 			return err
 		}
 	}
@@ -214,7 +216,14 @@ func (mb *mockBackend) respondColumns(packetIO *pnet.PacketIO) error {
 			return err
 		}
 	}
-	return packetIO.WriteEOFPacket(mb.status)
+	return mb.writeResultEndPacket(packetIO, mb.status)
+}
+
+func (mb *mockBackend) writeResultEndPacket(packetIO *pnet.PacketIO, status uint16) error {
+	if mb.capability&mysql.ClientDeprecateEOF > 0 {
+		return packetIO.WriteOKPacket(status, mysql.EOFHeader)
+	}
+	return packetIO.WriteEOFPacket(status)
 }
 
 // respond to Fetch
@@ -224,7 +233,7 @@ func (mb *mockBackend) respondRows(packetIO *pnet.PacketIO) error {
 			return err
 		}
 	}
-	return packetIO.WriteEOFPacket(mb.status)
+	return mb.writeResultEndPacket(packetIO, mb.status)
 }
 
 // respond to Query
@@ -265,11 +274,13 @@ func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, v
 				return err
 			}
 		}
-		if err := packetIO.WriteEOFPacket(status); err != nil {
-			return err
-		}
 
 		if status&mysql.ServerStatusCursorExists == 0 {
+			if mb.capability&mysql.ClientDeprecateEOF == 0 {
+				if err := packetIO.WriteEOFPacket(status); err != nil {
+					return err
+				}
+			}
 			for _, row := range values {
 				var data []byte
 				for _, value := range row {
@@ -279,9 +290,9 @@ func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, v
 					return err
 				}
 			}
-			if err := packetIO.WriteEOFPacket(status); err != nil {
-				return err
-			}
+		}
+		if err := mb.writeResultEndPacket(packetIO, status); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -313,7 +324,7 @@ func (mb *mockBackend) respondLoadFile(packetIO *pnet.PacketIO) error {
 				break
 			}
 		}
-		if err := packetIO.WriteOKPacket(status); err != nil {
+		if err := packetIO.WriteOKPacket(status, mysql.OKHeader); err != nil {
 			return err
 		}
 	}
@@ -337,8 +348,10 @@ func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
 				return err
 			}
 		}
-		if err := packetIO.WriteEOFPacket(mb.status); err != nil {
-			return err
+		if mb.capability&mysql.ClientDeprecateEOF == 0 {
+			if err := packetIO.WriteEOFPacket(mb.status); err != nil {
+				return err
+			}
 		}
 	}
 	if mb.columns > 0 {
@@ -347,11 +360,13 @@ func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
 				return err
 			}
 		}
-		if err := packetIO.WriteEOFPacket(mb.status); err != nil {
-			return err
+		if mb.capability&mysql.ClientDeprecateEOF == 0 {
+			if err := packetIO.WriteEOFPacket(mb.status); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+	return packetIO.Flush()
 }
 
 func (mb *mockBackend) respondSessionStates(packetIO *pnet.PacketIO) error {

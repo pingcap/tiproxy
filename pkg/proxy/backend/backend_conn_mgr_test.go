@@ -423,3 +423,56 @@ func TestRedirectFail(t *testing.T) {
 	}
 	ts.runTests(runners)
 }
+
+// Test that the proxy sends the right handshake info after COM_CHANGE_USER and COM_SET_OPTION.
+func TestSpecialCmds(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// change user
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.cmd = mysql.ComChangeUser
+				ts.mc.username = "another_user"
+				ts.mc.dbName = "another_db"
+				return ts.mc.request(packetIO)
+			},
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		// disable multi-stmts
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.cmd = mysql.ComSetOption
+				ts.mc.dataBytes = []byte{1, 0}
+				return ts.mc.request(packetIO)
+			},
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		// 2nd handshake
+		{
+			client: nil,
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				backend1 := ts.mp.backendConn
+				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
+				ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(t, eventSucceed)
+				require.NotEqual(t, backend1, ts.mp.backendConn)
+				return nil
+			},
+			backend: func(packetIO *pnet.PacketIO) error {
+				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
+				require.Equal(t, "another_user", ts.mb.username)
+				require.Equal(t, "another_db", ts.mb.db)
+				require.Equal(t, defaultClientCapability&^mysql.ClientMultiStatements, ts.mb.clientCapability)
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}

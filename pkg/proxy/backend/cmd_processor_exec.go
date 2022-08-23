@@ -86,7 +86,11 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 	case mysql.ErrHeader:
 		return cp.handleErrorPacket(response)
 	case mysql.EOFHeader:
-		cp.handleEOFPacket(request, response)
+		if cp.capability&mysql.ClientDeprecateEOF == 0 {
+			cp.handleEOFPacket(request, response)
+		} else {
+			cp.handleOKPacket(request, response)
+		}
 		return nil
 	}
 	// impossible here
@@ -100,14 +104,27 @@ func forwardOnePacket(destIO, srcIO *pnet.PacketIO, flush bool) (data []byte, er
 	return data, destIO.WritePacket(data, flush)
 }
 
-func forwardUntilEOF(clientIO, backendIO *pnet.PacketIO) (eofPacket []byte, err error) {
-	var response []byte
+func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
 	for {
-		if response, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
-			return
+		response, err := forwardOnePacket(clientIO, backendIO, false)
+		if err != nil {
+			return 0, err
 		}
-		if pnet.IsEOFPacket(response) {
-			return response, nil
+		if response[0] == mysql.ErrHeader {
+			if err := clientIO.Flush(); err != nil {
+				return 0, err
+			}
+			return 0, cp.handleErrorPacket(response)
+		}
+		if cp.capability&mysql.ClientDeprecateEOF == 0 {
+			if pnet.IsEOFPacket(response) {
+				return cp.handleEOFPacket(request, response), clientIO.Flush()
+			}
+		} else {
+			if pnet.IsResultSetOKPacket(response) {
+				rs := cp.handleOKPacket(request, response)
+				return rs.Status, clientIO.Flush()
+			}
 		}
 	}
 }
@@ -117,21 +134,24 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 	if err != nil {
 		return err
 	}
-	// The OK packet doesn't contain a server status.
 	switch response[0] {
 	case mysql.OKHeader:
-		expectedEOFNum := 0
+		// The OK packet doesn't contain a server status.
+		// See https://mariadb.com/kb/en/com_stmt_prepare/
 		numColumns := binary.LittleEndian.Uint16(response[5:])
-		if numColumns > 0 {
-			expectedEOFNum++
-		}
 		numParams := binary.LittleEndian.Uint16(response[7:])
-		if numParams > 0 {
-			expectedEOFNum++
+		expectedPackets := int(numColumns) + int(numParams)
+		if cp.capability&mysql.ClientDeprecateEOF == 0 {
+			if numColumns > 0 {
+				expectedPackets++
+			}
+			if numParams > 0 {
+				expectedPackets++
+			}
 		}
-		for i := 0; i < expectedEOFNum; i++ {
+		for i := 0; i < expectedPackets; i++ {
 			// Ignore this status because PREPARE doesn't affect status.
-			if _, err = forwardUntilEOF(clientIO, backendIO); err != nil {
+			if _, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
 				return err
 			}
 		}
@@ -147,23 +167,13 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 }
 
 func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
-	response, err := forwardOnePacket(clientIO, backendIO, false)
-	if err != nil {
-		return err
-	}
-	if response[0] == mysql.ErrHeader {
-		if err := clientIO.Flush(); err != nil {
-			return err
-		}
-		return cp.handleErrorPacket(response)
-	}
-	if !pnet.IsEOFPacket(response) {
-		if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
-			return err
-		}
-	}
-	cp.handleEOFPacket(request, response)
-	return clientIO.Flush()
+	_, err := cp.forwardUntilResultEnd(clientIO, backendIO, request)
+	return err
+}
+
+func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+	_, err := cp.forwardUntilResultEnd(clientIO, backendIO, request)
+	return err
 }
 
 func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
@@ -229,36 +239,27 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 	return serverStatus, errors.Errorf("unexpected response, cmd:%d resp:%d", mysql.ComQuery, response[0])
 }
 
-func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request, response []byte) (serverStatus uint16, err error) {
-	if !pnet.IsEOFPacket(response) {
+func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request, response []byte) (uint16, error) {
+	if cp.capability&mysql.ClientDeprecateEOF == 0 {
 		// read columns
-		if response, err = forwardUntilEOF(clientIO, backendIO); err != nil {
-			return
-		}
-	}
-	serverStatus = binary.LittleEndian.Uint16(response[3:])
-	// If a cursor exists, only columns are sent this time. The client will then send COM_STMT_FETCH to fetch rows.
-	// Otherwise, columns and rows are both sent once.
-	if serverStatus&mysql.ServerStatusCursorExists == 0 {
-		// read rows
 		for {
+			var err error
 			if response, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
-				return
-			}
-			// An error may occur when the backend writes rows.
-			if response[0] == mysql.ErrHeader {
-				if err = clientIO.Flush(); err != nil {
-					return serverStatus, err
-				}
-				return serverStatus, cp.handleErrorPacket(response)
+				return 0, err
 			}
 			if pnet.IsEOFPacket(response) {
 				break
 			}
 		}
+		serverStatus := binary.LittleEndian.Uint16(response[3:])
+		// If a cursor exists, only columns are sent this time. The client will then send COM_STMT_FETCH to fetch rows.
+		// Otherwise, columns and rows are both sent once.
+		if serverStatus&mysql.ServerStatusCursorExists > 0 {
+			return cp.handleEOFPacket(request, response), clientIO.Flush()
+		}
 	}
-	serverStatus = cp.handleEOFPacket(request, response)
-	return serverStatus, clientIO.Flush()
+	// Deprecate EOF or no cursor.
+	return cp.forwardUntilResultEnd(clientIO, backendIO, request)
 }
 
 func (cp *CmdProcessor) forwardCloseCmd(request []byte) error {
@@ -294,25 +295,6 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 			}
 		}
 	}
-}
-
-func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
-	response, err := forwardOnePacket(clientIO, backendIO, false)
-	if err != nil {
-		return err
-	}
-	if response[0] == mysql.ErrHeader {
-		if err = clientIO.Flush(); err != nil {
-			return err
-		}
-		return cp.handleErrorPacket(response)
-	}
-	// It sends some columns and an EOF packet.
-	if !pnet.IsEOFPacket(response) {
-		response, err = forwardUntilEOF(clientIO, backendIO)
-	}
-	cp.handleEOFPacket(request, response)
-	return clientIO.Flush()
 }
 
 func (cp *CmdProcessor) forwardStatisticsCmd(clientIO, backendIO *pnet.PacketIO) error {

@@ -33,11 +33,10 @@ import (
 // sent from the server and vice versa.
 
 const (
-	defaultBackendCapability = mysql.ClientLongPassword | mysql.ClientLongFlag |
-		mysql.ClientConnectWithDB | mysql.ClientProtocol41 | mysql.ClientSSL |
-		mysql.ClientTransactions | mysql.ClientSecureConnection | mysql.ClientFoundRows |
-		mysql.ClientMultiStatements | mysql.ClientMultiResults | mysql.ClientLocalFiles |
-		mysql.ClientConnectAtts | mysql.ClientPluginAuth | mysql.ClientInteractive
+	defaultBackendCapability = mysql.ClientLongPassword | mysql.ClientLongFlag | mysql.ClientConnectWithDB |
+		mysql.ClientProtocol41 | mysql.ClientSSL | mysql.ClientTransactions | mysql.ClientSecureConnection |
+		mysql.ClientFoundRows | mysql.ClientMultiStatements | mysql.ClientMultiResults | mysql.ClientLocalFiles |
+		mysql.ClientConnectAtts | mysql.ClientPluginAuth | mysql.ClientInteractive | mysql.ClientDeprecateEOF
 	defaultClientCapability = defaultBackendCapability
 )
 
@@ -49,7 +48,6 @@ var (
 	mockToken         = strings.Repeat("t", 512)
 	mockCmdStr        = "str"
 	mockCmdInt        = 100
-	mockCmdByte       = byte(1)
 	mockCmdBytes      = []byte("01234567890123456789")
 	mockSessionStates = "{\"current-db\":\"test_db\"}"
 )

@@ -106,9 +106,9 @@ func (p *PacketIO) WriteErrPacket(merr *mysql.SQLError) error {
 }
 
 // WriteOKPacket writes an OK packet. It's only for testing.
-func (p *PacketIO) WriteOKPacket(status uint16) error {
+func (p *PacketIO) WriteOKPacket(status uint16, header byte) error {
 	data := make([]byte, 0, 7)
-	data = append(data, mysql.OKHeader)
+	data = append(data, header)
 	data = append(data, 0, 0)
 	// ClientProtocol41 must be enabled.
 	data = DumpUint16(data, status)

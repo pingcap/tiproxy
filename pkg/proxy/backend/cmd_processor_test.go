@@ -85,55 +85,60 @@ func TestForwardCommands(t *testing.T) {
 	// Test every respond type for every command.
 	for cmd, respondTypes := range cmdResponseTypes {
 		for _, respondType := range respondTypes {
-			cfgOvr := func(cfg *testConfig) {
-				cfg.clientConfig.cmd = cmd
-				cfg.backendConfig.respondType = respondType
-			}
-			// Test more variables for some special response types.
-			switch respondType {
-			case responseTypeColumn:
-				for _, columns := range []int{1, 4096} {
-					extraCfgOvr := func(cfg *testConfig) {
-						cfg.backendConfig.columns = columns
-					}
-					runTest(cfgOvr, extraCfgOvr)
+			for _, capability := range []uint32{defaultBackendCapability &^ mysql.ClientDeprecateEOF, defaultBackendCapability | mysql.ClientDeprecateEOF} {
+				cfgOvr := func(cfg *testConfig) {
+					cfg.clientConfig.cmd = cmd
+					cfg.backendConfig.respondType = respondType
+					cfg.backendConfig.capability = capability
+					cfg.clientConfig.capability = capability
+					cfg.proxyConfig.capability = capability
 				}
-			case responseTypeRow:
-				for _, rows := range []int{0, 1, 3} {
-					extraCfgOvr := func(cfg *testConfig) {
-						cfg.backendConfig.rows = rows
-					}
-					runTest(cfgOvr, extraCfgOvr)
-				}
-			case responseTypePrepareOK:
-				for _, columns := range []int{0, 1, 4096} {
-					for _, params := range []int{0, 1, 3} {
+				// Test more variables for some special response types.
+				switch respondType {
+				case responseTypeColumn:
+					for _, columns := range []int{1, 4096} {
 						extraCfgOvr := func(cfg *testConfig) {
 							cfg.backendConfig.columns = columns
-							cfg.backendConfig.params = params
 						}
 						runTest(cfgOvr, extraCfgOvr)
 					}
-				}
-			case responseTypeResultSet:
-				for _, columns := range []int{1, 4096} {
+				case responseTypeRow:
 					for _, rows := range []int{0, 1, 3} {
 						extraCfgOvr := func(cfg *testConfig) {
-							cfg.backendConfig.columns = columns
 							cfg.backendConfig.rows = rows
 						}
 						runTest(cfgOvr, extraCfgOvr)
 					}
-				}
-			case responseTypeLoadFile:
-				for _, filePkts := range []int{0, 1, 3} {
-					extraCfgOvr := func(cfg *testConfig) {
-						cfg.clientConfig.filePkts = filePkts
+				case responseTypePrepareOK:
+					for _, columns := range []int{0, 1, 4096} {
+						for _, params := range []int{0, 1, 3} {
+							extraCfgOvr := func(cfg *testConfig) {
+								cfg.backendConfig.columns = columns
+								cfg.backendConfig.params = params
+							}
+							runTest(cfgOvr, extraCfgOvr)
+						}
 					}
-					runTest(cfgOvr, extraCfgOvr)
+				case responseTypeResultSet:
+					for _, columns := range []int{1, 4096} {
+						for _, rows := range []int{0, 1, 3} {
+							extraCfgOvr := func(cfg *testConfig) {
+								cfg.backendConfig.columns = columns
+								cfg.backendConfig.rows = rows
+							}
+							runTest(cfgOvr, extraCfgOvr)
+						}
+					}
+				case responseTypeLoadFile:
+					for _, filePkts := range []int{0, 1, 3} {
+						extraCfgOvr := func(cfg *testConfig) {
+							cfg.clientConfig.filePkts = filePkts
+						}
+						runTest(cfgOvr, extraCfgOvr)
+					}
+				default:
+					runTest(cfgOvr, cfgOvr)
 				}
-			default:
-				runTest(cfgOvr, cfgOvr)
 			}
 		}
 	}
@@ -148,6 +153,16 @@ func TestDirectQuery(t *testing.T) {
 	}{
 		{
 			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.columns = 2
+				cfg.backendConfig.rows = 1
+				cfg.backendConfig.respondType = responseTypeResultSet
+			},
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultBackendCapability &^ mysql.ClientDeprecateEOF
+				cfg.proxyConfig.capability = cfg.clientConfig.capability
+				cfg.backendConfig.capability = cfg.clientConfig.capability
 				cfg.backendConfig.columns = 2
 				cfg.backendConfig.rows = 1
 				cfg.backendConfig.respondType = responseTypeResultSet

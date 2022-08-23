@@ -19,7 +19,7 @@ import (
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/errors"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/siddontang/go/hack"
 )
@@ -47,10 +47,8 @@ func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *gomy
 		result = cp.handleOKPacket(request, response)
 	case mysql.ErrHeader:
 		err = cp.handleErrorPacket(response)
-	case mysql.EOFHeader:
-		cp.handleEOFPacket(request, response)
 	case mysql.LocalInFileHeader:
-		err = mysql.ErrMalformPacket
+		err = errors.WithStack(mysql.ErrMalformPacket)
 	default:
 		result, err = cp.readResultSet(packetIO, response)
 	}
@@ -61,7 +59,7 @@ func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *gomy
 func (cp *CmdProcessor) readResultSet(packetIO *pnet.PacketIO, data []byte) (*gomysql.Result, error) {
 	columnCount, _, n := pnet.ParseLengthEncodedInt(data)
 	if n-len(data) != 0 {
-		return nil, mysql.ErrMalformPacket
+		return nil, errors.WithStack(mysql.ErrMalformPacket)
 	}
 
 	result := &gomysql.Result{
@@ -81,22 +79,26 @@ func (cp *CmdProcessor) readResultColumns(packetIO *pnet.PacketIO, result *gomys
 	var data []byte
 
 	for {
+		if fieldIndex == len(result.Fields) {
+			if cp.capability&mysql.ClientDeprecateEOF == 0 {
+				if data, err = packetIO.ReadPacket(); err != nil {
+					return err
+				}
+				if !pnet.IsEOFPacket(data) {
+					return errors.WithStack(mysql.ErrMalformPacket)
+				}
+				result.Status = binary.LittleEndian.Uint16(data[3:])
+			}
+			return nil
+		}
 		if data, err = packetIO.ReadPacket(); err != nil {
 			return err
 		}
-		if pnet.IsEOFPacket(data) {
-			result.Status = binary.LittleEndian.Uint16(data[3:])
-			if fieldIndex != len(result.Fields) {
-				err = errors.Trace(mysql.ErrMalformPacket)
-			}
-			return
-		}
-
 		if result.Fields[fieldIndex] == nil {
 			result.Fields[fieldIndex] = &gomysql.Field{}
 		}
 		if err = result.Fields[fieldIndex].Parse(data); err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 		fieldName := hack.String(result.Fields[fieldIndex].Name)
 		result.FieldNames[fieldName] = fieldIndex
@@ -111,9 +113,17 @@ func (cp *CmdProcessor) readResultRows(packetIO *pnet.PacketIO, result *gomysql.
 		if data, err = packetIO.ReadPacket(); err != nil {
 			return err
 		}
-		if pnet.IsEOFPacket(data) {
-			result.Status = binary.LittleEndian.Uint16(data[3:])
-			break
+		if cp.capability&mysql.ClientDeprecateEOF == 0 {
+			if pnet.IsEOFPacket(data) {
+				result.Status = binary.LittleEndian.Uint16(data[3:])
+				break
+			}
+		} else {
+			if pnet.IsResultSetOKPacket(data) {
+				rs := pnet.ParseOKPacket(data)
+				result.Status = rs.Status
+				break
+			}
 		}
 		// An error may occur when the backend writes rows.
 		if data[0] == mysql.ErrHeader {
@@ -131,7 +141,7 @@ func (cp *CmdProcessor) readResultRows(packetIO *pnet.PacketIO, result *gomysql.
 	for i := range result.Values {
 		result.Values[i], err = result.RowDatas[i].Parse(result.Fields, false, result.Values[i])
 		if err != nil {
-			return errors.Trace(err)
+			return errors.WithStack(err)
 		}
 	}
 	return nil
