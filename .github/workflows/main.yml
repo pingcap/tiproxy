@@ -11,7 +11,7 @@ on:
         type: string
         description: "Checkout specific ref for the workflow"
         required: false
-        default: ${{ github.ref }}
+        default: "main"
   pull_request:
     branches:
       - main
