@@ -15,6 +15,12 @@ on:
     branches:
       - main
       - release-*
+  # cache only shares from the same branch, we need to trigger an extra flow on pushing
+  # thus all PRs will share the cache from main/release-* branches
+  push:
+    branches:
+      - main
+      - release-*
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
