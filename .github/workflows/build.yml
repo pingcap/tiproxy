@@ -9,7 +9,7 @@ on:
         default: false
   pull_request:
     branches:
-      - master
+      - main
       - release-*
 
 concurrency:
