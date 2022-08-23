@@ -8,8 +8,10 @@ on:
         required: false
         default: false
   workflow_run:
-    workflows: [build]
-    types: [completed]
+    workflows:
+      - build
+    types:
+      - completed
 
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
