@@ -18,7 +18,28 @@ concurrency:
 
 jobs:
   test:
-    uses: ./.github/workflows/common.yml@test
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    with:
-      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v3
+      - name: "setup golang"
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.18
+      - name: "try to use build cache"
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/Library/Caches/go-build
+            ~\AppData\Local\go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: "test all"
+        run: make test
+      - name: "set up tmate session if necessary"
+        if: ${{ failure() && github.event_name == 'workflow_dispatch' && inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
