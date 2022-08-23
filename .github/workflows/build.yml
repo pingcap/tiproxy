@@ -11,6 +11,8 @@ on:
     branches:
       - master
       - release-*
+    paths:
+      - "**"
 
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
@@ -18,12 +20,12 @@ concurrency:
 
 jobs:
   build_cmd:
-    uses: ./.github/workflows/common.yml@test
+    uses: ./.github/common.yml@test
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
 
   build:
     needs: build_cmd
-    uses: ./.github/workflows/common.yml@test
+    uses: ./.github/common.yml@test
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
