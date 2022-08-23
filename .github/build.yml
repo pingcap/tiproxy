@@ -44,7 +44,7 @@ jobs:
         uses: mxschmitt/action-tmate@v3
 
   all:
-    needs: build_cmd
+    needs: cmd
     runs-on: ubuntu-latest
     steps:
       - name: "checkout repo"
