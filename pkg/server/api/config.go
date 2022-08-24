@@ -35,11 +35,6 @@ func (h *configHttpHandler) HandleSetProxyConfig(c *gin.Context) {
 		return
 	}
 
-	if pco.MaxConnections == 0 {
-		c.String(http.StatusBadRequest, "set a zero max connection")
-		return
-	}
-
 	if err := h.cfgmgr.SetProxyConfig(c, pco); err != nil {
 		c.String(http.StatusInternalServerError, "can not update proxy config")
 		return
