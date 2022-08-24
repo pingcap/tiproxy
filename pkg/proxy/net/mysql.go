@@ -231,7 +231,7 @@ func MakeChangeUser(username, db string, authData []byte) []byte {
 
 // ParseChangeUser parses the data of COM_CHANGE_USER.
 func ParseChangeUser(data []byte) (username, db string) {
-	user, data := ParseNullTermString(data)
+	user, data := ParseNullTermString(data[1:])
 	username = string(user)
 	passLen := int(data[0])
 	data = data[passLen+1:]
@@ -267,7 +267,25 @@ func ParseErrorPacket(data []byte) error {
 	return e
 }
 
+// IsOKPacket returns true if it's an OK packet (but not ResultSet OK).
+func IsOKPacket(data []byte) bool {
+	return data[0] == mysql.OKHeader
+}
+
 // IsEOFPacket returns true if it's an EOF packet.
 func IsEOFPacket(data []byte) bool {
 	return data[0] == mysql.EOFHeader && len(data) <= 5
+}
+
+// IsResultSetOKPacket returns true if it's an OK packet after the result set when CLIENT_DEPRECATE_EOF is enabled.
+// A row packet may also begin with 0xfe, so we need to judge it with the packet length.
+// See https://mariadb.com/kb/en/result-set-packets/
+func IsResultSetOKPacket(data []byte) bool {
+	// With CLIENT_PROTOCOL_41 enabled, the least length is 7.
+	return data[0] == mysql.EOFHeader && len(data) >= 7 && len(data) < 0xFFFFFF
+}
+
+// IsErrorPacket returns true if it's an error packet.
+func IsErrorPacket(data []byte) bool {
+	return data[0] == mysql.ErrHeader
 }

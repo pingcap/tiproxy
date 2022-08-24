@@ -9,9 +9,10 @@ require (
 	github.com/go-mysql-org/go-mysql v1.6.0
 	github.com/goccy/go-yaml v1.9.5
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
-	github.com/pingcap/tidb v1.1.0-beta.0.20220804075006-e071841317c5
-	github.com/pingcap/tidb/parser v0.0.0-20220804082206-fff748348776
+	github.com/pingcap/tidb v1.1.0-beta.0.20220819110652-8b5b724d8a93
+	github.com/pingcap/tidb/parser v0.0.0-20220819110652-8b5b724d8a93
 	github.com/prometheus/client_golang v1.12.2
+	github.com/siddontang/go v0.0.0-20180604090527-bdc77568d726
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.8.0
 	go.etcd.io/etcd/api/v3 v3.5.2
@@ -23,7 +24,7 @@ require (
 )
 
 require (
-	github.com/BurntSushi/toml v1.1.0 // indirect
+	github.com/BurntSushi/toml v1.2.0 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
@@ -67,7 +68,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.1 // indirect
 	github.com/pingcap/failpoint v0.0.0-20220423142525-ae43b7f4e5c3 // indirect
-	github.com/pingcap/kvproto v0.0.0-20220711062932-08b02befd813 // indirect
+	github.com/pingcap/kvproto v0.0.0-20220804022843-f006036b1277 // indirect
 	github.com/pingcap/log v1.1.0 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -78,13 +79,12 @@ require (
 	github.com/prometheus/procfs v0.7.3 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0 // indirect
 	github.com/shirou/gopsutil/v3 v3.22.6 // indirect
-	github.com/siddontang/go v0.0.0-20180604090527-bdc77568d726 // indirect
 	github.com/siddontang/go-log v0.0.0-20180807004314-8d05993dda07 // indirect
-	github.com/sirupsen/logrus v1.8.1 // indirect
+	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stathat/consistent v1.0.0 // indirect
-	github.com/tikv/client-go/v2 v2.0.1-0.20220729034404-e10841f2d158 // indirect
+	github.com/tikv/client-go/v2 v2.0.1-0.20220818084834-0d0ae0dcfb1f // indirect
 	github.com/tikv/pd/client v0.0.0-20220725055910-7187a7ab72db // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
 	github.com/twmb/murmur3 v1.1.3 // indirect

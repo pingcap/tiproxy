@@ -30,7 +30,8 @@ const supportedServerCapabilities = mysql.ClientLongPassword | mysql.ClientFound
 	mysql.ClientConnectWithDB | mysql.ClientNoSchema | mysql.ClientODBC | mysql.ClientLocalFiles | mysql.ClientIgnoreSpace |
 	mysql.ClientProtocol41 | mysql.ClientInteractive | mysql.ClientSSL | mysql.ClientIgnoreSigpipe |
 	mysql.ClientTransactions | mysql.ClientReserved | mysql.ClientSecureConnection | mysql.ClientMultiStatements |
-	mysql.ClientMultiResults | mysql.ClientPluginAuth | mysql.ClientConnectAtts | mysql.ClientPluginAuthLenencClientData
+	mysql.ClientMultiResults | mysql.ClientPluginAuth | mysql.ClientConnectAtts | mysql.ClientPluginAuthLenencClientData |
+	mysql.ClientDeprecateEOF
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
@@ -103,11 +104,8 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	if err = backendIO.WritePacket(clientPkt, true); err != nil {
 		return err
 	}
-	if err = auth.readHandshakeResponse(clientPkt); err != nil {
+	if err = auth.readHandshakeResponse(clientPkt, serverCapability); err != nil {
 		return err
-	}
-	if unsupported := serverCapability & auth.capability &^ supportedServerCapabilities; unsupported > 0 {
-		return errors.Errorf("server capability is not supported: %d", unsupported)
 	}
 
 	// verify password
@@ -138,14 +136,17 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 	return
 }
 
-func (auth *Authenticator) readHandshakeResponse(data []byte) error {
+func (auth *Authenticator) readHandshakeResponse(data []byte, serverCapability uint32) error {
 	capability := uint32(binary.LittleEndian.Uint16(data[:2]))
 	if capability&mysql.ClientProtocol41 == 0 {
 		// TiDB doesn't support it now.
 		return errors.New("pre-4.1 MySQL client versions are not supported")
 	}
 	resp := pnet.ParseHandshakeResponse(data)
-	auth.capability = resp.Capability
+	auth.capability = resp.Capability & serverCapability
+	if unsupported := auth.capability &^ supportedServerCapabilities; unsupported > 0 {
+		return errors.Errorf("capability is not supported: %d", unsupported)
+	}
 	auth.user = resp.User
 	auth.dbname = resp.DB
 	auth.collation = resp.Collation
@@ -178,7 +179,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 	if serverPkt, err = backendIO.ReadPacket(); err != nil {
 		return
 	}
-	if serverPkt[0] == mysql.ErrHeader {
+	if pnet.IsErrorPacket(serverPkt) {
 		err = pnet.ParseErrorPacket(serverPkt)
 		return
 	}

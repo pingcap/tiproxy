@@ -17,6 +17,7 @@ package backend
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -99,6 +100,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	if err := mgr.authenticator.handshakeFirstTime(clientIO, backendIO, serverTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}
+	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	go mgr.processSignals(childCtx)
 	mgr.cancelFunc = cancelFunc
@@ -119,6 +121,18 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		switch request[0] {
 		case mysql.ComQuit:
 			return nil
+		case mysql.ComSetOption:
+			val := binary.LittleEndian.Uint16(request[1:])
+			switch val {
+			case 0:
+				mgr.authenticator.capability |= mysql.ClientMultiStatements
+				mgr.cmdProcessor.capability |= mysql.ClientMultiStatements
+			case 1:
+				mgr.authenticator.capability &^= mysql.ClientMultiStatements
+				mgr.cmdProcessor.capability &^= mysql.ClientMultiStatements
+			default:
+				return errors.Errorf("unrecognized set_option value:%d", val)
+			}
 		case mysql.ComChangeUser:
 			username, db := pnet.ParseChangeUser(request)
 			mgr.authenticator.changeUser(username, db)

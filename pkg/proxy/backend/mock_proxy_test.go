@@ -24,12 +24,14 @@ import (
 type proxyConfig struct {
 	frontendTLSConfig *tls.Config
 	backendTLSConfig  *tls.Config
+	capability        uint32
 	sessionToken      string
 	waitRedirect      bool
 }
 
 func newProxyConfig() *proxyConfig {
 	return &proxyConfig{
+		capability:   defaultBackendCapability,
 		sessionToken: mockToken,
 	}
 }
@@ -45,10 +47,12 @@ type mockProxy struct {
 }
 
 func newMockProxy(cfg *proxyConfig) *mockProxy {
-	return &mockProxy{
+	mp := &mockProxy{
 		proxyConfig:        cfg,
 		BackendConnManager: NewBackendConnManager(0),
 	}
+	mp.cmdProcessor.capability = cfg.capability
+	return mp
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
