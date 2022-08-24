@@ -126,7 +126,7 @@ func (cp *CmdProcessor) readResultRows(packetIO *pnet.PacketIO, result *gomysql.
 			}
 		}
 		// An error may occur when the backend writes rows.
-		if data[0] == mysql.ErrHeader {
+		if pnet.IsErrorPacket(data) {
 			return cp.handleErrorPacket(data)
 		}
 		result.RowDatas = append(result.RowDatas, data)

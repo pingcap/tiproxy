@@ -122,13 +122,16 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		case mysql.ComQuit:
 			return nil
 		case mysql.ComSetOption:
-			switch binary.LittleEndian.Uint16(request[1:]) {
+			val := binary.LittleEndian.Uint16(request[1:])
+			switch val {
 			case 0:
 				mgr.authenticator.capability |= mysql.ClientMultiStatements
 				mgr.cmdProcessor.capability |= mysql.ClientMultiStatements
 			case 1:
 				mgr.authenticator.capability &^= mysql.ClientMultiStatements
 				mgr.cmdProcessor.capability &^= mysql.ClientMultiStatements
+			default:
+				return errors.Errorf("unrecognized set_option value:%d", val)
 			}
 		case mysql.ComChangeUser:
 			username, db := pnet.ParseChangeUser(request)

@@ -179,7 +179,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 	if serverPkt, err = backendIO.ReadPacket(); err != nil {
 		return
 	}
-	if serverPkt[0] == mysql.ErrHeader {
+	if pnet.IsErrorPacket(serverPkt) {
 		err = pnet.ParseErrorPacket(serverPkt)
 		return
 	}

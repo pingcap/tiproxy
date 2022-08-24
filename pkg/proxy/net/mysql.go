@@ -267,6 +267,11 @@ func ParseErrorPacket(data []byte) error {
 	return e
 }
 
+// IsOKPacket returns true if it's an OK packet (but not ResultSet OK).
+func IsOKPacket(data []byte) bool {
+	return data[0] == mysql.OKHeader
+}
+
 // IsEOFPacket returns true if it's an EOF packet.
 func IsEOFPacket(data []byte) bool {
 	return data[0] == mysql.EOFHeader && len(data) <= 5
@@ -276,5 +281,11 @@ func IsEOFPacket(data []byte) bool {
 // A row packet may also begin with 0xfe, so we need to judge it with the packet length.
 // See https://mariadb.com/kb/en/result-set-packets/
 func IsResultSetOKPacket(data []byte) bool {
-	return data[0] == mysql.EOFHeader && len(data) > 5 && len(data) < 0xFFFFFF
+	// With CLIENT_PROTOCOL_41 enabled, the least length is 7.
+	return data[0] == mysql.EOFHeader && len(data) >= 7 && len(data) < 0xFFFFFF
+}
+
+// IsErrorPacket returns true if it's an error packet.
+func IsErrorPacket(data []byte) bool {
+	return data[0] == mysql.ErrHeader
 }

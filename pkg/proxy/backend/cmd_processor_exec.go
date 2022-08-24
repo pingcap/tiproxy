@@ -110,7 +110,7 @@ func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO
 		if err != nil {
 			return 0, err
 		}
-		if response[0] == mysql.ErrHeader {
+		if pnet.IsErrorPacket(response) {
 			if err := clientIO.Flush(); err != nil {
 				return 0, err
 			}
