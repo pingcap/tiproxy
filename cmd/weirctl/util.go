@@ -43,7 +43,7 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 	}
 
 	var rete string
-	for i := range rand.Perm(len(bctx.CUrls)) {
+	for _, i := range rand.Perm(len(bctx.CUrls)) {
 		req.URL.Host = bctx.CUrls[i]
 
 		res, err := bctx.Client.Do(req)
