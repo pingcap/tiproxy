@@ -86,7 +86,7 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.C
 
 func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, *clientv3.Event)) {
 	wkey := path.Join(e.basePath, ns, key)
-	logger := e.logger.With(zap.String("comp", wkey))
+	logger := e.logger.With(zap.String("component", wkey))
 	e.wg.Run(func() {
 		wch := e.etcdClient.Watch(ctx, wkey)
 		ticker := time.Tick(DefaultWatchLease)
