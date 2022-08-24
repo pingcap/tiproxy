@@ -29,8 +29,9 @@ func Register(group *gin.RouterGroup, ready *atomic.Bool, cfg config.API, logger
 		if cfg.EnableBasicAuth {
 			adminGroup.Use(gin.BasicAuth(gin.Accounts{cfg.User: cfg.Password}))
 		}
-		registerNamespace(adminGroup.Group("namespace"), logger, cfgmgr, nsmgr)
+		registerNamespace(adminGroup.Group("namespace"), logger.Named("namespace"), cfgmgr, nsmgr)
+		registerConfig(adminGroup.Group("config"), logger.Named("config"), cfgmgr)
 	}
 	registerMetrics(group.Group("metrics"))
-	registerDebug(group.Group("debug"), logger, nsmgr)
+	registerDebug(group.Group("debug"), logger.Named("debug"), nsmgr)
 }

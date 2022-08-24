@@ -16,12 +16,12 @@ package config
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"time"
 
 	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/errors"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -29,24 +29,36 @@ import (
 
 const (
 	DefaultEtcdDialTimeout = 3 * time.Second
+	DefaultWatchLease      = 10 * time.Minute
 	DefaultEtcdPath        = "/config"
 
 	PathPrefixNamespace = "ns"
+	PathPrefixProxy     = "proxy"
+)
+
+var (
+	ErrNoOrMultiResults = errors.Errorf("has no results or multiple results")
 )
 
 type ConfigManager struct {
+	wg         waitgroup.WaitGroup
+	cancel     context.CancelFunc
 	logger     *zap.Logger
 	etcdClient *clientv3.Client
 	kv         clientv3.KV
 	basePath   string
 	cfg        config.ConfigManager
+
+	chProxy chan *config.ProxyServerOnline
 }
 
 func NewConfigManager() *ConfigManager {
-	return &ConfigManager{}
+	return &ConfigManager{
+		chProxy: make(chan *config.ProxyServerOnline, 1),
+	}
 }
 
-func (srv *ConfigManager) Init(addrs []string, cfg config.ConfigManager, logger *zap.Logger) error {
+func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.ConfigManager, logger *zap.Logger) error {
 	srv.logger = logger
 	srv.cfg = cfg
 	// slash appended to distinguish '/dir'(file) and '/dir/'(directory)
@@ -59,12 +71,52 @@ func (srv *ConfigManager) Init(addrs []string, cfg config.ConfigManager, logger 
 
 	etcdClient, err := clientv3.New(etcdConfig)
 	if err != nil {
-		return errors.WithMessage(err, "create etcd config center error")
+		return errors.Wrapf(err, "create etcd config center error")
 	}
 	srv.etcdClient = etcdClient
 	srv.kv = clientv3.NewKV(srv.etcdClient)
 
+	ctx, cancel := context.WithCancel(ctx)
+	srv.cancel = cancel
+
+	srv.initProxyConfig(ctx)
+
 	return nil
+}
+
+func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, *clientv3.Event)) {
+	wkey := path.Join(e.basePath, ns, key)
+	logger := e.logger.With(zap.String("comp", wkey))
+	e.wg.Run(func() {
+		wch := e.etcdClient.Watch(ctx, wkey)
+		ticker := time.Tick(DefaultWatchLease)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker:
+				resp, err := e.kv.Get(ctx, path.Join(e.basePath, ns, wkey))
+				if err != nil {
+					logger.Warn("failed to poll", zap.Error(err))
+					break
+				}
+				if len(resp.Kvs) != 1 {
+					logger.Warn("failed to poll", zap.Error(ErrNoOrMultiResults))
+					break
+				}
+			case res := <-wch:
+				if res.Canceled {
+					logger.Warn("failed to watch", zap.Error(res.Err()))
+					wch = e.etcdClient.Watch(ctx, wkey)
+					break
+				}
+
+				for _, evt := range res.Events {
+					f(logger, evt)
+				}
+			}
+		}
+	})
 }
 
 func (e *ConfigManager) get(ctx context.Context, ns, key string) (*mvccpb.KeyValue, error) {
@@ -73,7 +125,7 @@ func (e *ConfigManager) get(ctx context.Context, ns, key string) (*mvccpb.KeyVal
 		return nil, err
 	}
 	if len(resp.Kvs) != 1 {
-		return nil, fmt.Errorf("has no results or multiple results")
+		return nil, ErrNoOrMultiResults
 	}
 	return resp.Kvs[0], nil
 }
@@ -106,16 +158,7 @@ func (e *ConfigManager) del(ctx context.Context, ns, key string) error {
 }
 
 func (e *ConfigManager) Close() error {
-	if err := e.etcdClient.Close(); err != nil {
-		e.logger.Error("fail to close config manager", zap.Error(err))
-		return err
-	}
-	return nil
-}
-
-func appendSlashToDirPath(dir string) string {
-	if len(dir) == 0 || dir[len(dir)-1] == '/' {
-		return dir
-	}
-	return dir + "/"
+	e.cancel()
+	e.wg.Wait()
+	return errors.Wrapf(e.etcdClient.Close(), "fail to close config manager")
 }

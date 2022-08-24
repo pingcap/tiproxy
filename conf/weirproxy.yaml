@@ -13,7 +13,7 @@ proxy:
   addr: "0.0.0.0:6000"
   tcp_keep_alive: true
   max_connections: 1000
-  pd_addrs: "127.0.0.1:2379"
+    #pd_addrs: "127.0.0.1:2379"
 metrics:
   prom_cluster: "default"
 api:

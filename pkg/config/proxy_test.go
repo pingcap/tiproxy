@@ -21,10 +21,12 @@ var testProxyConfig = Config{
 		IgnoreWrongNamespace: true,
 	},
 	Proxy: ProxyServer{
-		Addr:           "0.0.0.0:4000",
-		MaxConnections: 1,
-		TCPKeepAlive:   true,
-		PDAddrs:        "127.0.0.1:4089",
+		Addr:    "0.0.0.0:4000",
+		PDAddrs: "127.0.0.1:4089",
+		ProxyServerOnline: ProxyServerOnline{
+			MaxConnections: 1,
+			TCPKeepAlive:   true,
+		},
 	},
 	API: API{
 		EnableBasicAuth: false,

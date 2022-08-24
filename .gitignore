@@ -4,5 +4,6 @@ bin
 *.swp
 .DS_Store
 vendor
+work
 .vscode/
 .coverage*

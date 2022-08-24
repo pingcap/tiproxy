@@ -17,8 +17,6 @@ package main
 import (
 	"net/http"
 
-	"github.com/pingcap/TiProxy/cmd/weirctl/namespace"
-	"github.com/pingcap/TiProxy/cmd/weirctl/util"
 	"github.com/pingcap/TiProxy/pkg/util/cmd"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -30,9 +28,9 @@ func main() {
 		Short: "cli",
 	}
 
-	ctx := &util.Context{}
+	ctx := &Context{}
 
-	curls := rootCmd.PersistentFlags().StringArray("curls", []string{"localhost:2379"}, "API gateway addresses")
+	curls := rootCmd.PersistentFlags().StringArray("curls", []string{"localhost:3080"}, "API gateway addresses")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "info", "log level")
 	rootCmd.PersistentFlags().Bool("indent", true, "whether indent the returned json")
@@ -52,6 +50,7 @@ func main() {
 		return nil
 	}
 
-	rootCmd.AddCommand(namespace.GetRootCommand(ctx))
+	rootCmd.AddCommand(GetNamespaceCmd(ctx))
+	rootCmd.AddCommand(GetConfigCmd(ctx))
 	cmd.RunRootCommand(rootCmd)
 }

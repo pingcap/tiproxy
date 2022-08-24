@@ -65,20 +65,20 @@ func testConfigManager(t *testing.T, cfg config.ConfigManager) (*ConfigManager, 
 		ends[i] = etcd.Clients[i].Addr().String()
 	}
 
-	cfgmgr := NewConfigManager()
-	require.NoError(t, cfgmgr.Init(ends, cfg, logger))
-
-	t.Cleanup(func() {
-		require.NoError(t, cfgmgr.Close())
-		etcd.Close()
-	})
-
 	ctx := context.Background()
 	if ddl, ok := t.Deadline(); ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, ddl)
 		t.Cleanup(cancel)
 	}
+
+	cfgmgr := NewConfigManager()
+	require.NoError(t, cfgmgr.Init(ctx, ends, cfg, logger))
+
+	t.Cleanup(func() {
+		require.NoError(t, cfgmgr.Close())
+		etcd.Close()
+	})
 
 	return cfgmgr, ctx
 }
