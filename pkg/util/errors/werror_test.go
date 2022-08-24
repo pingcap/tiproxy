@@ -38,5 +38,5 @@ func TestWrapf(t *testing.T) {
 	require.ErrorIsf(t, e, e1, "equal to the external error")
 	require.ErrorAsf(t, e, &e2, "unwrapping to the internal error")
 
-	require.Nil(t, serr.Wrapf(nil, e2), "wrap nil got nil")
+	require.Nil(t, serr.Wrapf(nil, ""), "wrap nil got nil")
 }
