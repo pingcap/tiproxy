@@ -95,7 +95,7 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 			case <-ctx.Done():
 				return
 			case <-ticker:
-				resp, err := e.kv.Get(ctx, path.Join(e.basePath, ns, wkey))
+				resp, err := e.kv.Get(ctx, wkey)
 				if err != nil {
 					logger.Warn("failed to poll", zap.Error(err))
 					break
