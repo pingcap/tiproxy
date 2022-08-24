@@ -29,7 +29,7 @@ import (
 
 const (
 	DefaultEtcdDialTimeout = 3 * time.Second
-	DefaultWatchLease      = 10 * time.Minute
+	DefaultWatchInterval   = 10 * time.Minute
 	DefaultEtcdPath        = "/config"
 
 	PathPrefixNamespace = "ns"
@@ -87,14 +87,15 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.C
 func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, *clientv3.Event)) {
 	wkey := path.Join(e.basePath, ns, key)
 	logger := e.logger.With(zap.String("component", wkey))
+	tickDuration := DefaultWatchInterval
 	e.wg.Run(func() {
 		wch := e.etcdClient.Watch(ctx, wkey)
-		ticker := time.Tick(DefaultWatchLease)
+		ticker := time.NewTicker(tickDuration)
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker:
+			case <-ticker.C:
 				resp, err := e.kv.Get(ctx, wkey)
 				if err != nil {
 					logger.Warn("failed to poll", zap.Error(err))
@@ -114,6 +115,7 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 				for _, evt := range res.Events {
 					f(logger, evt)
 				}
+				ticker.Reset(tickDuration)
 			}
 		}
 	})
