@@ -47,7 +47,10 @@ type ConfigManager struct {
 	etcdClient *clientv3.Client
 	kv         clientv3.KV
 	basePath   string
-	cfg        config.ConfigManager
+
+	// config
+	IgnoreWrongNamespace bool
+	WatchInterval        time.Duration
 
 	chProxy chan *config.ProxyServerOnline
 }
@@ -60,7 +63,16 @@ func NewConfigManager() *ConfigManager {
 
 func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.ConfigManager, logger *zap.Logger) error {
 	srv.logger = logger
-	srv.cfg = cfg
+	srv.IgnoreWrongNamespace = cfg.IgnoreWrongNamespace
+	if cfg.WatchInterval == "" {
+		srv.WatchInterval = DefaultWatchInterval
+	} else {
+		wi, err := time.ParseDuration(cfg.WatchInterval)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parser watch interval %s", cfg.WatchInterval)
+		}
+		srv.WatchInterval = wi
+	}
 	// slash appended to distinguish '/dir'(file) and '/dir/'(directory)
 	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
 
@@ -87,10 +99,13 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.C
 func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, *clientv3.Event)) {
 	wkey := path.Join(e.basePath, ns, key)
 	logger := e.logger.With(zap.String("component", wkey))
-	tickDuration := DefaultWatchInterval
 	e.wg.Run(func() {
+		var prevKV *mvccpb.KeyValue
+
+		ticker := time.NewTicker(e.WatchInterval)
+		defer ticker.Stop()
+
 		wch := e.etcdClient.Watch(ctx, wkey)
-		ticker := time.NewTicker(tickDuration)
 		for {
 			select {
 			case <-ctx.Done():
@@ -101,21 +116,32 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 					logger.Warn("failed to poll", zap.Error(err))
 					break
 				}
-				if len(resp.Kvs) != 1 {
+				// len == 0 may mean there is no value set yet, do not warn about that
+				if len(resp.Kvs) > 1 {
 					logger.Warn("failed to poll", zap.Error(ErrNoOrMultiResults))
 					break
+				} else if len(resp.Kvs) == 1 {
+					f(logger, &clientv3.Event{
+						Type:   mvccpb.PUT,
+						Kv:     resp.Kvs[0],
+						PrevKv: prevKV,
+					})
+					prevKV = resp.Kvs[0]
 				}
 			case res := <-wch:
 				if res.Canceled {
-					logger.Warn("failed to watch", zap.Error(res.Err()))
+					logger.Warn("failed to watch, try again", zap.Error(res.Err()))
 					wch = e.etcdClient.Watch(ctx, wkey)
 					break
 				}
 
 				for _, evt := range res.Events {
 					f(logger, evt)
+					prevKV = evt.Kv
 				}
-				ticker.Reset(tickDuration)
+
+				// reset the ticker to prevent another tick immediately
+				ticker.Reset(e.WatchInterval)
 			}
 		}
 	})

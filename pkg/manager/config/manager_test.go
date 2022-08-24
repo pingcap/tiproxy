@@ -65,11 +65,10 @@ func testConfigManager(t *testing.T, cfg config.ConfigManager) (*ConfigManager, 
 		ends[i] = etcd.Clients[i].Addr().String()
 	}
 
+	var cancel context.CancelFunc
 	ctx := context.Background()
 	if ddl, ok := t.Deadline(); ok {
-		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, ddl)
-		t.Cleanup(cancel)
 	}
 
 	cfgmgr := NewConfigManager()
@@ -79,6 +78,8 @@ func testConfigManager(t *testing.T, cfg config.ConfigManager) (*ConfigManager, 
 		require.NoError(t, cfgmgr.Close())
 		etcd.Close()
 	})
+
+	t.Cleanup(cancel)
 
 	return cfgmgr, ctx
 }
@@ -189,4 +190,42 @@ func TestBaseConcurrency(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestBaseWatch(t *testing.T) {
+	cfgmgr, ctx := testConfigManager(t, config.ConfigManager{
+		IgnoreWrongNamespace: true,
+		WatchInterval:        "1s",
+	})
+
+	ch := make(chan string, 1)
+	cfgmgr.watch(ctx, "test", "t", func(l *zap.Logger, e *clientv3.Event) {
+		ch <- string(e.Kv.Value)
+	})
+
+	// clear the channel first
+	for len(ch) > 0 {
+		<-ch
+	}
+
+	// set it
+	_, err := cfgmgr.set(ctx, "test", "t", "1")
+	require.NoError(t, err)
+
+	// check multiple times, it will become the value after some point for at least three times
+	count := 0
+	for i := 0; i < 10; i++ {
+		val := <-ch
+		if val == "1" {
+			count++
+		} else if count != 0 {
+			t.Fatal("watched value changed after setting it to 1")
+		}
+		if count == 2 {
+			break
+		}
+	}
+	if count < 2 {
+		t.Fatal("should met the same value at least two times, one from polling, one from notify")
+	}
 }

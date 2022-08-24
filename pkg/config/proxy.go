@@ -52,7 +52,8 @@ type Metrics struct {
 }
 
 type ConfigManager struct {
-	IgnoreWrongNamespace bool `yaml:"ignore_wrong_namespace" toml:"ignore_wrong_namespace" json:"ignore_wrong_namespace"`
+	IgnoreWrongNamespace bool   `yaml:"ignore_wrong_namespace" toml:"ignore_wrong_namespace" json:"ignore_wrong_namespace"`
+	WatchInterval        string `yaml:"watch_interval" toml:"watch_interval" json:"watch_interval"`
 }
 
 type ProxyServerOnline struct {
