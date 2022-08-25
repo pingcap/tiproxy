@@ -19,13 +19,8 @@ import (
 	"encoding/json"
 
 	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/TiProxy/pkg/util/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
-)
-
-var (
-	ErrZeroMaxConn = errors.New("zero max connection set")
 )
 
 func (e *ConfigManager) initProxyConfig(ctx context.Context) {
