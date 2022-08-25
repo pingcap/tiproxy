@@ -220,11 +220,11 @@ func TestBaseWatch(t *testing.T) {
 		} else if count != 0 {
 			t.Fatal("watched value changed after setting it to 1")
 		}
-		if count == 2 {
+		if count == 3 {
 			break
 		}
 	}
-	if count < 2 {
-		t.Fatal("should met the same value at least two times, one from polling, one from notify")
+	if count < 3 {
+		t.Fatal("should met the same value at least two times, one from polling, one from notify, one from created")
 	}
 }

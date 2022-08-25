@@ -134,7 +134,7 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 					retryInterval *= 2
 					logger.Warn("failed to watch, will try again later", zap.Error(res.Err()), zap.Duration("sleep", retryInterval))
 					time.Sleep(retryInterval)
-					wch = e.etcdClient.Watch(ctx, wkey)
+					wch = e.etcdClient.Watch(ctx, wkey, clientv3.WithCreatedNotify())
 					break
 				}
 
