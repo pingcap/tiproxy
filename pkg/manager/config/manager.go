@@ -131,7 +131,10 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 				}
 			case res := <-wch:
 				if res.Canceled {
-					retryInterval *= 2
+					// don't wait for more than the polling interval
+					if k := retryInterval * 2; k < e.watchInterval {
+						retryInterval = k
+					}
 					logger.Warn("failed to watch, will try again later", zap.Error(res.Err()), zap.Duration("sleep", retryInterval))
 					time.Sleep(retryInterval)
 					wch = e.etcdClient.Watch(ctx, wkey, clientv3.WithCreatedNotify())
