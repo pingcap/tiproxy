@@ -49,8 +49,8 @@ type ConfigManager struct {
 	basePath   string
 
 	// config
-	IgnoreWrongNamespace bool
-	WatchInterval        time.Duration
+	ignoreWrongNamespace bool
+	watchInterval        time.Duration
 
 	chProxy chan *config.ProxyServerOnline
 }
@@ -63,15 +63,15 @@ func NewConfigManager() *ConfigManager {
 
 func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.ConfigManager, logger *zap.Logger) error {
 	srv.logger = logger
-	srv.IgnoreWrongNamespace = cfg.IgnoreWrongNamespace
+	srv.ignoreWrongNamespace = cfg.IgnoreWrongNamespace
 	if cfg.WatchInterval == "" {
-		srv.WatchInterval = DefaultWatchInterval
+		srv.watchInterval = DefaultWatchInterval
 	} else {
 		wi, err := time.ParseDuration(cfg.WatchInterval)
 		if err != nil {
 			return errors.Wrapf(err, "failed to parse watch interval %s", cfg.WatchInterval)
 		}
-		srv.WatchInterval = wi
+		srv.watchInterval = wi
 	}
 	// slash appended to distinguish '/dir'(file) and '/dir/'(directory)
 	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
@@ -99,10 +99,11 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.C
 func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, *clientv3.Event)) {
 	wkey := path.Join(e.basePath, ns, key)
 	logger := e.logger.With(zap.String("component", wkey))
+	retryInterval := 5 * time.Second
 	e.wg.Run(func() {
 		var prevKV *mvccpb.KeyValue
 
-		ticker := time.NewTicker(e.WatchInterval)
+		ticker := time.NewTicker(e.watchInterval)
 		defer ticker.Stop()
 
 		wch := e.etcdClient.Watch(ctx, wkey)
@@ -130,7 +131,9 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 				}
 			case res := <-wch:
 				if res.Canceled {
-					logger.Warn("failed to watch, try again", zap.Error(res.Err()))
+					retryInterval *= 2
+					logger.Warn("failed to watch, will try again later", zap.Error(res.Err()), zap.Duration("sleep", retryInterval))
+					time.Sleep(retryInterval)
 					wch = e.etcdClient.Watch(ctx, wkey)
 					break
 				}
@@ -141,7 +144,7 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 				}
 
 				// reset the ticker to prevent another tick immediately
-				ticker.Reset(e.WatchInterval)
+				ticker.Reset(e.watchInterval)
 			}
 		}
 	})

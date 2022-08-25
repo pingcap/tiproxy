@@ -65,8 +65,7 @@ func testConfigManager(t *testing.T, cfg config.ConfigManager) (*ConfigManager, 
 		ends[i] = etcd.Clients[i].Addr().String()
 	}
 
-	var cancel context.CancelFunc
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 	if ddl, ok := t.Deadline(); ok {
 		ctx, cancel = context.WithDeadline(ctx, ddl)
 	}
