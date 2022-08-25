@@ -69,7 +69,7 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.C
 	} else {
 		wi, err := time.ParseDuration(cfg.WatchInterval)
 		if err != nil {
-			return errors.Wrapf(err, "failed to parser watch interval %s", cfg.WatchInterval)
+			return errors.Wrapf(err, "failed to parse watch interval %s", cfg.WatchInterval)
 		}
 		srv.WatchInterval = wi
 	}
