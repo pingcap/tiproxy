@@ -1,4 +1,3 @@
-// Copyright 2020 Ipalfish, Inc.
 // Copyright 2022 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -64,8 +63,8 @@ type RedirectableConn interface {
 }
 
 type BackendWrapper struct {
-	BackendInfo
-	addr string
+	status BackendStatus
+	addr   string
 	// A list of *ConnWrapper and is ordered by the connecting or redirecting time.
 	connList *list.List
 	connMap  map[uint64]*list.Element
@@ -94,7 +93,7 @@ func NewRandomRouter(cfg *config.BackendNamespace, client *clientv3.Client) (*Ra
 	}
 	router.Lock()
 	defer router.Unlock()
-	observer, err := NewBackendObserver(router, client, cfg.Instances)
+	observer, err := StartBackendObserver(router, client, newDefaultHealthCheckConfig(), cfg.Instances)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +113,7 @@ func (router *RandomRouter) Route(conn RedirectableConn) (string, error) {
 	}
 	backend := be.Value.(*BackendWrapper)
 	switch backend.status {
-	case StatusCannotConnect, StatusServerDown, StatusSchemaOutdated:
+	case StatusCannotConnect, StatusSchemaOutdated:
 		return "", ErrNoInstanceToSelect
 	}
 	connWrapper := &ConnWrapper{
@@ -267,25 +266,25 @@ func (router *RandomRouter) OnConnClosed(addr string, conn RedirectableConn) {
 	router.removeBackendIfEmpty(be)
 }
 
-func (router *RandomRouter) OnBackendChanged(backends map[string]*BackendInfo) {
+func (router *RandomRouter) OnBackendChanged(backends map[string]BackendStatus) {
 	router.Lock()
 	defer router.Unlock()
-	for addr, info := range backends {
+	for addr, status := range backends {
 		be := router.lookupBackend(addr, true)
 		if be == nil {
 			logutil.BgLogger().Info("find new backend", zap.String("url", addr),
-				zap.String("status", info.status.String()))
+				zap.String("status", status.String()))
 			be = router.backends.PushBack(&BackendWrapper{
-				BackendInfo: *info,
-				addr:        addr,
-				connList:    list.New(),
-				connMap:     make(map[uint64]*list.Element),
+				status:   status,
+				addr:     addr,
+				connList: list.New(),
+				connMap:  make(map[uint64]*list.Element),
 			})
 		} else {
 			backend := be.Value.(*BackendWrapper)
 			logutil.BgLogger().Info("update backend", zap.String("url", addr),
-				zap.String("prev_status", backend.status.String()), zap.String("cur_status", info.status.String()))
-			backend.BackendInfo = *info
+				zap.String("prev_status", backend.status.String()), zap.String("cur_status", status.String()))
+			backend.status = status
 		}
 		router.adjustBackendList(be)
 		router.removeBackendIfEmpty(be)
@@ -335,7 +334,7 @@ func (router *RandomRouter) rebalance(maxNum int) {
 
 func (router *RandomRouter) removeBackendIfEmpty(be *list.Element) {
 	backend := be.Value.(*BackendWrapper)
-	if (backend.status == StatusServerDown || backend.status == StatusCannotConnect) && backend.connList.Len() == 0 {
+	if backend.status == StatusCannotConnect && backend.connList.Len() == 0 {
 		router.backends.Remove(be)
 	}
 }
