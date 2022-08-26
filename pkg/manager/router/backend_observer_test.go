@@ -17,16 +17,17 @@ package router
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/tidb/domain/infosync"
-	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
 	"net"
 	"net/url"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/tidb/domain/infosync"
+	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 type mockEventReceiver struct {
@@ -51,6 +52,100 @@ func newHealthCheckConfigForTest() *HealthCheckConfig {
 		healthCheckTimeout:       100 * time.Millisecond,
 		tombstoneThreshold:       tombstoneThreshold,
 	}
+}
+
+// Test that the notified backend status is correct when the backend starts or shuts down.
+func TestObserveBackends(t *testing.T) {
+	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
+		bo.Start()
+		listener1, addr1 := checkAddBackend(t, kv, backendChan)
+		addFakeTopology(t, kv, addr1)
+		listener2, addr2 := checkAddBackend(t, kv, backendChan)
+		checkBackendUnavailable(t, backendChan, listener1, addr1)
+		checkRemoveBackend(t, kv, backendChan, listener2, addr2)
+		listener1 = checkRestart(t, backendChan, addr1)
+	})
+}
+
+// Test that the health of tombstone backends won't be checked.
+func TestTombstoneBackends(t *testing.T) {
+	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
+		// Do not start observer to avoid data race, just mock data.
+		now := time.Now()
+		bo.allBackendInfo = map[string]*BackendTTLInfo{
+			"dead_addr": {
+				ttl:        []byte("123456789"),
+				lastUpdate: now.Add(-bo.config.tombstoneThreshold * 2),
+			},
+			"restart_addr": {
+				ttl:        []byte("123456789"),
+				lastUpdate: now.Add(-bo.config.tombstoneThreshold * 2),
+			},
+			"removed_addr": {
+				ttl:        []byte("123456789"),
+				lastUpdate: now,
+			},
+			"alive_addr": {
+				ttl:        []byte("123456789"),
+				lastUpdate: now,
+			},
+		}
+		bo.curBackendInfo = map[string]BackendStatus{
+			"dead_addr":    StatusCannotConnect,
+			"removed_addr": StatusHealthy,
+			"alive_addr":   StatusHealthy,
+		}
+
+		updateTTL(t, kv, "dead_addr", "123456789")
+		updateTTL(t, kv, "restart_addr", "999999999")
+		updateTTL(t, kv, "alive_addr", "999999999")
+		updateTTL(t, kv, "new_addr", "999999999")
+
+		backendsToBeChecked, err := bo.fetchBackendList(context.Background())
+		require.NoError(t, err)
+		// dead_addr and removed_addr won't be checked.
+		require.Equal(t, map[string]BackendStatus{
+			"restart_addr": StatusHealthy,
+			"alive_addr":   StatusHealthy,
+			"new_addr":     StatusHealthy,
+		}, backendsToBeChecked)
+		// All backends exist except removed_addr.
+		require.Equal(t, 4, len(bo.allBackendInfo))
+		checkAddrAndTTL := func(addr, ttl string) {
+			info, ok := bo.allBackendInfo[addr]
+			require.True(t, ok)
+			require.Equal(t, []byte(ttl), info.ttl)
+		}
+		checkAddrAndTTL("dead_addr", "123456789")
+		checkAddrAndTTL("restart_addr", "999999999")
+		checkAddrAndTTL("alive_addr", "999999999")
+		checkAddrAndTTL("new_addr", "999999999")
+	})
+}
+
+// Test that it won't hang or panic when the Etcd server fails.
+func TestEtcdUnavailable(t *testing.T) {
+	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
+		bo.Start()
+		etcd.Server.Stop()
+		<-etcd.Server.StopNotify()
+		// The observer will retry indefinitely. We verify it won't panic or hang here.
+		// There's no other way than modifying the code or just sleeping.
+		time.Sleep(bo.config.healthCheckInterval + bo.config.healthCheckTimeout + bo.config.healthCheckRetryInterval)
+		require.Equal(t, 0, len(backendChan))
+	})
+}
+
+func runTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus)) {
+	etcd := createEtcdServer(t, "127.0.0.1:0")
+	client := createEtcdClient(t, etcd)
+	backendChan := make(chan map[string]BackendStatus, 1)
+	mer := newMockEventReceiver(backendChan)
+	bo, err := NewBackendObserver(mer, client, newHealthCheckConfigForTest(), nil)
+	require.NoError(t, err)
+	kv := clientv3.NewKV(client)
+	f(etcd, kv, bo, backendChan)
+	bo.Close()
 }
 
 func createEtcdServer(t *testing.T, addr string) *embed.Etcd {
@@ -80,25 +175,6 @@ func createEtcdClient(t *testing.T, etcd *embed.Etcd) *clientv3.Client {
 		require.NoError(t, client.Close())
 	})
 	return client
-}
-
-// Test that the notified backend status is correct when the backend starts or shuts down.
-func TestObserveBackends(t *testing.T) {
-	etcd := createEtcdServer(t, "127.0.0.1:0")
-	client := createEtcdClient(t, etcd)
-	backendChan := make(chan map[string]BackendStatus, 1)
-	mer := newMockEventReceiver(backendChan)
-	bo, err := StartBackendObserver(mer, client, newHealthCheckConfigForTest(), nil)
-	require.NoError(t, err)
-	kv := clientv3.NewKV(client)
-
-	listener1, addr1 := checkAddBackend(t, kv, backendChan)
-	addFakeTopology(t, kv, addr1)
-	listener2, addr2 := checkAddBackend(t, kv, backendChan)
-	checkBackendUnavailable(t, backendChan, listener1, addr1)
-	checkRemoveBackend(t, kv, backendChan, listener2, addr2)
-	listener1 = checkRestart(t, backendChan, addr1)
-	bo.Close()
 }
 
 func newListener(t *testing.T, addr string) (net.Listener, string) {
@@ -165,83 +241,4 @@ func checkStatus(t *testing.T, backendChan chan map[string]BackendStatus, addr s
 func updateTTL(t *testing.T, kv clientv3.KV, addr, ttl string) {
 	_, err := kv.Put(context.Background(), path.Join(infosync.TopologyInformationPath, addr, topologyPathSuffix), ttl)
 	require.NoError(t, err)
-}
-
-// Test that the health of tombstone backends won't be checked.
-func TestTombstoneBackends(t *testing.T) {
-	etcd := createEtcdServer(t, "127.0.0.1:0")
-	client := createEtcdClient(t, etcd)
-	backendChan := make(chan map[string]BackendStatus, 1)
-	mer := newMockEventReceiver(backendChan)
-	bo, err := NewBackendObserver(mer, client, newHealthCheckConfigForTest(), nil)
-	require.NoError(t, err)
-	kv := clientv3.NewKV(client)
-
-	// Do not start observer to avoid data race, just mock data.
-	now := time.Now()
-	bo.allBackendInfo = map[string]*BackendTTLInfo{
-		"dead_addr": {
-			ttl:        []byte("123456789"),
-			lastUpdate: now.Add(-bo.config.tombstoneThreshold * 2),
-		},
-		"restart_addr": {
-			ttl:        []byte("123456789"),
-			lastUpdate: now.Add(-bo.config.tombstoneThreshold * 2),
-		},
-		"removed_addr": {
-			ttl:        []byte("123456789"),
-			lastUpdate: now,
-		},
-		"alive_addr": {
-			ttl:        []byte("123456789"),
-			lastUpdate: now,
-		},
-	}
-	bo.curBackendInfo = map[string]BackendStatus{
-		"dead_addr":    StatusCannotConnect,
-		"removed_addr": StatusHealthy,
-		"alive_addr":   StatusHealthy,
-	}
-
-	updateTTL(t, kv, "dead_addr", "123456789")
-	updateTTL(t, kv, "restart_addr", "999999999")
-	updateTTL(t, kv, "alive_addr", "999999999")
-	updateTTL(t, kv, "new_addr", "999999999")
-
-	backendsToBeChecked, err := bo.fetchBackendList(context.Background())
-	require.NoError(t, err)
-	// dead_addr and removed_addr won't be checked.
-	require.Equal(t, map[string]BackendStatus{
-		"restart_addr": StatusHealthy,
-		"alive_addr":   StatusHealthy,
-		"new_addr":     StatusHealthy,
-	}, backendsToBeChecked)
-	// All backends exist except removed_addr.
-	require.Equal(t, 4, len(bo.allBackendInfo))
-	checkAddrAndTTL := func(addr, ttl string) {
-		info, ok := bo.allBackendInfo[addr]
-		require.True(t, ok)
-		require.Equal(t, []byte(ttl), info.ttl)
-	}
-	checkAddrAndTTL("dead_addr", "123456789")
-	checkAddrAndTTL("restart_addr", "999999999")
-	checkAddrAndTTL("alive_addr", "999999999")
-	checkAddrAndTTL("new_addr", "999999999")
-}
-
-// Test that it won't hang or panic when the Etcd server fails.
-func TestEtcdUnavailable(t *testing.T) {
-	etcd := createEtcdServer(t, "127.0.0.1:0")
-	client := createEtcdClient(t, etcd)
-	backendChan := make(chan map[string]BackendStatus, 1)
-	mer := newMockEventReceiver(backendChan)
-	bo, err := StartBackendObserver(mer, client, newHealthCheckConfigForTest(), nil)
-	require.NoError(t, err)
-	etcd.Server.Stop()
-	<-etcd.Server.StopNotify()
-	// The observer will retry indefinitely. We verify it won't panic or hang here.
-	// There's no other way than modifying the code or just sleeping.
-	time.Sleep(bo.config.healthCheckInterval + bo.config.healthCheckTimeout + bo.config.healthCheckRetryInterval)
-	require.Equal(t, 0, len(backendChan))
-	bo.Close()
 }
