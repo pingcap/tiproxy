@@ -15,23 +15,35 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/pkg/config"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
-	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
-func Register(group *gin.RouterGroup, ready *atomic.Bool, cfg config.API, logger *zap.Logger, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
-	{
-		adminGroup := group.Group("admin")
-		if cfg.EnableBasicAuth {
-			adminGroup.Use(gin.BasicAuth(gin.Accounts{cfg.User: cfg.Password}))
-		}
-		registerNamespace(adminGroup.Group("namespace"), logger.Named("namespace"), cfgmgr, nsmgr)
-		registerConfig(adminGroup.Group("config"), logger.Named("config"), cfgmgr)
+type configHttpHandler struct {
+	logger *zap.Logger
+	cfgmgr *mgrcfg.ConfigManager
+}
+
+func (h *configHttpHandler) HandleSetProxyConfig(c *gin.Context) {
+	pco := &config.ProxyServerOnline{}
+	if c.ShouldBindJSON(pco) != nil {
+		c.String(http.StatusBadRequest, "bad proxy config json")
+		return
 	}
-	registerMetrics(group.Group("metrics"))
-	registerDebug(group.Group("debug"), logger.Named("debug"), nsmgr)
+
+	if err := h.cfgmgr.SetProxyConfig(c, pco); err != nil {
+		c.String(http.StatusInternalServerError, "can not update proxy config")
+		return
+	}
+
+	c.String(http.StatusOK, "")
+}
+
+func registerConfig(group *gin.RouterGroup, logger *zap.Logger, mgrcfg *mgrcfg.ConfigManager) {
+	h := &configHttpHandler{logger, mgrcfg}
+	group.PUT("/proxy", h.HandleSetProxyConfig)
 }

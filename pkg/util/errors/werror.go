@@ -62,7 +62,11 @@ func (e *WError) Unwrap() error {
 // 2. it got errors returned from external libraries
 // 3. you want to wrap these errors, expect `Unwrap(err) == ErrExternalErrors && Is(err, ErrReadMyConfig)`.
 // 4. then you are finding `err := Wrap(ErrReadMyConfig, ErrExternalErrors)`
+// Note that wrap nil error will get nil error.
 func Wrap(cerr error, uerr error) error {
+	if cerr == nil {
+		return nil
+	}
 	return &WError{
 		uerr: uerr,
 		cerr: cerr,
@@ -71,6 +75,9 @@ func Wrap(cerr error, uerr error) error {
 
 // Wrapf is like Wrap, with the underlying error being the result of `fmt.Errorf()`
 func Wrapf(cerr error, msg string, args ...any) error {
+	if cerr == nil {
+		return nil
+	}
 	return &WError{
 		uerr: fmt.Errorf(msg, args...),
 		cerr: cerr,

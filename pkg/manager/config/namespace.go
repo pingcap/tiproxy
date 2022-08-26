@@ -41,7 +41,7 @@ func (e *ConfigManager) ListAllNamespace(ctx context.Context) ([]*config.Namespa
 	for _, kv := range etcdKeyValues {
 		nsCfg, err := config.NewNamespaceConfig(kv.Value)
 		if err != nil {
-			if e.cfg.IgnoreWrongNamespace {
+			if e.ignoreWrongNamespace {
 				e.logger.Warn("parse namespace config error", zap.Error(err), zap.ByteString("namespace", kv.Key))
 				continue
 			} else {

@@ -39,9 +39,9 @@ func (h *debugHttpHandler) Redirect(c *gin.Context) {
 		}
 		h.logger.Error(errMsg, err_fields...)
 
-		c.JSON(http.StatusInternalServerError, errMsg)
+		c.String(http.StatusInternalServerError, errMsg)
 	} else {
-		c.JSON(http.StatusOK, "")
+		c.String(http.StatusOK, "")
 	}
 }
 

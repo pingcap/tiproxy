@@ -16,12 +16,12 @@ package config
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"time"
 
 	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/errors"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -29,26 +29,50 @@ import (
 
 const (
 	DefaultEtcdDialTimeout = 3 * time.Second
+	DefaultWatchInterval   = 10 * time.Minute
 	DefaultEtcdPath        = "/config"
 
 	PathPrefixNamespace = "ns"
+	PathPrefixProxy     = "proxy"
+)
+
+var (
+	ErrNoOrMultiResults = errors.Errorf("has no results or multiple results")
 )
 
 type ConfigManager struct {
+	wg         waitgroup.WaitGroup
+	cancel     context.CancelFunc
 	logger     *zap.Logger
 	etcdClient *clientv3.Client
 	kv         clientv3.KV
 	basePath   string
-	cfg        config.ConfigManager
+
+	// config
+	ignoreWrongNamespace bool
+	watchInterval        time.Duration
+
+	chProxy chan *config.ProxyServerOnline
 }
 
 func NewConfigManager() *ConfigManager {
-	return &ConfigManager{}
+	return &ConfigManager{
+		chProxy: make(chan *config.ProxyServerOnline, 1),
+	}
 }
 
-func (srv *ConfigManager) Init(addrs []string, cfg config.ConfigManager, logger *zap.Logger) error {
+func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.ConfigManager, logger *zap.Logger) error {
 	srv.logger = logger
-	srv.cfg = cfg
+	srv.ignoreWrongNamespace = cfg.IgnoreWrongNamespace
+	if cfg.WatchInterval == "" {
+		srv.watchInterval = DefaultWatchInterval
+	} else {
+		wi, err := time.ParseDuration(cfg.WatchInterval)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse watch interval %s", cfg.WatchInterval)
+		}
+		srv.watchInterval = wi
+	}
 	// slash appended to distinguish '/dir'(file) and '/dir/'(directory)
 	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
 
@@ -59,12 +83,74 @@ func (srv *ConfigManager) Init(addrs []string, cfg config.ConfigManager, logger 
 
 	etcdClient, err := clientv3.New(etcdConfig)
 	if err != nil {
-		return errors.WithMessage(err, "create etcd config center error")
+		return errors.Wrapf(err, "create etcd config center error")
 	}
 	srv.etcdClient = etcdClient
 	srv.kv = clientv3.NewKV(srv.etcdClient)
 
+	ctx, cancel := context.WithCancel(ctx)
+	srv.cancel = cancel
+
+	srv.initProxyConfig(ctx)
+
 	return nil
+}
+
+func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, *clientv3.Event)) {
+	wkey := path.Join(e.basePath, ns, key)
+	logger := e.logger.With(zap.String("component", wkey))
+	retryInterval := 5 * time.Second
+	e.wg.Run(func() {
+		var prevKV *mvccpb.KeyValue
+
+		ticker := time.NewTicker(e.watchInterval)
+		defer ticker.Stop()
+
+		wch := e.etcdClient.Watch(ctx, wkey)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				resp, err := e.kv.Get(ctx, wkey)
+				if err != nil {
+					logger.Warn("failed to poll", zap.Error(err))
+					break
+				}
+				// len == 0 may mean there is no value set yet, do not warn about that
+				if len(resp.Kvs) > 1 {
+					logger.Warn("failed to poll", zap.Error(ErrNoOrMultiResults))
+					break
+				} else if len(resp.Kvs) == 1 {
+					f(logger, &clientv3.Event{
+						Type:   mvccpb.PUT,
+						Kv:     resp.Kvs[0],
+						PrevKv: prevKV,
+					})
+					prevKV = resp.Kvs[0]
+				}
+			case res := <-wch:
+				if res.Canceled {
+					// don't wait for more than the polling interval
+					if k := retryInterval * 2; k < e.watchInterval {
+						retryInterval = k
+					}
+					logger.Warn("failed to watch, will try again later", zap.Error(res.Err()), zap.Duration("sleep", retryInterval))
+					time.Sleep(retryInterval)
+					wch = e.etcdClient.Watch(ctx, wkey, clientv3.WithCreatedNotify())
+					break
+				}
+
+				for _, evt := range res.Events {
+					f(logger, evt)
+					prevKV = evt.Kv
+				}
+
+				// reset the ticker to prevent another tick immediately
+				ticker.Reset(e.watchInterval)
+			}
+		}
+	})
 }
 
 func (e *ConfigManager) get(ctx context.Context, ns, key string) (*mvccpb.KeyValue, error) {
@@ -73,7 +159,7 @@ func (e *ConfigManager) get(ctx context.Context, ns, key string) (*mvccpb.KeyVal
 		return nil, err
 	}
 	if len(resp.Kvs) != 1 {
-		return nil, fmt.Errorf("has no results or multiple results")
+		return nil, ErrNoOrMultiResults
 	}
 	return resp.Kvs[0], nil
 }
@@ -106,16 +192,7 @@ func (e *ConfigManager) del(ctx context.Context, ns, key string) error {
 }
 
 func (e *ConfigManager) Close() error {
-	if err := e.etcdClient.Close(); err != nil {
-		e.logger.Error("fail to close config manager", zap.Error(err))
-		return err
-	}
-	return nil
-}
-
-func appendSlashToDirPath(dir string) string {
-	if len(dir) == 0 || dir[len(dir)-1] == '/' {
-		return dir
-	}
-	return dir + "/"
+	e.cancel()
+	e.wg.Wait()
+	return errors.Wrapf(e.etcdClient.Close(), "fail to close config manager")
 }

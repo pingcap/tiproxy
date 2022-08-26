@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package util
+package main
 
 import (
 	"context"
@@ -31,7 +31,7 @@ type Context struct {
 	Client *http.Client
 }
 
-func DoRequest(ctx context.Context, bctx *Context, method string, url string, rd io.Reader) (string, error) {
+func doRequest(ctx context.Context, bctx *Context, method string, url string, rd io.Reader) (string, error) {
 	var sep string
 	if len(url) > 0 && url[0] != '/' {
 		sep = "/"
@@ -43,7 +43,7 @@ func DoRequest(ctx context.Context, bctx *Context, method string, url string, rd
 	}
 
 	var rete string
-	for i := range rand.Perm(len(bctx.CUrls)) {
+	for _, i := range rand.Perm(len(bctx.CUrls)) {
 		req.URL.Host = bctx.CUrls[i]
 
 		res, err := bctx.Client.Do(req)
@@ -56,11 +56,14 @@ func DoRequest(ctx context.Context, bctx *Context, method string, url string, rd
 		switch res.StatusCode {
 		case http.StatusOK:
 			return string(resb), nil
+		case http.StatusBadRequest:
+			return fmt.Sprintf("bad request: %s", string(resb)), nil
 		case http.StatusInternalServerError:
 			rete = fmt.Sprintf("internal error: %s", string(resb))
 			continue
-		case http.StatusBadRequest:
-			return string(resb), fmt.Errorf("bad request")
+		default:
+			rete = fmt.Sprintf("%s: %s", res.Status, string(resb))
+			continue
 		}
 	}
 

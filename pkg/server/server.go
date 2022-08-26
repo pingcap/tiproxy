@@ -72,7 +72,8 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 			ginzap.Ginzap(logger.Named("gin"), "", true),
 			func(c *gin.Context) {
 				if !ready.Load() {
-					c.AbortWithStatusJSON(http.StatusInternalServerError, "service not ready")
+					c.Abort()
+					c.String(http.StatusInternalServerError, "service not ready")
 				}
 			},
 		)
@@ -122,7 +123,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 		for i := range addrs {
 			addrs[i] = srv.Etcd.Clients[i].Addr().String()
 		}
-		err = srv.ConfigManager.Init(addrs, cfg.Config, logger.Named("config"))
+		err = srv.ConfigManager.Init(ctx, addrs, cfg.Config, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -172,7 +173,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	return s.Proxy.Run(ctx)
+	return s.Proxy.Run(ctx, s.ConfigManager.GetProxyConfig())
 }
 
 func (s *Server) Close() error {

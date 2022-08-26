@@ -28,64 +28,69 @@ const (
 )
 
 type Config struct {
-	Workdir string `yaml:"workdir"`
+	Workdir string `yaml:"workdir" toml:"workdir" json:"workdir"`
 
-	LCUrlsI []string  `yaml:"listen-urls"`
-	ACUrlsI []string  `yaml:"advertise-urls"`
-	LPUrlsI []string  `yaml:"listen-peer-urls"`
-	APUrlsI []string  `yaml:"advertise-peer-urls"`
-	LCUrls  []url.URL `yaml:"-"`
-	ACUrls  []url.URL `yaml:"-"`
-	LPUrls  []url.URL `yaml:"-"`
-	APUrls  []url.URL `yaml:"-"`
+	LCUrlsI []string  `yaml:"listen-urls" toml:"listen-urls" json:"listen-urls"`
+	ACUrlsI []string  `yaml:"advertise-urls" toml:"advertise-urls" json:"advertise-urls"`
+	LPUrlsI []string  `yaml:"listen-peer-urls" toml:"listen-peer-urls" json:"listen-peer-urls"`
+	APUrlsI []string  `yaml:"advertise-peer-urls" toml:"advertise-peer-urls" json:"advertise-peer-urls"`
+	LCUrls  []url.URL `yaml:"-" toml:"-" json:"-"`
+	ACUrls  []url.URL `yaml:"-" toml:"-" json:"-"`
+	LPUrls  []url.URL `yaml:"-" toml:"-" json:"-"`
+	APUrls  []url.URL `yaml:"-" toml:"-" json:"-"`
 
-	Config   ConfigManager `yaml:"config"`
-	Proxy    ProxyServer   `yaml:"proxy"`
-	API      API           `yaml:"api"`
-	Metrics  Metrics       `yaml:"metrics"`
-	Log      Log           `yaml:"log"`
-	Security Security      `yaml:"security"`
+	Config   ConfigManager `yaml:"config" toml:"config" json:"config"`
+	Proxy    ProxyServer   `yaml:"proxy" toml:"proxy" json:"proxy"`
+	API      API           `yaml:"api" toml:"api" json:"api"`
+	Metrics  Metrics       `yaml:"metrics" toml:"metrics" json:"metrics"`
+	Log      Log           `yaml:"log" toml:"log" json:"log"`
+	Security Security      `yaml:"security" toml:"security" json:"security"`
 }
 
 type Metrics struct {
-	PromCluster string `yaml:"prom_cluster"`
+	PromCluster string `yaml:"prom_cluster" toml:"prom_cluster" json:"prom_cluster"`
 }
 
 type ConfigManager struct {
-	IgnoreWrongNamespace bool `yaml:"ignore_wrong_namespace"`
+	IgnoreWrongNamespace bool   `yaml:"ignore_wrong_namespace" toml:"ignore_wrong_namespace" json:"ignore_wrong_namespace"`
+	WatchInterval        string `yaml:"watch_interval" toml:"watch_interval" json:"watch_interval"`
+}
+
+type ProxyServerOnline struct {
+	MaxConnections uint64 `yaml:"max_connections" toml:"max_connections" json:"max_connections"`
+	TCPKeepAlive   bool   `yaml:"tcp_keep_alive" toml:"tcp_keep_alive" json:"tcp_keep_alive"`
 }
 
 type ProxyServer struct {
-	Addr           string `yaml:"addr"`
-	MaxConnections uint64 `yaml:"max_connections"`
-	TCPKeepAlive   bool   `yaml:"tcp_keep_alive"`
-	PDAddrs        string `yaml:"pd_addrs"`
-	ProxyProtocol  string `yaml:"proxy_protocol"`
+	ProxyServerOnline
+	Addr          string `yaml:"addr" toml:"addr" json:"addr"`
+	PDAddrs       string `yaml:"pd_addrs" toml:"pd_addrs" json:"pd_addrs"`
+	ProxyProtocol string `yaml:"proxy_protocol" toml:"proxy_protocol" json:"proxy_protocol"`
 }
 
 type API struct {
-	EnableBasicAuth bool   `yaml:"enable_basic_auth"`
-	User            string `yaml:"user"`
-	Password        string `yaml:"password"`
+	EnableBasicAuth bool   `yaml:"enable_basic_auth" toml:"enable_basic_auth" json:"enable_basic_auth"`
+	User            string `yaml:"user" toml:"user" json:"user"`
+	Password        string `yaml:"password" toml:"password" json:"password"`
 }
 
 type Log struct {
-	Level   string  `yaml:"level"`
-	Encoder string  `yaml:"encoder"`
-	LogFile LogFile `yaml:"log_file"`
+	Level   string  `yaml:"level" toml:"level" json:"level"`
+	Encoder string  `yaml:"encoder" toml:"encoder" json:"encoder"`
+	LogFile LogFile `yaml:"log_file" toml:"log_file" json:"log_file"`
 }
 
 type LogFile struct {
-	Filename   string `yaml:"filename"`
-	MaxSize    int    `yaml:"max_size"`
-	MaxDays    int    `yaml:"max_days"`
-	MaxBackups int    `yaml:"max_backups"`
+	Filename   string `yaml:"filename" toml:"filename" json:"filename"`
+	MaxSize    int    `yaml:"max_size" toml:"max_size" json:"max_size"`
+	MaxDays    int    `yaml:"max_days" toml:"max_days" json:"max_days"`
+	MaxBackups int    `yaml:"max_backups" toml:"max_backups" json:"max_backups"`
 }
 
 type TLSCert struct {
-	CA   string `toml:"ca" json:"ca"`
-	Cert string `toml:"cert" json:"cert"`
-	Key  string `toml:"key" json:"key"`
+	CA   string `yaml:"ca" toml:"ca" json:"ca"`
+	Cert string `yaml:"cert" toml:"cert" json:"cert"`
+	Key  string `yaml:"key" toml:"key" json:"key"`
 }
 
 func (c TLSCert) HasCert() bool {
@@ -97,9 +102,9 @@ func (c TLSCert) HasCA() bool {
 }
 
 type Security struct {
-	RSAKeySize int     `toml:"rsa-key-size" json:"rsa-key-size"`
-	Server     TLSCert `toml:"server" json:"server"`
-	Cluster    TLSCert `toml:"cluster" json:"cluster"`
+	RSAKeySize int     `yaml:"rsa-key-size" toml:"rsa-key-size" json:"rsa-key-size"`
+	Server     TLSCert `yaml:"server" toml:"server" json:"server"`
+	Cluster    TLSCert `yaml:"cluster" toml:"cluster" json:"cluster"`
 }
 
 func NewConfig(data []byte) (*Config, error) {

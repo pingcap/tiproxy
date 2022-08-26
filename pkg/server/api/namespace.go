@@ -33,14 +33,14 @@ type namespaceHttpHandler struct {
 func (h *namespaceHttpHandler) HandleGetNamespace(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
-		c.YAML(http.StatusBadRequest, "bad namespace parameter")
+		c.String(http.StatusBadRequest, "bad namespace parameter")
 		return
 	}
 
 	nsc, err := h.cfgmgr.GetNamespace(c, ns)
 	if err != nil {
 		h.logger.Error("can not get namespace", zap.String("namespace", ns), zap.Error(err))
-		c.YAML(http.StatusInternalServerError, "can not get namespace")
+		c.String(http.StatusInternalServerError, "can not get namespace")
 		return
 	}
 
@@ -50,38 +50,38 @@ func (h *namespaceHttpHandler) HandleGetNamespace(c *gin.Context) {
 func (h *namespaceHttpHandler) HandleUpsertNamesapce(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
-		c.YAML(http.StatusBadRequest, "bad namespace parameter")
+		c.String(http.StatusBadRequest, "bad namespace parameter")
 		return
 	}
 
 	nsc := &config.Namespace{}
 
 	if c.ShouldBindYAML(nsc) != nil {
-		c.YAML(http.StatusBadRequest, "bad namespace json")
+		c.String(http.StatusBadRequest, "bad namespace json")
 		return
 	}
 
 	if err := h.cfgmgr.SetNamespace(c, nsc.Namespace, nsc); err != nil {
-		c.YAML(http.StatusInternalServerError, "can not update config")
+		c.String(http.StatusInternalServerError, "can not update config")
 		return
 	}
 
-	c.YAML(http.StatusOK, "")
+	c.String(http.StatusOK, "")
 }
 
 func (h *namespaceHttpHandler) HandleRemoveNamespace(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
-		c.YAML(http.StatusBadRequest, "bad namespace parameter")
+		c.String(http.StatusBadRequest, "bad namespace parameter")
 		return
 	}
 
 	if err := h.cfgmgr.DelNamespace(c, ns); err != nil {
-		c.YAML(http.StatusInternalServerError, "can not update config")
+		c.String(http.StatusInternalServerError, "can not update config")
 		return
 	}
 
-	c.YAML(http.StatusOK, "")
+	c.String(http.StatusOK, "")
 }
 
 func (h *namespaceHttpHandler) HandleCommit(c *gin.Context) {
@@ -109,11 +109,11 @@ func (h *namespaceHttpHandler) HandleCommit(c *gin.Context) {
 	if err := h.nsmgr.CommitNamespaces(nss, nss_delete); err != nil {
 		errMsg := "commit reload namespace error"
 		h.logger.Error(errMsg, zap.Error(err), zap.Any("namespaces", nss))
-		c.YAML(http.StatusInternalServerError, errMsg)
+		c.String(http.StatusInternalServerError, errMsg)
 		return
 	}
 
-	c.YAML(http.StatusOK, "")
+	c.String(http.StatusOK, "")
 }
 
 func (h *namespaceHttpHandler) HandleList(c *gin.Context) {
@@ -121,7 +121,7 @@ func (h *namespaceHttpHandler) HandleList(c *gin.Context) {
 	if err != nil {
 		errMsg := "failed to list namespaces"
 		h.logger.Error(errMsg, zap.Error(err))
-		c.YAML(http.StatusInternalServerError, errMsg)
+		c.String(http.StatusInternalServerError, errMsg)
 		return
 	}
 

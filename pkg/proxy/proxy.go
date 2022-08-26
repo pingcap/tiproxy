@@ -80,7 +80,7 @@ func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, sc
 	return s, nil
 }
 
-func (s *SQLServer) Run(ctx context.Context) error {
+func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.ProxyServerOnline) error {
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
 
 	for {
@@ -88,6 +88,11 @@ func (s *SQLServer) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			s.wg.Wait()
 			return nil
+		case och := <-onlineProxyConfig:
+			s.mu.Lock()
+			s.mu.tcpKeepAlive = och.TCPKeepAlive
+			s.mu.maxConnections = och.MaxConnections
+			s.mu.Unlock()
 		default:
 			conn, err := s.listener.Accept()
 			if err != nil {
@@ -113,7 +118,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	tcpKeepAlive := s.mu.tcpKeepAlive
 
 	// 'maxConns == 0' => unlimited connections
-	if maxConns != 0 && maxConns <= conns {
+	if maxConns != 0 && conns >= maxConns {
 		s.mu.Unlock()
 		s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
 		return

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package namespace
+package main
 
 import (
 	"fmt"
@@ -20,15 +20,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pingcap/TiProxy/cmd/weirctl/util"
 	"github.com/spf13/cobra"
 )
 
 const (
-	prefix = "/api/admin/namespace"
+	namespacePrefix = "/api/admin/namespace"
 )
 
-func GetRootCommand(ctx *util.Context) *cobra.Command {
+func GetNamespaceCmd(ctx *Context) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "namespace",
 		Short: "",
@@ -39,12 +38,12 @@ func GetRootCommand(ctx *util.Context) *cobra.Command {
 		&cobra.Command{
 			Use: "list",
 			RunE: func(cmd *cobra.Command, args []string) error {
-				resp, err := util.DoRequest(cmd.Context(), ctx, http.MethodGet, prefix, nil)
+				resp, err := doRequest(cmd.Context(), ctx, http.MethodGet, namespacePrefix, nil)
 				if err != nil {
 					return err
 				}
 
-				fmt.Print(resp)
+				cmd.Println(resp)
 				return nil
 			},
 		},
@@ -56,12 +55,12 @@ func GetRootCommand(ctx *util.Context) *cobra.Command {
 			Use: "commit",
 		}
 		commitNamespaces.RunE = func(cmd *cobra.Command, args []string) error {
-			resp, err := util.DoRequest(cmd.Context(), ctx, http.MethodPost, fmt.Sprintf("%s/commit?namespaces=%s", prefix, strings.Join(args, ",")), nil)
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, fmt.Sprintf("%s/commit?namespaces=%s", namespacePrefix, strings.Join(args, ",")), nil)
 			if err != nil {
 				return err
 			}
 
-			fmt.Print(resp)
+			cmd.Println(resp)
 			return nil
 		}
 		rootCmd.AddCommand(commitNamespaces)
@@ -77,12 +76,12 @@ func GetRootCommand(ctx *util.Context) *cobra.Command {
 				return cmd.Help()
 			}
 
-			resp, err := util.DoRequest(cmd.Context(), ctx, http.MethodGet, fmt.Sprintf("%s/%s", prefix, args[0]), nil)
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodGet, fmt.Sprintf("%s/%s", namespacePrefix, args[0]), nil)
 			if err != nil {
 				return err
 			}
 
-			fmt.Print(resp)
+			cmd.Println(resp)
 			return nil
 		}
 		rootCmd.AddCommand(getNamespace)
@@ -109,12 +108,12 @@ func GetRootCommand(ctx *util.Context) *cobra.Command {
 				in = f
 			}
 
-			resp, err := util.DoRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", prefix, args[0]), in)
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, args[0]), in)
 			if err != nil {
 				return err
 			}
 
-			fmt.Print(resp)
+			cmd.Println(resp)
 			return nil
 		}
 		rootCmd.AddCommand(putNamespace)
@@ -130,12 +129,12 @@ func GetRootCommand(ctx *util.Context) *cobra.Command {
 				return cmd.Help()
 			}
 
-			resp, err := util.DoRequest(cmd.Context(), ctx, http.MethodDelete, fmt.Sprintf("%s/%s", prefix, args[0]), nil)
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodDelete, fmt.Sprintf("%s/%s", namespacePrefix, args[0]), nil)
 			if err != nil {
 				return err
 			}
 
-			fmt.Print(resp)
+			cmd.Println(resp)
 			return nil
 		}
 		rootCmd.AddCommand(delNamespace)

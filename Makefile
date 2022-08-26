@@ -30,8 +30,8 @@ cmd: $(EXECUTABLE_TARGETS)
 build: cmd
 	go build $(GOFLAGS) ./...
 
-cmd_%: OUTPUT=$(patsubst cmd_%,bin/%,$@)
-cmd_%: SOURCE=$(patsubst cmd_%,cmd/%/main.go,$@)
+cmd_%: OUTPUT=$(patsubst cmd_%,./bin/%,$@)
+cmd_%: SOURCE=$(patsubst cmd_%,./cmd/%,$@)
 cmd_%:
 	go build $(GOFLAGS) -o $(OUTPUT) $(SOURCE)
 
