@@ -72,21 +72,22 @@ func TestTombstoneBackends(t *testing.T) {
 	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
 		// Do not start observer to avoid data race, just mock data.
 		now := time.Now()
+		oldTTL, newTTL := "123456789", "999999999"
 		bo.allBackendInfo = map[string]*BackendTTLInfo{
 			"dead_addr": {
-				ttl:        []byte("123456789"),
+				ttl:        []byte(oldTTL),
 				lastUpdate: now.Add(-bo.config.tombstoneThreshold * 2),
 			},
 			"restart_addr": {
-				ttl:        []byte("123456789"),
+				ttl:        []byte(oldTTL),
 				lastUpdate: now.Add(-bo.config.tombstoneThreshold * 2),
 			},
 			"removed_addr": {
-				ttl:        []byte("123456789"),
+				ttl:        []byte(oldTTL),
 				lastUpdate: now,
 			},
 			"alive_addr": {
-				ttl:        []byte("123456789"),
+				ttl:        []byte(oldTTL),
 				lastUpdate: now,
 			},
 		}
@@ -96,10 +97,10 @@ func TestTombstoneBackends(t *testing.T) {
 			"alive_addr":   StatusHealthy,
 		}
 
-		updateTTL(t, kv, "dead_addr", "123456789")
-		updateTTL(t, kv, "restart_addr", "999999999")
-		updateTTL(t, kv, "alive_addr", "999999999")
-		updateTTL(t, kv, "new_addr", "999999999")
+		updateTTL(t, kv, "dead_addr", oldTTL)
+		updateTTL(t, kv, "restart_addr", newTTL)
+		updateTTL(t, kv, "alive_addr", newTTL)
+		updateTTL(t, kv, "new_addr", newTTL)
 
 		backendsToBeChecked, err := bo.fetchBackendList(context.Background())
 		require.NoError(t, err)
@@ -116,10 +117,10 @@ func TestTombstoneBackends(t *testing.T) {
 			require.True(t, ok)
 			require.Equal(t, []byte(ttl), info.ttl)
 		}
-		checkAddrAndTTL("dead_addr", "123456789")
-		checkAddrAndTTL("restart_addr", "999999999")
-		checkAddrAndTTL("alive_addr", "999999999")
-		checkAddrAndTTL("new_addr", "999999999")
+		checkAddrAndTTL("dead_addr", oldTTL)
+		checkAddrAndTTL("restart_addr", newTTL)
+		checkAddrAndTTL("alive_addr", newTTL)
+		checkAddrAndTTL("new_addr", newTTL)
 	})
 }
 
