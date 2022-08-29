@@ -16,7 +16,10 @@ package router
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
 	"strings"
 	"time"
 
@@ -78,7 +81,9 @@ const (
 	healthCheckRetryInterval = 2 * time.Second
 	healthCheckTimeout       = 2 * time.Second
 	tombstoneThreshold       = 10 * time.Minute
-	topologyPathSuffix       = "/ttl"
+	ttlPathSuffix            = "/ttl"
+	infoPathSuffix           = "/info"
+	statusPathSuffix         = "/status"
 )
 
 // HealthCheckConfig contains some configurations for health check.
@@ -108,8 +113,10 @@ type BackendEventReceiver interface {
 	OnBackendChanged(backends map[string]BackendStatus)
 }
 
-// BackendTTLInfo stores the ttl info of each backend.
-type BackendTTLInfo struct {
+// BackendInfo stores the ttl and status info of each backend.
+type BackendInfo struct {
+	// The TopologyInfo received from the /info path.
+	*infosync.TopologyInfo
 	// The TTL time in the topology info.
 	ttl []byte
 	// Last time the TTL time is refreshed.
@@ -120,10 +127,10 @@ type BackendTTLInfo struct {
 // BackendObserver refreshes backend list and notifies BackendEventReceiver.
 type BackendObserver struct {
 	config *HealthCheckConfig
-	// The current backend status sent to the receiver.
+	// The current backend status synced to the receiver.
 	curBackendInfo map[string]BackendStatus
 	// All the backend info in the topology, including tombstones.
-	allBackendInfo map[string]*BackendTTLInfo
+	allBackendInfo map[string]*BackendInfo
 	client         *clientv3.Client
 	staticAddrs    []string
 	eventReceiver  BackendEventReceiver
@@ -191,7 +198,7 @@ func NewBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Cli
 	bo := &BackendObserver{
 		config:         config,
 		curBackendInfo: make(map[string]BackendStatus),
-		allBackendInfo: make(map[string]*BackendTTLInfo),
+		allBackendInfo: make(map[string]*BackendInfo),
 		client:         client,
 		staticAddrs:    staticAddrs,
 		eventReceiver:  eventReceiver,
@@ -259,7 +266,7 @@ func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
 				break
 			}
 			for _, ev := range resp.Events {
-				if strings.HasSuffix(string(ev.Kv.Key), topologyPathSuffix) {
+				if strings.HasSuffix(string(ev.Kv.Key), infoPathSuffix) || strings.HasSuffix(string(ev.Kv.Key), ttlPathSuffix) {
 					needRefresh = true
 					break
 				}
@@ -278,106 +285,163 @@ func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
 }
 
 func (bo *BackendObserver) refreshBackends(ctx context.Context) {
-	backendInfo, err := bo.fetchBackendList(ctx)
-	if err != nil {
+	if err := bo.fetchBackendList(ctx); err != nil {
 		return
 	}
-	bo.checkHealth(ctx, backendInfo)
-	bo.notifyIfChanged(backendInfo)
+	backendInfo := bo.filterTombstoneBackends()
+	backendStatus := bo.checkHealth(ctx, backendInfo)
+	bo.notifyIfChanged(backendStatus)
 }
 
-func (bo *BackendObserver) fetchBackendList(ctx context.Context) (map[string]BackendStatus, error) {
+func (bo *BackendObserver) fetchBackendList(ctx context.Context) error {
 	var response *clientv3.GetResponse
 	var err error
 	// It's a critical problem if the proxy cannot connect to the server, so we always retry.
 	for {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
-		childCtx, cancel := context.WithTimeout(ctx, bo.config.healthCheckTimeout)
-		response, err = bo.client.Get(childCtx, infosync.TopologyInformationPath, clientv3.WithPrefix())
-		cancel()
-		if err == nil {
+		// In case there are too many tombstone backends, the query would be slow, so no need to set a timeout here.
+		if response, err = bo.client.Get(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix()); err == nil {
 			break
 		}
 		logutil.Logger(ctx).Error("fetch backend list failed, will retry later", zap.Error(err))
 		time.Sleep(bo.config.healthCheckRetryInterval)
 	}
 
-	curBackendInfo := make(map[string]BackendStatus, len(response.Kvs))
-	allBackendInfo := make(map[string]*BackendTTLInfo, len(response.Kvs))
+	allBackendInfo := make(map[string]*BackendInfo, len(response.Kvs))
 	now := time.Now()
 	for _, kv := range response.Kvs {
 		key := string(kv.Key)
-		if !strings.HasSuffix(key, topologyPathSuffix) {
-			continue
+		if strings.HasSuffix(key, ttlPathSuffix) {
+			addr := key[len(infosync.TopologyInformationPath)+1 : len(key)-len(ttlPathSuffix)]
+			info, ok := allBackendInfo[addr]
+			if !ok {
+				info, ok = bo.allBackendInfo[addr]
+			}
+			if ok {
+				if slices.Compare(info.ttl, kv.Value) != 0 {
+					// The TTL is updated this time.
+					info.lastUpdate = now
+					info.ttl = kv.Value
+				}
+			} else {
+				// A new backend.
+				info = &BackendInfo{
+					lastUpdate: now,
+					ttl:        kv.Value,
+				}
+			}
+			allBackendInfo[addr] = info
+		} else if strings.HasSuffix(key, infoPathSuffix) {
+			addr := key[len(infosync.TopologyInformationPath)+1 : len(key)-len(infoPathSuffix)]
+			// A backend may restart with a same address but a different status port in a short time, so
+			// we still need to marshal and update the topology even if the address exists in the map.
+			var topo *infosync.TopologyInfo
+			if err = json.Unmarshal(kv.Value, &topo); err != nil {
+				logutil.Logger(ctx).Error("unmarshal topology info failed", zap.String("key", string(kv.Key)),
+					zap.ByteString("value", kv.Value), zap.Error(err))
+				continue
+			}
+			info, ok := allBackendInfo[addr]
+			if !ok {
+				info, ok = bo.allBackendInfo[addr]
+			}
+			if ok {
+				info.TopologyInfo = topo
+			} else {
+				info = &BackendInfo{
+					TopologyInfo: topo,
+				}
+			}
+			allBackendInfo[addr] = info
 		}
-		addr := key[len(infosync.TopologyInformationPath)+1 : len(key)-len(topologyPathSuffix)]
-		info, ok := bo.allBackendInfo[addr]
-		isTombstone := false
-		if ok {
-			if slices.Compare(info.ttl, kv.Value) != 0 {
-				// The TTL is updated this time.
-				info.lastUpdate = now
-				info.ttl = kv.Value
-			} else if info.lastUpdate.Add(bo.config.tombstoneThreshold).Before(now) {
-				// The TTL has not been updated for a long time.
-				isTombstone = true
-			}
-		} else {
-			// A new backend.
-			info = &BackendTTLInfo{
-				lastUpdate: now,
-				ttl:        kv.Value,
-			}
+	}
+	bo.allBackendInfo = allBackendInfo
+	return nil
+}
+
+func (bo *BackendObserver) filterTombstoneBackends() map[string]*BackendInfo {
+	now := time.Now()
+	curBackendInfo := make(map[string]*BackendInfo, len(bo.allBackendInfo))
+	for addr, info := range bo.allBackendInfo {
+		if info.TopologyInfo == nil || info.ttl == nil {
+			continue
 		}
 		// After running for a long time, there might be many tombstones because failed TiDB instances
 		// don't delete themselves from the Etcd. Checking their health is a waste of time, leading to
 		// longer and longer checking interval. So tombstones won't be added to curBackendInfo.
-		if !isTombstone {
-			curBackendInfo[addr] = StatusHealthy
+		if info.lastUpdate.Add(bo.config.tombstoneThreshold).Before(now) {
+			continue
 		}
-		allBackendInfo[addr] = info
+		curBackendInfo[addr] = info
 	}
-	bo.allBackendInfo = allBackendInfo
-	return curBackendInfo, nil
+	return curBackendInfo
 }
 
-func (bo *BackendObserver) checkHealth(ctx context.Context, backendInfo map[string]BackendStatus) {
-	for addr := range backendInfo {
+func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]BackendStatus {
+	curBackendStatus := make(map[string]BackendStatus, len(backends))
+	for addr, info := range backends {
+		// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
+		// new connections, so we must check the status port first.
+		url := fmt.Sprintf("http://%s:%d%s", info.IP, info.StatusPort, statusPathSuffix)
+		var resp *http.Response
 		var err error
-		for i := 0; i < bo.config.healthCheckMaxRetries; i++ {
+		retriedTimes := 0
+		for ; retriedTimes < bo.config.healthCheckMaxRetries; retriedTimes++ {
 			if ctx.Err() != nil {
-				return
+				return nil
+			}
+			if resp, err = http.Get(url); err == nil {
+				if err := resp.Body.Close(); err != nil {
+					logutil.Logger(ctx).Warn("close http response in health check failed", zap.Error(err))
+				}
+				break
+			}
+			if retriedTimes < bo.config.healthCheckMaxRetries-1 {
+				time.Sleep(bo.config.healthCheckRetryInterval)
+			}
+		}
+		if err != nil || resp.StatusCode != http.StatusOK {
+			continue
+		}
+
+		// Also dial the SQL port just in case that the SQL port hangs.
+		for ; retriedTimes < bo.config.healthCheckMaxRetries; retriedTimes++ {
+			if ctx.Err() != nil {
+				return nil
 			}
 			var conn net.Conn
 			conn, err = net.DialTimeout("tcp", addr, bo.config.healthCheckTimeout)
 			if err == nil {
-				_ = conn.Close()
+				if err := conn.Close(); err != nil {
+					logutil.Logger(ctx).Warn("close connection in health check failed", zap.Error(err))
+				}
 				break
 			}
-			if i < bo.config.healthCheckMaxRetries-1 {
+			if retriedTimes < bo.config.healthCheckMaxRetries-1 {
 				time.Sleep(bo.config.healthCheckRetryInterval)
 			}
 		}
-		if err != nil {
-			backendInfo[addr] = StatusCannotConnect
+		if err == nil {
+			curBackendStatus[addr] = StatusHealthy
 		}
 	}
+	return curBackendStatus
 }
 
-func (bo *BackendObserver) notifyIfChanged(backendInfo map[string]BackendStatus) {
+func (bo *BackendObserver) notifyIfChanged(backendStatus map[string]BackendStatus) {
 	updatedBackends := make(map[string]BackendStatus)
 	for addr, lastStatus := range bo.curBackendInfo {
 		if lastStatus == StatusHealthy {
-			if newStatus, ok := backendInfo[addr]; !ok {
+			if newStatus, ok := backendStatus[addr]; !ok {
 				updatedBackends[addr] = StatusCannotConnect
 			} else if newStatus != StatusHealthy {
 				updatedBackends[addr] = newStatus
 			}
 		}
 	}
-	for addr, newStatus := range backendInfo {
+	for addr, newStatus := range backendStatus {
 		if newStatus == StatusHealthy {
 			if lastStatus, ok := bo.curBackendInfo[addr]; !ok || lastStatus != StatusHealthy {
 				updatedBackends[addr] = newStatus
@@ -387,7 +451,7 @@ func (bo *BackendObserver) notifyIfChanged(backendInfo map[string]BackendStatus)
 	if len(updatedBackends) > 0 {
 		bo.eventReceiver.OnBackendChanged(updatedBackends)
 	}
-	bo.curBackendInfo = backendInfo
+	bo.curBackendInfo = backendStatus
 }
 
 // Close releases all resources.

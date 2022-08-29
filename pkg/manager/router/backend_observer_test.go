@@ -16,18 +16,24 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"path"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/atomic"
 )
 
 type mockEventReceiver struct {
@@ -58,12 +64,29 @@ func newHealthCheckConfigForTest() *HealthCheckConfig {
 func TestObserveBackends(t *testing.T) {
 	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
 		bo.Start()
-		listener1, addr1 := checkAddBackend(t, kv, backendChan)
-		addFakeTopology(t, kv, addr1)
-		listener2, addr2 := checkAddBackend(t, kv, backendChan)
-		checkBackendUnavailable(t, backendChan, listener1, addr1)
-		checkRemoveBackend(t, kv, backendChan, listener2, addr2)
-		listener1 = checkRestart(t, backendChan, addr1)
+
+		backend1 := checkAddBackend(t, kv, backendChan)
+		addFakeTopology(t, kv, backend1.sqlAddr)
+		backend1.stopSQLServer()
+		checkStatus(t, backendChan, backend1, StatusCannotConnect)
+		backend1.startSQLServer()
+		checkStatus(t, backendChan, backend1, StatusHealthy)
+		backend1.setHTTPResp(false)
+		checkStatus(t, backendChan, backend1, StatusCannotConnect)
+		backend1.setHTTPResp(true)
+		checkStatus(t, backendChan, backend1, StatusHealthy)
+		backend1.stopHTTPServer()
+		checkStatus(t, backendChan, backend1, StatusCannotConnect)
+		backend1.startHTTPServer()
+		checkStatus(t, backendChan, backend1, StatusHealthy)
+
+		backend2 := checkAddBackend(t, kv, backendChan)
+		removeBackend(t, kv, backend2)
+		checkStatus(t, backendChan, backend2, StatusCannotConnect)
+
+		backend1.close()
+		checkStatus(t, backendChan, backend1, StatusCannotConnect)
+		backend2.close()
 	})
 }
 
@@ -72,23 +95,27 @@ func TestTombstoneBackends(t *testing.T) {
 	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
 		// Do not start observer to avoid data race, just mock data.
 		now := time.Now()
-		oldTTL, newTTL := "123456789", "999999999"
-		bo.allBackendInfo = map[string]*BackendTTLInfo{
+		oldTTL, newTTL := []byte("123456789"), []byte("999999999")
+		bo.allBackendInfo = map[string]*BackendInfo{
 			"dead_addr": {
-				ttl:        []byte(oldTTL),
-				lastUpdate: now.Add(-bo.config.tombstoneThreshold * 2),
+				TopologyInfo: &infosync.TopologyInfo{},
+				ttl:          oldTTL,
+				lastUpdate:   now.Add(-bo.config.tombstoneThreshold * 2),
 			},
 			"restart_addr": {
-				ttl:        []byte(oldTTL),
-				lastUpdate: now.Add(-bo.config.tombstoneThreshold * 2),
+				TopologyInfo: &infosync.TopologyInfo{},
+				ttl:          oldTTL,
+				lastUpdate:   now.Add(-bo.config.tombstoneThreshold * 2),
 			},
 			"removed_addr": {
-				ttl:        []byte(oldTTL),
-				lastUpdate: now,
+				TopologyInfo: &infosync.TopologyInfo{},
+				ttl:          oldTTL,
+				lastUpdate:   now,
 			},
 			"alive_addr": {
-				ttl:        []byte(oldTTL),
-				lastUpdate: now,
+				TopologyInfo: &infosync.TopologyInfo{},
+				ttl:          oldTTL,
+				lastUpdate:   now,
 			},
 		}
 		bo.curBackendInfo = map[string]BackendStatus{
@@ -98,29 +125,41 @@ func TestTombstoneBackends(t *testing.T) {
 		}
 
 		updateTTL(t, kv, "dead_addr", oldTTL)
+		updateTopologyInfo(t, kv, "dead_addr", "dead_addr:0")
 		updateTTL(t, kv, "restart_addr", newTTL)
+		updateTopologyInfo(t, kv, "restart_addr", "restart_addr:0")
 		updateTTL(t, kv, "alive_addr", newTTL)
+		updateTopologyInfo(t, kv, "alive_addr", "alive_addr:0")
 		updateTTL(t, kv, "new_addr", newTTL)
+		updateTopologyInfo(t, kv, "new_addr", "new_addr:0")
+		updateTTL(t, kv, "no_tp_addr", newTTL)
+		updateTopologyInfo(t, kv, "no_ttl_addr", "no_ttl_addr:0")
 
-		backendsToBeChecked, err := bo.fetchBackendList(context.Background())
+		err := bo.fetchBackendList(context.Background())
 		require.NoError(t, err)
-		// dead_addr and removed_addr won't be checked.
-		require.Equal(t, map[string]BackendStatus{
-			"restart_addr": StatusHealthy,
-			"alive_addr":   StatusHealthy,
-			"new_addr":     StatusHealthy,
-		}, backendsToBeChecked)
-		// All backends exist except removed_addr.
-		require.Equal(t, 4, len(bo.allBackendInfo))
-		checkAddrAndTTL := func(addr, ttl string) {
+		// removed_addr doesn't exist.
+		require.Equal(t, 6, len(bo.allBackendInfo))
+		checkAddrAndTTL := func(addr string, ttl []byte) {
 			info, ok := bo.allBackendInfo[addr]
 			require.True(t, ok)
-			require.Equal(t, []byte(ttl), info.ttl)
+			require.Equal(t, ttl, info.ttl)
 		}
 		checkAddrAndTTL("dead_addr", oldTTL)
 		checkAddrAndTTL("restart_addr", newTTL)
 		checkAddrAndTTL("alive_addr", newTTL)
 		checkAddrAndTTL("new_addr", newTTL)
+		checkAddrAndTTL("no_tp_addr", newTTL)
+		checkAddrAndTTL("no_ttl_addr", nil)
+
+		// dead_addr and removed_addr won't be checked.
+		backendStatus := bo.filterTombstoneBackends()
+		checkAddr := func(addr string) {
+			_, ok := backendStatus[addr]
+			require.True(t, ok)
+		}
+		checkAddr("restart_addr")
+		checkAddr("alive_addr")
+		checkAddr("new_addr")
 	})
 }
 
@@ -140,11 +179,11 @@ func TestEtcdUnavailable(t *testing.T) {
 func runTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus)) {
 	etcd := createEtcdServer(t, "127.0.0.1:0")
 	client := createEtcdClient(t, etcd)
+	kv := clientv3.NewKV(client)
 	backendChan := make(chan map[string]BackendStatus, 1)
 	mer := newMockEventReceiver(backendChan)
 	bo, err := NewBackendObserver(mer, client, newHealthCheckConfigForTest(), nil)
 	require.NoError(t, err)
-	kv := clientv3.NewKV(client)
 	f(etcd, kv, bo, backendChan)
 	bo.Close()
 }
@@ -178,68 +217,142 @@ func createEtcdClient(t *testing.T, etcd *embed.Etcd) *clientv3.Client {
 	return client
 }
 
-func newListener(t *testing.T, addr string) (net.Listener, string) {
-	listener, err := net.Listen("tcp", addr)
-	require.NoError(t, err)
-	addr = listener.Addr().String()
-	go func() {
+type backendServer struct {
+	t            *testing.T
+	sqlListener  net.Listener
+	sqlAddr      string
+	statusServer *http.Server
+	statusAddr   string
+	httpHandler  *mockHttpHandler
+	wg           waitgroup.WaitGroup
+}
+
+type mockHttpHandler struct {
+	t      *testing.T
+	httpOK atomic.Bool
+}
+
+func (handler *mockHttpHandler) setHTTPResp(succeed bool) {
+	handler.httpOK.Store(succeed)
+}
+
+func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !handler.httpOK.Load() {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+}
+
+func (srv *backendServer) startHTTPServer() {
+	if srv.httpHandler == nil {
+		srv.httpHandler = &mockHttpHandler{
+			t: srv.t,
+		}
+	}
+	var statusListener net.Listener
+	statusListener, srv.statusAddr = startListener(srv.t, srv.statusAddr)
+	srv.statusServer = &http.Server{Addr: srv.statusAddr, Handler: srv.httpHandler}
+	srv.wg.Run(func() {
+		_ = srv.statusServer.Serve(statusListener)
+	})
+}
+
+func (srv *backendServer) setHTTPResp(succeed bool) {
+	srv.httpHandler.setHTTPResp(succeed)
+}
+
+func (srv *backendServer) stopHTTPServer() {
+	err := srv.statusServer.Close()
+	require.NoError(srv.t, err)
+}
+
+func (srv *backendServer) startSQLServer() {
+	srv.sqlListener, srv.sqlAddr = startListener(srv.t, srv.sqlAddr)
+	srv.wg.Run(func() {
 		for {
-			conn, err := listener.Accept()
+			conn, err := srv.sqlListener.Accept()
 			if err != nil {
 				// listener is closed
 				break
 			}
 			_ = conn.Close()
 		}
-	}()
-	return listener, addr
+	})
+}
+
+func (srv *backendServer) stopSQLServer() {
+	err := srv.sqlListener.Close()
+	require.NoError(srv.t, err)
+}
+
+func (srv *backendServer) close() {
+	srv.stopHTTPServer()
+	srv.stopSQLServer()
+	srv.wg.Wait()
+}
+
+func startListener(t *testing.T, addr string) (net.Listener, string) {
+	if len(addr) == 0 {
+		addr = "127.0.0.1:0"
+	}
+	listener, err := net.Listen("tcp", addr)
+	require.NoError(t, err)
+	return listener, listener.Addr().String()
 }
 
 // A new healthy backend is added.
-func checkAddBackend(t *testing.T, kv clientv3.KV, backendChan chan map[string]BackendStatus) (net.Listener, string) {
-	listener, addr := newListener(t, "127.0.0.1:0")
-	updateTTL(t, kv, addr, "123456789")
-	checkStatus(t, backendChan, addr, StatusHealthy)
-	return listener, addr
+func checkAddBackend(t *testing.T, kv clientv3.KV, backendChan chan map[string]BackendStatus) *backendServer {
+	backend := &backendServer{
+		t: t,
+	}
+	backend.startHTTPServer()
+	backend.setHTTPResp(true)
+	backend.startSQLServer()
+	updateTTL(t, kv, backend.sqlAddr, []byte("123456789"))
+	updateTopologyInfo(t, kv, backend.sqlAddr, backend.statusAddr)
+	checkStatus(t, backendChan, backend, StatusHealthy)
+	return backend
 }
 
 // Update the path prefix but it doesn't affect the topology.
 func addFakeTopology(t *testing.T, kv clientv3.KV, addr string) {
-	_, err := kv.Put(context.Background(), path.Join(infosync.TopologyInformationPath, addr, "/info"), "{}")
+	_, err := kv.Put(context.Background(), path.Join(infosync.TopologyInformationPath, addr, "/fake"), "{}")
 	require.NoError(t, err)
-}
-
-// The backend is still in Etcd but it's actually unavailable.
-func checkBackendUnavailable(t *testing.T, backendChan chan map[string]BackendStatus, listener net.Listener, addr string) {
-	require.NoError(t, listener.Close())
-	checkStatus(t, backendChan, addr, StatusCannotConnect)
-}
-
-// Restart a backend that was alive.
-func checkRestart(t *testing.T, backendChan chan map[string]BackendStatus, addr string) net.Listener {
-	listener, _ := newListener(t, addr)
-	checkStatus(t, backendChan, addr, StatusHealthy)
-	return listener
 }
 
 // A backend is removed from Etcd.
-func checkRemoveBackend(t *testing.T, kv clientv3.KV, backendChan chan map[string]BackendStatus, listener net.Listener, addr string) {
-	_, err := kv.Delete(context.Background(), path.Join(infosync.TopologyInformationPath, addr, topologyPathSuffix))
+func removeBackend(t *testing.T, kv clientv3.KV, backend *backendServer) {
+	_, err := kv.Delete(context.Background(), path.Join(infosync.TopologyInformationPath, backend.sqlAddr, ttlPathSuffix))
 	require.NoError(t, err)
-	checkStatus(t, backendChan, addr, StatusCannotConnect)
-	require.NoError(t, listener.Close())
+	_, err = kv.Delete(context.Background(), path.Join(infosync.TopologyInformationPath, backend.sqlAddr, infoPathSuffix))
+	require.NoError(t, err)
 }
 
-func checkStatus(t *testing.T, backendChan chan map[string]BackendStatus, addr string, expectedStatus BackendStatus) {
+func checkStatus(t *testing.T, backendChan chan map[string]BackendStatus, backend *backendServer, expectedStatus BackendStatus) {
 	backends := <-backendChan
 	require.Equal(t, 1, len(backends))
-	status, ok := backends[addr]
+	status, ok := backends[backend.sqlAddr]
 	require.True(t, ok)
 	require.Equal(t, expectedStatus, status)
 }
 
 // Update the TTL for a backend.
-func updateTTL(t *testing.T, kv clientv3.KV, addr, ttl string) {
-	_, err := kv.Put(context.Background(), path.Join(infosync.TopologyInformationPath, addr, topologyPathSuffix), ttl)
+func updateTTL(t *testing.T, kv clientv3.KV, addr string, ttl []byte) {
+	_, err := kv.Put(context.Background(), path.Join(infosync.TopologyInformationPath, addr, ttlPathSuffix), string(ttl))
+	require.NoError(t, err)
+}
+
+// Update the TopologyInfo for a backend.
+func updateTopologyInfo(t *testing.T, kv clientv3.KV, sqlAddr, statusAddr string) {
+	hostAndPort := strings.Split(statusAddr, ":")
+	require.Equal(t, 2, len(hostAndPort))
+	port, err := strconv.ParseUint(hostAndPort[1], 10, 32)
+	require.NoError(t, err)
+	topology := &infosync.TopologyInfo{
+		IP:         hostAndPort[0],
+		StatusPort: uint(port),
+	}
+	data, err := json.Marshal(topology)
+	require.NoError(t, err)
+	_, err = kv.Put(context.Background(), path.Join(infosync.TopologyInformationPath, sqlAddr, infoPathSuffix), string(data))
 	require.NoError(t, err)
 }
