@@ -245,10 +245,7 @@ func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
 
 // If the PD address is configured, we watch the TiDB addresses on the ETCD.
 func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
-	watchCh := bo.client.Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix())
-	// Initialize the backends after watching so that new backends started between watching and refreshing
-	// will be fetched immediately.
-	bo.refreshBackends(ctx)
+	watchCh := bo.client.Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
 	ticker := time.NewTicker(bo.config.healthCheckInterval)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
@@ -261,8 +258,8 @@ func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
 			}
 			if resp.Canceled {
 				logutil.Logger(ctx).Warn("watch backend list is canceled, will retry later")
-				watchCh = bo.client.Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix())
 				time.Sleep(bo.config.healthCheckRetryInterval)
+				watchCh = bo.client.Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix())
 				break
 			}
 			for _, ev := range resp.Events {
@@ -276,11 +273,10 @@ func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		}
-		if !needRefresh {
-			continue
+		if needRefresh {
+			ticker.Reset(bo.config.healthCheckInterval)
+			bo.refreshBackends(ctx)
 		}
-		ticker.Reset(bo.config.healthCheckInterval)
-		bo.refreshBackends(ctx)
 	}
 }
 
