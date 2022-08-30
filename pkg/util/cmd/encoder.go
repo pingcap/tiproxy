@@ -45,8 +45,12 @@ func NewTiDBEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 	return &tidbEncoder{cfg, 0, _pool.Get()}
 }
 
-func (c tidbEncoder) Clone() zapcore.Encoder {
+func (c tidbEncoder) clone() *tidbEncoder {
 	return &tidbEncoder{c.EncoderConfig, 0, _pool.Get()}
+}
+
+func (c tidbEncoder) Clone() zapcore.Encoder {
+	return c.Clone()
 }
 
 func (c *tidbEncoder) beginQuoteFiled() {
@@ -74,10 +78,8 @@ func (c *tidbEncoder) encodeError(f zapcore.Field) {
 		}
 	}
 }
-func (c *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	c.line.Free()
-	c.line = _pool.Get()
-
+func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
+	c := e.clone()
 	if c.TimeKey != "" {
 		c.beginQuoteFiled()
 		if c.EncodeTime != nil {
@@ -327,11 +329,10 @@ func (s *tidbEncoder) closeOpenNamespaces() {
 
 /* array encoder part */
 func (s *tidbEncoder) addElementSeparator() {
-	length := s.line.Len()
-	if length == 0 {
+	if s.line.Len() <= 0 {
 		return
 	}
-	switch s.line.Bytes()[length-1] {
+	switch s.line.Bytes()[s.line.Len()-1] {
 	case '{', '[', ':', ',', ' ', '=':
 	default:
 		s.line.AppendByte(',')
