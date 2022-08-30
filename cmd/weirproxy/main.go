@@ -33,7 +33,7 @@ func main() {
 	}
 
 	configFile := rootCmd.PersistentFlags().String("config", "conf/weirproxy.yaml", "weir proxy config file path")
-	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "", "log in format of tidb, newtidb, console, or json")
+	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
 	namespaceFiles := rootCmd.PersistentFlags().String("namespaces", "", "import namespace from dir")
 

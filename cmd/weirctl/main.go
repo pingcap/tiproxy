@@ -31,7 +31,7 @@ func main() {
 	ctx := &Context{}
 
 	curls := rootCmd.PersistentFlags().StringArray("curls", []string{"localhost:3080"}, "API gateway addresses")
-	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, newtidb, console, or json")
+	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "info", "log level")
 	rootCmd.PersistentFlags().Bool("indent", true, "whether indent the returned json")
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
