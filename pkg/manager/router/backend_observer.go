@@ -76,11 +76,11 @@ var statusScores = map[BackendStatus]int{
 }
 
 const (
-	healthCheckInterval      = 5 * time.Second
+	healthCheckInterval      = 3 * time.Second
 	healthCheckMaxRetries    = 3
-	healthCheckRetryInterval = 2 * time.Second
+	healthCheckRetryInterval = 1 * time.Second
 	healthCheckTimeout       = 2 * time.Second
-	tombstoneThreshold       = 10 * time.Minute
+	tombstoneThreshold       = 5 * time.Minute
 	ttlPathSuffix            = "/ttl"
 	infoPathSuffix           = "/info"
 	statusPathSuffix         = "/status"
@@ -245,37 +245,15 @@ func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
 
 // If the PD address is configured, we watch the TiDB addresses on the ETCD.
 func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
-	watchCh := bo.client.Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix(), clientv3.WithCreatedNotify())
-	ticker := time.NewTicker(bo.config.healthCheckInterval)
-	defer ticker.Stop()
-	for ctx.Err() == nil {
-		needRefresh := false
+	// No need to watch the events from etcd because:
+	// - When a new backend starts and writes etcd, the HTTP status port is not ready yet.
+	// - When a backend shuts down, it doesn't delete itself from the etcd.
+	for {
+		bo.refreshBackends(ctx)
 		select {
-		case resp, ok := <-watchCh:
-			if !ok {
-				// The etcdClient is closed.
-				return
-			}
-			if resp.Canceled {
-				logutil.Logger(ctx).Warn("watch backend list is canceled, will retry later")
-				time.Sleep(bo.config.healthCheckRetryInterval)
-				watchCh = bo.client.Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix())
-				break
-			}
-			for _, ev := range resp.Events {
-				if strings.HasSuffix(string(ev.Kv.Key), infoPathSuffix) || strings.HasSuffix(string(ev.Kv.Key), ttlPathSuffix) {
-					needRefresh = true
-					break
-				}
-			}
-		case <-ticker.C:
-			needRefresh = true
+		case <-time.After(bo.config.healthCheckInterval):
 		case <-ctx.Done():
 			return
-		}
-		if needRefresh {
-			ticker.Reset(bo.config.healthCheckInterval)
-			bo.refreshBackends(ctx)
 		}
 	}
 }
@@ -378,47 +356,56 @@ func (bo *BackendObserver) filterTombstoneBackends() map[string]*BackendInfo {
 func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]BackendStatus {
 	curBackendStatus := make(map[string]BackendStatus, len(backends))
 	for addr, info := range backends {
+		if ctx.Err() != nil {
+			return nil
+		}
+		retriedTimes := 0
+		connectWithRetry := func(connect func() error) error {
+			var err error
+			for ; retriedTimes < bo.config.healthCheckMaxRetries; retriedTimes++ {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if err = connect(); err == nil {
+					return nil
+				}
+				if !isRetryableError(err) {
+					break
+				}
+				if retriedTimes < bo.config.healthCheckMaxRetries-1 {
+					time.Sleep(bo.config.healthCheckRetryInterval)
+				}
+			}
+			return err
+		}
+
 		// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
 		// new connections, so we must check the status port first.
 		url := fmt.Sprintf("http://%s:%d%s", info.IP, info.StatusPort, statusPathSuffix)
 		var resp *http.Response
-		var err error
-		retriedTimes := 0
-		for ; retriedTimes < bo.config.healthCheckMaxRetries; retriedTimes++ {
-			if ctx.Err() != nil {
-				return nil
-			}
+		err := connectWithRetry(func() error {
+			var err error
 			if resp, err = http.Get(url); err == nil {
 				if err := resp.Body.Close(); err != nil {
 					logutil.Logger(ctx).Warn("close http response in health check failed", zap.Error(err))
 				}
-				break
 			}
-			if retriedTimes < bo.config.healthCheckMaxRetries-1 {
-				time.Sleep(bo.config.healthCheckRetryInterval)
-			}
-		}
+			return err
+		})
 		if err != nil || resp.StatusCode != http.StatusOK {
 			continue
 		}
 
 		// Also dial the SQL port just in case that the SQL port hangs.
-		for ; retriedTimes < bo.config.healthCheckMaxRetries; retriedTimes++ {
-			if ctx.Err() != nil {
-				return nil
-			}
-			var conn net.Conn
-			conn, err = net.DialTimeout("tcp", addr, bo.config.healthCheckTimeout)
+		err = connectWithRetry(func() error {
+			conn, err := net.DialTimeout("tcp", addr, bo.config.healthCheckTimeout)
 			if err == nil {
 				if err := conn.Close(); err != nil {
 					logutil.Logger(ctx).Warn("close connection in health check failed", zap.Error(err))
 				}
-				break
 			}
-			if retriedTimes < bo.config.healthCheckMaxRetries-1 {
-				time.Sleep(bo.config.healthCheckRetryInterval)
-			}
-		}
+			return err
+		})
 		if err == nil {
 			curBackendStatus[addr] = StatusHealthy
 		}
@@ -456,4 +443,22 @@ func (bo *BackendObserver) Close() {
 		bo.cancelFunc()
 	}
 	bo.wg.Wait()
+}
+
+// When the server refused to connect, the port is shut down, so no need to retry.
+var notRetryableError = []string{
+	"connection refused",
+}
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, errStr := range notRetryableError {
+		if strings.Contains(msg, errStr) {
+			return false
+		}
+	}
+	return true
 }

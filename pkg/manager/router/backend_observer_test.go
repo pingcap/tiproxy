@@ -65,7 +65,8 @@ func TestObserveBackends(t *testing.T) {
 	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
 		bo.Start()
 
-		backend1 := checkAddBackend(t, kv, backendChan)
+		backend1 := addBackend(t, kv, backendChan)
+		checkStatus(t, backendChan, backend1, StatusHealthy)
 		addFakeTopology(t, kv, backend1.sqlAddr)
 		backend1.stopSQLServer()
 		checkStatus(t, backendChan, backend1, StatusCannotConnect)
@@ -80,7 +81,8 @@ func TestObserveBackends(t *testing.T) {
 		backend1.startHTTPServer()
 		checkStatus(t, backendChan, backend1, StatusHealthy)
 
-		backend2 := checkAddBackend(t, kv, backendChan)
+		backend2 := addBackend(t, kv, backendChan)
+		checkStatus(t, backendChan, backend2, StatusHealthy)
 		removeBackend(t, kv, backend2)
 		checkStatus(t, backendChan, backend2, StatusCannotConnect)
 
@@ -160,6 +162,36 @@ func TestTombstoneBackends(t *testing.T) {
 		checkAddr("restart_addr")
 		checkAddr("alive_addr")
 		checkAddr("new_addr")
+	})
+}
+
+// Test that the observer can exit during health check.
+func TestCancelObserver(t *testing.T) {
+	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
+		backends := make([]*backendServer, 0, 3)
+		for i := 0; i < 3; i++ {
+			backends = append(backends, addBackend(t, kv, backendChan))
+		}
+		err := bo.fetchBackendList(context.Background())
+		require.NoError(t, err)
+
+		// Try 10 times.
+		for i := 0; i < 10; i++ {
+			childCtx, cancelFunc := context.WithCancel(context.Background())
+			var wg waitgroup.WaitGroup
+			wg.Run(func() {
+				for childCtx.Err() != nil {
+					bo.checkHealth(childCtx, bo.allBackendInfo)
+				}
+			})
+			time.Sleep(10 * time.Millisecond)
+			cancelFunc()
+			wg.Wait()
+		}
+
+		for _, backend := range backends {
+			backend.close()
+		}
 	})
 }
 
@@ -300,7 +332,7 @@ func startListener(t *testing.T, addr string) (net.Listener, string) {
 }
 
 // A new healthy backend is added.
-func checkAddBackend(t *testing.T, kv clientv3.KV, backendChan chan map[string]BackendStatus) *backendServer {
+func addBackend(t *testing.T, kv clientv3.KV, backendChan chan map[string]BackendStatus) *backendServer {
 	backend := &backendServer{
 		t: t,
 	}
@@ -309,7 +341,6 @@ func checkAddBackend(t *testing.T, kv clientv3.KV, backendChan chan map[string]B
 	backend.startSQLServer()
 	updateTTL(t, kv, backend.sqlAddr, []byte("123456789"))
 	updateTopologyInfo(t, kv, backend.sqlAddr, backend.statusAddr)
-	checkStatus(t, backendChan, backend, StatusHealthy)
 	return backend
 }
 
