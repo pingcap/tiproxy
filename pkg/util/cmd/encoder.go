@@ -329,10 +329,11 @@ func (s *tidbEncoder) closeOpenNamespaces() {
 
 /* array encoder part */
 func (s *tidbEncoder) addElementSeparator() {
-	if s.line.Len() <= 0 {
+	length := s.line.Len()
+	if length == 0 {
 		return
 	}
-	switch s.line.Bytes()[s.line.Len()-1] {
+	switch s.line.Bytes()[length-1] {
 	case '{', '[', ':', ',', ' ', '=':
 	default:
 		s.line.AppendByte(',')
