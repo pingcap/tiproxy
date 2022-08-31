@@ -135,7 +135,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger) (srv
 		if errors.Is(dirErr, os.ErrNotExist) {
 			// first time running
 			nsc := &config.Namespace{
-				Namespace: "",
+				Namespace: "default",
 				Backend: config.BackendNamespace{
 					Instances:    []string{"127.0.0.1:4000"},
 					SelectorType: "random",

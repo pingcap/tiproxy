@@ -56,7 +56,7 @@ func (cc *ClientConnection) Addr() string {
 }
 
 func (cc *ClientConnection) connectBackend(ctx context.Context) error {
-	ns, ok := cc.nsmgr.GetNamespace("")
+	ns, ok := cc.nsmgr.GetNamespace("default")
 	if !ok {
 		return errors.New("failed to find a namespace")
 	}

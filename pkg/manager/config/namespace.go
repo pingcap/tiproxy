@@ -17,6 +17,7 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/pingcap/TiProxy/pkg/config"
 	"go.uber.org/zap"
@@ -56,6 +57,9 @@ func (e *ConfigManager) ListAllNamespace(ctx context.Context) ([]*config.Namespa
 }
 
 func (e *ConfigManager) SetNamespace(ctx context.Context, ns string, nsc *config.Namespace) error {
+	if ns == "" || nsc.Namespace == "" {
+		return errors.New("namespace name can not be empty string")
+	}
 	r, err := json.Marshal(nsc)
 	if err != nil {
 		return err
