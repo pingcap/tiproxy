@@ -60,8 +60,6 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 
 	ready := atomic.NewBool(false)
 
-	_, dirErr := os.Stat(cfg.Workdir)
-
 	// setup metrics
 	metrics.RegisterProxyMetrics(cfg.Metrics.PromCluster)
 
@@ -132,8 +130,13 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 			return
 		}
 
-		if errors.Is(dirErr, os.ErrNotExist) {
-			// first time running
+		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
+		if nerr != nil {
+			err = errors.WithStack(nerr)
+			return
+		}
+		if len(nscs) == 0 {
+			// no existed namespace
 			nsc := &config.Namespace{
 				Namespace: "",
 				Backend: config.BackendNamespace{
