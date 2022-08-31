@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -58,6 +59,8 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 	}
 
 	ready := atomic.NewBool(false)
+
+	_, dirErr := os.Stat(cfg.Workdir)
 
 	// setup metrics
 	metrics.RegisterProxyMetrics(cfg.Metrics.PromCluster)
@@ -127,6 +130,20 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 		if err != nil {
 			err = errors.WithStack(err)
 			return
+		}
+
+		if errors.Is(dirErr, os.ErrNotExist) {
+			// first time running
+			nsc := &config.Namespace{
+				Namespace: "",
+				Backend: config.BackendNamespace{
+					Instances:    []string{"127.0.0.1:4000"},
+					SelectorType: "random",
+				},
+			}
+			if err = srv.ConfigManager.SetNamespace(ctx, nsc.Namespace, nsc); err != nil {
+				return
+			}
 		}
 
 		if namespaceFiles != "" {
