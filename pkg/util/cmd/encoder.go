@@ -50,7 +50,7 @@ func (c tidbEncoder) clone() *tidbEncoder {
 }
 
 func (c tidbEncoder) Clone() zapcore.Encoder {
-	return c.Clone()
+	return c.clone()
 }
 
 func (c *tidbEncoder) beginQuoteFiled() {
