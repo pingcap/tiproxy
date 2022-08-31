@@ -30,10 +30,10 @@ const (
 type Config struct {
 	Workdir string `yaml:"workdir" toml:"workdir" json:"workdir"`
 
-	LCUrlsI []string  `yaml:"listen-urls" toml:"listen-urls" json:"listen-urls"`
-	ACUrlsI []string  `yaml:"advertise-urls" toml:"advertise-urls" json:"advertise-urls"`
-	LPUrlsI []string  `yaml:"listen-peer-urls" toml:"listen-peer-urls" json:"listen-peer-urls"`
-	APUrlsI []string  `yaml:"advertise-peer-urls" toml:"advertise-peer-urls" json:"advertise-peer-urls"`
+	LCUrlsI []string  `yaml:"listen_urls" toml:"listen_urls" json:"listen_urls"`
+	ACUrlsI []string  `yaml:"advertise_urls" toml:"advertise_urls" json:"advertise_urls"`
+	LPUrlsI []string  `yaml:"listen_peer_urls" toml:"listen_peer_urls" json:"listen_peer_urls"`
+	APUrlsI []string  `yaml:"advertise_peer_urls" toml:"advertise_peer_urls" json:"advertise_peer_urls"`
 	LCUrls  []url.URL `yaml:"-" toml:"-" json:"-"`
 	ACUrls  []url.URL `yaml:"-" toml:"-" json:"-"`
 	LPUrls  []url.URL `yaml:"-" toml:"-" json:"-"`
@@ -102,7 +102,7 @@ func (c TLSCert) HasCA() bool {
 }
 
 type Security struct {
-	RSAKeySize int     `yaml:"rsa-key-size" toml:"rsa-key-size" json:"rsa-key-size"`
+	RSAKeySize int     `yaml:"rsa_key_size" toml:"rsa_key_size" json:"rsa_key_size"`
 	Server     TLSCert `yaml:"server" toml:"server" json:"server"`
 	Cluster    TLSCert `yaml:"cluster" toml:"cluster" json:"cluster"`
 }

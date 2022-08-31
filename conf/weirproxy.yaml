@@ -1,11 +1,11 @@
 workdir: "./work"
-listen-urls:
+listen_urls:
   - "http://0.0.0.0:3080"
-advertise-urls:
+advertise_urls:
   - "http://127.0.0.1:3080"
-listen-peer-urls:
+listen_peer_urls:
   - "http://0.0.0.0:3081"
-advertise-peer-urls:
+advertise_peer_urls:
   - "http://127.0.0.1:3081"
 config:
   ignore_wrong_namespace: true
@@ -29,4 +29,4 @@ log:
     max_days: 1
     max_backups: 1
 security:
-  rsa-key-size: 4096
+  rsa_key_size: 4096
