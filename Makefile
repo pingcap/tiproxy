@@ -21,7 +21,10 @@ GOFLAGS ?= -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}'
 ifeq ("$(WITH_RACE)", "1")
 	GOFLAGS = $(GOFLAGS) -race
 endif
+IMAGE_TAG ?= latest
 EXECUTABLE_TARGETS := $(patsubst cmd/%,cmd_%,$(wildcard cmd/*))
+
+.PHONY: cmd_% build test docker
 
 default: cmd
 
@@ -40,3 +43,6 @@ test:
 	go tool cover -func=.coverage.out -o .coverage.func
 	tail -1 .coverage.func
 	go tool cover -html=.coverage.out -o .coverage.html
+
+docker:
+	docker build -t "tiproxy:${IMAGE_TAG}" -f docker/Dockerfile .
