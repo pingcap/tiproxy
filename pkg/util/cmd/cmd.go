@@ -22,6 +22,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -32,6 +33,9 @@ var registerEncoders sync.Once
 func RunRootCommand(rootCmd *cobra.Command) {
 	registerEncoders.Do(func() {
 		zap.RegisterEncoder("tidb", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
+			return log.NewTextEncoder(&log.Config{})
+		})
+		zap.RegisterEncoder("newtidb", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
 			return NewTiDBEncoder(cfg), nil
 		})
 	})

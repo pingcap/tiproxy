@@ -57,6 +57,7 @@ func main() {
 
 		zapcfg := zap.NewDevelopmentConfig()
 		zapcfg.Encoding = cfg.Log.Encoder
+		zapcfg.DisableStacktrace = true
 		if level, err := zap.ParseAtomicLevel(cfg.Log.Level); err == nil {
 			zapcfg.Level = level
 		}
