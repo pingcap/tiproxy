@@ -1,4 +1,3 @@
-// Copyright 2020 Ipalfish, Inc.
 // Copyright 2022 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,17 +18,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/pkg/util/errors"
 	"github.com/pingcap/TiProxy/pkg/util/security"
-	"github.com/pingcap/errors"
+	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tidb/util/logutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
@@ -52,7 +54,6 @@ func (bs *BackendStatus) String() string {
 const (
 	StatusHealthy BackendStatus = iota
 	StatusCannotConnect
-	StatusServerDown
 	StatusMemoryHigh
 	StatusRunSlow
 	StatusSchemaOutdated
@@ -61,7 +62,6 @@ const (
 var statusNames = map[BackendStatus]string{
 	StatusHealthy:        "healthy",
 	StatusCannotConnect:  "cannot connect",
-	StatusServerDown:     "server down",
 	StatusMemoryHigh:     "memory high",
 	StatusRunSlow:        "run slow",
 	StatusSchemaOutdated: "schema outdated",
@@ -70,36 +70,75 @@ var statusNames = map[BackendStatus]string{
 var statusScores = map[BackendStatus]int{
 	StatusHealthy:        0,
 	StatusCannotConnect:  10000000,
-	StatusServerDown:     10000000,
 	StatusMemoryHigh:     5000,
 	StatusRunSlow:        5000,
 	StatusSchemaOutdated: 10000000,
 }
 
 const (
-	healthCheckInterval      = 5 * time.Second
+	healthCheckInterval      = 3 * time.Second
 	healthCheckMaxRetries    = 3
-	healthCheckRetryInterval = 100 * time.Millisecond
-	healthCheckTimeout       = 1 * time.Second
+	healthCheckRetryInterval = 1 * time.Second
+	healthCheckTimeout       = 2 * time.Second
+	tombstoneThreshold       = 5 * time.Minute
+	ttlPathSuffix            = "/ttl"
+	infoPathSuffix           = "/info"
+	statusPathSuffix         = "/status"
 )
 
+// HealthCheckConfig contains some configurations for health check.
+// Some general configurations of them may be exposed to users in the future.
+// We can use shorter durations to speed up unit tests.
+type HealthCheckConfig struct {
+	healthCheckInterval      time.Duration
+	healthCheckMaxRetries    int
+	healthCheckRetryInterval time.Duration
+	healthCheckTimeout       time.Duration
+	tombstoneThreshold       time.Duration
+}
+
+func newDefaultHealthCheckConfig() *HealthCheckConfig {
+	return &HealthCheckConfig{
+		healthCheckInterval:      healthCheckInterval,
+		healthCheckMaxRetries:    healthCheckMaxRetries,
+		healthCheckRetryInterval: healthCheckRetryInterval,
+		healthCheckTimeout:       healthCheckTimeout,
+		tombstoneThreshold:       tombstoneThreshold,
+	}
+}
+
+// BackendEventReceiver receives the event of backend status change.
 type BackendEventReceiver interface {
-	OnBackendChanged(backends map[string]*BackendInfo)
+	// OnBackendChanged is called when the backend list changes.
+	OnBackendChanged(backends map[string]BackendStatus)
 }
 
+// BackendInfo stores the ttl and status info of each backend.
 type BackendInfo struct {
+	// The TopologyInfo received from the /info path.
 	*infosync.TopologyInfo
-	status BackendStatus
+	// The TTL time in the topology info.
+	ttl []byte
+	// Last time the TTL time is refreshed.
+	// If the TTL stays unchanged for a long time, the backend might be a tombstone.
+	lastUpdate time.Time
 }
 
+// BackendObserver refreshes backend list and notifies BackendEventReceiver.
 type BackendObserver struct {
-	backendInfo   map[string]*BackendInfo
-	client        *clientv3.Client
-	staticAddrs   []string
-	eventReceiver BackendEventReceiver
-	cancelFunc    context.CancelFunc
+	config *HealthCheckConfig
+	// The current backend status synced to the receiver.
+	curBackendInfo map[string]BackendStatus
+	// All the backend info in the topology, including tombstones.
+	allBackendInfo map[string]*BackendInfo
+	client         *clientv3.Client
+	staticAddrs    []string
+	eventReceiver  BackendEventReceiver
+	wg             waitgroup.WaitGroup
+	cancelFunc     context.CancelFunc
 }
 
+// InitEtcdClient initializes an etcd client that fetches TiDB instance topology from PD.
 func InitEtcdClient(cfg *config.Config) (*clientv3.Client, error) {
 	pdAddr := cfg.Proxy.PDAddrs
 	if len(pdAddr) == 0 {
@@ -138,23 +177,42 @@ func InitEtcdClient(cfg *config.Config) (*clientv3.Client, error) {
 			}),
 		},
 	})
-	return etcdClient, errors.Annotate(err, "init etcd client failed")
+	return etcdClient, errors.Wrapf(err, "init etcd client failed")
 }
 
-func NewBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, staticAddrs []string) (*BackendObserver, error) {
+// StartBackendObserver creates a BackendObserver and starts watching.
+func StartBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
+	bo, err := NewBackendObserver(eventReceiver, client, config, staticAddrs)
+	if err != nil {
+		return nil, err
+	}
+	bo.Start()
+	return bo, nil
+}
+
+// NewBackendObserver creates a BackendObserver.
+func NewBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
 	if client == nil && len(staticAddrs) == 0 {
 		return nil, ErrNoInstanceToSelect
 	}
 	bo := &BackendObserver{
-		backendInfo:   make(map[string]*BackendInfo),
-		client:        client,
-		staticAddrs:   staticAddrs,
-		eventReceiver: eventReceiver,
+		config:         config,
+		curBackendInfo: make(map[string]BackendStatus),
+		allBackendInfo: make(map[string]*BackendInfo),
+		client:         client,
+		staticAddrs:    staticAddrs,
+		eventReceiver:  eventReceiver,
 	}
+	return bo, nil
+}
+
+// Start starts watching.
+func (bo *BackendObserver) Start() {
 	childCtx, cancelFunc := context.WithCancel(context.Background())
 	bo.cancelFunc = cancelFunc
-	go bo.observe(childCtx)
-	return bo, nil
+	bo.wg.Run(func() {
+		bo.observe(childCtx)
+	})
 }
 
 func (bo *BackendObserver) observe(ctx context.Context) {
@@ -171,15 +229,13 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
 	for ctx.Err() == nil {
 		select {
-		case <-time.After(healthCheckInterval):
+		case <-time.After(bo.config.healthCheckInterval):
 		case <-ctx.Done():
 			return
 		}
-		backendInfo := make(map[string]*BackendInfo)
+		backendInfo := make(map[string]BackendStatus)
 		for _, addr := range bo.staticAddrs {
-			backendInfo[addr] = &BackendInfo{
-				status: StatusHealthy,
-			}
+			backendInfo[addr] = StatusHealthy
 		}
 		// The status port is not configured, so we skip checking health now.
 		//bo.checkHealth(ctx, backendInfo)
@@ -189,125 +245,220 @@ func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
 
 // If the PD address is configured, we watch the TiDB addresses on the ETCD.
 func (bo *BackendObserver) observeDynamicAddrs(ctx context.Context) {
-	watchCh := bo.client.Watch(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix())
-	for ctx.Err() == nil {
+	// No need to watch the events from etcd because:
+	// - When a new backend starts and writes etcd, the HTTP status port is not ready yet.
+	// - When a backend shuts down, it doesn't delete itself from the etcd.
+	for {
+		bo.refreshBackends(ctx)
 		select {
-		case _, ok := <-watchCh:
-			if !ok {
-				// The etcdClient is closed.
-				return
-			}
-		case <-time.After(healthCheckInterval):
+		case <-time.After(bo.config.healthCheckInterval):
 		case <-ctx.Done():
 			return
 		}
-		backendInfo, err := bo.fetchBackendList(ctx)
-		if err != nil {
-			continue
-		}
-		bo.checkHealth(ctx, backendInfo)
-		bo.notifyIfChanged(backendInfo)
 	}
 }
 
-func (bo *BackendObserver) fetchBackendList(ctx context.Context) (map[string]*BackendInfo, error) {
+func (bo *BackendObserver) refreshBackends(ctx context.Context) {
+	if err := bo.fetchBackendList(ctx); err != nil {
+		return
+	}
+	backendInfo := bo.filterTombstoneBackends()
+	backendStatus := bo.checkHealth(ctx, backendInfo)
+	bo.notifyIfChanged(backendStatus)
+}
+
+func (bo *BackendObserver) fetchBackendList(ctx context.Context) error {
 	var response *clientv3.GetResponse
 	var err error
 	// It's a critical problem if the proxy cannot connect to the server, so we always retry.
 	for {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return ctx.Err()
 		}
-		childCtx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
-		response, err = bo.client.Get(childCtx, infosync.TopologyInformationPath, clientv3.WithPrefix())
-		cancel()
-		if err == nil {
+		// In case there are too many tombstone backends, the query would be slow, so no need to set a timeout here.
+		if response, err = bo.client.Get(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix()); err == nil {
 			break
 		}
-		logutil.Logger(ctx).Error("fetch backend list failed", zap.Error(err))
-		time.Sleep(healthCheckRetryInterval)
-	}
-	if err != nil {
-		return nil, err
+		logutil.Logger(ctx).Error("fetch backend list failed, will retry later", zap.Error(err))
+		time.Sleep(bo.config.healthCheckRetryInterval)
 	}
 
-	backendInfo := make(map[string]*BackendInfo)
+	allBackendInfo := make(map[string]*BackendInfo, len(response.Kvs))
+	now := time.Now()
 	for _, kv := range response.Kvs {
 		key := string(kv.Key)
-		if !strings.HasSuffix(key, "/info") {
-			continue
-		}
-		var topo *infosync.TopologyInfo
-		if err = json.Unmarshal(kv.Value, &topo); err != nil {
-			logutil.Logger(ctx).Error("unmarshal topology info failed", zap.String("key", string(kv.Key)),
-				zap.ByteString("value", kv.Value), zap.Error(err))
-			return nil, err
-		}
-		addr := key[len(infosync.TopologyInformationPath)+1 : len(key)-len("/info")]
-		backendInfo[addr] = &BackendInfo{
-			TopologyInfo: topo,
-			status:       StatusHealthy,
+		if strings.HasSuffix(key, ttlPathSuffix) {
+			addr := key[len(infosync.TopologyInformationPath)+1 : len(key)-len(ttlPathSuffix)]
+			info, ok := allBackendInfo[addr]
+			if !ok {
+				info, ok = bo.allBackendInfo[addr]
+			}
+			if ok {
+				if slices.Compare(info.ttl, kv.Value) != 0 {
+					// The TTL is updated this time.
+					info.lastUpdate = now
+					info.ttl = kv.Value
+				}
+			} else {
+				// A new backend.
+				info = &BackendInfo{
+					lastUpdate: now,
+					ttl:        kv.Value,
+				}
+			}
+			allBackendInfo[addr] = info
+		} else if strings.HasSuffix(key, infoPathSuffix) {
+			addr := key[len(infosync.TopologyInformationPath)+1 : len(key)-len(infoPathSuffix)]
+			// A backend may restart with a same address but a different status port in a short time, so
+			// we still need to marshal and update the topology even if the address exists in the map.
+			var topo *infosync.TopologyInfo
+			if err = json.Unmarshal(kv.Value, &topo); err != nil {
+				logutil.Logger(ctx).Error("unmarshal topology info failed", zap.String("key", string(kv.Key)),
+					zap.ByteString("value", kv.Value), zap.Error(err))
+				continue
+			}
+			info, ok := allBackendInfo[addr]
+			if !ok {
+				info, ok = bo.allBackendInfo[addr]
+			}
+			if ok {
+				info.TopologyInfo = topo
+			} else {
+				info = &BackendInfo{
+					TopologyInfo: topo,
+				}
+			}
+			allBackendInfo[addr] = info
 		}
 	}
-	return backendInfo, nil
+	bo.allBackendInfo = allBackendInfo
+	return nil
 }
 
-func (bo *BackendObserver) checkHealth(ctx context.Context, backendInfo map[string]*BackendInfo) {
-	for _, info := range backendInfo {
-		url := fmt.Sprintf("http://%s:%d/status", info.TopologyInfo.IP, info.TopologyInfo.StatusPort)
+func (bo *BackendObserver) filterTombstoneBackends() map[string]*BackendInfo {
+	now := time.Now()
+	curBackendInfo := make(map[string]*BackendInfo, len(bo.allBackendInfo))
+	for addr, info := range bo.allBackendInfo {
+		if info.TopologyInfo == nil || info.ttl == nil {
+			continue
+		}
+		// After running for a long time, there might be many tombstones because failed TiDB instances
+		// don't delete themselves from the Etcd. Checking their health is a waste of time, leading to
+		// longer and longer checking interval. So tombstones won't be added to curBackendInfo.
+		if info.lastUpdate.Add(bo.config.tombstoneThreshold).Before(now) {
+			continue
+		}
+		curBackendInfo[addr] = info
+	}
+	return curBackendInfo
+}
+
+func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]BackendStatus {
+	curBackendStatus := make(map[string]BackendStatus, len(backends))
+	for addr, info := range backends {
+		if ctx.Err() != nil {
+			return nil
+		}
+		retriedTimes := 0
+		connectWithRetry := func(connect func() error) error {
+			var err error
+			for ; retriedTimes < bo.config.healthCheckMaxRetries; retriedTimes++ {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if err = connect(); err == nil {
+					return nil
+				}
+				if !isRetryableError(err) {
+					break
+				}
+				if retriedTimes < bo.config.healthCheckMaxRetries-1 {
+					time.Sleep(bo.config.healthCheckRetryInterval)
+				}
+			}
+			return err
+		}
+
+		// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
+		// new connections, so we must check the status port first.
+		url := fmt.Sprintf("http://%s:%d%s", info.IP, info.StatusPort, statusPathSuffix)
 		var resp *http.Response
-		var err error
-		for i := 0; i < healthCheckMaxRetries; i++ {
-			if ctx.Err() != nil {
-				return
-			}
+		err := connectWithRetry(func() error {
+			var err error
 			if resp, err = http.Get(url); err == nil {
-				break
+				if err := resp.Body.Close(); err != nil {
+					logutil.Logger(ctx).Warn("close http response in health check failed", zap.Error(err))
+				}
 			}
-			if i < healthCheckMaxRetries-1 {
-				time.Sleep(healthCheckRetryInterval)
-			}
-		}
-		if err != nil {
-			info.status = StatusCannotConnect
+			return err
+		})
+		if err != nil || resp.StatusCode != http.StatusOK {
 			continue
-		} else if resp.StatusCode != http.StatusOK {
-			info.status = StatusServerDown
-		} else {
-			info.status = StatusHealthy
 		}
-		if err = resp.Body.Close(); err != nil {
-			logutil.Logger(ctx).Warn("close http response failed", zap.Error(err))
+
+		// Also dial the SQL port just in case that the SQL port hangs.
+		err = connectWithRetry(func() error {
+			conn, err := net.DialTimeout("tcp", addr, bo.config.healthCheckTimeout)
+			if err == nil {
+				if err := conn.Close(); err != nil {
+					logutil.Logger(ctx).Warn("close connection in health check failed", zap.Error(err))
+				}
+			}
+			return err
+		})
+		if err == nil {
+			curBackendStatus[addr] = StatusHealthy
 		}
 	}
+	return curBackendStatus
 }
 
-func (bo *BackendObserver) notifyIfChanged(backendInfo map[string]*BackendInfo) {
-	backends := make(map[string]*BackendInfo)
-	for addr, originalInfo := range bo.backendInfo {
-		if originalInfo.status == StatusHealthy {
-			newInfo, ok := backendInfo[addr]
-			if !ok || newInfo.status != StatusHealthy {
-				backends[addr] = newInfo
+func (bo *BackendObserver) notifyIfChanged(backendStatus map[string]BackendStatus) {
+	updatedBackends := make(map[string]BackendStatus)
+	for addr, lastStatus := range bo.curBackendInfo {
+		if lastStatus == StatusHealthy {
+			if newStatus, ok := backendStatus[addr]; !ok {
+				updatedBackends[addr] = StatusCannotConnect
+			} else if newStatus != StatusHealthy {
+				updatedBackends[addr] = newStatus
 			}
 		}
 	}
-	for addr, newInfo := range backendInfo {
-		if newInfo.status == StatusHealthy {
-			originalInfo, ok := bo.backendInfo[addr]
-			if !ok || originalInfo.status != StatusHealthy {
-				backends[addr] = newInfo
+	for addr, newStatus := range backendStatus {
+		if newStatus == StatusHealthy {
+			if lastStatus, ok := bo.curBackendInfo[addr]; !ok || lastStatus != StatusHealthy {
+				updatedBackends[addr] = newStatus
 			}
 		}
 	}
-	if len(backends) > 0 {
-		bo.eventReceiver.OnBackendChanged(backends)
+	if len(updatedBackends) > 0 {
+		bo.eventReceiver.OnBackendChanged(updatedBackends)
 	}
-	bo.backendInfo = backendInfo
+	bo.curBackendInfo = backendStatus
 }
 
+// Close releases all resources.
 func (bo *BackendObserver) Close() {
 	if bo.cancelFunc != nil {
 		bo.cancelFunc()
 	}
+	bo.wg.Wait()
+}
+
+// When the server refused to connect, the port is shut down, so no need to retry.
+var notRetryableError = []string{
+	"connection refused",
+}
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, errStr := range notRetryableError {
+		if strings.Contains(msg, errStr) {
+			return false
+		}
+	}
+	return true
 }
