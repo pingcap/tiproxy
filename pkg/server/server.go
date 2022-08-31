@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -51,13 +52,15 @@ type Server struct {
 	Proxy *proxy.SQLServer
 }
 
-func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, namespaceFiles string) (srv *Server, err error) {
+func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger) (srv *Server, err error) {
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
 	}
 
 	ready := atomic.NewBool(false)
+
+	_, dirErr := os.Stat(cfg.Workdir)
 
 	// setup metrics
 	metrics.RegisterProxyMetrics(cfg.Metrics.PromCluster)
@@ -129,13 +132,8 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 			return
 		}
 
-		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
-		if nerr != nil {
-			err = errors.WithStack(nerr)
-			return
-		}
-		if len(nscs) == 0 {
-			// no existed namespace
+		if errors.Is(dirErr, os.ErrNotExist) {
+			// first time running
 			nsc := &config.Namespace{
 				Namespace: "",
 				Backend: config.BackendNamespace{
@@ -144,13 +142,6 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 				},
 			}
 			if err = srv.ConfigManager.SetNamespace(ctx, nsc.Namespace, nsc); err != nil {
-				return
-			}
-		}
-
-		if namespaceFiles != "" {
-			err = srv.ConfigManager.ImportNamespaceFromDir(ctx, namespaceFiles)
-			if err != nil {
 				return
 			}
 		}
