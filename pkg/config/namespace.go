@@ -15,44 +15,18 @@
 
 package config
 
-import (
-	"io/ioutil"
-
-	"github.com/goccy/go-yaml"
-)
-
 type Namespace struct {
-	Namespace string            `yaml:"namespace"`
-	Frontend  FrontendNamespace `yaml:"frontend"`
-	Backend   BackendNamespace  `yaml:"backend"`
+	Namespace string            `yaml:"namespace" json:"namespace" toml:"namespace"`
+	Frontend  FrontendNamespace `yaml:"frontend" json:"frontend" toml:"frontend"`
+	Backend   BackendNamespace  `yaml:"backend" json:"backend" toml:"backend"`
 }
 
 type FrontendNamespace struct {
-	Security TLSCert `yaml:"security"`
+	Security TLSCert `yaml:"security" json:"security" toml:"security"`
 }
 
 type BackendNamespace struct {
-	Instances    []string `yaml:"instances"`
-	SelectorType string   `yaml:"selector_type"`
-	Security     TLSCert  `yaml:"security"`
-}
-
-func NewNamespaceConfig(data []byte) (*Namespace, error) {
-	var cfg Namespace
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
-func NewNamespaceConfigFile(path string) (*Namespace, error) {
-	fileData, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return NewNamespaceConfig(fileData)
-}
-
-func (cfg *Namespace) ToBytes() ([]byte, error) {
-	return yaml.Marshal(cfg)
+	Instances    []string `yaml:"instances" json:"instances" toml:"instances"`
+	SelectorType string   `yaml:"selector_type" json:"selector_type" toml:"selector_type"`
+	Security     TLSCert  `yaml:"security" json:"security" toml:"security"`
 }

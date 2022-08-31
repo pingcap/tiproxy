@@ -31,16 +31,16 @@ type configHttpHandler struct {
 func (h *configHttpHandler) HandleSetProxyConfig(c *gin.Context) {
 	pco := &config.ProxyServerOnline{}
 	if c.ShouldBindJSON(pco) != nil {
-		c.String(http.StatusBadRequest, "bad proxy config json")
+		c.JSON(http.StatusBadRequest, "bad proxy config json")
 		return
 	}
 
 	if err := h.cfgmgr.SetProxyConfig(c, pco); err != nil {
-		c.String(http.StatusInternalServerError, "can not update proxy config")
+		c.JSON(http.StatusInternalServerError, "can not update proxy config")
 		return
 	}
 
-	c.String(http.StatusOK, "")
+	c.JSON(http.StatusOK, "")
 }
 
 func registerConfig(group *gin.RouterGroup, logger *zap.Logger, mgrcfg *mgrcfg.ConfigManager) {

@@ -73,7 +73,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 			func(c *gin.Context) {
 				if !ready.Load() {
 					c.Abort()
-					c.String(http.StatusInternalServerError, "service not ready")
+					c.JSON(http.StatusInternalServerError, "service not ready")
 				}
 			},
 		)

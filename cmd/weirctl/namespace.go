@@ -15,12 +15,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 
+	"github.com/pingcap/TiProxy/pkg/config"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -43,7 +47,15 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 					return err
 				}
 
-				cmd.Println(resp)
+				var nscs []config.Namespace
+				if err := json.Unmarshal([]byte(resp), &nscs); err != nil {
+					return err
+				}
+				nscsbytes, err := yaml.Marshal(&nscs)
+				if err != nil {
+					return err
+				}
+				cmd.Print(string(nscsbytes))
 				return nil
 			},
 		},
@@ -60,7 +72,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			cmd.Println(resp)
+			cmd.Print(resp)
 			return nil
 		}
 		rootCmd.AddCommand(commitNamespaces)
@@ -81,7 +93,15 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			cmd.Println(resp)
+			var nsc config.Namespace
+			if err := json.Unmarshal([]byte(resp), &nsc); err != nil {
+				return err
+			}
+			nscbytes, err := yaml.Marshal(&nsc)
+			if err != nil {
+				return err
+			}
+			cmd.Print(string(nscbytes))
 			return nil
 		}
 		rootCmd.AddCommand(getNamespace)
@@ -107,13 +127,21 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				defer f.Close()
 				in = f
 			}
-
-			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, args[0]), in)
+			var nsc config.Namespace
+			if err := yaml.NewDecoder(in).Decode(&nsc); err != nil {
+				return err
+			}
+			nscbytes, err := json.Marshal(&nsc)
 			if err != nil {
 				return err
 			}
 
-			cmd.Println(resp)
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, args[0]), bytes.NewReader(nscbytes))
+			if err != nil {
+				return err
+			}
+
+			cmd.Print(resp)
 			return nil
 		}
 		rootCmd.AddCommand(putNamespace)
@@ -134,7 +162,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			cmd.Println(resp)
+			cmd.Print(resp)
 			return nil
 		}
 		rootCmd.AddCommand(delNamespace)
