@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 
 	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -51,11 +52,11 @@ func NewNamespacesFromDir(nsdir string) (*NamespaceDir, error) {
 		if err != nil {
 			return nil, err
 		}
-		cfg, err := NewNamespaceConfig(fileData)
-		if err != nil {
+		var cfg Namespace
+		if err := yaml.Unmarshal(fileData, &cfg); err != nil {
 			return nil, err
 		}
-		c.cfgs[cfg.Namespace] = cfg
+		c.cfgs[cfg.Namespace] = &cfg
 		c.nspath[cfg.Namespace] = yamlFile
 	}
 

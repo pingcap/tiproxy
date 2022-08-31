@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 var testNamespaceConfig = Namespace{
@@ -27,9 +28,9 @@ var testNamespaceConfig = Namespace{
 }
 
 func TestNamespaceConfig(t *testing.T) {
-	data, err := testNamespaceConfig.ToBytes()
+	data, err := yaml.Marshal(testNamespaceConfig)
 	require.NoError(t, err)
-	cfg, err := NewNamespaceConfig(data)
-	require.NoError(t, err)
-	require.Equal(t, testNamespaceConfig, *cfg)
+	var cfg Namespace
+	require.NoError(t, yaml.Unmarshal(data, &cfg))
+	require.Equal(t, testNamespaceConfig, cfg)
 }

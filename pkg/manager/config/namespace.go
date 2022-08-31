@@ -16,11 +16,13 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"io/ioutil"
 	"path/filepath"
 
 	"github.com/pingcap/TiProxy/pkg/config"
 	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
 )
 
 func (e *ConfigManager) GetNamespace(ctx context.Context, ns string) (*config.Namespace, error) {
@@ -28,7 +30,9 @@ func (e *ConfigManager) GetNamespace(ctx context.Context, ns string) (*config.Na
 	if err != nil {
 		return nil, err
 	}
-	return config.NewNamespaceConfig(etcdKeyValue.Value)
+	var cfg config.Namespace
+	err = json.Unmarshal(etcdKeyValue.Value, &cfg)
+	return &cfg, err
 }
 
 func (e *ConfigManager) ListAllNamespace(ctx context.Context) ([]*config.Namespace, error) {
@@ -39,8 +43,8 @@ func (e *ConfigManager) ListAllNamespace(ctx context.Context) ([]*config.Namespa
 
 	var ret []*config.Namespace
 	for _, kv := range etcdKeyValues {
-		nsCfg, err := config.NewNamespaceConfig(kv.Value)
-		if err != nil {
+		var nsCfg config.Namespace
+		if err := json.Unmarshal(kv.Value, &nsCfg); err != nil {
 			if e.ignoreWrongNamespace {
 				e.logger.Warn("parse namespace config error", zap.Error(err), zap.ByteString("namespace", kv.Key))
 				continue
@@ -48,14 +52,14 @@ func (e *ConfigManager) ListAllNamespace(ctx context.Context) ([]*config.Namespa
 				return nil, err
 			}
 		}
-		ret = append(ret, nsCfg)
+		ret = append(ret, &nsCfg)
 	}
 
 	return ret, nil
 }
 
 func (e *ConfigManager) SetNamespace(ctx context.Context, ns string, nsc *config.Namespace) error {
-	r, err := nsc.ToBytes()
+	r, err := json.Marshal(nsc)
 	if err != nil {
 		return err
 	}
@@ -78,11 +82,11 @@ func (e *ConfigManager) ImportNamespaceFromDir(ctx context.Context, dir string) 
 		if err != nil {
 			return err
 		}
-		cfg, err := config.NewNamespaceConfig(fileData)
-		if err != nil {
+		var cfg config.Namespace
+		if err := yaml.Unmarshal(fileData, &cfg); err != nil {
 			return err
 		}
-		if err := e.SetNamespace(ctx, cfg.Namespace, cfg); err != nil {
+		if err := e.SetNamespace(ctx, cfg.Namespace, &cfg); err != nil {
 			return err
 		}
 	}
