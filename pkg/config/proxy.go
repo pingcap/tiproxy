@@ -48,28 +48,28 @@ type Config struct {
 }
 
 type Metrics struct {
-	PromCluster string `yaml:"prom_cluster" toml:"prom_cluster" json:"prom_cluster"`
+	PromCluster string `yaml:"prom-cluster" toml:"prom-cluster" json:"prom-cluster"`
 }
 
 type ConfigManager struct {
-	IgnoreWrongNamespace bool   `yaml:"ignore_wrong_namespace" toml:"ignore_wrong_namespace" json:"ignore_wrong_namespace"`
-	WatchInterval        string `yaml:"watch_interval" toml:"watch_interval" json:"watch_interval"`
+	IgnoreWrongNamespace bool   `yaml:"ignore-wrong-namespace" toml:"ignore-wrong-namespace" json:"ignore-wrong-namespace"`
+	WatchInterval        string `yaml:"watch-interval" toml:"watch-interval" json:"watch-interval"`
 }
 
 type ProxyServerOnline struct {
-	MaxConnections uint64 `yaml:"max_connections" toml:"max_connections" json:"max_connections"`
-	TCPKeepAlive   bool   `yaml:"tcp_keep_alive" toml:"tcp_keep_alive" json:"tcp_keep_alive"`
+	MaxConnections uint64 `yaml:"max-connections" toml:"max-connections" json:"max-connections"`
+	TCPKeepAlive   bool   `yaml:"tcp-keep-alive" toml:"tcp-keep-alive" json:"tcp-keep-alive"`
 }
 
 type ProxyServer struct {
 	ProxyServerOnline
 	Addr          string `yaml:"addr" toml:"addr" json:"addr"`
-	PDAddrs       string `yaml:"pd_addrs" toml:"pd_addrs" json:"pd_addrs"`
-	ProxyProtocol string `yaml:"proxy_protocol" toml:"proxy_protocol" json:"proxy_protocol"`
+	PDAddrs       string `yaml:"pd-addrs" toml:"pd-addrs" json:"pd-addrs"`
+	ProxyProtocol string `yaml:"proxy-protocol" toml:"proxy-protocol" json:"proxy-protocol"`
 }
 
 type API struct {
-	EnableBasicAuth bool   `yaml:"enable_basic_auth" toml:"enable_basic_auth" json:"enable_basic_auth"`
+	EnableBasicAuth bool   `yaml:"enable-basic-auth" toml:"enable-basic-auth" json:"enable-basic-auth"`
 	User            string `yaml:"user" toml:"user" json:"user"`
 	Password        string `yaml:"password" toml:"password" json:"password"`
 }
@@ -77,14 +77,14 @@ type API struct {
 type Log struct {
 	Level   string  `yaml:"level" toml:"level" json:"level"`
 	Encoder string  `yaml:"encoder" toml:"encoder" json:"encoder"`
-	LogFile LogFile `yaml:"log_file" toml:"log_file" json:"log_file"`
+	LogFile LogFile `yaml:"log-file" toml:"log-file" json:"log-file"`
 }
 
 type LogFile struct {
 	Filename   string `yaml:"filename" toml:"filename" json:"filename"`
-	MaxSize    int    `yaml:"max_size" toml:"max_size" json:"max_size"`
-	MaxDays    int    `yaml:"max_days" toml:"max_days" json:"max_days"`
-	MaxBackups int    `yaml:"max_backups" toml:"max_backups" json:"max_backups"`
+	MaxSize    int    `yaml:"max-size" toml:"max-size" json:"max-size"`
+	MaxDays    int    `yaml:"max-days" toml:"max-days" json:"max-days"`
+	MaxBackups int    `yaml:"max-backups" toml:"max-backups" json:"max-backups"`
 }
 
 type TLSCert struct {

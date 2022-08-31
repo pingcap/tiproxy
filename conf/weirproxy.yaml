@@ -8,25 +8,25 @@ listen-peer-urls:
 advertise-peer-urls:
   - "http://127.0.0.1:3081"
 config:
-  ignore_wrong_namespace: true
+  ignore-wrong-namespace: true
 proxy:
   addr: "0.0.0.0:6000"
-  tcp_keep_alive: true
-  max_connections: 1000
-  pd_addrs: "127.0.0.1:2379"
+  tcp-keep-alive: true
+  max-connections: 1000
+  pd-addrs: "127.0.0.1:2379"
 metrics:
-  prom_cluster: "default"
+  prom-cluster: "default"
 api:
-  enable_basic_auth: false
+  enable-basic-auth: false
   user: ""
   password: ""
 log:
   level: "info"
   encoder: "tidb"
-  log_file:
+  log-file:
     filename: ""
-    max_size: 300
-    max_days: 1
-    max_backups: 1
+    max-size: 300
+    max-days: 1
+    max-backups: 1
 security:
   rsa-key-size: 4096

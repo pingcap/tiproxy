@@ -27,6 +27,6 @@ type FrontendNamespace struct {
 
 type BackendNamespace struct {
 	Instances    []string `yaml:"instances" json:"instances" toml:"instances"`
-	SelectorType string   `yaml:"selector_type" json:"selector_type" toml:"selector_type"`
+	SelectorType string   `yaml:"selector-type" json:"selector-type" toml:"selector-type"`
 	Security     TLSCert  `yaml:"security" json:"security" toml:"security"`
 }
