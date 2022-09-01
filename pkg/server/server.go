@@ -137,7 +137,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger) (srv
 			nsc := &config.Namespace{
 				Namespace: "default",
 				Backend: config.BackendNamespace{
-					Instances:    []string{"127.0.0.1:4000"},
+					Instances:    []string{},
 					SelectorType: "random",
 				},
 			}
