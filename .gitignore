@@ -7,3 +7,4 @@ vendor
 work
 .vscode/
 .coverage*
+.git
