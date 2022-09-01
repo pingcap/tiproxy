@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
@@ -83,7 +84,8 @@ type runner struct {
 // backendMgrTester encapsulates testSuite but is dedicated for BackendConnMgr.
 type backendMgrTester struct {
 	*testSuite
-	t *testing.T
+	t      *testing.T
+	closed bool
 }
 
 func newBackendMgrTester(t *testing.T) *backendMgrTester {
@@ -92,18 +94,23 @@ func newBackendMgrTester(t *testing.T) *backendMgrTester {
 		cfg.testSuiteConfig.initBackendConn = false
 	}
 	ts, clean := newTestSuite(t, tc, cfg)
-	t.Cleanup(func() {
-		clean()
-		err := ts.mp.Close()
-		require.NoError(t, err)
-		if ts.mp.eventReceiver != nil {
-			ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(t, eventClose)
-		}
-	})
-	return &backendMgrTester{
+	tester := &backendMgrTester{
 		testSuite: ts,
 		t:         t,
 	}
+	t.Cleanup(func() {
+		clean()
+		if tester.closed {
+			return
+		}
+		err := ts.mp.Close()
+		require.NoError(t, err)
+		eventReceiver := ts.mp.getEventReceiver()
+		if eventReceiver != nil {
+			eventReceiver.(*mockEventReceiver).checkEvent(t, eventClose)
+		}
+	})
+	return tester
 }
 
 // Define some common runners here to reduce code redundancy.
@@ -175,7 +182,7 @@ func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.Pac
 	backend1 := ts.mp.backendConn
 	err := ts.forwardCmd4Proxy(clientIO, backendIO)
 	require.NoError(ts.t, err)
-	ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
+	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
 	require.NotEqual(ts.t, backend1, ts.mp.backendConn)
 	return nil
 }
@@ -183,7 +190,7 @@ func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.Pac
 func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketIO) error {
 	backend1 := ts.mp.backendConn
 	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
-	ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(ts.t, eventFail)
+	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
 	require.Equal(ts.t, backend1, ts.mp.backendConn)
 	return nil
 }
@@ -210,7 +217,7 @@ func TestNormalRedirect(t *testing.T) {
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
 				backend1 := ts.mp.backendConn
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
-				ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(t, eventSucceed)
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
 				require.NotEqual(t, backend1, ts.mp.backendConn)
 				return nil
 			},
@@ -314,7 +321,7 @@ func TestRedirectInTxn(t *testing.T) {
 				backend1 := ts.mp.backendConn
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(t, err)
-				ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(t, eventFail)
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventFail)
 				require.Equal(t, backend1, ts.mp.backendConn)
 				return nil
 			},
@@ -461,7 +468,7 @@ func TestSpecialCmds(t *testing.T) {
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
 				backend1 := ts.mp.backendConn
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
-				ts.mp.eventReceiver.(*mockEventReceiver).checkEvent(t, eventSucceed)
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
 				require.NotEqual(t, backend1, ts.mp.backendConn)
 				return nil
 			},
@@ -470,6 +477,43 @@ func TestSpecialCmds(t *testing.T) {
 				require.Equal(t, "another_user", ts.mb.username)
 				require.Equal(t, "another_db", ts.mb.db)
 				require.Equal(t, defaultClientCapability&^mysql.ClientMultiStatements, ts.mb.clientCapability)
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+// Test that closing the BackendConnMgr while it's receiving a redirection signal is OK.
+func TestCloseWhileRedirect(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// close and redirect concurrently
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				// Send an event to make Close() block at notifying.
+				addr := ts.tc.backendListener.Addr().String()
+				eventReceiver := ts.mp.getEventReceiver().(*mockEventReceiver)
+				eventReceiver.OnRedirectSucceed(addr, addr, ts.mp)
+				var wg waitgroup.WaitGroup
+				wg.Run(func() {
+					_ = ts.mp.Close()
+					ts.closed = true
+				})
+				// Make sure the process goroutine finishes.
+				ts.mp.wg.Wait()
+				// Redirect() should not panic after Close().
+				ts.mp.Redirect(addr)
+				eventReceiver.checkEvent(t, eventSucceed)
+				require.Equal(t, addr, ts.mp.GetRedirectingAddr())
+				wg.Wait()
+				eventReceiver.checkEvent(t, eventClose)
 				return nil
 			},
 		},
