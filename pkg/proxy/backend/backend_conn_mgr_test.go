@@ -184,6 +184,7 @@ func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.Pac
 	require.NoError(ts.t, err)
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
 	require.NotEqual(ts.t, backend1, ts.mp.backendConn)
+	require.Len(ts.t, ts.mp.GetRedirectingAddr(), 0)
 	return nil
 }
 
@@ -192,6 +193,7 @@ func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketI
 	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
 	require.Equal(ts.t, backend1, ts.mp.backendConn)
+	require.Len(ts.t, ts.mp.GetRedirectingAddr(), 0)
 	return nil
 }
 

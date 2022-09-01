@@ -237,10 +237,12 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		from: mgr.backendConn.Addr(),
 		to:   signal.newAddr,
 	}
-	// Notifying may block. Notify the receiver asynchronously to:
-	// - Reduce the latency of session migration
-	// - Avoid the risk of deadlock
 	defer func() {
+		// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
+		atomic.CompareAndSwapPointer(&mgr.signal, unsafe.Pointer(signal), nil)
+		// Notifying may block. Notify the receiver asynchronously to:
+		// - Reduce the latency of session migration
+		// - Avoid the risk of deadlock
 		mgr.redirectResCh <- rs
 	}()
 	var sessionStates, sessionToken string
@@ -265,8 +267,6 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		logutil.Logger(ctx).Warn("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
-	// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
-	atomic.CompareAndSwapPointer(&mgr.signal, unsafe.Pointer(signal), nil)
 }
 
 // The original db in the auth info may be dropped during the session, so we need to authenticate with the current db.
