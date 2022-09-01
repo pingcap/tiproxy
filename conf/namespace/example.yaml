@@ -1,4 +1,4 @@
-namespace: "default"
+namespace: "example"
 frontend:
   security:
 backend:

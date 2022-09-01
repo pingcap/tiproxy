@@ -1,8 +1,0 @@
-namespace: "test_namespace"
-frontend:
-  security:
-backend:
-  instances:
-    - "127.0.0.1:4000"
-  selector-type: "random"
-  security:
