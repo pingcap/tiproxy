@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
@@ -46,6 +47,12 @@ type signalRedirect struct {
 	newAddr string
 }
 
+type redirectResult struct {
+	from string
+	to   string
+	err  error
+}
+
 // BackendConnManager migrates a session from one BackendConnection to another.
 //
 // The signal processing goroutine tries to migrate the session once it receives a signal.
@@ -59,7 +66,7 @@ type BackendConnManager struct {
 	connectionID  uint64
 	authenticator *Authenticator
 	cmdProcessor  *CmdProcessor
-	eventReceiver router.ConnEventReceiver
+	eventReceiver unsafe.Pointer
 	backendConn   *BackendConnection
 	// processLock makes redirecting and command processing exclusive.
 	processLock sync.Mutex
@@ -68,8 +75,11 @@ type BackendConnManager struct {
 	// type *signalRedirect, it saves the last signal if there are multiple signals.
 	// It will be set to nil after migration.
 	signal unsafe.Pointer
+	// redirectResCh is used to notify the event receiver asynchronously.
+	redirectResCh chan *redirectResult
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc context.CancelFunc
+	wg         waitgroup.WaitGroup
 }
 
 // NewBackendConnManager creates a BackendConnManager.
@@ -79,6 +89,7 @@ func NewBackendConnManager(connectionID uint64) *BackendConnManager {
 		cmdProcessor:   NewCmdProcessor(),
 		authenticator:  &Authenticator{},
 		signalReceived: make(chan struct{}),
+		redirectResCh:  make(chan *redirectResult, 1),
 	}
 }
 
@@ -102,8 +113,10 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	}
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
-	go mgr.processSignals(childCtx)
 	mgr.cancelFunc = cancelFunc
+	mgr.wg.Run(func() {
+		mgr.processSignals(childCtx)
+	})
 	return nil
 }
 
@@ -141,7 +154,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	}
 	// Even if it meets an MySQL error, it may have changed the status, such as when executing multi-statements.
 	if waitingRedirect && mgr.cmdProcessor.canRedirect() {
-		_ = mgr.tryRedirect(ctx)
+		mgr.tryRedirect(ctx)
 		// Execute the held request no matter redirection succeeds or not.
 		if holdRequest {
 			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
@@ -157,7 +170,15 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 // SetEventReceiver implements RedirectableConn.SetEventReceiver interface.
 // The receiver sends redirection signals and watches redirecting events.
 func (mgr *BackendConnManager) SetEventReceiver(receiver router.ConnEventReceiver) {
-	mgr.eventReceiver = receiver
+	atomic.StorePointer(&mgr.eventReceiver, unsafe.Pointer(&receiver))
+}
+
+func (mgr *BackendConnManager) getEventReceiver() router.ConnEventReceiver {
+	eventReceiver := (*router.ConnEventReceiver)(atomic.LoadPointer(&mgr.eventReceiver))
+	if eventReceiver == nil {
+		return nil
+	}
+	return *eventReceiver
 }
 
 func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessionStates string) error {
@@ -182,19 +203,19 @@ func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken
 	return
 }
 
-// processSignals runs in a goroutine to receive redirection signals.
-// It will then try to migrate the session.
+// processSignals runs in a goroutine to:
+// - Receive redirection signals and then try to migrate the session.
+// - Send redirection results to the event receiver.
 func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 	for {
 		select {
-		// Redirect the session immediately just in case the session is idle.
-		case _, ok := <-mgr.signalReceived:
-			if !ok {
-				return
-			}
+		case <-mgr.signalReceived:
+			// Redirect the session immediately just in case the session is idle.
 			mgr.processLock.Lock()
-			_ = mgr.tryRedirect(ctx)
+			mgr.tryRedirect(ctx)
 			mgr.processLock.Unlock()
+		case rs := <-mgr.redirectResCh:
+			mgr.notifyRedirectResult(ctx, rs)
 		case <-ctx.Done():
 			return
 		}
@@ -203,54 +224,49 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 
 // tryRedirect tries to migrate the session if the session is redirect-able.
 // NOTE: processLock should be held before calling this function.
-func (mgr *BackendConnManager) tryRedirect(ctx context.Context) error {
+func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
 	if signal == nil {
-		return nil
+		return
 	}
-
 	if !mgr.cmdProcessor.canRedirect() {
-		return nil
+		return
 	}
-	from := mgr.backendConn.Addr()
-	to := signal.newAddr
 
-	var err error
+	rs := &redirectResult{
+		from: mgr.backendConn.Addr(),
+		to:   signal.newAddr,
+	}
 	defer func() {
-		if err != nil {
-			mgr.eventReceiver.OnRedirectFail(from, to, mgr)
-			logutil.Logger(ctx).Warn("redirect connection failed", zap.String("from", from), zap.String("to", to), zap.Error(err))
-		} else {
-			mgr.eventReceiver.OnRedirectSucceed(from, to, mgr)
-			logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("from", from), zap.String("to", to))
-		}
+		// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
+		atomic.CompareAndSwapPointer(&mgr.signal, unsafe.Pointer(signal), nil)
+		// Notifying may block. Notify the receiver asynchronously to:
+		// - Reduce the latency of session migration
+		// - Avoid the risk of deadlock
+		mgr.redirectResCh <- rs
 	}()
-
 	var sessionStates, sessionToken string
-	if sessionStates, sessionToken, err = mgr.querySessionStates(); err != nil {
-		return err
+	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(); rs.err != nil {
+		return
 	}
 
-	newConn := NewBackendConnection(to)
-	if err = newConn.Connect(); err != nil {
-		return err
+	newConn := NewBackendConnection(rs.to)
+	if rs.err = newConn.Connect(); rs.err != nil {
+		return
 	}
-	if err = mgr.authenticator.handshakeSecondTime(newConn.PacketIO(), sessionToken); err == nil {
-		err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
+	if rs.err = mgr.authenticator.handshakeSecondTime(newConn.PacketIO(), sessionToken); rs.err == nil {
+		rs.err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
 	}
-	if err != nil {
+	if rs.err != nil {
 		if ignoredErr := newConn.Close(); ignoredErr != nil {
 			logutil.Logger(ctx).Warn("close new backend connection failed", zap.Error(ignoredErr))
 		}
-		return err
+		return
 	}
 	if ignoredErr := mgr.backendConn.Close(); ignoredErr != nil {
 		logutil.Logger(ctx).Warn("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
-	// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
-	atomic.CompareAndSwapPointer(&mgr.signal, unsafe.Pointer(signal), nil)
-	return nil
 }
 
 // The original db in the auth info may be dropped during the session, so we need to authenticate with the current db.
@@ -272,13 +288,42 @@ func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []b
 func (mgr *BackendConnManager) Redirect(newAddr string) {
 	// We do not use `chan signalRedirect` to avoid blocking. We cannot discard the signal when it blocks,
 	// because only the latest signal matters.
+	// NOTE: BackendConnManager may be closing concurrently because of no lock.
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
 	}))
-	logutil.BgLogger().Info("received redirect command", zap.String("from", mgr.backendConn.Addr()), zap.String("to", newAddr))
 	select {
 	case mgr.signalReceived <- struct{}{}:
 	default:
+	}
+}
+
+// GetRedirectingAddr implements RedirectableConn.GetRedirectingAddr interface.
+// It returns the goal backend address to redirect to.
+func (mgr *BackendConnManager) GetRedirectingAddr() string {
+	signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
+	if signal == nil {
+		return ""
+	}
+	return signal.newAddr
+}
+
+func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *redirectResult) {
+	if rs == nil {
+		return
+	}
+	eventReceiver := mgr.getEventReceiver()
+	if eventReceiver == nil {
+		return
+	}
+	if rs.err != nil {
+		eventReceiver.OnRedirectFail(rs.from, rs.to, mgr)
+		logutil.Logger(ctx).Warn("redirect connection failed", zap.String("from", rs.from),
+			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID), zap.Error(rs.err))
+	} else {
+		eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
+		logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("from", rs.from),
+			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID))
 	}
 }
 
@@ -288,21 +333,28 @@ func (mgr *BackendConnManager) Close() error {
 		mgr.cancelFunc()
 		mgr.cancelFunc = nil
 	}
-	mgr.processLock.Lock()
-	defer mgr.processLock.Unlock()
+	mgr.wg.Wait()
+
 	var err error
-	if mgr.eventReceiver != nil {
-		// Always notify the eventReceiver with the latest address.
-		signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
-		if signal != nil {
-			mgr.eventReceiver.OnConnClosed(signal.newAddr, mgr)
-		} else if mgr.backendConn != nil {
-			mgr.eventReceiver.OnConnClosed(mgr.backendConn.Addr(), mgr)
-		}
-	}
+	var addr string
+	mgr.processLock.Lock()
 	if mgr.backendConn != nil {
+		addr = mgr.backendConn.address
 		err = mgr.backendConn.Close()
 		mgr.backendConn = nil
+	}
+	mgr.processLock.Unlock()
+
+	eventReceiver := mgr.getEventReceiver()
+	if eventReceiver != nil {
+		// Notify the receiver if there's any event.
+		if len(mgr.redirectResCh) > 0 {
+			mgr.notifyRedirectResult(context.Background(), <-mgr.redirectResCh)
+		}
+		// Just notify it with the current address.
+		if len(addr) > 0 {
+			eventReceiver.OnConnClosed(addr, mgr)
+		}
 	}
 	return err
 }

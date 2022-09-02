@@ -41,7 +41,7 @@ func NewNamespaceManager() *NamespaceManager {
 }
 func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clientv3.Client) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
-	rt, err := router.NewRandomRouter(&cfg.Backend, client)
+	rt, err := router.NewScoreBasedRouter(&cfg.Backend, client)
 	if err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
