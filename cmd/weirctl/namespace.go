@@ -18,8 +18,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/pingcap/TiProxy/pkg/config"
@@ -30,6 +32,23 @@ import (
 const (
 	namespacePrefix = "/api/admin/namespace"
 )
+
+func listAllYamlFiles(dir string) ([]string, error) {
+	infos, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var ret []string
+	for _, info := range infos {
+		fileName := info.Name()
+		if filepath.Ext(fileName) == ".yaml" {
+			ret = append(ret, filepath.Join(dir, fileName))
+		}
+	}
+
+	return ret, nil
+}
 
 func GetNamespaceCmd(ctx *Context) *cobra.Command {
 	rootCmd := &cobra.Command{
@@ -55,7 +74,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				cmd.Print(string(nscsbytes))
+				cmd.Println(string(nscsbytes))
 				return nil
 			},
 		},
@@ -64,7 +83,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 	// refresh namespaces
 	{
 		commitNamespaces := &cobra.Command{
-			Use: "commit",
+			Use: "commit nsName...",
 		}
 		commitNamespaces.RunE = func(cmd *cobra.Command, args []string) error {
 			resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, fmt.Sprintf("%s/commit?namespaces=%s", namespacePrefix, strings.Join(args, ",")), nil)
@@ -72,7 +91,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			cmd.Print(resp)
+			cmd.Println(resp)
 			return nil
 		}
 		rootCmd.AddCommand(commitNamespaces)
@@ -81,7 +100,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 	// get specific namespace
 	{
 		getNamespace := &cobra.Command{
-			Use: "get",
+			Use: "get nsName",
 		}
 		getNamespace.RunE = func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
@@ -101,7 +120,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cmd.Print(string(nscbytes))
+			cmd.Println(string(nscbytes))
 			return nil
 		}
 		rootCmd.AddCommand(getNamespace)
@@ -114,10 +133,6 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 		}
 		ns := putNamespace.Flags().String("ns", "-", "file")
 		putNamespace.RunE = func(cmd *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return cmd.Help()
-			}
-
 			in := cmd.InOrStdin()
 			if *ns != "-" {
 				f, err := os.Open(*ns)
@@ -136,21 +151,63 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, args[0]), bytes.NewReader(nscbytes))
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, nsc.Namespace), bytes.NewReader(nscbytes))
 			if err != nil {
 				return err
 			}
 
-			cmd.Print(resp)
+			cmd.Println(resp)
 			return nil
 		}
 		rootCmd.AddCommand(putNamespace)
 	}
 
+	// import specific namespaces
+	{
+		importNamespace := &cobra.Command{
+			Use: "import nsdir",
+		}
+		importNamespace.RunE = func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return cmd.Help()
+			}
+
+			yamlFiles, err := listAllYamlFiles(args[0])
+			if err != nil {
+				return err
+			}
+
+			for _, yamlFile := range yamlFiles {
+				fileData, err := ioutil.ReadFile(yamlFile)
+				if err != nil {
+					return err
+				}
+				var nsc config.Namespace
+				if err := yaml.Unmarshal(fileData, &nsc); err != nil {
+					return err
+				}
+				nscbytes, err := json.Marshal(&nsc)
+				if err != nil {
+					return err
+				}
+
+				resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, nsc.Namespace), bytes.NewBuffer(nscbytes))
+				if err != nil {
+					return err
+				}
+
+				cmd.Printf("- file: %s\n%s\n", nsc.Namespace, resp)
+			}
+
+			return nil
+		}
+		rootCmd.AddCommand(importNamespace)
+	}
+
 	// delete specific namespace
 	{
 		delNamespace := &cobra.Command{
-			Use: "del",
+			Use: "del nsName",
 		}
 		delNamespace.RunE = func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
@@ -162,7 +219,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			cmd.Print(resp)
+			cmd.Println(resp)
 			return nil
 		}
 		rootCmd.AddCommand(delNamespace)

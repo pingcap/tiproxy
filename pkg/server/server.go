@@ -51,7 +51,7 @@ type Server struct {
 	Proxy *proxy.SQLServer
 }
 
-func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, namespaceFiles string) (srv *Server, err error) {
+func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger) (srv *Server, err error) {
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
@@ -129,9 +129,21 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, name
 			return
 		}
 
-		if namespaceFiles != "" {
-			err = srv.ConfigManager.ImportNamespaceFromDir(ctx, namespaceFiles)
-			if err != nil {
+		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
+		if nerr != nil {
+			err = errors.WithStack(nerr)
+			return
+		}
+		if len(nscs) == 0 {
+			// no existed namespace
+			nsc := &config.Namespace{
+				Namespace: "default",
+				Backend: config.BackendNamespace{
+					Instances:    []string{},
+					SelectorType: "random",
+				},
+			}
+			if err = srv.ConfigManager.SetNamespace(ctx, nsc.Namespace, nsc); err != nil {
 				return
 			}
 		}

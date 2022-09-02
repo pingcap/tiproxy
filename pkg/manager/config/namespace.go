@@ -17,12 +17,10 @@ package config
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
-	"path/filepath"
+	"errors"
 
 	"github.com/pingcap/TiProxy/pkg/config"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v3"
 )
 
 func (e *ConfigManager) GetNamespace(ctx context.Context, ns string) (*config.Namespace, error) {
@@ -59,6 +57,9 @@ func (e *ConfigManager) ListAllNamespace(ctx context.Context) ([]*config.Namespa
 }
 
 func (e *ConfigManager) SetNamespace(ctx context.Context, ns string, nsc *config.Namespace) error {
+	if ns == "" || nsc.Namespace == "" {
+		return errors.New("namespace name can not be empty string")
+	}
 	r, err := json.Marshal(nsc)
 	if err != nil {
 		return err
@@ -69,44 +70,4 @@ func (e *ConfigManager) SetNamespace(ctx context.Context, ns string, nsc *config
 
 func (e *ConfigManager) DelNamespace(ctx context.Context, ns string) error {
 	return e.del(ctx, PathPrefixNamespace, ns)
-}
-
-func (e *ConfigManager) ImportNamespaceFromDir(ctx context.Context, dir string) error {
-	yamlFiles, err := listAllYamlFiles(dir)
-	if err != nil {
-		return err
-	}
-
-	for _, yamlFile := range yamlFiles {
-		fileData, err := ioutil.ReadFile(yamlFile)
-		if err != nil {
-			return err
-		}
-		var cfg config.Namespace
-		if err := yaml.Unmarshal(fileData, &cfg); err != nil {
-			return err
-		}
-		if err := e.SetNamespace(ctx, cfg.Namespace, &cfg); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func listAllYamlFiles(dir string) ([]string, error) {
-	infos, err := ioutil.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	var ret []string
-	for _, info := range infos {
-		fileName := info.Name()
-		if filepath.Ext(fileName) == ".yaml" {
-			ret = append(ret, filepath.Join(dir, fileName))
-		}
-	}
-
-	return ret, nil
 }

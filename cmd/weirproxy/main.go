@@ -35,7 +35,6 @@ func main() {
 	configFile := rootCmd.PersistentFlags().String("config", "conf/weirproxy.yaml", "weir proxy config file path")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
-	namespaceFiles := rootCmd.PersistentFlags().String("namespaces", "", "import namespace from dir")
 
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		proxyConfigData, err := ioutil.ReadFile(*configFile)
@@ -67,7 +66,7 @@ func main() {
 		}
 		logger = logger.Named("main")
 
-		srv, err := server.NewServer(cmd.Context(), cfg, logger, *namespaceFiles)
+		srv, err := server.NewServer(cmd.Context(), cfg, logger)
 		if err != nil {
 			logger.Error("fail to create server", zap.Error(err))
 			return err
