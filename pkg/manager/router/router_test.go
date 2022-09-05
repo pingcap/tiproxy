@@ -138,6 +138,14 @@ func (tester *routerTester) killBackends(num int) {
 	tester.checkBackendOrder()
 }
 
+func (tester *routerTester) updateBackendStatusByAddr(addr string, status BackendStatus) {
+	backends := map[string]BackendStatus{
+		addr: status,
+	}
+	tester.router.OnBackendChanged(backends)
+	tester.checkBackendOrder()
+}
+
 func (tester *routerTester) getBackendByIndex(index int) *backendWrapper {
 	be := tester.router.backends.Front()
 	for i := 0; be != nil && i < index; be, i = be.Next(), i+1 {
@@ -321,6 +329,35 @@ func TestNoBackends(t *testing.T) {
 	tester.killBackends(1)
 	_, err = tester.router.Route(conn)
 	require.ErrorIs(t, err, ErrNoInstanceToSelect)
+}
+
+// Test that the backends are balanced during rolling restart.
+func TestRollingRestart(t *testing.T) {
+	tester := newRouterTester(t)
+	backendNum := 3
+	tester.addBackends(backendNum)
+	tester.addConnections(100)
+	tester.checkBalanced()
+
+	backendAddrs := make([]string, 0, backendNum)
+	for i := 0; i < backendNum; i++ {
+		backendAddrs = append(backendAddrs, tester.getBackendByIndex(i).addr)
+	}
+
+	for i := 0; i < backendNum+1; i++ {
+		if i > 0 {
+			tester.updateBackendStatusByAddr(backendAddrs[i-1], StatusHealthy)
+			tester.rebalance(100)
+			tester.redirectFinish(100, true)
+			tester.checkBalanced()
+		}
+		if i < backendNum {
+			tester.updateBackendStatusByAddr(backendAddrs[i], StatusCannotConnect)
+			tester.rebalance(100)
+			tester.redirectFinish(100, true)
+			tester.checkBalanced()
+		}
+	}
 }
 
 // Test the corner cases of rebalance.

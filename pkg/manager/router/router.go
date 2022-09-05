@@ -61,9 +61,6 @@ const (
 	// The threshold of ratio of the highest score and lowest score.
 	// If the ratio exceeds the threshold, the proxy will rebalance connections.
 	rebalanceMaxScoreRatio = 1.2
-	// The minimal interval of redirection for each connection.
-	// This helps to avoid frequent session migration to reduce latency jitter.
-	redirectMinInterval = 3 * time.Second
 )
 
 // ConnEventReceiver receives connection events.
@@ -100,8 +97,6 @@ func (b *backendWrapper) score() int {
 type connWrapper struct {
 	RedirectableConn
 	phase connPhase
-	// Last redirect start time of this connection.
-	lastRedirect time.Time
 }
 
 // ScoreBasedRouter is an implementation of Router interface.
@@ -352,7 +347,6 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 }
 
 func (router *ScoreBasedRouter) rebalance(maxNum int) {
-	curTime := time.Now()
 	router.Lock()
 	defer router.Unlock()
 	for i := 0; i < maxNum; i++ {
@@ -376,19 +370,11 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 		var ce *list.Element
 		for ele := busiestBackend.connList.Front(); ele != nil; ele = ele.Next() {
 			conn := ele.Value.(*connWrapper)
-			// If the oldest connection is just redirected, maybe the balancer redirects too frequently,
-			// such as when all the clients are closing. Just check again in the next rebalance loop.
-			if conn.lastRedirect.Add(redirectMinInterval).After(curTime) {
+			// A connection cannot be redirected again when it has not finished redirecting.
+			if conn.phase != phaseRedirectNotify {
+				ce = ele
 				break
 			}
-			// A connection cannot be redirected again when it has not finished redirecting.
-			// Typically, the connection should finish redirecting in redirectMinInterval. If it doesn't,
-			// don't block other connections from redirecting.
-			if conn.phase == phaseRedirectNotify {
-				continue
-			}
-			ce = ele
-			break
 		}
 		if ce == nil {
 			break
@@ -396,7 +382,6 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 		router.removeConn(busiestEle, ce)
 		conn := ce.Value.(*connWrapper)
 		conn.phase = phaseRedirectNotify
-		conn.lastRedirect = curTime
 		router.addConn(idlestEle, conn)
 		conn.Redirect(idlestBackend.addr)
 	}
