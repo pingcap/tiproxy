@@ -264,6 +264,11 @@ func (tester *routerTester) checkBackendNum(num int) {
 	require.Equal(tester.t, num, tester.router.backends.Len())
 }
 
+func (tester *routerTester) clear() {
+	tester.conns = make(map[uint64]*mockRedirectableConn)
+	tester.router.backends = list.New()
+}
+
 // Test that the backends are always ordered by scores.
 func TestBackendScore(t *testing.T) {
 	tester := newRouterTester(t)
@@ -363,65 +368,125 @@ func TestRollingRestart(t *testing.T) {
 // Test the corner cases of rebalance.
 func TestRebalanceCornerCase(t *testing.T) {
 	tester := newRouterTester(t)
-	tester.addBackends(1)
-	tester.addConnections(10)
+	tests := []func(){
+		func() {
+			// Balancer won't work when there's no backend.
+			tester.rebalance(10)
+			tester.checkRedirectingNum(0)
+		},
+		func() {
+			// Balancer won't work when there's only one backend.
+			tester.addBackends(1)
+			tester.addConnections(10)
+			tester.rebalance(10)
+			tester.checkRedirectingNum(0)
+		},
+		func() {
+			// Router should have already balanced it.
+			tester.addBackends(1)
+			tester.addConnections(10)
+			tester.addBackends(1)
+			tester.addConnections(10)
+			tester.rebalance(10)
+			tester.checkRedirectingNum(0)
+		},
+		func() {
+			// Balancer won't work when all the backends are unhealthy.
+			tester.addBackends(2)
+			tester.addConnections(20)
+			tester.killBackends(2)
+			tester.rebalance(10)
+			tester.checkRedirectingNum(0)
+		},
+		func() {
+			// The parameter limits the redirecting num.
+			tester.addBackends(2)
+			tester.addConnections(50)
+			tester.killBackends(1)
+			tester.rebalance(5)
+			tester.checkRedirectingNum(5)
+		},
+		func() {
+			// All the connections are redirected to the new healthy one and the unhealthy backends are removed.
+			tester.addBackends(1)
+			tester.addConnections(10)
+			tester.killBackends(1)
+			tester.addBackends(1)
+			tester.rebalance(10)
+			tester.checkRedirectingNum(10)
+			tester.checkBackendNum(1)
+			backend := tester.getBackendByIndex(0)
+			require.Len(t, backend.connMap, 10)
+		},
+		func() {
+			// Connections won't be redirected again before redirection finishes.
+			tester.addBackends(1)
+			tester.addConnections(10)
+			tester.killBackends(1)
+			tester.addBackends(1)
+			tester.rebalance(10)
+			tester.checkRedirectingNum(10)
+			backend := tester.getBackendByIndex(0)
+			tester.killBackends(1)
+			tester.addBackends(1)
+			tester.rebalance(10)
+			tester.checkRedirectingNum(10)
+			require.Len(t, backend.connMap, 10)
+		},
+		func() {
+			// After redirection fails, the connections are moved back to the unhealthy backends.
+			tester.addBackends(1)
+			tester.addConnections(10)
+			tester.killBackends(1)
+			tester.addBackends(1)
+			tester.rebalance(10)
+			tester.checkBackendNum(1)
+			tester.redirectFinish(10, false)
+			tester.checkBackendNum(2)
+		},
+		func() {
+			// It won't rebalance when there's no connection.
+			tester.addBackends(1)
+			tester.addConnections(10)
+			tester.closeConnections(10, false)
+			tester.rebalance(10)
+			tester.checkRedirectingNum(0)
+		},
+		func() {
+			// It won't rebalance when there's only 1 connection.
+			tester.addBackends(1)
+			tester.addConnections(1)
+			tester.addBackends(1)
+			tester.rebalance(1)
+			tester.checkRedirectingNum(0)
+		},
+		func() {
+			// It won't rebalance when only 2 connections are on 3 backends.
+			tester.addBackends(2)
+			tester.addConnections(2)
+			tester.addBackends(1)
+			tester.rebalance(1)
+			tester.checkRedirectingNum(0)
+		},
+		func() {
+			// Connections will be redirected again immediately after failure.
+			tester.addBackends(1)
+			tester.addConnections(10)
+			tester.killBackends(1)
+			tester.addBackends(1)
+			tester.rebalance(10)
+			tester.redirectFinish(10, false)
+			tester.killBackends(1)
+			tester.addBackends(1)
+			tester.rebalance(10)
+			tester.checkRedirectingNum(0)
+		},
+	}
 
-	// Balancer won't work when there's only one backend.
-	tester.rebalance(10)
-	tester.checkRedirectingNum(0)
-
-	// Router should have already balanced it.
-	tester.addBackends(1)
-	tester.addConnections(10)
-	tester.rebalance(10)
-	tester.checkRedirectingNum(0)
-
-	// Balancer won't work when all the backends are unhealthy.
-	tester.killBackends(2)
-	tester.rebalance(10)
-	tester.checkRedirectingNum(0)
-
-	// The parameter limits the redirecting num.
-	tester.addBackends(1)
-	tester.rebalance(10)
-	tester.checkRedirectingNum(10)
-
-	// All the connections are redirected to the new healthy one and the unhealthy backends are removed.
-	tester.rebalance(10)
-	tester.checkRedirectingNum(20)
-	tester.checkBackendNum(1)
-	backend := tester.getBackendByIndex(0)
-	require.Len(t, backend.connMap, 20)
-
-	// Connections won't be redirected again before redirection finishes.
-	tester.killBackends(1)
-	tester.addBackends(1)
-	tester.rebalance(10)
-	tester.checkRedirectingNum(20)
-	require.Len(t, backend.connMap, 20)
-
-	// The connections are moved back to the unhealthy backends.
-	tester.redirectFinish(20, false)
-	tester.checkBackendNum(3)
-
-	// It won't rebalance when there's no connection.
-	tester.closeConnections(20, false)
-	tester.checkBackendNum(1)
-	tester.rebalance(10)
-	tester.checkRedirectingNum(0)
-	tester.addBackends(1)
-	tester.checkRedirectingNum(0)
-
-	// It won't rebalance when there's only 1 connection.
-	tester.addConnections(1)
-	tester.rebalance(1)
-	tester.checkRedirectingNum(0)
-
-	// It won't rebalance when only 2 connections are on 3 backends.
-	tester.addConnections(1)
-	tester.addBackends(1)
-	tester.rebalance(1)
-	tester.checkRedirectingNum(0)
+	for _, test := range tests {
+		test()
+		tester.clear()
+	}
 }
 
 // Test all kinds of events occur concurrently.

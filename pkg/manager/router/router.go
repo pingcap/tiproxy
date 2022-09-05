@@ -61,6 +61,9 @@ const (
 	// The threshold of ratio of the highest score and lowest score.
 	// If the ratio exceeds the threshold, the proxy will rebalance connections.
 	rebalanceMaxScoreRatio = 1.2
+	// After a connection fails to redirect, it may contain some unmigratable status.
+	// Limit its redirection interval to avoid unnecessary retrial to reduce latency jitter.
+	redirectFailMinInterval = 3 * time.Second
 )
 
 // ConnEventReceiver receives connection events.
@@ -97,6 +100,8 @@ func (b *backendWrapper) score() int {
 type connWrapper struct {
 	RedirectableConn
 	phase connPhase
+	// Last redirect start time of this connection.
+	lastRedirect time.Time
 }
 
 // ScoreBasedRouter is an implementation of Router interface.
@@ -347,6 +352,7 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 }
 
 func (router *ScoreBasedRouter) rebalance(maxNum int) {
+	curTime := time.Now()
 	router.Lock()
 	defer router.Unlock()
 	for i := 0; i < maxNum; i++ {
@@ -370,11 +376,18 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 		var ce *list.Element
 		for ele := busiestBackend.connList.Front(); ele != nil; ele = ele.Next() {
 			conn := ele.Value.(*connWrapper)
-			// A connection cannot be redirected again when it has not finished redirecting.
-			if conn.phase != phaseRedirectNotify {
-				ce = ele
-				break
+			switch conn.phase {
+			case phaseRedirectNotify:
+				// A connection cannot be redirected again when it has not finished redirecting.
+				continue
+			case phaseRedirectFail:
+				// If it failed recently, it will probably fail this time.
+				if conn.lastRedirect.Add(redirectFailMinInterval).After(curTime) {
+					continue
+				}
 			}
+			ce = ele
+			break
 		}
 		if ce == nil {
 			break
@@ -382,6 +395,7 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 		router.removeConn(busiestEle, ce)
 		conn := ce.Value.(*connWrapper)
 		conn.phase = phaseRedirectNotify
+		conn.lastRedirect = curTime
 		router.addConn(idlestEle, conn)
 		conn.Redirect(idlestBackend.addr)
 	}
