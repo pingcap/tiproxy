@@ -88,7 +88,7 @@ func NewBackendConnManager(connectionID uint64) *BackendConnManager {
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
 		authenticator:  &Authenticator{},
-		signalReceived: make(chan struct{}),
+		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
 }
@@ -292,10 +292,8 @@ func (mgr *BackendConnManager) Redirect(newAddr string) {
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
 	}))
-	select {
-	case mgr.signalReceived <- struct{}{}:
-	default:
-	}
+	// Generally, it won't wait because the caller won't send another signal because the last one finishes.
+	mgr.signalReceived <- struct{}{}
 }
 
 // GetRedirectingAddr implements RedirectableConn.GetRedirectingAddr interface.
