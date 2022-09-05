@@ -315,13 +315,14 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 		return
 	}
 	if rs.err != nil {
-		eventReceiver.OnRedirectFail(rs.from, rs.to, mgr)
+		err := eventReceiver.OnRedirectFail(rs.from, rs.to, mgr)
 		logutil.Logger(ctx).Warn("redirect connection failed", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID), zap.Error(rs.err))
+			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID),
+			zap.NamedError("redirect_err", rs.err), zap.NamedError("notify_err", err))
 	} else {
-		eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
+		err := eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
 		logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID))
+			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID), zap.NamedError("notify_err", err))
 	}
 }
 
@@ -351,7 +352,10 @@ func (mgr *BackendConnManager) Close() error {
 		}
 		// Just notify it with the current address.
 		if len(addr) > 0 {
-			eventReceiver.OnConnClosed(addr, mgr)
+			if err := eventReceiver.OnConnClosed(addr, mgr); err != nil {
+				logutil.BgLogger().Error("close connection error", zap.String("addr", addr),
+					zap.Uint64("conn", mgr.connectionID), zap.NamedError("notify_err", err))
+			}
 		}
 	}
 	return err

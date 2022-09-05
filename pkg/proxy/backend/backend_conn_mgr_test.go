@@ -47,27 +47,30 @@ func newMockEventReceiver() *mockEventReceiver {
 	}
 }
 
-func (mer *mockEventReceiver) OnRedirectSucceed(from, to string, conn router.RedirectableConn) {
+func (mer *mockEventReceiver) OnRedirectSucceed(from, to string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
 		from:      from,
 		to:        to,
 		eventName: eventSucceed,
 	}
+	return nil
 }
 
-func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.RedirectableConn) {
+func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
 		from:      from,
 		to:        to,
 		eventName: eventFail,
 	}
+	return nil
 }
 
-func (mer *mockEventReceiver) OnConnClosed(from string, conn router.RedirectableConn) {
+func (mer *mockEventReceiver) OnConnClosed(from string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
 		from:      from,
 		eventName: eventClose,
 	}
+	return nil
 }
 
 func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) {
@@ -502,7 +505,8 @@ func TestCloseWhileRedirect(t *testing.T) {
 				// Send an event to make Close() block at notifying.
 				addr := ts.tc.backendListener.Addr().String()
 				eventReceiver := ts.mp.getEventReceiver().(*mockEventReceiver)
-				eventReceiver.OnRedirectSucceed(addr, addr, ts.mp)
+				err := eventReceiver.OnRedirectSucceed(addr, addr, ts.mp)
+				require.NoError(t, err)
 				var wg waitgroup.WaitGroup
 				wg.Run(func() {
 					_ = ts.mp.Close()
