@@ -292,10 +292,8 @@ func (mgr *BackendConnManager) Redirect(newAddr string) {
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
 	}))
-	select {
-	case mgr.signalReceived <- struct{}{}:
-	default:
-	}
+	// Generally, it won't wait because the caller won't send another signal because the last one finishes.
+	mgr.signalReceived <- struct{}{}
 }
 
 // GetRedirectingAddr implements RedirectableConn.GetRedirectingAddr interface.
