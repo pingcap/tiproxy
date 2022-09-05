@@ -88,7 +88,7 @@ func NewBackendConnManager(connectionID uint64) *BackendConnManager {
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
 		authenticator:  &Authenticator{},
-		signalReceived: make(chan struct{}),
+		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
 }
