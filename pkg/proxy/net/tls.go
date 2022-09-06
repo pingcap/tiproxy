@@ -18,7 +18,7 @@ import (
 	"crypto/tls"
 	"net"
 
-	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
 func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) (tls.ConnectionState, error) {

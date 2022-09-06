@@ -1,22 +1,13 @@
 workdir: "./work"
-listen-urls:
-  - "http://0.0.0.0:3080"
-advertise-urls:
-  - "http://127.0.0.1:3080"
-listen-peer-urls:
-  - "http://0.0.0.0:3081"
-advertise-peer-urls:
-  - "http://127.0.0.1:3081"
-config:
-  ignore-wrong-namespace: true
 proxy:
   addr: "0.0.0.0:6000"
   tcp-keep-alive: true
   max-connections: 1000
-  pd-addrs: "127.0.0.1:2379"
+  pd-addrs: "127.0.0.1:3080"
 metrics:
   prom-cluster: "default"
 api:
+  addr: "0.0.0.0:2379"
   enable-basic-auth: false
   user: ""
   password: ""
@@ -30,3 +21,7 @@ log:
     max-backups: 1
 security:
   rsa-key-size: 4096
+advance:
+  # ignore-wrong-namespace: true
+  # peer-port: "3081"
+  # watch-interval: "10m"

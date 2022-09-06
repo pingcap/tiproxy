@@ -20,7 +20,7 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,13 +42,13 @@ func NewNamespacesFromDir(nsdir string) (*NamespaceDir, error) {
 		nspath: make(map[string]string),
 	}
 
-	yamlFiles, err := listAllYamlFiles(c.dir)
+	nFiles, err := listAllFiles(c.dir, ".toml")
 	if err != nil {
 		return nil, err
 	}
 
-	for _, yamlFile := range yamlFiles {
-		fileData, err := ioutil.ReadFile(yamlFile)
+	for _, nfile := range nFiles {
+		fileData, err := ioutil.ReadFile(nfile)
 		if err != nil {
 			return nil, err
 		}
@@ -57,13 +57,13 @@ func NewNamespacesFromDir(nsdir string) (*NamespaceDir, error) {
 			return nil, err
 		}
 		c.cfgs[cfg.Namespace] = &cfg
-		c.nspath[cfg.Namespace] = yamlFile
+		c.nspath[cfg.Namespace] = nfile
 	}
 
 	return c, nil
 }
 
-func listAllYamlFiles(dir string) ([]string, error) {
+func listAllFiles(dir, ext string) ([]string, error) {
 	infos, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func listAllYamlFiles(dir string) ([]string, error) {
 	var ret []string
 	for _, info := range infos {
 		fileName := info.Name()
-		if path.Ext(fileName) == ".yaml" {
+		if path.Ext(fileName) == ext {
 			ret = append(ret, filepath.Join(dir, fileName))
 		}
 	}

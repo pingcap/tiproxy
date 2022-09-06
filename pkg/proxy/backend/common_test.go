@@ -21,8 +21,8 @@ import (
 	"testing"
 
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/TiProxy/pkg/util/errors"
-	"github.com/pingcap/TiProxy/pkg/util/security"
+	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/tidb/util"
 	"github.com/stretchr/testify/require"
 )

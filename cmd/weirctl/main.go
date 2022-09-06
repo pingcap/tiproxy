@@ -15,42 +15,11 @@
 package main
 
 import (
-	"net/http"
-
-	"github.com/pingcap/TiProxy/pkg/util/cmd"
-	"github.com/spf13/cobra"
-	"go.uber.org/zap"
+	"github.com/pingcap/TiProxy/lib/cli"
+	"github.com/pingcap/TiProxy/lib/util/cmd"
 )
 
 func main() {
-	rootCmd := &cobra.Command{
-		Use:   "weirctl",
-		Short: "cli",
-	}
-
-	ctx := &Context{}
-
-	curls := rootCmd.PersistentFlags().StringArray("curls", []string{"localhost:3080"}, "API gateway addresses")
-	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
-	logLevel := rootCmd.PersistentFlags().String("log_level", "info", "log level")
-	rootCmd.PersistentFlags().Bool("indent", true, "whether indent the returned json")
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		zapcfg := zap.NewDevelopmentConfig()
-		zapcfg.Encoding = *logEncoder
-		if level, err := zap.ParseAtomicLevel(*logLevel); err == nil {
-			zapcfg.Level = level
-		}
-		logger, err := zapcfg.Build()
-		if err != nil {
-			return err
-		}
-		ctx.Logger = logger.Named("cli")
-		ctx.Client = &http.Client{}
-		ctx.CUrls = *curls
-		return nil
-	}
-
-	rootCmd.AddCommand(GetNamespaceCmd(ctx))
-	rootCmd.AddCommand(GetConfigCmd(ctx))
+	rootCmd := cli.GetRootCmd()
 	cmd.RunRootCommand(rootCmd)
 }

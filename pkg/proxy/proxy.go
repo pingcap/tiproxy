@@ -20,13 +20,13 @@ import (
 	"net"
 	"sync"
 
-	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/lib/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
-	"github.com/pingcap/TiProxy/pkg/util/errors"
-	"github.com/pingcap/TiProxy/pkg/util/security"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/security"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/tidb/metrics"
 	"go.uber.org/zap"
 )
@@ -65,7 +65,7 @@ func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, sc
 		},
 	}
 
-	if s.serverTLSConfig, err = security.CreateServerTLSConfig(scfg.Server.CA, scfg.Server.Key, scfg.Server.Cert, scfg.RSAKeySize, workdir); err != nil {
+	if s.serverTLSConfig, err = security.CreateServerTLSConfig(logger, scfg.Server.CA, scfg.Server.Key, scfg.Server.Cert, scfg.RSAKeySize, workdir); err != nil {
 		return nil, err
 	}
 	if s.clusterTLSConfig, err = security.CreateClientTLSConfig(scfg.Cluster.CA, scfg.Cluster.Key, scfg.Cluster.Cert); err != nil {
@@ -80,14 +80,14 @@ func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, sc
 	return s, nil
 }
 
-func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.ProxyServerOnline) error {
+func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.ProxyServerOnline) {
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
 
 	for {
 		select {
 		case <-ctx.Done():
 			s.wg.Wait()
-			return nil
+			return
 		case och := <-onlineProxyConfig:
 			s.mu.Lock()
 			s.mu.tcpKeepAlive = och.TCPKeepAlive
@@ -97,11 +97,11 @@ func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.Pr
 			conn, err := s.listener.Accept()
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) {
-					return nil
+					return
 				}
 
 				s.logger.Error("accept failed", zap.Error(err))
-				return err
+				continue
 			}
 
 			s.wg.Run(func() {

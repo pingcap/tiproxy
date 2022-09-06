@@ -27,8 +27,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"

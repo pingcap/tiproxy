@@ -14,7 +14,7 @@
 
 package client
 
-import "github.com/pingcap/TiProxy/pkg/util/errors"
+import "github.com/pingcap/TiProxy/lib/util/errors"
 
 var (
 	ErrCloseConn = errors.New("failed to close client connection")
