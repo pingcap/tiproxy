@@ -15,7 +15,7 @@
 
 package namespace
 
-import "github.com/pingcap/TiProxy/pkg/util/errors"
+import "github.com/pingcap/TiProxy/lib/util/errors"
 
 var (
 	ErrDuplicatedUser      = errors.New("duplicated user")

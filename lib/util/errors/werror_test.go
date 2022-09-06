@@ -17,7 +17,7 @@ package errors_test
 import (
 	"testing"
 
-	serr "github.com/pingcap/TiProxy/pkg/util/errors"
+	serr "github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/stretchr/testify/require"
 )
 

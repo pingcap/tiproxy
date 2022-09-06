@@ -29,16 +29,15 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
 )
 
 // CreateServerTLSConfig creates a tlsConfig that is used to connect to the client.
-func CreateServerTLSConfig(ca, key, cert string, rsaKeySize int, workdir string) (tlsConfig *tls.Config, err error) {
+func CreateServerTLSConfig(logger *zap.Logger, ca, key, cert string, rsaKeySize int, workdir string) (tlsConfig *tls.Config, err error) {
 	if len(cert) == 0 || len(key) == 0 {
 		cert = filepath.Join(workdir, "cert.pem")
 		key = filepath.Join(workdir, "key.pem")
-		if err := createTLSCertificates(cert, key, rsaKeySize); err != nil {
+		if err := createTLSCertificates(logger, cert, key, rsaKeySize); err != nil {
 			return nil, err
 		}
 	}
@@ -46,7 +45,7 @@ func CreateServerTLSConfig(ca, key, cert string, rsaKeySize int, workdir string)
 	var tlsCert tls.Certificate
 	tlsCert, err = tls.LoadX509KeyPair(cert, key)
 	if err != nil {
-		logutil.BgLogger().Warn("load x509 failed", zap.Error(err))
+		logger.Warn("load x509 failed", zap.Error(err))
 		err = errors.Trace(err)
 		return
 	}
@@ -58,7 +57,7 @@ func CreateServerTLSConfig(ca, key, cert string, rsaKeySize int, workdir string)
 		var caCert []byte
 		caCert, err = os.ReadFile(ca)
 		if err != nil {
-			logutil.BgLogger().Warn("read file failed", zap.Error(err))
+			logger.Warn("read file failed", zap.Error(err))
 			err = errors.Trace(err)
 			return
 		}
@@ -76,7 +75,7 @@ func CreateServerTLSConfig(ca, key, cert string, rsaKeySize int, workdir string)
 	return
 }
 
-func createTLSCertificates(certpath string, keypath string, rsaKeySize int) error {
+func createTLSCertificates(logger *zap.Logger, certpath string, keypath string, rsaKeySize int) error {
 	privkey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
 	if err != nil {
 		return err
@@ -135,7 +134,7 @@ func createTLSCertificates(certpath string, keypath string, rsaKeySize int) erro
 		return err
 	}
 
-	logutil.BgLogger().Info("TLS Certificates created", zap.String("cert", certpath), zap.String("key", keypath),
+	logger.Info("TLS Certificates created", zap.String("cert", certpath), zap.String("key", keypath),
 		zap.Duration("validity", certValidity), zap.Int("rsaKeySize", rsaKeySize))
 	return nil
 }

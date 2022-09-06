@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -40,7 +40,7 @@ func (t *testingLog) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func testConfigManager(t *testing.T, cfg config.ConfigManager) (*ConfigManager, context.Context) {
+func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, context.Context) {
 	addr, err := url.Parse("http://127.0.0.1:0")
 	require.NoError(t, err)
 
@@ -84,7 +84,7 @@ func testConfigManager(t *testing.T, cfg config.ConfigManager) (*ConfigManager, 
 }
 
 func TestBase(t *testing.T) {
-	cfgmgr, ctx := testConfigManager(t, config.ConfigManager{
+	cfgmgr, ctx := testConfigManager(t, config.Advance{
 		IgnoreWrongNamespace: true,
 	})
 
@@ -148,7 +148,7 @@ func TestBase(t *testing.T) {
 }
 
 func TestBaseConcurrency(t *testing.T) {
-	cfgmgr, ctx := testConfigManager(t, config.ConfigManager{
+	cfgmgr, ctx := testConfigManager(t, config.Advance{
 		IgnoreWrongNamespace: true,
 	})
 
@@ -192,7 +192,7 @@ func TestBaseConcurrency(t *testing.T) {
 }
 
 func TestBaseWatch(t *testing.T) {
-	cfgmgr, ctx := testConfigManager(t, config.ConfigManager{
+	cfgmgr, ctx := testConfigManager(t, config.Advance{
 		IgnoreWrongNamespace: true,
 		WatchInterval:        "1s",
 	})

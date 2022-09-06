@@ -20,9 +20,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/TiProxy/pkg/util/errors"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/tidb/util/logutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"

@@ -17,7 +17,7 @@ package net
 import (
 	"encoding/binary"
 
-	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 )
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package cli
 
 import (
 	"bytes"
@@ -24,16 +24,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 const (
 	namespacePrefix = "/api/admin/namespace"
 )
 
-func listAllYamlFiles(dir string) ([]string, error) {
+func listAllFiles(dir, ext string) ([]string, error) {
 	infos, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,7 @@ func listAllYamlFiles(dir string) ([]string, error) {
 	var ret []string
 	for _, info := range infos {
 		fileName := info.Name()
-		if filepath.Ext(fileName) == ".yaml" {
+		if filepath.Ext(fileName) == ext {
 			ret = append(ret, filepath.Join(dir, fileName))
 		}
 	}
@@ -172,13 +172,13 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return cmd.Help()
 			}
 
-			yamlFiles, err := listAllYamlFiles(args[0])
+			nFiles, err := listAllFiles(args[0], ".yaml")
 			if err != nil {
 				return err
 			}
 
-			for _, yamlFile := range yamlFiles {
-				fileData, err := ioutil.ReadFile(yamlFile)
+			for _, nFile := range nFiles {
+				fileData, err := ioutil.ReadFile(nFile)
 				if err != nil {
 					return err
 				}

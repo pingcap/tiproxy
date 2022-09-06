@@ -15,20 +15,18 @@
 package errors_test
 
 import (
+	"fmt"
 	"testing"
 
-	serr "github.com/pingcap/TiProxy/pkg/util/errors"
+	serr "github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/stretchr/testify/require"
 )
 
-func TestCollect(t *testing.T) {
-	e1 := serr.New("tt")
-	e2 := serr.New("dd")
-	e3 := serr.New("dd")
-	e := serr.Collect(e1, e2, e3)
+func TestOfficialAPI(t *testing.T) {
+	e1 := serr.New("t")
+	e2 := fmt.Errorf("%w: f", e1)
 
-	require.ErrorIsf(t, e, e1, "equal to the external error")
-	require.Equal(t, serr.Unwrap(e), e, "unwrapping is noop")
-	require.Equal(t, e.(*serr.MError).Cause(), []error{e2, e3}, "get underlying errors")
-	require.NoError(t, serr.Collect(e3), "nil if there is no underlying error")
+	require.True(t, e1 == serr.Unwrap(e2))
+	require.True(t, serr.Is(e2, e1))
+	require.True(t, serr.As(e2, &e1))
 }

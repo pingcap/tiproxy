@@ -18,10 +18,11 @@ package main
 import (
 	"io/ioutil"
 
-	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/pkg/server"
-	"github.com/pingcap/TiProxy/pkg/util/cmd"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/lib/util/cmd"
+	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -33,6 +34,7 @@ func main() {
 	}
 
 	configFile := rootCmd.PersistentFlags().String("config", "conf/weirproxy.yaml", "weir proxy config file path")
+	pubAddr := rootCmd.PersistentFlags().String("pub_addr", "127.0.0.1", "IP or domain, will be used as the accessible addr for other clients")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
 
@@ -66,28 +68,23 @@ func main() {
 		}
 		logger = logger.Named("main")
 
-		srv, err := server.NewServer(cmd.Context(), cfg, logger)
+		srv, err := server.NewServer(cmd.Context(), cfg, logger, *pubAddr)
 		if err != nil {
-			logger.Error("fail to create server", zap.Error(err))
-			return err
+			return errors.Wrapf(err, "fail to create server")
 		}
 
 		var wg waitgroup.WaitGroup
-		wg.Run(func() {
-			if err := srv.Run(cmd.Context()); err != nil {
-				logger.Error("shutdown with error", zap.Error(err))
-			}
-		})
+		wg.Run(func() { srv.Run(cmd.Context()) })
 
 		<-cmd.Context().Done()
 		if e := srv.Close(); e != nil {
-			logger.Error("shutdown with errors", zap.Error(e))
+			err = errors.Wrapf(err, "shutdown with errors")
 		} else {
 			logger.Info("gracefully shutdown")
 		}
 
 		wg.Wait()
-		return nil
+		return err
 	}
 
 	cmd.RunRootCommand(rootCmd)

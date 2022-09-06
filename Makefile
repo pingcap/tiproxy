@@ -15,11 +15,16 @@
 
 PROJECTNAME = $(shell basename "$(PWD)")
 GOBIN := $(shell pwd)/bin
+DOCKERFLAG ?=
+RELEASE ?=
+ifneq ($(RELEASE), "")
+	DOCKERFLAG ?= --squash
+endif
 BUILD_TAGS ?=
 LDFLAGS ?= 
-GOFLAGS ?= -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}'
+BUILDFLAGS := $(BUILDFLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}'
 ifeq ("$(WITH_RACE)", "1")
-	GOFLAGS = $(GOFLAGS) -race
+	BUILDFLAGS = $(BUILDFLAGS) -race
 endif
 IMAGE_TAG ?= latest
 EXECUTABLE_TARGETS := $(patsubst cmd/%,cmd_%,$(wildcard cmd/*))
@@ -30,13 +35,13 @@ default: cmd
 
 cmd: $(EXECUTABLE_TARGETS)
 
-build: cmd
-	go build $(GOFLAGS) ./...
+build:
+	go build $(BUILDFLAGS) ./...
 
 cmd_%: OUTPUT=$(patsubst cmd_%,./bin/%,$@)
 cmd_%: SOURCE=$(patsubst cmd_%,./cmd/%,$@)
 cmd_%:
-	go build $(GOFLAGS) -o $(OUTPUT) $(SOURCE)
+	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
 test:
 	go test -coverprofile=.coverage.out ./...
@@ -45,4 +50,4 @@ test:
 	go tool cover -html=.coverage.out -o .coverage.html
 
 docker:
-	docker build -t "tiproxy:${IMAGE_TAG}" -f docker/Dockerfile .
+	docker build $(DOCKERFLAG) -t "tiproxy:${IMAGE_TAG}" --build-arg='GOPROXY=$(shell go env GOPROXY),BUILDFLAGS=$(BUILDFLAGS),' -f docker/Dockerfile .

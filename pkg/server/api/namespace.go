@@ -18,7 +18,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/lib/config"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"go.uber.org/zap"
