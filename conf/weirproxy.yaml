@@ -5,7 +5,6 @@ proxy:
   max-connections: 1000
   pd-addrs: "127.0.0.1:2379"
 metrics:
-  prom-cluster: "default"
 api:
   addr: "0.0.0.0:3080"
   enable-basic-auth: false

@@ -57,7 +57,7 @@ func RetLabel(err error) string {
 	return opFailed
 }
 
-func RegisterProxyMetrics(cluster string) {
+func RegisterProxyMetrics() {
 	prometheus.MustRegister(PanicCounter)
 	prometheus.MustRegister(QueryTotalCounter)
 	prometheus.MustRegister(ExecuteErrorCounter)

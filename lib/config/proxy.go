@@ -22,10 +22,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	DefaultClusterName = "default"
-)
-
 type Config struct {
 	Workdir  string      `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
 	Proxy    ProxyServer `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
@@ -37,7 +33,6 @@ type Config struct {
 }
 
 type Metrics struct {
-	PromCluster string `yaml:"prom-cluster,omitempty" toml:"prom-cluster,omitempty" json:"prom-cluster,omitempty"`
 }
 
 type ProxyServerOnline struct {
@@ -111,9 +106,6 @@ func NewConfig(data []byte) (*Config, error) {
 }
 
 func (cfg *Config) Check() error {
-	if cfg.Metrics.PromCluster == "" {
-		cfg.Metrics.PromCluster = DefaultClusterName
-	}
 	if cfg.Workdir == "" {
 		d, err := os.Getwd()
 		if err != nil {
