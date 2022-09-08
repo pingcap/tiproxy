@@ -27,14 +27,14 @@ import (
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy"
 	"github.com/pingcap/TiProxy/pkg/server/api"
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/atomic"
@@ -93,46 +93,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
 		api.Register(engine.Group("/api"), ready, cfg.API, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		etcd_cfg := embed.NewConfig()
-
-		apiAddrStr := cfg.API.Addr
-		if !strings.HasPrefix(apiAddrStr, "http://") {
-			apiAddrStr = fmt.Sprintf("http://%s", apiAddrStr)
-		}
-		apiAddr, uerr := url.Parse(apiAddrStr)
-		if uerr != nil {
-			err = errors.WithStack(uerr)
-			return
-		}
-		etcd_cfg.LCUrls = []url.URL{*apiAddr}
-		apiAddrAdvertise := *apiAddr
-		apiAddrAdvertise.Host = fmt.Sprintf("%s:%s", pubAddr, apiAddrAdvertise.Port())
-		etcd_cfg.ACUrls = []url.URL{apiAddrAdvertise}
-
-		peerPort := cfg.Advance.PeerPort
-		if peerPort == "" {
-			peerPortNum, uerr := strconv.Atoi(apiAddr.Port())
-			if uerr != nil {
-				err = errors.WithStack(uerr)
-				return
-			}
-			peerPort = strconv.Itoa(peerPortNum + 1)
-		}
-		peerAddr := *apiAddr
-		peerAddr.Host = fmt.Sprintf("%s:%s", peerAddr.Hostname(), peerPort)
-		etcd_cfg.LPUrls = []url.URL{peerAddr}
-		peerAddrAdvertise := *apiAddr
-		peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", pubAddr, peerPort)
-		etcd_cfg.APUrls = []url.URL{peerAddrAdvertise}
-
-		etcd_cfg.Name = "proxy-" + fmt.Sprint(time.Now().UnixMicro())
-		etcd_cfg.InitialCluster = etcd_cfg.InitialClusterFromName(etcd_cfg.Name)
-		etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
-		etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
-		etcd_cfg.UserHandlers = map[string]http.Handler{
-			"/api/": engine,
-		}
-		srv.Etcd, err = embed.StartEtcd(etcd_cfg)
+		srv.Etcd, err = buildEtcd(ctx, cfg, logger, pubAddr, engine)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -255,4 +216,47 @@ func (s *Server) Close() error {
 		wg.Wait()
 	}
 	return errors.Collect(ErrCloseServer, errs...)
+}
+
+func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string, engine *gin.Engine) (srv *embed.Etcd, err error) {
+	etcd_cfg := embed.NewConfig()
+
+	apiAddrStr := cfg.API.Addr
+	if !strings.HasPrefix(apiAddrStr, "http://") {
+		apiAddrStr = fmt.Sprintf("http://%s", apiAddrStr)
+	}
+	apiAddr, uerr := url.Parse(apiAddrStr)
+	if uerr != nil {
+		err = errors.WithStack(uerr)
+		return
+	}
+	etcd_cfg.LCUrls = []url.URL{*apiAddr}
+	apiAddrAdvertise := *apiAddr
+	apiAddrAdvertise.Host = fmt.Sprintf("%s:%s", pubAddr, apiAddrAdvertise.Port())
+	etcd_cfg.ACUrls = []url.URL{apiAddrAdvertise}
+
+	peerPort := cfg.Advance.PeerPort
+	if peerPort == "" {
+		peerPortNum, uerr := strconv.Atoi(apiAddr.Port())
+		if uerr != nil {
+			err = errors.WithStack(uerr)
+			return
+		}
+		peerPort = strconv.Itoa(peerPortNum + 1)
+	}
+	peerAddr := *apiAddr
+	peerAddr.Host = fmt.Sprintf("%s:%s", peerAddr.Hostname(), peerPort)
+	etcd_cfg.LPUrls = []url.URL{peerAddr}
+	peerAddrAdvertise := *apiAddr
+	peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", pubAddr, peerPort)
+	etcd_cfg.APUrls = []url.URL{peerAddrAdvertise}
+
+	etcd_cfg.Name = "proxy-" + fmt.Sprint(time.Now().UnixMicro())
+	etcd_cfg.InitialCluster = etcd_cfg.InitialClusterFromName(etcd_cfg.Name)
+	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
+	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
+	etcd_cfg.UserHandlers = map[string]http.Handler{
+		"/api/": engine,
+	}
+	return embed.StartEtcd(etcd_cfg)
 }
