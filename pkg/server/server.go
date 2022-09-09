@@ -63,7 +63,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	ready := atomic.NewBool(false)
 
 	// setup metrics
-	metrics.SetupMetrics(cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
+	metrics.SetupMetrics(logger.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
 
 	// setup gin and etcd
 	{

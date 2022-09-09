@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
@@ -25,13 +26,13 @@ import (
 func TestSystimeMonitor(t *testing.T) {
 	errTriggered := atomic.NewBool(false)
 	nowTriggered := atomic.NewBool(false)
-	go StartMonitor(
+	log := logger.CreateLoggerForTest(t)
+	go StartMonitor(log,
 		func() time.Time {
 			if !nowTriggered.Load() {
 				nowTriggered.Store(true)
 				return time.Now()
 			}
-
 			return time.Now().Add(-2 * time.Second)
 		}, func() {
 			errTriggered.Store(true)

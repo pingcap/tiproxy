@@ -12,18 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metrics
+package logger
 
 import (
 	"testing"
 
-	"github.com/pingcap/TiProxy/lib/util/logger"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-func TestPushMetrics(t *testing.T) {
-	SetupMetrics(logger.CreateLoggerForTest(t), "127.0.0.1:9091", 15, "0.0.0.0:6000")
+type testingLog struct {
+	*testing.T
 }
 
-func TestNoPushMetrics(t *testing.T) {
-	SetupMetrics(logger.CreateLoggerForTest(t), "", 15, "0.0.0.0:6000")
+func (t *testingLog) Write(b []byte) (int, error) {
+	t.Logf("%s", b)
+	return len(b), nil
+}
+
+// CreateLoggerForTest creates a logger for unit tests.
+func CreateLoggerForTest(t *testing.T) *zap.Logger {
+	return zap.New(zapcore.NewCore(
+		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
+		zapcore.AddSync(&testingLog{t}),
+		zap.InfoLevel,
+	)).Named(t.Name())
 }

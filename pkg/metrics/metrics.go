@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/util/systimemon"
-	"github.com/pingcap/tidb/util/logutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -44,10 +43,10 @@ const (
 )
 
 // SetupMetrics pushes metrics to prometheus.
-func SetupMetrics(metricsAddr string, metricsInterval uint, proxyAddr string) {
+func SetupMetrics(logger *zap.Logger, metricsAddr string, metricsInterval uint, proxyAddr string) {
 	registerProxyMetrics()
-	setupMonitor()
-	pushMetric(metricsAddr, time.Duration(metricsInterval)*time.Second, proxyAddr)
+	setupMonitor(logger)
+	pushMetric(logger, metricsAddr, time.Duration(metricsInterval)*time.Second, proxyAddr)
 }
 
 // RegisterProxyMetrics registers metrics.
@@ -66,7 +65,7 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(MigrateDurationHistogram)
 }
 
-func setupMonitor() {
+func setupMonitor(logger *zap.Logger) {
 	// Enable the mutex profile, 1/10 of mutex blocking event sampling.
 	runtime.SetMutexProfileFraction(10)
 	systimeErrHandler := func() {
@@ -81,21 +80,21 @@ func setupMonitor() {
 			KeepAliveCounter.Inc()
 		}
 	}
-	go systimemon.StartMonitor(time.Now, systimeErrHandler, successCallBack)
+	go systimemon.StartMonitor(logger, time.Now, systimeErrHandler, successCallBack)
 }
 
 // pushMetric pushes metrics in background.
-func pushMetric(addr string, interval time.Duration, proxyAddr string) {
+func pushMetric(logger *zap.Logger, addr string, interval time.Duration, proxyAddr string) {
 	if interval == time.Duration(0) || len(addr) == 0 {
-		logutil.BgLogger().Info("disable Prometheus push client")
+		logger.Info("disable Prometheus push client")
 		return
 	}
-	logutil.BgLogger().Info("start prometheus push client", zap.String("server addr", addr), zap.String("interval", interval.String()))
-	go prometheusPushClient(addr, interval, proxyAddr)
+	logger.Info("start prometheus push client", zap.String("server addr", addr), zap.String("interval", interval.String()))
+	go prometheusPushClient(logger, addr, interval, proxyAddr)
 }
 
 // prometheusPushClient pushes metrics to Prometheus Pushgateway.
-func prometheusPushClient(addr string, interval time.Duration, proxyAddr string) {
+func prometheusPushClient(logger *zap.Logger, addr string, interval time.Duration, proxyAddr string) {
 	job := "proxy"
 	pusher := push.New(addr, job)
 	pusher = pusher.Gatherer(prometheus.DefaultGatherer)
@@ -103,7 +102,7 @@ func prometheusPushClient(addr string, interval time.Duration, proxyAddr string)
 	for {
 		err := pusher.Push()
 		if err != nil {
-			logutil.BgLogger().Error("could not push metrics to prometheus pushgateway", zap.String("err", err.Error()))
+			logger.Error("could not push metrics to prometheus pushgateway", zap.String("err", err.Error()))
 		}
 		time.Sleep(interval)
 	}
