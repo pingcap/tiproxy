@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - if: ${{ runner.os == 'Windows' }}
-        name: Use GNU tar from git for faster cache restore
+        name: Use GNU tar for faster cache restore
         shell: cmd
         run: |
           echo "Adding GNU tar to PATH"
