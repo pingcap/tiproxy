@@ -37,13 +37,13 @@ func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, contex
 
 	testDir := t.TempDir()
 
-	log := logger.CreateLoggerForTest(t)
+	logger := logger.CreateLoggerForTest(t)
 
 	etcd_cfg := embed.NewConfig()
 	etcd_cfg.LCUrls = []url.URL{*addr}
 	etcd_cfg.LPUrls = []url.URL{*addr}
 	etcd_cfg.Dir = filepath.Join(testDir, "etcd")
-	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(log.Named("etcd"))
+	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
 	etcd, err := embed.StartEtcd(etcd_cfg)
 	require.NoError(t, err)
 
@@ -58,7 +58,7 @@ func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, contex
 	}
 
 	cfgmgr := NewConfigManager()
-	require.NoError(t, cfgmgr.Init(ctx, ends, cfg, log))
+	require.NoError(t, cfgmgr.Init(ctx, ends, cfg, config.TLSCert{}, logger))
 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())

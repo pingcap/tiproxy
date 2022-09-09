@@ -28,6 +28,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
@@ -58,8 +59,8 @@ type Server struct {
 func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string) (srv *Server, err error) {
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
-		NamespaceManager: mgrns.NewNamespaceManager(),
 		MetricsManager:   metrics.NewMetricsManager(),
+		NamespaceManager: mgrns.NewNamespaceManager(cfg.Workdir, cfg.Security.RSAKeySize),
 	}
 
 	ready := atomic.NewBool(false)
@@ -116,7 +117,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		for i := range addrs {
 			addrs[i] = srv.Etcd.Clients[i].Addr().String()
 		}
-		err = srv.ConfigManager.Init(ctx, addrs, cfg.Advance, logger.Named("config"))
+		err = srv.ConfigManager.Init(ctx, addrs, cfg.Advance, cfg.Security.Client, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -144,7 +145,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup namespace manager
 	{
-		srv.ObserverClient, err = router.InitEtcdClient(cfg)
+		srv.ObserverClient, err = router.InitEtcdClient(logger, cfg)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -232,7 +233,6 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	}
 	apiAddr, uerr := url.Parse(apiAddrStr)
 	if uerr != nil {
-		err = errors.WithStack(uerr)
 		return
 	}
 	etcd_cfg.LCUrls = []url.URL{*apiAddr}
@@ -244,7 +244,6 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	if peerPort == "" {
 		peerPortNum, uerr := strconv.Atoi(apiAddr.Port())
 		if uerr != nil {
-			err = errors.WithStack(uerr)
 			return
 		}
 		peerPort = strconv.Itoa(peerPortNum + 1)
@@ -260,6 +259,11 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	etcd_cfg.InitialCluster = etcd_cfg.InitialClusterFromName(etcd_cfg.Name)
 	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
 	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
+
+	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.Client, cfg.Security.Cluster, cfg.Workdir, "frontend", cfg.Security.RSAKeySize); err != nil {
+		return
+	}
+
 	etcd_cfg.UserHandlers = map[string]http.Handler{
 		"/api/": engine,
 	}

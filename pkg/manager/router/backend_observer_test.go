@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/stretchr/testify/require"
@@ -241,7 +242,7 @@ func createEtcdClient(t *testing.T, etcd *embed.Etcd) *clientv3.Client {
 			PDAddrs: etcd.Clients[0].Addr().String(),
 		},
 	}
-	client, err := InitEtcdClient(cfg)
+	client, err := InitEtcdClient(logger.CreateLoggerForTest(t), cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, client.Close())

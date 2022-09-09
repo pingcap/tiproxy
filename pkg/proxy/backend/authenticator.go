@@ -19,8 +19,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/hack"
 )
@@ -48,7 +48,7 @@ func (auth *Authenticator) String() string {
 		auth.user, auth.dbname, auth.capability, auth.collation)
 }
 
-func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
+func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	backendIO.ResetSequence()
 	// Read initial handshake packet from the backend.
 	serverPkt, serverCapability, err := auth.readInitialHandshake(backendIO)
@@ -76,7 +76,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	sslEnabled := uint32(clientCapability)&mysql.ClientSSL > 0
 	if sslEnabled {
 		// Upgrade TLS with the client if SSL is enabled.
-		if _, err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
+		if _, err = clientIO.UpgradeToServerTLS(frontendTLSConfig); err != nil {
 			return err
 		}
 	} else {

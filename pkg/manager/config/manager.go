@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -61,7 +62,7 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
-func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.Advance, logger *zap.Logger) error {
+func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.Advance, scfg config.TLSCert, logger *zap.Logger) error {
 	srv.logger = logger
 	srv.ignoreWrongNamespace = cfg.IgnoreWrongNamespace
 	if cfg.WatchInterval == "" {
@@ -79,6 +80,14 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.A
 	etcdConfig := clientv3.Config{
 		Endpoints:   addrs,
 		DialTimeout: DefaultEtcdDialTimeout,
+	}
+
+	var err error
+	// local connection, let us skip ca check
+	scfg.SkipCA = true
+	etcdConfig.TLS, err = security.BuildClientTLSConfig(logger, scfg, "frontend")
+	if err != nil {
+		return errors.Wrapf(err, "create etcd config center error")
 	}
 
 	etcdClient, err := clientv3.New(etcdConfig)

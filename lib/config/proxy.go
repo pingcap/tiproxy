@@ -76,9 +76,11 @@ type LogFile struct {
 }
 
 type TLSCert struct {
-	CA   string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
-	Cert string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
-	Key  string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
+	CA        string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
+	SkipCA    bool   `yaml:"skip-ca,omitempty" toml:"skip-ca,omitempty" json:"skip-ca,omitempty"`
+	Cert      string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
+	Key       string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
+	AutoCerts bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty"`
 }
 
 func (c TLSCert) HasCert() bool {
@@ -91,8 +93,10 @@ func (c TLSCert) HasCA() bool {
 
 type Security struct {
 	RSAKeySize int     `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
-	Server     TLSCert `yaml:"server,omitempty" toml:"server,omitempty" json:"server,omitempty"`
+	Client     TLSCert `yaml:"client,omitempty" toml:"client,omitempty" json:"client,omitempty"`
 	Cluster    TLSCert `yaml:"cluster,omitempty" toml:"cluster,omitempty" json:"cluster,omitempty"`
+	PDTLS      TLSCert `yaml:"pd-tls,omitempty" toml:"pd-tls,omitempty" json:"pd-tls,omitempty"`
+	TiDBTLS    TLSCert `yaml:"tidb-tls,omitempty" toml:"tidb-tls,omitempty" json:"tidb-tls,omitempty"`
 }
 
 func NewConfig(data []byte) (*Config, error) {

@@ -57,15 +57,33 @@ var testProxyConfig = Config{
 	},
 	Security: Security{
 		RSAKeySize: 64,
-		Server: TLSCert{
-			CA:   "a",
-			Cert: "b",
-			Key:  "c",
+		Client: TLSCert{
+			CA:        "a",
+			SkipCA:    true,
+			Cert:      "b",
+			Key:       "c",
+			AutoCerts: true,
 		},
 		Cluster: TLSCert{
-			CA:   "a",
-			Cert: "b",
-			Key:  "c",
+			CA:        "a",
+			SkipCA:    true,
+			Cert:      "b",
+			Key:       "c",
+			AutoCerts: true,
+		},
+		PDTLS: TLSCert{
+			CA:        "a",
+			SkipCA:    true,
+			Cert:      "b",
+			Key:       "c",
+			AutoCerts: true,
+		},
+		TiDBTLS: TLSCert{
+			CA:        "a",
+			SkipCA:    true,
+			Cert:      "b",
+			Key:       "c",
+			AutoCerts: true,
 		},
 	},
 }

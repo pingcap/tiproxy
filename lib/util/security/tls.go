@@ -22,60 +22,29 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
+	"io/ioutil"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/pingcap/errors"
+	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.uber.org/zap"
 )
 
-// CreateServerTLSConfig creates a tlsConfig that is used to connect to the client.
-func CreateServerTLSConfig(logger *zap.Logger, ca, key, cert string, rsaKeySize int, workdir string) (tlsConfig *tls.Config, err error) {
-	if len(cert) == 0 || len(key) == 0 {
-		cert = filepath.Join(workdir, "cert.pem")
-		key = filepath.Join(workdir, "key.pem")
-		if err := createTLSCertificates(logger, cert, key, rsaKeySize); err != nil {
-			return nil, err
-		}
-	}
-
-	var tlsCert tls.Certificate
-	tlsCert, err = tls.LoadX509KeyPair(cert, key)
-	if err != nil {
-		logger.Warn("load x509 failed", zap.Error(err))
-		err = errors.Trace(err)
-		return
-	}
-
-	// Try loading CA cert.
-	clientAuthPolicy := tls.NoClientCert
-	var certPool *x509.CertPool
-	if len(ca) > 0 {
-		var caCert []byte
-		caCert, err = os.ReadFile(ca)
-		if err != nil {
-			logger.Warn("read file failed", zap.Error(err))
-			err = errors.Trace(err)
-			return
-		}
-		certPool = x509.NewCertPool()
-		if certPool.AppendCertsFromPEM(caCert) {
-			clientAuthPolicy = tls.VerifyClientCertIfGiven
-		}
-	}
-
-	tlsConfig = &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-		ClientCAs:    certPool,
-		ClientAuth:   clientAuthPolicy,
-	}
-	return
-}
-
 func createTLSCertificates(logger *zap.Logger, certpath string, keypath string, rsaKeySize int) error {
+	_, e1 := os.Stat(certpath)
+	_, e2 := os.Stat(keypath)
+	if errors.Is(e1, os.ErrExist) &&  errors.Is(e2, os.ErrExist) {
+		return nil
+	} else if errors.Is(e1, os.ErrExist) ||  errors.Is(e2, os.ErrExist) {
+		return errors.New("cert and key should be present or not at the same time")
+	}
+
 	privkey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
 	if err != nil {
 		return err
@@ -137,67 +106,6 @@ func createTLSCertificates(logger *zap.Logger, certpath string, keypath string, 
 	logger.Info("TLS Certificates created", zap.String("cert", certpath), zap.String("key", keypath),
 		zap.Duration("validity", certValidity), zap.Int("rsaKeySize", rsaKeySize))
 	return nil
-}
-
-// CreateClusterTLSConfig generates tls's config based on security section of the config.
-// It's used to connect to PD.
-func CreateClusterTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Config, err error) {
-	if len(sslCA) != 0 {
-		certPool := x509.NewCertPool()
-		// Create a certificate pool from the certificate authority
-		var ca []byte
-		ca, err = os.ReadFile(sslCA)
-		if err != nil {
-			err = errors.Errorf("could not read ca certificate: %s", err)
-			return
-		}
-		// Append the certificates from the CA
-		if !certPool.AppendCertsFromPEM(ca) {
-			err = errors.New("failed to append ca certs")
-			return
-		}
-		tlsConfig = &tls.Config{
-			RootCAs:   certPool,
-			ClientCAs: certPool,
-		}
-
-		if len(sslCert) != 0 && len(sslKey) != 0 {
-			getCert := func() (*tls.Certificate, error) {
-				// Load the client certificates from disk
-				cert, err := tls.LoadX509KeyPair(sslCert, sslKey)
-				if err != nil {
-					return nil, errors.Errorf("could not load client key pair: %s", err)
-				}
-				return &cert, nil
-			}
-			// pre-test cert's loading.
-			if _, err = getCert(); err != nil {
-				return
-			}
-			tlsConfig.GetClientCertificate = func(info *tls.CertificateRequestInfo) (certificate *tls.Certificate, err error) {
-				return getCert()
-			}
-			tlsConfig.GetCertificate = func(info *tls.ClientHelloInfo) (certificate *tls.Certificate, err error) {
-				return getCert()
-			}
-		}
-	}
-	return
-}
-
-// CreateClientTLSConfig creates a tlsConfig that is used to connect to the backend server.
-func CreateClientTLSConfig(sslCA, sslKey, sslCert string) (tlsConfig *tls.Config, err error) {
-	tlsConfig, err = CreateClusterTLSConfig(sslCA, sslKey, sslCert)
-	if err != nil {
-		return nil, err
-	}
-	if tlsConfig != nil {
-		return tlsConfig, nil
-	}
-	tlsConfig = &tls.Config{
-		InsecureSkipVerify: true,
-	}
-	return
 }
 
 // CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
@@ -300,6 +208,115 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	certpool.AppendCertsFromPEM(caPEM.Bytes())
 	clientTLSConf = &tls.Config{
 		RootCAs: certpool,
+	}
+
+	return
+}
+
+func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSCert, workdir, mod string, keySize int) (*tls.Config, error) {
+	if !cfg.HasCert() {
+		if cfg.AutoCerts {
+			cfg.Cert = filepath.Join(workdir, mod, "cert.pem")
+			cfg.Key = filepath.Join(workdir, mod, "key.pem")
+			if err := createTLSCertificates(logger, cfg.Cert, cfg.Key, keySize); err != nil {
+				return nil, err
+			}
+			return BuildServerTLSConfig(logger, cfg, workdir, mod, keySize)
+		}
+
+		// TODO: require certs here
+		logger.Warn(fmt.Sprintf("require certificates to secure %s clients connections", mod))
+		return nil, nil
+	}
+
+	tcfg := &tls.Config{}
+	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
+	if err != nil {
+		return nil, errors.Errorf("failed to load certs for %s: %w", mod, err)
+	}
+	tcfg.Certificates = append(tcfg.Certificates, cert)
+
+	if !cfg.HasCA() {
+		logger.Warn(fmt.Sprintf("no signed certs for %s, will not authenticate %s clients (connection is still secured)", mod, mod))
+		return tcfg, nil
+	}
+
+	tcfg.ClientAuth = tls.RequireAndVerifyClientCert
+	tcfg.ClientCAs = x509.NewCertPool()
+	certBytes, err := ioutil.ReadFile(cfg.CA)
+	if err != nil {
+		return nil, errors.Errorf("failed to read CA for %s: %w", mod, err)
+	}
+	if !tcfg.ClientCAs.AppendCertsFromPEM(certBytes) {
+		return nil, errors.Errorf("failed to append CA for %s", mod)
+	}
+	return tcfg, nil
+}
+
+func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSCert, mod string) (*tls.Config, error) {
+	if !cfg.HasCA() {
+		logger.Warn(fmt.Sprintf("require CA to verify %s server connections", mod))
+		if cfg.SkipCA {
+			// still enable TLS without verify server certs
+			return &tls.Config{InsecureSkipVerify: true}, nil
+		}
+		// no TLS
+		return nil, nil
+	}
+
+	tcfg := &tls.Config{}
+	tcfg.ClientAuth = tls.RequireAndVerifyClientCert
+	tcfg.ClientCAs = x509.NewCertPool()
+	certBytes, err := ioutil.ReadFile(cfg.CA)
+	if err != nil {
+		return nil, errors.Errorf("failed to read CA for %s: %w", mod, err)
+	}
+	if !tcfg.ClientCAs.AppendCertsFromPEM(certBytes) {
+		return nil, errors.Errorf("failed to append CA for %s", mod)
+	}
+
+	if !cfg.HasCert() {
+		logger.Warn(fmt.Sprintf("no certs for %s, server may reject the connection", mod))
+		return tcfg, nil
+	}
+	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
+	if err != nil {
+		return nil, errors.Errorf("failed to load certs for %s: %w", mod, err)
+	}
+	tcfg.Certificates = append(tcfg.Certificates, cert)
+
+	return tcfg, nil
+}
+
+func BuildEtcdTLSConfig(logger *zap.Logger, client, cluster config.TLSCert, workdir, mod string, keySize int) (clientInfo, peerInfo transport.TLSInfo, err error) {
+	if !client.HasCert() {
+		if client.AutoCerts {
+			client.Cert = filepath.Join(workdir, mod, "cert.pem")
+			client.Key = filepath.Join(workdir, mod, "key.pem")
+			if err = createTLSCertificates(logger, client.Cert, client.Key, keySize); err != nil {
+				return
+			}
+			return BuildEtcdTLSConfig(logger, client, cluster, workdir, mod, keySize)
+		}
+	} else {
+		clientInfo.CertFile = client.Cert
+		clientInfo.KeyFile = client.Key
+		if client.HasCA() {
+			clientInfo.ClientCertAuth = true
+			clientInfo.TrustedCAFile = client.CA
+		} else {
+			logger.Warn("no signed certs for etcd clients, proxy will not authenticate etcd clients (connection is still secured)")
+		}
+	}
+
+	if cluster.HasCA() && cluster.HasCert() {
+		peerInfo.CertFile = cluster.Cert
+		peerInfo.KeyFile = cluster.Key
+		peerInfo.TrustedCAFile = cluster.CA
+		peerInfo.ClientCertAuth = true
+	} else if cluster.HasCA() || cluster.HasCert() {
+		err = errors.New("need a full set of cert/ca/key for secure etcd peer inter-communication")
+		return
 	}
 
 	return

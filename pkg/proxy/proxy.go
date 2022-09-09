@@ -43,8 +43,8 @@ type SQLServer struct {
 	listener         net.Listener
 	logger           *zap.Logger
 	nsmgr            *mgrns.NamespaceManager
-	serverTLSConfig  *tls.Config
-	clusterTLSConfig *tls.Config
+	frontendTLSConfig  *tls.Config
+	backendTLSConfig *tls.Config
 	wg               waitgroup.WaitGroup
 
 	mu serverState
@@ -65,10 +65,10 @@ func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, sc
 		},
 	}
 
-	if s.serverTLSConfig, err = security.CreateServerTLSConfig(logger, scfg.Server.CA, scfg.Server.Key, scfg.Server.Cert, scfg.RSAKeySize, workdir); err != nil {
+	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.Client, workdir, "frontend", scfg.RSAKeySize); err != nil {
 		return nil, err
 	}
-	if s.clusterTLSConfig, err = security.CreateClientTLSConfig(scfg.Cluster.CA, scfg.Cluster.Key, scfg.Cluster.Cert); err != nil {
+	if s.backendTLSConfig, err = security.BuildClientTLSConfig(logger, scfg.TiDBTLS, "backend"); err != nil {
 		return nil, err
 	}
 
@@ -125,7 +125,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID))
-	clientConn := client.NewClientConnection(logger, conn, s.serverTLSConfig, s.clusterTLSConfig, s.nsmgr, backend.NewBackendConnManager(connID))
+	clientConn := client.NewClientConnection(logger, conn, s.frontendTLSConfig, s.backendTLSConfig, s.nsmgr, backend.NewBackendConnManager(connID))
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 
