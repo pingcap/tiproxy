@@ -1,7 +1,6 @@
 package config
 
 import (
-	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,16 +8,10 @@ import (
 
 var testProxyConfig = Config{
 	Workdir: "./wd",
-	LCUrlsI: []string{"http://0.0.0.0:3080"},
-	ACUrlsI: []string{},
-	LPUrlsI: []string{"http://0.0.0.0:3081"},
-	APUrlsI: []string{},
-	LCUrls:  []url.URL{},
-	ACUrls:  []url.URL{},
-	LPUrls:  []url.URL{},
-	APUrls:  []url.URL{},
-	Config: ConfigManager{
+	Advance: Advance{
+		PeerPort:             "343",
 		IgnoreWrongNamespace: true,
+		WatchInterval:        "30m",
 	},
 	Proxy: ProxyServer{
 		Addr:    "0.0.0.0:4000",
@@ -29,13 +22,12 @@ var testProxyConfig = Config{
 		},
 	},
 	API: API{
+		Addr:            "0.0.0.0:3080",
 		EnableBasicAuth: false,
 		User:            "user",
 		Password:        "pwd",
 	},
-	Metrics: Metrics{
-		PromCluster: "ffgfg",
-	},
+	Metrics: Metrics{},
 	Log: Log{
 		Level:   "info",
 		Encoder: "tidb",

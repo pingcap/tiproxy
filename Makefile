@@ -35,19 +35,24 @@ default: cmd
 
 cmd: $(EXECUTABLE_TARGETS)
 
-build:
+build: cmd
 	go build $(BUILDFLAGS) ./...
+	cd lib && go build $(BUILDFLAGS) ./...
 
 cmd_%: OUTPUT=$(patsubst cmd_%,./bin/%,$@)
 cmd_%: SOURCE=$(patsubst cmd_%,./cmd/%,$@)
 cmd_%:
 	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
-test:
-	go test -coverprofile=.coverage.out ./...
-	go tool cover -func=.coverage.out -o .coverage.func
-	tail -1 .coverage.func
-	go tool cover -html=.coverage.out -o .coverage.html
+test: ./bin/gocovmerge
+	go test -coverprofile=.cover.pkg ./...
+	cd lib && go test -coverprofile=../.cover.lib ./...
+	./bin/gocovmerge .cover.* > .cover
+	rm .cover.*
+	go tool cover -html=.cover -o .cover.html
+
+./bin/gocovmerge:
+	GOBIN=$(GOBIN) go install github.com/wadey/gocovmerge@master
 
 docker:
 	docker build $(DOCKERFLAG) -t "tiproxy:${IMAGE_TAG}" --build-arg='GOPROXY=$(shell go env GOPROXY),BUILDFLAGS=$(BUILDFLAGS),' -f docker/Dockerfile .
