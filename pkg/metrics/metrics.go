@@ -16,7 +16,19 @@
 package metrics
 
 import (
+	"fmt"
+	"net"
+	"os"
+	"runtime"
+	"time"
+
+	"github.com/pingcap/TiProxy/lib/util/systimemon"
+	"github.com/pingcap/tidb/util/logutil"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/push"
+	dto "github.com/prometheus/client_model/go"
+	"go.uber.org/zap"
 )
 
 const (
@@ -25,54 +37,104 @@ const (
 
 // metrics labels.
 const (
-	LabelServer    = "server"
-	LabelQueryCtx  = "queryctx"
-	LabelBackend   = "backend"
-	LabelSession   = "session"
-	LabelDomain    = "domain"
-	LabelDDLOwner  = "ddl-owner"
-	LabelDDL       = "ddl"
-	LabelDDLWorker = "ddl-worker"
-	LabelDDLSyncer = "ddl-syncer"
-	LabelGCWorker  = "gcworker"
-	LabelAnalyze   = "analyze"
-
-	LabelBatchRecvLoop = "batch-recv-loop"
-	LabelBatchSendLoop = "batch-send-loop"
-
-	opSucc   = "ok"
-	opFailed = "err"
-
-	LableScope   = "scope"
-	ScopeGlobal  = "global"
-	ScopeSession = "session"
+	LabelServer  = "server"
+	LabelBalance = "balance"
+	LabelSession = "session"
+	LabelMonitor = "monitor"
 )
 
-// RetLabel returns "ok" when err == nil and "err" when err != nil.
-// This could be useful when you need to observe the operation result.
-func RetLabel(err error) string {
-	if err == nil {
-		return opSucc
-	}
-	return opFailed
+// SetupMetrics pushes metrics to prometheus.
+func SetupMetrics(metricsAddr string, metricsInterval uint, proxyAddr string) {
+	registerProxyMetrics()
+	setupMonitor()
+	pushMetric(metricsAddr, time.Duration(metricsInterval)*time.Second, proxyAddr)
 }
 
-func RegisterProxyMetrics() {
-	prometheus.MustRegister(PanicCounter)
-	prometheus.MustRegister(QueryTotalCounter)
-	prometheus.MustRegister(ExecuteErrorCounter)
+// RegisterProxyMetrics registers metrics.
+func registerProxyMetrics() {
+	prometheus.DefaultRegisterer.Unregister(prometheus.NewGoCollector())
+	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
+
 	prometheus.MustRegister(ConnGauge)
+	prometheus.MustRegister(TimeJumpBackCounter)
+	prometheus.MustRegister(KeepAliveCounter)
+	prometheus.MustRegister(BackendStatusGauge)
+	prometheus.MustRegister(BackendConnGauge)
+	prometheus.MustRegister(QueryTotalCounter)
+	prometheus.MustRegister(QueryDurationHistogram)
+	prometheus.MustRegister(MigrateCounter)
+	prometheus.MustRegister(MigrateDurationHistogram)
+}
 
-	// query ctx metrics
-	prometheus.MustRegister(QueryCtxQueryCounter)
-	prometheus.MustRegister(QueryCtxQueryDeniedCounter)
-	prometheus.MustRegister(QueryCtxQueryDurationHistogram)
-	prometheus.MustRegister(QueryCtxGauge)
-	prometheus.MustRegister(QueryCtxAttachedConnGauge)
-	prometheus.MustRegister(QueryCtxTransactionDuration)
+func setupMonitor() {
+	// Enable the mutex profile, 1/10 of mutex blocking event sampling.
+	runtime.SetMutexProfileFraction(10)
+	systimeErrHandler := func() {
+		TimeJumpBackCounter.Inc()
+	}
+	callBackCount := 0
+	successCallBack := func() {
+		callBackCount++
+		// It is callback by monitor per second, we increase metrics.KeepAliveCounter per 5s.
+		if callBackCount >= 5 {
+			callBackCount = 0
+			KeepAliveCounter.Inc()
+		}
+	}
+	go systimemon.StartMonitor(time.Now, systimeErrHandler, successCallBack)
+}
 
-	// backend metrics
-	prometheus.MustRegister(BackendEventCounter)
-	prometheus.MustRegister(BackendQueryCounter)
-	prometheus.MustRegister(BackendConnInUseGauge)
+// pushMetric pushes metrics in background.
+func pushMetric(addr string, interval time.Duration, proxyAddr string) {
+	if interval == time.Duration(0) || len(addr) == 0 {
+		logutil.BgLogger().Info("disable Prometheus push client")
+		return
+	}
+	logutil.BgLogger().Info("start prometheus push client", zap.String("server addr", addr), zap.String("interval", interval.String()))
+	go prometheusPushClient(addr, interval, proxyAddr)
+}
+
+// prometheusPushClient pushes metrics to Prometheus Pushgateway.
+func prometheusPushClient(addr string, interval time.Duration, proxyAddr string) {
+	job := "proxy"
+	pusher := push.New(addr, job)
+	pusher = pusher.Gatherer(prometheus.DefaultGatherer)
+	pusher = pusher.Grouping("instance", instanceName(proxyAddr))
+	for {
+		err := pusher.Push()
+		if err != nil {
+			logutil.BgLogger().Error("could not push metrics to prometheus pushgateway", zap.String("err", err.Error()))
+		}
+		time.Sleep(interval)
+	}
+}
+
+func instanceName(proxyAddr string) string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "unknown"
+	}
+	_, port, err := net.SplitHostPort(proxyAddr)
+	if err != nil {
+		return "unknown"
+	}
+	return fmt.Sprintf("%s_%s", hostname, port)
+}
+
+// ReadCounter reads the value from the counter. It is only used for testing.
+func ReadCounter(counter prometheus.Counter) (int, error) {
+	var metric dto.Metric
+	if err := counter.Write(&metric); err != nil {
+		return 0, err
+	}
+	return int(metric.Counter.GetValue()), nil
+}
+
+// ReadGauge reads the value from the gauge. It is only used for testing.
+func ReadGauge(gauge prometheus.Gauge) (int, error) {
+	var metric dto.Metric
+	if err := gauge.Write(&metric); err != nil {
+		return 0, err
+	}
+	return int(metric.Gauge.GetValue()), nil
 }

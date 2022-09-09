@@ -41,7 +41,10 @@ var testProxyConfig = Config{
 		User:            "user",
 		Password:        "pwd",
 	},
-	Metrics: Metrics{},
+	Metrics: Metrics{
+		MetricsAddr:     "127.0.0.1:9021",
+		MetricsInterval: 15,
+	},
 	Log: Log{
 		Level:   "info",
 		Encoder: "tidb",

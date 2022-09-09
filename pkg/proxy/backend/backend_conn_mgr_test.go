@@ -19,9 +19,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
@@ -152,7 +152,13 @@ func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO *pnet.PacketIO)
 	clientIO.ResetSequence()
 	request, err := clientIO.ReadPacket()
 	require.NoError(ts.t, err)
-	return ts.mp.ExecuteCmd(context.Background(), request, clientIO)
+	prevCounter, err := readCmdCounter(request[0], ts.tc.backendListener.Addr().String())
+	require.NoError(ts.t, err)
+	rsErr := ts.mp.ExecuteCmd(context.Background(), request, clientIO)
+	curCounter, err := readCmdCounter(request[0], ts.tc.backendListener.Addr().String())
+	require.NoError(ts.t, err)
+	require.Equal(ts.t, prevCounter+1, curCounter)
+	return rsErr
 }
 
 func (ts *backendMgrTester) respondWithNoTxn4Backend(packetIO *pnet.PacketIO) error {

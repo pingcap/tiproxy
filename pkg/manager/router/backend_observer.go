@@ -61,7 +61,7 @@ const (
 
 var statusNames = map[BackendStatus]string{
 	StatusHealthy:        "healthy",
-	StatusCannotConnect:  "cannot connect",
+	StatusCannotConnect:  "down",
 	StatusMemoryHigh:     "memory high",
 	StatusRunSlow:        "run slow",
 	StatusSchemaOutdated: "schema outdated",
@@ -419,15 +419,22 @@ func (bo *BackendObserver) notifyIfChanged(backendStatus map[string]BackendStatu
 		if lastStatus == StatusHealthy {
 			if newStatus, ok := backendStatus[addr]; !ok {
 				updatedBackends[addr] = StatusCannotConnect
+				updateBackendStatusMetrics(addr, lastStatus, StatusCannotConnect)
 			} else if newStatus != StatusHealthy {
 				updatedBackends[addr] = newStatus
+				updateBackendStatusMetrics(addr, lastStatus, newStatus)
 			}
 		}
 	}
 	for addr, newStatus := range backendStatus {
 		if newStatus == StatusHealthy {
-			if lastStatus, ok := bo.curBackendInfo[addr]; !ok || lastStatus != StatusHealthy {
+			lastStatus, ok := bo.curBackendInfo[addr]
+			if !ok {
+				lastStatus = StatusCannotConnect
+			}
+			if lastStatus != StatusHealthy {
 				updatedBackends[addr] = newStatus
+				updateBackendStatusMetrics(addr, lastStatus, newStatus)
 			}
 		}
 	}

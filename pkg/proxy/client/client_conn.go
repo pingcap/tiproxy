@@ -19,11 +19,10 @@ import (
 	"crypto/tls"
 	"net"
 
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
@@ -75,7 +74,6 @@ func (cc *ClientConnection) connectBackend(ctx context.Context) error {
 func (cc *ClientConnection) Run(ctx context.Context) {
 	if err := cc.connectBackend(ctx); err != nil {
 		logutil.Logger(ctx).Info("new connection fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
-		metrics.HandShakeErrorCounter.Inc()
 		return
 	}
 

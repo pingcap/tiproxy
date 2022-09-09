@@ -33,6 +33,8 @@ type Config struct {
 }
 
 type Metrics struct {
+	MetricsAddr     string `toml:"metrics-addr" json:"metrics-addr"`
+	MetricsInterval uint   `toml:"metrics-interval" json:"metrics-interval"`
 }
 
 type ProxyServerOnline struct {

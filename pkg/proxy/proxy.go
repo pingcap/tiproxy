@@ -21,13 +21,13 @@ import (
 	"sync"
 
 	"github.com/pingcap/TiProxy/lib/config"
-	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
-	"github.com/pingcap/TiProxy/pkg/proxy/backend"
-	"github.com/pingcap/TiProxy/pkg/proxy/client"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
-	"github.com/pingcap/tidb/metrics"
+	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/metrics"
+	"github.com/pingcap/TiProxy/pkg/proxy/backend"
+	"github.com/pingcap/TiProxy/pkg/proxy/client"
 	"go.uber.org/zap"
 )
 
@@ -81,8 +81,6 @@ func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, sc
 }
 
 func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.ProxyServerOnline) {
-	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -172,7 +170,5 @@ func (s *SQLServer) Close() error {
 	s.mu.Unlock()
 
 	s.wg.Wait()
-
-	metrics.ServerEventCounter.WithLabelValues(metrics.EventClose).Inc()
 	return errors.Collect(ErrCloseServer, errs...)
 }

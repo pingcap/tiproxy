@@ -364,6 +364,7 @@ func checkStatus(t *testing.T, backendChan chan map[string]BackendStatus, backen
 	status, ok := backends[backend.sqlAddr]
 	require.True(t, ok)
 	require.Equal(t, expectedStatus, status)
+	require.True(t, checkBackendStatusMetrics(backend.sqlAddr, status))
 }
 
 // Update the TTL for a backend.

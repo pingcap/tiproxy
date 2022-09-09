@@ -153,6 +153,7 @@ func (router *ScoreBasedRouter) Route(conn RedirectableConn) (string, error) {
 		phase:            phaseNotRedirected,
 	}
 	router.addConn(be, connWrapper)
+	addBackendConnMetrics(backend.addr)
 	conn.SetEventReceiver(router)
 	return backend.addr, nil
 }
@@ -256,6 +257,9 @@ func (router *ScoreBasedRouter) OnRedirectSucceed(from, to string, conn Redirect
 	}
 	connWrapper := e.Value.(*connWrapper)
 	connWrapper.phase = phaseRedirectEnd
+	addMigrateMetrics(from, to, true, connWrapper.lastRedirect)
+	subBackendConnMetrics(from)
+	addBackendConnMetrics(to)
 	return nil
 }
 
@@ -286,6 +290,7 @@ func (router *ScoreBasedRouter) OnRedirectFail(from, to string, conn Redirectabl
 	}
 	connWrapper := ce.Value.(*connWrapper)
 	connWrapper.phase = phaseRedirectFail
+	addMigrateMetrics(from, to, false, connWrapper.lastRedirect)
 	router.addConn(be, connWrapper)
 	return nil
 }
@@ -310,6 +315,7 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 		return errors.WithStack(errors.Errorf("connection %d is not found on the backend %s", conn.ConnectionID(), addr))
 	}
 	router.removeConn(be, ce)
+	subBackendConnMetrics(addr)
 	return nil
 }
 
