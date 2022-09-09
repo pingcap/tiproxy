@@ -15,15 +15,20 @@
 package metrics
 
 import (
+	"context"
 	"testing"
 
 	"github.com/pingcap/TiProxy/lib/util/logger"
 )
 
 func TestPushMetrics(t *testing.T) {
-	SetupMetrics(logger.CreateLoggerForTest(t), "127.0.0.1:9091", 15, "0.0.0.0:6000")
+	mm := NewMetricsManager()
+	mm.Init(context.Background(), logger.CreateLoggerForTest(t), "127.0.0.1:9091", 15, "0.0.0.0:6000")
+	mm.Close()
 }
 
 func TestNoPushMetrics(t *testing.T) {
-	SetupMetrics(logger.CreateLoggerForTest(t), "", 15, "0.0.0.0:6000")
+	mm := NewMetricsManager()
+	mm.Init(context.Background(), logger.CreateLoggerForTest(t), "", 15, "0.0.0.0:6000")
+	mm.Close()
 }

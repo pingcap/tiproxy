@@ -16,6 +16,7 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/util/systimemon"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -42,14 +44,68 @@ const (
 	LabelMonitor = "monitor"
 )
 
-// SetupMetrics pushes metrics to prometheus.
-func SetupMetrics(logger *zap.Logger, metricsAddr string, metricsInterval uint, proxyAddr string) {
-	registerProxyMetrics()
-	setupMonitor(logger)
-	pushMetric(logger, metricsAddr, time.Duration(metricsInterval)*time.Second, proxyAddr)
+// MetricsManager manages metrics.
+type MetricsManager struct {
+	wg     waitgroup.WaitGroup
+	cancel context.CancelFunc
+	logger *zap.Logger
 }
 
-// RegisterProxyMetrics registers metrics.
+// NewMetricsManager creates a MetricsManager.
+func NewMetricsManager() *MetricsManager {
+	return &MetricsManager{}
+}
+
+// Init registers metrics and pushes metrics to prometheus.
+func (mm *MetricsManager) Init(ctx context.Context, logger *zap.Logger, metricsAddr string, metricsInterval uint, proxyAddr string) {
+	mm.logger = logger
+	registerProxyMetrics()
+	ctx, mm.cancel = context.WithCancel(ctx)
+	mm.setupMonitor(ctx)
+	mm.pushMetric(ctx, metricsAddr, time.Duration(metricsInterval)*time.Second, proxyAddr)
+}
+
+// Close stops all goroutines.
+func (mm *MetricsManager) Close() {
+	if mm.cancel != nil {
+		mm.cancel()
+	}
+	mm.wg.Wait()
+}
+
+func (mm *MetricsManager) setupMonitor(ctx context.Context) {
+	// Enable the mutex profile, 1/10 of mutex blocking event sampling.
+	runtime.SetMutexProfileFraction(10)
+	systimeErrHandler := func() {
+		TimeJumpBackCounter.Inc()
+	}
+	callBackCount := 0
+	successCallBack := func() {
+		callBackCount++
+		// It is callback by monitor per second, we increase metrics.KeepAliveCounter per 5s.
+		if callBackCount >= 5 {
+			callBackCount = 0
+			KeepAliveCounter.Inc()
+		}
+	}
+	mm.wg.Run(func() {
+		systimemon.StartMonitor(ctx, mm.logger, time.Now, systimeErrHandler, successCallBack)
+	})
+}
+
+// pushMetric pushes metrics in background.
+func (mm *MetricsManager) pushMetric(ctx context.Context, addr string, interval time.Duration, proxyAddr string) {
+	if interval == time.Duration(0) || len(addr) == 0 {
+		mm.logger.Info("disable Prometheus push client")
+		return
+	}
+	mm.logger.Info("start prometheus push client", zap.String("server addr", addr), zap.String("interval", interval.String()))
+	mm.wg.Run(func() {
+		prometheusPushClient(ctx, mm.logger, addr, interval, proxyAddr)
+	})
+}
+
+// registerProxyMetrics registers metrics.
 func registerProxyMetrics() {
 	prometheus.DefaultRegisterer.Unregister(prometheus.NewGoCollector())
 	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
@@ -65,46 +121,22 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(MigrateDurationHistogram)
 }
 
-func setupMonitor(logger *zap.Logger) {
-	// Enable the mutex profile, 1/10 of mutex blocking event sampling.
-	runtime.SetMutexProfileFraction(10)
-	systimeErrHandler := func() {
-		TimeJumpBackCounter.Inc()
-	}
-	callBackCount := 0
-	successCallBack := func() {
-		callBackCount++
-		// It is callback by monitor per second, we increase metrics.KeepAliveCounter per 5s.
-		if callBackCount >= 5 {
-			callBackCount = 0
-			KeepAliveCounter.Inc()
-		}
-	}
-	go systimemon.StartMonitor(logger, time.Now, systimeErrHandler, successCallBack)
-}
-
-// pushMetric pushes metrics in background.
-func pushMetric(logger *zap.Logger, addr string, interval time.Duration, proxyAddr string) {
-	if interval == time.Duration(0) || len(addr) == 0 {
-		logger.Info("disable Prometheus push client")
-		return
-	}
-	logger.Info("start prometheus push client", zap.String("server addr", addr), zap.String("interval", interval.String()))
-	go prometheusPushClient(logger, addr, interval, proxyAddr)
-}
-
 // prometheusPushClient pushes metrics to Prometheus Pushgateway.
-func prometheusPushClient(logger *zap.Logger, addr string, interval time.Duration, proxyAddr string) {
+func prometheusPushClient(ctx context.Context, logger *zap.Logger, addr string, interval time.Duration, proxyAddr string) {
 	job := "proxy"
 	pusher := push.New(addr, job)
 	pusher = pusher.Gatherer(prometheus.DefaultGatherer)
 	pusher = pusher.Grouping("instance", instanceName(proxyAddr))
-	for {
+	for ctx.Err() == nil {
 		err := pusher.Push()
 		if err != nil {
 			logger.Error("could not push metrics to prometheus pushgateway", zap.String("err", err.Error()))
 		}
-		time.Sleep(interval)
+		select {
+		case <-time.After(interval):
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
