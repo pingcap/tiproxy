@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/lib/config"
 	"go.uber.org/zap"
 )
 

@@ -19,7 +19,7 @@ import (
 	"io"
 	"net"
 
-	"github.com/pingcap/TiProxy/pkg/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
 type ProxyVersion int

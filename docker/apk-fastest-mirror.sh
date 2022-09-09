@@ -36,11 +36,7 @@ for URL in $MIRRORS; do
 
 done
 
-if printf '%b' "$DATA" | sort -n | tail -n +2 > $DST; then
-    echo file $DST created
-fi
-
-BEST=$(head -n1 $DST | cut -d ' ' -f2)
+BEST=$(printf '%b' "$DATA" | sort -n | head -n 1 | cut -d ' ' -f2)
 echo "Best mirror is: $BEST"
 
 sed -i -r 's#^http.+/(.+/main)#'"${BEST%/}"'/\1#' /etc/apk/repositories

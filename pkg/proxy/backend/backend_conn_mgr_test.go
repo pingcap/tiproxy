@@ -21,7 +21,7 @@ import (
 
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )

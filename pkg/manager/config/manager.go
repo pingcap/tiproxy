@@ -19,9 +19,9 @@ import (
 	"path"
 	"time"
 
-	"github.com/pingcap/TiProxy/pkg/config"
-	"github.com/pingcap/TiProxy/pkg/util/errors"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -61,7 +61,7 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
-func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.ConfigManager, logger *zap.Logger) error {
+func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.Advance, logger *zap.Logger) error {
 	srv.logger = logger
 	srv.ignoreWrongNamespace = cfg.IgnoreWrongNamespace
 	if cfg.WatchInterval == "" {

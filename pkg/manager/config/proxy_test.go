@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/TiProxy/pkg/config"
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/stretchr/testify/require"
 )
 
 func TestProxyConfig(t *testing.T) {
-	cfgmgr, ctx := testConfigManager(t, config.ConfigManager{
+	cfgmgr, ctx := testConfigManager(t, config.Advance{
 		IgnoreWrongNamespace: true,
 	})
 

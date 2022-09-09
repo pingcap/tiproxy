@@ -19,8 +19,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pingcap/TiProxy/pkg/util/security"
-	"github.com/pingcap/TiProxy/pkg/util/waitgroup"
+	"github.com/pingcap/TiProxy/lib/util/security"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
