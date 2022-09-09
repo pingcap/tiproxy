@@ -18,6 +18,12 @@ jobs:
         platform: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
+      - if: ${{ runner.os == 'Windows' }}
+        name: Use GNU tar for faster cache restore
+        shell: cmd
+        run: |
+          echo "Adding GNU tar to PATH"
+          echo C:\Program Files\Git\usr\bin>>"%GITHUB_PATH%"
       - name: "checkout repo"
         uses: actions/checkout@v3
         with:

@@ -1,7 +1,20 @@
+// Copyright 2022 PingCAP, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package config
 
 import (
-	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,16 +22,10 @@ import (
 
 var testProxyConfig = Config{
 	Workdir: "./wd",
-	LCUrlsI: []string{"http://0.0.0.0:3080"},
-	ACUrlsI: []string{},
-	LPUrlsI: []string{"http://0.0.0.0:3081"},
-	APUrlsI: []string{},
-	LCUrls:  []url.URL{},
-	ACUrls:  []url.URL{},
-	LPUrls:  []url.URL{},
-	APUrls:  []url.URL{},
-	Config: ConfigManager{
+	Advance: Advance{
+		PeerPort:             "343",
 		IgnoreWrongNamespace: true,
+		WatchInterval:        "30m",
 	},
 	Proxy: ProxyServer{
 		Addr:    "0.0.0.0:4000",
@@ -29,13 +36,12 @@ var testProxyConfig = Config{
 		},
 	},
 	API: API{
+		Addr:            "0.0.0.0:3080",
 		EnableBasicAuth: false,
 		User:            "user",
 		Password:        "pwd",
 	},
-	Metrics: Metrics{
-		PromCluster: "ffgfg",
-	},
+	Metrics: Metrics{},
 	Log: Log{
 		Level:   "info",
 		Encoder: "tidb",
