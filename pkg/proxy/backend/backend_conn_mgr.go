@@ -130,14 +130,13 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	cmd := request[0]
 	startTime := time.Now()
 	mgr.processLock.Lock()
-	defer func() {
-		addr := mgr.backendConn.Addr()
-		mgr.processLock.Unlock()
-		addCmdMetrics(cmd, addr, startTime)
-	}()
+	defer mgr.processLock.Unlock()
 
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
 	holdRequest, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), waitingRedirect)
+	if !holdRequest {
+		addCmdMetrics(cmd, mgr.backendConn.Addr(), startTime)
+	}
 	if err != nil && !IsMySQLError(err) {
 		return err
 	}
@@ -169,6 +168,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		// Execute the held request no matter redirection succeeds or not.
 		if holdRequest {
 			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
+			addCmdMetrics(cmd, mgr.backendConn.Addr(), startTime)
 		}
 		if err != nil && !IsMySQLError(err) {
 			return err
