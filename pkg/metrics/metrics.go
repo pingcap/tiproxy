@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/util/systimemon"
@@ -56,10 +57,12 @@ func NewMetricsManager() *MetricsManager {
 	return &MetricsManager{}
 }
 
+var registerOnce = &sync.Once{}
+
 // Init registers metrics and pushes metrics to prometheus.
 func (mm *MetricsManager) Init(ctx context.Context, logger *zap.Logger, metricsAddr string, metricsInterval uint, proxyAddr string) {
 	mm.logger = logger
-	registerProxyMetrics()
+	registerOnce.Do(registerProxyMetrics)
 	ctx, mm.cancel = context.WithCancel(ctx)
 	mm.setupMonitor(ctx)
 	mm.pushMetric(ctx, metricsAddr, time.Duration(metricsInterval)*time.Second, proxyAddr)
