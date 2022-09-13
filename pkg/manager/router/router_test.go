@@ -326,25 +326,28 @@ func TestConnBalanced(t *testing.T) {
 	tester.addConnections(100)
 	tester.checkBalanced()
 
-	// balanced after scale in
-	tester.killBackends(1)
-	tester.rebalance(100)
-	tester.redirectFinish(100, true)
-	tester.checkBalanced()
-	tester.checkBackendConnMetrics()
+	tests := []func(){
+		func() {
+			// balanced after scale in
+			tester.killBackends(1)
+		},
+		func() {
+			// balanced after scale out
+			tester.addBackends(1)
+		},
+		func() {
+			// balanced after closing connections
+			tester.closeConnections(10, false)
+		},
+	}
 
-	// balanced after scale out
-	tester.addBackends(1)
-	tester.rebalance(100)
-	tester.redirectFinish(100, true)
-	tester.checkBalanced()
-	tester.checkBackendConnMetrics()
-
-	// balanced after closing connections
-	tester.closeConnections(10, false)
-	tester.rebalance(100)
-	tester.checkBalanced()
-	tester.checkBackendConnMetrics()
+	for _, tt := range tests {
+		tt()
+		tester.rebalance(100)
+		tester.redirectFinish(100, true)
+		tester.checkBalanced()
+		tester.checkBackendConnMetrics()
+	}
 }
 
 // Test that routing fails when there's no healthy backends.
