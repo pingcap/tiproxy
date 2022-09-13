@@ -20,42 +20,27 @@ import (
 )
 
 var (
-	// PanicCounter measures the count of panics.
-	PanicCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: ModuleWeirProxy,
-			Subsystem: LabelServer,
-			Name:      "panic_total",
-			Help:      "Counter of panic.",
-		}, []string{LblCluster, LblType})
-
-	QueryTotalCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: ModuleWeirProxy,
-			Subsystem: LabelServer,
-			Name:      "query_total",
-			Help:      "Counter of queries.",
-		}, []string{LblCluster, LblType, LblResult})
-
-	ExecuteErrorCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: ModuleWeirProxy,
-			Subsystem: LabelServer,
-			Name:      "execute_error_total",
-			Help:      "Counter of execute errors.",
-		}, []string{LblCluster, LblType})
-
-	ConnGauge = prometheus.NewGaugeVec(
+	ConnGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: ModuleWeirProxy,
 			Subsystem: LabelServer,
 			Name:      "connections",
 			Help:      "Number of connections.",
-		}, []string{LblCluster})
+		})
 
-	EventStart        = "start"
-	EventGracefulDown = "graceful_shutdown"
-	// Eventkill occurs when the server.Kill() function is called.
-	EventKill  = "kill"
-	EventClose = "close"
+	TimeJumpBackCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: ModuleWeirProxy,
+			Subsystem: LabelMonitor,
+			Name:      "time_jump_back_total",
+			Help:      "Counter of system time jumps backward.",
+		})
+
+	KeepAliveCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: ModuleWeirProxy,
+			Subsystem: LabelMonitor,
+			Name:      "keep_alive_total",
+			Help:      "Counter of proxy keep alive.",
+		})
 )

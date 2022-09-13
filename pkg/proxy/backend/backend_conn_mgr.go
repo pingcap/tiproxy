@@ -23,13 +23,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/TiProxy/pkg/manager/router"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
@@ -123,15 +124,24 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 // ExecuteCmd forwards messages between the client and the backend.
 // If it finds that the session is ready for redirection, it migrates the session.
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error {
+	if len(request) < 1 {
+		return mysql.ErrMalformPacket
+	}
+	cmd := request[0]
+	startTime := time.Now()
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
+
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
 	holdRequest, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), waitingRedirect)
+	if !holdRequest {
+		addCmdMetrics(cmd, mgr.backendConn.Addr(), startTime)
+	}
 	if err != nil && !IsMySQLError(err) {
 		return err
 	}
 	if err == nil {
-		switch request[0] {
+		switch cmd {
 		case mysql.ComQuit:
 			return nil
 		case mysql.ComSetOption:
@@ -158,6 +168,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		// Execute the held request no matter redirection succeeds or not.
 		if holdRequest {
 			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
+			addCmdMetrics(cmd, mgr.backendConn.Addr(), startTime)
 		}
 		if err != nil && !IsMySQLError(err) {
 			return err

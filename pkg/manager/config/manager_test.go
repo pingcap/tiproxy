@@ -23,22 +23,13 @@ import (
 	"testing"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
-
-type testingLog struct {
-	*testing.T
-}
-
-func (t *testingLog) Write(b []byte) (int, error) {
-	t.Logf("%s", b)
-	return len(b), nil
-}
 
 func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, context.Context) {
 	addr, err := url.Parse("http://127.0.0.1:0")
@@ -46,17 +37,13 @@ func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, contex
 
 	testDir := t.TempDir()
 
-	logger := zap.New(zapcore.NewCore(
-		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
-		zapcore.AddSync(&testingLog{t}),
-		zap.InfoLevel,
-	)).Named(t.Name())
+	log := logger.CreateLoggerForTest(t)
 
 	etcd_cfg := embed.NewConfig()
 	etcd_cfg.LCUrls = []url.URL{*addr}
 	etcd_cfg.LPUrls = []url.URL{*addr}
 	etcd_cfg.Dir = filepath.Join(testDir, "etcd")
-	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
+	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(log.Named("etcd"))
 	etcd, err := embed.StartEtcd(etcd_cfg)
 	require.NoError(t, err)
 
@@ -71,7 +58,7 @@ func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, contex
 	}
 
 	cfgmgr := NewConfigManager()
-	require.NoError(t, cfgmgr.Init(ctx, ends, cfg, logger))
+	require.NoError(t, cfgmgr.Init(ctx, ends, cfg, log))
 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())

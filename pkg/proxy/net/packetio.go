@@ -128,7 +128,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	var header [4]byte
 
 	if _, err := io.ReadFull(p.conn, header[:]); err != nil {
-		return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
+		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 
 	// probe proxy V2
@@ -150,7 +150,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 	// refill mysql headers
 	if refill {
 		if _, err := io.ReadFull(p.conn, header[:]); err != nil {
-			return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
+			return nil, false, errors.Wrap(ErrReadConn, err)
 		}
 	}
 
@@ -163,7 +163,7 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 
 	data := make([]byte, length)
 	if _, err := io.ReadFull(p.conn, data); err != nil {
-		return nil, false, errors.WithStack(errors.Wrap(ErrReadConn, err))
+		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 	return data, length == mysql.MaxPayloadLen, nil
 }
@@ -202,11 +202,11 @@ func (p *PacketIO) WriteOnePacket(data []byte) (int, bool, error) {
 	p.sequence++
 
 	if _, err := io.Copy(p.buf, bytes.NewReader(header[:])); err != nil {
-		return 0, more, errors.WithStack(errors.Wrap(ErrWriteConn, err))
+		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
 
 	if _, err := io.Copy(p.buf, bytes.NewReader(data[:length])); err != nil {
-		return 0, more, errors.WithStack(errors.Wrap(ErrWriteConn, err))
+		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
 
 	return length, more, nil

@@ -26,6 +26,7 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/stretchr/testify/require"
 )
 
@@ -115,6 +116,7 @@ func (tester *routerTester) addBackends(num int) {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
 		backends[addr] = StatusHealthy
+		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
 	tester.router.OnBackendChanged(backends)
 	tester.checkBackendOrder()
@@ -215,15 +217,23 @@ func (tester *routerTester) redirectFinish(num int, succeed bool) {
 		if len(conn.GetRedirectingAddr()) == 0 {
 			continue
 		}
+
+		from, to := conn.from, conn.to
+		prevCount, err := readMigrateCounter(from, to, succeed)
+		require.NoError(tester.t, err)
 		if succeed {
-			err := tester.router.OnRedirectSucceed(conn.from, conn.to, conn)
+			err = tester.router.OnRedirectSucceed(from, to, conn)
 			require.NoError(tester.t, err)
 			conn.redirectSucceed()
 		} else {
-			err := tester.router.OnRedirectFail(conn.from, conn.to, conn)
+			err = tester.router.OnRedirectFail(from, to, conn)
 			require.NoError(tester.t, err)
 			conn.redirectFail()
 		}
+		curCount, err := readMigrateCounter(from, to, succeed)
+		require.NoError(tester.t, err)
+		require.Equal(tester.t, prevCount+1, curCount)
+
 		i++
 		if i >= num {
 			break
@@ -264,6 +274,15 @@ func (tester *routerTester) checkBackendNum(num int) {
 	require.Equal(tester.t, num, tester.router.backends.Len())
 }
 
+func (tester *routerTester) checkBackendConnMetrics() {
+	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
+		backend := be.Value.(*backendWrapper)
+		val, err := readBackendConnMetrics(backend.addr)
+		require.NoError(tester.t, err)
+		require.Equal(tester.t, backend.connList.Len(), val)
+	}
+}
+
 func (tester *routerTester) clear() {
 	tester.conns = make(map[uint64]*mockRedirectableConn)
 	tester.router.backends = list.New()
@@ -275,8 +294,10 @@ func TestBackendScore(t *testing.T) {
 	tester.addBackends(3)
 	tester.killBackends(2)
 	tester.addConnections(100)
+	tester.checkBackendConnMetrics()
 	// 90 not redirecting
 	tester.closeConnections(10, false)
+	tester.checkBackendConnMetrics()
 	// make sure rebalance will work
 	tester.addBackends(3)
 	// 40 not redirecting, 50 redirecting
@@ -310,17 +331,20 @@ func TestConnBalanced(t *testing.T) {
 	tester.rebalance(100)
 	tester.redirectFinish(100, true)
 	tester.checkBalanced()
+	tester.checkBackendConnMetrics()
 
 	// balanced after scale out
 	tester.addBackends(1)
 	tester.rebalance(100)
 	tester.redirectFinish(100, true)
 	tester.checkBalanced()
+	tester.checkBackendConnMetrics()
 
 	// balanced after closing connections
 	tester.closeConnections(10, false)
 	tester.rebalance(100)
 	tester.checkBalanced()
+	tester.checkBackendConnMetrics()
 }
 
 // Test that routing fails when there's no healthy backends.

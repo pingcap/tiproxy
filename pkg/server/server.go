@@ -46,6 +46,7 @@ type Server struct {
 	ConfigManager    *mgrcfg.ConfigManager
 	NamespaceManager *mgrns.NamespaceManager
 	ObserverClient   *clientv3.Client
+	MetricsManager   *metrics.MetricsManager
 
 	// HTTP/GRPC services
 	Etcd *embed.Etcd
@@ -58,12 +59,13 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
+		MetricsManager:   metrics.NewMetricsManager(),
 	}
 
 	ready := atomic.NewBool(false)
 
 	// setup metrics
-	metrics.RegisterProxyMetrics()
+	srv.MetricsManager.Init(ctx, logger.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
 
 	// setup gin and etcd
 	{
@@ -214,6 +216,9 @@ func (s *Server) Close() error {
 		})
 		s.Etcd.Close()
 		wg.Wait()
+	}
+	if s.MetricsManager != nil {
+		s.MetricsManager.Close()
 	}
 	return errors.Collect(ErrCloseServer, errs...)
 }

@@ -15,31 +15,28 @@
 
 package metrics
 
-// Label constants.
-const (
-	LblUnretryable = "unretryable"
-	LblReachMax    = "reach_max"
-	LblOK          = "ok"
-	LblError       = "error"
-	LblCommit      = "commit"
-	LblAbort       = "abort"
-	LblRollback    = "rollback"
-	LblType        = "type"
-	LblDb          = "db"
-	LblTable       = "table"
-	LblResult      = "result"
-	LblSQLType     = "sql_type"
-	LblGeneral     = "general"
-	LblInternal    = "internal"
-	LbTxnMode      = "txn_mode"
-	LblPessimistic = "pessimistic"
-	LblOptimistic  = "optimistic"
-	LblStore       = "store"
-	LblAddress     = "address"
-	LblBatchGet    = "batch_get"
-	LblGet         = "get"
-	LblNamespace   = "namespace"
-	LblCluster     = "cluster"
+import "github.com/prometheus/client_golang/prometheus"
 
-	LblBackendAddr = "backend_addr"
+// LblCmdType is the label constant.
+const (
+	LblCmdType = "cmd_type"
+)
+
+var (
+	QueryTotalCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: ModuleWeirProxy,
+			Subsystem: LabelSession,
+			Name:      "query_total",
+			Help:      "Counter of queries.",
+		}, []string{LblBackend, LblCmdType})
+
+	QueryDurationHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: ModuleWeirProxy,
+			Subsystem: LabelSession,
+			Name:      "query_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled queries.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 29), // 0.5ms ~ 1.5days
+		}, []string{LblBackend, LblCmdType})
 )
