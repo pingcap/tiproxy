@@ -68,7 +68,7 @@ func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, sc
 	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.ServerTLS, workdir, "frontend", scfg.RSAKeySize); err != nil {
 		return nil, err
 	}
-	if s.backendTLSConfig, err = security.BuildClientTLSConfig(logger, scfg.ClusterTLS, "backend"); err != nil {
+	if s.backendTLSConfig, err = security.BuildClientTLSConfig(logger, scfg.SQLTLS, "backend"); err != nil {
 		return nil, err
 	}
 

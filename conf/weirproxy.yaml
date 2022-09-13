@@ -38,6 +38,9 @@ security:
   cluster-tls: # client object
     # access to other components like TiDB or PD, will use this
     skip-ca: true
+  sql-tls: # client object
+    # access to TiDB sql port, it has a standalone TLS configuration
+    skip-ca: true
   server-tls: # server object
     # proxy SQL or internal HTTP port will all use this
     auto-certs: true

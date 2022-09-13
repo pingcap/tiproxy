@@ -69,6 +69,12 @@ var testProxyConfig = Config{
 			Cert:   "b",
 			Key:    "c",
 		},
+		SQLTLS: TLSConfig{
+			CA:     "a",
+			SkipCA: true,
+			Cert:   "b",
+			Key:    "c",
+		},
 	},
 }
 
