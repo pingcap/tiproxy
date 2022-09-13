@@ -231,9 +231,9 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	if !strings.HasPrefix(apiAddrStr, "http://") {
 		apiAddrStr = fmt.Sprintf("http://%s", apiAddrStr)
 	}
-	apiAddr, uerr := url.Parse(apiAddrStr)
-	if uerr != nil {
-		return
+	apiAddr, err := url.Parse(apiAddrStr)
+	if err != nil {
+		return nil, err
 	}
 	etcd_cfg.LCUrls = []url.URL{*apiAddr}
 	apiAddrAdvertise := *apiAddr
@@ -242,9 +242,9 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	peerPort := cfg.Advance.PeerPort
 	if peerPort == "" {
-		peerPortNum, uerr := strconv.Atoi(apiAddr.Port())
-		if uerr != nil {
-			return
+		peerPortNum, err := strconv.Atoi(apiAddr.Port())
+		if err != nil {
+			return nil, err
 		}
 		peerPort = strconv.Itoa(peerPortNum + 1)
 	}
