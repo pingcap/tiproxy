@@ -20,31 +20,26 @@ log:
     max-backups: 1
 security:
   rsa-key-size: 4096
-  # tls object
-  # for client:
-  # 1. requires ca or skip-ca
-  # 2. set certs will be used for server-side client verification, if any
-  # 3. auto-certs is useless
-  # for server:
-  # 1. requires cert/key or auto-certs
-  # 2. set ca will enable server-side client verification
-  # 3. skip-ca is useless
-  # tls:
+  # tls object is either of type server or client
+  # xxxx:
+  #   ca: ca.pem
   #   cert: c.pem
   #   key: k.pem
   #   auto-certs: true
-  #   ca: ca.pem
   #   skip-ca: trure
-  tidb-tls: # client object
+  # client-tls:
+  #   1. requires: ca or skip-ca(skip verify server certs)
+  #   2. optionally: cert/key will be used for server-side client verification
+  #   3. useless/forbid: auto-certs
+  # server object:
+  #   1. requires: cert/key or auto-certs(generate a temporary cert, mostly for testing)
+  #   2. optionally: ca will enable server-side client verification
+  #   3. useless/forbid: skip-ca
+  cluster-tls: # client object
+    # access to other components like TiDB or PD, will use this
     skip-ca: true
-  pd-tls: # client object
-    skip-ca: true
-  cluster:
-    # cluster will be used for internal peer communication:
-    # that said, it is both a client and a server object
-  client: # server object
+  server-tls: # server object
     # proxy SQL or internal HTTP port will all use this
-    skip-ca: true
     auto-certs: true
 advance:
   # ignore-wrong-namespace: true

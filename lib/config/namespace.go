@@ -22,11 +22,11 @@ type Namespace struct {
 }
 
 type FrontendNamespace struct {
-	Security TLSCert `yaml:"security" json:"security" toml:"security"`
+	Security TLSConfig `yaml:"security" json:"security" toml:"security"`
 }
 
 type BackendNamespace struct {
-	Instances    []string `yaml:"instances" json:"instances" toml:"instances"`
-	SelectorType string   `yaml:"selector-type" json:"selector-type" toml:"selector-type"`
-	Security     TLSCert  `yaml:"security" json:"security" toml:"security"`
+	Instances    []string  `yaml:"instances" json:"instances" toml:"instances"`
+	SelectorType string    `yaml:"selector-type" json:"selector-type" toml:"selector-type"`
+	Security     TLSConfig `yaml:"security" json:"security" toml:"security"`
 }

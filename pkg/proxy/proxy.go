@@ -40,12 +40,12 @@ type serverState struct {
 }
 
 type SQLServer struct {
-	listener         net.Listener
-	logger           *zap.Logger
-	nsmgr            *mgrns.NamespaceManager
-	frontendTLSConfig  *tls.Config
-	backendTLSConfig *tls.Config
-	wg               waitgroup.WaitGroup
+	listener          net.Listener
+	logger            *zap.Logger
+	nsmgr             *mgrns.NamespaceManager
+	frontendTLSConfig *tls.Config
+	backendTLSConfig  *tls.Config
+	wg                waitgroup.WaitGroup
 
 	mu serverState
 }
@@ -65,10 +65,10 @@ func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, sc
 		},
 	}
 
-	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.Client, workdir, "frontend", scfg.RSAKeySize); err != nil {
+	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.ServerTLS, workdir, "frontend", scfg.RSAKeySize); err != nil {
 		return nil, err
 	}
-	if s.backendTLSConfig, err = security.BuildClientTLSConfig(logger, scfg.TiDBTLS, "backend"); err != nil {
+	if s.backendTLSConfig, err = security.BuildClientTLSConfig(logger, scfg.ClusterTLS, "backend"); err != nil {
 		return nil, err
 	}
 

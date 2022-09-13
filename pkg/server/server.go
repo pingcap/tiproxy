@@ -117,7 +117,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		for i := range addrs {
 			addrs[i] = srv.Etcd.Clients[i].Addr().String()
 		}
-		err = srv.ConfigManager.Init(ctx, addrs, cfg.Advance, cfg.Security.Client, logger.Named("config"))
+		err = srv.ConfigManager.Init(ctx, addrs, cfg.Advance, cfg.Security.ServerTLS, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -260,7 +260,7 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
 	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
 
-	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.Client, cfg.Security.Cluster, cfg.Workdir, "frontend", cfg.Security.RSAKeySize); err != nil {
+	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Workdir, "frontend", cfg.Security.RSAKeySize); err != nil {
 		return
 	}
 

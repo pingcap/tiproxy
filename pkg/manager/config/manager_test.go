@@ -58,7 +58,7 @@ func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, contex
 	}
 
 	cfgmgr := NewConfigManager()
-	require.NoError(t, cfgmgr.Init(ctx, ends, cfg, config.TLSCert{}, logger))
+	require.NoError(t, cfgmgr.Init(ctx, ends, cfg, config.TLSConfig{}, logger))
 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())

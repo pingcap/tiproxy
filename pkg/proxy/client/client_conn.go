@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/tidb/metrics"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"

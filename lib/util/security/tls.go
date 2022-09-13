@@ -36,12 +36,12 @@ import (
 	"go.uber.org/zap"
 )
 
-func createTLSCertificates(logger *zap.Logger, certpath string, keypath string, rsaKeySize int) error {
+func createTLSConfigificates(logger *zap.Logger, certpath string, keypath string, rsaKeySize int) error {
 	_, e1 := os.Stat(certpath)
 	_, e2 := os.Stat(keypath)
-	if errors.Is(e1, os.ErrExist) &&  errors.Is(e2, os.ErrExist) {
+	if errors.Is(e1, os.ErrExist) && errors.Is(e2, os.ErrExist) {
 		return nil
-	} else if errors.Is(e1, os.ErrExist) ||  errors.Is(e2, os.ErrExist) {
+	} else if errors.Is(e1, os.ErrExist) || errors.Is(e2, os.ErrExist) {
 		return errors.New("cert and key should be present or not at the same time")
 	}
 
@@ -213,12 +213,12 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	return
 }
 
-func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSCert, workdir, mod string, keySize int) (*tls.Config, error) {
+func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig, workdir, mod string, keySize int) (*tls.Config, error) {
 	if !cfg.HasCert() {
 		if cfg.AutoCerts {
 			cfg.Cert = filepath.Join(workdir, mod, "cert.pem")
 			cfg.Key = filepath.Join(workdir, mod, "key.pem")
-			if err := createTLSCertificates(logger, cfg.Cert, cfg.Key, keySize); err != nil {
+			if err := createTLSConfigificates(logger, cfg.Cert, cfg.Key, keySize); err != nil {
 				return nil, err
 			}
 			return BuildServerTLSConfig(logger, cfg, workdir, mod, keySize)
@@ -253,7 +253,7 @@ func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSCert, workdir, mod s
 	return tcfg, nil
 }
 
-func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSCert, mod string) (*tls.Config, error) {
+func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig, mod string) (*tls.Config, error) {
 	if !cfg.HasCA() {
 		logger.Warn(fmt.Sprintf("require CA to verify %s server connections", mod))
 		if cfg.SkipCA {
@@ -265,7 +265,6 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSCert, mod string) (*
 	}
 
 	tcfg := &tls.Config{}
-	tcfg.ClientAuth = tls.RequireAndVerifyClientCert
 	tcfg.ClientCAs = x509.NewCertPool()
 	certBytes, err := ioutil.ReadFile(cfg.CA)
 	if err != nil {
@@ -288,33 +287,33 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSCert, mod string) (*
 	return tcfg, nil
 }
 
-func BuildEtcdTLSConfig(logger *zap.Logger, client, cluster config.TLSCert, workdir, mod string, keySize int) (clientInfo, peerInfo transport.TLSInfo, err error) {
-	if !client.HasCert() {
-		if client.AutoCerts {
-			client.Cert = filepath.Join(workdir, mod, "cert.pem")
-			client.Key = filepath.Join(workdir, mod, "key.pem")
-			if err = createTLSCertificates(logger, client.Cert, client.Key, keySize); err != nil {
+func BuildEtcdTLSConfig(logger *zap.Logger, server config.TLSConfig, workdir, mod string, keySize int) (clientInfo, peerInfo transport.TLSInfo, err error) {
+	if !server.HasCert() {
+		if server.AutoCerts {
+			server.Cert = filepath.Join(workdir, mod, "cert.pem")
+			server.Key = filepath.Join(workdir, mod, "key.pem")
+			if err = createTLSConfigificates(logger, server.Cert, server.Key, keySize); err != nil {
 				return
 			}
-			return BuildEtcdTLSConfig(logger, client, cluster, workdir, mod, keySize)
+			return BuildEtcdTLSConfig(logger, server, workdir, mod, keySize)
 		}
 	} else {
-		clientInfo.CertFile = client.Cert
-		clientInfo.KeyFile = client.Key
-		if client.HasCA() {
+		clientInfo.CertFile = server.Cert
+		clientInfo.KeyFile = server.Key
+		if server.HasCA() {
 			clientInfo.ClientCertAuth = true
-			clientInfo.TrustedCAFile = client.CA
+			clientInfo.TrustedCAFile = server.CA
 		} else {
 			logger.Warn("no signed certs for etcd clients, proxy will not authenticate etcd clients (connection is still secured)")
 		}
 	}
 
-	if cluster.HasCA() && cluster.HasCert() {
-		peerInfo.CertFile = cluster.Cert
-		peerInfo.KeyFile = cluster.Key
-		peerInfo.TrustedCAFile = cluster.CA
+	if server.HasCA() && server.HasCert() {
+		peerInfo.CertFile = server.Cert
+		peerInfo.KeyFile = server.Key
+		peerInfo.TrustedCAFile = server.CA
 		peerInfo.ClientCertAuth = true
-	} else if cluster.HasCA() || cluster.HasCert() {
+	} else if server.HasCA() || server.HasCert() {
 		err = errors.New("need a full set of cert/ca/key for secure etcd peer inter-communication")
 		return
 	}

@@ -149,7 +149,7 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, e
 	pdEndpoints := strings.Split(pdAddr, ",")
 	logConfig := zap.NewProductionConfig()
 	logConfig.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
-	tlsConfig, err := security.BuildClientTLSConfig(logger, cfg.Security.PDTLS, "pd")
+	tlsConfig, err := security.BuildClientTLSConfig(logger, cfg.Security.ClusterTLS, "pd")
 	if err != nil {
 		return nil, err
 	}

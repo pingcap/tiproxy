@@ -62,7 +62,7 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
-func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.Advance, scfg config.TLSCert, logger *zap.Logger) error {
+func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.Advance, scfg config.TLSConfig, logger *zap.Logger) error {
 	srv.logger = logger
 	srv.ignoreWrongNamespace = cfg.IgnoreWrongNamespace
 	if cfg.WatchInterval == "" {
