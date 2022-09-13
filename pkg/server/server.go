@@ -46,21 +46,41 @@ type Server struct {
 	// managers
 	ConfigManager    *mgrcfg.ConfigManager
 	NamespaceManager *mgrns.NamespaceManager
-	ObserverClient   *clientv3.Client
 	MetricsManager   *metrics.MetricsManager
-
+	ObserverClient   *clientv3.Client
+	// HTTP client
+	Http *http.Client
 	// HTTP/GRPC services
 	Etcd *embed.Etcd
-
 	// L7 proxy
 	Proxy *proxy.SQLServer
 }
 
 func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string) (srv *Server, err error) {
+	{
+		tlogger := logger.Named("tls")
+		if uerr := security.PreProcessTLSConfig(tlogger, &cfg.Security.ClusterTLS, cfg.Workdir, "cluster", cfg.Security.RSAKeySize); uerr != nil {
+			err = errors.WithStack(uerr)
+			return
+		}
+		if uerr := security.PreProcessTLSConfig(tlogger, &cfg.Security.SQLTLS, cfg.Workdir, "sql", cfg.Security.RSAKeySize); uerr != nil {
+			err = errors.WithStack(uerr)
+			return
+		}
+		if uerr := security.PreProcessTLSConfig(logger.Named("tls"), &cfg.Security.ServerTLS, cfg.Workdir, "server", cfg.Security.RSAKeySize); uerr != nil {
+			err = errors.WithStack(uerr)
+			return
+		}
+		if uerr := security.PreProcessTLSConfig(logger.Named("tls"), &cfg.Security.PeerTLS, cfg.Workdir, "peer", cfg.Security.RSAKeySize); uerr != nil {
+			err = errors.WithStack(uerr)
+			return
+		}
+	}
+
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		MetricsManager:   metrics.NewMetricsManager(),
-		NamespaceManager: mgrns.NewNamespaceManager(cfg.Workdir, cfg.Security.RSAKeySize),
+		NamespaceManager: mgrns.NewNamespaceManager(),
 	}
 
 	ready := atomic.NewBool(false)
@@ -111,13 +131,27 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		}
 	}
 
+	// general cluster HTTP client
+	{
+		clientTLS, uerr := security.BuildClientTLSConfig(logger.Named("http"), cfg.Security.ClusterTLS)
+		if uerr != nil {
+			err = errors.WithStack(err)
+			return
+		}
+		srv.Http = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: clientTLS,
+			},
+		}
+	}
+
 	// setup config manager
 	{
-		addrs := make([]string, len(srv.Etcd.Clients))
+		addrs := make([]string, len(srv.Etcd.Peers))
 		for i := range addrs {
-			addrs[i] = srv.Etcd.Clients[i].Addr().String()
+			addrs[i] = srv.Etcd.Peers[i].Addr().String()
 		}
-		err = srv.ConfigManager.Init(ctx, addrs, cfg.Advance, cfg.Security.ServerTLS, logger.Named("config"))
+		err = srv.ConfigManager.Init(ctx, addrs, cfg.Advance, cfg.Security.PeerTLS, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -158,7 +192,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 			return
 		}
 
-		err = srv.NamespaceManager.Init(logger.Named("nsmgr"), nss, srv.ObserverClient)
+		err = srv.NamespaceManager.Init(logger.Named("nsmgr"), nss, srv.ObserverClient, srv.Http)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -167,7 +201,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup proxy server
 	{
-		srv.Proxy, err = proxy.NewSQLServer(logger.Named("proxy"), cfg.Workdir, cfg.Proxy, cfg.Security, srv.NamespaceManager)
+		srv.Proxy, err = proxy.NewSQLServer(logger.Named("proxy"), cfg.Proxy, cfg.Security, srv.NamespaceManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -227,7 +261,7 @@ func (s *Server) Close() error {
 func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string, engine *gin.Engine) (srv *embed.Etcd, err error) {
 	etcd_cfg := embed.NewConfig()
 
-	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Workdir, "frontend", cfg.Security.RSAKeySize); err != nil {
+	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Security.PeerTLS); err != nil {
 		return
 	}
 

@@ -63,6 +63,12 @@ var testProxyConfig = Config{
 			Key:       "c",
 			AutoCerts: true,
 		},
+		PeerTLS: TLSConfig{
+			CA:        "a",
+			Cert:      "b",
+			Key:       "c",
+			AutoCerts: true,
+		},
 		ClusterTLS: TLSConfig{
 			CA:     "a",
 			SkipCA: true,

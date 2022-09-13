@@ -523,7 +523,7 @@ func TestConcurrency(t *testing.T) {
 	// We create other goroutines to change backends easily.
 	etcd := createEtcdServer(t, "127.0.0.1:0")
 	client := createEtcdClient(t, etcd)
-	router, err := NewScoreBasedRouter(cfg, client)
+	router, err := NewScoreBasedRouter(cfg, client, nil)
 	require.NoError(t, err)
 
 	var wg waitgroup.WaitGroup

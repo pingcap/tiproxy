@@ -51,7 +51,7 @@ type SQLServer struct {
 }
 
 // NewSQLServer creates a new SQLServer.
-func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, scfg config.Security, nsmgr *mgrns.NamespaceManager) (*SQLServer, error) {
+func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Security, nsmgr *mgrns.NamespaceManager) (*SQLServer, error) {
 	var err error
 
 	s := &SQLServer{
@@ -65,10 +65,10 @@ func NewSQLServer(logger *zap.Logger, workdir string, cfg config.ProxyServer, sc
 		},
 	}
 
-	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.ServerTLS, workdir, "frontend", scfg.RSAKeySize); err != nil {
+	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.ServerTLS); err != nil {
 		return nil, err
 	}
-	if s.backendTLSConfig, err = security.BuildClientTLSConfig(logger, scfg.SQLTLS, "backend"); err != nil {
+	if s.backendTLSConfig, err = security.BuildClientTLSConfig(logger, scfg.SQLTLS); err != nil {
 		return nil, err
 	}
 

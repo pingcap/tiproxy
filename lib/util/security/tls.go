@@ -22,7 +22,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"fmt"
 	"io/ioutil"
 	"math/big"
 	"net"
@@ -43,6 +42,13 @@ func createTLSConfigificates(logger *zap.Logger, certpath string, keypath string
 		return nil
 	} else if errors.Is(e1, os.ErrExist) || errors.Is(e2, os.ErrExist) {
 		return errors.New("cert and key should be present or not at the same time")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(keypath), 0755); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(certpath), 0755); err != nil {
+		return err
 	}
 
 	privkey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
@@ -105,6 +111,18 @@ func createTLSConfigificates(logger *zap.Logger, certpath string, keypath string
 
 	logger.Info("TLS Certificates created", zap.String("cert", certpath), zap.String("key", keypath),
 		zap.Duration("validity", certValidity), zap.Int("rsaKeySize", rsaKeySize))
+	return nil
+}
+
+func PreProcessTLSConfig(logger *zap.Logger, scfg *config.TLSConfig, workdir, mod string, keySize int) error {
+	if !scfg.HasCert() && scfg.AutoCerts {
+		scfg.Cert = filepath.Join(workdir, mod, "cert.pem")
+		scfg.Key = filepath.Join(workdir, mod, "key.pem")
+		if err := createTLSConfigificates(logger, scfg.Cert, scfg.Key, keySize); err != nil {
+			return errors.WithStack(err)
+		}
+		return PreProcessTLSConfig(logger, scfg, workdir, mod, keySize)
+	}
 	return nil
 }
 
@@ -213,31 +231,22 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	return
 }
 
-func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig, workdir, mod string, keySize int) (*tls.Config, error) {
+func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config, error) {
+	logger = logger.With(zap.String("tls", "server"))
 	if !cfg.HasCert() {
-		if cfg.AutoCerts {
-			cfg.Cert = filepath.Join(workdir, mod, "cert.pem")
-			cfg.Key = filepath.Join(workdir, mod, "key.pem")
-			if err := createTLSConfigificates(logger, cfg.Cert, cfg.Key, keySize); err != nil {
-				return nil, err
-			}
-			return BuildServerTLSConfig(logger, cfg, workdir, mod, keySize)
-		}
-
-		// TODO: require certs here
-		logger.Warn(fmt.Sprintf("require certificates to secure %s clients connections", mod))
+		logger.Warn("require certificates to secure clients connections, disable TLS")
 		return nil, nil
 	}
 
 	tcfg := &tls.Config{}
 	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
-		return nil, errors.Errorf("failed to load certs for %s: %w", mod, err)
+		return nil, errors.Errorf("failed to load certs: %w", err)
 	}
 	tcfg.Certificates = append(tcfg.Certificates, cert)
 
 	if !cfg.HasCA() {
-		logger.Warn(fmt.Sprintf("no signed certs for %s, will not authenticate %s clients (connection is still secured)", mod, mod))
+		logger.Warn("no CA, server will not authenticate clients (connection is still secured)")
 		return tcfg, nil
 	}
 
@@ -245,22 +254,22 @@ func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig, workdir, mod
 	tcfg.ClientCAs = x509.NewCertPool()
 	certBytes, err := ioutil.ReadFile(cfg.CA)
 	if err != nil {
-		return nil, errors.Errorf("failed to read CA for %s: %w", mod, err)
+		return nil, errors.Errorf("failed to read CA: %w", err)
 	}
 	if !tcfg.ClientCAs.AppendCertsFromPEM(certBytes) {
-		return nil, errors.Errorf("failed to append CA for %s", mod)
+		return nil, errors.Errorf("failed to append CA")
 	}
 	return tcfg, nil
 }
 
-func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig, mod string) (*tls.Config, error) {
+func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config, error) {
+	logger = logger.With(zap.String("tls", "client"))
 	if !cfg.HasCA() {
-		logger.Warn(fmt.Sprintf("require CA to verify %s server connections", mod))
 		if cfg.SkipCA {
 			// still enable TLS without verify server certs
 			return &tls.Config{InsecureSkipVerify: true}, nil
 		}
-		// no TLS
+		logger.Warn("no CA to verify server connections, disable TLS")
 		return nil, nil
 	}
 
@@ -268,54 +277,52 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig, mod string) 
 	tcfg.ClientCAs = x509.NewCertPool()
 	certBytes, err := ioutil.ReadFile(cfg.CA)
 	if err != nil {
-		return nil, errors.Errorf("failed to read CA for %s: %w", mod, err)
+		return nil, errors.Errorf("failed to read CA: %w", err)
 	}
 	if !tcfg.ClientCAs.AppendCertsFromPEM(certBytes) {
-		return nil, errors.Errorf("failed to append CA for %s", mod)
+		return nil, errors.Errorf("failed to append CA")
 	}
 
 	if !cfg.HasCert() {
-		logger.Warn(fmt.Sprintf("no certs for %s, server may reject the connection", mod))
+		logger.Warn("no certificates, server may reject the connection")
 		return tcfg, nil
 	}
 	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
-		return nil, errors.Errorf("failed to load certs for %s: %w", mod, err)
+		return nil, errors.Errorf("failed to load certs for: %w", err)
 	}
 	tcfg.Certificates = append(tcfg.Certificates, cert)
 
 	return tcfg, nil
 }
 
-func BuildEtcdTLSConfig(logger *zap.Logger, server config.TLSConfig, workdir, mod string, keySize int) (clientInfo, peerInfo transport.TLSInfo, err error) {
-	if !server.HasCert() {
-		if server.AutoCerts {
-			server.Cert = filepath.Join(workdir, mod, "cert.pem")
-			server.Key = filepath.Join(workdir, mod, "key.pem")
-			if err = createTLSConfigificates(logger, server.Cert, server.Key, keySize); err != nil {
-				return
-			}
-			return BuildEtcdTLSConfig(logger, server, workdir, mod, keySize)
-		}
-	} else {
+func BuildEtcdTLSConfig(logger *zap.Logger, server, peer config.TLSConfig) (clientInfo, peerInfo transport.TLSInfo, err error) {
+	logger = logger.With(zap.String("tls", "etcd"))
+
+	if server.HasCert() {
 		clientInfo.CertFile = server.Cert
 		clientInfo.KeyFile = server.Key
 		if server.HasCA() {
 			clientInfo.ClientCertAuth = true
 			clientInfo.TrustedCAFile = server.CA
-		} else {
-			logger.Warn("no signed certs for etcd clients, proxy will not authenticate etcd clients (connection is still secured)")
+		} else if !server.SkipCA {
+			logger.Warn("no CA, proxy will not authenticate etcd clients (connection is still secured)")
 		}
 	}
 
-	if server.HasCA() && server.HasCert() {
-		peerInfo.CertFile = server.Cert
-		peerInfo.KeyFile = server.Key
-		peerInfo.TrustedCAFile = server.CA
-		peerInfo.ClientCertAuth = true
-	} else if server.HasCA() || server.HasCert() {
-		err = errors.New("need a full set of cert/ca/key for secure etcd peer inter-communication")
-		return
+	if peer.HasCert() {
+		peerInfo.CertFile = peer.Cert
+		peerInfo.KeyFile = peer.Key
+		if peer.HasCA() {
+			peerInfo.TrustedCAFile = peer.CA
+			peerInfo.ClientCertAuth = true
+		} else if peer.SkipCA {
+			peerInfo.InsecureSkipVerify = true
+			peerInfo.ClientCertAuth = false
+		} else {
+			err = errors.New("need a full set of cert/key/ca or cert/key/skip-ca for secure etcd peer inter-communication")
+			return
+		}
 	}
 
 	return

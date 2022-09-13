@@ -17,7 +17,7 @@ package namespace
 
 import (
 	"fmt"
-	"path/filepath"
+	"net/http"
 	"sync"
 
 	"github.com/pingcap/TiProxy/lib/config"
@@ -31,18 +31,18 @@ import (
 type NamespaceManager struct {
 	sync.RWMutex
 	client  *clientv3.Client
+	httpCli *http.Client
 	logger  *zap.Logger
-	workdir string
-	keySize int
 	nsm     map[string]*Namespace
 }
 
-func NewNamespaceManager(workdir string, keySize int) *NamespaceManager {
-	return &NamespaceManager{workdir: workdir, keySize: keySize}
+func NewNamespaceManager() *NamespaceManager {
+	return &NamespaceManager{}
 }
-func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clientv3.Client) (*Namespace, error) {
+func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
-	rt, err := router.NewScoreBasedRouter(&cfg.Backend, client)
+
+	rt, err := router.NewScoreBasedRouter(&cfg.Backend, mgr.client, mgr.httpCli)
 	if err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
@@ -51,12 +51,12 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clien
 		router: rt,
 	}
 
-	r.frontendTLS, err = security.BuildServerTLSConfig(logger, cfg.Frontend.Security, filepath.Join(mgr.workdir, r.name), "frontend", mgr.keySize)
+	r.frontendTLS, err = security.BuildServerTLSConfig(logger, cfg.Frontend.Security)
 	if err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
 
-	r.backendTLS, err = security.BuildClientTLSConfig(logger, cfg.Backend.Security, "backend")
+	r.backendTLS, err = security.BuildClientTLSConfig(logger, cfg.Backend.Security)
 	if err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
@@ -78,7 +78,7 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 			continue
 		}
 
-		ns, err := mgr.buildNamespace(nsc, mgr.client)
+		ns, err := mgr.buildNamespace(nsc)
 		if err != nil {
 			return fmt.Errorf("%w: create namespace error, namespace: %s", err, nsc.Namespace)
 		}
@@ -91,9 +91,10 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nss []*config.Namespace, client *clientv3.Client) error {
+func (mgr *NamespaceManager) Init(logger *zap.Logger, nss []*config.Namespace, client *clientv3.Client, httpCli *http.Client) error {
 	mgr.Lock()
 	mgr.client = client
+	mgr.httpCli = httpCli
 	mgr.logger = logger
 	mgr.Unlock()
 

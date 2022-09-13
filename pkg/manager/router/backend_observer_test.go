@@ -66,7 +66,7 @@ func TestObserveBackends(t *testing.T) {
 	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
 		bo.Start()
 
-		backend1 := addBackend(t, kv, backendChan)
+		backend1 := addBackend(t, kv)
 		checkStatus(t, backendChan, backend1, StatusHealthy)
 		addFakeTopology(t, kv, backend1.sqlAddr)
 		backend1.stopSQLServer()
@@ -82,7 +82,7 @@ func TestObserveBackends(t *testing.T) {
 		backend1.startHTTPServer()
 		checkStatus(t, backendChan, backend1, StatusHealthy)
 
-		backend2 := addBackend(t, kv, backendChan)
+		backend2 := addBackend(t, kv)
 		checkStatus(t, backendChan, backend2, StatusHealthy)
 		removeBackend(t, kv, backend2)
 		checkStatus(t, backendChan, backend2, StatusCannotConnect)
@@ -171,7 +171,7 @@ func TestCancelObserver(t *testing.T) {
 	runTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
 		backends := make([]*backendServer, 0, 3)
 		for i := 0; i < 3; i++ {
-			backends = append(backends, addBackend(t, kv, backendChan))
+			backends = append(backends, addBackend(t, kv))
 		}
 		err := bo.fetchBackendList(context.Background())
 		require.NoError(t, err)
@@ -215,7 +215,7 @@ func runTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendO
 	kv := clientv3.NewKV(client)
 	backendChan := make(chan map[string]BackendStatus, 1)
 	mer := newMockEventReceiver(backendChan)
-	bo, err := NewBackendObserver(mer, client, newHealthCheckConfigForTest(), nil)
+	bo, err := NewBackendObserver(mer, client, nil, newHealthCheckConfigForTest(), nil)
 	require.NoError(t, err)
 	f(etcd, kv, bo, backendChan)
 	bo.Close()
@@ -333,7 +333,7 @@ func startListener(t *testing.T, addr string) (net.Listener, string) {
 }
 
 // A new healthy backend is added.
-func addBackend(t *testing.T, kv clientv3.KV, backendChan chan map[string]BackendStatus) *backendServer {
+func addBackend(t *testing.T, kv clientv3.KV) *backendServer {
 	backend := &backendServer{
 		t: t,
 	}

@@ -132,6 +132,8 @@ type BackendObserver struct {
 	// All the backend info in the topology, including tombstones.
 	allBackendInfo map[string]*BackendInfo
 	client         *clientv3.Client
+	httpCli        *http.Client
+	httpTLS        bool
 	staticAddrs    []string
 	eventReceiver  BackendEventReceiver
 	wg             waitgroup.WaitGroup
@@ -149,7 +151,7 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, e
 	pdEndpoints := strings.Split(pdAddr, ",")
 	logConfig := zap.NewProductionConfig()
 	logConfig.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
-	tlsConfig, err := security.BuildClientTLSConfig(logger, cfg.Security.ClusterTLS, "pd")
+	tlsConfig, err := security.BuildClientTLSConfig(logger, cfg.Security.ClusterTLS)
 	if err != nil {
 		return nil, err
 	}
@@ -182,8 +184,8 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, e
 }
 
 // StartBackendObserver creates a BackendObserver and starts watching.
-func StartBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
-	bo, err := NewBackendObserver(eventReceiver, client, config, staticAddrs)
+func StartBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
+	bo, err := NewBackendObserver(eventReceiver, client, httpCli, config, staticAddrs)
 	if err != nil {
 		return nil, err
 	}
@@ -192,15 +194,24 @@ func StartBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.C
 }
 
 // NewBackendObserver creates a BackendObserver.
-func NewBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
+func NewBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
 	if client == nil && len(staticAddrs) == 0 {
 		return nil, ErrNoInstanceToSelect
+	}
+	if httpCli == nil {
+		httpCli = http.DefaultClient
+	}
+	httpTLS := false
+	if v, ok := httpCli.Transport.(*http.Transport); ok && v != nil && v.TLSClientConfig != nil {
+		httpTLS = true
 	}
 	bo := &BackendObserver{
 		config:         config,
 		curBackendInfo: make(map[string]BackendStatus),
 		allBackendInfo: make(map[string]*BackendInfo),
 		client:         client,
+		httpCli:        httpCli,
+		httpTLS:        httpTLS,
 		staticAddrs:    staticAddrs,
 		eventReceiver:  eventReceiver,
 	}
@@ -382,11 +393,15 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 
 		// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
 		// new connections, so we must check the status port first.
-		url := fmt.Sprintf("http://%s:%d%s", info.IP, info.StatusPort, statusPathSuffix)
+		schema := "http"
+		if bo.httpTLS {
+			schema = "https"
+		}
+		url := fmt.Sprintf("%s://%s:%d%s", schema, info.IP, info.StatusPort, statusPathSuffix)
 		var resp *http.Response
 		err := connectWithRetry(func() error {
 			var err error
-			if resp, err = http.Get(url); err == nil {
+			if resp, err = bo.httpCli.Get(url); err == nil {
 				if err := resp.Body.Close(); err != nil {
 					logutil.Logger(ctx).Warn("close http response in health check failed", zap.Error(err))
 				}
