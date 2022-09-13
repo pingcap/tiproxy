@@ -22,7 +22,7 @@ import (
 var (
 	ConnGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelServer,
 			Name:      "connections",
 			Help:      "Number of connections.",
@@ -30,7 +30,7 @@ var (
 
 	TimeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelMonitor,
 			Name:      "time_jump_back_total",
 			Help:      "Counter of system time jumps backward.",
@@ -38,7 +38,7 @@ var (
 
 	KeepAliveCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelMonitor,
 			Name:      "keep_alive_total",
 			Help:      "Counter of proxy keep alive.",

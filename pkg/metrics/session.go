@@ -25,7 +25,7 @@ const (
 var (
 	QueryTotalCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelSession,
 			Name:      "query_total",
 			Help:      "Counter of queries.",
@@ -33,7 +33,7 @@ var (
 
 	QueryDurationHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelSession,
 			Name:      "query_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled queries.",

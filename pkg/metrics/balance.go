@@ -31,7 +31,7 @@ const (
 var (
 	BackendStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelBalance,
 			Name:      "b_status",
 			Help:      "Gauge of backend status.",
@@ -39,7 +39,7 @@ var (
 
 	BackendConnGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelBalance,
 			Name:      "b_conn",
 			Help:      "Number of backend connections.",
@@ -47,7 +47,7 @@ var (
 
 	MigrateCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelBalance,
 			Name:      "migrate_total",
 			Help:      "Number and result of session migration.",
@@ -55,7 +55,7 @@ var (
 
 	MigrateDurationHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: ModuleWeirProxy,
+			Namespace: ModuleProxy,
 			Subsystem: LabelBalance,
 			Name:      "migrate_duration_millis",
 			Help:      "Bucketed histogram of migrating time (s) of sessions.",
