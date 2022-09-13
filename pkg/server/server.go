@@ -227,9 +227,17 @@ func (s *Server) Close() error {
 func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string, engine *gin.Engine) (srv *embed.Etcd, err error) {
 	etcd_cfg := embed.NewConfig()
 
+	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Workdir, "frontend", cfg.Security.RSAKeySize); err != nil {
+		return
+	}
+
 	apiAddrStr := cfg.API.Addr
-	if !strings.HasPrefix(apiAddrStr, "http://") {
-		apiAddrStr = fmt.Sprintf("http://%s", apiAddrStr)
+	if !strings.HasPrefix(apiAddrStr, "http://") || !strings.HasPrefix(apiAddrStr, "https://") {
+		if etcd_cfg.ClientTLSInfo.Empty() {
+			apiAddrStr = fmt.Sprintf("http://%s", apiAddrStr)
+		} else {
+			apiAddrStr = fmt.Sprintf("https://%s", apiAddrStr)
+		}
 	}
 	apiAddr, err := url.Parse(apiAddrStr)
 	if err != nil {
@@ -259,10 +267,6 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	etcd_cfg.InitialCluster = etcd_cfg.InitialClusterFromName(etcd_cfg.Name)
 	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
 	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
-
-	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Workdir, "frontend", cfg.Security.RSAKeySize); err != nil {
-		return
-	}
 
 	etcd_cfg.UserHandlers = map[string]http.Handler{
 		"/api/": engine,
