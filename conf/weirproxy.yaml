@@ -44,6 +44,7 @@ security:
     # that said, it is both a client and a server object
   client: # server object
     # proxy SQL or internal HTTP port will all use this
+    skip-ca: true
     auto-certs: true
 advance:
   # ignore-wrong-namespace: true

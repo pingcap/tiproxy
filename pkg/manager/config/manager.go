@@ -83,8 +83,6 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.A
 	}
 
 	var err error
-	// local connection, let us skip ca check
-	scfg.SkipCA = true
 	etcdConfig.TLS, err = security.BuildClientTLSConfig(logger, scfg, "frontend")
 	if err != nil {
 		return errors.Wrapf(err, "create etcd config center error")
