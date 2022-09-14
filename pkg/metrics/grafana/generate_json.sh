@@ -14,7 +14,7 @@
 # limitations under the License.
 
 go install github.com/google/go-jsonnet/cmd/jsonnet@latest
-git clone https://github.com/grafana/grafonnet-lib.git
+git clone https://github.com/grafana/grafonnet-lib.git --depth=1
 
 export JSONNET_PATH=grafonnet-lib
 jsonnet tiproxy_summary.jsonnet > tiproxy_summary.json
