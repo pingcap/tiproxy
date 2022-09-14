@@ -274,12 +274,12 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	}
 
 	tcfg := &tls.Config{}
-	tcfg.ClientCAs = x509.NewCertPool()
+	tcfg.RootCAs = x509.NewCertPool()
 	certBytes, err := ioutil.ReadFile(cfg.CA)
 	if err != nil {
 		return nil, errors.Errorf("failed to read CA: %w", err)
 	}
-	if !tcfg.ClientCAs.AppendCertsFromPEM(certBytes) {
+	if !tcfg.RootCAs.AppendCertsFromPEM(certBytes) {
 		return nil, errors.Errorf("failed to append CA")
 	}
 
@@ -303,8 +303,8 @@ func BuildEtcdTLSConfig(logger *zap.Logger, server, peer config.TLSConfig) (clie
 		clientInfo.CertFile = server.Cert
 		clientInfo.KeyFile = server.Key
 		if server.HasCA() {
-			clientInfo.ClientCertAuth = true
 			clientInfo.TrustedCAFile = server.CA
+			clientInfo.ClientCertAuth = true
 		} else if !server.SkipCA {
 			logger.Warn("no CA, proxy will not authenticate etcd clients (connection is still secured)")
 		}
