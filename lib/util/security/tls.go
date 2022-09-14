@@ -320,7 +320,7 @@ func BuildEtcdTLSConfig(logger *zap.Logger, server, peer config.TLSConfig) (clie
 			peerInfo.InsecureSkipVerify = true
 			peerInfo.ClientCertAuth = false
 		} else {
-			err = errors.New("need a full set of cert/key/ca or cert/key/skip-ca for secure etcd peer inter-communication")
+			err = errors.New("need a full set of cert/key/ca or cert/key/skip-ca to secure etcd peer inter-communication")
 			return
 		}
 	}
