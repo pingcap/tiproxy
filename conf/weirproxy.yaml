@@ -48,8 +48,8 @@ security:
     auto-certs: true
   peer-tls: # peer object
     # internal communication between proxies
-    # auto-certs: true
-    # skip-ca: true
+    auto-certs: true
+    skip-ca: true
 advance:
   # ignore-wrong-namespace: true
   # peer-port: "3081"

@@ -77,6 +77,7 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.A
 	// slash appended to distinguish '/dir'(file) and '/dir/'(directory)
 	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
 
+	srv.logger.Info("connect to etcd servers", zap.Strings("addrs", addrs))
 	etcdConfig := clientv3.Config{
 		Endpoints:   addrs,
 		DialTimeout: DefaultEtcdDialTimeout,
