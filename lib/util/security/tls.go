@@ -211,6 +211,7 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	certpool := x509.NewCertPool()
 	certpool.AppendCertsFromPEM(caPEM.Bytes())
 	clientTLSConf = &tls.Config{
+		InsecureSkipVerify: true,
 		RootCAs: certpool,
 	}
 

@@ -109,6 +109,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 		return err
 	}
 	backendIO := mgr.backendConn.PacketIO()
+	mgr.authenticator.serverAddr = serverAddr
 	if err := mgr.authenticator.handshakeFirstTime(clientIO, backendIO, frontendTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}

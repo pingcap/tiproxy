@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"net"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
@@ -39,6 +40,7 @@ type Authenticator struct {
 	dbname           string // default database name
 	capability       uint32 // client capability
 	collation        uint8
+	serverAddr       string
 	attrs            []byte // no need to parse
 	backendTLSConfig *tls.Config
 }
@@ -90,8 +92,16 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 		return err
 	}
 	// Always upgrade TLS with the server.
-	auth.backendTLSConfig = backendTLSConfig
-	if err = backendIO.UpgradeToClientTLS(backendTLSConfig); err != nil {
+	auth.backendTLSConfig = backendTLSConfig.Clone()
+	addr := backendIO.RemoteAddr().String()
+	if auth.serverAddr != "" {
+		addr = auth.serverAddr
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		auth.backendTLSConfig.ServerName = host
+	}
+	if err = backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
 		return err
 	}
 	if sslEnabled {
