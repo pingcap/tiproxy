@@ -148,6 +148,7 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, e
 		return nil, nil
 	}
 	pdEndpoints := strings.Split(pdAddr, ",")
+	logger.Info("connect PD servers", zap.Strings("addrs", pdEndpoints))
 	tlsConfig, err := security.BuildClientTLSConfig(logger, cfg.Security.ClusterTLS)
 	if err != nil {
 		return nil, err

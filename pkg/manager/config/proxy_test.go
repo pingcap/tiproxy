@@ -27,6 +27,7 @@ func TestProxyConfig(t *testing.T) {
 		IgnoreWrongNamespace: true,
 	})
 
+
 	cases := []*config.ProxyServerOnline{
 		{
 			MaxConnections: 1,
@@ -45,6 +46,7 @@ func TestProxyConfig(t *testing.T) {
 			TCPKeepAlive:   true,
 		},
 	}
+
 	ch := cfgmgr.GetProxyConfig()
 	for _, tc := range cases {
 		require.NoError(t, cfgmgr.SetProxyConfig(ctx, tc))

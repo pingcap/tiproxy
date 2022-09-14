@@ -35,13 +35,22 @@ import (
 	"go.uber.org/zap"
 )
 
-func createTLSConfigificates(logger *zap.Logger, certpath string, keypath string, rsaKeySize int) error {
+func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int) error {
+	logger = logger.With(zap.String("cert", certpath), zap.String("key", keypath), zap.String("ca", capath), zap.Int("rsaKeySize", rsaKeySize))
+
 	_, e1 := os.Stat(certpath)
 	_, e2 := os.Stat(keypath)
-	if errors.Is(e1, os.ErrExist) && errors.Is(e2, os.ErrExist) {
+	if errors.Is(e1, os.ErrExist) || errors.Is(e2, os.ErrExist) {
+		logger.Warn("either cert or key exists")
 		return nil
-	} else if errors.Is(e1, os.ErrExist) || errors.Is(e2, os.ErrExist) {
-		return errors.New("cert and key should be present or not at the same time")
+	}
+
+	if capath != "" {
+		_, e3 := os.Stat(capath)
+		if errors.Is(e3, os.ErrExist) {
+			logger.Warn("ca exists")
+			return nil
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(keypath), 0755); err != nil {
@@ -50,84 +59,49 @@ func createTLSConfigificates(logger *zap.Logger, certpath string, keypath string
 	if err := os.MkdirAll(filepath.Dir(certpath), 0755); err != nil {
 		return err
 	}
+	if capath != "" {
+		if err := os.MkdirAll(filepath.Dir(capath), 0755); err != nil {
+			return err
+		}
+	}
 
-	privkey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
+	certPEM, keyPEM, caPEM, err := CreateTempTLS()
 	if err != nil {
 		return err
 	}
 
-	certValidity := 90 * 24 * time.Hour // 90 days
-	notBefore := time.Now()
-	notAfter := notBefore.Add(certValidity)
-	hostname, err := os.Hostname()
-	if err != nil {
+	if err := ioutil.WriteFile(certpath, certPEM.Bytes(), 0600); err != nil {
 		return err
+	}
+	if err := ioutil.WriteFile(keypath, keyPEM.Bytes(), 0600); err != nil {
+		return err
+	}
+	if capath != "" {
+		if err := ioutil.WriteFile(capath, caPEM.Bytes(), 0600); err != nil {
+			return err
+		}
 	}
 
-	template := x509.Certificate{
-		Subject: pkix.Name{
-			CommonName: "TiDB_Server_Auto_Generated_Server_Certificate",
-		},
-		SerialNumber: big.NewInt(1),
-		NotBefore:    notBefore,
-		NotAfter:     notAfter,
-		DNSNames:     []string{hostname},
-	}
-
-	// DER: Distinguished Encoding Rules, this is the ASN.1 encoding rule of the certificate.
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privkey.PublicKey, privkey)
-	if err != nil {
-		return err
-	}
-
-	certOut, err := os.Create(certpath)
-	if err != nil {
-		return err
-	}
-	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
-		return err
-	}
-	if err := certOut.Close(); err != nil {
-		return err
-	}
-
-	keyOut, err := os.OpenFile(keypath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-
-	privBytes, err := x509.MarshalPKCS8PrivateKey(privkey)
-	if err != nil {
-		return err
-	}
-
-	if err := pem.Encode(keyOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
-		return err
-	}
-
-	if err := keyOut.Close(); err != nil {
-		return err
-	}
-
-	logger.Info("TLS Certificates created", zap.String("cert", certpath), zap.String("key", keypath),
-		zap.Duration("validity", certValidity), zap.Int("rsaKeySize", rsaKeySize))
+	logger.Info("TLS Certificates created")
 	return nil
 }
 
-func PreProcessTLSConfig(logger *zap.Logger, scfg *config.TLSConfig, workdir, mod string, keySize int) error {
+func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, mod string, keySize int) error {
 	if !scfg.HasCert() && scfg.AutoCerts {
 		scfg.Cert = filepath.Join(workdir, mod, "cert.pem")
 		scfg.Key = filepath.Join(workdir, mod, "key.pem")
-		if err := createTLSConfigificates(logger, scfg.Cert, scfg.Key, keySize); err != nil {
+		if autoca {
+			scfg.CA = filepath.Join(workdir, mod, "ca.pem")
+		}
+		if err := createTLSConfigificates(logger, scfg.Cert, scfg.Key, scfg.CA, keySize); err != nil {
 			return errors.WithStack(err)
 		}
-		return PreProcessTLSConfig(logger, scfg, workdir, mod, keySize)
+		return AutoTLS(logger, scfg, autoca, workdir, mod, keySize)
 	}
 	return nil
 }
 
-// CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
-func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, err error) {
+func CreateTempTLS() (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
 	// set up our CA certificate
 	ca := &x509.Certificate{
 		SerialNumber: big.NewInt(2019),
@@ -150,27 +124,23 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	// create our private and public key
 	caPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// create the CA
 	caBytes, err := x509.CreateCertificate(rand.Reader, ca, ca, &caPrivKey.PublicKey, caPrivKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// pem encode
 	caPEM := new(bytes.Buffer)
-	pem.Encode(caPEM, &pem.Block{
+	if err := pem.Encode(caPEM, &pem.Block{
 		Type:  "CERTIFICATE",
 		Bytes: caBytes,
-	})
-
-	caPrivKeyPEM := new(bytes.Buffer)
-	pem.Encode(caPrivKeyPEM, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(caPrivKey),
-	})
+	}); err != nil {
+		return nil, nil, nil, err
+	}
 
 	// set up our server certificate
 	cert := &x509.Certificate{
@@ -193,29 +163,45 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 
 	certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	certBytes, err := x509.CreateCertificate(rand.Reader, cert, ca, &certPrivKey.PublicKey, caPrivKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	certPEM := new(bytes.Buffer)
-	pem.Encode(certPEM, &pem.Block{
+	if err := pem.Encode(certPEM, &pem.Block{
 		Type:  "CERTIFICATE",
 		Bytes: certBytes,
-	})
+	}); err != nil {
+		return nil, nil, nil, err
+	}
 
-	certPrivKeyPEM := new(bytes.Buffer)
-	pem.Encode(certPrivKeyPEM, &pem.Block{
+	keyPEM := new(bytes.Buffer)
+	if err := pem.Encode(keyPEM, &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(certPrivKey),
-	})
+	}); err != nil {
+		return nil, nil, nil, err
+	}
 
-	serverCert, err := tls.X509KeyPair(certPEM.Bytes(), certPrivKeyPEM.Bytes())
-	if err != nil {
-		return nil, nil, err
+	return certPEM, keyPEM, caPEM, nil
+}
+
+// CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
+func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, err error) {
+	certPEM, keyPEM, caPEM, uerr := CreateTempTLS()
+	if uerr != nil {
+		err = uerr
+		return
+	}
+
+	serverCert, uerr := tls.X509KeyPair(certPEM.Bytes(), keyPEM.Bytes())
+	if uerr != nil {
+		err = uerr
+		return
 	}
 
 	serverTLSConf = &tls.Config{
@@ -298,6 +284,8 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 
 func BuildEtcdTLSConfig(logger *zap.Logger, server, peer config.TLSConfig) (clientInfo, peerInfo transport.TLSInfo, err error) {
 	logger = logger.With(zap.String("tls", "etcd"))
+	clientInfo.Logger = logger
+	peerInfo.Logger = logger
 
 	if server.HasCert() {
 		clientInfo.CertFile = server.Cert

@@ -21,7 +21,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	ginzap "github.com/gin-contrib/zap"
@@ -59,19 +58,12 @@ type Server struct {
 func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string) (srv *Server, err error) {
 	{
 		tlogger := logger.Named("tls")
-		if uerr := security.PreProcessTLSConfig(tlogger, &cfg.Security.ClusterTLS, cfg.Workdir, "cluster", cfg.Security.RSAKeySize); uerr != nil {
+		// auto generate CA for serverTLS will break
+		if uerr := security.AutoTLS(tlogger, &cfg.Security.ServerTLS, false, cfg.Workdir, "server", cfg.Security.RSAKeySize); uerr != nil {
 			err = errors.WithStack(uerr)
 			return
 		}
-		if uerr := security.PreProcessTLSConfig(tlogger, &cfg.Security.SQLTLS, cfg.Workdir, "sql", cfg.Security.RSAKeySize); uerr != nil {
-			err = errors.WithStack(uerr)
-			return
-		}
-		if uerr := security.PreProcessTLSConfig(logger.Named("tls"), &cfg.Security.ServerTLS, cfg.Workdir, "server", cfg.Security.RSAKeySize); uerr != nil {
-			err = errors.WithStack(uerr)
-			return
-		}
-		if uerr := security.PreProcessTLSConfig(logger.Named("tls"), &cfg.Security.PeerTLS, cfg.Workdir, "peer", cfg.Security.RSAKeySize); uerr != nil {
+		if uerr := security.AutoTLS(tlogger, &cfg.Security.PeerTLS, true, cfg.Workdir, "peer", cfg.Security.RSAKeySize); uerr != nil {
 			err = errors.WithStack(uerr)
 			return
 		}
@@ -147,11 +139,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup config manager
 	{
-		addrs := make([]string, len(srv.Etcd.Peers))
-		for i := range addrs {
-			addrs[i] = srv.Etcd.Peers[i].Addr().String()
-		}
-		err = srv.ConfigManager.Init(ctx, addrs, cfg.Advance, cfg.Security.PeerTLS, logger.Named("config"))
+		err = srv.ConfigManager.Init(ctx, srv.Etcd.Server.KV(), cfg.Advance, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -265,17 +253,14 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		return
 	}
 
-	apiAddrStr := cfg.API.Addr
-	if !strings.HasPrefix(apiAddrStr, "http://") || !strings.HasPrefix(apiAddrStr, "https://") {
-		if etcd_cfg.ClientTLSInfo.Empty() {
-			apiAddrStr = fmt.Sprintf("http://%s", apiAddrStr)
-		} else {
-			apiAddrStr = fmt.Sprintf("https://%s", apiAddrStr)
-		}
-	}
-	apiAddr, err := url.Parse(apiAddrStr)
+	apiAddr, err := url.Parse(fmt.Sprintf("http://%s", cfg.API.Addr))
 	if err != nil {
 		return nil, err
+	}
+	if etcd_cfg.ClientTLSInfo.Empty() {
+		apiAddr.Scheme = "http"
+	} else {
+		apiAddr.Scheme = "https"
 	}
 	etcd_cfg.LCUrls = []url.URL{*apiAddr}
 	apiAddrAdvertise := *apiAddr
@@ -291,9 +276,14 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		peerPort = strconv.Itoa(peerPortNum + 1)
 	}
 	peerAddr := *apiAddr
+	if etcd_cfg.PeerTLSInfo.Empty() {
+		peerAddr.Scheme = "http"
+	} else {
+		peerAddr.Scheme = "https"
+	}
 	peerAddr.Host = fmt.Sprintf("%s:%s", peerAddr.Hostname(), peerPort)
 	etcd_cfg.LPUrls = []url.URL{peerAddr}
-	peerAddrAdvertise := *apiAddr
+	peerAddrAdvertise := peerAddr
 	peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", pubAddr, peerPort)
 	etcd_cfg.APUrls = []url.URL{peerAddrAdvertise}
 
