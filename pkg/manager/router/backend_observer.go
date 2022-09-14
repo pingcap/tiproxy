@@ -142,15 +142,12 @@ type BackendObserver struct {
 
 // InitEtcdClient initializes an etcd client that fetches TiDB instance topology from PD.
 func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, error) {
-	logger = logger.Named("pd")
 	pdAddr := cfg.Proxy.PDAddrs
 	if len(pdAddr) == 0 {
 		// use tidb server addresses directly
 		return nil, nil
 	}
 	pdEndpoints := strings.Split(pdAddr, ",")
-	logConfig := zap.NewProductionConfig()
-	logConfig.Level = zap.NewAtomicLevelAt(zap.ErrorLevel)
 	tlsConfig, err := security.BuildClientTLSConfig(logger, cfg.Security.ClusterTLS)
 	if err != nil {
 		return nil, err
@@ -159,7 +156,7 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, e
 	etcdClient, err = clientv3.New(clientv3.Config{
 		Endpoints:        pdEndpoints,
 		TLS:              tlsConfig,
-		LogConfig:        &logConfig,
+		Logger:           logger.Named("etcdcli"),
 		AutoSyncInterval: 30 * time.Second,
 		DialTimeout:      5 * time.Second,
 		DialOptions: []grpc.DialOption{

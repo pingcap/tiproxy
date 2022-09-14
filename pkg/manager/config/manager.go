@@ -81,6 +81,7 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.A
 	etcdConfig := clientv3.Config{
 		Endpoints:   addrs,
 		DialTimeout: DefaultEtcdDialTimeout,
+		Logger:      srv.logger.Named("etcdcli"),
 	}
 
 	var err error

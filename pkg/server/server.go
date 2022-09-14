@@ -116,7 +116,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
 		api.Register(engine.Group("/api"), ready, cfg.API, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		srv.Etcd, err = buildEtcd(ctx, cfg, logger, pubAddr, engine)
+		srv.Etcd, err = buildEtcd(ctx, cfg, logger.Named("etcd"), pubAddr, engine)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -179,7 +179,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup namespace manager
 	{
-		srv.ObserverClient, err = router.InitEtcdClient(logger, cfg)
+		srv.ObserverClient, err = router.InitEtcdClient(logger.Named("pd"), cfg)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -300,7 +300,7 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 	etcd_cfg.Name = "proxy-" + fmt.Sprint(time.Now().UnixMicro())
 	etcd_cfg.InitialCluster = etcd_cfg.InitialClusterFromName(etcd_cfg.Name)
 	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
-	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
+	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger)
 
 	etcd_cfg.UserHandlers = map[string]http.Handler{
 		"/api/": engine,
