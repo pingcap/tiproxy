@@ -32,7 +32,6 @@ import (
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
-	"github.com/pingcap/tidb/util/logutil"
 	"go.uber.org/zap"
 )
 
@@ -64,6 +63,7 @@ type redirectResult struct {
 // - If it retries after each command: the latency will be unacceptable afterwards if it always fails.
 // - If it stops receiving signals: the previous new backend may be abnormal but the next new backend may be good.
 type BackendConnManager struct {
+	logger        *zap.Logger
 	connectionID  uint64
 	authenticator *Authenticator
 	cmdProcessor  *CmdProcessor
@@ -84,8 +84,9 @@ type BackendConnManager struct {
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(connectionID uint64) *BackendConnManager {
+func NewBackendConnManager(logger *zap.Logger, connectionID uint64) *BackendConnManager {
 	return &BackendConnManager{
+		logger:         logger,
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
 		authenticator:  &Authenticator{},
@@ -270,12 +271,12 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 	if rs.err != nil {
 		if ignoredErr := newConn.Close(); ignoredErr != nil {
-			logutil.Logger(ctx).Warn("close new backend connection failed", zap.Error(ignoredErr))
+			mgr.logger.Warn("close new backend connection failed", zap.Error(ignoredErr))
 		}
 		return
 	}
 	if ignoredErr := mgr.backendConn.Close(); ignoredErr != nil {
-		logutil.Logger(ctx).Warn("close previous backend connection failed", zap.Error(ignoredErr))
+		mgr.logger.Warn("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
 }
@@ -327,12 +328,12 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 	}
 	if rs.err != nil {
 		err := eventReceiver.OnRedirectFail(rs.from, rs.to, mgr)
-		logutil.Logger(ctx).Warn("redirect connection failed", zap.String("from", rs.from),
+		mgr.logger.Warn("redirect connection failed", zap.String("from", rs.from),
 			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID),
 			zap.NamedError("redirect_err", rs.err), zap.NamedError("notify_err", err))
 	} else {
 		err := eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
-		logutil.Logger(ctx).Info("redirect connection succeeds", zap.String("from", rs.from),
+		mgr.logger.Info("redirect connection succeeds", zap.String("from", rs.from),
 			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID), zap.NamedError("notify_err", err))
 	}
 }
@@ -364,7 +365,7 @@ func (mgr *BackendConnManager) Close() error {
 		// Just notify it with the current address.
 		if len(addr) > 0 {
 			if err := eventReceiver.OnConnClosed(addr, mgr); err != nil {
-				logutil.BgLogger().Error("close connection error", zap.String("addr", addr),
+				mgr.logger.Error("close connection error", zap.String("addr", addr),
 					zap.Uint64("conn", mgr.connectionID), zap.NamedError("notify_err", err))
 			}
 		}

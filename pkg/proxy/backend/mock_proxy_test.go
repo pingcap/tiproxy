@@ -16,8 +16,10 @@ package backend
 
 import (
 	"crypto/tls"
+	"testing"
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
@@ -46,10 +48,10 @@ type mockProxy struct {
 	holdRequest bool
 }
 
-func newMockProxy(cfg *proxyConfig) *mockProxy {
+func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
 		proxyConfig:        cfg,
-		BackendConnManager: NewBackendConnManager(0),
+		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), 0),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
