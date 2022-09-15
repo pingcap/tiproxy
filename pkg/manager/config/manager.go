@@ -85,7 +85,13 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 		wch := e.kv.NewWatchStream()
 		defer wch.Close()
 		for {
-			_, err := wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), wch.Rev()-1)
+			var err error
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				_, err = wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), wch.Rev()-1)
+			}
 			if err == nil {
 				break
 			}

@@ -53,12 +53,12 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 
 	r.frontendTLS, err = security.BuildServerTLSConfig(logger, cfg.Frontend.Security)
 	if err != nil {
-		return nil, errors.Errorf("build router error: %w", err)
+		return nil, errors.Errorf("build frontend TLS error: %w", err)
 	}
 
 	r.backendTLS, err = security.BuildClientTLSConfig(logger, cfg.Backend.Security)
 	if err != nil {
-		return nil, errors.Errorf("build router error: %w", err)
+		return nil, errors.Errorf("build backend TLS error: %w", err)
 	}
 
 	return r, nil

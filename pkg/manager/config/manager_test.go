@@ -188,7 +188,7 @@ func TestBaseWatch(t *testing.T) {
 	// set it
 	require.NoError(t, cfgmgr.set(ctx, "test", "t", "1"))
 
-	// check multiple times, it will become the value after some point for at least three times
+	// now the only way to check watch is to wait
 	select {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting chan")

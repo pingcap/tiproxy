@@ -96,7 +96,6 @@ func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, m
 		if err := createTLSConfigificates(logger, scfg.Cert, scfg.Key, scfg.CA, keySize); err != nil {
 			return errors.WithStack(err)
 		}
-		return AutoTLS(logger, scfg, autoca, workdir, mod, keySize)
 	}
 	return nil
 }
