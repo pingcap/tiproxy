@@ -27,7 +27,6 @@ func TestProxyConfig(t *testing.T) {
 		IgnoreWrongNamespace: true,
 	})
 
-
 	cases := []*config.ProxyServerOnline{
 		{
 			MaxConnections: 1,
