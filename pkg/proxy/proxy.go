@@ -125,7 +125,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID))
-	clientConn := client.NewClientConnection(logger, conn, s.serverTLSConfig, s.clusterTLSConfig, s.nsmgr, backend.NewBackendConnManager(connID))
+	clientConn := client.NewClientConnection(logger.Named("cliconn"), conn, s.serverTLSConfig, s.clusterTLSConfig, s.nsmgr, backend.NewBackendConnManager(logger.Named("bemgr"), connID))
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 
