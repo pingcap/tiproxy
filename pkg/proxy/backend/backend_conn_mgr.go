@@ -102,7 +102,7 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 }
 
 // Connect connects to the first backend and then start watching redirection signals.
-func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 	mgr.backendConn = NewBackendConnection(serverAddr)
@@ -110,7 +110,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 		return err
 	}
 	backendIO := mgr.backendConn.PacketIO()
-	if err := mgr.authenticator.handshakeFirstTime(clientIO, backendIO, serverTLSConfig, backendTLSConfig); err != nil {
+	mgr.authenticator.serverAddr = serverAddr
+	if err := mgr.authenticator.handshakeFirstTime(clientIO, backendIO, frontendTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}
 	mgr.cmdProcessor.capability = mgr.authenticator.capability

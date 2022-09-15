@@ -28,24 +28,24 @@ import (
 )
 
 type ClientConnection struct {
-	logger           *zap.Logger
-	serverTLSConfig  *tls.Config    // the TLS config to connect to clients.
-	backendTLSConfig *tls.Config    // the TLS config to connect to TiDB server.
-	pkt              *pnet.PacketIO // a helper to read and write data in packet format.
-	nsmgr            *namespace.NamespaceManager
-	ns               *namespace.Namespace
-	connMgr          *backend.BackendConnManager
+	logger            *zap.Logger
+	frontendTLSConfig *tls.Config    // the TLS config to connect to clients.
+	backendTLSConfig  *tls.Config    // the TLS config to connect to TiDB server.
+	pkt               *pnet.PacketIO // a helper to read and write data in packet format.
+	nsmgr             *namespace.NamespaceManager
+	ns                *namespace.Namespace
+	connMgr           *backend.BackendConnManager
 }
 
-func NewClientConnection(logger *zap.Logger, conn net.Conn, serverTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager) *ClientConnection {
+func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager) *ClientConnection {
 	pkt := pnet.NewPacketIO(conn)
 	return &ClientConnection{
-		logger:           logger,
-		serverTLSConfig:  serverTLSConfig,
-		backendTLSConfig: backendTLSConfig,
-		pkt:              pkt,
-		nsmgr:            nsmgr,
-		connMgr:          bemgr,
+		logger:            logger,
+		frontendTLSConfig: frontendTLSConfig,
+		backendTLSConfig:  backendTLSConfig,
+		pkt:               pkt,
+		nsmgr:             nsmgr,
+		connMgr:           bemgr,
 	}
 }
 
@@ -64,7 +64,7 @@ func (cc *ClientConnection) connectBackend(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.serverTLSConfig, cc.backendTLSConfig); err != nil {
+	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.frontendTLSConfig, cc.backendTLSConfig); err != nil {
 		return err
 	}
 	return nil

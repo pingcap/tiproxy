@@ -19,12 +19,12 @@ import (
 	"encoding/json"
 
 	"github.com/pingcap/TiProxy/lib/config"
-	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 )
 
 func (e *ConfigManager) initProxyConfig(ctx context.Context) {
-	e.watch(ctx, PathPrefixProxy, "config", func(logger *zap.Logger, evt *clientv3.Event) {
+	e.watch(ctx, PathPrefixProxy, "config", func(logger *zap.Logger, evt mvccpb.Event) {
 		var proxy config.ProxyServerOnline
 		if err := json.Unmarshal(evt.Kv.Value, &proxy); err != nil {
 			logger.Warn("failed unmarshal proxy config", zap.Error(err))
@@ -43,6 +43,5 @@ func (e *ConfigManager) SetProxyConfig(ctx context.Context, proxy *config.ProxyS
 	if err != nil {
 		return err
 	}
-	_, err = e.set(ctx, PathPrefixProxy, "config", string(value))
-	return err
+	return e.set(ctx, PathPrefixProxy, "config", string(value))
 }

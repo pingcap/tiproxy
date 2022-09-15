@@ -45,10 +45,11 @@ cmd_%:
 	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
 test: ./bin/gocovmerge
+	rm -f .cover.*
 	go test -coverprofile=.cover.pkg ./...
 	cd lib && go test -coverprofile=../.cover.lib ./...
 	./bin/gocovmerge .cover.* > .cover
-	rm .cover.*
+	rm -f .cover.*
 	go tool cover -html=.cover -o .cover.html
 
 ./bin/gocovmerge:

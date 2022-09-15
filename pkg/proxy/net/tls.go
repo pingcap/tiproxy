@@ -16,7 +16,6 @@ package net
 
 import (
 	"crypto/tls"
-	"net"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 )
@@ -34,10 +33,6 @@ func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) (tls.ConnectionStat
 
 func (p *PacketIO) UpgradeToClientTLS(tlsConfig *tls.Config) error {
 	tlsConfig = tlsConfig.Clone()
-	host, _, err := net.SplitHostPort(p.conn.RemoteAddr().String())
-	if err == nil {
-		tlsConfig.ServerName = host
-	}
 	tlsConn := tls.Client(p.conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))

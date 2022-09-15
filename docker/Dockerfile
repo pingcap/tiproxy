@@ -13,6 +13,6 @@ RUN sh ./proxy/apk-fastest-mirror.sh
 RUN apk add --no-cache --progress git make go
 ARG BUILDFLAGS
 ARG GOPROXY
-RUN export BUILDFLAGS=${BUILDFLAGS} && export GOPROXY=${GOPROXY} && cd proxy && ls -al && cat Makefile && make cmd && cp bin/* /bin/ && cp -a conf /etc/proxy && cd .. && rm -rf proxy
+RUN export BUILDFLAGS=${BUILDFLAGS} && export GOPROXY=${GOPROXY} && cd proxy && make cmd && cp bin/* /bin/ && cp -a conf /etc/proxy && cd .. && rm -rf proxy
 RUN rm -rf $(go env GOMODCACHE GOCACHE) && apk del git make go
 ENTRYPOINT ["/bin/weirproxy", "-conf", "/etc/proxy/weirproxy.yaml"]

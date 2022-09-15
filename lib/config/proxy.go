@@ -75,24 +75,28 @@ type LogFile struct {
 	MaxBackups int    `yaml:"max-backups,omitempty" toml:"max-backups,omitempty" json:"max-backups,omitempty"`
 }
 
-type TLSCert struct {
-	CA   string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
-	Cert string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
-	Key  string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
+type TLSConfig struct {
+	Cert      string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
+	Key       string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
+	AutoCerts bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty"`
+	CA        string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
+	SkipCA    bool   `yaml:"skip-ca,omitempty" toml:"skip-ca,omitempty" json:"skip-ca,omitempty"`
 }
 
-func (c TLSCert) HasCert() bool {
+func (c TLSConfig) HasCert() bool {
 	return !(c.Cert == "" && c.Key == "")
 }
 
-func (c TLSCert) HasCA() bool {
+func (c TLSConfig) HasCA() bool {
 	return c.CA != ""
 }
 
 type Security struct {
-	RSAKeySize int     `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
-	Server     TLSCert `yaml:"server,omitempty" toml:"server,omitempty" json:"server,omitempty"`
-	Cluster    TLSCert `yaml:"cluster,omitempty" toml:"cluster,omitempty" json:"cluster,omitempty"`
+	RSAKeySize int       `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
+	ServerTLS  TLSConfig `yaml:"server-tls,omitempty" toml:"server-tls,omitempty" json:"server-tls,omitempty"`
+	PeerTLS    TLSConfig `yaml:"peer-tls,omitempty" toml:"peer-tls,omitempty" json:"peer-tls,omitempty"`
+	ClusterTLS TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
+	SQLTLS     TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
 }
 
 func NewConfig(data []byte) (*Config, error) {

@@ -21,13 +21,13 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
@@ -45,21 +45,34 @@ type Server struct {
 	// managers
 	ConfigManager    *mgrcfg.ConfigManager
 	NamespaceManager *mgrns.NamespaceManager
-	ObserverClient   *clientv3.Client
 	MetricsManager   *metrics.MetricsManager
-
+	ObserverClient   *clientv3.Client
+	// HTTP client
+	Http *http.Client
 	// HTTP/GRPC services
 	Etcd *embed.Etcd
-
 	// L7 proxy
 	Proxy *proxy.SQLServer
 }
 
 func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string) (srv *Server, err error) {
+	{
+		tlogger := logger.Named("tls")
+		// auto generate CA for serverTLS will break
+		if uerr := security.AutoTLS(tlogger, &cfg.Security.ServerTLS, false, cfg.Workdir, "server", cfg.Security.RSAKeySize); uerr != nil {
+			err = errors.WithStack(uerr)
+			return
+		}
+		if uerr := security.AutoTLS(tlogger, &cfg.Security.PeerTLS, true, cfg.Workdir, "peer", cfg.Security.RSAKeySize); uerr != nil {
+			err = errors.WithStack(uerr)
+			return
+		}
+	}
+
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
-		NamespaceManager: mgrns.NewNamespaceManager(),
 		MetricsManager:   metrics.NewMetricsManager(),
+		NamespaceManager: mgrns.NewNamespaceManager(),
 	}
 
 	ready := atomic.NewBool(false)
@@ -95,7 +108,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
 		api.Register(engine.Group("/api"), ready, cfg.API, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		srv.Etcd, err = buildEtcd(ctx, cfg, logger, pubAddr, engine)
+		srv.Etcd, err = buildEtcd(ctx, cfg, logger.Named("etcd"), pubAddr, engine)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -110,13 +123,23 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		}
 	}
 
+	// general cluster HTTP client
+	{
+		clientTLS, uerr := security.BuildClientTLSConfig(logger.Named("http"), cfg.Security.ClusterTLS)
+		if uerr != nil {
+			err = errors.WithStack(err)
+			return
+		}
+		srv.Http = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: clientTLS,
+			},
+		}
+	}
+
 	// setup config manager
 	{
-		addrs := make([]string, len(srv.Etcd.Clients))
-		for i := range addrs {
-			addrs[i] = srv.Etcd.Clients[i].Addr().String()
-		}
-		err = srv.ConfigManager.Init(ctx, addrs, cfg.Advance, logger.Named("config"))
+		err = srv.ConfigManager.Init(ctx, srv.Etcd.Server.KV(), cfg.Advance, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -144,7 +167,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup namespace manager
 	{
-		srv.ObserverClient, err = router.InitEtcdClient(cfg)
+		srv.ObserverClient, err = router.InitEtcdClient(logger.Named("pd"), cfg)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -157,7 +180,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 			return
 		}
 
-		err = srv.NamespaceManager.Init(logger.Named("nsmgr"), nss, srv.ObserverClient)
+		err = srv.NamespaceManager.Init(logger.Named("nsmgr"), nss, srv.ObserverClient, srv.Http)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -166,7 +189,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup proxy server
 	{
-		srv.Proxy, err = proxy.NewSQLServer(logger.Named("proxy"), cfg.Workdir, cfg.Proxy, cfg.Security, srv.NamespaceManager)
+		srv.Proxy, err = proxy.NewSQLServer(logger.Named("proxy"), cfg.Proxy, cfg.Security, srv.NamespaceManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -226,14 +249,18 @@ func (s *Server) Close() error {
 func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string, engine *gin.Engine) (srv *embed.Etcd, err error) {
 	etcd_cfg := embed.NewConfig()
 
-	apiAddrStr := cfg.API.Addr
-	if !strings.HasPrefix(apiAddrStr, "http://") {
-		apiAddrStr = fmt.Sprintf("http://%s", apiAddrStr)
-	}
-	apiAddr, uerr := url.Parse(apiAddrStr)
-	if uerr != nil {
-		err = errors.WithStack(uerr)
+	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Security.PeerTLS); err != nil {
 		return
+	}
+
+	apiAddr, err := url.Parse(fmt.Sprintf("http://%s", cfg.API.Addr))
+	if err != nil {
+		return nil, err
+	}
+	if etcd_cfg.ClientTLSInfo.Empty() {
+		apiAddr.Scheme = "http"
+	} else {
+		apiAddr.Scheme = "https"
 	}
 	etcd_cfg.LCUrls = []url.URL{*apiAddr}
 	apiAddrAdvertise := *apiAddr
@@ -242,24 +269,29 @@ func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	peerPort := cfg.Advance.PeerPort
 	if peerPort == "" {
-		peerPortNum, uerr := strconv.Atoi(apiAddr.Port())
-		if uerr != nil {
-			err = errors.WithStack(uerr)
-			return
+		peerPortNum, err := strconv.Atoi(apiAddr.Port())
+		if err != nil {
+			return nil, err
 		}
 		peerPort = strconv.Itoa(peerPortNum + 1)
 	}
 	peerAddr := *apiAddr
+	if etcd_cfg.PeerTLSInfo.Empty() {
+		peerAddr.Scheme = "http"
+	} else {
+		peerAddr.Scheme = "https"
+	}
 	peerAddr.Host = fmt.Sprintf("%s:%s", peerAddr.Hostname(), peerPort)
 	etcd_cfg.LPUrls = []url.URL{peerAddr}
-	peerAddrAdvertise := *apiAddr
+	peerAddrAdvertise := peerAddr
 	peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", pubAddr, peerPort)
 	etcd_cfg.APUrls = []url.URL{peerAddrAdvertise}
 
 	etcd_cfg.Name = "proxy-" + fmt.Sprint(time.Now().UnixMicro())
 	etcd_cfg.InitialCluster = etcd_cfg.InitialClusterFromName(etcd_cfg.Name)
 	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
-	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
+	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger)
+
 	etcd_cfg.UserHandlers = map[string]http.Handler{
 		"/api/": engine,
 	}

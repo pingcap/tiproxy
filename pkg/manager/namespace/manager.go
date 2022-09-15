@@ -16,32 +16,33 @@
 package namespace
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"io/ioutil"
+	"net/http"
 	"sync"
 
 	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/pkg/manager/router"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/security"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
 type NamespaceManager struct {
 	sync.RWMutex
-	client *clientv3.Client
-	logger *zap.Logger
-	nsm    map[string]*Namespace
+	client  *clientv3.Client
+	httpCli *http.Client
+	logger  *zap.Logger
+	nsm     map[string]*Namespace
 }
 
 func NewNamespaceManager() *NamespaceManager {
 	return &NamespaceManager{}
 }
-func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clientv3.Client) (*Namespace, error) {
+func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
-	rt, err := router.NewScoreBasedRouter(&cfg.Backend, client)
+
+	rt, err := router.NewScoreBasedRouter(&cfg.Backend, mgr.client, mgr.httpCli)
 	if err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
@@ -50,62 +51,14 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace, client *clien
 		router: rt,
 	}
 
-	// frontend tls configuration
-	{
-		r.frontendTLS = &tls.Config{}
-
-		if !cfg.Frontend.Security.HasCert() {
-			// TODO: require certs here
-			logger.Warn("require certificates to secure frontend tls connections")
-		} else {
-			cert, err := tls.LoadX509KeyPair(cfg.Frontend.Security.Cert, cfg.Frontend.Security.Key)
-			if err != nil {
-				return nil, errors.Errorf("failed to load server certs: %w", err)
-			}
-			r.frontendTLS.Certificates = append(r.frontendTLS.Certificates, cert)
-		}
-
-		if cfg.Frontend.Security.HasCA() {
-			r.frontendTLS.ClientAuth = tls.RequireAndVerifyClientCert
-			r.frontendTLS.ClientCAs = x509.NewCertPool()
-			certBytes, err := ioutil.ReadFile(cfg.Frontend.Security.CA)
-			if err != nil {
-				return nil, errors.Errorf("failed to read server signed certs from disk: %w", err)
-			}
-			if !r.frontendTLS.ClientCAs.AppendCertsFromPEM(certBytes) {
-				return nil, errors.Errorf("failed to load server signed certs")
-			}
-		} else {
-			logger.Warn("no signed certs for frontend, proxy will not authenticate clients (connection is still secured)")
-		}
+	r.frontendTLS, err = security.BuildServerTLSConfig(logger, cfg.Frontend.Security)
+	if err != nil {
+		return nil, errors.Errorf("build frontend TLS error: %w", err)
 	}
 
-	{
-		r.backendTLS = &tls.Config{}
-		// backend tls configuration
-		if !cfg.Backend.Security.HasCA() {
-			// TODO: require certs here
-			logger.Error("require signed certs to verify backend tls connections")
-		} else {
-			r.backendTLS.RootCAs = x509.NewCertPool()
-			certBytes, err := ioutil.ReadFile(cfg.Backend.Security.CA)
-			if err != nil {
-				return nil, errors.Errorf("failed to read server signed certs from disk: %w", err)
-			}
-			if !r.backendTLS.RootCAs.AppendCertsFromPEM(certBytes) {
-				return nil, errors.Errorf("failed to load server signed certs")
-			}
-		}
-
-		if cfg.Backend.Security.HasCert() {
-			cert, err := tls.LoadX509KeyPair(cfg.Backend.Security.Cert, cfg.Backend.Security.Key)
-			if err != nil {
-				return nil, errors.Errorf("failed to load cluster certs: %w", err)
-			}
-			r.backendTLS.Certificates = append(r.backendTLS.Certificates, cert)
-		} else {
-			logger.Warn("no certs for backend authentication, backend may reject proxy connections (connection is still secured)")
-		}
+	r.backendTLS, err = security.BuildClientTLSConfig(logger, cfg.Backend.Security)
+	if err != nil {
+		return nil, errors.Errorf("build backend TLS error: %w", err)
 	}
 
 	return r, nil
@@ -125,7 +78,7 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 			continue
 		}
 
-		ns, err := mgr.buildNamespace(nsc, mgr.client)
+		ns, err := mgr.buildNamespace(nsc)
 		if err != nil {
 			return fmt.Errorf("%w: create namespace error, namespace: %s", err, nsc.Namespace)
 		}
@@ -138,9 +91,10 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nss []*config.Namespace, client *clientv3.Client) error {
+func (mgr *NamespaceManager) Init(logger *zap.Logger, nss []*config.Namespace, client *clientv3.Client, httpCli *http.Client) error {
 	mgr.Lock()
 	mgr.client = client
+	mgr.httpCli = httpCli
 	mgr.logger = logger
 	mgr.Unlock()
 

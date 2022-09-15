@@ -65,16 +65,12 @@ func (c *tidbEncoder) endQuoteFiled() {
 func (c *tidbEncoder) encodeError(f zapcore.Field) {
 	err := f.Interface.(error)
 	basic := err.Error()
-	c.beginQuoteFiled()
 	c.AddString(f.Key, basic)
-	c.endQuoteFiled()
 	if e, isFormatter := err.(fmt.Formatter); isFormatter {
 		verbose := fmt.Sprintf("%+v", e)
 		if verbose != basic {
 			// This is a rich error type, like those produced by github.com/pkg/errors.
-			c.beginQuoteFiled()
 			c.AddString(f.Key+"Verbose", verbose)
-			c.endQuoteFiled()
 		}
 	}
 }
@@ -125,6 +121,9 @@ func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 		c.line.AppendByte(' ')
 	}
 
+	// append the old fields
+	c.line.WriteString(e.line.String())
+
 	for _, f := range fields {
 		if f.Type == zapcore.ErrorType {
 			// handle ErrorType in pingcap/log to fix "[key=?,keyVerbose=?]" problem.
@@ -132,9 +131,7 @@ func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 			c.encodeError(f)
 			continue
 		}
-		c.beginQuoteFiled()
 		f.AddTo(c)
-		c.endQuoteFiled()
 	}
 
 	c.closeOpenNamespaces()
@@ -217,103 +214,151 @@ func (s *tidbEncoder) addKey(key string) {
 	s.line.AppendByte('=')
 }
 func (s *tidbEncoder) AddArray(key string, arr zapcore.ArrayMarshaler) error {
+	s.beginQuoteFiled()
 	s.addKey(key)
-	return s.AppendArray(arr)
+	err := s.AppendArray(arr)
+	s.endQuoteFiled()
+	return err
 }
 func (s *tidbEncoder) AddObject(key string, obj zapcore.ObjectMarshaler) error {
+	s.beginQuoteFiled()
 	s.addKey(key)
-	return s.AppendObject(obj)
+	err := s.AppendObject(obj)
+	s.endQuoteFiled()
+	return err
 }
 func (s *tidbEncoder) AddBinary(key string, val []byte) {
 	s.AddString(key, base64.StdEncoding.EncodeToString(val))
 }
 func (s *tidbEncoder) AddByteString(key string, val []byte) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendByteString(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddBool(key string, val bool) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendBool(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddComplex128(key string, val complex128) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendComplex128(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddComplex64(key string, val complex64) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendComplex64(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddDuration(key string, val time.Duration) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendDuration(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddFloat64(key string, val float64) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendFloat64(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddFloat32(key string, val float32) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendFloat32(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddInt(key string, val int) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendInt(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddInt8(key string, val int8) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendInt8(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddInt16(key string, val int16) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendInt16(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddInt32(key string, val int32) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendInt32(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddInt64(key string, val int64) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendInt64(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddString(key string, val string) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendString(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddTime(key string, val time.Time) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendTime(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddUint(key string, val uint) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendUint(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddUint8(key string, val uint8) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendUint8(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddUint16(key string, val uint16) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendUint16(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddUint32(key string, val uint32) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendUint32(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddUint64(key string, val uint64) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendUint64(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddUintptr(key string, val uintptr) {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	s.AppendUintptr(val)
+	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddReflected(key string, obj interface{}) error {
+	s.beginQuoteFiled()
 	s.addKey(key)
 	enc := json.NewEncoder(s.line)
 	if err := enc.Encode(obj); err != nil {
 		return err
 	}
 	s.line.TrimNewline()
+	s.endQuoteFiled()
 	return nil
 }
 func (s *tidbEncoder) OpenNamespace(key string) {

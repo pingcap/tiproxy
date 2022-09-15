@@ -17,6 +17,7 @@ package router
 import (
 	"container/list"
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
@@ -116,13 +117,13 @@ type ScoreBasedRouter struct {
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
-func NewScoreBasedRouter(cfg *config.BackendNamespace, client *clientv3.Client) (*ScoreBasedRouter, error) {
+func NewScoreBasedRouter(cfg *config.BackendNamespace, client *clientv3.Client, httpCli *http.Client) (*ScoreBasedRouter, error) {
 	router := &ScoreBasedRouter{
 		backends: list.New(),
 	}
 	router.Lock()
 	defer router.Unlock()
-	observer, err := StartBackendObserver(router, client, newDefaultHealthCheckConfig(), cfg.Instances)
+	observer, err := StartBackendObserver(router, client, httpCli, newDefaultHealthCheckConfig(), cfg.Instances)
 	if err != nil {
 		return nil, err
 	}

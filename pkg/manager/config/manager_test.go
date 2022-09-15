@@ -21,11 +21,13 @@ import (
 	"path"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
@@ -37,20 +39,15 @@ func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, contex
 
 	testDir := t.TempDir()
 
-	log := logger.CreateLoggerForTest(t)
+	logger := logger.CreateLoggerForTest(t)
 
 	etcd_cfg := embed.NewConfig()
 	etcd_cfg.LCUrls = []url.URL{*addr}
 	etcd_cfg.LPUrls = []url.URL{*addr}
 	etcd_cfg.Dir = filepath.Join(testDir, "etcd")
-	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(log.Named("etcd"))
+	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.Named("etcd"))
 	etcd, err := embed.StartEtcd(etcd_cfg)
 	require.NoError(t, err)
-
-	ends := make([]string, len(etcd.Clients))
-	for i := range ends {
-		ends[i] = etcd.Clients[i].Addr().String()
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if ddl, ok := t.Deadline(); ok {
@@ -58,7 +55,7 @@ func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, contex
 	}
 
 	cfgmgr := NewConfigManager()
-	require.NoError(t, cfgmgr.Init(ctx, ends, cfg, log))
+	require.NoError(t, cfgmgr.Init(ctx, etcd.Server.KV(), cfg, logger))
 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())
@@ -89,8 +86,7 @@ func TestBase(t *testing.T) {
 		ns := getNs(i)
 		for j := 0; j < valNum; j++ {
 			k := getKey(j)
-			_, err := cfgmgr.set(ctx, ns, k, k)
-			require.NoError(t, err)
+			require.NoError(t, cfgmgr.set(ctx, ns, k, k))
 		}
 	}
 
@@ -123,8 +119,7 @@ func TestBase(t *testing.T) {
 		ns := getNs(i)
 		for j := 0; j < valNum; j++ {
 			k := getKey(j)
-			_, err := cfgmgr.set(ctx, ns, k, k)
-			require.NoError(t, err)
+			require.NoError(t, cfgmgr.set(ctx, ns, k, k))
 
 			require.NoError(t, cfgmgr.del(ctx, ns, k))
 		}
@@ -144,8 +139,7 @@ func TestBaseConcurrency(t *testing.T) {
 	for i := 0; i < batchNum; i++ {
 		k := fmt.Sprint(i)
 		wg.Run(func() {
-			_, err := cfgmgr.set(ctx, k, "1", "1")
-			require.NoError(t, err)
+			require.NoError(t, cfgmgr.set(ctx, k, "1", "1"))
 		})
 
 		wg.Run(func() {
@@ -158,16 +152,14 @@ func TestBaseConcurrency(t *testing.T) {
 	for i := 0; i < batchNum; i++ {
 		k := fmt.Sprint(i)
 
-		_, err := cfgmgr.set(ctx, k, "1", "1")
-		require.NoError(t, err)
+		require.NoError(t, cfgmgr.set(ctx, k, "1", "1"))
 	}
 
 	for i := 0; i < batchNum; i++ {
 		k := fmt.Sprint(i)
 
 		wg.Run(func() {
-			_, err := cfgmgr.set(ctx, k, "1", "1")
-			require.NoError(t, err)
+			require.NoError(t, cfgmgr.set(ctx, k, "1", "1"))
 		})
 
 		wg.Run(func() {
@@ -181,11 +173,10 @@ func TestBaseConcurrency(t *testing.T) {
 func TestBaseWatch(t *testing.T) {
 	cfgmgr, ctx := testConfigManager(t, config.Advance{
 		IgnoreWrongNamespace: true,
-		WatchInterval:        "1s",
 	})
 
 	ch := make(chan string, 1)
-	cfgmgr.watch(ctx, "test", "t", func(l *zap.Logger, e *clientv3.Event) {
+	cfgmgr.watch(ctx, "test", "t", func(l *zap.Logger, e mvccpb.Event) {
 		ch <- string(e.Kv.Value)
 	})
 
@@ -195,23 +186,13 @@ func TestBaseWatch(t *testing.T) {
 	}
 
 	// set it
-	_, err := cfgmgr.set(ctx, "test", "t", "1")
-	require.NoError(t, err)
+	require.NoError(t, cfgmgr.set(ctx, "test", "t", "1"))
 
-	// check multiple times, it will become the value after some point for at least three times
-	count := 0
-	for i := 0; i < 10; i++ {
-		val := <-ch
-		if val == "1" {
-			count++
-		} else if count != 0 {
-			t.Fatal("watched value changed after setting it to 1")
-		}
-		if count == 3 {
-			break
-		}
-	}
-	if count < 3 {
-		t.Fatal("should met the same value at least two times, one from polling, one from notify, one from created")
+	// now the only way to check watch is to wait
+	select {
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting chan")
+	case tg := <-ch:
+		require.Equal(t, "1", tg)
 	}
 }

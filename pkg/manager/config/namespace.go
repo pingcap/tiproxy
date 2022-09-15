@@ -64,8 +64,7 @@ func (e *ConfigManager) SetNamespace(ctx context.Context, ns string, nsc *config
 	if err != nil {
 		return err
 	}
-	_, err = e.set(ctx, PathPrefixNamespace, ns, string(r))
-	return err
+	return e.set(ctx, PathPrefixNamespace, ns, string(r))
 }
 
 func (e *ConfigManager) DelNamespace(ctx context.Context, ns string) error {

@@ -18,9 +18,10 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"net"
 
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/hack"
 )
@@ -39,6 +40,7 @@ type Authenticator struct {
 	dbname           string // default database name
 	capability       uint32 // client capability
 	collation        uint8
+	serverAddr       string
 	attrs            []byte // no need to parse
 	backendTLSConfig *tls.Config
 }
@@ -48,7 +50,7 @@ func (auth *Authenticator) String() string {
 		auth.user, auth.dbname, auth.capability, auth.collation)
 }
 
-func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO, serverTLSConfig, backendTLSConfig *tls.Config) error {
+func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	backendIO.ResetSequence()
 	// Read initial handshake packet from the backend.
 	serverPkt, serverCapability, err := auth.readInitialHandshake(backendIO)
@@ -76,7 +78,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	sslEnabled := uint32(clientCapability)&mysql.ClientSSL > 0
 	if sslEnabled {
 		// Upgrade TLS with the client if SSL is enabled.
-		if _, err = clientIO.UpgradeToServerTLS(serverTLSConfig); err != nil {
+		if _, err = clientIO.UpgradeToServerTLS(frontendTLSConfig); err != nil {
 			return err
 		}
 	} else {
@@ -90,8 +92,19 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 		return err
 	}
 	// Always upgrade TLS with the server.
-	auth.backendTLSConfig = backendTLSConfig
-	if err = backendIO.UpgradeToClientTLS(backendTLSConfig); err != nil {
+	auth.backendTLSConfig = backendTLSConfig.Clone()
+	addr := backendIO.RemoteAddr().String()
+	if auth.serverAddr != "" {
+		// NOTE: should use DNS name as much as possible
+		// Usally certs are signed with domain instead of IP addrs
+		// And `RemoteAddr()` will return IP addr
+		addr = auth.serverAddr
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		auth.backendTLSConfig.ServerName = host
+	}
+	if err = backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
 		return err
 	}
 	if sslEnabled {

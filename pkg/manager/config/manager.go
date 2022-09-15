@@ -24,12 +24,13 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/lease"
+	"go.etcd.io/etcd/server/v3/mvcc"
 	"go.uber.org/zap"
 )
 
 const (
 	DefaultEtcdDialTimeout = 3 * time.Second
-	DefaultWatchInterval   = 10 * time.Minute
 	DefaultEtcdPath        = "/config"
 
 	PathPrefixNamespace = "ns"
@@ -41,12 +42,11 @@ var (
 )
 
 type ConfigManager struct {
-	wg         waitgroup.WaitGroup
-	cancel     context.CancelFunc
-	logger     *zap.Logger
-	etcdClient *clientv3.Client
-	kv         clientv3.KV
-	basePath   string
+	wg       waitgroup.WaitGroup
+	cancel   context.CancelFunc
+	logger   *zap.Logger
+	kv       mvcc.WatchableKV
+	basePath string
 
 	// config
 	ignoreWrongNamespace bool
@@ -61,32 +61,13 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
-func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.Advance, logger *zap.Logger) error {
+func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg config.Advance, logger *zap.Logger) error {
 	srv.logger = logger
 	srv.ignoreWrongNamespace = cfg.IgnoreWrongNamespace
-	if cfg.WatchInterval == "" {
-		srv.watchInterval = DefaultWatchInterval
-	} else {
-		wi, err := time.ParseDuration(cfg.WatchInterval)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse watch interval %s", cfg.WatchInterval)
-		}
-		srv.watchInterval = wi
-	}
 	// slash appended to distinguish '/dir'(file) and '/dir/'(directory)
 	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
 
-	etcdConfig := clientv3.Config{
-		Endpoints:   addrs,
-		DialTimeout: DefaultEtcdDialTimeout,
-	}
-
-	etcdClient, err := clientv3.New(etcdConfig)
-	if err != nil {
-		return errors.Wrapf(err, "create etcd config center error")
-	}
-	srv.etcdClient = etcdClient
-	srv.kv = clientv3.NewKV(srv.etcdClient)
+	srv.kv = kv
 
 	ctx, cancel := context.WithCancel(ctx)
 	srv.cancel = cancel
@@ -96,103 +77,85 @@ func (srv *ConfigManager) Init(ctx context.Context, addrs []string, cfg config.A
 	return nil
 }
 
-func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, *clientv3.Event)) {
-	wkey := path.Join(e.basePath, ns, key)
-	logger := e.logger.With(zap.String("component", wkey))
+func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, mvccpb.Event)) {
+	wkey := []byte(path.Join(e.basePath, ns, key))
+	logger := e.logger.With(zap.String("component", string(wkey)))
 	retryInterval := 5 * time.Second
 	e.wg.Run(func() {
-		var prevKV *mvccpb.KeyValue
-
-		ticker := time.NewTicker(e.watchInterval)
-		defer ticker.Stop()
-
-		wch := e.etcdClient.Watch(ctx, wkey)
+		wch := e.kv.NewWatchStream()
+		defer wch.Close()
+		for {
+			if _, err := wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), wch.Rev()-1); err == nil {
+				break
+			}
+			if k := retryInterval * 2; k < e.watchInterval {
+				retryInterval = k
+			}
+			logger.Warn("failed to watch, will try again later", zap.Duration("sleep", retryInterval))
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(retryInterval):
+			}
+		}
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				resp, err := e.kv.Get(ctx, wkey)
-				if err != nil {
-					logger.Warn("failed to poll", zap.Error(err))
-					break
-				}
-				// len == 0 may mean there is no value set yet, do not warn about that
-				if len(resp.Kvs) > 1 {
-					logger.Warn("failed to poll", zap.Error(ErrNoOrMultiResults))
-					break
-				} else if len(resp.Kvs) == 1 {
-					f(logger, &clientv3.Event{
-						Type:   mvccpb.PUT,
-						Kv:     resp.Kvs[0],
-						PrevKv: prevKV,
-					})
-					prevKV = resp.Kvs[0]
-				}
-			case res := <-wch:
-				if res.Canceled {
-					// don't wait for more than the polling interval
-					if k := retryInterval * 2; k < e.watchInterval {
-						retryInterval = k
-					}
-					logger.Warn("failed to watch, will try again later", zap.Error(res.Err()), zap.Duration("sleep", retryInterval))
-					time.Sleep(retryInterval)
-					wch = e.etcdClient.Watch(ctx, wkey, clientv3.WithCreatedNotify())
-					break
-				}
-
+			case res := <-wch.Chan():
 				for _, evt := range res.Events {
 					f(logger, evt)
-					prevKV = evt.Kv
 				}
-
-				// reset the ticker to prevent another tick immediately
-				ticker.Reset(e.watchInterval)
 			}
 		}
 	})
 }
 
 func (e *ConfigManager) get(ctx context.Context, ns, key string) (*mvccpb.KeyValue, error) {
-	resp, err := e.kv.Get(ctx, path.Join(e.basePath, ns, key))
+	resp, err := e.kv.Range(ctx, []byte(path.Join(e.basePath, ns, key)), nil, mvcc.RangeOptions{Rev: 0})
 	if err != nil {
 		return nil, err
 	}
-	if len(resp.Kvs) != 1 {
+	if len(resp.KVs) != 1 {
 		return nil, ErrNoOrMultiResults
 	}
-	return resp.Kvs[0], nil
+	return &resp.KVs[0], nil
 }
 
-func (e *ConfigManager) list(ctx context.Context, ns string, ops ...clientv3.OpOption) ([]*mvccpb.KeyValue, error) {
-	options := make([]clientv3.OpOption, 1, 1+len(ops))
-	options[0] = clientv3.WithPrefix()
-	options = append(options, ops...)
-	resp, err := e.kv.Get(ctx, path.Join(e.basePath, ns), options...)
+func getPrefix(key []byte) []byte {
+	end := make([]byte, len(key))
+	copy(end, key)
+	for i := len(end) - 1; i >= 0; i-- {
+		if end[i] < 0xff {
+			end[i] = end[i] + 1
+			end = end[:i+1]
+			return end
+		}
+	}
+	return []byte{0}
+}
+
+func (e *ConfigManager) list(ctx context.Context, ns string, ops ...clientv3.OpOption) ([]mvccpb.KeyValue, error) {
+	k := []byte(path.Join(e.basePath, ns))
+	resp, err := e.kv.Range(ctx, k, getPrefix(k), mvcc.RangeOptions{Rev: 0})
 	if err != nil {
 		return nil, err
 	}
-	return resp.Kvs, nil
+	return resp.KVs, nil
 }
 
-func (e *ConfigManager) set(ctx context.Context, ns, key, val string) (*mvccpb.KeyValue, error) {
-	resp, err := e.kv.Put(ctx, path.Join(e.basePath, ns, key), val)
-	if err != nil {
-		return nil, err
-	}
-	return resp.PrevKv, nil
+func (e *ConfigManager) set(ctx context.Context, ns, key, val string) error {
+	_ = e.kv.Put([]byte(path.Join(e.basePath, ns, key)), []byte(val), lease.NoLease)
+	return nil
 }
 
 func (e *ConfigManager) del(ctx context.Context, ns, key string) error {
-	_, err := e.kv.Delete(ctx, path.Join(e.basePath, ns, key))
-	if err != nil {
-		return err
-	}
+	_, _ = e.kv.DeleteRange([]byte(path.Join(e.basePath, ns, key)), nil)
 	return nil
 }
 
 func (e *ConfigManager) Close() error {
 	e.cancel()
 	e.wg.Wait()
-	return errors.Wrapf(e.etcdClient.Close(), "fail to close config manager")
+	return nil
 }

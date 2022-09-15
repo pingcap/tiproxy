@@ -24,19 +24,21 @@ import (
 var testNamespaceConfig = Namespace{
 	Namespace: "test_ns",
 	Frontend: FrontendNamespace{
-		Security: TLSCert{
-			CA:   "t",
-			Cert: "t",
-			Key:  "t",
+		Security: TLSConfig{
+			CA:        "t",
+			Cert:      "t",
+			Key:       "t",
+			AutoCerts: true,
 		},
 	},
 	Backend: BackendNamespace{
 		Instances:    []string{"127.0.0.1:4000", "127.0.0.1:4001"},
 		SelectorType: "random",
-		Security: TLSCert{
-			CA:   "t",
-			Cert: "t",
-			Key:  "t",
+		Security: TLSConfig{
+			CA:     "t",
+			Cert:   "t",
+			Key:    "t",
+			SkipCA: true,
 		},
 	},
 }
