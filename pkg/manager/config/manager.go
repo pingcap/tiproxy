@@ -85,21 +85,18 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 		wch := e.kv.NewWatchStream()
 		defer wch.Close()
 		for {
-			var err error
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				_, err = wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), wch.Rev()-1)
-			}
-			if err == nil {
+			if _, err := wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), wch.Rev()-1); err == nil {
 				break
 			}
 			if k := retryInterval * 2; k < e.watchInterval {
 				retryInterval = k
 			}
 			logger.Warn("failed to watch, will try again later", zap.Duration("sleep", retryInterval))
-			time.Sleep(retryInterval)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(retryInterval):
+			}
 		}
 		for {
 			select {
