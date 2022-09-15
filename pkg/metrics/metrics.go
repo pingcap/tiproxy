@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	ModuleWeirProxy = "weirproxy"
+	ModuleProxy = "tiproxy"
 )
 
 // metrics labels.
@@ -126,7 +126,7 @@ func registerProxyMetrics() {
 
 // prometheusPushClient pushes metrics to Prometheus Pushgateway.
 func prometheusPushClient(ctx context.Context, logger *zap.Logger, addr string, interval time.Duration, proxyAddr string) {
-	job := "proxy"
+	job := "tiproxy"
 	pusher := push.New(addr, job)
 	pusher = pusher.Gatherer(prometheus.DefaultGatherer)
 	pusher = pusher.Grouping("instance", instanceName(proxyAddr))

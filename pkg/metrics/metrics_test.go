@@ -31,10 +31,10 @@ import (
 // Test that the metrics are pushed or not pushed with different configurations.
 func TestPushMetrics(t *testing.T) {
 	proxyAddr := "0.0.0.0:6000"
-	labelName := fmt.Sprintf("%s_%s_connections", ModuleWeirProxy, LabelServer)
+	labelName := fmt.Sprintf("%s_%s_connections", ModuleProxy, LabelServer)
 	hostname, err := os.Hostname()
 	require.NoError(t, err)
-	expectedPath := fmt.Sprintf("/metrics/job/proxy/instance/%s_6000", hostname)
+	expectedPath := fmt.Sprintf("/metrics/job/tiproxy/instance/%s_6000", hostname)
 	bodyCh := make(chan string)
 	pgwOK := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
