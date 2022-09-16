@@ -144,7 +144,7 @@ func (ts *backendMgrTester) redirectSucceed4Backend(packetIO *pnet.PacketIO) err
 	require.NoError(ts.t, err)
 	// previous connection is closed
 	_, err = packetIO.ReadPacket()
-	require.True(ts.t, isNetworkError(err))
+	require.True(ts.t, pnet.IsDisconnectError(err))
 	return nil
 }
 
@@ -410,7 +410,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(t, err)
 				// the new connection is closed
 				_, err = tmpBackendIO.ReadPacket()
-				require.True(ts.t, isNetworkError(err))
+				require.True(ts.t, pnet.IsDisconnectError(err))
 				return tmpBackendIO.Close()
 			},
 		},
@@ -434,7 +434,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(t, err)
 				// the new connection is closed
 				_, err = tmpBackendIO.ReadPacket()
-				require.True(ts.t, isNetworkError(err))
+				require.True(ts.t, pnet.IsDisconnectError(err))
 				return tmpBackendIO.Close()
 			},
 		},

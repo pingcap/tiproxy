@@ -271,13 +271,13 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		rs.err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
 	}
 	if rs.err != nil {
-		if ignoredErr := newConn.Close(); ignoredErr != nil {
-			mgr.logger.Debug("close new backend connection failed", zap.Error(ignoredErr))
+		if ignoredErr := newConn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+			mgr.logger.Error("close new backend connection failed", zap.Error(ignoredErr))
 		}
 		return
 	}
-	if ignoredErr := mgr.backendConn.Close(); ignoredErr != nil {
-		mgr.logger.Debug("close previous backend connection failed", zap.Error(ignoredErr))
+	if ignoredErr := mgr.backendConn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
 }

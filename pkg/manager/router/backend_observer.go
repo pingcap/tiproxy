@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/domain/infosync"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -403,7 +404,7 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 			var err error
 			if resp, err = bo.httpCli.Get(url); err == nil {
 				if err := resp.Body.Close(); err != nil {
-					bo.logger.Debug("close http response in health check failed", zap.Error(err))
+					bo.logger.Error("close http response in health check failed", zap.Error(err))
 				}
 			}
 			return err
@@ -416,8 +417,8 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 		err = connectWithRetry(func() error {
 			conn, err := net.DialTimeout("tcp", addr, bo.config.healthCheckTimeout)
 			if err == nil {
-				if err := conn.Close(); err != nil {
-					bo.logger.Debug("close connection in health check failed", zap.Error(err))
+				if err := conn.Close(); err != nil && !pnet.IsDisconnectError(err) {
+					bo.logger.Error("close connection in health check failed", zap.Error(err))
 				}
 			}
 			return err

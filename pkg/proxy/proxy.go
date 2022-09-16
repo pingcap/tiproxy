@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
 
@@ -137,10 +138,8 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		delete(s.mu.clients, connID)
 		s.mu.Unlock()
 
-		if err := clientConn.Close(); err != nil {
-			// Close() always reports `tls: failed to send closeNotify alert (but connection was closed anyway)`
-			// when the client quits unexpectedly.
-			logger.Debug("close connection fails", zap.Error(err))
+		if err := clientConn.Close(); err != nil && !pnet.IsDisconnectError(err) {
+			logger.Error("close connection fails", zap.Error(err))
 		}
 		logger.Info("connection closed")
 		metrics.ConnGauge.Dec()
