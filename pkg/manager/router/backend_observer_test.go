@@ -215,7 +215,7 @@ func runTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendO
 	kv := clientv3.NewKV(client)
 	backendChan := make(chan map[string]BackendStatus, 1)
 	mer := newMockEventReceiver(backendChan)
-	bo, err := NewBackendObserver(mer, client, nil, newHealthCheckConfigForTest(), nil)
+	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, client, nil, newHealthCheckConfigForTest(), nil)
 	require.NoError(t, err)
 	f(etcd, kv, bo, backendChan)
 	bo.Close()

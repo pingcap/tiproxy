@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/stretchr/testify/require"
@@ -92,6 +93,7 @@ type routerTester struct {
 
 func newRouterTester(t *testing.T) *routerTester {
 	router := &ScoreBasedRouter{
+		logger:   logger.CreateLoggerForTest(t),
 		backends: list.New(),
 	}
 	t.Cleanup(router.Close)
@@ -523,7 +525,7 @@ func TestConcurrency(t *testing.T) {
 	// We create other goroutines to change backends easily.
 	etcd := createEtcdServer(t, "127.0.0.1:0")
 	client := createEtcdClient(t, etcd)
-	router, err := NewScoreBasedRouter(cfg, client, nil)
+	router, err := NewScoreBasedRouter(logger.CreateLoggerForTest(t), cfg, client, nil)
 	require.NoError(t, err)
 
 	var wg waitgroup.WaitGroup

@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
-	"github.com/pingcap/tidb/util/logutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -109,6 +108,7 @@ type connWrapper struct {
 // It routes a connection based on score.
 type ScoreBasedRouter struct {
 	sync.Mutex
+	logger     *zap.Logger
 	observer   *BackendObserver
 	cancelFunc context.CancelFunc
 	wg         waitgroup.WaitGroup
@@ -117,13 +117,14 @@ type ScoreBasedRouter struct {
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
-func NewScoreBasedRouter(cfg *config.BackendNamespace, client *clientv3.Client, httpCli *http.Client) (*ScoreBasedRouter, error) {
+func NewScoreBasedRouter(logger *zap.Logger, cfg *config.BackendNamespace, client *clientv3.Client, httpCli *http.Client) (*ScoreBasedRouter, error) {
 	router := &ScoreBasedRouter{
+		logger:   logger,
 		backends: list.New(),
 	}
 	router.Lock()
 	defer router.Unlock()
-	observer, err := StartBackendObserver(router, client, httpCli, newDefaultHealthCheckConfig(), cfg.Instances)
+	observer, err := StartBackendObserver(logger.Named("observer"), router, client, httpCli, newDefaultHealthCheckConfig(), cfg.Instances)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +328,7 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 	for addr, status := range backends {
 		be := router.lookupBackend(addr, true)
 		if be == nil && status != StatusCannotConnect {
-			logutil.BgLogger().Info("find new backend", zap.String("addr", addr),
+			router.logger.Info("find new backend", zap.String("addr", addr),
 				zap.String("status", status.String()))
 			be = router.backends.PushBack(&backendWrapper{
 				status:   status,
@@ -337,7 +338,7 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 			})
 		} else {
 			backend := be.Value.(*backendWrapper)
-			logutil.BgLogger().Info("update backend", zap.String("addr", addr),
+			router.logger.Info("update backend", zap.String("addr", addr),
 				zap.String("prev_status", backend.status.String()), zap.String("cur_status", status.String()))
 			backend.status = status
 		}

@@ -137,7 +137,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		delete(s.mu.clients, connID)
 		s.mu.Unlock()
 
-		logger.Info("connection closed", zap.Error(clientConn.Close()))
+		if err := clientConn.Close(); err != nil {
+			// Close() always reports `tls: failed to send closeNotify alert (but connection was closed anyway)`
+			// when the client quits unexpectedly.
+			logger.Debug("close connection fails", zap.Error(err))
+		}
+		logger.Info("connection closed")
 		metrics.ConnGauge.Dec()
 	}()
 
