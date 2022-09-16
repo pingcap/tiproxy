@@ -140,8 +140,9 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 
 		if err := clientConn.Close(); err != nil && !pnet.IsDisconnectError(err) {
 			logger.Error("close connection fails", zap.Error(err))
+		} else {
+			logger.Info("connection closed")
 		}
-		logger.Info("connection closed")
 		metrics.ConnGauge.Dec()
 	}()
 
