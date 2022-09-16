@@ -36,6 +36,7 @@ func (h *configHttpHandler) HandleSetProxyConfig(c *gin.Context) {
 	}
 
 	if err := h.cfgmgr.SetProxyConfig(c, pco); err != nil {
+		h.logger.Error("can not update proxy config", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, "can not update proxy config")
 		return
 	}
@@ -43,7 +44,19 @@ func (h *configHttpHandler) HandleSetProxyConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
+func (h *configHttpHandler) HandleGetProxyConfig(c *gin.Context) {
+	pco, err := h.cfgmgr.GetProxyConfig(c)
+	if err != nil {
+		h.logger.Error("can not get proxy config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, "can not get proxy config")
+		return
+	}
+
+	c.JSON(http.StatusOK, pco)
+}
+
 func registerConfig(group *gin.RouterGroup, logger *zap.Logger, mgrcfg *mgrcfg.ConfigManager) {
 	h := &configHttpHandler{logger, mgrcfg}
 	group.PUT("/proxy", h.HandleSetProxyConfig)
+	group.GET("/proxy", h.HandleGetProxyConfig)
 }

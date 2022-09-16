@@ -23,7 +23,7 @@ func New(text string) error {
 	return errors.New(text)
 }
 
-func Errorf(format string, args ...any) error {
+func Errorf(format string, args ...interface{}) error {
 	return fmt.Errorf(format, args...)
 }
 
@@ -31,7 +31,7 @@ func Is(err, target error) bool {
 	return errors.Is(err, target)
 }
 
-func As(err error, target any) bool {
+func As(err error, target interface{}) bool {
 	return errors.As(err, target)
 }
 

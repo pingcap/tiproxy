@@ -74,7 +74,7 @@ func Wrap(cerr error, uerr error) error {
 }
 
 // Wrapf is like Wrap, with the underlying error being the result of `fmt.Errorf()`
-func Wrapf(cerr error, msg string, args ...any) error {
+func Wrapf(cerr error, msg string, args ...interface{}) error {
 	if cerr == nil {
 		return nil
 	}

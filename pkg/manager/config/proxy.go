@@ -19,11 +19,20 @@ import (
 	"encoding/json"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 )
 
-func (e *ConfigManager) initProxyConfig(ctx context.Context) {
+func (e *ConfigManager) watchCfgProxy(ctx context.Context, cfg *config.Config) error {
+	if _, err := e.GetProxyConfig(ctx); err != nil && errors.Is(err, ErrNoOrMultiResults) {
+		if err := e.SetProxyConfig(ctx, &config.ProxyServerOnline{
+			MaxConnections: cfg.Proxy.MaxConnections,
+			TCPKeepAlive:   cfg.Proxy.TCPKeepAlive,
+		}); err != nil {
+			return err
+		}
+	}
 	e.watch(ctx, PathPrefixProxy, "config", func(logger *zap.Logger, evt mvccpb.Event) {
 		var proxy config.ProxyServerOnline
 		if err := json.Unmarshal(evt.Kv.Value, &proxy); err != nil {
@@ -32,10 +41,23 @@ func (e *ConfigManager) initProxyConfig(ctx context.Context) {
 		}
 		e.chProxy <- &proxy
 	})
+	return nil
 }
 
-func (e *ConfigManager) GetProxyConfig() <-chan *config.ProxyServerOnline {
+func (e *ConfigManager) GetProxyConfigWatch() <-chan *config.ProxyServerOnline {
 	return e.chProxy
+}
+
+func (e *ConfigManager) GetProxyConfig(ctx context.Context) (*config.ProxyServerOnline, error) {
+	val, err := e.get(ctx, PathPrefixProxy, "config")
+	if err != nil {
+		return nil, err
+	}
+	ret := &config.ProxyServerOnline{}
+	if err := json.Unmarshal(val.Value, ret); err != nil {
+		return nil, err
+	}
+	return ret, nil
 }
 
 func (e *ConfigManager) SetProxyConfig(ctx context.Context, proxy *config.ProxyServerOnline) error {

@@ -15,4 +15,4 @@ ARG BUILDFLAGS
 ARG GOPROXY
 RUN export BUILDFLAGS=${BUILDFLAGS} && export GOPROXY=${GOPROXY} && cd proxy && make cmd && cp bin/* /bin/ && cp -a conf /etc/proxy && cd .. && rm -rf proxy
 RUN rm -rf $(go env GOMODCACHE GOCACHE) && apk del git make go
-ENTRYPOINT ["/bin/weirproxy", "-conf", "/etc/proxy/weirproxy.yaml"]
+ENTRYPOINT ["/bin/tiproxy", "-conf", "/etc/proxy/proxy.yaml"]

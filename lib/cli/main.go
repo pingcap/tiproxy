@@ -23,7 +23,7 @@ import (
 
 func GetRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "weirctl",
+		Use:   "tiproxyctl",
 		Short: "cli",
 	}
 
