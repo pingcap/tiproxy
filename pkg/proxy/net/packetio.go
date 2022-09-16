@@ -240,7 +240,7 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) error {
 
 func (p *PacketIO) Flush() error {
 	if err := p.buf.Flush(); err != nil {
-		return errors.WithStack(errors.Wrap(ErrFlushConn, err))
+		return errors.Wrap(ErrFlushConn, err)
 	}
 	return nil
 }

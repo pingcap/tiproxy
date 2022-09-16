@@ -271,13 +271,13 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		rs.err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
 	}
 	if rs.err != nil {
-		if ignoredErr := newConn.Close(); ignoredErr != nil {
-			mgr.logger.Warn("close new backend connection failed", zap.Error(ignoredErr))
+		if ignoredErr := newConn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+			mgr.logger.Error("close new backend connection failed", zap.Error(ignoredErr))
 		}
 		return
 	}
-	if ignoredErr := mgr.backendConn.Close(); ignoredErr != nil {
-		mgr.logger.Warn("close previous backend connection failed", zap.Error(ignoredErr))
+	if ignoredErr := mgr.backendConn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
 }
@@ -330,12 +330,11 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 	if rs.err != nil {
 		err := eventReceiver.OnRedirectFail(rs.from, rs.to, mgr)
 		mgr.logger.Warn("redirect connection failed", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID),
-			zap.NamedError("redirect_err", rs.err), zap.NamedError("notify_err", err))
+			zap.String("to", rs.to), zap.NamedError("redirect_err", rs.err), zap.NamedError("notify_err", err))
 	} else {
 		err := eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
 		mgr.logger.Info("redirect connection succeeds", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.Uint64("conn", mgr.connectionID), zap.NamedError("notify_err", err))
+			zap.String("to", rs.to), zap.NamedError("notify_err", err))
 	}
 }
 
@@ -366,8 +365,7 @@ func (mgr *BackendConnManager) Close() error {
 		// Just notify it with the current address.
 		if len(addr) > 0 {
 			if err := eventReceiver.OnConnClosed(addr, mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("addr", addr),
-					zap.Uint64("conn", mgr.connectionID), zap.NamedError("notify_err", err))
+				mgr.logger.Error("close connection error", zap.String("addr", addr), zap.NamedError("notify_err", err))
 			}
 		}
 	}

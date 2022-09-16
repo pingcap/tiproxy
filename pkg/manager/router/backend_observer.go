@@ -27,8 +27,8 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/domain/infosync"
-	"github.com/pingcap/tidb/util/logutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -126,6 +126,7 @@ type BackendInfo struct {
 
 // BackendObserver refreshes backend list and notifies BackendEventReceiver.
 type BackendObserver struct {
+	logger *zap.Logger
 	config *HealthCheckConfig
 	// The current backend status synced to the receiver.
 	curBackendInfo map[string]BackendStatus
@@ -182,8 +183,8 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, e
 }
 
 // StartBackendObserver creates a BackendObserver and starts watching.
-func StartBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
-	bo, err := NewBackendObserver(eventReceiver, client, httpCli, config, staticAddrs)
+func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
+	bo, err := NewBackendObserver(logger, eventReceiver, client, httpCli, config, staticAddrs)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +193,8 @@ func StartBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.C
 }
 
 // NewBackendObserver creates a BackendObserver.
-func NewBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client, config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
+func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client,
+	config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
 	if client == nil && len(staticAddrs) == 0 {
 		return nil, ErrNoInstanceToSelect
 	}
@@ -204,6 +206,7 @@ func NewBackendObserver(eventReceiver BackendEventReceiver, client *clientv3.Cli
 		httpTLS = true
 	}
 	bo := &BackendObserver{
+		logger:         logger,
 		config:         config,
 		curBackendInfo: make(map[string]BackendStatus),
 		allBackendInfo: make(map[string]*BackendInfo),
@@ -227,7 +230,7 @@ func (bo *BackendObserver) Start() {
 
 func (bo *BackendObserver) observe(ctx context.Context) {
 	if bo.client == nil {
-		logutil.BgLogger().Info("pd addr is not configured, use static backend instances instead.")
+		bo.logger.Info("pd addr is not configured, use static backend instances instead.")
 		bo.observeStaticAddrs(ctx)
 	} else {
 		bo.observeDynamicAddrs(ctx)
@@ -289,7 +292,7 @@ func (bo *BackendObserver) fetchBackendList(ctx context.Context) error {
 		if response, err = bo.client.Get(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix()); err == nil {
 			break
 		}
-		logutil.Logger(ctx).Error("fetch backend list failed, will retry later", zap.Error(err))
+		bo.logger.Error("fetch backend list failed, will retry later", zap.Error(err))
 		time.Sleep(bo.config.healthCheckRetryInterval)
 	}
 
@@ -323,7 +326,7 @@ func (bo *BackendObserver) fetchBackendList(ctx context.Context) error {
 			// we still need to marshal and update the topology even if the address exists in the map.
 			var topo *infosync.TopologyInfo
 			if err = json.Unmarshal(kv.Value, &topo); err != nil {
-				logutil.Logger(ctx).Error("unmarshal topology info failed", zap.String("key", string(kv.Key)),
+				bo.logger.Error("unmarshal topology info failed", zap.String("key", string(kv.Key)),
 					zap.ByteString("value", kv.Value), zap.Error(err))
 				continue
 			}
@@ -401,7 +404,7 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 			var err error
 			if resp, err = bo.httpCli.Get(url); err == nil {
 				if err := resp.Body.Close(); err != nil {
-					logutil.Logger(ctx).Warn("close http response in health check failed", zap.Error(err))
+					bo.logger.Error("close http response in health check failed", zap.Error(err))
 				}
 			}
 			return err
@@ -414,8 +417,8 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 		err = connectWithRetry(func() error {
 			conn, err := net.DialTimeout("tcp", addr, bo.config.healthCheckTimeout)
 			if err == nil {
-				if err := conn.Close(); err != nil {
-					logutil.Logger(ctx).Warn("close connection in health check failed", zap.Error(err))
+				if err := conn.Close(); err != nil && !pnet.IsDisconnectError(err) {
+					bo.logger.Error("close connection in health check failed", zap.Error(err))
 				}
 			}
 			return err

@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
 
@@ -137,7 +138,11 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		delete(s.mu.clients, connID)
 		s.mu.Unlock()
 
-		logger.Info("connection closed", zap.Error(clientConn.Close()))
+		if err := clientConn.Close(); err != nil && !pnet.IsDisconnectError(err) {
+			logger.Error("close connection fails", zap.Error(err))
+		} else {
+			logger.Info("connection closed")
+		}
 		metrics.ConnGauge.Dec()
 	}()
 
