@@ -23,17 +23,8 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version-file: go.mod
-      - name: "try to use build cache"
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-            ~/Library/Caches/go-build
-            ~\AppData\Local\go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          check-latest: true
+          cache: true
       - name: "test all"
         run: make test
       - name: "set up tmate session if necessary"
