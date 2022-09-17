@@ -45,7 +45,6 @@ func TestProxyConfig(t *testing.T) {
 	}
 
 	ch := cfgmgr.GetProxyConfigWatch()
-	<-ch
 
 	for _, tc := range cases {
 		require.NoError(t, cfgmgr.SetProxyConfig(ctx, tc))
@@ -53,6 +52,9 @@ func TestProxyConfig(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("timeout waiting chan")
 		case tg := <-ch:
+			for len(ch) > 0 {
+				tg = <-ch
+			}
 			require.Equal(t, tc, tg)
 		}
 	}

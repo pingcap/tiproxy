@@ -173,17 +173,17 @@ func TestBaseWatch(t *testing.T) {
 	cfgmgr.watch(ctx, "test", "t", func(l *zap.Logger, e mvccpb.Event) {
 		ch <- string(e.Kv.Value)
 	})
-	// clear the channel first
-	<-ch
 
 	// set it
 	require.NoError(t, cfgmgr.set(ctx, "test", "t", "1"))
-
 	// now the only way to check watch is to wait
 	select {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting chan")
 	case tg := <-ch:
+		for len(ch) > 0 {
+			tg = <-ch
+		}
 		require.Equal(t, "1", tg)
 	}
 }
