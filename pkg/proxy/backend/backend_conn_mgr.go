@@ -48,9 +48,9 @@ type signalRedirect struct {
 }
 
 type redirectResult struct {
+	err  error
 	from string
 	to   string
-	err  error
 }
 
 // BackendConnManager migrates a session from one BackendConnection to another.
@@ -63,24 +63,24 @@ type redirectResult struct {
 // - If it retries after each command: the latency will be unacceptable afterwards if it always fails.
 // - If it stops receiving signals: the previous new backend may be abnormal but the next new backend may be good.
 type BackendConnManager struct {
-	logger        *zap.Logger
-	connectionID  uint64
-	authenticator *Authenticator
-	cmdProcessor  *CmdProcessor
-	eventReceiver unsafe.Pointer
-	backendConn   *BackendConnection
 	// processLock makes redirecting and command processing exclusive.
 	processLock sync.Mutex
+	wg          waitgroup.WaitGroup
 	// signalReceived is used to notify the signal processing goroutine.
 	signalReceived chan struct{}
+	authenticator  *Authenticator
+	cmdProcessor   *CmdProcessor
+	eventReceiver  unsafe.Pointer
+	logger         *zap.Logger
 	// type *signalRedirect, it saves the last signal if there are multiple signals.
 	// It will be set to nil after migration.
 	signal unsafe.Pointer
 	// redirectResCh is used to notify the event receiver asynchronously.
 	redirectResCh chan *redirectResult
 	// cancelFunc is used to cancel the signal processing goroutine.
-	cancelFunc context.CancelFunc
-	wg         waitgroup.WaitGroup
+	cancelFunc   context.CancelFunc
+	backendConn  *BackendConnection
+	connectionID uint64
 }
 
 // NewBackendConnManager creates a BackendConnManager.

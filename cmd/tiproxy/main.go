@@ -39,7 +39,7 @@ func main() {
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
 
-	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
+	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		proxyConfigData, err := ioutil.ReadFile(*configFile)
 		if err != nil {
 			return err

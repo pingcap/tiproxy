@@ -30,9 +30,9 @@ var (
 )
 
 type tidbEncoder struct {
+	line *buffer.Buffer
 	zapcore.EncoderConfig
 	openNamespaces int
-	line           *buffer.Buffer
 }
 
 func NewTiDBEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
@@ -42,11 +42,11 @@ func NewTiDBEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 	if cfg.LineEnding == "" {
 		cfg.LineEnding = zapcore.DefaultLineEnding
 	}
-	return &tidbEncoder{cfg, 0, _pool.Get()}
+	return &tidbEncoder{_pool.Get(), cfg, 0}
 }
 
 func (c tidbEncoder) clone() *tidbEncoder {
-	return &tidbEncoder{c.EncoderConfig, 0, _pool.Get()}
+	return &tidbEncoder{_pool.Get(), c.EncoderConfig, 0}
 }
 
 func (c tidbEncoder) Clone() zapcore.Encoder {

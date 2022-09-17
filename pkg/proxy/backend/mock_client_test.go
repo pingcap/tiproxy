@@ -23,23 +23,23 @@ import (
 )
 
 type clientConfig struct {
+	// for auth
+	tlsConfig    *tls.Config
+	sql          string
+	username     string
+	dbName       string
+	authPlugin   string
+	dataBytes    []byte
+	attrs        []byte
+	authData     []byte
+	filePkts     int
+	prepStmtID   int
+	capability   uint32
+	collation    uint8
+	// for cmd
+	cmd          byte
 	// for both auth and cmd
 	abnormalExit bool
-	// for auth
-	tlsConfig  *tls.Config
-	capability uint32
-	username   string
-	dbName     string
-	collation  uint8
-	authPlugin string
-	authData   []byte
-	attrs      []byte
-	// for cmd
-	cmd        byte
-	dataBytes  []byte
-	filePkts   int
-	prepStmtID int
-	sql        string
 }
 
 func newClientConfig() *clientConfig {
@@ -57,11 +57,11 @@ func newClientConfig() *clientConfig {
 }
 
 type mockClient struct {
+	err error
 	// Inputs that assigned by the test and will be sent to the server.
 	*clientConfig
 	// Outputs that received from the server and will be checked by the test.
 	authSucceed bool
-	err         error
 }
 
 func newMockClient(cfg *clientConfig) *mockClient {

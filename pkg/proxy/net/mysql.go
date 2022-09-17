@@ -64,13 +64,13 @@ func ParseInitialHandshake(data []byte) uint32 {
 
 // HandshakeResp indicates the response read from the client.
 type HandshakeResp struct {
-	Capability uint32
-	Collation  uint8
 	User       string
 	DB         string
-	AuthData   []byte
 	AuthPlugin string
 	Attrs      []byte
+	AuthData   []byte
+	Capability uint32
+	Collation  uint8
 }
 
 func ParseHandshakeResponse(data []byte) *HandshakeResp {

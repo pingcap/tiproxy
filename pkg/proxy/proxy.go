@@ -34,10 +34,10 @@ import (
 
 type serverState struct {
 	sync.RWMutex
-	tcpKeepAlive   bool
+	clients        map[uint64]*client.ClientConnection
 	connID         uint64
 	maxConnections uint64
-	clients        map[uint64]*client.ClientConnection
+	tcpKeepAlive   bool
 }
 
 type SQLServer struct {

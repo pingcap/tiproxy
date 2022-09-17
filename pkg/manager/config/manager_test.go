@@ -170,7 +170,7 @@ func TestBaseWatch(t *testing.T) {
 	cfgmgr, ctx := testConfigManager(t, &config.Config{})
 
 	ch := make(chan string, 1)
-	cfgmgr.watch(ctx, "test", "t", func(l *zap.Logger, e mvccpb.Event) {
+	cfgmgr.watch(ctx, "test", "t", func(_ *zap.Logger, e mvccpb.Event) {
 		ch <- string(e.Kv.Value)
 	})
 

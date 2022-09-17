@@ -24,23 +24,22 @@ import (
 )
 
 type backendConfig struct {
+	// for auth
+	tlsConfig  *tls.Config
+	authPlugin string
+	salt         []byte
+	columns      int
+	loops        int
+	params       int
+	rows         int
+	respondType  respondType // for cmd
+	stmtNum      int
+	capability   uint32
+	status       uint16
+	authSucceed  bool
+	switchAuth   bool
 	// for both auth and cmd
 	abnormalExit bool
-	// for auth
-	tlsConfig   *tls.Config
-	capability  uint32
-	salt        []byte
-	authPlugin  string
-	switchAuth  bool
-	authSucceed bool
-	// for cmd
-	respondType respondType
-	columns     int
-	rows        int
-	params      int
-	status      uint16
-	loops       int
-	stmtNum     int
 }
 
 func newBackendConfig() *backendConfig {
@@ -56,15 +55,15 @@ func newBackendConfig() *backendConfig {
 }
 
 type mockBackend struct {
+	err error
 	// Inputs that assigned by the test and will be sent to the client.
 	*backendConfig
 	// Outputs that received from the client and will be checked by the test.
 	username         string
-	authData         []byte
 	db               string
+	authData         []byte
 	attrs            []byte
 	clientCapability uint32
-	err              error
 }
 
 func newMockBackend(cfg *backendConfig) *mockBackend {

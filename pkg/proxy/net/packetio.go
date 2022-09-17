@@ -76,9 +76,9 @@ func (f *rdbufConn) Read(b []byte) (int, error) {
 type PacketIO struct {
 	conn        net.Conn
 	buf         *bufio.ReadWriter
-	sequence    uint8
 	proxyInited *atomic.Bool
 	proxy       *Proxy
+	sequence    uint8
 }
 
 func NewPacketIO(conn net.Conn) *PacketIO {

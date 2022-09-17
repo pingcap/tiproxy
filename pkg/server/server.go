@@ -106,9 +106,9 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		// We have some alternative solution, for example:
 		// 1. globally lazily creation of managers. It introduced racing/chaos-management/hard-code-reading as in TiDB.
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
-		api.Register(engine.Group("/api"), ready, cfg.API, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
+		api.Register(engine.Group("/api"), cfg.API, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		srv.Etcd, err = buildEtcd(ctx, cfg, logger.Named("etcd"), pubAddr, engine)
+		srv.Etcd, err = buildEtcd(cfg, logger.Named("etcd"), pubAddr, engine)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -246,7 +246,7 @@ func (s *Server) Close() error {
 	return errors.Collect(ErrCloseServer, errs...)
 }
 
-func buildEtcd(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string, engine *gin.Engine) (srv *embed.Etcd, err error) {
+func buildEtcd(cfg *config.Config, logger *zap.Logger, pubAddr string, engine *gin.Engine) (srv *embed.Etcd, err error) {
 	etcd_cfg := embed.NewConfig()
 
 	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Security.PeerTLS); err != nil {

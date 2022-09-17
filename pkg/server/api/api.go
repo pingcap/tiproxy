@@ -19,11 +19,10 @@ import (
 	"github.com/pingcap/TiProxy/lib/config"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
-func Register(group *gin.RouterGroup, ready *atomic.Bool, cfg config.API, logger *zap.Logger, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
+func Register(group *gin.RouterGroup, cfg config.API, logger *zap.Logger, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
 	{
 		adminGroup := group.Group("admin")
 		if cfg.EnableBasicAuth {

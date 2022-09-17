@@ -42,17 +42,14 @@ var (
 )
 
 type ConfigManager struct {
-	wg       waitgroup.WaitGroup
-	cancel   context.CancelFunc
-	logger   *zap.Logger
-	kv       mvcc.WatchableKV
-	basePath string
-
-	// config
-	ignoreWrongNamespace bool
+	wg                   waitgroup.WaitGroup
+	kv                   mvcc.WatchableKV
+	cancel               context.CancelFunc
+	logger               *zap.Logger
+	chProxy              chan *config.ProxyServerOnline
+	basePath             string
 	watchInterval        time.Duration
-
-	chProxy chan *config.ProxyServerOnline
+	ignoreWrongNamespace bool
 }
 
 func NewConfigManager() *ConfigManager {

@@ -26,8 +26,8 @@ import (
 type proxyConfig struct {
 	frontendTLSConfig *tls.Config
 	backendTLSConfig  *tls.Config
-	capability        uint32
 	sessionToken      string
+	capability        uint32
 	waitRedirect      bool
 }
 
