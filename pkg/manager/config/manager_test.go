@@ -173,11 +173,8 @@ func TestBaseWatch(t *testing.T) {
 	cfgmgr.watch(ctx, "test", "t", func(l *zap.Logger, e mvccpb.Event) {
 		ch <- string(e.Kv.Value)
 	})
-
 	// clear the channel first
-	for len(ch) > 0 {
-		<-ch
-	}
+	<-ch
 
 	// set it
 	require.NoError(t, cfgmgr.set(ctx, "test", "t", "1"))

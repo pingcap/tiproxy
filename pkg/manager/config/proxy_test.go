@@ -45,6 +45,8 @@ func TestProxyConfig(t *testing.T) {
 	}
 
 	ch := cfgmgr.GetProxyConfigWatch()
+	<-ch
+
 	for _, tc := range cases {
 		require.NoError(t, cfgmgr.SetProxyConfig(ctx, tc))
 		select {
