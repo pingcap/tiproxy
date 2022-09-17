@@ -15,11 +15,15 @@
 package main
 
 import (
+	"os"
+	"strings"
+
 	"github.com/pingcap/TiProxy/lib/cli"
 	"github.com/pingcap/TiProxy/lib/util/cmd"
 )
 
 func main() {
 	rootCmd := cli.GetRootCmd()
+	rootCmd.Use = strings.Replace(rootCmd.Use, "tiproxyctl", os.Args[0], 1)
 	cmd.RunRootCommand(rootCmd)
 }

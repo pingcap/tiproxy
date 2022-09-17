@@ -23,9 +23,7 @@ import (
 )
 
 func TestProxyConfig(t *testing.T) {
-	cfgmgr, ctx := testConfigManager(t, config.Advance{
-		IgnoreWrongNamespace: true,
-	})
+	cfgmgr, ctx := testConfigManager(t, &config.Config{})
 
 	cases := []*config.ProxyServerOnline{
 		{
@@ -46,13 +44,17 @@ func TestProxyConfig(t *testing.T) {
 		},
 	}
 
-	ch := cfgmgr.GetProxyConfig()
+	ch := cfgmgr.GetProxyConfigWatch()
+
 	for _, tc := range cases {
 		require.NoError(t, cfgmgr.SetProxyConfig(ctx, tc))
 		select {
 		case <-time.After(5 * time.Second):
 			t.Fatal("timeout waiting chan")
 		case tg := <-ch:
+			for len(ch) > 0 {
+				tg = <-ch
+			}
 			require.Equal(t, tc, tg)
 		}
 	}

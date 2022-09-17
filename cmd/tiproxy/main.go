@@ -17,23 +17,24 @@ package main
 
 import (
 	"io/ioutil"
+	"os"
 
 	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/pkg/server"
 	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/server"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "weirproxy",
+		Use:   os.Args[0],
 		Short: "start the proxy server",
 	}
 
-	configFile := rootCmd.PersistentFlags().String("config", "conf/weirproxy.yaml", "weir proxy config file path")
+	configFile := rootCmd.PersistentFlags().String("config", "conf/proxy.yaml", "proxy config file path")
 	pubAddr := rootCmd.PersistentFlags().String("pub_addr", "127.0.0.1", "IP or domain, will be used as the accessible addr for other clients")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")

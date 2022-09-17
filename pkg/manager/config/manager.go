@@ -61,9 +61,9 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
-func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg config.Advance, logger *zap.Logger) error {
+func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg *config.Config, logger *zap.Logger) error {
 	srv.logger = logger
-	srv.ignoreWrongNamespace = cfg.IgnoreWrongNamespace
+	srv.ignoreWrongNamespace = cfg.Advance.IgnoreWrongNamespace
 	// slash appended to distinguish '/dir'(file) and '/dir/'(directory)
 	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
 
@@ -72,9 +72,7 @@ func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg con
 	ctx, cancel := context.WithCancel(ctx)
 	srv.cancel = cancel
 
-	srv.initProxyConfig(ctx)
-
-	return nil
+	return srv.watchCfgProxy(ctx, cfg)
 }
 
 func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, mvccpb.Event)) {
@@ -85,7 +83,7 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 		wch := e.kv.NewWatchStream()
 		defer wch.Close()
 		for {
-			if _, err := wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), wch.Rev()-1); err == nil {
+			if _, err := wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), wch.Rev()); err == nil {
 				break
 			}
 			if k := retryInterval * 2; k < e.watchInterval {

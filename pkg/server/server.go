@@ -139,7 +139,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup config manager
 	{
-		err = srv.ConfigManager.Init(ctx, srv.Etcd.Server.KV(), cfg.Advance, logger.Named("config"))
+		err = srv.ConfigManager.Init(ctx, srv.Etcd.Server.KV(), cfg, logger.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -201,7 +201,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 }
 
 func (s *Server) Run(ctx context.Context) {
-	s.Proxy.Run(ctx, s.ConfigManager.GetProxyConfig())
+	s.Proxy.Run(ctx, s.ConfigManager.GetProxyConfigWatch())
 }
 
 func (s *Server) Close() error {

@@ -81,7 +81,7 @@ func (e *Error) Is(target error) bool {
 	return errors.Is(e.err, target)
 }
 
-func (e *Error) As(target any) bool {
+func (e *Error) As(target interface{}) bool {
 	return errors.As(e.err, target)
 }
 

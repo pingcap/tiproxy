@@ -33,7 +33,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, context.Context) {
+func testConfigManager(t *testing.T, cfg *config.Config) (*ConfigManager, context.Context) {
 	addr, err := url.Parse("http://127.0.0.1:0")
 	require.NoError(t, err)
 
@@ -68,9 +68,7 @@ func testConfigManager(t *testing.T, cfg config.Advance) (*ConfigManager, contex
 }
 
 func TestBase(t *testing.T) {
-	cfgmgr, ctx := testConfigManager(t, config.Advance{
-		IgnoreWrongNamespace: true,
-	})
+	cfgmgr, ctx := testConfigManager(t, &config.Config{})
 
 	nsNum := 10
 	valNum := 30
@@ -130,9 +128,7 @@ func TestBase(t *testing.T) {
 }
 
 func TestBaseConcurrency(t *testing.T) {
-	cfgmgr, ctx := testConfigManager(t, config.Advance{
-		IgnoreWrongNamespace: true,
-	})
+	cfgmgr, ctx := testConfigManager(t, &config.Config{})
 
 	var wg waitgroup.WaitGroup
 	batchNum := 16
@@ -171,28 +167,23 @@ func TestBaseConcurrency(t *testing.T) {
 }
 
 func TestBaseWatch(t *testing.T) {
-	cfgmgr, ctx := testConfigManager(t, config.Advance{
-		IgnoreWrongNamespace: true,
-	})
+	cfgmgr, ctx := testConfigManager(t, &config.Config{})
 
 	ch := make(chan string, 1)
 	cfgmgr.watch(ctx, "test", "t", func(l *zap.Logger, e mvccpb.Event) {
 		ch <- string(e.Kv.Value)
 	})
 
-	// clear the channel first
-	for len(ch) > 0 {
-		<-ch
-	}
-
 	// set it
 	require.NoError(t, cfgmgr.set(ctx, "test", "t", "1"))
-
 	// now the only way to check watch is to wait
 	select {
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting chan")
 	case tg := <-ch:
+		for len(ch) > 0 {
+			tg = <-ch
+		}
 		require.Equal(t, "1", tg)
 	}
 }

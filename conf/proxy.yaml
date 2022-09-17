@@ -40,16 +40,16 @@ security:
   #   2. useless/forbid: skip-ca
   cluster-tls: # client object
     # access to other components like TiDB or PD, will use this
-    skip-ca: true
+    # skip-ca: true
   sql-tls: # client object
     # access to TiDB sql port, it has a standalone TLS configuration
     skip-ca: true
   server-tls: # server object
     # proxy SQL or HTTP port will use this
-    auto-certs: true
+    # auto-certs: true
   peer-tls: # peer object
     # internal communication between proxies
-    auto-certs: true
+    # auto-certs: true
 advance:
   # ignore-wrong-namespace: true
   # peer-port: "3081"

@@ -27,19 +27,18 @@ const (
 	configPrefix = "/api/admin/config"
 )
 
-func GetConfigCmd(ctx *Context) *cobra.Command {
+func GetConfigProxyCmd(ctx *Context) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "config",
-		Short: "",
+		Use: "proxy",
 	}
 
-	// config proxy
+	// set config proxy
 	{
-		configProxy := &cobra.Command{
-			Use: "proxy",
+		setProxy := &cobra.Command{
+			Use: "set",
 		}
-		input := configProxy.Flags().String("input", "", "specify the input json file for proxy config")
-		configProxy.RunE = func(cmd *cobra.Command, args []string) error {
+		input := setProxy.Flags().String("input", "", "specify the input json file for proxy config")
+		setProxy.RunE = func(cmd *cobra.Command, args []string) error {
 			var b io.Reader
 			if *input != "" {
 				f, err := os.Open(*input)
@@ -59,8 +58,34 @@ func GetConfigCmd(ctx *Context) *cobra.Command {
 			cmd.Println(resp)
 			return nil
 		}
-		rootCmd.AddCommand(configProxy)
+		rootCmd.AddCommand(setProxy)
 	}
 
+	// get config proxy
+	{
+		getProxy := &cobra.Command{
+			Use: "get",
+		}
+		getProxy.RunE = func(cmd *cobra.Command, args []string) error {
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodGet, fmt.Sprintf("%s/proxy", configPrefix), nil)
+			if err != nil {
+				return err
+			}
+
+			cmd.Println(resp)
+			return nil
+		}
+		rootCmd.AddCommand(getProxy)
+	}
+
+	return rootCmd
+}
+
+func GetConfigCmd(ctx *Context) *cobra.Command {
+	rootCmd := &cobra.Command{
+		Use:   "config",
+		Short: "",
+	}
+	rootCmd.AddCommand(GetConfigProxyCmd(ctx))
 	return rootCmd
 }
