@@ -228,6 +228,7 @@ func createEtcdServer(t *testing.T, addr string) *embed.Etcd {
 	cfg.Dir = t.TempDir()
 	cfg.LCUrls = []url.URL{*serverURL}
 	cfg.LPUrls = []url.URL{*serverURL}
+	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger.CreateLoggerForTest(t))
 	cfg.LogLevel = "fatal"
 	etcd, err := embed.StartEtcd(cfg)
 	require.NoError(t, err)
