@@ -1,0 +1,64 @@
+name: make
+on:
+  workflow_call:
+    inputs:
+      debug:
+        type: boolean
+        description: "set tmate on failure"
+        required: true
+      target:
+        type: string
+        description: "makefile target"
+        required: true
+      ref:
+        type: string
+        description: "checkout specific ref"
+        required: true
+      all_platform:
+        type: boolean
+        description: "test on all platforms or not"
+        default: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  make:
+    strategy:
+      matrix:
+        platform: ${{ inputs.all_platform && fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - if: ${{ runner.os == 'Windows' }}
+        name: Use GNU tar for faster cache restore
+        shell: cmd
+        run: |
+          echo "Adding GNU tar to PATH"
+          echo C:\Program Files\Git\usr\bin>>"%GITHUB_PATH%"
+      - name: "checkout repo"
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
+      - name: "setup golang"
+        uses: actions/setup-go@v3
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: "set vars"
+        run: |
+          echo "GOCACHE=$(go env GOCACHE)" >> $GITHUB_ENV
+          echo "GOMODCACHE=$(go env GOMODCACHE)" >> $GITHUB_ENV
+      - name: "try to use build cache"
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - run: make ${{ inputs.target }}
+      - name: "set up tmate session if necessary"
+        if: ${{ failure() && inputs.debug }}
+        uses: mxschmitt/action-tmate@v3

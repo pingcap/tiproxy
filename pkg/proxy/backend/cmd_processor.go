@@ -31,11 +31,11 @@ const (
 
 // CmdProcessor maintains the transaction and prepared statement status and decides whether the session can be redirected.
 type CmdProcessor struct {
-	capability uint32
-	// Only includes in_trans or quit status.
-	serverStatus uint32
 	// Each prepared statement has an independent status.
 	preparedStmtStatus map[int]uint32
+	capability         uint32
+	// Only includes in_trans or quit status.
+	serverStatus uint32
 }
 
 func NewCmdProcessor() *CmdProcessor {

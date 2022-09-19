@@ -60,7 +60,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 	rootCmd.AddCommand(
 		&cobra.Command{
 			Use: "list",
-			RunE: func(cmd *cobra.Command, args []string) error {
+			RunE: func(cmd *cobra.Command, _ []string) error {
 				resp, err := doRequest(cmd.Context(), ctx, http.MethodGet, namespacePrefix, nil)
 				if err != nil {
 					return err
@@ -132,7 +132,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 			Use: "put",
 		}
 		ns := putNamespace.Flags().String("ns", "-", "file")
-		putNamespace.RunE = func(cmd *cobra.Command, args []string) error {
+		putNamespace.RunE = func(cmd *cobra.Command, _ []string) error {
 			in := cmd.InOrStdin()
 			if *ns != "-" {
 				f, err := os.Open(*ns)

@@ -36,13 +36,13 @@ const supportedServerCapabilities = mysql.ClientLongPassword | mysql.ClientFound
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
-	user             string
+	backendTLSConfig *tls.Config
 	dbname           string // default database name
+	serverAddr       string
+	user             string
+	attrs            []byte // no need to parse
 	capability       uint32 // client capability
 	collation        uint8
-	serverAddr       string
-	attrs            []byte // no need to parse
-	backendTLSConfig *tls.Config
 }
 
 func (auth *Authenticator) String() string {

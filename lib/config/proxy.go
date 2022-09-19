@@ -23,13 +23,13 @@ import (
 )
 
 type Config struct {
-	Workdir  string      `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
 	Proxy    ProxyServer `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
 	API      API         `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
+	Advance  Advance     `yaml:"advance,omitempty" toml:"advance,omitempty" json:"advance,omitempty"`
+	Workdir  string      `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
+	Security Security    `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
 	Metrics  Metrics     `yaml:"metrics,omitempty" toml:"metrics,omitempty" json:"metrics,omitempty"`
 	Log      Log         `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
-	Security Security    `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
-	Advance  Advance     `yaml:"advance,omitempty" toml:"advance,omitempty" json:"advance,omitempty"`
 }
 
 type Metrics struct {
@@ -43,23 +43,23 @@ type ProxyServerOnline struct {
 }
 
 type ProxyServer struct {
-	ProxyServerOnline
 	Addr          string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
 	PDAddrs       string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
 	ProxyProtocol string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
+	ProxyServerOnline
 }
 
 type API struct {
 	Addr            string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
-	EnableBasicAuth bool   `yaml:"enable-basic-auth,omitempty" toml:"enable-basic-auth,omitempty" json:"enable-basic-auth,omitempty"`
 	User            string `yaml:"user,omitempty" toml:"user,omitempty" json:"user,omitempty"`
 	Password        string `yaml:"password,omitempty" toml:"password,omitempty" json:"password,omitempty"`
+	EnableBasicAuth bool   `yaml:"enable-basic-auth,omitempty" toml:"enable-basic-auth,omitempty" json:"enable-basic-auth,omitempty"`
 }
 
 type Advance struct {
 	PeerPort             string `yaml:"peer-port,omitempty" toml:"peer-port,omitempty" json:"peer-port,omitempty"`
-	IgnoreWrongNamespace bool   `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
 	WatchInterval        string `yaml:"watch-interval,omitempty" toml:"watch-interval,omitempty" json:"watch-interval,omitempty"`
+	IgnoreWrongNamespace bool   `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
 }
 
 type Log struct {
@@ -78,8 +78,8 @@ type LogFile struct {
 type TLSConfig struct {
 	Cert      string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
 	Key       string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
-	AutoCerts bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty"`
 	CA        string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
+	AutoCerts bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty"`
 	SkipCA    bool   `yaml:"skip-ca,omitempty" toml:"skip-ca,omitempty" json:"skip-ca,omitempty"`
 }
 
@@ -92,11 +92,11 @@ func (c TLSConfig) HasCA() bool {
 }
 
 type Security struct {
-	RSAKeySize int       `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
 	ServerTLS  TLSConfig `yaml:"server-tls,omitempty" toml:"server-tls,omitempty" json:"server-tls,omitempty"`
 	PeerTLS    TLSConfig `yaml:"peer-tls,omitempty" toml:"peer-tls,omitempty" json:"peer-tls,omitempty"`
 	ClusterTLS TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
 	SQLTLS     TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
+	RSAKeySize int       `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
 }
 
 func NewConfig(data []byte) (*Config, error) {

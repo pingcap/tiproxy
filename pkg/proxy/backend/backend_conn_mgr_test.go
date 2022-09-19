@@ -225,7 +225,7 @@ func TestNormalRedirect(t *testing.T) {
 		// 2nd handshake: redirect immediately after connection
 		{
 			client: nil,
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(_, _ *pnet.PacketIO) error {
 				backend1 := ts.mp.backendConn
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
@@ -362,7 +362,7 @@ func TestConnectFail(t *testing.T) {
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
 				return ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
 			},
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(_ *pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(ts.t, err)
 				ts.tc.backendIO = pnet.NewPacketIO(conn)
@@ -476,7 +476,7 @@ func TestSpecialCmds(t *testing.T) {
 		// 2nd handshake
 		{
 			client: nil,
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(_, _ *pnet.PacketIO) error {
 				backend1 := ts.mp.backendConn
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
@@ -507,7 +507,7 @@ func TestCloseWhileRedirect(t *testing.T) {
 		},
 		// close and redirect concurrently
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(_, _ *pnet.PacketIO) error {
 				// Send an event to make Close() block at notifying.
 				addr := ts.tc.backendListener.Addr().String()
 				eventReceiver := ts.mp.getEventReceiver().(*mockEventReceiver)

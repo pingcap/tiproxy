@@ -27,15 +27,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    uses: ./.github/workflows/build.yml
+  cmd:
+    uses: ./.github/workflows/common.yml
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
       ref: ${{ inputs.ref || github.ref }}
+      target: "cmd"
+      all_platform: true
+
+  build:
+    needs: cmd
+    uses: ./.github/workflows/common.yml
+    with:
+      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+      ref: ${{ inputs.ref || github.ref }}
+      target: "build"
 
   test:
     needs: build
-    uses: ./.github/workflows/test.yml
+    uses: ./.github/workflows/common.yml
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
       ref: ${{ inputs.ref || github.ref }}
+      target: "test"

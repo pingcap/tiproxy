@@ -26,9 +26,9 @@ import (
 )
 
 type Context struct {
-	CUrls  []string
 	Logger *zap.Logger
 	Client *http.Client
+	CUrls  []string
 }
 
 func doRequest(ctx context.Context, bctx *Context, method string, url string, rd io.Reader) (string, error) {

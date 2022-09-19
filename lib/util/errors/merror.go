@@ -24,8 +24,8 @@ var (
 )
 
 type MError struct {
-	uerr []error
 	cerr error
+	uerr []error
 }
 
 func (e *MError) Format(st fmt.State, verb rune) {

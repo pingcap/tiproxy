@@ -33,7 +33,7 @@ func GetRootCmd() *cobra.Command {
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "info", "log level")
 	rootCmd.PersistentFlags().Bool("indent", true, "whether indent the returned json")
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+	rootCmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
 		zapcfg := zap.NewDevelopmentConfig()
 		zapcfg.Encoding = *logEncoder
 		if level, err := zap.ParseAtomicLevel(*logLevel); err == nil {

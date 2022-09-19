@@ -69,16 +69,16 @@ const (
 )
 
 type ProxyTlv struct {
-	typ     ProxyTlvType
 	content []byte
+	typ     ProxyTlvType
 }
 
 type Proxy struct {
-	Version    ProxyVersion
-	Command    ProxyCommand
 	SrcAddress net.Addr
 	DstAddress net.Addr
 	TLV        []ProxyTlv
+	Version    ProxyVersion
+	Command    ProxyCommand
 }
 
 func (p *Proxy) ToBytes() []byte {
