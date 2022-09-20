@@ -24,10 +24,6 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-const (
-	defaultLogMaxSize = 300 // MB
-)
-
 var registerEncoders sync.Once
 
 func buildEncoder(cfg *config.Log) (zapcore.Encoder, error) {

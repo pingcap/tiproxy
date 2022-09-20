@@ -25,6 +25,10 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+const (
+	defaultLogMaxSize = 300 // MB
+)
+
 var _ closableSyncer = (*rotateLogger)(nil)
 var _ closableSyncer = (*stdoutLogger)(nil)
 var _ zapcore.WriteSyncer = (*AtomicWriteSyncer)(nil)
