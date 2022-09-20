@@ -33,11 +33,13 @@ import (
 // sent from the server and vice versa.
 
 const (
-	defaultBackendCapability = mysql.ClientLongPassword | mysql.ClientLongFlag | mysql.ClientConnectWithDB |
-		mysql.ClientProtocol41 | mysql.ClientSSL | mysql.ClientTransactions | mysql.ClientSecureConnection |
-		mysql.ClientFoundRows | mysql.ClientMultiStatements | mysql.ClientMultiResults | mysql.ClientLocalFiles |
-		mysql.ClientConnectAtts | mysql.ClientPluginAuth | mysql.ClientInteractive | mysql.ClientDeprecateEOF
-	defaultClientCapability = defaultBackendCapability
+	defaultTestBackendCapability = mysql.ClientLongPassword | mysql.ClientFoundRows | mysql.ClientLongFlag |
+		mysql.ClientConnectWithDB | mysql.ClientNoSchema | mysql.ClientODBC | mysql.ClientLocalFiles | mysql.ClientIgnoreSpace |
+		mysql.ClientProtocol41 | mysql.ClientInteractive | mysql.ClientSSL | mysql.ClientIgnoreSigpipe |
+		mysql.ClientTransactions | mysql.ClientReserved | mysql.ClientSecureConnection | mysql.ClientMultiStatements |
+		mysql.ClientMultiResults | mysql.ClientPluginAuth | mysql.ClientConnectAtts | mysql.ClientPluginAuthLenencClientData |
+		mysql.ClientDeprecateEOF
+	defaultTestClientCapability = defaultTestBackendCapability
 )
 
 var (

@@ -46,7 +46,6 @@ func (bc *BackendConnection) Connect() error {
 	if err != nil {
 		return errors.Wrapf(err, "dial backend error")
 	}
-
 	pkt := pnet.NewPacketIO(cn)
 	bc.pkt = pkt
 	return nil

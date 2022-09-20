@@ -29,6 +29,7 @@ func (e *ConfigManager) watchCfgProxy(ctx context.Context, cfg *config.Config) e
 		if err := e.SetProxyConfig(ctx, &config.ProxyServerOnline{
 			MaxConnections: cfg.Proxy.MaxConnections,
 			TCPKeepAlive:   cfg.Proxy.TCPKeepAlive,
+			ProxyProtocol:  cfg.Proxy.ProxyProtocol,
 		}); err != nil {
 			return err
 		}

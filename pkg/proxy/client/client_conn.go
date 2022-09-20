@@ -17,6 +17,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -35,22 +36,24 @@ type ClientConnection struct {
 	nsmgr             *namespace.NamespaceManager
 	ns                *namespace.Namespace
 	connMgr           *backend.BackendConnManager
+	proxyProtocol     bool
 }
 
-func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager) *ClientConnection {
+func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager, proxyProtocol bool) *ClientConnection {
+	opts := make([]pnet.PacketIOption, 0, 1)
+	if proxyProtocol {
+		opts = append(opts, pnet.WithProxy)
+	}
 	pkt := pnet.NewPacketIO(conn)
 	return &ClientConnection{
-		logger:            logger,
+		logger:            logger.With(zap.Bool("proxy-protocol", proxyProtocol)),
 		frontendTLSConfig: frontendTLSConfig,
 		backendTLSConfig:  backendTLSConfig,
 		pkt:               pkt,
 		nsmgr:             nsmgr,
 		connMgr:           bemgr,
+		proxyProtocol:     proxyProtocol,
 	}
-}
-
-func (cc *ClientConnection) Addr() string {
-	return cc.pkt.RemoteAddr().String()
 }
 
 func (cc *ClientConnection) connectBackend(ctx context.Context) error {
@@ -64,7 +67,7 @@ func (cc *ClientConnection) connectBackend(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.frontendTLSConfig, cc.backendTLSConfig); err != nil {
+	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.frontendTLSConfig, cc.backendTLSConfig, cc.proxyProtocol); err != nil {
 		return err
 	}
 	return nil
@@ -72,12 +75,12 @@ func (cc *ClientConnection) connectBackend(ctx context.Context) error {
 
 func (cc *ClientConnection) Run(ctx context.Context) {
 	if err := cc.connectBackend(ctx); err != nil {
-		cc.logger.Info("new connection fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
+		cc.logger.Info("new connection fails", zap.Error(err))
 		return
 	}
 
-	if err := cc.processMsg(ctx); err != nil {
-		cc.logger.Info("process message fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
+	if err := cc.processMsg(ctx); err != nil && !errors.Is(err, io.EOF) {
+		cc.logger.Info("process message fails", zap.Error(err))
 	}
 }
 

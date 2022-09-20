@@ -38,6 +38,7 @@ type serverState struct {
 	connID         uint64
 	maxConnections uint64
 	tcpKeepAlive   bool
+	proxyProtocol  bool
 }
 
 type SQLServer struct {
@@ -61,6 +62,7 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Securi
 		mu: serverState{
 			tcpKeepAlive:   cfg.TCPKeepAlive,
 			maxConnections: cfg.MaxConnections,
+			proxyProtocol:  cfg.ProxyProtocol != "",
 			connID:         0,
 			clients:        make(map[uint64]*client.ClientConnection),
 		},
@@ -124,12 +126,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 
 	connID := s.mu.connID
 	s.mu.connID++
-	logger := s.logger.With(zap.Uint64("connID", connID))
-	clientConn := client.NewClientConnection(logger.Named("cliconn"), conn, s.frontendTLSConfig, s.backendTLSConfig, s.nsmgr, backend.NewBackendConnManager(logger.Named("bemgr"), connID))
+	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
+	clientConn := client.NewClientConnection(logger.Named("cliconn"), conn, s.frontendTLSConfig, s.backendTLSConfig, s.nsmgr, backend.NewBackendConnManager(logger.Named("clibemgr"), connID), s.mu.proxyProtocol)
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 
-	logger.Info("new connection", zap.String("remoteAddr", conn.RemoteAddr().String()))
+	logger.Info("new connection")
 	metrics.ConnGauge.Inc()
 
 	defer func() {

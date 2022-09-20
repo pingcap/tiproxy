@@ -22,6 +22,10 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
+var (
+	ErrAddressFamilyMismatch = errors.New("address family between source and target mismatched")
+)
+
 type ProxyVersion int
 
 const (
@@ -81,43 +85,44 @@ type Proxy struct {
 	Command    ProxyCommand
 }
 
-func (p *Proxy) ToBytes() []byte {
-	buf := make([]byte, len(proxyV2Magic)+4)
-	ptr := copy(buf, proxyV2Magic)
+func (p *Proxy) ToBytes() ([]byte, error) {
+	magicLen := len(proxyV2Magic)
+	buf := make([]byte, magicLen+4)
+	_ = copy(buf, proxyV2Magic)
+	buf[magicLen] = byte(p.Version<<4) | byte(p.Command&0xF)
 
-	buf[ptr] = byte(p.Version<<4) | byte(p.Command&0xF)
-	ptr++
-
-	var length int
 	addressFamily := ProxyAFUnspec
 	network := ProxyNetworkUnspec
 	switch sadd := p.SrcAddress.(type) {
 	case *net.TCPAddr:
-		length = len(sadd.IP)*2 + 4
 		addressFamily = ProxyAFINet
-		if length == 36 {
+		if len(sadd.IP) == net.IPv6len {
 			addressFamily = ProxyAFINet6
 		}
 		network = ProxyNetworkStream
-		dadd := p.DstAddress.(*net.TCPAddr)
+		dadd, ok := p.DstAddress.(*net.TCPAddr)
+		if !ok {
+			return nil, ErrAddressFamilyMismatch
+		}
 		buf = append(buf, sadd.IP...)
 		buf = append(buf, dadd.IP...)
 		buf = append(buf, byte(sadd.Port>>8), byte(sadd.Port))
 		buf = append(buf, byte(dadd.Port>>8), byte(dadd.Port))
 	case *net.UDPAddr:
-		length = len(sadd.IP)*2 + 4
 		addressFamily = ProxyAFINet
-		if length == 36 {
+		if len(sadd.IP) == net.IPv6len {
 			addressFamily = ProxyAFINet6
 		}
 		network = ProxyNetworkDgram
-		dadd := p.DstAddress.(*net.UDPAddr)
+		dadd, ok := p.DstAddress.(*net.UDPAddr)
+		if !ok {
+			return nil, ErrAddressFamilyMismatch
+		}
 		buf = append(buf, sadd.IP...)
 		buf = append(buf, dadd.IP...)
 		buf = append(buf, byte(sadd.Port>>8), byte(sadd.Port))
 		buf = append(buf, byte(dadd.Port>>8), byte(dadd.Port))
 	case *net.UnixAddr:
-		length = 216
 		addressFamily = ProxyAFUnix
 		switch sadd.Net {
 		case "unix":
@@ -125,25 +130,27 @@ func (p *Proxy) ToBytes() []byte {
 		case "unixdgram":
 			network = ProxyNetworkDgram
 		}
-		dadd := p.DstAddress.(*net.UnixAddr)
+		dadd, ok := p.DstAddress.(*net.UnixAddr)
+		if !ok {
+			return nil, ErrAddressFamilyMismatch
+		}
 		buf = append(buf, []byte(sadd.Name)...)
 		buf = append(buf, []byte(dadd.Name)...)
 	}
-	buf[ptr] = byte(addressFamily<<4) | byte(network&0xF)
-	ptr++
+	buf[magicLen+1] = byte(addressFamily<<4) | byte(network&0xF)
 
 	for _, tlv := range p.TLV {
 		buf = append(buf, byte(tlv.typ))
 		tlen := len(tlv.content)
 		buf = append(buf, byte(tlen>>8), byte(tlen))
 		buf = append(buf, tlv.content...)
-		length += 3 + tlen
 	}
 
-	buf[ptr] = byte(length >> 8)
-	buf[ptr+1] = byte(length)
+	length := len(buf) - 4 - magicLen
+	buf[magicLen+2] = byte(length >> 8)
+	buf[magicLen+3] = byte(length)
 
-	return buf
+	return buf, nil
 }
 
 func (p *PacketIO) parseProxyV2() (*Proxy, error) {
@@ -269,8 +276,12 @@ func (p *PacketIO) parseProxyV2() (*Proxy, error) {
 
 // WriteProxyV2 should only be called at the beginning of connection, before any write operations.
 func (p *PacketIO) WriteProxyV2(m *Proxy) error {
-	if _, err := io.Copy(p.buf, bytes.NewReader(m.ToBytes())); err != nil {
-		return errors.WithStack(errors.Wrap(ErrWriteConn, err))
+	buf, err := m.ToBytes()
+	if err != nil {
+		return errors.Wrap(ErrWriteConn, err)
+	}
+	if _, err := io.Copy(p.buf, bytes.NewReader(buf)); err != nil {
+		return errors.Wrap(ErrWriteConn, err)
 	}
 	// according to the spec, we better flush to avoid server hanging
 	return p.Flush()

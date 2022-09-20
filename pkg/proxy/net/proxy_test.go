@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProxy(t *testing.T) {
+func TestProxyParse(t *testing.T) {
 	tcpaddr, err := net.ResolveTCPAddr("tcp", "192.168.1.1:34")
 	require.NoError(t, err)
 
@@ -66,4 +66,22 @@ func TestProxy(t *testing.T) {
 		},
 		1,
 	)
+}
+
+func TestProxyToBytes(t *testing.T) {
+	hdr := &Proxy{
+		Version:    ProxyVersion2,
+		Command:    ProxyCommandLocal,
+		SrcAddress: &net.TCPAddr{IP: make(net.IP, net.IPv4len), Port: 0},
+		DstAddress: &net.TCPAddr{IP: make(net.IP, net.IPv6len), Port: 0},
+	}
+	hdrBytes, err := hdr.ToBytes()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(hdrBytes), len(proxyV2Magic)+4)
+	length := int(hdrBytes[len(proxyV2Magic)+2])<<8 | int(hdrBytes[len(proxyV2Magic)+3])
+	require.Equal(t, len(hdrBytes)-4-len(proxyV2Magic), length)
+
+	hdr.DstAddress = &net.UDPAddr{}
+	_, err = hdr.ToBytes()
+	require.ErrorIs(t, err, ErrAddressFamilyMismatch)
 }

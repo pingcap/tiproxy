@@ -22,9 +22,10 @@ ifneq ($(RELEASE), "")
 endif
 BUILD_TAGS ?=
 LDFLAGS ?= 
+DEBUG ?=
 BUILDFLAGS := $(BUILDFLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}'
 ifeq ("$(WITH_RACE)", "1")
-	BUILDFLAGS = $(BUILDFLAGS) -race
+	BUILDFLAGS += -race
 endif
 IMAGE_TAG ?= latest
 EXECUTABLE_TARGETS := $(patsubst cmd/%,cmd_%,$(wildcard cmd/*))

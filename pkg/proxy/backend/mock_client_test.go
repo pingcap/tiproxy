@@ -44,7 +44,7 @@ type clientConfig struct {
 
 func newClientConfig() *clientConfig {
 	return &clientConfig{
-		capability: defaultClientCapability,
+		capability: defaultTestClientCapability,
 		username:   mockUsername,
 		dbName:     mockDBName,
 		authPlugin: mysql.AuthCachingSha2Password,

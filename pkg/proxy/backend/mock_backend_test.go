@@ -44,7 +44,7 @@ type backendConfig struct {
 
 func newBackendConfig() *backendConfig {
 	return &backendConfig{
-		capability:  defaultBackendCapability,
+		capability:  defaultTestBackendCapability,
 		salt:        mockSalt,
 		authPlugin:  mysql.AuthCachingSha2Password,
 		switchAuth:  true,

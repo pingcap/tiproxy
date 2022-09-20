@@ -81,7 +81,7 @@ type PacketIO struct {
 	sequence    uint8
 }
 
-func NewPacketIO(conn net.Conn) *PacketIO {
+func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 	buf := bufio.NewReadWriter(
 		bufio.NewReaderSize(conn, defaultReaderSize),
 		bufio.NewWriterSize(conn, defaultWriterSize),
@@ -95,6 +95,9 @@ func NewPacketIO(conn net.Conn) *PacketIO {
 		// TODO: disable it by default now
 		proxyInited: atomic.NewBool(true),
 		buf:         buf,
+	}
+	for _, opt := range opts {
+		opt(p)
 	}
 	return p
 }
@@ -124,7 +127,7 @@ func (p *PacketIO) GetSequence() uint8 {
 	return p.sequence
 }
 
-func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
+func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	var header [4]byte
 
 	if _, err := io.ReadFull(p.conn, header[:]); err != nil {
@@ -169,27 +172,24 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 }
 
 // ReadPacket reads data and removes the header
-func (p *PacketIO) ReadPacket() ([]byte, error) {
-	var data []byte
-	for {
-		buf, more, err := p.ReadOnePacket()
+func (p *PacketIO) ReadPacket() (data []byte, err error) {
+	for more := true; more; {
+		var buf []byte
+		buf, more, err = p.readOnePacket()
 		if err != nil {
-			return nil, err
+			return
 		}
-
 		data = append(data, buf...)
-
-		if !more {
-			break
-		}
 	}
 	return data, nil
 }
 
-func (p *PacketIO) WriteOnePacket(data []byte) (int, bool, error) {
+func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 	more := false
 	length := len(data)
 	if length >= mysql.MaxPayloadLen {
+		// we need another packet, this is true even if
+		// the current packet is of len(MaxPayloadLen) exactly
 		length = mysql.MaxPayloadLen
 		more = true
 	}
@@ -213,24 +213,14 @@ func (p *PacketIO) WriteOnePacket(data []byte) (int, bool, error) {
 }
 
 // WritePacket writes data without a header
-func (p *PacketIO) WritePacket(data []byte, flush bool) error {
-	// The original data might be empty.
-	for {
-		n, more, err := p.WriteOnePacket(data)
+func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
+	for more := true; more; {
+		var n int
+		n, more, err = p.writeOnePacket(data)
 		if err != nil {
-			return err
+			return
 		}
 		data = data[n:]
-		// if the last packet ends with a length of MaxPayloadLen exactly
-		// we need another zero-length packet to end it
-		if len(data) == 0 {
-			if more {
-				if _, _, err := p.WriteOnePacket(nil); err != nil {
-					return err
-				}
-			}
-			break
-		}
 	}
 	if flush {
 		return p.Flush()
