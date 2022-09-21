@@ -28,7 +28,8 @@ func TestCollect(t *testing.T) {
 	e := serr.Collect(e1, e2, e3)
 
 	require.ErrorIsf(t, e, e1, "equal to the external error")
-	require.Equal(t, serr.Unwrap(e), e, "unwrapping is noop")
+	require.Equal(t, nil, serr.Unwrap(e), "unwrapping stops here")
+	require.ErrorIsf(t, e, e1, "but errors.Is works for all errors")
 	require.Equal(t, e.(*serr.MError).Cause(), []error{e2, e3}, "get underlying errors")
 	require.NoError(t, serr.Collect(e3), "nil if there is no underlying error")
 }
