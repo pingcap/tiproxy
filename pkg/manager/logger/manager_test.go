@@ -171,25 +171,20 @@ func TestLogConcurrently(t *testing.T) {
 		},
 	}
 
-	lm, err := NewLoggerManager(cfg)
-	require.NoError(t, err)
-	log := lm.BuildLogger()
-	ch := make(chan *config.Log)
-	lm.Init(log, ch)
-
+	lg, ch := setupLogManager(t, cfg)
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	for i := 0; i < 5; i++ {
 		wg.Run(func() {
 			for ctx.Err() == nil {
-				log = log.Named("test_name")
-				log.Info("test_info")
-				log.Warn("test_warn")
-				log.Error("test_error")
-				log = log.With(zap.String("with", "test_with"))
-				log.Info("test_info")
-				log.Warn("test_warn")
-				log.Error("test_error")
+				lg = lg.Named("test_name")
+				lg.Info("test_info")
+				lg.Warn("test_warn")
+				lg.Error("test_error")
+				lg = lg.With(zap.String("with", "test_with"))
+				lg.Info("test_info")
+				lg.Warn("test_warn")
+				lg.Error("test_error")
 			}
 		})
 	}
@@ -209,5 +204,4 @@ func TestLogConcurrently(t *testing.T) {
 	})
 	wg.Wait()
 	cancel()
-	require.NoError(t, lm.Close())
 }
