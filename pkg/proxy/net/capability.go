@@ -95,6 +95,10 @@ var capabilityStrings = []struct {
 	{ClientRememberOptions, "CLIENT_REMEMBER_OPTIONS"},
 }
 
+func (f Capability) Uint32() uint32 {
+	return uint32(f)
+}
+
 func (f Capability) String() string {
 	str := &strings.Builder{}
 	cnt := 0

@@ -40,4 +40,6 @@ func TestCapability(t *testing.T) {
 	var newcapsUnmarshaler encoding.TextUnmarshaler = &newcaps
 	require.NoError(t, newcapsUnmarshaler.UnmarshalText(capBytes))
 	require.Equal(t, caps.String(), newcaps.String())
+
+	require.Equal(t, uint32(caps), caps.Uint32())
 }
