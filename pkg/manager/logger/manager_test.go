@@ -120,7 +120,7 @@ func TestUpdateCfg(t *testing.T) {
 		ch <- &clonedCfg
 		ch <- &clonedCfg
 		test.action(lg)
-		logfiles := readLogFiles(dir)
+		logfiles := readLogFiles(t, dir)
 		test.check(logfiles)
 	}
 }
@@ -138,16 +138,19 @@ func setupLogManager(t *testing.T, cfg *config.Log) (*zap.Logger, chan *config.L
 	return lg, ch
 }
 
-func readLogFiles(dir string) []os.FileInfo {
+func readLogFiles(t *testing.T, dir string) []os.FileInfo {
 	entries, err := os.ReadDir(dir)
 	// The directory may not exist when the output is stdout.
 	if err != nil {
+		require.ErrorIs(t, err, os.ErrNotExist)
 		return nil
 	}
 	files := make([]os.FileInfo, 0, len(entries))
 	for _, entry := range entries {
 		if info, err := entry.Info(); err == nil {
 			files = append(files, info)
+		} else {
+			require.ErrorIs(t, err, os.ErrNotExist)
 		}
 	}
 	return files
