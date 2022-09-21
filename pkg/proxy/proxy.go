@@ -85,7 +85,6 @@ func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.Pr
 	for {
 		select {
 		case <-ctx.Done():
-			s.wg.Wait()
 			return
 		case och := <-onlineProxyConfig:
 			s.mu.Lock()

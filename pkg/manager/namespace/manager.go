@@ -124,5 +124,10 @@ func (n *NamespaceManager) RedirectConnections() []error {
 }
 
 func (n *NamespaceManager) Close() error {
+	n.RLock()
+	for _, ns := range n.nsm {
+		ns.Close()
+	}
+	n.RUnlock()
 	return nil
 }

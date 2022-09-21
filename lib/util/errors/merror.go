@@ -61,12 +61,12 @@ func (e *MError) Error() string {
 	return fmt.Sprintf("%s", e)
 }
 
-func (e *MError) Unwrap() error {
-	return e
-}
-
 func (e *MError) Is(s error) bool {
-	return errors.Is(e.cerr, s)
+	is := errors.Is(e.cerr, s)
+	for _, e := range e.uerr {
+		is  = is || errors.Is(e, s)
+	}
+	return is
 }
 
 func (e *MError) Cause() []error {
