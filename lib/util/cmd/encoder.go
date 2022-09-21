@@ -16,8 +16,10 @@ package cmd
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -35,7 +37,7 @@ type tidbEncoder struct {
 	openNamespaces int
 }
 
-func NewTiDBEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
+func NewTiDBEncoder(cfg zapcore.EncoderConfig) *tidbEncoder {
 	if cfg.ConsoleSeparator == "" {
 		cfg.ConsoleSeparator = "\t"
 	}
@@ -148,20 +150,6 @@ func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 }
 
 /* map encoder part */
-func (f *tidbEncoder) needDoubleQuotes(s string) bool {
-	for i := 0; i < len(s); {
-		b := s[i]
-		if b <= 0x20 {
-			return true
-		}
-		switch b {
-		case '\\', '"', '[', ']', '=':
-			return true
-		}
-		i++
-	}
-	return false
-}
 func (f *tidbEncoder) safeAddString(s string) {
 	needQuotes := false
 outerloop:
@@ -176,7 +164,6 @@ outerloop:
 			break outerloop
 		}
 	}
-
 	if needQuotes {
 		f.line.AppendByte('"')
 	}
@@ -187,9 +174,12 @@ outerloop:
 			f.line.AppendString(`\ufffd`)
 		} else if size == 1 {
 			switch r {
-			case '\\', '"', '\n', '\r', '\t':
-				f.line.AppendByte('\\')
-				f.line.AppendByte(s[i])
+			case '"':
+				f.line.AppendString("\\\"")
+			case '\n':
+				f.line.AppendString("\\n")
+			case '\r':
+				f.line.AppendString("\\r")
 			default:
 				if r >= 0x20 {
 					f.line.AppendByte(s[i])
@@ -305,7 +295,7 @@ func (s *tidbEncoder) AddInt64(key string, val int64) {
 func (s *tidbEncoder) AddString(key string, val string) {
 	s.beginQuoteFiled()
 	s.addKey(key)
-	s.AppendString(val)
+	s.safeAddString(val)
 	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddTime(key string, val time.Time) {
@@ -353,11 +343,7 @@ func (s *tidbEncoder) AddUintptr(key string, val uintptr) {
 func (s *tidbEncoder) AddReflected(key string, obj interface{}) error {
 	s.beginQuoteFiled()
 	s.addKey(key)
-	enc := json.NewEncoder(s.line)
-	if err := enc.Encode(obj); err != nil {
-		return err
-	}
-	s.line.TrimNewline()
+	s.AppendReflected(obj)
 	s.endQuoteFiled()
 	return nil
 }
@@ -404,8 +390,12 @@ func (s *tidbEncoder) AppendObject(v zapcore.ObjectMarshaler) error {
 }
 func (s *tidbEncoder) AppendReflected(v interface{}) error {
 	s.addElementSeparator()
-	_, err := fmt.Fprint(s.line, v)
-	return err
+	bytes, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	s.safeAddString(strings.TrimSpace(string(bytes)))
+	return nil
 }
 func (s *tidbEncoder) AppendBool(v bool) {
 	s.addElementSeparator()
@@ -413,7 +403,8 @@ func (s *tidbEncoder) AppendBool(v bool) {
 }
 func (s *tidbEncoder) AppendByteString(v []byte) {
 	s.addElementSeparator()
-	fmt.Fprint(s.line, v)
+	fmt.Fprint(s.line, "0x")
+	fmt.Fprint(s.line, hex.EncodeToString(v))
 }
 func (s *tidbEncoder) AppendComplex128(v complex128) {
 	s.addElementSeparator()
