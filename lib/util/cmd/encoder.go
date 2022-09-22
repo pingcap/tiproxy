@@ -47,12 +47,18 @@ func NewTiDBEncoder(cfg zapcore.EncoderConfig) *tidbEncoder {
 	return &tidbEncoder{_pool.Get(), cfg, 0}
 }
 
-func (c tidbEncoder) clone() *tidbEncoder {
-	return &tidbEncoder{_pool.Get(), c.EncoderConfig, 0}
+func (c tidbEncoder) clone(keepOld bool) *tidbEncoder {
+	newbuf := _pool.Get()
+	if keepOld {
+		newbuf.AppendString(c.line.String())
+	}
+	return &tidbEncoder{newbuf, c.EncoderConfig, 0}
 }
 
 func (c tidbEncoder) Clone() zapcore.Encoder {
-	return c.clone()
+	// this API is called on logger.With/Named or any other log deriviation action
+	// thus old fields must be kept
+	return c.clone(true)
 }
 
 func (c *tidbEncoder) beginQuoteFiled() {
@@ -65,7 +71,11 @@ func (c *tidbEncoder) endQuoteFiled() {
 	c.line.AppendByte(']')
 }
 func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	c := e.clone()
+	// save fields attached to the encoder
+	oldFields := e.line.String()
+
+	// clone here to ensure concurrent safe
+	c := e.clone(false)
 	if c.TimeKey != "" {
 		c.beginQuoteFiled()
 		if c.EncodeTime != nil {
@@ -111,8 +121,8 @@ func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 		c.line.AppendByte(' ')
 	}
 
-	// append the old fields
-	c.line.WriteString(e.line.String())
+	// append old fields
+	c.line.AppendString(oldFields)
 
 	for _, f := range fields {
 		f.AddTo(c)
