@@ -17,7 +17,6 @@ package client
 import (
 	"context"
 	"crypto/tls"
-	"io"
 	"net"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -81,10 +80,11 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 		return
 	}
 
-	if err := cc.processMsg(ctx); err != nil &&
-		// ignore EOF from client
-		!(errors.Is(err, ErrClientConn) && errors.Is(err, io.EOF)) {
-		cc.logger.Info("process message fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
+	if err := cc.processMsg(ctx); err != nil {
+		clientErr := errors.Is(err, ErrClientConn)
+		if !(clientErr && pnet.IsDisconnectError(err)) {
+			cc.logger.Info("process message fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err), zap.Bool("clientErr", clientErr), zap.Bool("serverErr", !clientErr))
+		}
 	}
 }
 
