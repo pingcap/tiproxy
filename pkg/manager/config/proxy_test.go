@@ -45,16 +45,14 @@ func TestProxyConfig(t *testing.T) {
 	}
 
 	ch := cfgmgr.GetProxyConfigWatch()
+	require.Equal(t, <-ch, &config.ProxyServerOnline{})
 
 	for _, tc := range cases {
 		require.NoError(t, cfgmgr.SetProxyConfig(ctx, tc))
 		select {
 		case <-time.After(5 * time.Second):
-			t.Fatal("timeout waiting chan")
+			t.Fatalf("\n\ntimeout waiting chan\n\n")
 		case tg := <-ch:
-			for len(ch) > 0 {
-				tg = <-ch
-			}
 			require.Equal(t, tc, tg)
 		}
 	}
