@@ -50,6 +50,7 @@ type ConfigManager struct {
 	basePath             string
 	watchInterval        time.Duration
 	ignoreWrongNamespace bool
+	metas                map[cfgType]imeta
 }
 
 func NewConfigManager() *ConfigManager {
@@ -63,6 +64,7 @@ func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg *co
 	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
 
 	srv.kv = kv
+	srv.initMetas()
 
 	ctx, cancel := context.WithCancel(ctx)
 	srv.cancel = cancel

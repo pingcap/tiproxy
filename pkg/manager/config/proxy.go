@@ -74,17 +74,19 @@ func (m meta[T]) getInitial(cfg *config.Config) any {
 	return m.initFunc(cfg)
 }
 
-var metas = map[cfgType]imeta{
-	cfgServer: newMeta(pathPrefixProxyServer, func(cfg *config.Config) config.ProxyServerOnline {
-		return cfg.Proxy.ProxyServerOnline
-	}),
-	cfgLog: newMeta(pathPrefixLog, func(cfg *config.Config) config.LogOnline {
-		return cfg.Log.LogOnline
-	}),
+func (e *ConfigManager) initMetas() {
+	e.metas = map[cfgType]imeta{
+		cfgServer: newMeta(pathPrefixProxyServer, func(cfg *config.Config) config.ProxyServerOnline {
+			return cfg.Proxy.ProxyServerOnline
+		}),
+		cfgLog: newMeta(pathPrefixLog, func(cfg *config.Config) config.LogOnline {
+			return cfg.Log.LogOnline
+		}),
+	}
 }
 
 func (e *ConfigManager) watchCfgProxy(ctx context.Context, cfg *config.Config) error {
-	for _, m := range metas {
+	for _, m := range e.metas {
 		if err := func(m imeta) error {
 			_, err := e.get(ctx, m.getPrefix(), "config")
 			if err != nil && errors.Is(err, ErrNoOrMultiResults) {
@@ -113,7 +115,7 @@ func (e *ConfigManager) watchCfgProxy(ctx context.Context, cfg *config.Config) e
 }
 
 func (e *ConfigManager) getCfg(ctx context.Context, tp cfgType) (any, error) {
-	m := metas[tp]
+	m := e.metas[tp]
 	val, err := e.get(ctx, m.getPrefix(), "config")
 	if err != nil {
 		return nil, err
@@ -122,7 +124,7 @@ func (e *ConfigManager) getCfg(ctx context.Context, tp cfgType) (any, error) {
 }
 
 func (e *ConfigManager) setCfg(ctx context.Context, tp cfgType, obj any) error {
-	m := metas[tp]
+	m := e.metas[tp]
 	value, err := json.Marshal(obj)
 	if err != nil {
 		return err
@@ -138,13 +140,13 @@ func getConfig[T onlineCfgTypes](ctx context.Context, e *ConfigManager, tp cfgTy
 	return obj.(*T), nil
 }
 
-func subscribe[T onlineCfgTypes](tp cfgType) chan *T {
-	mt := metas[tp].(*meta[T])
+func subscribe[T onlineCfgTypes](e *ConfigManager, tp cfgType) chan *T {
+	mt := e.metas[tp].(*meta[T])
 	return mt.ch
 }
 
 func (e *ConfigManager) GetProxyConfigWatch() <-chan *config.ProxyServerOnline {
-	return subscribe[config.ProxyServerOnline](cfgServer)
+	return subscribe[config.ProxyServerOnline](e, cfgServer)
 }
 
 func (e *ConfigManager) GetProxyConfig(ctx context.Context) (*config.ProxyServerOnline, error) {
@@ -156,7 +158,7 @@ func (e *ConfigManager) SetProxyConfig(ctx context.Context, proxy *config.ProxyS
 }
 
 func (e *ConfigManager) GetLogConfigWatch() <-chan *config.LogOnline {
-	return subscribe[config.LogOnline](cfgLog)
+	return subscribe[config.LogOnline](e, cfgLog)
 }
 
 func (e *ConfigManager) GetLogConfig(ctx context.Context) (*config.LogOnline, error) {
