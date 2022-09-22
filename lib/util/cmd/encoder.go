@@ -64,18 +64,6 @@ func (c *tidbEncoder) beginQuoteFiled() {
 func (c *tidbEncoder) endQuoteFiled() {
 	c.line.AppendByte(']')
 }
-func (c *tidbEncoder) encodeError(f zapcore.Field) {
-	err := f.Interface.(error)
-	basic := err.Error()
-	c.AddString(f.Key, basic)
-	if e, isFormatter := err.(fmt.Formatter); isFormatter {
-		verbose := fmt.Sprintf("%+v", e)
-		if verbose != basic {
-			// This is a rich error type, like those produced by github.com/pkg/errors.
-			c.AddString(f.Key+"Verbose", verbose)
-		}
-	}
-}
 func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	c := e.clone()
 	if c.TimeKey != "" {
@@ -127,12 +115,6 @@ func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 	c.line.WriteString(e.line.String())
 
 	for _, f := range fields {
-		if f.Type == zapcore.ErrorType {
-			// handle ErrorType in pingcap/log to fix "[key=?,keyVerbose=?]" problem.
-			// see more detail at https://github.com/pingcap/log/pull/5
-			c.encodeError(f)
-			continue
-		}
 		f.AddTo(c)
 	}
 
