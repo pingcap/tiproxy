@@ -28,6 +28,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrClientConn = errors.New("this is an error from client")
+)
+
 type ClientConnection struct {
 	logger            *zap.Logger
 	frontendTLSConfig *tls.Config    // the TLS config to connect to clients.
@@ -39,7 +43,7 @@ type ClientConnection struct {
 }
 
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager) *ClientConnection {
-	pkt := pnet.NewPacketIO(conn)
+	pkt := pnet.NewPacketIOWrapErr(conn, ErrClientConn)
 	return &ClientConnection{
 		logger:            logger,
 		frontendTLSConfig: frontendTLSConfig,
@@ -77,7 +81,9 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 		return
 	}
 
-	if err := cc.processMsg(ctx); err != nil && !errors.Is(err, io.EOF) {
+	if err := cc.processMsg(ctx); err != nil &&
+		// ignore EOF from client
+		!(errors.Is(err, ErrClientConn) && errors.Is(err, io.EOF)) {
 		cc.logger.Info("process message fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
 	}
 }
