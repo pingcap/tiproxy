@@ -76,11 +76,12 @@ func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.L
 	wkey := []byte(path.Join(e.basePath, ns, key))
 	logger := e.logger.With(zap.String("component", string(wkey)))
 	retryInterval := 5 * time.Second
+	rev := e.kv.Rev()
 	e.wg.Run(func() {
 		wch := e.kv.NewWatchStream()
 		defer wch.Close()
 		for {
-			if _, err := wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), wch.Rev()); err == nil {
+			if _, err := wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), rev); err == nil {
 				break
 			}
 			if k := retryInterval * 2; k < e.watchInterval {
