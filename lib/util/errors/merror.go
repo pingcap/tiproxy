@@ -65,6 +65,9 @@ func (e *MError) Is(s error) bool {
 	is := errors.Is(e.cerr, s)
 	for _, e := range e.uerr {
 		is  = is || errors.Is(e, s)
+		if is {
+			break
+		}
 	}
 	return is
 }
