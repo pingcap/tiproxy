@@ -71,10 +71,9 @@ func (c *tidbEncoder) endQuoteFiled() {
 	c.line.AppendByte(']')
 }
 func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	// save fields attached to the encoder
-	oldFields := e.line.String()
-
-	// clone here to ensure concurrent safe
+	// clone here to ensure concurrent safety, note that:
+	// 1. the buffer will be used/freed by caller
+	// 2. we want to start with time format.. etc, so we don't copy old fields
 	c := e.clone(false)
 	if c.TimeKey != "" {
 		c.beginQuoteFiled()
@@ -122,7 +121,7 @@ func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 	}
 
 	// append old fields
-	c.line.AppendString(oldFields)
+	c.line.AppendString(e.line.String())
 
 	for _, f := range fields {
 		f.AddTo(c)

@@ -31,7 +31,7 @@ func TestEncoder(t *testing.T) {
 
 	// test quotes
 	for _, ch := range []rune{'\\', '"', '[', ']', '='} {
-		enc = enc.clone()
+		enc = enc.clone(false)
 		enc.AddString("ff", fmt.Sprintf("ff%c", ch))
 		escape := ""
 		if ch == '"' {
@@ -41,12 +41,12 @@ func TestEncoder(t *testing.T) {
 	}
 
 	// test append bytes
-	enc = enc.clone()
+	enc = enc.clone(false)
 	enc.AddByteString("ff", []byte{0x33, 0x22})
 	require.Equal(t, "[ff=0x3322]", enc.line.String())
 
 	// test append reflected
-	enc = enc.clone()
-	enc.AddReflected("ff", struct{A string}{"\""})
+	enc = enc.clone(false)
+	enc.AddReflected("ff", struct{ A string }{"\""})
 	require.Equal(t, "[ff=\"{\\\"A\\\":\\\"\\\\\"\\\"}\"]", enc.line.String())
 }
