@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/server"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -57,19 +56,7 @@ func main() {
 			cfg.Log.Level = *logLevel
 		}
 
-		zapcfg := zap.NewDevelopmentConfig()
-		zapcfg.Encoding = cfg.Log.Encoder
-		zapcfg.DisableStacktrace = true
-		if level, err := zap.ParseAtomicLevel(cfg.Log.Level); err == nil {
-			zapcfg.Level = level
-		}
-		logger, err := zapcfg.Build()
-		if err != nil {
-			return err
-		}
-		logger = logger.Named("main")
-
-		srv, err := server.NewServer(cmd.Context(), cfg, logger, *pubAddr)
+		srv, err := server.NewServer(cmd.Context(), cfg, *pubAddr)
 		if err != nil {
 			return errors.Wrapf(err, "fail to create server")
 		}
@@ -80,8 +67,6 @@ func main() {
 		<-cmd.Context().Done()
 		if e := srv.Close(); e != nil {
 			err = errors.Wrapf(err, "shutdown with errors")
-		} else {
-			logger.Info("gracefully shutdown")
 		}
 
 		wg.Wait()

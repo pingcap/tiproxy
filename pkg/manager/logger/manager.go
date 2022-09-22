@@ -48,6 +48,7 @@ func NewLoggerManager(cfg *config.Log) (*LoggerManager, error) {
 	if lm.level, err = buildLevel(cfg); err != nil {
 		return nil, err
 	}
+	lm.logger = lm.BuildLogger().Named("lgmgr")
 	return lm, nil
 }
 
@@ -59,8 +60,7 @@ func (lm *LoggerManager) BuildLogger() *zap.Logger {
 }
 
 // Init starts a goroutine to watch configuration.
-func (lm *LoggerManager) Init(logger *zap.Logger, cfgCh chan *config.Log) {
-	lm.logger = logger
+func (lm *LoggerManager) Init(cfgCh <-chan *config.LogOnline) {
 	ctx, cancel := context.WithCancel(context.Background())
 	lm.wg.Run(func() {
 		lm.watchCfg(ctx, cfgCh)
@@ -68,7 +68,7 @@ func (lm *LoggerManager) Init(logger *zap.Logger, cfgCh chan *config.Log) {
 	lm.cancel = cancel
 }
 
-func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh chan *config.Log) {
+func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh <-chan *config.LogOnline) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,7 +87,7 @@ func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh chan *config.Log) {
 	}
 }
 
-func (lm *LoggerManager) updateLoggerCfg(cfg *config.Log) error {
+func (lm *LoggerManager) updateLoggerCfg(cfg *config.LogOnline) error {
 	// encoder cannot be configured dynamically, because Core.With always clones the encoder.
 	if err := lm.syncer.Rebuild(cfg); err != nil {
 		return err
