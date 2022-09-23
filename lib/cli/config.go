@@ -27,9 +27,9 @@ const (
 	configPrefix = "/api/admin/config"
 )
 
-func getConfigCmd(ctx *Context, use, pathSuffix string) *cobra.Command {
+func getConfigCmd(ctx *Context, pathSuffix string) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use: use,
+		Use: pathSuffix,
 	}
 	path := fmt.Sprintf("%s/%s", configPrefix, pathSuffix)
 
@@ -87,7 +87,7 @@ func GetConfigCmd(ctx *Context) *cobra.Command {
 		Use:   "config",
 		Short: "",
 	}
-	rootCmd.AddCommand(getConfigCmd(ctx, "proxy", "proxy"))
-	rootCmd.AddCommand(getConfigCmd(ctx, "log", "log"))
+	rootCmd.AddCommand(getConfigCmd(ctx, "proxy"))
+	rootCmd.AddCommand(getConfigCmd(ctx, "log"))
 	return rootCmd
 }

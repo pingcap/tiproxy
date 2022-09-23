@@ -88,17 +88,17 @@ func (e *ConfigManager) initMetas() {
 func (e *ConfigManager) watchCfgProxy(ctx context.Context, cfg *config.Config) error {
 	for _, m := range e.metas {
 		if err := func(m imeta) error {
-			_, err := e.get(ctx, m.getPrefix(), "config")
+			_, err := e.get(ctx, m.getPrefix(), "")
 			if err != nil && errors.Is(err, ErrNoOrMultiResults) {
 				value, err := json.Marshal(m.getInitial(cfg))
 				if err != nil {
 					return err
 				}
-				if err = e.set(ctx, m.getPrefix(), "config", string(value)); err != nil {
+				if err = e.set(ctx, m.getPrefix(), "", string(value)); err != nil {
 					return err
 				}
 			}
-			e.watch(ctx, m.getPrefix(), "config", func(logger *zap.Logger, evt mvccpb.Event) {
+			e.watch(ctx, m.getPrefix(), "", func(logger *zap.Logger, evt mvccpb.Event) {
 				if obj, err := m.unmarshal(evt.Kv.Value); err != nil {
 					logger.Warn("failed unmarshal proxy config", zap.Error(err))
 					return
@@ -116,7 +116,7 @@ func (e *ConfigManager) watchCfgProxy(ctx context.Context, cfg *config.Config) e
 
 func (e *ConfigManager) getCfg(ctx context.Context, tp CfgType) (any, error) {
 	m := e.metas[tp]
-	val, err := e.get(ctx, m.getPrefix(), "config")
+	val, err := e.get(ctx, m.getPrefix(), "")
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (e *ConfigManager) setCfg(ctx context.Context, tp CfgType, obj any) error {
 	if err != nil {
 		return err
 	}
-	return e.set(ctx, m.getPrefix(), "config", string(value))
+	return e.set(ctx, m.getPrefix(), "", string(value))
 }
 
 // GetConfig queries the configuration from the config center.

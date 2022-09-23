@@ -128,9 +128,8 @@ func TestUpdateCfg(t *testing.T) {
 }
 
 func setupLogManager(t *testing.T, cfg *config.Log) (*zap.Logger, chan *config.LogOnline) {
-	lm, err := NewLoggerManager(cfg)
+	lm, lg, err := NewLoggerManager(cfg)
 	require.NoError(t, err)
-	lg := lm.BuildLogger()
 	ch := make(chan *config.LogOnline)
 	lm.Init(ch)
 

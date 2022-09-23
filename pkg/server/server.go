@@ -65,10 +65,10 @@ func NewServer(ctx context.Context, cfg *config.Config, pubAddr string) (srv *Se
 	}
 
 	// set up logger
-	if srv.LoggerManager, err = logger.NewLoggerManager(&cfg.Log); err != nil {
+	var lg *zap.Logger
+	if srv.LoggerManager, lg, err = logger.NewLoggerManager(&cfg.Log); err != nil {
 		return
 	}
-	lg := srv.LoggerManager.BuildLogger().Named("main")
 
 	{
 		tlogger := lg.Named("tls")
