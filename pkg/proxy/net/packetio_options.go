@@ -21,3 +21,7 @@ type PacketIOption = func(*PacketIO)
 func WithProxy(pi *PacketIO) {
 	pi.proxyInited = atomic.NewBool(true)
 }
+
+func WithClient(pi *PacketIO) {
+	pi.wrap = ErrClientConn
+}

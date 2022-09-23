@@ -50,6 +50,7 @@ import (
 
 var (
 	errInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
+	ErrClientConn      = errors.New("this is an error from client")
 
 	proxyV2Magic = []byte{0xD, 0xA, 0xD, 0xA, 0x0, 0xD, 0xA, 0x51, 0x55, 0x49, 0x54, 0xA}
 )
@@ -78,6 +79,7 @@ type PacketIO struct {
 	buf         *bufio.ReadWriter
 	proxyInited *atomic.Bool
 	proxy       *Proxy
+	wrap        error
 	sequence    uint8
 }
 
@@ -100,6 +102,13 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 		opt(p)
 	}
 	return p
+}
+
+func (p *PacketIO) wrapErr(err error) error {
+	if p.wrap != nil {
+		return errors.Wrap(p.wrap, err)
+	}
+	return err
 }
 
 // Proxy returned parsed proxy header from clients if any.
@@ -177,6 +186,7 @@ func (p *PacketIO) ReadPacket() (data []byte, err error) {
 		var buf []byte
 		buf, more, err = p.readOnePacket()
 		if err != nil {
+			err = p.wrapErr(err)
 			return
 		}
 		data = append(data, buf...)
@@ -218,6 +228,7 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 		var n int
 		n, more, err = p.writeOnePacket(data)
 		if err != nil {
+			err = p.wrapErr(err)
 			return
 		}
 		data = data[n:]
@@ -230,13 +241,16 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 
 func (p *PacketIO) Flush() error {
 	if err := p.buf.Flush(); err != nil {
-		return errors.Wrap(ErrFlushConn, err)
+		return p.wrapErr(errors.Wrap(ErrFlushConn, err))
 	}
 	return nil
 }
 
 func (p *PacketIO) Close() error {
 	var errs []error
+	if p.wrap != nil {
+		errs = append(errs, p.wrap)
+	}
 	/*
 		TODO: flush when we want to smoothly exit
 		if err := p.Flush(); err != nil {

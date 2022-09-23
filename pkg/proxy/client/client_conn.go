@@ -28,6 +28,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrClientConn = errors.New("this is an error from client")
+)
+
 type ClientConnection struct {
 	logger            *zap.Logger
 	frontendTLSConfig *tls.Config    // the TLS config to connect to clients.
@@ -38,11 +42,10 @@ type ClientConnection struct {
 	connMgr           *backend.BackendConnManager
 	proxyProtocol     bool
 }
-
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager, proxyProtocol bool) *ClientConnection {
 	opts := make([]pnet.PacketIOption, 0, 1)
 	if proxyProtocol {
-		opts = append(opts, pnet.WithProxy)
+		opts = append(opts, pnet.WithProxy, pnet.WithClient)
 	}
 	pkt := pnet.NewPacketIO(conn)
 	return &ClientConnection{
@@ -79,8 +82,11 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 		return
 	}
 
-	if err := cc.processMsg(ctx); err != nil && !errors.Is(err, io.EOF) {
-		cc.logger.Info("process message fails", zap.Error(err))
+	if err := cc.processMsg(ctx); err != nil {
+		clientErr := errors.Is(err, ErrClientConn)
+		if !(clientErr && errors.Is(err, io.EOF)) {
+			cc.logger.Info("process message fails", zap.Error(err), zap.Bool("clientErr", clientErr), zap.Bool("serverErr", !clientErr))
+		}
 	}
 }
 
