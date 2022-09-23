@@ -64,7 +64,7 @@ func (e *MError) Error() string {
 func (e *MError) Is(s error) bool {
 	is := errors.Is(e.cerr, s)
 	for _, e := range e.uerr {
-		is  = is || errors.Is(e, s)
+		is = is || errors.Is(e, s)
 		if is {
 			break
 		}
@@ -78,6 +78,14 @@ func (e *MError) Cause() []error {
 
 // Collect is used to collect multiple errors. `Unwrap` is noop and `Is(err, ErrMine) == true`. While `As(err, underlyingError)` do not work, you can still get underlying errors by `MError.Cause`.
 func Collect(cerr error, uerr ...error) error {
+	n := 0
+	for _, e := range uerr {
+		if e != nil {
+			uerr[n] = e
+			n++
+		}
+	}
+	uerr = uerr[:n]
 	if len(uerr) == 0 {
 		return nil
 	}

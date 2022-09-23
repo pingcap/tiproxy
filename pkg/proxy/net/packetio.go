@@ -246,7 +246,7 @@ func (p *PacketIO) Flush() error {
 }
 
 func (p *PacketIO) Close() error {
-	var errs []error
+	errs := make([]error, 0, 1)
 	/*
 		TODO: flush when we want to smoothly exit
 		if err := p.Flush(); err != nil {
@@ -254,9 +254,7 @@ func (p *PacketIO) Close() error {
 		}
 	*/
 	if p.conn != nil {
-		if err := p.conn.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, p.conn.Close())
 	}
-	return errors.Collect(ErrCloseConn, errs...)
+	return errors.Collect(ErrCloseConn, p.conn.Close())
 }
