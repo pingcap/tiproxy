@@ -91,7 +91,7 @@ func NewBackendConnManager(logger *zap.Logger, connectionID uint64) *BackendConn
 		salt:           GenerateSalt(20),
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
-		authenticator:  &Authenticator{},
+		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities},
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}

@@ -25,19 +25,19 @@ import (
 
 type backendConfig struct {
 	// for auth
-	tlsConfig  *tls.Config
-	authPlugin string
-	salt         []byte
-	columns      int
-	loops        int
-	params       int
-	rows         int
-	respondType  respondType // for cmd
-	stmtNum      int
-	capability   uint32
-	status       uint16
-	authSucceed  bool
-	switchAuth   bool
+	tlsConfig   *tls.Config
+	authPlugin  string
+	salt        []byte
+	columns     int
+	loops       int
+	params      int
+	rows        int
+	respondType respondType // for cmd
+	stmtNum     int
+	capability  uint32
+	status      uint16
+	authSucceed bool
+	switchAuth  bool
 	// for both auth and cmd
 	abnormalExit bool
 }

@@ -27,6 +27,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrUnsupportedCapability = errors.New("unsupported capability")
+)
+
 // Other server capabilities are not supported.
 const supportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientLongFlag |
 	pnet.ClientConnectWithDB | pnet.ClientLocalFiles | pnet.ClientProtocol41 | pnet.ClientInteractive | pnet.ClientSSL |
@@ -35,13 +39,14 @@ const supportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRo
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
-	backendTLSConfig *tls.Config
-	dbname           string // default database name
-	serverAddr       string
-	user             string
-	attrs            []byte // no need to parse
-	capability       uint32 // client capability
-	collation        uint8
+	backendTLSConfig            *tls.Config
+	supportedServerCapabilities pnet.Capability
+	dbname                      string // default database name
+	serverAddr                  string
+	user                        string
+	attrs                       []byte // no need to parse
+	capability                  uint32 // client capability
+	collation                   uint8
 }
 
 func (auth *Authenticator) String() string {
@@ -53,7 +58,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	clientIO.ResetSequence()
 	backendIO.ResetSequence()
 
-	serverCapability := supportedServerCapabilities
+	serverCapability := auth.supportedServerCapabilities
 	if frontendTLSConfig == nil {
 		serverCapability ^= pnet.ClientSSL
 	}
@@ -64,6 +69,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	clientCapability := pnet.Capability(binary.LittleEndian.Uint32(pkt))
 	if isSSL {
 		if serverCapability&pnet.ClientSSL == 0 {
 			return clientIO.WriteErrPacket(mysql.NewErr(mysql.ErrAbortingConnection, "should not go here", nil))
@@ -79,8 +85,18 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 			return errors.WithStack(errors.New("expect handshake resp"))
 		}
 	} else {
-		binary.LittleEndian.PutUint32(pkt, binary.LittleEndian.Uint32(pkt)|pnet.ClientSSL.Uint32())
+		binary.LittleEndian.PutUint32(pkt, (clientCapability | pnet.ClientSSL).Uint32())
 	}
+	if cc := clientCapability & serverCapability; clientCapability^cc != 0 {
+		logger.Info("unsupported capability from the frontend", zap.Stringer("common", cc), zap.Stringer("frontend", clientCapability^cc), zap.Stringer("proxy", serverCapability^cc))
+		return errors.Wrapf(ErrUnsupportedCapability, "%s", clientCapability^cc)
+	}
+	resp := pnet.ParseHandshakeResponse(pkt)
+	auth.capability = (clientCapability & serverCapability).Uint32()
+	auth.user = resp.User
+	auth.dbname = resp.DB
+	auth.collation = resp.Collation
+	auth.attrs = resp.Attrs
 
 	// write proxy header
 	if proxyProtocol {
@@ -205,18 +221,18 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 	capability := auth.capability | mysql.ClientSSL
 	// Always enable auth_plugin.
 	capability |= mysql.ClientPluginAuth
-	data, headerPos := pnet.MakeHandshakeResponse(auth.user, auth.dbname, mysql.AuthTiDBSessionToken,
+	data := pnet.MakeHandshakeResponse(auth.user, auth.dbname, mysql.AuthTiDBSessionToken,
 		auth.collation, authData, auth.attrs, capability)
 
-	// write header
-	if err := backendIO.WritePacket(data[:headerPos], true); err != nil {
+	// write SSL req
+	if err := backendIO.WritePacket(data[:32], true); err != nil {
 		return err
 	}
 	// Send TLS / SSL request packet. The server must have supported TLS.
 	if err := backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
 		return err
 	}
-	// write body
+	// write handshake resp
 	return backendIO.WritePacket(data, true)
 }
 

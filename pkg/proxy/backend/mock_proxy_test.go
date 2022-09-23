@@ -59,6 +59,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), 0),
 	}
 	mp.cmdProcessor.capability = cfg.capability
+	mp.authenticator.supportedServerCapabilities = pnet.Capability(defaultTestBackendCapability)
 	return mp
 }
 

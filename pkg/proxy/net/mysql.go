@@ -143,7 +143,7 @@ func ParseHandshakeResponse(data []byte) *HandshakeResp {
 	return resp
 }
 
-func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, authData, attrs []byte, capability uint32) (data []byte, headerPos int) {
+func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, authData, attrs []byte, capability uint32) []byte {
 	// encode length of the auth data
 	var (
 		authRespBuf, attrRespBuf [9]byte
@@ -160,7 +160,7 @@ func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, aut
 	}
 
 	length := 4 + 4 + 1 + 23 + len(username) + 1 + len(authResp) + len(authData) + len(db) + 1 + len(authPlugin) + 1 + len(attrResp) + len(attrs)
-	data = make([]byte, length)
+	data := make([]byte, length)
 	pos := 0
 	// capability [32 bit]
 	DumpUint32(data[:0], capability)
@@ -172,7 +172,6 @@ func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, aut
 	pos++
 	// Filler [23 bytes] (all 0x00)
 	pos += 23
-	headerPos = pos
 
 	// User [null terminated string]
 	pos += copy(data[pos:], username)
@@ -212,7 +211,7 @@ func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, aut
 		pos += copy(data[pos:], attrResp)
 		pos += copy(data[pos:], attrs)
 	}
-	return data[:pos], headerPos
+	return data[:pos]
 }
 
 // MakeChangeUser creates the data of COM_CHANGE_USER. It's only used for testing.
