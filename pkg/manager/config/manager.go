@@ -50,7 +50,7 @@ type ConfigManager struct {
 	basePath             string
 	watchInterval        time.Duration
 	ignoreWrongNamespace bool
-	metas                map[cfgType]imeta
+	metas                map[CfgType]imeta
 }
 
 func NewConfigManager() *ConfigManager {

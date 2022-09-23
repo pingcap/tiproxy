@@ -83,7 +83,7 @@ func TestLogConfig(t *testing.T) {
 	})
 }
 
-func testWatch[T onlineCfgTypes](t *testing.T, cases []*T, getWatch func(*ConfigManager) <-chan *T,
+func testWatch[T OnlineCfgTypes](t *testing.T, cases []*T, getWatch func(*ConfigManager) <-chan *T,
 	setConfig func(context.Context, *ConfigManager, *T) error) {
 	cfgmgr, ctx := testConfigManager(t, &config.Config{})
 	ch := getWatch(cfgmgr)

@@ -24,14 +24,14 @@ import (
 	"go.uber.org/zap"
 )
 
-type cfgType int
+type CfgType int
 
 const (
-	cfgServer cfgType = iota
-	cfgLog
+	CfgServer CfgType = iota
+	CfgLog
 )
 
-type onlineCfgTypes interface {
+type OnlineCfgTypes interface {
 	config.ProxyServerOnline | config.LogOnline
 }
 
@@ -42,13 +42,13 @@ type imeta interface {
 	getInitial(cfg *config.Config) any
 }
 
-type meta[T onlineCfgTypes] struct {
+type meta[T OnlineCfgTypes] struct {
 	prefix   string
 	initFunc func(cfg *config.Config) T
 	ch       chan *T
 }
 
-func newMeta[T onlineCfgTypes](prefix string, initFunc func(cfg *config.Config) T) *meta[T] {
+func newMeta[T OnlineCfgTypes](prefix string, initFunc func(cfg *config.Config) T) *meta[T] {
 	return &meta[T]{
 		prefix:   prefix,
 		initFunc: initFunc,
@@ -75,11 +75,11 @@ func (m meta[T]) getInitial(cfg *config.Config) any {
 }
 
 func (e *ConfigManager) initMetas() {
-	e.metas = map[cfgType]imeta{
-		cfgServer: newMeta(pathPrefixProxyServer, func(cfg *config.Config) config.ProxyServerOnline {
+	e.metas = map[CfgType]imeta{
+		CfgServer: newMeta(pathPrefixProxyServer, func(cfg *config.Config) config.ProxyServerOnline {
 			return cfg.Proxy.ProxyServerOnline
 		}),
-		cfgLog: newMeta(pathPrefixLog, func(cfg *config.Config) config.LogOnline {
+		CfgLog: newMeta(pathPrefixLog, func(cfg *config.Config) config.LogOnline {
 			return cfg.Log.LogOnline
 		}),
 	}
@@ -114,7 +114,7 @@ func (e *ConfigManager) watchCfgProxy(ctx context.Context, cfg *config.Config) e
 	return nil
 }
 
-func (e *ConfigManager) getCfg(ctx context.Context, tp cfgType) (any, error) {
+func (e *ConfigManager) getCfg(ctx context.Context, tp CfgType) (any, error) {
 	m := e.metas[tp]
 	val, err := e.get(ctx, m.getPrefix(), "config")
 	if err != nil {
@@ -123,7 +123,7 @@ func (e *ConfigManager) getCfg(ctx context.Context, tp cfgType) (any, error) {
 	return m.unmarshal(val.Value)
 }
 
-func (e *ConfigManager) setCfg(ctx context.Context, tp cfgType, obj any) error {
+func (e *ConfigManager) setCfg(ctx context.Context, tp CfgType, obj any) error {
 	m := e.metas[tp]
 	value, err := json.Marshal(obj)
 	if err != nil {
@@ -132,7 +132,8 @@ func (e *ConfigManager) setCfg(ctx context.Context, tp cfgType, obj any) error {
 	return e.set(ctx, m.getPrefix(), "config", string(value))
 }
 
-func getConfig[T onlineCfgTypes](ctx context.Context, e *ConfigManager, tp cfgType) (*T, error) {
+// GetConfig queries the configuration from the config center.
+func GetConfig[T OnlineCfgTypes](ctx context.Context, e *ConfigManager, tp CfgType) (*T, error) {
 	obj, err := e.getCfg(ctx, tp)
 	if err != nil {
 		return nil, err
@@ -140,31 +141,37 @@ func getConfig[T onlineCfgTypes](ctx context.Context, e *ConfigManager, tp cfgTy
 	return obj.(*T), nil
 }
 
-func subscribe[T onlineCfgTypes](e *ConfigManager, tp cfgType) chan *T {
+// SetConfig sets a configuration to the config center.
+func SetConfig[T OnlineCfgTypes](ctx context.Context, e *ConfigManager, tp CfgType, c *T) error {
+	return e.setCfg(ctx, tp, c)
+}
+
+// GetCfgWatch returns the channel that contains updated configuration.
+func GetCfgWatch[T OnlineCfgTypes](e *ConfigManager, tp CfgType) chan *T {
 	mt := e.metas[tp].(*meta[T])
 	return mt.ch
 }
 
 func (e *ConfigManager) GetProxyConfigWatch() <-chan *config.ProxyServerOnline {
-	return subscribe[config.ProxyServerOnline](e, cfgServer)
+	return GetCfgWatch[config.ProxyServerOnline](e, CfgServer)
 }
 
 func (e *ConfigManager) GetProxyConfig(ctx context.Context) (*config.ProxyServerOnline, error) {
-	return getConfig[config.ProxyServerOnline](ctx, e, cfgServer)
+	return GetConfig[config.ProxyServerOnline](ctx, e, CfgServer)
 }
 
 func (e *ConfigManager) SetProxyConfig(ctx context.Context, proxy *config.ProxyServerOnline) error {
-	return e.setCfg(ctx, cfgServer, proxy)
+	return e.setCfg(ctx, CfgServer, proxy)
 }
 
 func (e *ConfigManager) GetLogConfigWatch() <-chan *config.LogOnline {
-	return subscribe[config.LogOnline](e, cfgLog)
+	return GetCfgWatch[config.LogOnline](e, CfgLog)
 }
 
 func (e *ConfigManager) GetLogConfig(ctx context.Context) (*config.LogOnline, error) {
-	return getConfig[config.LogOnline](ctx, e, cfgLog)
+	return GetConfig[config.LogOnline](ctx, e, CfgLog)
 }
 
 func (e *ConfigManager) SetLogConfig(ctx context.Context, log *config.LogOnline) error {
-	return e.setCfg(ctx, cfgLog, log)
+	return e.setCfg(ctx, CfgLog, log)
 }
