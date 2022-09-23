@@ -28,14 +28,16 @@ import (
 )
 
 var (
-	ErrUnsupportedCapability = errors.New("unsupported capability")
+	ErrCapabilityNegotiation = errors.New("capability negotiation failed")
 )
 
 // Other server capabilities are not supported.
 const supportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientLongFlag |
-	pnet.ClientConnectWithDB | pnet.ClientLocalFiles | pnet.ClientProtocol41 | pnet.ClientInteractive | pnet.ClientSSL |
-	pnet.ClientTransactions | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
-	pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientDeprecateEOF
+	pnet.ClientConnectWithDB | pnet.ClientNoSchema | pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientIgnoreSpace |
+	pnet.ClientProtocol41 | pnet.ClientInteractive | pnet.ClientSSL | pnet.ClientIgnoreSigpipe |
+	pnet.ClientTransactions | pnet.ClientReserved | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
+	pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientPluginAuthLenencClientData |
+	pnet.ClientDeprecateEOF
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
@@ -58,20 +60,20 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	clientIO.ResetSequence()
 	backendIO.ResetSequence()
 
-	serverCapability := auth.supportedServerCapabilities
+	proxyCapability := auth.supportedServerCapabilities
 	if frontendTLSConfig == nil {
-		serverCapability ^= pnet.ClientSSL
+		proxyCapability ^= pnet.ClientSSL
 	}
-	if err := clientIO.WriteInitialHandshake(serverCapability.Uint32(), salt, mysql.AuthCachingSha2Password); err != nil {
+	if err := clientIO.WriteInitialHandshake(proxyCapability.Uint32(), salt, mysql.AuthCachingSha2Password); err != nil {
 		return errors.WithStack(err)
 	}
 	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	clientCapability := pnet.Capability(binary.LittleEndian.Uint32(pkt))
+	frontendCapability := pnet.Capability(binary.LittleEndian.Uint32(pkt))
 	if isSSL {
-		if serverCapability&pnet.ClientSSL == 0 {
+		if proxyCapability&pnet.ClientSSL == 0 {
 			return clientIO.WriteErrPacket(mysql.NewErr(mysql.ErrAbortingConnection, "should not go here", nil))
 		}
 		if _, err = clientIO.UpgradeToServerTLS(frontendTLSConfig); err != nil {
@@ -85,14 +87,15 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 			return errors.WithStack(errors.New("expect handshake resp"))
 		}
 	} else {
-		binary.LittleEndian.PutUint32(pkt, (clientCapability | pnet.ClientSSL).Uint32())
+		binary.LittleEndian.PutUint32(pkt, (frontendCapability | pnet.ClientSSL).Uint32())
 	}
-	if cc := clientCapability & serverCapability; clientCapability^cc != 0 {
-		logger.Info("unsupported capability from the frontend", zap.Stringer("common", cc), zap.Stringer("frontend", clientCapability^cc), zap.Stringer("proxy", serverCapability^cc))
-		return errors.Wrapf(ErrUnsupportedCapability, "%s", clientCapability^cc)
+	commonClientProxyCaps := frontendCapability & proxyCapability
+	if frontendCapability^commonClientProxyCaps != 0 {
+		logger.Error("frontend send capabilities unsupported by proxy", zap.Stringer("common", commonClientProxyCaps), zap.Stringer("frontend", frontendCapability^commonClientProxyCaps), zap.Stringer("proxy", proxyCapability^commonClientProxyCaps))
+		return errors.Wrapf(ErrCapabilityNegotiation, "%s", frontendCapability^commonClientProxyCaps)
 	}
 	resp := pnet.ParseHandshakeResponse(pkt)
-	auth.capability = (clientCapability & serverCapability).Uint32()
+	auth.capability = commonClientProxyCaps.Uint32()
 	auth.user = resp.User
 	auth.dbname = resp.DB
 	auth.collation = resp.Collation
@@ -120,9 +123,8 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 		return errors.WithStack(err)
 	}
 	backendCapability := pnet.Capability(backendCapabilityU)
-	if sc, bc := serverCapability&^pnet.ClientSSL, backendCapability&^pnet.ClientSSL; sc != bc {
-		cc := sc & bc
-		logger.Info("proxy capability is different from the backend", zap.Stringer("common", cc), zap.Stringer("server", serverCapability^cc), zap.Stringer("backend", backendCapability^cc))
+	if common := commonClientProxyCaps & backendCapability; (commonClientProxyCaps^common)&^pnet.ClientSSL != 0 {
+		logger.Info("backend does not support capabilities from client&proxy", zap.Stringer("common", common), zap.Stringer("server", commonClientProxyCaps^common), zap.Stringer("backend", backendCapability^common))
 	}
 	if backendCapability&pnet.ClientSSL == 0 {
 		// The error cannot be sent to the client because the client only expects an initial handshake packet.

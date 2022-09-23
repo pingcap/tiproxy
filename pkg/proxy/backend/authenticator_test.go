@@ -75,7 +75,7 @@ func TestUnsupportedCapability(t *testing.T) {
 				require.ErrorContains(t, ts.mp.err, "must enable TLS")
 			} else if (ts.mc.clientConfig.capability&mysql.ClientProtocol41 == 0) ||
 				(ts.mb.backendConfig.capability&ts.mc.capability&mysql.ClientPSMultiResults > 0) {
-				require.ErrorIs(t, ts.mp.err, ErrUnsupportedCapability)
+				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
 			} else {
 				require.NoError(t, ts.mc.err)
 				require.NoError(t, ts.mp.err)
