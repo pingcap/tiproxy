@@ -17,6 +17,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -25,6 +26,10 @@ import (
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"go.uber.org/zap"
+)
+
+var (
+	ErrClientConn = errors.New("this is an error from client")
 )
 
 type ClientConnection struct {
@@ -38,7 +43,7 @@ type ClientConnection struct {
 }
 
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager) *ClientConnection {
-	pkt := pnet.NewPacketIO(conn)
+	pkt := pnet.NewPacketIOWrapErr(conn, ErrClientConn)
 	return &ClientConnection{
 		logger:            logger,
 		frontendTLSConfig: frontendTLSConfig,
@@ -77,7 +82,10 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 	}
 
 	if err := cc.processMsg(ctx); err != nil {
-		cc.logger.Info("process message fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err))
+		clientErr := errors.Is(err, ErrClientConn)
+		if !(clientErr && errors.Is(err, io.EOF)) {
+			cc.logger.Info("process message fails", zap.String("remoteAddr", cc.Addr()), zap.Error(err), zap.Bool("clientErr", clientErr), zap.Bool("serverErr", !clientErr))
+		}
 	}
 }
 

@@ -78,10 +78,15 @@ type PacketIO struct {
 	buf         *bufio.ReadWriter
 	proxyInited *atomic.Bool
 	proxy       *Proxy
+	wrap        error
 	sequence    uint8
 }
 
 func NewPacketIO(conn net.Conn) *PacketIO {
+	return NewPacketIOWrapErr(conn, nil)
+}
+
+func NewPacketIOWrapErr(conn net.Conn, wrap error) *PacketIO {
 	buf := bufio.NewReadWriter(
 		bufio.NewReaderSize(conn, defaultReaderSize),
 		bufio.NewWriterSize(conn, defaultWriterSize),
@@ -91,12 +96,20 @@ func NewPacketIO(conn net.Conn) *PacketIO {
 			conn,
 			buf.Reader,
 		},
+		wrap:     wrap,
 		sequence: 0,
 		// TODO: disable it by default now
 		proxyInited: atomic.NewBool(true),
 		buf:         buf,
 	}
 	return p
+}
+
+func (p *PacketIO) wrapErr(err error) error {
+	if p.wrap != nil {
+		return errors.Wrap(p.wrap, err)
+	}
+	return err
 }
 
 // Proxy returned parsed proxy header from clients if any.
@@ -124,7 +137,7 @@ func (p *PacketIO) GetSequence() uint8 {
 	return p.sequence
 }
 
-func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
+func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	var header [4]byte
 
 	if _, err := io.ReadFull(p.conn, header[:]); err != nil {
@@ -172,9 +185,9 @@ func (p *PacketIO) ReadOnePacket() ([]byte, bool, error) {
 func (p *PacketIO) ReadPacket() ([]byte, error) {
 	var data []byte
 	for {
-		buf, more, err := p.ReadOnePacket()
+		buf, more, err := p.readOnePacket()
 		if err != nil {
-			return nil, err
+			return nil, p.wrapErr(err)
 		}
 
 		data = append(data, buf...)
@@ -186,7 +199,7 @@ func (p *PacketIO) ReadPacket() ([]byte, error) {
 	return data, nil
 }
 
-func (p *PacketIO) WriteOnePacket(data []byte) (int, bool, error) {
+func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 	more := false
 	length := len(data)
 	if length >= mysql.MaxPayloadLen {
@@ -216,17 +229,17 @@ func (p *PacketIO) WriteOnePacket(data []byte) (int, bool, error) {
 func (p *PacketIO) WritePacket(data []byte, flush bool) error {
 	// The original data might be empty.
 	for {
-		n, more, err := p.WriteOnePacket(data)
+		n, more, err := p.writeOnePacket(data)
 		if err != nil {
-			return err
+			return p.wrapErr(err)
 		}
 		data = data[n:]
 		// if the last packet ends with a length of MaxPayloadLen exactly
 		// we need another zero-length packet to end it
 		if len(data) == 0 {
 			if more {
-				if _, _, err := p.WriteOnePacket(nil); err != nil {
-					return err
+				if _, _, err := p.writeOnePacket(nil); err != nil {
+					return p.wrapErr(err)
 				}
 			}
 			break
@@ -240,13 +253,16 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) error {
 
 func (p *PacketIO) Flush() error {
 	if err := p.buf.Flush(); err != nil {
-		return errors.Wrap(ErrFlushConn, err)
+		return p.wrapErr(errors.Wrap(ErrFlushConn, err))
 	}
 	return nil
 }
 
 func (p *PacketIO) Close() error {
 	var errs []error
+	if p.wrap != nil {
+		errs = append(errs, p.wrap)
+	}
 	/*
 		TODO: flush when we want to smoothly exit
 		if err := p.Flush(); err != nil {
