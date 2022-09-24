@@ -205,26 +205,18 @@ func (s *Server) Run(ctx context.Context) {
 }
 
 func (s *Server) Close() error {
-	var errs []error
+	errs := make([]error, 0, 4)
 	if s.Proxy != nil {
-		if err := s.Proxy.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, s.Proxy.Close())
 	}
 	if s.NamespaceManager != nil {
-		if err := s.NamespaceManager.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, s.NamespaceManager.Close())
 	}
 	if s.ConfigManager != nil {
-		if err := s.ConfigManager.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, s.ConfigManager.Close())
 	}
 	if s.ObserverClient != nil {
-		if err := s.ObserverClient.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, s.ObserverClient.Close())
 	}
 	if s.Etcd != nil {
 		var wg waitgroup.WaitGroup

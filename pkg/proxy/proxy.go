@@ -158,11 +158,9 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 
 // Close closes the server.
 func (s *SQLServer) Close() error {
-	var errs []error
+	errs := make([]error, 0, 4)
 	if s.listener != nil {
-		if err := s.listener.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, s.listener.Close())
 	}
 
 	s.mu.Lock()

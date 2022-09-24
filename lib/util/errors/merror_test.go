@@ -32,4 +32,8 @@ func TestCollect(t *testing.T) {
 	require.ErrorIsf(t, e, e1, "but errors.Is works for all errors")
 	require.Equal(t, e.(*serr.MError).Cause(), []error{e2, e3}, "get underlying errors")
 	require.NoError(t, serr.Collect(e3), "nil if there is no underlying error")
+
+	e4 := serr.Collect(e1, e2, nil).(*serr.MError)
+	require.Len(t, e4.Cause(), 1, "collect non-nil erros only")
+	require.NoError(t, serr.Collect(e3, nil, nil), "nil if all errors are nil")
 }

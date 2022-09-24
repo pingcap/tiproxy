@@ -109,12 +109,5 @@ func (cc *ClientConnection) processMsg(ctx context.Context) error {
 }
 
 func (cc *ClientConnection) Close() error {
-	var errs []error
-	if err := cc.pkt.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	if err := cc.connMgr.Close(); err != nil {
-		errs = append(errs, err)
-	}
-	return errors.Collect(ErrCloseConn, errs...)
+	return errors.Collect(ErrCloseConn, cc.pkt.Close(), cc.connMgr.Close())
 }
