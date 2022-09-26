@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
+	"github.com/pingcap/TiProxy/pkg/manager/logger"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	"github.com/pingcap/TiProxy/pkg/metrics"
@@ -46,6 +47,7 @@ type Server struct {
 	ConfigManager    *mgrcfg.ConfigManager
 	NamespaceManager *mgrns.NamespaceManager
 	MetricsManager   *metrics.MetricsManager
+	LoggerManager    *logger.LoggerManager
 	ObserverClient   *clientv3.Client
 	// HTTP client
 	Http *http.Client
@@ -55,9 +57,21 @@ type Server struct {
 	Proxy *proxy.SQLServer
 }
 
-func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubAddr string) (srv *Server, err error) {
+func NewServer(ctx context.Context, cfg *config.Config, pubAddr string) (srv *Server, err error) {
+	srv = &Server{
+		ConfigManager:    mgrcfg.NewConfigManager(),
+		MetricsManager:   metrics.NewMetricsManager(),
+		NamespaceManager: mgrns.NewNamespaceManager(),
+	}
+
+	// set up logger
+	var lg *zap.Logger
+	if srv.LoggerManager, lg, err = logger.NewLoggerManager(&cfg.Log); err != nil {
+		return
+	}
+
 	{
-		tlogger := logger.Named("tls")
+		tlogger := lg.Named("tls")
 		// auto generate CA for serverTLS will break
 		if uerr := security.AutoTLS(tlogger, &cfg.Security.ServerTLS, false, cfg.Workdir, "server", cfg.Security.RSAKeySize); uerr != nil {
 			err = errors.WithStack(uerr)
@@ -69,25 +83,18 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		}
 	}
 
-	srv = &Server{
-		ConfigManager:    mgrcfg.NewConfigManager(),
-		MetricsManager:   metrics.NewMetricsManager(),
-		NamespaceManager: mgrns.NewNamespaceManager(),
-	}
-
 	ready := atomic.NewBool(false)
 
 	// setup metrics
-	srv.MetricsManager.Init(ctx, logger.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
+	srv.MetricsManager.Init(ctx, lg.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
 
 	// setup gin and etcd
 	{
-
 		gin.SetMode(gin.ReleaseMode)
 		engine := gin.New()
 		engine.Use(
 			gin.Recovery(),
-			ginzap.Ginzap(logger.Named("gin"), "", true),
+			ginzap.Ginzap(lg.Named("gin"), "", true),
 			func(c *gin.Context) {
 				if !ready.Load() {
 					c.Abort()
@@ -106,9 +113,9 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 		// We have some alternative solution, for example:
 		// 1. globally lazily creation of managers. It introduced racing/chaos-management/hard-code-reading as in TiDB.
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
-		api.Register(engine.Group("/api"), cfg.API, logger.Named("api"), srv.NamespaceManager, srv.ConfigManager)
+		api.Register(engine.Group("/api"), cfg.API, lg.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		srv.Etcd, err = buildEtcd(cfg, logger.Named("etcd"), pubAddr, engine)
+		srv.Etcd, err = buildEtcd(cfg, lg.Named("etcd"), pubAddr, engine)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -125,7 +132,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// general cluster HTTP client
 	{
-		clientTLS, uerr := security.BuildClientTLSConfig(logger.Named("http"), cfg.Security.ClusterTLS)
+		clientTLS, uerr := security.BuildClientTLSConfig(lg.Named("http"), cfg.Security.ClusterTLS)
 		if uerr != nil {
 			err = errors.WithStack(err)
 			return
@@ -139,11 +146,12 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup config manager
 	{
-		err = srv.ConfigManager.Init(ctx, srv.Etcd.Server.KV(), cfg, logger.Named("config"))
+		err = srv.ConfigManager.Init(ctx, srv.Etcd.Server.KV(), cfg, lg.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
 		}
+		srv.LoggerManager.Init(srv.ConfigManager.GetLogConfigWatch())
 
 		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
 		if nerr != nil {
@@ -167,7 +175,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup namespace manager
 	{
-		srv.ObserverClient, err = router.InitEtcdClient(logger.Named("pd"), cfg)
+		srv.ObserverClient, err = router.InitEtcdClient(lg.Named("pd"), cfg)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -180,7 +188,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 			return
 		}
 
-		err = srv.NamespaceManager.Init(logger.Named("nsmgr"), nss, srv.ObserverClient, srv.Http)
+		err = srv.NamespaceManager.Init(lg.Named("nsmgr"), nss, srv.ObserverClient, srv.Http)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -189,7 +197,7 @@ func NewServer(ctx context.Context, cfg *config.Config, logger *zap.Logger, pubA
 
 	// setup proxy server
 	{
-		srv.Proxy, err = proxy.NewSQLServer(logger.Named("proxy"), cfg.Proxy, cfg.Security, srv.NamespaceManager)
+		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, cfg.Security, srv.NamespaceManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -234,6 +242,11 @@ func (s *Server) Close() error {
 	}
 	if s.MetricsManager != nil {
 		s.MetricsManager.Close()
+	}
+	if s.LoggerManager != nil {
+		if err := s.LoggerManager.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Collect(ErrCloseServer, errs...)
 }

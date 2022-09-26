@@ -36,31 +36,32 @@ type LoggerManager struct {
 }
 
 // NewLoggerManager creates a new LoggerManager.
-func NewLoggerManager(cfg *config.Log) (*LoggerManager, error) {
+func NewLoggerManager(cfg *config.Log) (*LoggerManager, *zap.Logger, error) {
 	lm := &LoggerManager{}
 	var err error
 	if lm.encoder, err = buildEncoder(cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if lm.syncer, err = buildSyncer(cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if lm.level, err = buildLevel(cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return lm, nil
+	mainLogger := lm.buildLogger().Named("main")
+	lm.logger = mainLogger.Named("lgmgr")
+	return lm, mainLogger, nil
 }
 
-// BuildLogger returns a new logger with the same syncer.
-func (lm *LoggerManager) BuildLogger() *zap.Logger {
+// buildLogger returns a new logger with the same syncer.
+func (lm *LoggerManager) buildLogger() *zap.Logger {
 	return zap.New(zapcore.NewCore(lm.encoder, lm.syncer, lm.level),
 		zap.ErrorOutput(lm.syncer),
 		zap.AddStacktrace(zapcore.FatalLevel))
 }
 
 // Init starts a goroutine to watch configuration.
-func (lm *LoggerManager) Init(logger *zap.Logger, cfgCh chan *config.Log) {
-	lm.logger = logger
+func (lm *LoggerManager) Init(cfgCh <-chan *config.LogOnline) {
 	ctx, cancel := context.WithCancel(context.Background())
 	lm.wg.Run(func() {
 		lm.watchCfg(ctx, cfgCh)
@@ -68,7 +69,7 @@ func (lm *LoggerManager) Init(logger *zap.Logger, cfgCh chan *config.Log) {
 	lm.cancel = cancel
 }
 
-func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh chan *config.Log) {
+func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh <-chan *config.LogOnline) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,7 +88,7 @@ func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh chan *config.Log) {
 	}
 }
 
-func (lm *LoggerManager) updateLoggerCfg(cfg *config.Log) error {
+func (lm *LoggerManager) updateLoggerCfg(cfg *config.LogOnline) error {
 	// encoder cannot be configured dynamically, because Core.With always clones the encoder.
 	if err := lm.syncer.Rebuild(cfg); err != nil {
 		return err

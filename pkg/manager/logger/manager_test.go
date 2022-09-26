@@ -34,23 +34,25 @@ func TestUpdateCfg(t *testing.T) {
 	dir := t.TempDir()
 	fileName := filepath.Join(dir, "proxy.log")
 	cfg := &config.Log{
-		Level:   "info",
 		Encoder: "tidb",
-		LogFile: config.LogFile{
-			Filename:   fileName,
-			MaxSize:    1,
-			MaxDays:    2,
-			MaxBackups: 1,
+		LogOnline: config.LogOnline{
+			Level: "info",
+			LogFile: config.LogFile{
+				Filename:   fileName,
+				MaxSize:    1,
+				MaxDays:    2,
+				MaxBackups: 1,
+			},
 		},
 	}
 
 	tests := []struct {
-		updateCfg func(cfg *config.Log)
+		updateCfg func(cfg *config.LogOnline)
 		action    func(log *zap.Logger)
 		check     func(files []os.FileInfo)
 	}{
 		{
-			updateCfg: func(cfg *config.Log) {
+			updateCfg: func(cfg *config.LogOnline) {
 				cfg.Level = "error"
 				cfg.LogFile.MaxBackups = 2
 			},
@@ -65,7 +67,7 @@ func TestUpdateCfg(t *testing.T) {
 			},
 		},
 		{
-			updateCfg: func(cfg *config.Log) {
+			updateCfg: func(cfg *config.LogOnline) {
 				cfg.LogFile.MaxSize = 3
 				cfg.LogFile.MaxBackups = 5
 			},
@@ -81,7 +83,7 @@ func TestUpdateCfg(t *testing.T) {
 			},
 		},
 		{
-			updateCfg: func(cfg *config.Log) {
+			updateCfg: func(cfg *config.LogOnline) {
 				cfg.LogFile.MaxBackups = 2
 			},
 			action: func(log *zap.Logger) {
@@ -95,7 +97,7 @@ func TestUpdateCfg(t *testing.T) {
 			},
 		},
 		{
-			updateCfg: func(cfg *config.Log) {
+			updateCfg: func(cfg *config.LogOnline) {
 				cfg.LogFile.Filename = ""
 			},
 			action: func(log *zap.Logger) {
@@ -114,7 +116,7 @@ func TestUpdateCfg(t *testing.T) {
 		err := os.RemoveAll(dir)
 		require.NoError(t, err)
 
-		clonedCfg := *cfg
+		clonedCfg := cfg.LogOnline
 		test.updateCfg(&clonedCfg)
 		// Push it 2 times to make sure the first one has already taken affect.
 		ch <- &clonedCfg
@@ -125,12 +127,11 @@ func TestUpdateCfg(t *testing.T) {
 	}
 }
 
-func setupLogManager(t *testing.T, cfg *config.Log) (*zap.Logger, chan *config.Log) {
-	lm, err := NewLoggerManager(cfg)
+func setupLogManager(t *testing.T, cfg *config.Log) (*zap.Logger, chan *config.LogOnline) {
+	lm, lg, err := NewLoggerManager(cfg)
 	require.NoError(t, err)
-	lg := lm.BuildLogger()
-	ch := make(chan *config.Log)
-	lm.Init(lg, ch)
+	ch := make(chan *config.LogOnline)
+	lm.Init(ch)
 
 	t.Cleanup(func() {
 		require.NoError(t, lm.Close())
@@ -161,13 +162,15 @@ func TestLogConcurrently(t *testing.T) {
 	dir := t.TempDir()
 	fileName := filepath.Join(dir, "proxy.log")
 	cfg := &config.Log{
-		Level:   "info",
 		Encoder: "tidb",
-		LogFile: config.LogFile{
-			Filename:   fileName,
-			MaxSize:    1,
-			MaxDays:    2,
-			MaxBackups: 3,
+		LogOnline: config.LogOnline{
+			Level: "info",
+			LogFile: config.LogFile{
+				Filename:   fileName,
+				MaxSize:    1,
+				MaxDays:    2,
+				MaxBackups: 3,
+			},
 		},
 	}
 
@@ -189,7 +192,7 @@ func TestLogConcurrently(t *testing.T) {
 		})
 	}
 	wg.Run(func() {
-		newCfg := *cfg
+		newCfg := cfg.LogOnline
 		for ctx.Err() == nil {
 			newCfg.LogFile.MaxDays = int(rand.Int31n(10))
 			ch <- &newCfg

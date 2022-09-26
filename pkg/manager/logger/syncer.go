@@ -62,7 +62,7 @@ type AtomicWriteSyncer struct {
 }
 
 // Rebuild creates a new output and replaces the current one.
-func (ws *AtomicWriteSyncer) Rebuild(cfg *config.Log) error {
+func (ws *AtomicWriteSyncer) Rebuild(cfg *config.LogOnline) error {
 	var output closableSyncer
 	if len(cfg.LogFile.Filename) > 0 {
 		fileLogger, err := initFileLog(&cfg.LogFile)

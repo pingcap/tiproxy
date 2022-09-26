@@ -28,35 +28,46 @@ type configHttpHandler struct {
 	cfgmgr *mgrcfg.ConfigManager
 }
 
-func (h *configHttpHandler) HandleSetProxyConfig(c *gin.Context) {
-	pco := &config.ProxyServerOnline{}
-	if c.ShouldBindJSON(pco) != nil {
-		c.JSON(http.StatusBadRequest, "bad proxy config json")
+func setConfig[T mgrcfg.OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
+	cfg := new(T)
+	if c.ShouldBindJSON(cfg) != nil {
+		c.JSON(http.StatusBadRequest, "bad config json")
 		return
 	}
 
-	if err := h.cfgmgr.SetProxyConfig(c, pco); err != nil {
-		h.logger.Error("can not update proxy config", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, "can not update proxy config")
+	if err := mgrcfg.SetConfig(c, h.cfgmgr, cfg); err != nil {
+		h.logger.Error("can not update config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, "can not update config")
 		return
 	}
 
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *configHttpHandler) HandleGetProxyConfig(c *gin.Context) {
-	pco, err := h.cfgmgr.GetProxyConfig(c)
+func getConfig[T mgrcfg.OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
+	var cfg T
+	err := mgrcfg.GetConfig(c, h.cfgmgr, &cfg)
 	if err != nil {
-		h.logger.Error("can not get proxy config", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, "can not get proxy config")
+		h.logger.Error("can not get config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, "can not get config")
 		return
 	}
 
-	c.JSON(http.StatusOK, pco)
+	c.JSON(http.StatusOK, &cfg)
 }
 
-func registerConfig(group *gin.RouterGroup, logger *zap.Logger, mgrcfg *mgrcfg.ConfigManager) {
-	h := &configHttpHandler{logger, mgrcfg}
-	group.PUT("/proxy", h.HandleSetProxyConfig)
-	group.GET("/proxy", h.HandleGetProxyConfig)
+func registerConfig(group *gin.RouterGroup, logger *zap.Logger, cfgmgr *mgrcfg.ConfigManager) {
+	h := &configHttpHandler{logger, cfgmgr}
+	group.PUT("/proxy", func(c *gin.Context) {
+		setConfig[config.ProxyServerOnline](h, c)
+	})
+	group.GET("/proxy", func(c *gin.Context) {
+		getConfig[config.ProxyServerOnline](h, c)
+	})
+	group.PUT("/log", func(c *gin.Context) {
+		setConfig[config.LogOnline](h, c)
+	})
+	group.GET("/log", func(c *gin.Context) {
+		getConfig[config.LogOnline](h, c)
+	})
 }

@@ -33,8 +33,9 @@ const (
 	DefaultEtcdDialTimeout = 3 * time.Second
 	DefaultEtcdPath        = "/config"
 
-	PathPrefixNamespace = "ns"
-	PathPrefixProxy     = "proxy"
+	pathPrefixNamespace   = "ns"
+	pathPrefixProxyServer = "proxy"
+	pathPrefixLog         = "log"
 )
 
 var (
@@ -46,16 +47,14 @@ type ConfigManager struct {
 	kv                   mvcc.WatchableKV
 	cancel               context.CancelFunc
 	logger               *zap.Logger
-	chProxy              chan *config.ProxyServerOnline
 	basePath             string
 	watchInterval        time.Duration
 	ignoreWrongNamespace bool
+	metas                map[mKeyType]imeta
 }
 
 func NewConfigManager() *ConfigManager {
-	return &ConfigManager{
-		chProxy: make(chan *config.ProxyServerOnline, 1),
-	}
+	return &ConfigManager{}
 }
 
 func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg *config.Config, logger *zap.Logger) error {
@@ -65,11 +64,12 @@ func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg *co
 	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
 
 	srv.kv = kv
+	srv.initMetas()
 
 	ctx, cancel := context.WithCancel(ctx)
 	srv.cancel = cancel
 
-	return srv.watchCfgProxy(ctx, cfg)
+	return srv.watchConfig(ctx, cfg)
 }
 
 func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, mvccpb.Event)) {

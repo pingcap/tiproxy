@@ -62,10 +62,14 @@ type Advance struct {
 	IgnoreWrongNamespace bool   `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
 }
 
-type Log struct {
+type LogOnline struct {
 	Level   string  `yaml:"level,omitempty" toml:"level,omitempty" json:"level,omitempty"`
-	Encoder string  `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty"`
 	LogFile LogFile `yaml:"log-file,omitempty" toml:"log-file,omitempty" json:"log-file,omitempty"`
+}
+
+type Log struct {
+	Encoder   string `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty"`
+	LogOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
 type LogFile struct {

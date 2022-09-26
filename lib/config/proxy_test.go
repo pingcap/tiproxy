@@ -46,13 +46,15 @@ var testProxyConfig = Config{
 		MetricsInterval: 15,
 	},
 	Log: Log{
-		Level:   "info",
 		Encoder: "tidb",
-		LogFile: LogFile{
-			Filename:   ".",
-			MaxSize:    10,
-			MaxDays:    1,
-			MaxBackups: 1,
+		LogOnline: LogOnline{
+			Level: "info",
+			LogFile: LogFile{
+				Filename:   ".",
+				MaxSize:    10,
+				MaxDays:    1,
+				MaxBackups: 1,
+			},
 		},
 	},
 	Security: Security{
