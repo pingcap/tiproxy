@@ -114,9 +114,10 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 				SrcAddress: clientIO.RemoteAddr(),
 				DstAddress: backendIO.RemoteAddr(),
 				Version:    pnet.ProxyVersion2,
-				Command:    pnet.ProxyCommandProxy,
 			}
 		}
+		// either from another proxy or directly from clients, we are actings as a proxy
+		proxy.Command = pnet.ProxyCommandProxy
 		if err := backendIO.WriteProxyV2(proxy); err != nil {
 			return err
 		}
