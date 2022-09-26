@@ -23,7 +23,7 @@ import (
 )
 
 func main() {
-	rootCmd := cli.GetRootCmd()
+	rootCmd := cli.GetRootCmd(nil)
 	rootCmd.Use = strings.Replace(rootCmd.Use, "tiproxyctl", os.Args[0], 1)
 	cmd.RunRootCommand(rootCmd)
 }
