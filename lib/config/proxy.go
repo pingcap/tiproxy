@@ -43,10 +43,10 @@ type ProxyServerOnline struct {
 }
 
 type ProxyServer struct {
-	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
-	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
-	ProxyProtocol     string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
-	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
+	Addr          string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
+	PDAddrs       string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
+	ProxyProtocol string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
+	ProxyServerOnline
 }
 
 type API struct {
@@ -68,8 +68,8 @@ type LogOnline struct {
 }
 
 type Log struct {
-	Encoder string `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty"`
-	LogOnline
+	Encoder   string `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty"`
+	LogOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
 type LogFile struct {
