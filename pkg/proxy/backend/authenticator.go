@@ -65,7 +65,32 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	if frontendTLSConfig == nil {
 		proxyCapability ^= pnet.ClientSSL
 	}
-	if err := clientIO.WriteInitialHandshake(proxyCapability.Uint32(), salt, mysql.AuthCachingSha2Password); err != nil {
+
+	// read backend initial handshake
+	backendHandshake, backendCapabilityU, err := auth.readInitialHandshake(backendIO)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	backendCapability := pnet.Capability(backendCapabilityU)
+	if backendCapability&pnet.ClientSSL == 0 {
+		// The error cannot be sent to the client because the client only expects an initial handshake packet.
+		// The only way is to log it and disconnect.
+		return errors.New("the TiDB server must enable TLS")
+	}
+	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
+		// TODO: need to do negotiation with backend
+		// 1. proxyCapability &= backendCapability
+		// 2. binary.LittleEndian.PutUint32(backendHandshake, proxyCapability.Uint32())
+		//
+		// it should exchange caps with the backend
+		// but TiDB does not send all of its supported capabilities
+		// thus we must ignore server capabilities
+		// however, I will log something
+		logger.Info("backend does not support capabilities from client&proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
+	}
+
+	// forward backend handshake
+	if err := clientIO.WritePacket(backendHandshake, true); err != nil {
 		return errors.WithStack(err)
 	}
 	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
@@ -121,21 +146,6 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 		if err := backendIO.WriteProxyV2(proxy); err != nil {
 			return err
 		}
-	}
-
-	// read server initial handshake
-	_, backendCapabilityU, err := auth.readInitialHandshake(backendIO)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	backendCapability := pnet.Capability(backendCapabilityU)
-	if common := commonCaps & backendCapability; (commonCaps^common)&^pnet.ClientSSL != 0 {
-		logger.Info("backend does not support capabilities from client&proxy", zap.Stringer("common", common), zap.Stringer("server", commonCaps^common), zap.Stringer("backend", backendCapability^common))
-	}
-	if backendCapability&pnet.ClientSSL == 0 {
-		// The error cannot be sent to the client because the client only expects an initial handshake packet.
-		// The only way is to log it and disconnect.
-		return errors.New("the TiDB server must enable TLS")
 	}
 
 	// write SSL Packet

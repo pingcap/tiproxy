@@ -126,6 +126,7 @@ func (cfg *Config) Check() error {
 	}
 	switch cfg.Proxy.ProxyProtocol {
 	case "v2":
+	case "":
 	default:
 		return errors.Wrapf(ErrUnsupportedProxyProtocolVersion, "%s", cfg.Proxy.ProxyProtocol)
 	}

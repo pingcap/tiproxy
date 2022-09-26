@@ -196,7 +196,7 @@ func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver
 func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client,
 	config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
 	if client == nil && len(staticAddrs) == 0 {
-		return nil, ErrNoInstanceToSelect
+		staticAddrs = []string{"127.0.0.1:4000"}
 	}
 	if httpCli == nil {
 		httpCli = http.DefaultClient
