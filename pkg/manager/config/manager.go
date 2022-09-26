@@ -69,7 +69,7 @@ func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg *co
 	ctx, cancel := context.WithCancel(ctx)
 	srv.cancel = cancel
 
-	return srv.watchCfgProxy(ctx, cfg)
+	return srv.watchConfig(ctx, cfg)
 }
 
 func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, mvccpb.Event)) {

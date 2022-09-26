@@ -89,7 +89,7 @@ func (e *ConfigManager) initMetas() {
 	}
 }
 
-func (e *ConfigManager) watchCfgProxy(ctx context.Context, cfg *config.Config) error {
+func (e *ConfigManager) watchConfig(ctx context.Context, cfg *config.Config) error {
 	for _, m := range e.metas {
 		if err := func(m imeta) error {
 			_, err := e.get(ctx, m.getPrefix(), "")
