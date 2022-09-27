@@ -127,13 +127,12 @@ func TestUpdateCfg(t *testing.T) {
 
 		// Backup files are removed by another goroutine, so there will be some delay.
 		// We check it multiple times until it succeeds.
-		ticker := time.NewTicker(3 * time.Second)
+		timer := time.NewTimer(3 * time.Second)
 		succeed := false
 		for !succeed {
 			select {
-			case <-ticker.C:
-				ticker.Stop()
-				require.Fail(t, "time out", "%dth case", i)
+			case <-timer.C:
+				t.Fatalf("%dth case time out", i)
 			case <-time.After(10 * time.Millisecond):
 				logfiles := readLogFiles(t, dir)
 				if test.check(logfiles) {
@@ -142,7 +141,7 @@ func TestUpdateCfg(t *testing.T) {
 				}
 			}
 		}
-		ticker.Stop()
+		timer.Stop()
 	}
 }
 
