@@ -43,6 +43,15 @@ jobs:
       ref: ${{ inputs.ref || github.ref }}
       target: "build"
 
+  lint:
+    needs: build
+    uses: ./.github/workflows/common.yml
+    with:
+      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+      ref: ${{ inputs.ref || github.ref }}
+      lint: true
+      target: ""
+
   test:
     needs: build
     uses: ./.github/workflows/common.yml

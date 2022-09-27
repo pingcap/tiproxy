@@ -18,8 +18,8 @@ import (
 	"net"
 	"time"
 
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
 const (

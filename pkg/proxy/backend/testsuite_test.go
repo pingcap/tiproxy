@@ -75,9 +75,6 @@ func getCfgCombinations(cfgs [][]cfgOverrider) [][]cfgOverrider {
 		// Append the cfg to each of the existing overrider list.
 		for _, cfg := range cfgList {
 			for _, o := range cfgOverriders {
-				newOverrider := make([]cfgOverrider, 0, len(o)+1)
-				newOverrider = append(newOverrider, o...)
-				newOverrider = append(newOverrider, cfg)
 				newOverriders = append(newOverriders, append(o, cfg))
 			}
 		}

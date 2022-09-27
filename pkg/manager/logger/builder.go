@@ -35,14 +35,18 @@ func buildEncoder(cfg *config.Log) (zapcore.Encoder, error) {
 		return nil, err
 	}
 	registerEncoders.Do(func() {
-		zap.RegisterEncoder("tidb", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		if err = zap.RegisterEncoder("tidb", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
 			return encoder, nil
-		})
-		zap.RegisterEncoder("newtidb", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
+		}); err != nil {
+			return
+		}
+		if err = zap.RegisterEncoder("newtidb", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
 			return cmd.NewTiDBEncoder(cfg), nil
-		})
+		}); err != nil {
+			return
+		}
 	})
-	return encoder, nil
+	return encoder, err
 }
 
 func buildLevel(cfg *config.Log) (zap.AtomicLevel, error) {

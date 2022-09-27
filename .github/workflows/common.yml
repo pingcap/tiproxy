@@ -10,6 +10,10 @@ on:
         type: string
         description: "makefile target"
         required: true
+      lint:
+        type: boolean
+        description: "run with lint or not"
+        default: false
       ref:
         type: string
         description: "checkout specific ref"
@@ -58,7 +62,14 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - run: make ${{ inputs.target }}
+      - name: "lint programs"
+        if: ${{ inputs.lint }}
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+      - name: make ${{ inputs.target }} 
+        if: ${{ inputs.target != '' }}
+        run: make ${{ inputs.target }}
       - name: "set up tmate session if necessary"
         if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3
