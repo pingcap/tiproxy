@@ -49,7 +49,7 @@ func TestUpdateCfg(t *testing.T) {
 	tests := []struct {
 		updateCfg func(cfg *config.LogOnline)
 		action    func(log *zap.Logger)
-		check     func(files []os.FileInfo)
+		check     func(files []os.FileInfo) bool
 	}{
 		{
 			updateCfg: func(cfg *config.LogOnline) {
@@ -62,8 +62,8 @@ func TestUpdateCfg(t *testing.T) {
 				msg = strings.Repeat("b", 800*1024)
 				log.Error(msg)
 			},
-			check: func(files []os.FileInfo) {
-				require.Equal(t, 1, len(files))
+			check: func(files []os.FileInfo) bool {
+				return len(files) == 1
 			},
 		},
 		{
@@ -77,9 +77,11 @@ func TestUpdateCfg(t *testing.T) {
 					log.Info(msg)
 				}
 			},
-			check: func(files []os.FileInfo) {
-				require.Equal(t, 1, len(files))
-				require.GreaterOrEqual(t, files[0].Size(), int64(2500*1024))
+			check: func(files []os.FileInfo) bool {
+				if len(files) != 1 {
+					return false
+				}
+				return files[0].Size() >= int64(2500*1024)
 			},
 		},
 		{
@@ -92,8 +94,8 @@ func TestUpdateCfg(t *testing.T) {
 					log.Info(msg)
 				}
 			},
-			check: func(files []os.FileInfo) {
-				require.Equal(t, 3, len(files))
+			check: func(files []os.FileInfo) bool {
+				return len(files) == 3
 			},
 		},
 		{
@@ -103,8 +105,8 @@ func TestUpdateCfg(t *testing.T) {
 			action: func(log *zap.Logger) {
 				log.Info("a")
 			},
-			check: func(files []os.FileInfo) {
-				require.Equal(t, 0, len(files))
+			check: func(files []os.FileInfo) bool {
+				return len(files) == 0
 			},
 		},
 	}
@@ -112,7 +114,7 @@ func TestUpdateCfg(t *testing.T) {
 	lg, ch := setupLogManager(t, cfg)
 	// Make sure the latest config also applies to cloned loggers.
 	lg = lg.Named("another").With(zap.String("field", "test_field"))
-	for _, test := range tests {
+	for i, test := range tests {
 		err := os.RemoveAll(dir)
 		require.NoError(t, err)
 
@@ -122,8 +124,24 @@ func TestUpdateCfg(t *testing.T) {
 		ch <- &clonedCfg
 		ch <- &clonedCfg
 		test.action(lg)
-		logfiles := readLogFiles(t, dir)
-		test.check(logfiles)
+
+		// Backup files are removed by another goroutine, so there will be some delay.
+		// We check it multiple times until it succeeds.
+		timer := time.NewTimer(3 * time.Second)
+		succeed := false
+		for !succeed {
+			select {
+			case <-timer.C:
+				t.Fatalf("%dth case time out", i)
+			case <-time.After(10 * time.Millisecond):
+				logfiles := readLogFiles(t, dir)
+				if test.check(logfiles) {
+					succeed = true
+					break
+				}
+			}
+		}
+		timer.Stop()
 	}
 }
 
