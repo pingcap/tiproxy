@@ -132,16 +132,17 @@ func TestUpdateCfg(t *testing.T) {
 		for !succeed {
 			select {
 			case <-ticker.C:
+				ticker.Stop()
 				require.Fail(t, "time out", "%dth case", i)
 			case <-time.After(10 * time.Millisecond):
 				logfiles := readLogFiles(t, dir)
 				if test.check(logfiles) {
 					succeed = true
-					ticker.Stop()
 					break
 				}
 			}
 		}
+		ticker.Stop()
 	}
 }
 
