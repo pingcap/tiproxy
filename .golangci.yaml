@@ -3,12 +3,21 @@ run:
   issues-exit-code: 1
 
 linters-settings:
+  errcheck:
+    exclude-functions:
+        - io.WriteString
+        - (*go.uber.org/zap/buffer.Buffer).WriteString
+        - (*go.uber.org/zap/buffer.Buffer).WriteByte
 
 issues:
   exclude-rules:
     - path: _test\.go
       linters:
         - gosec
+    - path: util/security/tls.go
+      linters:
+        - gosec
+      text: "G402:"
 
 linters:
   enable:

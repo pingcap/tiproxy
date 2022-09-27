@@ -49,8 +49,7 @@ jobs:
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
       ref: ${{ inputs.ref || github.ref }}
-      lint: true
-      target: ""
+      target: "lint"
 
   test:
     needs: build

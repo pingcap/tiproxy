@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -27,37 +28,26 @@ import (
 // LoggerManager updates log configurations online.
 type LoggerManager struct {
 	// The logger used by LoggerManager itself to log.
-	logger  *zap.Logger
-	encoder zapcore.Encoder
-	syncer  *AtomicWriteSyncer
-	level   zap.AtomicLevel
-	cancel  context.CancelFunc
-	wg      waitgroup.WaitGroup
+	logger *zap.Logger
+	syncer *cmd.AtomicWriteSyncer
+	level  zap.AtomicLevel
+	cancel context.CancelFunc
+	wg     waitgroup.WaitGroup
 }
 
 // NewLoggerManager creates a new LoggerManager.
 func NewLoggerManager(cfg *config.Log) (*LoggerManager, *zap.Logger, error) {
 	lm := &LoggerManager{}
 	var err error
-	if lm.encoder, err = buildEncoder(cfg); err != nil {
+	mainLogger, syncer, level, err := cmd.BuildLogger(cfg)
+	if err != nil {
 		return nil, nil, err
 	}
-	if lm.syncer, err = buildSyncer(cfg); err != nil {
-		return nil, nil, err
-	}
-	if lm.level, err = buildLevel(cfg); err != nil {
-		return nil, nil, err
-	}
-	mainLogger := lm.buildLogger().Named("main")
+	lm.syncer = syncer
+	lm.level = level
+	mainLogger = mainLogger.Named("main")
 	lm.logger = mainLogger.Named("lgmgr")
 	return lm, mainLogger, nil
-}
-
-// buildLogger returns a new logger with the same syncer.
-func (lm *LoggerManager) buildLogger() *zap.Logger {
-	return zap.New(zapcore.NewCore(lm.encoder, lm.syncer, lm.level),
-		zap.ErrorOutput(lm.syncer),
-		zap.AddStacktrace(zapcore.FatalLevel))
 }
 
 // Init starts a goroutine to watch configuration.

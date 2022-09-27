@@ -46,6 +46,7 @@ cmd_%:
 
 lint: ./bin/golangci-lint
 	$(GOBIN)/golangci-lint run
+	cd lib && $(GOBIN)/golangci-lint run
 
 test: ./bin/gocovmerge
 	rm -f .cover.*

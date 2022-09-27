@@ -10,10 +10,6 @@ on:
         type: string
         description: "makefile target"
         required: true
-      lint:
-        type: boolean
-        description: "run with lint or not"
-        default: false
       ref:
         type: string
         description: "checkout specific ref"
@@ -62,12 +58,6 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - name: "lint programs"
-        if: ${{ inputs.lint }}
-        uses: golangci/golangci-lint-action@v3
-        with:
-          version: latest
-          skip-cache: true
       - name: make ${{ inputs.target }} 
         if: ${{ inputs.target != '' }}
         run: make ${{ inputs.target }}
