@@ -137,6 +137,7 @@ func TestUpdateCfg(t *testing.T) {
 				logfiles := readLogFiles(t, dir)
 				if test.check(logfiles) {
 					succeed = true
+					ticker.Stop()
 					break
 				}
 			}
