@@ -15,16 +15,20 @@
 package cli
 
 import (
+	"crypto/tls"
 	"net/http"
 
+	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
-func GetRootCmd() *cobra.Command {
+func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "tiproxyctl",
-		Short: "cli",
+		Use:          "tiproxyctl",
+		Short:        "cli",
+		SilenceUsage: true,
 	}
 
 	ctx := &Context{}
@@ -32,6 +36,10 @@ func GetRootCmd() *cobra.Command {
 	curls := rootCmd.PersistentFlags().StringArray("curls", []string{"localhost:3080"}, "API gateway addresses")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "info", "log level")
+	insecure := rootCmd.PersistentFlags().BoolP("insecure", "k", false, "enable TLS without CA, useful for testing, or for expired certs")
+	caPath := rootCmd.PersistentFlags().String("ca", "", "CA to verify server certificates, set to 'skip' if want to enable SSL without verification")
+	certPath := rootCmd.PersistentFlags().String("cert", "", "cert for server-side client authentication")
+	keyPath := rootCmd.PersistentFlags().String("key", "", "key for server-side client authentication")
 	rootCmd.PersistentFlags().Bool("indent", true, "whether indent the returned json")
 	rootCmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
 		zapcfg := zap.NewDevelopmentConfig()
@@ -43,9 +51,31 @@ func GetRootCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if tlsConfig == nil {
+			skipCA := *insecure
+			realCAPath := *caPath
+			if skipCA {
+				realCAPath = ""
+			}
+			tlsConfig, err = security.BuildClientTLSConfig(logger, config.TLSConfig{
+				CA:     realCAPath,
+				Cert:   *certPath,
+				Key:    *keyPath,
+				SkipCA: skipCA,
+			})
+			if err != nil {
+				return err
+			}
+		}
 		ctx.Logger = logger.Named("cli")
-		ctx.Client = &http.Client{}
+		ctx.Client = &http.Client{
+			Transport: &http.Transport{
+				Proxy:           http.ProxyFromEnvironment,
+				TLSClientConfig: tlsConfig,
+			},
+		}
 		ctx.CUrls = *curls
+		ctx.SSL = tlsConfig != nil
 		return nil
 	}
 

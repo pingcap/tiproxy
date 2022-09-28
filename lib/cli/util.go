@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"net/http"
 
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"go.uber.org/zap"
 )
 
@@ -29,6 +30,7 @@ type Context struct {
 	Logger *zap.Logger
 	Client *http.Client
 	CUrls  []string
+	SSL    bool
 }
 
 func doRequest(ctx context.Context, bctx *Context, method string, url string, rd io.Reader) (string, error) {
@@ -37,18 +39,36 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 		sep = "/"
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, fmt.Sprintf("http://localhost%s%s", sep, url), rd)
+	schema := "http"
+	if bctx.SSL {
+		schema = "https"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, fmt.Sprintf("%s://localhost%s%s", schema, sep, url), rd)
 	if err != nil {
 		return "", err
 	}
 
 	var rete string
+	var res *http.Response
 	for _, i := range rand.Perm(len(bctx.CUrls)) {
 		req.URL.Host = bctx.CUrls[i]
 
-		res, err := bctx.Client.Do(req)
+		res, err = bctx.Client.Do(req)
 		if err != nil {
-			return "", err
+			if errors.Is(err, io.EOF) {
+				if req.URL.Scheme == "https" {
+					req.URL.Scheme = "http"
+				} else if req.URL.Scheme == "http" {
+					req.URL.Scheme = "https"
+				}
+				// probably server did not enable TLS, try again with plain http
+				// or the reverse, server enabled TLS, but we should try https
+				res, err = bctx.Client.Do(req)
+			}
+			if err != nil {
+				return "", err
+			}
 		}
 		resb, _ := ioutil.ReadAll(res.Body)
 		res.Body.Close()
@@ -57,9 +77,9 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 		case http.StatusOK:
 			return string(resb), nil
 		case http.StatusBadRequest:
-			return fmt.Sprintf("bad request: %s", string(resb)), nil
+			return "", errors.Errorf("bad request: %s", string(resb))
 		case http.StatusInternalServerError:
-			rete = fmt.Sprintf("internal error: %s", string(resb))
+			err = errors.Errorf("internal error: %s", string(resb))
 			continue
 		default:
 			rete = fmt.Sprintf("%s: %s", res.Status, string(resb))
@@ -67,5 +87,5 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 		}
 	}
 
-	return rete, nil
+	return rete, err
 }
