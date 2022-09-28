@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -279,6 +280,20 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
+}
+
+// The original db in the auth info may be dropped during the session, so we need to authenticate with the current db.
+// The user may be renamed during the session, but the session cannot detect it, so this will affect the user.
+// TODO: this may be a security problem: a different new user may just be renamed to this user name.
+func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []byte) error {
+	var statesMap map[string]string
+	if err := json.Unmarshal(sessionStates, &statesMap); err != nil {
+		return errors.Wrapf(err, "unmarshal session states error")
+	}
+	// The currentDBKey may be omitted if it's empty. In this case, we still need to update it.
+	currentDB := statesMap[currentDBKey]
+	mgr.authenticator.updateCurrentDB(currentDB)
+	return nil
 }
 
 // Redirect implements RedirectableConn.Redirect interface. It redirects the current session to the newAddr.
