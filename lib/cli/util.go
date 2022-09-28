@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
 
@@ -70,7 +69,7 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 				return "", err
 			}
 		}
-		resb, _ := ioutil.ReadAll(res.Body)
+		resb, _ := io.ReadAll(res.Body)
 		res.Body.Close()
 
 		switch res.StatusCode {

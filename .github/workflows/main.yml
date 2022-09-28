@@ -28,6 +28,7 @@ concurrency:
 
 jobs:
   cmd:
+    if: ${{ github.event_name != 'push' }}
     uses: ./.github/workflows/common.yml
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
@@ -36,6 +37,7 @@ jobs:
       all_platform: true
 
   build:
+    if: ${{ github.event_name != 'push' }}
     needs: cmd
     uses: ./.github/workflows/common.yml
     with:
@@ -43,10 +45,28 @@ jobs:
       ref: ${{ inputs.ref || github.ref }}
       target: "build"
 
+  lint:
+    if: ${{ github.event_name != 'push' }}
+    needs: build
+    uses: ./.github/workflows/common.yml
+    with:
+      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
+      ref: ${{ inputs.ref || github.ref }}
+      target: "lint"
+
   test:
+    if: ${{ github.event_name != 'push' }}
     needs: build
     uses: ./.github/workflows/common.yml
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
       ref: ${{ inputs.ref || github.ref }}
       target: "test"
+
+  cache:
+    if: ${{ github.event_name == 'push' }}
+    uses: ./.github/workflows/common.yml
+    with:
+      ref: ${{ inputs.ref || github.ref }}
+      debug: false
+      target: "build lint test"

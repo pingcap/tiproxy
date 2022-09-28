@@ -19,9 +19,9 @@ import (
 	"net/http"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
 func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
@@ -42,12 +42,12 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 	keyPath := rootCmd.PersistentFlags().String("key", "", "key for server-side client authentication")
 	rootCmd.PersistentFlags().Bool("indent", true, "whether indent the returned json")
 	rootCmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
-		zapcfg := zap.NewDevelopmentConfig()
-		zapcfg.Encoding = *logEncoder
-		if level, err := zap.ParseAtomicLevel(*logLevel); err == nil {
-			zapcfg.Level = level
-		}
-		logger, err := zapcfg.Build()
+		logger, _, _, err := cmd.BuildLogger(&config.Log{
+			Encoder: *logEncoder,
+			LogOnline: config.LogOnline{
+				Level: *logLevel,
+			},
+		})
 		if err != nil {
 			return err
 		}

@@ -29,7 +29,7 @@ endif
 IMAGE_TAG ?= latest
 EXECUTABLE_TARGETS := $(patsubst cmd/%,cmd_%,$(wildcard cmd/*))
 
-.PHONY: cmd_% build test docker
+.PHONY: cmd_% build test docker ./bin/golangci-lint ./bin/gocovmerge
 
 default: cmd
 
@@ -44,13 +44,20 @@ cmd_%: SOURCE=$(patsubst cmd_%,./cmd/%,$@)
 cmd_%:
 	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
+lint: ./bin/golangci-lint
+	$(GOBIN)/golangci-lint run
+	cd lib && $(GOBIN)/golangci-lint run
+
 test: ./bin/gocovmerge
 	rm -f .cover.*
 	go test -coverprofile=.cover.pkg ./...
 	cd lib && go test -coverprofile=../.cover.lib ./...
-	./bin/gocovmerge .cover.* > .cover
+	$(GOBIN)/gocovmerge .cover.* > .cover
 	rm -f .cover.*
 	go tool cover -html=.cover -o .cover.html
+
+./bin/golangci-lint:
+	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 ./bin/gocovmerge:
 	GOBIN=$(GOBIN) go install github.com/wadey/gocovmerge@master

@@ -147,7 +147,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	// probe proxy V2
 	refill := false
 	if !p.proxyInited.Load() {
-		if bytes.Compare(header[:], proxyV2Magic[:4]) == 0 {
+		if bytes.Equal(header[:], proxyV2Magic[:4]) {
 			proxyHeader, err := p.parseProxyV2()
 			if err != nil {
 				return nil, false, errors.Wrap(ErrReadConn, err)

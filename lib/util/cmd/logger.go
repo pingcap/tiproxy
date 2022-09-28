@@ -12,37 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package logger
+package cmd
 
 import (
-	"sync"
-
 	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-var registerEncoders sync.Once
-
 func buildEncoder(cfg *config.Log) (zapcore.Encoder, error) {
-	zapcfg := zap.NewDevelopmentConfig()
-	zapcfg.Encoding = cfg.Encoder
-	zapcfg.DisableStacktrace = true
-	encoder, err := log.NewTextEncoder(&log.Config{})
-	if err != nil {
-		return nil, err
+	encfg := zap.NewProductionEncoderConfig()
+	switch cfg.Encoder {
+	case "tidb":
+		return log.NewTextEncoder(&log.Config{})
+	case "newtidb":
+		fallthrough
+	default:
+		return NewTiDBEncoder(encfg), nil
 	}
-	registerEncoders.Do(func() {
-		zap.RegisterEncoder("tidb", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
-			return encoder, nil
-		})
-		zap.RegisterEncoder("newtidb", func(cfg zapcore.EncoderConfig) (zapcore.Encoder, error) {
-			return cmd.NewTiDBEncoder(cfg), nil
-		})
-	})
-	return encoder, nil
 }
 
 func buildLevel(cfg *config.Log) (zap.AtomicLevel, error) {
@@ -55,4 +43,20 @@ func buildSyncer(cfg *config.Log) (*AtomicWriteSyncer, error) {
 		return nil, err
 	}
 	return syncer, nil
+}
+
+func BuildLogger(cfg *config.Log) (*zap.Logger, *AtomicWriteSyncer, zap.AtomicLevel, error) {
+	level, err := buildLevel(cfg)
+	if err != nil {
+		return nil, nil, level, err
+	}
+	encoder, err := buildEncoder(cfg)
+	if err != nil {
+		return nil, nil, level, err
+	}
+	syncer, err := buildSyncer(cfg)
+	if err != nil {
+		return nil, nil, level, err
+	}
+	return zap.New(zapcore.NewCore(encoder, syncer, level), zap.ErrorOutput(syncer), zap.AddStacktrace(zapcore.FatalLevel)), syncer, level, nil
 }

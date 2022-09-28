@@ -151,7 +151,7 @@ func (p *PacketIO) parseProxyV2() (*Proxy, error) {
 	if err != nil {
 		return nil, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
-	if bytes.Compare(rem, proxyV2Magic[4:]) != 0 {
+	if !bytes.Equal(rem, proxyV2Magic[4:]) {
 		return nil, nil
 	}
 

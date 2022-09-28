@@ -96,7 +96,7 @@ func (auth *Authenticator) handshakeFirstTime(clientIO, backendIO *pnet.PacketIO
 	addr := backendIO.RemoteAddr().String()
 	if auth.serverAddr != "" {
 		// NOTE: should use DNS name as much as possible
-		// Usally certs are signed with domain instead of IP addrs
+		// Usually certs are signed with domain instead of IP addrs
 		// And `RemoteAddr()` will return IP addr
 		addr = auth.serverAddr
 	}

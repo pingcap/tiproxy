@@ -18,8 +18,8 @@ import (
 	"encoding/binary"
 	"strings"
 
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/siddontang/go/hack"
@@ -196,7 +196,7 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 		case mysql.LocalInFileHeader:
 			serverStatus, err = cp.forwardLoadInFile(clientIO, backendIO, request)
 		default:
-			serverStatus, err = cp.forwardResultSet(clientIO, backendIO, request, response)
+			serverStatus, err = cp.forwardResultSet(clientIO, backendIO, request)
 		}
 		if err != nil {
 			return err
@@ -239,8 +239,9 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 	return serverStatus, errors.Errorf("unexpected response, cmd:%d resp:%d", mysql.ComQuery, response[0])
 }
 
-func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request, response []byte) (uint16, error) {
+func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
 	if cp.capability&mysql.ClientDeprecateEOF == 0 {
+		var response []byte
 		// read columns
 		for {
 			var err error

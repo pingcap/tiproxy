@@ -16,7 +16,6 @@
 package main
 
 import (
-	"io/ioutil"
 	"os"
 
 	"github.com/pingcap/TiProxy/lib/config"
@@ -39,7 +38,7 @@ func main() {
 	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		proxyConfigData, err := ioutil.ReadFile(*configFile)
+		proxyConfigData, err := os.ReadFile(*configFile)
 		if err != nil {
 			return err
 		}
