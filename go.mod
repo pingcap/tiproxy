@@ -8,6 +8,7 @@ require (
 	github.com/gin-gonic/gin v1.8.1
 	github.com/go-mysql-org/go-mysql v1.6.0
 	github.com/pingcap/TiProxy/lib v0.0.0-00010101000000-000000000000
+	github.com/pingcap/log v1.1.0
 	github.com/pingcap/tidb v1.1.0-beta.0.20220908042057-08b1faf2ad1e
 	github.com/pingcap/tidb/parser v0.0.0-20220908042057-08b1faf2ad1e
 	github.com/prometheus/client_golang v1.13.0
@@ -72,7 +73,6 @@ require (
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/failpoint v0.0.0-20220423142525-ae43b7f4e5c3 // indirect
 	github.com/pingcap/kvproto v0.0.0-20220906053631-2e37953b2b43 // indirect
-	github.com/pingcap/log v1.1.0 // indirect
 	github.com/pingcap/tipb v0.0.0-20220824081009-0714a57aff1d // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
