@@ -36,6 +36,7 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 	curls := rootCmd.PersistentFlags().StringArray("curls", []string{"localhost:3080"}, "API gateway addresses")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "info", "log level")
+	insecure := rootCmd.PersistentFlags().BoolP("insecure", "k", false, "enable TLS without CA, useful for testing, or for expired certs")
 	caPath := rootCmd.PersistentFlags().String("ca", "", "CA to verify server certificates, set to 'skip' if want to enable SSL without verification")
 	certPath := rootCmd.PersistentFlags().String("cert", "", "cert for server-side client authentication")
 	keyPath := rootCmd.PersistentFlags().String("key", "", "key for server-side client authentication")
@@ -51,7 +52,7 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 			return err
 		}
 		if tlsConfig == nil {
-			skipCA := *caPath == "skip"
+			skipCA := *insecure
 			realCAPath := *caPath
 			if skipCA {
 				realCAPath = ""
