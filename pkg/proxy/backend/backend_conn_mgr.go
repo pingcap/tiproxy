@@ -72,7 +72,6 @@ type BackendConnManager struct {
 	cmdProcessor   *CmdProcessor
 	eventReceiver  unsafe.Pointer
 	logger         *zap.Logger
-	salt           []byte
 	// type *signalRedirect, it saves the last signal if there are multiple signals.
 	// It will be set to nil after migration.
 	signal unsafe.Pointer
@@ -88,7 +87,6 @@ type BackendConnManager struct {
 func NewBackendConnManager(logger *zap.Logger, connectionID uint64) *BackendConnManager {
 	return &BackendConnManager{
 		logger:         logger,
-		salt:           GenerateSalt(20),
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
 		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities},
@@ -115,7 +113,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	backendIO := mgr.backendConn.PacketIO()
 
 	mgr.authenticator.serverAddr = serverAddr
-	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, backendIO, mgr.salt, frontendTLSConfig, backendTLSConfig, proxyProtocol); err != nil {
+	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, backendIO, frontendTLSConfig, backendTLSConfig, proxyProtocol); err != nil {
 		return err
 	}
 

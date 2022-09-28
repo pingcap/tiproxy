@@ -105,10 +105,12 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 }
 
 func (p *PacketIO) wrapErr(err error) error {
+	e := err
 	if p.wrap != nil {
-		return errors.Wrap(p.wrap, err)
+		e = errors.Wrap(p.wrap, err)
 	}
-	return err
+	e = errors.WithStack(e)
+	return e
 }
 
 // Proxy returned parsed proxy header from clients if any.

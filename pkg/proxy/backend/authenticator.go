@@ -33,9 +33,8 @@ var (
 
 // Other server capabilities are not supported.
 const requiredCapabilities = pnet.ClientProtocol41
-const supportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientLongFlag |
-	pnet.ClientConnectWithDB | pnet.ClientNoSchema | pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientIgnoreSpace |
-	pnet.ClientInteractive | pnet.ClientSSL | pnet.ClientIgnoreSigpipe |
+const supportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientConnectWithDB |
+	pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientInteractive | pnet.ClientSSL | pnet.ClientLongFlag |
 	pnet.ClientTransactions | pnet.ClientReserved | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
 	pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientPluginAuthLenencClientData |
 	pnet.ClientDeprecateEOF | requiredCapabilities
@@ -57,7 +56,7 @@ func (auth *Authenticator) String() string {
 		auth.user, auth.dbname, auth.capability, auth.collation)
 }
 
-func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, salt []byte, frontendTLSConfig, backendTLSConfig *tls.Config, proxyProtocol bool) error {
+func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, proxyProtocol bool) error {
 	clientIO.ResetSequence()
 	backendIO.ResetSequence()
 
@@ -69,7 +68,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	// read backend initial handshake
 	backendHandshake, backendCapabilityU, err := auth.readInitialHandshake(backendIO)
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	backendCapability := pnet.Capability(backendCapabilityU)
 	if backendCapability&pnet.ClientSSL == 0 {
@@ -86,31 +85,33 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 		// but TiDB does not send all of its supported capabilities
 		// thus we must ignore server capabilities
 		// however, I will log something
-		logger.Info("backend does not support capabilities from client&proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
+		logger.Info("backend does not support capabilities from proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
 	}
 
 	// forward backend handshake
 	if err := clientIO.WritePacket(backendHandshake, true); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
 	if err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	frontendCapability := pnet.Capability(binary.LittleEndian.Uint32(pkt))
 	if isSSL {
-		if proxyCapability&pnet.ClientSSL == 0 {
-			return clientIO.WriteErrPacket(mysql.NewErr(mysql.ErrAbortingConnection, "should not go here", nil))
+		if _, err = clientIO.ServerTLSHandshake(frontendTLSConfig); err != nil {
+			return err
 		}
-		if _, err = clientIO.UpgradeToServerTLS(frontendTLSConfig); err != nil {
-			return errors.WithStack(err)
-		}
-		pkt, isSSL, err = clientIO.ReadSSLRequestOrHandshakeResp()
+		pkt, _, err = clientIO.ReadSSLRequestOrHandshakeResp()
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
-		if isSSL {
+		if len(pkt) <= 32 {
 			return errors.WithStack(errors.New("expect handshake resp"))
+		}
+		frontendCapabilityResponse := pnet.Capability(binary.LittleEndian.Uint32(pkt))
+		if frontendCapability != frontendCapabilityResponse {
+			common := frontendCapability & frontendCapabilityResponse
+			logger.Warn("frontend capabilities differs between SSL request and handshake response", zap.Stringer("common", common), zap.Stringer("ssl", frontendCapability^common), zap.Stringer("resp", frontendCapabilityResponse^common))
 		}
 	} else {
 		binary.LittleEndian.PutUint32(pkt, (frontendCapability | pnet.ClientSSL).Uint32())
@@ -121,8 +122,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	}
 	commonCaps := frontendCapability & proxyCapability
 	if frontendCapability^commonCaps != 0 {
-		logger.Error("frontend send capabilities unsupported by proxy", zap.Stringer("common", commonCaps), zap.Stringer("frontend", frontendCapability^commonCaps), zap.Stringer("proxy", proxyCapability^commonCaps))
-		return errors.Wrapf(ErrCapabilityNegotiation, "%s", frontendCapability^commonCaps)
+		logger.Debug("frontend send capabilities unsupported by proxy", zap.Stringer("common", commonCaps), zap.Stringer("frontend", frontendCapability^commonCaps), zap.Stringer("proxy", proxyCapability^commonCaps))
 	}
 	resp := pnet.ParseHandshakeResponse(pkt)
 	auth.capability = commonCaps.Uint32()
@@ -150,7 +150,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 
 	// write SSL Packet
 	if err := backendIO.WritePacket(pkt[:32], true); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 	auth.backendTLSConfig = backendTLSConfig.Clone()
 	addr := backendIO.RemoteAddr().String()
@@ -164,13 +164,13 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	if err == nil {
 		auth.backendTLSConfig.ServerName = host
 	}
-	if err = backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
-		return errors.WithStack(err)
+	if err = backendIO.ClientTLSHandshake(auth.backendTLSConfig); err != nil {
+		return err
 	}
 
 	// forward client handshake resp
 	if err := backendIO.WritePacket(pkt, true); err != nil {
-		return errors.WithStack(err)
+		return err
 	}
 
 	// forward other packets
@@ -247,7 +247,7 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 		return err
 	}
 	// Send TLS / SSL request packet. The server must have supported TLS.
-	if err := backendIO.UpgradeToClientTLS(auth.backendTLSConfig); err != nil {
+	if err := backendIO.ClientTLSHandshake(auth.backendTLSConfig); err != nil {
 		return err
 	}
 	// write handshake resp

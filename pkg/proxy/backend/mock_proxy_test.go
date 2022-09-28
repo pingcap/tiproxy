@@ -47,7 +47,6 @@ type mockProxy struct {
 	// execution results
 	err         error
 	logger      *zap.Logger
-	salt        []byte
 	holdRequest bool
 }
 
@@ -55,7 +54,6 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
 		proxyConfig:        cfg,
 		logger:             logger.CreateLoggerForTest(t).Named("mockProxy"),
-		salt:               GenerateSalt(20),
 		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), 0),
 	}
 	mp.cmdProcessor.capability = cfg.capability
@@ -63,7 +61,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeFirstTime(mp.logger, clientIO, backendIO, mp.salt, mp.frontendTLSConfig, mp.backendTLSConfig, false)
+	return mp.authenticator.handshakeFirstTime(mp.logger, clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig, false)
 }
 
 func (mp *mockProxy) authenticateSecondTime(_, backendIO *pnet.PacketIO) error {

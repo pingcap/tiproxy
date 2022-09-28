@@ -97,16 +97,8 @@ func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err 
 		return
 	}
 
-	isSSL = len(pkt) <= 32
-
-	if isSSL {
-		capability := uint32(binary.LittleEndian.Uint32(pkt[:4]))
-		if capability&mysql.ClientSSL == 0 {
-			err = errors.WithStack(errors.Errorf("%w: but capability flags has no SSL", ErrExpectSSLRequest))
-			return
-		}
-	}
-
+	capability := uint32(binary.LittleEndian.Uint32(pkt[:4]))
+	isSSL = capability&mysql.ClientSSL != 0
 	return
 }
 
