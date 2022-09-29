@@ -24,7 +24,7 @@ import (
 )
 
 func (e *ConfigManager) GetNamespace(ctx context.Context, ns string) (*config.Namespace, error) {
-	etcdKeyValue, err := e.get(ctx, PathPrefixNamespace, ns)
+	etcdKeyValue, err := e.get(ctx, pathPrefixNamespace, ns)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (e *ConfigManager) GetNamespace(ctx context.Context, ns string) (*config.Na
 }
 
 func (e *ConfigManager) ListAllNamespace(ctx context.Context) ([]*config.Namespace, error) {
-	etcdKeyValues, err := e.list(ctx, PathPrefixNamespace)
+	etcdKeyValues, err := e.list(ctx, pathPrefixNamespace)
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +64,9 @@ func (e *ConfigManager) SetNamespace(ctx context.Context, ns string, nsc *config
 	if err != nil {
 		return err
 	}
-	return e.set(ctx, PathPrefixNamespace, ns, string(r))
+	return e.set(ctx, pathPrefixNamespace, ns, string(r))
 }
 
 func (e *ConfigManager) DelNamespace(ctx context.Context, ns string) error {
-	return e.del(ctx, PathPrefixNamespace, ns)
+	return e.del(ctx, pathPrefixNamespace, ns)
 }

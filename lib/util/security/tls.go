@@ -22,7 +22,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"io/ioutil"
 	"math/big"
 	"net"
 	"os"
@@ -70,14 +69,14 @@ func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath strin
 		return err
 	}
 
-	if err := ioutil.WriteFile(certpath, certPEM.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(certpath, certPEM.Bytes(), 0600); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(keypath, keyPEM.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(keypath, keyPEM.Bytes(), 0600); err != nil {
 		return err
 	}
 	if capath != "" {
-		if err := ioutil.WriteFile(capath, caPEM.Bytes(), 0600); err != nil {
+		if err := os.WriteFile(capath, caPEM.Bytes(), 0600); err != nil {
 			return err
 		}
 	}
@@ -204,14 +203,16 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	}
 
 	serverTLSConf = &tls.Config{
+		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{serverCert},
 	}
 
 	certpool := x509.NewCertPool()
 	certpool.AppendCertsFromPEM(caPEM.Bytes())
 	clientTLSConf = &tls.Config{
+		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true,
-		RootCAs: certpool,
+		RootCAs:            certpool,
 	}
 
 	return
@@ -224,7 +225,9 @@ func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 		return nil, nil
 	}
 
-	tcfg := &tls.Config{}
+	tcfg := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
 	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
 		return nil, errors.Errorf("failed to load certs: %w", err)
@@ -238,7 +241,7 @@ func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 
 	tcfg.ClientAuth = tls.RequireAndVerifyClientCert
 	tcfg.ClientCAs = x509.NewCertPool()
-	certBytes, err := ioutil.ReadFile(cfg.CA)
+	certBytes, err := os.ReadFile(cfg.CA)
 	if err != nil {
 		return nil, errors.Errorf("failed to read CA: %w", err)
 	}
@@ -253,15 +256,20 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	if !cfg.HasCA() {
 		if cfg.SkipCA {
 			// still enable TLS without verify server certs
-			return &tls.Config{InsecureSkipVerify: true}, nil
+			return &tls.Config{
+				InsecureSkipVerify: true,
+				MinVersion:         tls.VersionTLS12,
+			}, nil
 		}
 		logger.Warn("no CA to verify server connections, disable TLS")
 		return nil, nil
 	}
 
-	tcfg := &tls.Config{}
+	tcfg := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
 	tcfg.RootCAs = x509.NewCertPool()
-	certBytes, err := ioutil.ReadFile(cfg.CA)
+	certBytes, err := os.ReadFile(cfg.CA)
 	if err != nil {
 		return nil, errors.Errorf("failed to read CA: %w", err)
 	}

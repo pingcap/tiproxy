@@ -24,20 +24,20 @@ import (
 
 type clientConfig struct {
 	// for auth
-	tlsConfig    *tls.Config
-	sql          string
-	username     string
-	dbName       string
-	authPlugin   string
-	dataBytes    []byte
-	attrs        []byte
-	authData     []byte
-	filePkts     int
-	prepStmtID   int
-	capability   uint32
-	collation    uint8
+	tlsConfig  *tls.Config
+	sql        string
+	username   string
+	dbName     string
+	authPlugin string
+	dataBytes  []byte
+	attrs      []byte
+	authData   []byte
+	filePkts   int
+	prepStmtID int
+	capability uint32
+	collation  uint8
 	// for cmd
-	cmd          byte
+	cmd byte
 	// for both auth and cmd
 	abnormalExit bool
 }
@@ -206,7 +206,7 @@ func (mc *mockClient) requestPrepare(packetIO *pnet.PacketIO) error {
 		}
 	}
 	for i := 0; i < expectedPacketNum; i++ {
-		if response, err = packetIO.ReadPacket(); err != nil {
+		if _, err = packetIO.ReadPacket(); err != nil {
 			return err
 		}
 	}

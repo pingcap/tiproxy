@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package logger
+package cmd
 
 import (
 	"os"
@@ -62,7 +62,7 @@ type AtomicWriteSyncer struct {
 }
 
 // Rebuild creates a new output and replaces the current one.
-func (ws *AtomicWriteSyncer) Rebuild(cfg *config.Log) error {
+func (ws *AtomicWriteSyncer) Rebuild(cfg *config.LogOnline) error {
 	var output closableSyncer
 	if len(cfg.LogFile.Filename) > 0 {
 		fileLogger, err := initFileLog(&cfg.LogFile)

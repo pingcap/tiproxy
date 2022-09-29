@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,7 +33,7 @@ const (
 )
 
 func listAllFiles(dir, ext string) ([]string, error) {
-	infos, err := ioutil.ReadDir(dir)
+	infos, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +177,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 			}
 
 			for _, nFile := range nFiles {
-				fileData, err := ioutil.ReadFile(nFile)
+				fileData, err := os.ReadFile(nFile)
 				if err != nil {
 					return err
 				}

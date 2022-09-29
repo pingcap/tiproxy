@@ -58,7 +58,9 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - run: make ${{ inputs.target }}
+      - name: make ${{ inputs.target }} 
+        if: ${{ inputs.target != '' }}
+        run: make ${{ inputs.target }}
       - name: "set up tmate session if necessary"
         if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3

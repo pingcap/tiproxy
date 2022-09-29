@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -27,40 +28,30 @@ import (
 // LoggerManager updates log configurations online.
 type LoggerManager struct {
 	// The logger used by LoggerManager itself to log.
-	logger  *zap.Logger
-	encoder zapcore.Encoder
-	syncer  *AtomicWriteSyncer
-	level   zap.AtomicLevel
-	cancel  context.CancelFunc
-	wg      waitgroup.WaitGroup
+	logger *zap.Logger
+	syncer *cmd.AtomicWriteSyncer
+	level  zap.AtomicLevel
+	cancel context.CancelFunc
+	wg     waitgroup.WaitGroup
 }
 
 // NewLoggerManager creates a new LoggerManager.
-func NewLoggerManager(cfg *config.Log) (*LoggerManager, error) {
+func NewLoggerManager(cfg *config.Log) (*LoggerManager, *zap.Logger, error) {
 	lm := &LoggerManager{}
 	var err error
-	if lm.encoder, err = buildEncoder(cfg); err != nil {
-		return nil, err
+	mainLogger, syncer, level, err := cmd.BuildLogger(cfg)
+	if err != nil {
+		return nil, nil, err
 	}
-	if lm.syncer, err = buildSyncer(cfg); err != nil {
-		return nil, err
-	}
-	if lm.level, err = buildLevel(cfg); err != nil {
-		return nil, err
-	}
-	return lm, nil
-}
-
-// BuildLogger returns a new logger with the same syncer.
-func (lm *LoggerManager) BuildLogger() *zap.Logger {
-	return zap.New(zapcore.NewCore(lm.encoder, lm.syncer, lm.level),
-		zap.ErrorOutput(lm.syncer),
-		zap.AddStacktrace(zapcore.FatalLevel))
+	lm.syncer = syncer
+	lm.level = level
+	mainLogger = mainLogger.Named("main")
+	lm.logger = mainLogger.Named("lgmgr")
+	return lm, mainLogger, nil
 }
 
 // Init starts a goroutine to watch configuration.
-func (lm *LoggerManager) Init(logger *zap.Logger, cfgCh chan *config.Log) {
-	lm.logger = logger
+func (lm *LoggerManager) Init(cfgCh <-chan *config.LogOnline) {
 	ctx, cancel := context.WithCancel(context.Background())
 	lm.wg.Run(func() {
 		lm.watchCfg(ctx, cfgCh)
@@ -68,7 +59,7 @@ func (lm *LoggerManager) Init(logger *zap.Logger, cfgCh chan *config.Log) {
 	lm.cancel = cancel
 }
 
-func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh chan *config.Log) {
+func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh <-chan *config.LogOnline) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,7 +78,7 @@ func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh chan *config.Log) {
 	}
 }
 
-func (lm *LoggerManager) updateLoggerCfg(cfg *config.Log) error {
+func (lm *LoggerManager) updateLoggerCfg(cfg *config.LogOnline) error {
 	// encoder cannot be configured dynamically, because Core.With always clones the encoder.
 	if err := lm.syncer.Rebuild(cfg); err != nil {
 		return err

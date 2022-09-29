@@ -148,20 +148,6 @@ func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 }
 
 /* map encoder part */
-func (f *tidbEncoder) needDoubleQuotes(s string) bool {
-	for i := 0; i < len(s); {
-		b := s[i]
-		if b <= 0x20 {
-			return true
-		}
-		switch b {
-		case '\\', '"', '[', ']', '=':
-			return true
-		}
-		i++
-	}
-	return false
-}
 func (f *tidbEncoder) safeAddString(s string) {
 	needQuotes := false
 outerloop:

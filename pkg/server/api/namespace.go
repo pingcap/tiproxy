@@ -93,6 +93,10 @@ func (h *namespaceHttpHandler) HandleCommit(c *gin.Context) {
 	if len(ns_names) == 0 {
 		nss, err = h.cfgmgr.ListAllNamespace(c)
 		if err != nil {
+			errMsg := "failed to list all namespaces"
+			h.logger.Error(errMsg, zap.Error(err), zap.Any("namespaces", nss))
+			c.JSON(http.StatusInternalServerError, errMsg)
+			return
 		}
 	} else {
 		nss = make([]*config.Namespace, len(ns_names))
@@ -100,6 +104,10 @@ func (h *namespaceHttpHandler) HandleCommit(c *gin.Context) {
 		for i, ns_name := range ns_names {
 			ns, err := h.cfgmgr.GetNamespace(c, ns_name)
 			if err != nil {
+				errMsg := "failed to get namespace"
+				h.logger.Error(errMsg, zap.Error(err), zap.Any("namespaces", nss))
+				c.JSON(http.StatusInternalServerError, errMsg)
+				return
 			}
 			nss[i] = ns
 			nss_delete[i] = false

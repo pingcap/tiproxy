@@ -34,23 +34,25 @@ func TestUpdateCfg(t *testing.T) {
 	dir := t.TempDir()
 	fileName := filepath.Join(dir, "proxy.log")
 	cfg := &config.Log{
-		Level:   "info",
 		Encoder: "tidb",
-		LogFile: config.LogFile{
-			Filename:   fileName,
-			MaxSize:    1,
-			MaxDays:    2,
-			MaxBackups: 1,
+		LogOnline: config.LogOnline{
+			Level: "info",
+			LogFile: config.LogFile{
+				Filename:   fileName,
+				MaxSize:    1,
+				MaxDays:    2,
+				MaxBackups: 1,
+			},
 		},
 	}
 
 	tests := []struct {
-		updateCfg func(cfg *config.Log)
+		updateCfg func(cfg *config.LogOnline)
 		action    func(log *zap.Logger)
-		check     func(files []os.FileInfo)
+		check     func(files []os.FileInfo) bool
 	}{
 		{
-			updateCfg: func(cfg *config.Log) {
+			updateCfg: func(cfg *config.LogOnline) {
 				cfg.Level = "error"
 				cfg.LogFile.MaxBackups = 2
 			},
@@ -60,12 +62,12 @@ func TestUpdateCfg(t *testing.T) {
 				msg = strings.Repeat("b", 800*1024)
 				log.Error(msg)
 			},
-			check: func(files []os.FileInfo) {
-				require.Equal(t, 1, len(files))
+			check: func(files []os.FileInfo) bool {
+				return len(files) == 1
 			},
 		},
 		{
-			updateCfg: func(cfg *config.Log) {
+			updateCfg: func(cfg *config.LogOnline) {
 				cfg.LogFile.MaxSize = 3
 				cfg.LogFile.MaxBackups = 5
 			},
@@ -75,13 +77,15 @@ func TestUpdateCfg(t *testing.T) {
 					log.Info(msg)
 				}
 			},
-			check: func(files []os.FileInfo) {
-				require.Equal(t, 1, len(files))
-				require.GreaterOrEqual(t, files[0].Size(), int64(2500*1024))
+			check: func(files []os.FileInfo) bool {
+				if len(files) != 1 {
+					return false
+				}
+				return files[0].Size() >= int64(2500*1024)
 			},
 		},
 		{
-			updateCfg: func(cfg *config.Log) {
+			updateCfg: func(cfg *config.LogOnline) {
 				cfg.LogFile.MaxBackups = 2
 			},
 			action: func(log *zap.Logger) {
@@ -90,19 +94,19 @@ func TestUpdateCfg(t *testing.T) {
 					log.Info(msg)
 				}
 			},
-			check: func(files []os.FileInfo) {
-				require.Equal(t, 3, len(files))
+			check: func(files []os.FileInfo) bool {
+				return len(files) == 3
 			},
 		},
 		{
-			updateCfg: func(cfg *config.Log) {
+			updateCfg: func(cfg *config.LogOnline) {
 				cfg.LogFile.Filename = ""
 			},
 			action: func(log *zap.Logger) {
 				log.Info("a")
 			},
-			check: func(files []os.FileInfo) {
-				require.Equal(t, 0, len(files))
+			check: func(files []os.FileInfo) bool {
+				return len(files) == 0
 			},
 		},
 	}
@@ -110,27 +114,42 @@ func TestUpdateCfg(t *testing.T) {
 	lg, ch := setupLogManager(t, cfg)
 	// Make sure the latest config also applies to cloned loggers.
 	lg = lg.Named("another").With(zap.String("field", "test_field"))
-	for _, test := range tests {
+	for i, test := range tests {
 		err := os.RemoveAll(dir)
 		require.NoError(t, err)
 
-		clonedCfg := *cfg
+		clonedCfg := cfg.LogOnline
 		test.updateCfg(&clonedCfg)
 		// Push it 2 times to make sure the first one has already taken affect.
 		ch <- &clonedCfg
 		ch <- &clonedCfg
 		test.action(lg)
-		logfiles := readLogFiles(t, dir)
-		test.check(logfiles)
+
+		// Backup files are removed by another goroutine, so there will be some delay.
+		// We check it multiple times until it succeeds.
+		timer := time.NewTimer(3 * time.Second)
+		succeed := false
+		for !succeed {
+			select {
+			case <-timer.C:
+				t.Fatalf("%dth case time out", i)
+			case <-time.After(10 * time.Millisecond):
+				logfiles := readLogFiles(t, dir)
+				if test.check(logfiles) {
+					succeed = true
+					break
+				}
+			}
+		}
+		timer.Stop()
 	}
 }
 
-func setupLogManager(t *testing.T, cfg *config.Log) (*zap.Logger, chan *config.Log) {
-	lm, err := NewLoggerManager(cfg)
+func setupLogManager(t *testing.T, cfg *config.Log) (*zap.Logger, chan *config.LogOnline) {
+	lm, lg, err := NewLoggerManager(cfg)
 	require.NoError(t, err)
-	lg := lm.BuildLogger()
-	ch := make(chan *config.Log)
-	lm.Init(lg, ch)
+	ch := make(chan *config.LogOnline)
+	lm.Init(ch)
 
 	t.Cleanup(func() {
 		require.NoError(t, lm.Close())
@@ -161,13 +180,15 @@ func TestLogConcurrently(t *testing.T) {
 	dir := t.TempDir()
 	fileName := filepath.Join(dir, "proxy.log")
 	cfg := &config.Log{
-		Level:   "info",
 		Encoder: "tidb",
-		LogFile: config.LogFile{
-			Filename:   fileName,
-			MaxSize:    1,
-			MaxDays:    2,
-			MaxBackups: 3,
+		LogOnline: config.LogOnline{
+			Level: "info",
+			LogFile: config.LogFile{
+				Filename:   fileName,
+				MaxSize:    1,
+				MaxDays:    2,
+				MaxBackups: 3,
+			},
 		},
 	}
 
@@ -189,7 +210,7 @@ func TestLogConcurrently(t *testing.T) {
 		})
 	}
 	wg.Run(func() {
-		newCfg := *cfg
+		newCfg := cfg.LogOnline
 		for ctx.Err() == nil {
 			newCfg.LogFile.MaxDays = int(rand.Int31n(10))
 			ch <- &newCfg

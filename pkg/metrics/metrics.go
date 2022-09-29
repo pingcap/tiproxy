@@ -110,7 +110,7 @@ func (mm *MetricsManager) pushMetric(ctx context.Context, addr string, interval 
 
 // registerProxyMetrics registers metrics.
 func registerProxyMetrics() {
-	prometheus.DefaultRegisterer.Unregister(prometheus.NewGoCollector())
+	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
 	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
 
 	prometheus.MustRegister(ConnGauge)

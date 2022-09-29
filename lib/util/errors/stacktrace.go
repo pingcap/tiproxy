@@ -53,7 +53,7 @@ func formatFrame(s fmt.State, fr runtime.Frame, verb rune) {
 	}
 }
 
-// stacktrace only stores the pointers, infomation will be queried as need.
+// stacktrace only stores the pointers, information will be queried as need.
 type stacktrace []uintptr
 
 // Format formats the stack of Frames according to the fmt.Formatter interface.
