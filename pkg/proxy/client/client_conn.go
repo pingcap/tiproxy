@@ -44,7 +44,7 @@ type ClientConnection struct {
 }
 
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager, proxyProtocol bool) *ClientConnection {
-	opts := make([]pnet.PacketIOption, 0, 1)
+	opts := make([]pnet.PacketIOption, 0, 2)
 	if proxyProtocol {
 		opts = append(opts, pnet.WithProxy, pnet.WithClient)
 	}

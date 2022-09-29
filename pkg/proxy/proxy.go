@@ -60,13 +60,12 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Securi
 		logger: logger,
 		nsmgr:  nsmgr,
 		mu: serverState{
-			tcpKeepAlive:   cfg.TCPKeepAlive,
-			maxConnections: cfg.MaxConnections,
-			proxyProtocol:  cfg.ProxyProtocol != "",
-			connID:         0,
-			clients:        make(map[uint64]*client.ClientConnection),
+			connID:  0,
+			clients: make(map[uint64]*client.ClientConnection),
 		},
 	}
+
+	s.reset(&cfg.ProxyServerOnline)
 
 	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.ServerTLS); err != nil {
 		return nil, err
@@ -83,16 +82,21 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Securi
 	return s, nil
 }
 
+func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
+	s.mu.Lock()
+	s.mu.tcpKeepAlive = cfg.TCPKeepAlive
+	s.mu.maxConnections = cfg.MaxConnections
+	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
+	s.mu.Unlock()
+}
+
 func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.ProxyServerOnline) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case och := <-onlineProxyConfig:
-			s.mu.Lock()
-			s.mu.tcpKeepAlive = och.TCPKeepAlive
-			s.mu.maxConnections = och.MaxConnections
-			s.mu.Unlock()
+			s.reset(och)
 		default:
 			conn, err := s.listener.Accept()
 			if err != nil {
