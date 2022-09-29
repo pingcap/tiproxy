@@ -484,42 +484,13 @@ func TestSpecialCmds(t *testing.T) {
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
+				ts.mb.sessionStates = "{\"current-db\":\"session_db\"}"
 				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
 				require.Equal(t, "another_user", ts.mb.username)
-				require.Equal(t, "another_db", ts.mb.db)
+				require.Equal(t, "session_db", ts.mb.db)
 				expectCap := pnet.Capability(ts.mp.authenticator.supportedServerCapabilities.Uint32() &^ (mysql.ClientMultiStatements | mysql.ClientPluginAuthLenencClientData))
 				gotCap := pnet.Capability(ts.mb.clientCapability &^ mysql.ClientPluginAuthLenencClientData)
 				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
-				return nil
-			},
-		},
-	}
-	ts.runTests(runners)
-}
-
-func TestUpdateCurrentDB(t *testing.T) {
-	ts := newBackendMgrTester(t)
-	runners := []runner{
-		// 1st handshake
-		{
-			client:  ts.mc.authenticate,
-			proxy:   ts.firstHandshake4Proxy,
-			backend: ts.handshake4Backend,
-		},
-		// 2nd handshake
-		{
-			client: nil,
-			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
-				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
-				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendConn)
-				return nil
-			},
-			backend: func(packetIO *pnet.PacketIO) error {
-				ts.mb.sessionStates = "{\"current-db\":\"another_db\"}"
-				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
-				require.Equal(t, "another_db", ts.mb.db)
 				return nil
 			},
 		},
