@@ -24,33 +24,33 @@ import (
 )
 
 type backendConfig struct {
-	// for auth
-	tlsConfig   *tls.Config
-	authPlugin  string
-	salt        []byte
-	columns     int
-	loops       int
-	params      int
-	rows        int
-	respondType respondType // for cmd
-	stmtNum     int
-	capability  uint32
-	status      uint16
-	authSucceed bool
-	switchAuth  bool
-	// for both auth and cmd
-	abnormalExit bool
+	tlsConfig     *tls.Config
+	authPlugin    string
+	sessionStates string
+	salt          []byte
+	columns       int
+	loops         int
+	params        int
+	rows          int
+	respondType   respondType
+	stmtNum       int
+	capability    uint32
+	status        uint16
+	authSucceed   bool
+	switchAuth    bool
+	abnormalExit  bool
 }
 
 func newBackendConfig() *backendConfig {
 	return &backendConfig{
-		capability:  defaultTestBackendCapability,
-		salt:        mockSalt,
-		authPlugin:  mysql.AuthCachingSha2Password,
-		switchAuth:  true,
-		authSucceed: true,
-		loops:       1,
-		stmtNum:     1,
+		capability:    defaultTestBackendCapability,
+		salt:          mockSalt,
+		authPlugin:    mysql.AuthCachingSha2Password,
+		switchAuth:    true,
+		authSucceed:   true,
+		loops:         1,
+		stmtNum:       1,
+		sessionStates: mockSessionStates,
 	}
 }
 
@@ -372,7 +372,7 @@ func (mb *mockBackend) respondSessionStates(packetIO *pnet.PacketIO) error {
 	names := []string{sessionStatesCol, sessionTokenCol}
 	values := [][]any{
 		{
-			mockSessionStates, mockCmdStr,
+			mb.sessionStates, mockCmdStr,
 		},
 	}
 	return mb.writeResultSet(packetIO, names, values)

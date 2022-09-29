@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
 
@@ -263,6 +264,9 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}()
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(); rs.err != nil {
+		return
+	}
+	if rs.err = mgr.updateAuthInfoFromSessionStates(hack.Slice(sessionStates)); rs.err != nil {
 		return
 	}
 

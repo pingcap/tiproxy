@@ -497,6 +497,36 @@ func TestSpecialCmds(t *testing.T) {
 	ts.runTests(runners)
 }
 
+func TestUpdateCurrentDB(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// 2nd handshake
+		{
+			client: nil,
+			proxy: func(_, _ *pnet.PacketIO) error {
+				backend1 := ts.mp.backendConn
+				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
+				require.NotEqual(t, backend1, ts.mp.backendConn)
+				return nil
+			},
+			backend: func(packetIO *pnet.PacketIO) error {
+				ts.mb.sessionStates = "{\"current-db\":\"another_db\"}"
+				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
+				require.Equal(t, "another_db", ts.mb.db)
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
 // Test that closing the BackendConnMgr while it's receiving a redirection signal is OK.
 func TestCloseWhileRedirect(t *testing.T) {
 	ts := newBackendMgrTester(t)
