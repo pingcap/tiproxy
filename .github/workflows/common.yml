@@ -14,6 +14,10 @@ on:
         type: string
         description: "checkout specific ref"
         required: true
+      cache:
+        type: string
+        description: "cache key"
+        default: "tmp"
       all_platform:
         type: boolean
         description: "test on all platforms or not"
@@ -55,8 +59,9 @@ jobs:
           path: |
             ${{ env.GOCACHE }}
             ${{ env.GOMODCACHE }}
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-go-${{ inputs.cache }}-${{ hashFiles('**/go.sum') }}
           restore-keys: |
+            ${{ runner.os }}-go-best
             ${{ runner.os }}-go-
       - name: make ${{ inputs.target }} 
         if: ${{ inputs.target != '' }}
