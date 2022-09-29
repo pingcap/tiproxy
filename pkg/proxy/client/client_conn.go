@@ -42,12 +42,13 @@ type ClientConnection struct {
 	connMgr           *backend.BackendConnManager
 	proxyProtocol     bool
 }
+
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager, proxyProtocol bool) *ClientConnection {
 	opts := make([]pnet.PacketIOption, 0, 1)
 	if proxyProtocol {
 		opts = append(opts, pnet.WithProxy, pnet.WithClient)
 	}
-	pkt := pnet.NewPacketIO(conn)
+	pkt := pnet.NewPacketIO(conn, opts...)
 	return &ClientConnection{
 		logger:            logger.With(zap.Bool("proxy-protocol", proxyProtocol)),
 		frontendTLSConfig: frontendTLSConfig,

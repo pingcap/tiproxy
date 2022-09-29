@@ -83,7 +83,7 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 		if err := packetIO.WritePacket(resp[:32], true); err != nil {
 			return err
 		}
-		if err := packetIO.UpgradeToClientTLS(mc.tlsConfig); err != nil {
+		if err := packetIO.ClientTLSHandshake(mc.tlsConfig); err != nil {
 			return err
 		}
 	}

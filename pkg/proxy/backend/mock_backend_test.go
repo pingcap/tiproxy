@@ -90,7 +90,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	capability := binary.LittleEndian.Uint16(clientPkt[:2])
 	sslEnabled := uint32(capability)&mysql.ClientSSL > 0 && mb.capability&mysql.ClientSSL > 0
 	if sslEnabled {
-		if _, err = packetIO.UpgradeToServerTLS(mb.tlsConfig); err != nil {
+		if _, err = packetIO.ServerTLSHandshake(mb.tlsConfig); err != nil {
 			return err
 		}
 		// read the response again

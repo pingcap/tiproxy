@@ -150,7 +150,7 @@ func TestTLS(t *testing.T) {
 			err = cli.WritePacket(message, true)
 			require.NoError(t, err)
 
-			require.NoError(t, cli.UpgradeToClientTLS(ctls))
+			require.NoError(t, cli.ClientTLSHandshake(ctls))
 
 			err = cli.WritePacket(message, true)
 			require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestTLS(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, message, data)
 
-			_, err = srv.UpgradeToServerTLS(stls)
+			_, err = srv.ServerTLSHandshake(stls)
 			require.NoError(t, err)
 
 			data, err = srv.ReadPacket()
