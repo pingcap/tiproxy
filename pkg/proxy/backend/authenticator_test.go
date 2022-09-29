@@ -73,8 +73,7 @@ func TestUnsupportedCapability(t *testing.T) {
 		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
 			if ts.mb.backendConfig.capability&mysql.ClientSSL == 0 {
 				require.ErrorContains(t, ts.mp.err, "must enable TLS")
-			} else if (ts.mc.clientConfig.capability&mysql.ClientProtocol41 == 0) ||
-				(ts.mb.backendConfig.capability&ts.mc.capability&mysql.ClientPSMultiResults > 0) {
+			} else if ts.mc.clientConfig.capability&mysql.ClientProtocol41 == 0 {
 				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
 			} else {
 				require.NoError(t, ts.mc.err)

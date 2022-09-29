@@ -487,7 +487,7 @@ func TestSpecialCmds(t *testing.T) {
 				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
 				require.Equal(t, "another_user", ts.mb.username)
 				require.Equal(t, "another_db", ts.mb.db)
-				expectCap := pnet.Capability(defaultTestClientCapability &^ (mysql.ClientMultiStatements | mysql.ClientPluginAuthLenencClientData))
+				expectCap := pnet.Capability(ts.mp.authenticator.supportedServerCapabilities.Uint32() &^ (mysql.ClientMultiStatements | mysql.ClientPluginAuthLenencClientData))
 				gotCap := pnet.Capability(ts.mb.clientCapability &^ mysql.ClientPluginAuthLenencClientData)
 				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
 				return nil

@@ -131,8 +131,9 @@ func TestPacketIO(t *testing.T) {
 			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp()
 			require.NoError(t, err)
 			require.True(t, isSSL)
-			_, _, err = srv.ReadSSLRequestOrHandshakeResp()
-			require.ErrorIs(t, err, ErrExpectSSLRequest)
+			_, isSSL, err = srv.ReadSSLRequestOrHandshakeResp()
+			require.NoError(t, err)
+			require.False(t, isSSL)
 		},
 		1,
 	)
