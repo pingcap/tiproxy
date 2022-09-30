@@ -30,38 +30,36 @@ endif
 IMAGE_TAG ?= latest
 EXECUTABLE_TARGETS := $(patsubst cmd/%,cmd_%,$(wildcard cmd/*))
 
-.PHONY: cmd_% build test docker ./bin/golangci-lint ./bin/gocovmerge
+.PHONY: cmd_% test lint docker golangci-lint gocovmerge
 
 default: cmd
 
-cmd: $(EXECUTABLE_TARGETS)
+dev: cmd lint test
 
-build: cmd
-	go build $(BUILDFLAGS) ./...
-	cd lib && go build $(BUILDFLAGS) ./...
+cmd: $(EXECUTABLE_TARGETS)
 
 cmd_%: OUTPUT=$(patsubst cmd_%,./bin/%,$@)
 cmd_%: SOURCE=$(patsubst cmd_%,./cmd/%,$@)
 cmd_%:
 	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
-lint: ./bin/golangci-lint
+golangci-lint:
+	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+lint: golangci-lint
 	$(GOBIN)/golangci-lint run
 	cd lib && $(GOBIN)/golangci-lint run
 
-test: ./bin/gocovmerge
+gocovmerge:
+	GOBIN=$(GOBIN) go install github.com/wadey/gocovmerge@master
+
+test: gocovmerge
 	rm -f .cover.*
 	go test -coverprofile=.cover.pkg ./...
 	cd lib && go test -coverprofile=../.cover.lib ./...
 	$(GOBIN)/gocovmerge .cover.* > .cover
 	rm -f .cover.*
 	go tool cover -html=.cover -o .cover.html
-
-./bin/golangci-lint:
-	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-./bin/gocovmerge:
-	GOBIN=$(GOBIN) go install github.com/wadey/gocovmerge@master
 
 docker:
 	docker build $(DOCKERFLAG) -t "tiproxy:${IMAGE_TAG}" --build-arg='GOPROXY=$(shell go env GOPROXY),BUILDFLAGS=$(BUILDFLAGS),' -f docker/Dockerfile .

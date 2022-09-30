@@ -36,18 +36,9 @@ jobs:
       target: "cmd"
       all_platform: true
 
-  build:
-    if: ${{ github.event_name != 'push' }}
-    needs: cmd
-    uses: ./.github/workflows/common.yml
-    with:
-      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
-      ref: ${{ inputs.ref || github.ref }}
-      target: "build"
-
   lint:
     if: ${{ github.event_name != 'push' }}
-    needs: build
+    needs: cmd
     uses: ./.github/workflows/common.yml
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}
@@ -56,7 +47,7 @@ jobs:
 
   test:
     if: ${{ github.event_name != 'push' }}
-    needs: build
+    needs: cmd
     uses: ./.github/workflows/common.yml
     with:
       debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug }}

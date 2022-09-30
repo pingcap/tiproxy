@@ -55,7 +55,7 @@ jobs:
           path: |
             ${{ env.GOCACHE }}
             ${{ env.GOMODCACHE }}
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-go-${{ inputs.ref }}
           restore-keys: |
             ${{ runner.os }}-go-
       - name: make ${{ inputs.target }} 
