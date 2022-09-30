@@ -18,9 +18,6 @@ issues:
       linters:
         - gosec
       text: "G402:"
-    - linters:
-        - unused
-      source: "updateAuthInfoFromSessionStates"
 
 linters:
   enable:
