@@ -60,5 +60,4 @@ jobs:
     with:
       ref: ${{ inputs.ref || github.ref }}
       debug: false
-      cache: best
       target: "build lint test"
