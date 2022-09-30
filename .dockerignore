@@ -1,1 +1,11 @@
-.gitignore
+.git/
+**/bin
+**/test
+**/*.iml
+**/.idea
+**/*.swp
+**/.DS_Store
+**/vendor
+**/work
+**/.vscode/
+**/.cover*
