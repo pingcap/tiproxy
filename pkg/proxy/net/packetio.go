@@ -50,6 +50,7 @@ import (
 
 var (
 	errInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
+	ErrClientConn      = errors.New("this is an error from client")
 
 	proxyV2Magic = []byte{0xD, 0xA, 0xD, 0xA, 0x0, 0xD, 0xA, 0x51, 0x55, 0x49, 0x54, 0xA}
 )
@@ -82,11 +83,7 @@ type PacketIO struct {
 	sequence    uint8
 }
 
-func NewPacketIO(conn net.Conn) *PacketIO {
-	return NewPacketIOWrapErr(conn, nil)
-}
-
-func NewPacketIOWrapErr(conn net.Conn, wrap error) *PacketIO {
+func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 	buf := bufio.NewReadWriter(
 		bufio.NewReaderSize(conn, defaultReaderSize),
 		bufio.NewWriterSize(conn, defaultWriterSize),
@@ -96,20 +93,24 @@ func NewPacketIOWrapErr(conn net.Conn, wrap error) *PacketIO {
 			conn,
 			buf.Reader,
 		},
-		wrap:     wrap,
 		sequence: 0,
 		// TODO: disable it by default now
 		proxyInited: atomic.NewBool(true),
 		buf:         buf,
 	}
+	for _, opt := range opts {
+		opt(p)
+	}
 	return p
 }
 
 func (p *PacketIO) wrapErr(err error) error {
+	e := err
 	if p.wrap != nil {
-		return errors.Wrap(p.wrap, err)
+		e = errors.Wrap(p.wrap, err)
 	}
-	return err
+	e = errors.WithStack(e)
+	return e
 }
 
 // Proxy returned parsed proxy header from clients if any.
@@ -182,19 +183,15 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 }
 
 // ReadPacket reads data and removes the header
-func (p *PacketIO) ReadPacket() ([]byte, error) {
-	var data []byte
-	for {
-		buf, more, err := p.readOnePacket()
+func (p *PacketIO) ReadPacket() (data []byte, err error) {
+	for more := true; more; {
+		var buf []byte
+		buf, more, err = p.readOnePacket()
 		if err != nil {
-			return nil, p.wrapErr(err)
+			err = p.wrapErr(err)
+			return
 		}
-
 		data = append(data, buf...)
-
-		if !more {
-			break
-		}
 	}
 	return data, nil
 }
@@ -203,6 +200,8 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 	more := false
 	length := len(data)
 	if length >= mysql.MaxPayloadLen {
+		// we need another packet, this is true even if
+		// the current packet is of len(MaxPayloadLen) exactly
 		length = mysql.MaxPayloadLen
 		more = true
 	}
@@ -226,24 +225,15 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 }
 
 // WritePacket writes data without a header
-func (p *PacketIO) WritePacket(data []byte, flush bool) error {
-	// The original data might be empty.
-	for {
-		n, more, err := p.writeOnePacket(data)
+func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
+	for more := true; more; {
+		var n int
+		n, more, err = p.writeOnePacket(data)
 		if err != nil {
-			return p.wrapErr(err)
+			err = p.wrapErr(err)
+			return
 		}
 		data = data[n:]
-		// if the last packet ends with a length of MaxPayloadLen exactly
-		// we need another zero-length packet to end it
-		if len(data) == 0 {
-			if more {
-				if _, _, err := p.writeOnePacket(nil); err != nil {
-					return p.wrapErr(err)
-				}
-			}
-			break
-		}
 	}
 	if flush {
 		return p.Flush()

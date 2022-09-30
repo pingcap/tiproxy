@@ -89,7 +89,7 @@ func NewBackendConnManager(logger *zap.Logger, connectionID uint64) *BackendConn
 		logger:         logger,
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
-		authenticator:  &Authenticator{},
+		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities},
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
@@ -102,18 +102,21 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 }
 
 // Connect connects to the first backend and then start watching redirection signals.
-func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, proxyProtocol bool) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
+
 	mgr.backendConn = NewBackendConnection(serverAddr)
 	if err := mgr.backendConn.Connect(); err != nil {
 		return err
 	}
 	backendIO := mgr.backendConn.PacketIO()
+
 	mgr.authenticator.serverAddr = serverAddr
-	if err := mgr.authenticator.handshakeFirstTime(clientIO, backendIO, frontendTLSConfig, backendTLSConfig); err != nil {
+	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, backendIO, frontendTLSConfig, backendTLSConfig, proxyProtocol); err != nil {
 		return err
 	}
+
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc

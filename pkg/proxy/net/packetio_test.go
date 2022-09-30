@@ -29,6 +29,10 @@ func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T
 	var wg waitgroup.WaitGroup
 	client, server := net.Pipe()
 	cli, srv := NewPacketIO(client), NewPacketIO(server)
+	if ddl, ok := t.Deadline(); ok {
+		require.NoError(t, client.SetDeadline(ddl))
+		require.NoError(t, server.SetDeadline(ddl))
+	}
 	for i := 0; i < loop; i++ {
 		wg.Run(func() {
 			a(t, cli)
@@ -53,6 +57,9 @@ func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T,
 		wg.Run(func() {
 			cli, err := net.Dial("tcp", listener.Addr().String())
 			require.NoError(t, err)
+			if ddl, ok := t.Deadline(); ok {
+				require.NoError(t, cli.SetDeadline(ddl))
+			}
 			cliIO := NewPacketIO(cli)
 			a(t, cliIO)
 			require.NoError(t, cliIO.Close())
@@ -60,6 +67,9 @@ func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T,
 		wg.Run(func() {
 			srv, err := listener.Accept()
 			require.NoError(t, err)
+			if ddl, ok := t.Deadline(); ok {
+				require.NoError(t, srv.SetDeadline(ddl))
+			}
 			srvIO := NewPacketIO(srv)
 			b(t, srvIO)
 			require.NoError(t, srvIO.Close())
@@ -87,8 +97,8 @@ func TestPacketIO(t *testing.T) {
 			require.NoError(t, err)
 
 			// send correct and wrong capability flags
-			var hdr [4]byte
-			binary.LittleEndian.PutUint16(hdr[:], uint16(mysql.ClientSSL))
+			var hdr [32]byte
+			binary.LittleEndian.PutUint32(hdr[:], mysql.ClientSSL)
 			err = cli.WritePacket(hdr[:], true)
 			require.NoError(t, err)
 
@@ -97,7 +107,7 @@ func TestPacketIO(t *testing.T) {
 			require.NoError(t, err)
 		},
 		func(t *testing.T, srv *PacketIO) {
-			var salt [8]byte
+			var salt [40]byte
 			var msg []byte
 			var err error
 
@@ -114,12 +124,16 @@ func TestPacketIO(t *testing.T) {
 
 			// send handshake
 			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], mysql.AuthNativePassword))
+			// salt should not be long enough
+			require.ErrorIs(t, srv.WriteInitialHandshake(0, make([]byte, 4), mysql.AuthNativePassword), ErrSaltNotLongEnough)
 
 			// expect correct and wrong capability flags
-			_, err = srv.ReadSSLRequest()
+			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp()
 			require.NoError(t, err)
-			_, err = srv.ReadSSLRequest()
-			require.ErrorIs(t, err, ErrExpectSSLRequest)
+			require.True(t, isSSL)
+			_, isSSL, err = srv.ReadSSLRequestOrHandshakeResp()
+			require.NoError(t, err)
+			require.False(t, isSSL)
 		},
 		1,
 	)
@@ -137,7 +151,7 @@ func TestTLS(t *testing.T) {
 			err = cli.WritePacket(message, true)
 			require.NoError(t, err)
 
-			require.NoError(t, cli.UpgradeToClientTLS(ctls))
+			require.NoError(t, cli.ClientTLSHandshake(ctls))
 
 			err = cli.WritePacket(message, true)
 			require.NoError(t, err)
@@ -152,7 +166,7 @@ func TestTLS(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, message, data)
 
-			_, err = srv.UpgradeToServerTLS(stls)
+			_, err = srv.ServerTLSHandshake(stls)
 			require.NoError(t, err)
 
 			data, err = srv.ReadPacket()

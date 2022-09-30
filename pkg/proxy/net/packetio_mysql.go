@@ -21,9 +21,20 @@ import (
 	"github.com/pingcap/tidb/parser/mysql"
 )
 
-// WriteInitialHandshake mocks an initial handshake as a server.
-// It's used for testing and will be used for tenant-aware routing.
+var (
+	ErrSaltNotLongEnough = errors.New("salt is not long enough")
+)
+
+// WriteInitialHandshake writes an initial handshake as a server.
+// It's used for tenant-aware routing and testing.
 func (p *PacketIO) WriteInitialHandshake(capability uint32, salt []byte, authPlugin string) error {
+	saltLen := len(salt)
+	if saltLen < 8 {
+		return ErrSaltNotLongEnough
+	} else if saltLen > 20 {
+		saltLen = 20
+	}
+
 	data := make([]byte, 0, 128)
 
 	// min version 10
@@ -46,11 +57,11 @@ func (p *PacketIO) WriteInitialHandshake(capability uint32, salt []byte, authPlu
 	// capability flag upper 2 bytes, using default capability here
 	data = append(data, byte(capability>>16), byte(capability>>24))
 	// length of auth-plugin-data
-	data = append(data, byte(len(salt)+1))
+	data = append(data, byte(saltLen+1))
 	// reserved 10 [00]
 	data = append(data, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 	// auth-plugin-data-part-2
-	data = append(data, salt[8:]...)
+	data = append(data, salt[8:saltLen]...)
 	data = append(data, 0)
 	// auth-plugin name
 	data = append(data, []byte(authPlugin)...)
@@ -75,22 +86,20 @@ func (p *PacketIO) WriteShaCommand() error {
 	return p.WritePacket([]byte{ShaCommand, FastAuthFail}, true)
 }
 
-func (p *PacketIO) ReadSSLRequest() ([]byte, error) {
-	pkt, err := p.ReadPacket()
+func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err error) {
+	pkt, err = p.ReadPacket()
 	if err != nil {
-		return nil, err
+		return
 	}
 
-	if len(pkt) < 2 {
-		return nil, errors.WithStack(errors.Errorf("%w: but got less than 2 bytes", ErrExpectSSLRequest))
+	if len(pkt) < 32 {
+		err = errors.WithStack(errors.Errorf("%w: but got less than 32 bytes", ErrExpectSSLRequest))
+		return
 	}
 
-	capability := uint32(binary.LittleEndian.Uint16(pkt[:2]))
-	if capability&mysql.ClientSSL == 0 {
-		return nil, errors.WithStack(errors.Errorf("%w: but capability flags has no SSL", ErrExpectSSLRequest))
-	}
-
-	return pkt, nil
+	capability := uint32(binary.LittleEndian.Uint32(pkt[:4]))
+	isSSL = capability&mysql.ClientSSL != 0
+	return
 }
 
 // WriteErrPacket writes an Error packet.

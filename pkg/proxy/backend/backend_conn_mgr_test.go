@@ -118,7 +118,7 @@ func newBackendMgrTester(t *testing.T) *backendMgrTester {
 
 // Define some common runners here to reduce code redundancy.
 func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	err := ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+	err := ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, false)
 	require.NoError(ts.t, err)
 	mer := newMockEventReceiver()
 	ts.mp.SetEventReceiver(mer)
@@ -360,7 +360,7 @@ func TestConnectFail(t *testing.T) {
 		{
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				return ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				return ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, false)
 			},
 			backend: func(_ *pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()
@@ -487,7 +487,9 @@ func TestSpecialCmds(t *testing.T) {
 				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
 				require.Equal(t, "another_user", ts.mb.username)
 				require.Equal(t, "another_db", ts.mb.db)
-				require.Equal(t, defaultClientCapability&^mysql.ClientMultiStatements, ts.mb.clientCapability)
+				expectCap := pnet.Capability(ts.mp.authenticator.supportedServerCapabilities.Uint32() &^ (mysql.ClientMultiStatements | mysql.ClientPluginAuthLenencClientData))
+				gotCap := pnet.Capability(ts.mb.clientCapability &^ mysql.ClientPluginAuthLenencClientData)
+				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
 				return nil
 			},
 		},

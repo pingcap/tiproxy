@@ -19,7 +19,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"gopkg.in/yaml.v3"
+)
+
+var (
+	ErrUnsupportedProxyProtocolVersion = errors.New("unsupported proxy protocol version")
 )
 
 type Config struct {
@@ -40,13 +45,13 @@ type Metrics struct {
 type ProxyServerOnline struct {
 	MaxConnections uint64 `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
 	TCPKeepAlive   bool   `yaml:"tcp-keep-alive,omitempty" toml:"tcp-keep-alive,omitempty" json:"tcp-keep-alive,omitempty"`
+	ProxyProtocol  string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
 }
 
 type ProxyServer struct {
-	Addr          string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
-	PDAddrs       string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
-	ProxyProtocol string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
-	ProxyServerOnline
+	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
+	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
+	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
 type API struct {
@@ -122,6 +127,12 @@ func (cfg *Config) Check() error {
 			return err
 		}
 		cfg.Workdir = filepath.Clean(d)
+	}
+	switch cfg.Proxy.ProxyProtocol {
+	case "v2":
+	case "":
+	default:
+		return errors.Wrapf(ErrUnsupportedProxyProtocolVersion, "%s", cfg.Proxy.ProxyProtocol)
 	}
 	return nil
 }

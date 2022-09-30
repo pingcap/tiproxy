@@ -15,6 +15,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,6 +35,7 @@ var testProxyConfig = Config{
 		ProxyServerOnline: ProxyServerOnline{
 			MaxConnections: 1,
 			TCPKeepAlive:   true,
+			ProxyProtocol:  "v2",
 		},
 	},
 	API: API{
@@ -94,4 +97,39 @@ func TestProxyConfig(t *testing.T) {
 	data2, err := cfg.ToBytes()
 	require.NoError(t, err)
 	require.Equal(t, data1, data2)
+}
+
+func TestProxyCheck(t *testing.T) {
+	testcases := []struct {
+		pre  func(*testing.T, *Config)
+		post func(*testing.T, *Config)
+		err  error
+	}{
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Workdir = ""
+			},
+			post: func(t *testing.T, c *Config) {
+				cwd, err := os.Getwd()
+				require.NoError(t, err)
+				require.Equal(t, filepath.Clean(cwd), c.Workdir)
+			},
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.ProxyProtocol = "v1"
+			},
+			err: ErrUnsupportedProxyProtocolVersion,
+		},
+	}
+	for _, tc := range testcases {
+		cfg := testProxyConfig
+		tc.pre(t, &cfg)
+		if tc.err != nil {
+			require.ErrorIs(t, cfg.Check(), tc.err)
+			continue
+		}
+		require.NoError(t, cfg.Check())
+		tc.post(t, &cfg)
+	}
 }

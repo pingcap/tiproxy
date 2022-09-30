@@ -39,7 +39,7 @@ Notable changes
 
 - [ ] Has configuration change
 - [ ] Has HTTP API interfaces change (Don't forget to [add the declarative for API](https://github.com/tikv/pd/blob/master/docs/development.md#updating-api-documentation))
-- [ ] Has weirctl change
+- [ ] Has tiproxyctl change
 - [ ] Other user behavior changes
 
 ### Release note

@@ -134,7 +134,7 @@ func NewScoreBasedRouter(logger *zap.Logger, cfg *config.BackendNamespace, clien
 	router.wg.Run(func() {
 		router.rebalanceLoop(childCtx)
 	})
-	return router, err
+	return router, nil
 }
 
 // Route implements Router.Route interface.

@@ -21,6 +21,7 @@ import (
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"go.uber.org/zap"
 )
 
 type proxyConfig struct {
@@ -33,7 +34,7 @@ type proxyConfig struct {
 
 func newProxyConfig() *proxyConfig {
 	return &proxyConfig{
-		capability:   defaultBackendCapability,
+		capability:   defaultTestBackendCapability,
 		sessionToken: mockToken,
 	}
 }
@@ -45,12 +46,14 @@ type mockProxy struct {
 	rs *gomysql.Result
 	// execution results
 	err         error
+	logger      *zap.Logger
 	holdRequest bool
 }
 
 func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
 		proxyConfig:        cfg,
+		logger:             logger.CreateLoggerForTest(t).Named("mockProxy"),
 		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), 0),
 	}
 	mp.cmdProcessor.capability = cfg.capability
@@ -58,7 +61,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeFirstTime(clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig)
+	return mp.authenticator.handshakeFirstTime(mp.logger, clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig, false)
 }
 
 func (mp *mockProxy) authenticateSecondTime(_, backendIO *pnet.PacketIO) error {

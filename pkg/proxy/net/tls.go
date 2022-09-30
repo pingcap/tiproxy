@@ -20,18 +20,18 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
-func (p *PacketIO) UpgradeToServerTLS(tlsConfig *tls.Config) (tls.ConnectionState, error) {
+func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error) {
 	tlsConfig = tlsConfig.Clone()
 	tlsConn := tls.Server(p.conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
-		return tlsConn.ConnectionState(), errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
+		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(ErrHandshakeTLS, err))
 	}
 	p.conn = tlsConn
 	p.buf.Writer.Reset(p.conn)
 	return tlsConn.ConnectionState(), nil
 }
 
-func (p *PacketIO) UpgradeToClientTLS(tlsConfig *tls.Config) error {
+func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 	tlsConfig = tlsConfig.Clone()
 	tlsConn := tls.Client(p.conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {

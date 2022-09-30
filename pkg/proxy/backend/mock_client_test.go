@@ -44,7 +44,7 @@ type clientConfig struct {
 
 func newClientConfig() *clientConfig {
 	return &clientConfig{
-		capability: defaultClientCapability,
+		capability: defaultTestClientCapability,
 		username:   mockUsername,
 		dbName:     mockDBName,
 		authPlugin: mysql.AuthCachingSha2Password,
@@ -78,12 +78,12 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 		return err
 	}
 
-	resp, headerPos := pnet.MakeHandshakeResponse(mc.username, mc.dbName, mc.authPlugin, mc.collation, mc.authData, mc.attrs, mc.capability)
+	resp := pnet.MakeHandshakeResponse(mc.username, mc.dbName, mc.authPlugin, mc.collation, mc.authData, mc.attrs, mc.capability)
 	if mc.capability&mysql.ClientSSL > 0 {
-		if err := packetIO.WritePacket(resp[:headerPos], true); err != nil {
+		if err := packetIO.WritePacket(resp[:32], true); err != nil {
 			return err
 		}
-		if err := packetIO.UpgradeToClientTLS(mc.tlsConfig); err != nil {
+		if err := packetIO.ClientTLSHandshake(mc.tlsConfig); err != nil {
 			return err
 		}
 	}

@@ -38,6 +38,7 @@ type serverState struct {
 	connID         uint64
 	maxConnections uint64
 	tcpKeepAlive   bool
+	proxyProtocol  bool
 }
 
 type SQLServer struct {
@@ -59,12 +60,12 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Securi
 		logger: logger,
 		nsmgr:  nsmgr,
 		mu: serverState{
-			tcpKeepAlive:   cfg.TCPKeepAlive,
-			maxConnections: cfg.MaxConnections,
-			connID:         0,
-			clients:        make(map[uint64]*client.ClientConnection),
+			connID:  0,
+			clients: make(map[uint64]*client.ClientConnection),
 		},
 	}
+
+	s.reset(&cfg.ProxyServerOnline)
 
 	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.ServerTLS); err != nil {
 		return nil, err
@@ -81,16 +82,21 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Securi
 	return s, nil
 }
 
+func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
+	s.mu.Lock()
+	s.mu.tcpKeepAlive = cfg.TCPKeepAlive
+	s.mu.maxConnections = cfg.MaxConnections
+	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
+	s.mu.Unlock()
+}
+
 func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.ProxyServerOnline) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case och := <-onlineProxyConfig:
-			s.mu.Lock()
-			s.mu.tcpKeepAlive = och.TCPKeepAlive
-			s.mu.maxConnections = och.MaxConnections
-			s.mu.Unlock()
+			s.reset(och)
 		default:
 			conn, err := s.listener.Accept()
 			if err != nil {
@@ -124,12 +130,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 
 	connID := s.mu.connID
 	s.mu.connID++
-	logger := s.logger.With(zap.Uint64("connID", connID))
-	clientConn := client.NewClientConnection(logger.Named("cliconn"), conn, s.frontendTLSConfig, s.backendTLSConfig, s.nsmgr, backend.NewBackendConnManager(logger.Named("bemgr"), connID))
+	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
+	clientConn := client.NewClientConnection(logger.Named("cliconn"), conn, s.frontendTLSConfig, s.backendTLSConfig, s.nsmgr, backend.NewBackendConnManager(logger.Named("clibemgr"), connID), s.mu.proxyProtocol)
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 
-	logger.Info("new connection", zap.String("remoteAddr", conn.RemoteAddr().String()))
+	logger.Info("new connection")
 	metrics.ConnGauge.Inc()
 
 	defer func() {

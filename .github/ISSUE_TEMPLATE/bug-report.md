@@ -18,7 +18,7 @@ Please answer these questions before submitting your issue. Thanks!
 
 ### 4. What is your version? (Required)
 
-<!-- Paste the output of weirproxy -V -->
-<!-- Paste the output of weirctl -V if related -->
+<!-- Paste the output of tiproxy version -->
+<!-- Paste the output of tiproxyctl version if related -->
 <!-- Paste the output of SELECT tidb_version()  if related -->
 

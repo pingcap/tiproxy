@@ -26,42 +26,42 @@ func TestUnsupportedCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientSSL
+				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientSSL
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientSSL
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultBackendCapability & ^mysql.ClientSSL
-			},
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultBackendCapability | mysql.ClientSSL
+				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientSSL
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientProtocol41
+				cfg.backendConfig.capability = defaultTestBackendCapability & ^mysql.ClientSSL
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientProtocol41
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultClientCapability & ^mysql.ClientPSMultiResults
-			},
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultClientCapability | mysql.ClientPSMultiResults
+				cfg.backendConfig.capability = defaultTestBackendCapability | mysql.ClientSSL
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientPSMultiResults
+				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientProtocol41
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientPSMultiResults
+				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientProtocol41
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability = defaultTestClientCapability & ^mysql.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability = defaultTestClientCapability | mysql.ClientPSMultiResults
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientPSMultiResults
 			},
 		},
 	}
@@ -74,9 +74,7 @@ func TestUnsupportedCapability(t *testing.T) {
 			if ts.mb.backendConfig.capability&mysql.ClientSSL == 0 {
 				require.ErrorContains(t, ts.mp.err, "must enable TLS")
 			} else if ts.mc.clientConfig.capability&mysql.ClientProtocol41 == 0 {
-				require.ErrorContains(t, ts.mp.err, "not supported")
-			} else if ts.mb.backendConfig.capability&ts.mc.capability&mysql.ClientPSMultiResults > 0 {
-				require.ErrorContains(t, ts.mp.err, "not supported")
+				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
 			} else {
 				require.NoError(t, ts.mc.err)
 				require.NoError(t, ts.mp.err)
@@ -99,10 +97,10 @@ func TestAuthPlugin(t *testing.T) {
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientPluginAuth
+				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientPluginAuth
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientPluginAuth
+				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientPluginAuth
 			},
 		},
 		{
@@ -152,27 +150,27 @@ func TestCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientConnectWithDB
+				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientConnectWithDB
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientConnectWithDB
+				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientConnectWithDB
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientConnectAtts
+				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientConnectAtts
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientConnectAtts
+				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientConnectAtts
 				cfg.clientConfig.attrs = []byte(strings.Repeat("x", 512))
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability & ^mysql.ClientSecureConnection
+				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientSecureConnection
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultClientCapability | mysql.ClientSecureConnection
+				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientSecureConnection
 			},
 		},
 	}
