@@ -60,4 +60,4 @@ jobs:
     with:
       ref: ${{ inputs.ref || github.ref }}
       debug: false
-      target: "build lint test"
+      target: "lint test"
