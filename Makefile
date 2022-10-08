@@ -58,6 +58,8 @@ test: gocovmerge
 	go test -coverprofile=.cover.pkg ./...
 	cd lib && go test -coverprofile=../.cover.lib ./...
 	$(GOBIN)/gocovmerge .cover.* > .cover
+	go tool cover -func=.cover -o .cover.func
+	tail -1 .cover.func
 	rm -f .cover.*
 	go tool cover -html=.cover -o .cover.html
 
