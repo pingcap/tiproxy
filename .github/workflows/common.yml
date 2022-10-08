@@ -46,8 +46,6 @@ jobs:
           go-version-file: go.mod
           check-latest: true
       - name: "set vars"
-        run: |
-      - name: "set vars"
         id: cache
         run: |
           echo "::set-output name=go_cache::$(go env GOCACHE)"
