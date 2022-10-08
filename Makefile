@@ -13,24 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-PROJECTNAME = $(shell basename "$(PWD)")
 GOBIN := $(shell pwd)/bin
-DOCKERFLAG ?=
-RELEASE ?=
-ifneq ($(RELEASE), "")
-	DOCKERFLAG ?= --squash
-endif
+DEBUG ?=
+DOCKERPREFIX ?=
 BUILD_TAGS ?=
 LDFLAGS ?= 
-DEBUG ?=
 BUILDFLAGS := $(BUILDFLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}'
-ifeq ("$(WITH_RACE)", "1")
+ifneq ("$(DEBUG)", "")
 	BUILDFLAGS += -race
 endif
 IMAGE_TAG ?= latest
 EXECUTABLE_TARGETS := $(patsubst cmd/%,cmd_%,$(wildcard cmd/*))
 
-.PHONY: cmd_% test lint docker golangci-lint gocovmerge
+.PHONY: cmd_% test lint docker docker-release golangci-lint gocovmerge
 
 default: cmd
 
@@ -64,4 +59,7 @@ test: gocovmerge
 	go tool cover -html=.cover -o .cover.html
 
 docker:
-	docker build $(DOCKERFLAG) -t "tiproxy:${IMAGE_TAG}" --build-arg='GOPROXY=$(shell go env GOPROXY),BUILDFLAGS=$(BUILDFLAGS),' -f docker/Dockerfile .
+	docker build -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg 'GOPROXY=$(shell go env GOPROXY),BUILDFLAGS=$(BUILDFLAGS),' -f docker/Dockerfile .
+
+docker-release:
+	docker buildx build --platform linux/amd64,linux/arm64 --push -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg 'GOPROXY=$(shell go env GOPROXY),BUILDFLAGS=$(BUILDFLAGS),' -f docker/Dockerfile .
