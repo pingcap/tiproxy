@@ -37,7 +37,6 @@ type backendConfig struct {
 	capability    uint32
 	status        uint16
 	authSucceed   bool
-	switchAuth    bool
 	abnormalExit  bool
 }
 
@@ -46,7 +45,6 @@ func newBackendConfig() *backendConfig {
 		capability:    defaultTestBackendCapability,
 		salt:          mockSalt,
 		authPlugin:    mysql.AuthCachingSha2Password,
-		switchAuth:    true,
 		authSucceed:   true,
 		loops:         1,
 		stmtNum:       1,
@@ -109,7 +107,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 }
 
 func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.HandshakeResp) error {
-	if resp.AuthPlugin != mysql.AuthTiDBSessionToken && mb.switchAuth {
+	if resp.AuthPlugin != mysql.AuthTiDBSessionToken {
 		var err error
 		if err = packetIO.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
 			return err

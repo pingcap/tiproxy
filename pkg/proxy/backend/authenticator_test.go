@@ -42,6 +42,14 @@ func TestUnsupportedCapability(t *testing.T) {
 		},
 		{
 			func(cfg *testConfig) {
+				cfg.backendConfig.capability = defaultTestBackendCapability & ^mysql.ClientDeprecateEOF
+			},
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability = defaultTestBackendCapability | mysql.ClientDeprecateEOF
+			},
+		},
+		{
+			func(cfg *testConfig) {
 				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientProtocol41
 			},
 			func(cfg *testConfig) {
@@ -71,9 +79,9 @@ func TestUnsupportedCapability(t *testing.T) {
 	for _, cfgs := range cfgOverriders {
 		ts, clean := newTestSuite(t, tc, cfgs...)
 		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
-			if ts.mb.backendConfig.capability&mysql.ClientSSL == 0 {
-				require.ErrorContains(t, ts.mp.err, "must enable TLS")
-			} else if ts.mc.clientConfig.capability&mysql.ClientProtocol41 == 0 {
+			if ts.mb.backendConfig.capability&requiredBackendCaps.Uint32() != requiredBackendCaps.Uint32() {
+				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
+			} else if ts.mc.clientConfig.capability&requiredFrontendCaps.Uint32() != requiredFrontendCaps.Uint32() {
 				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
 			} else {
 				require.NoError(t, ts.mc.err)
@@ -117,14 +125,6 @@ func TestAuthPlugin(t *testing.T) {
 			},
 			func(cfg *testConfig) {
 				cfg.backendConfig.authPlugin = mysql.AuthCachingSha2Password
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.backendConfig.switchAuth = true
-			},
-			func(cfg *testConfig) {
-				cfg.backendConfig.switchAuth = false
 			},
 		},
 		{

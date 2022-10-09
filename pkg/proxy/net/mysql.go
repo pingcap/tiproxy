@@ -143,23 +143,24 @@ func ParseHandshakeResponse(data []byte) *HandshakeResp {
 	return resp
 }
 
-func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, authData, attrs []byte, capability uint32) []byte {
+func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 	// encode length of the auth data
 	var (
 		authRespBuf, attrRespBuf [9]byte
 		authResp, attrResp       []byte
 	)
-	authResp = DumpLengthEncodedInt(authRespBuf[:0], uint64(len(authData)))
+	authResp = DumpLengthEncodedInt(authRespBuf[:0], uint64(len(resp.AuthData)))
+	capability := resp.Capability
 	if len(authResp) > 1 {
 		capability |= mysql.ClientPluginAuthLenencClientData
 	} else {
 		capability &= ^mysql.ClientPluginAuthLenencClientData
 	}
 	if capability&mysql.ClientConnectAtts > 0 {
-		attrResp = DumpLengthEncodedInt(attrRespBuf[:0], uint64(len(attrs)))
+		attrResp = DumpLengthEncodedInt(attrRespBuf[:0], uint64(len(resp.Attrs)))
 	}
 
-	length := 4 + 4 + 1 + 23 + len(username) + 1 + len(authResp) + len(authData) + len(db) + 1 + len(authPlugin) + 1 + len(attrResp) + len(attrs)
+	length := 4 + 4 + 1 + 23 + len(resp.User) + 1 + len(authResp) + len(resp.AuthData) + len(resp.DB) + 1 + len(resp.AuthPlugin) + 1 + len(attrResp) + len(resp.Attrs)
 	data := make([]byte, length)
 	pos := 0
 	// capability [32 bit]
@@ -168,40 +169,40 @@ func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, aut
 	// MaxPacketSize [32 bit]
 	pos += 4
 	// Charset [1 byte]
-	data[pos] = collation
+	data[pos] = resp.Collation
 	pos++
 	// Filler [23 bytes] (all 0x00)
 	pos += 23
 
 	// User [null terminated string]
-	pos += copy(data[pos:], username)
+	pos += copy(data[pos:], resp.User)
 	data[pos] = 0x00
 	pos++
 
 	// auth data
 	if capability&mysql.ClientPluginAuthLenencClientData > 0 {
 		pos += copy(data[pos:], authResp)
-		pos += copy(data[pos:], authData)
+		pos += copy(data[pos:], resp.AuthData)
 	} else if capability&mysql.ClientSecureConnection > 0 {
-		data[pos] = byte(len(authData))
+		data[pos] = byte(len(resp.AuthData))
 		pos++
-		pos += copy(data[pos:], authData)
+		pos += copy(data[pos:], resp.AuthData)
 	} else {
-		pos += copy(data[pos:], authData)
+		pos += copy(data[pos:], resp.AuthData)
 		data[pos] = 0x00
 		pos++
 	}
 
 	// db [null terminated string]
 	if capability&mysql.ClientConnectWithDB > 0 {
-		pos += copy(data[pos:], db)
+		pos += copy(data[pos:], resp.DB)
 		data[pos] = 0x00
 		pos++
 	}
 
 	// auth_plugin [null terminated string]
 	if capability&mysql.ClientPluginAuth > 0 {
-		pos += copy(data[pos:], authPlugin)
+		pos += copy(data[pos:], resp.AuthPlugin)
 		data[pos] = 0x00
 		pos++
 	}
@@ -209,7 +210,7 @@ func MakeHandshakeResponse(username, db, authPlugin string, collation uint8, aut
 	// attrs
 	if capability&mysql.ClientConnectAtts > 0 {
 		pos += copy(data[pos:], attrResp)
-		pos += copy(data[pos:], attrs)
+		pos += copy(data[pos:], resp.Attrs)
 	}
 	return data[:pos]
 }

@@ -78,16 +78,25 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 		return err
 	}
 
-	resp := pnet.MakeHandshakeResponse(mc.username, mc.dbName, mc.authPlugin, mc.collation, mc.authData, mc.attrs, mc.capability)
+	resp := &pnet.HandshakeResp{
+		User:       mc.username,
+		DB:         mc.dbName,
+		AuthPlugin: mc.authPlugin,
+		Attrs:      mc.attrs,
+		AuthData:   mc.authData,
+		Capability: mc.capability,
+		Collation:  mc.collation,
+	}
+	pkt := pnet.MakeHandshakeResponse(resp)
 	if mc.capability&mysql.ClientSSL > 0 {
-		if err := packetIO.WritePacket(resp[:32], true); err != nil {
+		if err := packetIO.WritePacket(pkt[:32], true); err != nil {
 			return err
 		}
 		if err := packetIO.ClientTLSHandshake(mc.tlsConfig); err != nil {
 			return err
 		}
 	}
-	if err := packetIO.WritePacket(resp, true); err != nil {
+	if err := packetIO.WritePacket(pkt, true); err != nil {
 		return err
 	}
 	return mc.writePassword(packetIO)
