@@ -46,20 +46,20 @@ jobs:
           go-version-file: go.mod
           check-latest: true
       - name: "set vars"
+        id: cache
         run: |
-          echo "GOCACHE=$(go env GOCACHE)" >> $GITHUB_ENV
-          echo "GOMODCACHE=$(go env GOMODCACHE)" >> $GITHUB_ENV
+          echo "::set-output name=go_cache::$(go env GOCACHE)"
+          echo "::set-output name=go_mod_cache::$(go env GOMODCACHE)"
       - name: "try to use build cache"
         uses: actions/cache@v3
         with:
           path: |
-            ${{ env.GOCACHE }}
-            ${{ env.GOMODCACHE }}
-          key: ${{ runner.os }}-go-${{ inputs.target == "cache" && github.run_id || hashFiles('**/go.sum')}}
+            ${{ steps.cache.outputs.go_cache }}
+            ${{ steps.cache.outputs.go_mod_cache }}
+          key: ${{ runner.os }}-go-${{ inputs.target == 'cache' && github.run_id || hashFiles('**/go.sum')}}
           restore-keys: |
             ${{ runner.os }}-go-
       - name: make ${{ inputs.target }} 
-        if: ${{ inputs.target != '' }}
         run: make ${{ inputs.target }}
       - name: "set up tmate session if necessary"
         if: ${{ failure() && inputs.debug }}
