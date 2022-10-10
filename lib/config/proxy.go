@@ -35,6 +35,16 @@ type Config struct {
 	Security Security    `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
 	Metrics  Metrics     `yaml:"metrics,omitempty" toml:"metrics,omitempty" json:"metrics,omitempty"`
 	Log      Log         `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
+	Cluster  Cluster     `yaml:"-" toml:"-" json:"-"`
+}
+
+type Cluster struct {
+	PubAddr           string
+	ClusterName       string
+	NodeName          string
+	BootstrapDurl     string
+	BootstrapDdns     string
+	BootstrapClusters []string
 }
 
 type Metrics struct {
