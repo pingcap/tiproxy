@@ -31,6 +31,8 @@ default: cmd
 
 dev: cmd lint test
 
+cache: build lint test
+
 cmd: $(EXECUTABLE_TARGETS)
 
 cmd_%: OUTPUT=$(patsubst cmd_%,./bin/%,$@)
