@@ -31,13 +31,15 @@ var (
 	ErrCapabilityNegotiation = errors.New("capability negotiation failed")
 )
 
-// Other server capabilities are not supported.
-const requiredCapabilities = pnet.ClientProtocol41
+const requiredFrontendCaps = pnet.ClientProtocol41
+const requiredBackendCaps = pnet.ClientDeprecateEOF | pnet.ClientSSL
+
+// Other server capabilities are not supported. ClientDeprecateEOF is supported but TiDB 6.2.0 doesn't support it now.
 const supportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientConnectWithDB |
-	pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientInteractive | pnet.ClientSSL | pnet.ClientLongFlag |
+	pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientInteractive | pnet.ClientLongFlag |
 	pnet.ClientTransactions | pnet.ClientReserved | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
 	pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientPluginAuthLenencClientData |
-	pnet.ClientDeprecateEOF | requiredCapabilities
+	requiredFrontendCaps | requiredBackendCaps
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
@@ -65,31 +67,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 		proxyCapability ^= pnet.ClientSSL
 	}
 
-	// read backend initial handshake
-	backendHandshake, backendCapabilityU, err := auth.readInitialHandshake(backendIO)
-	if err != nil {
-		return err
-	}
-	backendCapability := pnet.Capability(backendCapabilityU)
-	if backendCapability&pnet.ClientSSL == 0 {
-		// The error cannot be sent to the client because the client only expects an initial handshake packet.
-		// The only way is to log it and disconnect.
-		return errors.New("the TiDB server must enable TLS")
-	}
-	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
-		// TODO: need to do negotiation with backend
-		// 1. proxyCapability &= backendCapability
-		// 2. binary.LittleEndian.PutUint32(backendHandshake, proxyCapability.Uint32())
-		//
-		// it should exchange caps with the backend
-		// but TiDB does not send all of its supported capabilities
-		// thus we must ignore server capabilities
-		// however, I will log something
-		logger.Info("backend does not support capabilities from proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
-	}
-
-	// forward backend handshake
-	if err := clientIO.WritePacket(backendHandshake, true); err != nil {
+	if err := clientIO.WriteInitialHandshake(proxyCapability.Uint32(), make([]byte, 20), mysql.AuthNativePassword); err != nil {
 		return err
 	}
 	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
@@ -116,9 +94,9 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	} else {
 		binary.LittleEndian.PutUint32(pkt, (frontendCapability | pnet.ClientSSL).Uint32())
 	}
-	if commonCaps := frontendCapability & requiredCapabilities; commonCaps != requiredCapabilities {
-		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredCapabilities))
-		return errors.Wrapf(ErrCapabilityNegotiation, "require %s", requiredCapabilities&^commonCaps)
+	if commonCaps := frontendCapability & requiredFrontendCaps; commonCaps != requiredFrontendCaps {
+		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredFrontendCaps))
+		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from frontend", requiredFrontendCaps&^commonCaps)
 	}
 	commonCaps := frontendCapability & proxyCapability
 	if frontendCapability^commonCaps != 0 {
@@ -148,6 +126,34 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 		}
 	}
 
+	// read backend initial handshake
+	_, backendCapabilityU, err := auth.readInitialHandshake(backendIO)
+	if err != nil {
+		return err
+	}
+	backendCapability := pnet.Capability(backendCapabilityU)
+	if commonCaps := backendCapability & requiredBackendCaps; commonCaps != requiredBackendCaps {
+		// The error cannot be sent to the client because the client only expects an initial handshake packet.
+		// The only way is to log it and disconnect.
+		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps))
+		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps&^commonCaps)
+	}
+	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
+		// TODO: need to do negotiation with backend
+		// 1. proxyCapability &= backendCapability
+		// 2. binary.LittleEndian.PutUint32(backendHandshake, proxyCapability.Uint32())
+		//
+		// it should exchange caps with the backend
+		// but TiDB does not send all of its supported capabilities
+		// thus we must ignore server capabilities
+		// however, I will log something
+		logger.Info("backend does not support capabilities from proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
+	}
+
+	resp.Capability = auth.capability | mysql.ClientSSL
+	// Send an unknown auth plugin so that the backend will request the auth data again.
+	resp.AuthPlugin = "auth_unknown_plugin"
+	pkt = pnet.MakeHandshakeResponse(resp)
 	// write SSL Packet
 	if err := backendIO.WritePacket(pkt[:32], true); err != nil {
 		return err
@@ -235,12 +241,17 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 }
 
 func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte) error {
-	// Always handshake with SSL enabled.
-	capability := auth.capability | mysql.ClientSSL
-	// Always enable auth_plugin.
-	capability |= mysql.ClientPluginAuth
-	data := pnet.MakeHandshakeResponse(auth.user, auth.dbname, mysql.AuthTiDBSessionToken,
-		auth.collation, authData, auth.attrs, capability)
+	// Always handshake with SSL enabled and enable auth_plugin.
+	resp := &pnet.HandshakeResp{
+		User:       auth.user,
+		DB:         auth.dbname,
+		AuthPlugin: mysql.AuthTiDBSessionToken,
+		Attrs:      auth.attrs,
+		AuthData:   authData,
+		Capability: auth.capability | mysql.ClientSSL | mysql.ClientPluginAuth,
+		Collation:  auth.collation,
+	}
+	data := pnet.MakeHandshakeResponse(resp)
 
 	// write SSL req
 	if err := backendIO.WritePacket(data[:32], true); err != nil {

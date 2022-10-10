@@ -97,7 +97,7 @@ func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err 
 		return
 	}
 
-	capability := uint32(binary.LittleEndian.Uint32(pkt[:4]))
+	capability := binary.LittleEndian.Uint32(pkt[:4])
 	isSSL = capability&mysql.ClientSSL != 0
 	return
 }
