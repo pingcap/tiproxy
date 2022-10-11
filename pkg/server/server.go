@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
@@ -257,7 +257,11 @@ func buildEtcd(cfg *config.Config, logger *zap.Logger, engine *gin.Engine) (srv 
 		return nil, errors.New("cluster_name can not be empty")
 	}
 	if cfg.Cluster.NodeName == "" {
-		cfg.Cluster.NodeName = fmt.Sprintf("%s-%d", cfg.Cluster.ClusterName, time.Now().UnixMicro())
+		hname, err := os.Hostname()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		cfg.Cluster.NodeName = fmt.Sprintf("%s-%s", cfg.Cluster.ClusterName, hname)
 	}
 
 	cnt := 0
