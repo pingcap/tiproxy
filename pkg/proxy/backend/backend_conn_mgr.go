@@ -85,12 +85,12 @@ type BackendConnManager struct {
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(logger *zap.Logger, connectionID uint64) *BackendConnManager {
+func NewBackendConnManager(logger *zap.Logger, connectionID uint64, proxyProtocol bool) *BackendConnManager {
 	return &BackendConnManager{
 		logger:         logger,
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
-		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities},
+		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities, proxyProtocol: proxyProtocol},
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
@@ -103,7 +103,7 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 }
 
 // Connect connects to the first backend and then start watching redirection signals.
-func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, proxyProtocol bool) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
@@ -114,7 +114,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	backendIO := mgr.backendConn.PacketIO()
 
 	mgr.authenticator.serverAddr = serverAddr
-	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, backendIO, frontendTLSConfig, backendTLSConfig, proxyProtocol); err != nil {
+	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, backendIO, frontendTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}
 
@@ -122,7 +122,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, c
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
 	mgr.wg.Run(func() {
-		mgr.processSignals(childCtx)
+		mgr.processSignals(childCtx, clientIO)
 	})
 	return nil
 }
@@ -170,7 +170,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	}
 	// Even if it meets an MySQL error, it may have changed the status, such as when executing multi-statements.
 	if waitingRedirect && mgr.cmdProcessor.canRedirect() {
-		mgr.tryRedirect(ctx)
+		mgr.tryRedirect(ctx, clientIO)
 		// Execute the held request no matter redirection succeeds or not.
 		if holdRequest {
 			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
@@ -223,13 +223,13 @@ func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken
 // processSignals runs in a goroutine to:
 // - Receive redirection signals and then try to migrate the session.
 // - Send redirection results to the event receiver.
-func (mgr *BackendConnManager) processSignals(ctx context.Context) {
+func (mgr *BackendConnManager) processSignals(ctx context.Context, clientIO *pnet.PacketIO) {
 	for {
 		select {
 		case <-mgr.signalReceived:
 			// Redirect the session immediately just in case the session is idle.
 			mgr.processLock.Lock()
-			mgr.tryRedirect(ctx)
+			mgr.tryRedirect(ctx, clientIO)
 			mgr.processLock.Unlock()
 		case rs := <-mgr.redirectResCh:
 			mgr.notifyRedirectResult(ctx, rs)
@@ -241,7 +241,7 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 
 // tryRedirect tries to migrate the session if the session is redirect-able.
 // NOTE: processLock should be held before calling this function.
-func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
+func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.PacketIO) {
 	signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
 	if signal == nil {
 		return
@@ -274,7 +274,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	if rs.err = newConn.Connect(); rs.err != nil {
 		return
 	}
-	if rs.err = mgr.authenticator.handshakeSecondTime(newConn.PacketIO(), sessionToken); rs.err == nil {
+	if rs.err = mgr.authenticator.handshakeSecondTime(clientIO, newConn.PacketIO(), sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
 	}
 	if rs.err != nil {
@@ -293,13 +293,14 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 // The user may be renamed during the session, but the session cannot detect it, so this will affect the user.
 // TODO: this may be a security problem: a different new user may just be renamed to this user name.
 func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []byte) error {
-	var statesMap map[string]string
+	var statesMap map[string]any
 	if err := json.Unmarshal(sessionStates, &statesMap); err != nil {
 		return errors.Wrapf(err, "unmarshal session states error")
 	}
 	// The currentDBKey may be omitted if it's empty. In this case, we still need to update it.
-	currentDB := statesMap[currentDBKey]
-	mgr.authenticator.updateCurrentDB(currentDB)
+	if currentDB, ok := statesMap[currentDBKey].(string); ok {
+		mgr.authenticator.updateCurrentDB(currentDB)
+	}
 	return nil
 }
 

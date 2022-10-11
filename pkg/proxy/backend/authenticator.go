@@ -51,6 +51,7 @@ type Authenticator struct {
 	attrs                       []byte // no need to parse
 	capability                  uint32 // client capability
 	collation                   uint8
+	proxyProtocol               bool
 }
 
 func (auth *Authenticator) String() string {
@@ -58,7 +59,26 @@ func (auth *Authenticator) String() string {
 		auth.user, auth.dbname, auth.capability, auth.collation)
 }
 
-func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, proxyProtocol bool) error {
+func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO) error {
+	if auth.proxyProtocol {
+		proxy := clientIO.Proxy()
+		if proxy == nil {
+			proxy = &pnet.Proxy{
+				SrcAddress: clientIO.RemoteAddr(),
+				DstAddress: backendIO.RemoteAddr(),
+				Version:    pnet.ProxyVersion2,
+			}
+		}
+		// either from another proxy or directly from clients, we are actings as a proxy
+		proxy.Command = pnet.ProxyCommandProxy
+		if err := backendIO.WriteProxyV2(proxy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
 	backendIO.ResetSequence()
 
@@ -110,20 +130,8 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	auth.attrs = resp.Attrs
 
 	// write proxy header
-	if proxyProtocol {
-		proxy := clientIO.Proxy()
-		if proxy == nil {
-			proxy = &pnet.Proxy{
-				SrcAddress: clientIO.RemoteAddr(),
-				DstAddress: backendIO.RemoteAddr(),
-				Version:    pnet.ProxyVersion2,
-			}
-		}
-		// either from another proxy or directly from clients, we are actings as a proxy
-		proxy.Command = pnet.ProxyCommandProxy
-		if err := backendIO.WriteProxyV2(proxy); err != nil {
-			return err
-		}
+	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
+		return err
 	}
 
 	// read backend initial handshake
@@ -207,9 +215,14 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 	return
 }
 
-func (auth *Authenticator) handshakeSecondTime(backendIO *pnet.PacketIO, sessionToken string) error {
+func (auth *Authenticator) handshakeSecondTime(clientIO, backendIO *pnet.PacketIO, sessionToken string) error {
 	if len(sessionToken) == 0 {
 		return errors.New("session token is empty")
+	}
+
+	// write proxy header
+	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
+		return err
 	}
 
 	_, serverCapability, err := auth.readInitialHandshake(backendIO)

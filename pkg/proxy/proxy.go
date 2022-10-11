@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/metrics"
-	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
@@ -131,7 +130,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
-	clientConn := client.NewClientConnection(logger.Named("cliconn"), conn, s.frontendTLSConfig, s.backendTLSConfig, s.nsmgr, backend.NewBackendConnManager(logger.Named("clibemgr"), connID), s.mu.proxyProtocol)
+	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.frontendTLSConfig, s.backendTLSConfig, s.nsmgr, connID, s.mu.proxyProtocol)
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 
