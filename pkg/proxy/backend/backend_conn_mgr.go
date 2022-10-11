@@ -293,13 +293,14 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.P
 // The user may be renamed during the session, but the session cannot detect it, so this will affect the user.
 // TODO: this may be a security problem: a different new user may just be renamed to this user name.
 func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []byte) error {
-	var statesMap map[string]string
+	var statesMap map[string]any
 	if err := json.Unmarshal(sessionStates, &statesMap); err != nil {
 		return errors.Wrapf(err, "unmarshal session states error")
 	}
 	// The currentDBKey may be omitted if it's empty. In this case, we still need to update it.
-	currentDB := statesMap[currentDBKey]
-	mgr.authenticator.updateCurrentDB(currentDB)
+	if currentDB, ok := statesMap[currentDBKey].(string); ok {
+		mgr.authenticator.updateCurrentDB(currentDB)
+	}
 	return nil
 }
 
