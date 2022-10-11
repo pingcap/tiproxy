@@ -19,9 +19,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
-	"time"
+	"strings"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
@@ -57,7 +58,7 @@ type Server struct {
 	Proxy *proxy.SQLServer
 }
 
-func NewServer(ctx context.Context, cfg *config.Config, pubAddr string) (srv *Server, err error) {
+func NewServer(ctx context.Context, cfg *config.Config) (srv *Server, err error) {
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		MetricsManager:   metrics.NewMetricsManager(),
@@ -115,7 +116,7 @@ func NewServer(ctx context.Context, cfg *config.Config, pubAddr string) (srv *Se
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
 		api.Register(engine.Group("/api"), cfg.API, lg.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		srv.Etcd, err = buildEtcd(cfg, lg.Named("etcd"), pubAddr, engine)
+		srv.Etcd, err = buildEtcd(cfg, lg.Named("etcd"), engine)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -251,7 +252,32 @@ func (s *Server) Close() error {
 	return errors.Collect(ErrCloseServer, errs...)
 }
 
-func buildEtcd(cfg *config.Config, logger *zap.Logger, pubAddr string, engine *gin.Engine) (srv *embed.Etcd, err error) {
+func buildEtcd(cfg *config.Config, logger *zap.Logger, engine *gin.Engine) (srv *embed.Etcd, err error) {
+	if cfg.Cluster.ClusterName == "" {
+		return nil, errors.New("cluster_name can not be empty")
+	}
+	if cfg.Cluster.NodeName == "" {
+		hname, err := os.Hostname()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		cfg.Cluster.NodeName = fmt.Sprintf("%s-%s", cfg.Cluster.ClusterName, hname)
+	}
+
+	cnt := 0
+	if len(cfg.Cluster.BootstrapClusters) != 0 {
+		cnt++
+	}
+	if cfg.Cluster.BootstrapDurl != "" {
+		cnt++
+	}
+	if cfg.Cluster.BootstrapDdns != "" {
+		cnt++
+	}
+	if cnt > 1 {
+		return nil, errors.New("you can only pass one 'bootstrap_xxx' to bootstrap the node, or leave them empty to start a single-node cluster")
+	}
+
 	etcd_cfg := embed.NewConfig()
 
 	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Security.PeerTLS); err != nil {
@@ -269,7 +295,7 @@ func buildEtcd(cfg *config.Config, logger *zap.Logger, pubAddr string, engine *g
 	}
 	etcd_cfg.LCUrls = []url.URL{*apiAddr}
 	apiAddrAdvertise := *apiAddr
-	apiAddrAdvertise.Host = fmt.Sprintf("%s:%s", pubAddr, apiAddrAdvertise.Port())
+	apiAddrAdvertise.Host = fmt.Sprintf("%s:%s", cfg.Cluster.PubAddr, apiAddrAdvertise.Port())
 	etcd_cfg.ACUrls = []url.URL{apiAddrAdvertise}
 
 	peerPort := cfg.Advance.PeerPort
@@ -289,11 +315,30 @@ func buildEtcd(cfg *config.Config, logger *zap.Logger, pubAddr string, engine *g
 	peerAddr.Host = fmt.Sprintf("%s:%s", peerAddr.Hostname(), peerPort)
 	etcd_cfg.LPUrls = []url.URL{peerAddr}
 	peerAddrAdvertise := peerAddr
-	peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", pubAddr, peerPort)
+	peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", cfg.Cluster.PubAddr, peerPort)
 	etcd_cfg.APUrls = []url.URL{peerAddrAdvertise}
 
-	etcd_cfg.Name = "proxy-" + fmt.Sprint(time.Now().UnixMicro())
-	etcd_cfg.InitialCluster = etcd_cfg.InitialClusterFromName(etcd_cfg.Name)
+	etcd_cfg.Name = cfg.Cluster.NodeName
+	if cnt == 0 {
+		etcd_cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Cluster.NodeName, peerAddrAdvertise.String())
+		etcd_cfg.InitialClusterToken = cfg.Cluster.ClusterName
+	} else if len(cfg.Cluster.BootstrapClusters) > 0 {
+		for i := range cfg.Cluster.BootstrapClusters {
+			if etcd_cfg.PeerTLSInfo.Empty() {
+				cfg.Cluster.BootstrapClusters[i] = strings.Replace(cfg.Cluster.BootstrapClusters[i], "=", "=http://", 1)
+			} else {
+				cfg.Cluster.BootstrapClusters[i] = strings.Replace(cfg.Cluster.BootstrapClusters[i], "=", "=https://", 1)
+			}
+		}
+		etcd_cfg.InitialCluster = strings.Join(append(cfg.Cluster.BootstrapClusters, fmt.Sprintf("%s=%s", cfg.Cluster.NodeName, peerAddrAdvertise.String())), ",")
+		etcd_cfg.InitialClusterToken = cfg.Cluster.ClusterName
+	} else if cfg.Cluster.BootstrapDurl != "" {
+		etcd_cfg.Durl = cfg.Cluster.BootstrapDurl
+	} else if cfg.Cluster.BootstrapDdns != "" {
+		etcd_cfg.DNSCluster = cfg.Cluster.BootstrapDdns
+		etcd_cfg.DNSClusterServiceName = cfg.Cluster.ClusterName
+	}
+
 	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
 	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger)
 
