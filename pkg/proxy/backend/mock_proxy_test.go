@@ -54,18 +54,18 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
 		proxyConfig:        cfg,
 		logger:             logger.CreateLoggerForTest(t).Named("mockProxy"),
-		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), 0),
+		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), 0, false),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeFirstTime(mp.logger, clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig, false)
+	return mp.authenticator.handshakeFirstTime(mp.logger, clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig)
 }
 
-func (mp *mockProxy) authenticateSecondTime(_, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeSecondTime(backendIO, mp.sessionToken)
+func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO *pnet.PacketIO) error {
+	return mp.authenticator.handshakeSecondTime(clientIO, backendIO, mp.sessionToken)
 }
 
 func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {

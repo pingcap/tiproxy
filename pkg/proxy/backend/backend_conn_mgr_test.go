@@ -118,7 +118,7 @@ func newBackendMgrTester(t *testing.T) *backendMgrTester {
 
 // Define some common runners here to reduce code redundancy.
 func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	err := ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, false)
+	err := ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
 	require.NoError(ts.t, err)
 	mer := newMockEventReceiver()
 	ts.mp.SetEventReceiver(mer)
@@ -360,7 +360,7 @@ func TestConnectFail(t *testing.T) {
 		{
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				return ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, false)
+				return ts.mp.Connect(context.Background(), ts.tc.backendListener.Addr().String(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
 			},
 			backend: func(_ *pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()

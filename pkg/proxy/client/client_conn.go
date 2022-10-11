@@ -40,13 +40,14 @@ type ClientConnection struct {
 	nsmgr             *namespace.NamespaceManager
 	ns                *namespace.Namespace
 	connMgr           *backend.BackendConnManager
-	proxyProtocol     bool
 }
 
-func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, bemgr *backend.BackendConnManager, proxyProtocol bool) *ClientConnection {
+func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, connID uint64, proxyProtocol bool) *ClientConnection {
+	bemgr := backend.NewBackendConnManager(logger.Named("be"), connID, proxyProtocol)
 	opts := make([]pnet.PacketIOption, 0, 2)
+	opts = append(opts, pnet.WithClient)
 	if proxyProtocol {
-		opts = append(opts, pnet.WithProxy, pnet.WithClient)
+		opts = append(opts, pnet.WithProxy)
 	}
 	pkt := pnet.NewPacketIO(conn, opts...)
 	return &ClientConnection{
@@ -56,7 +57,6 @@ func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *t
 		pkt:               pkt,
 		nsmgr:             nsmgr,
 		connMgr:           bemgr,
-		proxyProtocol:     proxyProtocol,
 	}
 }
 
@@ -71,7 +71,7 @@ func (cc *ClientConnection) connectBackend(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.frontendTLSConfig, cc.backendTLSConfig, cc.proxyProtocol); err != nil {
+	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.frontendTLSConfig, cc.backendTLSConfig); err != nil {
 		return err
 	}
 	return nil
