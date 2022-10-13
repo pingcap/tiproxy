@@ -16,28 +16,16 @@
 package namespace
 
 import (
-	"crypto/tls"
-
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 )
 
 type Namespace struct {
-	name        string
-	router      router.Router
-	frontendTLS *tls.Config
-	backendTLS  *tls.Config
+	name   string
+	router router.Router
 }
 
 func (n *Namespace) Name() string {
 	return n.name
-}
-
-func (n *Namespace) FrontendTLSConfig() *tls.Config {
-	return n.frontendTLS
-}
-
-func (n *Namespace) BackendTLSConfig() *tls.Config {
-	return n.backendTLS
 }
 
 func (n *Namespace) GetRouter() router.Router {

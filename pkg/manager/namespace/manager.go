@@ -22,7 +22,6 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -39,6 +38,7 @@ type NamespaceManager struct {
 func NewNamespaceManager() *NamespaceManager {
 	return &NamespaceManager{}
 }
+
 func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
@@ -46,22 +46,10 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	if err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
-	r := &Namespace{
+	return &Namespace{
 		name:   cfg.Namespace,
 		router: rt,
-	}
-
-	r.frontendTLS, err = security.BuildServerTLSConfig(logger, cfg.Frontend.Security)
-	if err != nil {
-		return nil, errors.Errorf("build frontend TLS error: %w", err)
-	}
-
-	r.backendTLS, err = security.BuildClientTLSConfig(logger, cfg.Backend.Security)
-	if err != nil {
-		return nil, errors.Errorf("build backend TLS error: %w", err)
-	}
-
-	return r, nil
+	}, nil
 }
 
 func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delete []bool) error {

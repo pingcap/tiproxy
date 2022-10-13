@@ -16,14 +16,13 @@ package proxy
 
 import (
 	"context"
-	"crypto/tls"
 	"net"
 	"sync"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
@@ -41,23 +40,23 @@ type serverState struct {
 }
 
 type SQLServer struct {
-	listener          net.Listener
-	logger            *zap.Logger
-	nsmgr             *mgrns.NamespaceManager
-	frontendTLSConfig *tls.Config
-	backendTLSConfig  *tls.Config
-	wg                waitgroup.WaitGroup
+	listener net.Listener
+	logger   *zap.Logger
+	certMgr  *cert.CertManager
+	nsmgr    *mgrns.NamespaceManager
+	wg       waitgroup.WaitGroup
 
 	mu serverState
 }
 
 // NewSQLServer creates a new SQLServer.
-func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Security, nsmgr *mgrns.NamespaceManager) (*SQLServer, error) {
+func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.CertManager, nsmgr *mgrns.NamespaceManager) (*SQLServer, error) {
 	var err error
 
 	s := &SQLServer{
-		logger: logger,
-		nsmgr:  nsmgr,
+		logger:  logger,
+		certMgr: certMgr,
+		nsmgr:   nsmgr,
 		mu: serverState{
 			connID:  0,
 			clients: make(map[uint64]*client.ClientConnection),
@@ -65,13 +64,6 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, scfg config.Securi
 	}
 
 	s.reset(&cfg.ProxyServerOnline)
-
-	if s.frontendTLSConfig, err = security.BuildServerTLSConfig(logger, scfg.ServerTLS); err != nil {
-		return nil, err
-	}
-	if s.backendTLSConfig, err = security.BuildClientTLSConfig(logger, scfg.SQLTLS); err != nil {
-		return nil, err
-	}
 
 	s.listener, err = net.Listen("tcp", cfg.Addr)
 	if err != nil {
@@ -130,7 +122,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
-	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.frontendTLSConfig, s.backendTLSConfig, s.nsmgr, connID, s.mu.proxyProtocol)
+	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(), s.nsmgr, connID, s.mu.proxyProtocol)
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 

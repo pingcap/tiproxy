@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	"github.com/pingcap/TiProxy/pkg/manager/logger"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
@@ -49,6 +50,7 @@ type Server struct {
 	NamespaceManager *mgrns.NamespaceManager
 	MetricsManager   *metrics.MetricsManager
 	LoggerManager    *logger.LoggerManager
+	CertManager      *cert.CertManager
 	ObserverClient   *clientv3.Client
 	// HTTP client
 	Http *http.Client
@@ -63,6 +65,7 @@ func NewServer(ctx context.Context, cfg *config.Config) (srv *Server, err error)
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		MetricsManager:   metrics.NewMetricsManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
+		CertManager:      cert.NewCertManager(),
 	}
 
 	// set up logger
@@ -71,15 +74,10 @@ func NewServer(ctx context.Context, cfg *config.Config) (srv *Server, err error)
 		return
 	}
 
+	// setup certs
 	{
-		tlogger := lg.Named("tls")
-		// auto generate CA for serverTLS will break
-		if uerr := security.AutoTLS(tlogger, &cfg.Security.ServerTLS, false, cfg.Workdir, "server", cfg.Security.RSAKeySize); uerr != nil {
-			err = errors.WithStack(uerr)
-			return
-		}
-		if uerr := security.AutoTLS(tlogger, &cfg.Security.PeerTLS, true, cfg.Workdir, "peer", cfg.Security.RSAKeySize); uerr != nil {
-			err = errors.WithStack(uerr)
+		clogger := lg.Named("cert")
+		if err = srv.CertManager.Init(cfg, clogger); err != nil {
 			return
 		}
 	}
@@ -133,14 +131,9 @@ func NewServer(ctx context.Context, cfg *config.Config) (srv *Server, err error)
 
 	// general cluster HTTP client
 	{
-		clientTLS, uerr := security.BuildClientTLSConfig(lg.Named("http"), cfg.Security.ClusterTLS)
-		if uerr != nil {
-			err = errors.WithStack(err)
-			return
-		}
 		srv.Http = &http.Client{
 			Transport: &http.Transport{
-				TLSClientConfig: clientTLS,
+				TLSClientConfig: srv.CertManager.ClusterTLS(),
 			},
 		}
 	}
@@ -176,7 +169,7 @@ func NewServer(ctx context.Context, cfg *config.Config) (srv *Server, err error)
 
 	// setup namespace manager
 	{
-		srv.ObserverClient, err = router.InitEtcdClient(lg.Named("pd"), cfg)
+		srv.ObserverClient, err = router.InitEtcdClient(lg.Named("pd"), cfg, srv.CertManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -198,7 +191,7 @@ func NewServer(ctx context.Context, cfg *config.Config) (srv *Server, err error)
 
 	// setup proxy server
 	{
-		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, cfg.Security, srv.NamespaceManager)
+		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, srv.CertManager, srv.NamespaceManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
