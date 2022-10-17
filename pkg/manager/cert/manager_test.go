@@ -15,6 +15,7 @@
 package cert
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -29,10 +30,10 @@ func TestReloadCerts(t *testing.T) {
 	dir := t.TempDir()
 	lg := logger.CreateLoggerForTest(t)
 	sqlCfg := &config.TLSConfig{AutoCerts: true}
-	err := security.AutoTLS(lg, sqlCfg, true, dir, "sql", 4096, 240*time.Hour)
+	err := security.AutoTLS(lg, sqlCfg, true, dir, "sql", 1024)
 	require.NoError(t, err)
 	clusterCfg := &config.TLSConfig{AutoCerts: true}
-	err = security.AutoTLS(lg, clusterCfg, true, dir, "cluster", 4096, 240*time.Hour)
+	err = security.AutoTLS(lg, clusterCfg, true, dir, "cluster", 1024)
 	require.NoError(t, err)
 
 	cfg := &config.Config{
@@ -50,25 +51,40 @@ func TestReloadCerts(t *testing.T) {
 	}
 	certMgr := NewCertManager()
 	certMgr.SetRetryInterval(100 * time.Millisecond)
-	certMgr.SetAutoExp(240 * time.Hour)
+	certMgr.SetAutoCertInterval(50 * time.Millisecond)
 	err = certMgr.Init(cfg, lg)
 	require.NoError(t, err)
 	t.Cleanup(certMgr.Close)
 
-	var before = [3]time.Time{
-		certMgr.serverTLS.expTime,
-		certMgr.sqlTLS.expTime,
-		certMgr.clusterTLS.expTime,
+	areCertsDifferent := func(before, after [4][][]byte) bool {
+		for i := 0; i < 4; i++ {
+			if len(before[i]) != len(after[i]) {
+				continue
+			}
+			if before[i] == nil || after[i] == nil {
+				continue
+			}
+			different := false
+			for j := 0; j < len(before[i]); j++ {
+				if !bytes.Equal(before[i][j], after[i][j]) {
+					different = true
+					break
+				}
+			}
+			if !different {
+				return false
+			}
+		}
+		return true
 	}
 
+	var before = getAllCertificates(t, certMgr)
 	sqlCfg = &config.TLSConfig{AutoCerts: true}
-	err = security.AutoTLS(lg, sqlCfg, true, dir, "sql", 4096, 480*time.Hour)
+	err = security.AutoTLS(lg, sqlCfg, true, dir, "sql", 1024)
 	require.NoError(t, err)
 	clusterCfg = &config.TLSConfig{AutoCerts: true}
-	err = security.AutoTLS(lg, clusterCfg, true, dir, "cluster", 4096, 480*time.Hour)
+	err = security.AutoTLS(lg, clusterCfg, true, dir, "cluster", 1024)
 	require.NoError(t, err)
-	certMgr.SetReloadAhead(360 * time.Hour)
-	certMgr.SetAutoExp(480 * time.Hour)
 
 	timer := time.NewTimer(10 * time.Second)
 	for {
@@ -76,15 +92,30 @@ func TestReloadCerts(t *testing.T) {
 		case <-timer.C:
 			t.Fatal("timeout")
 		case <-time.After(100 * time.Millisecond):
-			var after = [3]time.Time{
-				certMgr.serverTLS.expTime,
-				certMgr.sqlTLS.expTime,
-				certMgr.clusterTLS.expTime,
-			}
-			if after[0] != before[0] && after[1] != before[1] && after[2] != before[2] {
+			var after = getAllCertificates(t, certMgr)
+			if areCertsDifferent(before, after) {
 				return
 			}
 		}
+	}
+}
+
+func getRawCertificate(t *testing.T, ci *certInfo) [][]byte {
+	tlsConfig := ci.getTLS()
+	if tlsConfig == nil {
+		return nil
+	}
+	cert, err := tlsConfig.GetCertificate(nil)
+	require.NoError(t, err)
+	return cert.Certificate
+}
+
+func getAllCertificates(t *testing.T, certMgr *CertManager) [4][][]byte {
+	return [4][][]byte{
+		getRawCertificate(t, &certMgr.serverTLS),
+		getRawCertificate(t, &certMgr.peerTLS),
+		getRawCertificate(t, &certMgr.sqlTLS),
+		getRawCertificate(t, &certMgr.clusterTLS),
 	}
 }
 
@@ -107,7 +138,8 @@ func TestReloadEmptyCerts(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(certMgr.Close)
 
-	require.Equal(t, certMgr.serverTLS.expTime, time.Time{})
-	require.Equal(t, certMgr.sqlTLS.expTime, time.Time{})
-	require.Equal(t, certMgr.clusterTLS.expTime, time.Time{})
+	rawCerts := getAllCertificates(t, certMgr)
+	for i := 0; i < len(rawCerts); i++ {
+		require.Nil(t, rawCerts[i])
+	}
 }
