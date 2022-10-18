@@ -25,8 +25,8 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/domain/infosync"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -142,7 +142,7 @@ type BackendObserver struct {
 }
 
 // InitEtcdClient initializes an etcd client that fetches TiDB instance topology from PD.
-func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, error) {
+func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager) (*clientv3.Client, error) {
 	pdAddr := cfg.Proxy.PDAddrs
 	if len(pdAddr) == 0 {
 		// use tidb server addresses directly
@@ -150,14 +150,9 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, e
 	}
 	pdEndpoints := strings.Split(pdAddr, ",")
 	logger.Info("connect PD servers", zap.Strings("addrs", pdEndpoints))
-	tlsConfig, err := security.BuildClientTLSConfig(logger, cfg.Security.ClusterTLS)
-	if err != nil {
-		return nil, err
-	}
-	var etcdClient *clientv3.Client
-	etcdClient, err = clientv3.New(clientv3.Config{
+	etcdClient, err := clientv3.New(clientv3.Config{
 		Endpoints:        pdEndpoints,
-		TLS:              tlsConfig,
+		TLS:              certMgr.ClusterTLS(),
 		Logger:           logger.Named("etcdcli"),
 		AutoSyncInterval: 30 * time.Second,
 		DialTimeout:      5 * time.Second,
@@ -166,7 +161,6 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config) (*clientv3.Client, e
 				Time:    10 * time.Second,
 				Timeout: 3 * time.Second,
 			}),
-			//grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
 			grpc.WithBlock(),
 			grpc.WithConnectParams(grpc.ConnectParams{
 				Backoff: backoff.Config{

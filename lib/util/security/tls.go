@@ -34,7 +34,9 @@ import (
 	"go.uber.org/zap"
 )
 
-func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int) error {
+const DefaultCertExpiration = 10 * 365 * 24 * time.Hour
+
+func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
 	logger = logger.With(zap.String("cert", certpath), zap.String("key", keypath), zap.String("ca", capath), zap.Int("rsaKeySize", rsaKeySize))
 
 	_, e1 := os.Stat(certpath)
@@ -64,7 +66,7 @@ func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath strin
 		}
 	}
 
-	certPEM, keyPEM, caPEM, err := CreateTempTLS()
+	certPEM, keyPEM, caPEM, err := CreateTempTLS(expiration)
 	if err != nil {
 		return err
 	}
@@ -86,20 +88,18 @@ func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath strin
 }
 
 func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, mod string, keySize int) error {
-	if !scfg.HasCert() && scfg.AutoCerts {
-		scfg.Cert = filepath.Join(workdir, mod, "cert.pem")
-		scfg.Key = filepath.Join(workdir, mod, "key.pem")
-		if autoca {
-			scfg.CA = filepath.Join(workdir, mod, "ca.pem")
-		}
-		if err := createTLSConfigificates(logger, scfg.Cert, scfg.Key, scfg.CA, keySize); err != nil {
-			return errors.WithStack(err)
-		}
+	scfg.Cert = filepath.Join(workdir, mod, "cert.pem")
+	scfg.Key = filepath.Join(workdir, mod, "key.pem")
+	if autoca {
+		scfg.CA = filepath.Join(workdir, mod, "ca.pem")
+	}
+	if err := createTLSConfigificates(logger, scfg.Cert, scfg.Key, scfg.CA, keySize, DefaultCertExpiration); err != nil {
+		return errors.WithStack(err)
 	}
 	return nil
 }
 
-func CreateTempTLS() (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
+func CreateTempTLS(expiration time.Duration) (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
 	// set up our CA certificate
 	ca := &x509.Certificate{
 		SerialNumber: big.NewInt(2019),
@@ -112,7 +112,7 @@ func CreateTempTLS() (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
 			PostalCode:    []string{"94016"},
 		},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0),
+		NotAfter:              time.Now().Add(expiration),
 		IsCA:                  true,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
@@ -153,7 +153,7 @@ func CreateTempTLS() (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
 		},
 		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
 		NotBefore:    time.Now(),
-		NotAfter:     time.Now().AddDate(10, 0, 0),
+		NotAfter:     time.Now().Add(expiration),
 		SubjectKeyId: []byte{1, 2, 3, 4, 6},
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:     x509.KeyUsageDigitalSignature,
@@ -190,7 +190,7 @@ func CreateTempTLS() (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
 
 // CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
 func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, err error) {
-	certPEM, keyPEM, caPEM, uerr := CreateTempTLS()
+	certPEM, keyPEM, caPEM, uerr := CreateTempTLS(DefaultCertExpiration)
 	if uerr != nil {
 		err = uerr
 		return

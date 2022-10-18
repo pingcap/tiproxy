@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	"github.com/pingcap/tidb/domain/infosync"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -243,7 +244,10 @@ func createEtcdClient(t *testing.T, etcd *embed.Etcd) *clientv3.Client {
 			PDAddrs: etcd.Clients[0].Addr().String(),
 		},
 	}
-	client, err := InitEtcdClient(logger.CreateLoggerForTest(t), cfg)
+	certMgr := cert.NewCertManager()
+	err := certMgr.Init(cfg, logger.CreateLoggerForTest(t))
+	require.NoError(t, err)
+	client, err := InitEtcdClient(logger.CreateLoggerForTest(t), cfg, certMgr)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, client.Close())
