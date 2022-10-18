@@ -100,8 +100,8 @@ func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, m
 }
 
 func CreateTempTLS(rsaKeySize int, expiration time.Duration) (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
-	if rsaKeySize < 512 {
-		rsaKeySize = 512
+	if rsaKeySize < 1024 {
+		rsaKeySize = 1024
 	}
 
 	// set up our CA certificate
