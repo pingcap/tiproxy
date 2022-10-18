@@ -30,10 +30,10 @@ func TestReloadCerts(t *testing.T) {
 	dir := t.TempDir()
 	lg := logger.CreateLoggerForTest(t)
 	sqlCfg := &config.TLSConfig{AutoCerts: true}
-	err := security.AutoTLS(lg, sqlCfg, true, dir, "sql", 1024)
+	err := security.AutoTLS(lg, sqlCfg, true, dir, "sql", 0)
 	require.NoError(t, err)
 	clusterCfg := &config.TLSConfig{AutoCerts: true}
-	err = security.AutoTLS(lg, clusterCfg, true, dir, "cluster", 1024)
+	err = security.AutoTLS(lg, clusterCfg, true, dir, "cluster", 0)
 	require.NoError(t, err)
 
 	cfg := &config.Config{
@@ -80,10 +80,10 @@ func TestReloadCerts(t *testing.T) {
 
 	var before = getAllCertificates(t, certMgr)
 	sqlCfg = &config.TLSConfig{AutoCerts: true}
-	err = security.AutoTLS(lg, sqlCfg, true, dir, "sql", 1024)
+	err = security.AutoTLS(lg, sqlCfg, true, dir, "sql", 0)
 	require.NoError(t, err)
 	clusterCfg = &config.TLSConfig{AutoCerts: true}
-	err = security.AutoTLS(lg, clusterCfg, true, dir, "cluster", 1024)
+	err = security.AutoTLS(lg, clusterCfg, true, dir, "cluster", 0)
 	require.NoError(t, err)
 
 	timer := time.NewTimer(10 * time.Second)

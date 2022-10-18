@@ -66,7 +66,7 @@ func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath strin
 		}
 	}
 
-	certPEM, keyPEM, caPEM, err := CreateTempTLS(expiration)
+	certPEM, keyPEM, caPEM, err := CreateTempTLS(rsaKeySize, expiration)
 	if err != nil {
 		return err
 	}
@@ -99,7 +99,11 @@ func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, m
 	return nil
 }
 
-func CreateTempTLS(expiration time.Duration) (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
+func CreateTempTLS(rsaKeySize int, expiration time.Duration) (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
+	if rsaKeySize < 1024 {
+		rsaKeySize = 1024
+	}
+
 	// set up our CA certificate
 	ca := &x509.Certificate{
 		SerialNumber: big.NewInt(2019),
@@ -120,7 +124,7 @@ func CreateTempTLS(expiration time.Duration) (*bytes.Buffer, *bytes.Buffer, *byt
 	}
 
 	// create our private and public key
-	caPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	caPrivKey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -159,7 +163,7 @@ func CreateTempTLS(expiration time.Duration) (*bytes.Buffer, *bytes.Buffer, *byt
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 	}
 
-	certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	certPrivKey, err := rsa.GenerateKey(rand.Reader, rsaKeySize)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -190,7 +194,7 @@ func CreateTempTLS(expiration time.Duration) (*bytes.Buffer, *bytes.Buffer, *byt
 
 // CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
 func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, err error) {
-	certPEM, keyPEM, caPEM, uerr := CreateTempTLS(DefaultCertExpiration)
+	certPEM, keyPEM, caPEM, uerr := CreateTempTLS(0, DefaultCertExpiration)
 	if uerr != nil {
 		err = uerr
 		return
