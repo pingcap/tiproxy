@@ -16,6 +16,7 @@ package cert
 
 import (
 	"bytes"
+	"crypto/tls"
 	"testing"
 	"time"
 
@@ -100,22 +101,33 @@ func TestReloadCerts(t *testing.T) {
 	}
 }
 
-func getRawCertificate(t *testing.T, ci *certInfo) [][]byte {
-	tlsConfig := ci.getTLS()
-	if tlsConfig == nil {
-		return nil
+func getRawCertificate(t *testing.T, ci *certInfo, server bool) [][]byte {
+	var tlsConfig *tls.Config
+	if server {
+		tlsConfig = ci.getServerTLS()
+		if tlsConfig == nil {
+			return nil
+		}
+		tlsConfig, err := tlsConfig.GetConfigForClient(nil)
+		require.NoError(t, err)
+		return tlsConfig.Certificates[0].Certificate
+	} else {
+		tlsConfig = ci.getClientTLS()
+		if tlsConfig == nil {
+			return nil
+		}
+		cert, err := tlsConfig.GetClientCertificate(nil)
+		require.NoError(t, err)
+		return cert.Certificate
 	}
-	cert, err := tlsConfig.GetCertificate(nil)
-	require.NoError(t, err)
-	return cert.Certificate
 }
 
 func getAllCertificates(t *testing.T, certMgr *CertManager) [4][][]byte {
 	return [4][][]byte{
-		getRawCertificate(t, &certMgr.serverTLS),
-		getRawCertificate(t, &certMgr.peerTLS),
-		getRawCertificate(t, &certMgr.sqlTLS),
-		getRawCertificate(t, &certMgr.clusterTLS),
+		getRawCertificate(t, &certMgr.serverTLS, true),
+		getRawCertificate(t, &certMgr.peerTLS, false),
+		getRawCertificate(t, &certMgr.sqlTLS, false),
+		getRawCertificate(t, &certMgr.clusterTLS, false),
 	}
 }
 

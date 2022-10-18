@@ -17,6 +17,7 @@ package cert
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"sync/atomic"
 	"time"
 
@@ -35,35 +36,82 @@ const (
 // Security configurations don't support dynamically updating now.
 type certInfo struct {
 	cfg         config.TLSConfig
-	tlsConfig   *tls.Config
+	tlsConfig   atomic.Pointer[tls.Config]
 	certificate atomic.Pointer[tls.Certificate]
 	autoCert    bool
 	autoCertExp time.Time
 }
 
-func (ci *certInfo) getTLS() *tls.Config {
-	if ci.tlsConfig != nil {
-		return ci.tlsConfig.Clone()
+func (ci *certInfo) setTLS(tlsConfig *tls.Config) {
+	ci.tlsConfig.Store(tlsConfig)
+	if tlsConfig == nil {
+		return
 	}
-	return nil
+	if len(tlsConfig.Certificates) > 0 {
+		ci.certificate.Store(&tlsConfig.Certificates[0])
+	}
 }
 
-func (ci *certInfo) setTLS(tlsConfig *tls.Config) {
-	if tlsConfig != nil {
-		tlsConfig = tlsConfig.Clone()
-		if tlsConfig.Certificates != nil {
-			ci.certificate.Store(&tlsConfig.Certificates[0])
-			// Doesn't support rotating CA now. It needs overwriting InsecureSkipVerify and VerifyPeerCertificate.
-			tlsConfig.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return ci.certificate.Load(), nil
+// Some methods to rotate server config:
+// - For certs: customize GetCertificate / GetConfigForClient.
+// - For CA: customize ClientAuth + VerifyPeerCertificate / GetConfigForClient
+func (ci *certInfo) getServerTLS() *tls.Config {
+	tlsConfig := ci.tlsConfig.Load()
+	if tlsConfig == nil {
+		return nil
+	}
+	tlsConfig = tlsConfig.Clone()
+	tlsConfig.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		return ci.tlsConfig.Load(), nil
+	}
+	return tlsConfig
+}
+
+// Some methods to rotate client config:
+// - For certs: customize GetClientCertificate
+// - For CA: customize InsecureSkipVerify + VerifyPeerCertificate
+func (ci *certInfo) getClientTLS() *tls.Config {
+	tlsConfig := ci.tlsConfig.Load()
+	if tlsConfig == nil {
+		return nil
+	}
+	tlsConfig = tlsConfig.Clone()
+	tlsConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+		return ci.certificate.Load(), nil
+	}
+	if !tlsConfig.InsecureSkipVerify {
+		tlsConfig.InsecureSkipVerify = true
+		// The following code is modified from tls.Conn.verifyServerCertificate().
+		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			certs := make([]*x509.Certificate, len(rawCerts))
+			for i, asn1Data := range rawCerts {
+				cert, err := x509.ParseCertificate(asn1Data)
+				if err != nil {
+					return errors.New("tls: failed to parse certificate from server: " + err.Error())
+				}
+				certs[i] = cert
 			}
-			tlsConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-				return ci.certificate.Load(), nil
+
+			latestConfig := ci.tlsConfig.Load()
+			t := latestConfig.Time
+			if t == nil {
+				t = time.Now
 			}
-			tlsConfig.Certificates = nil
+			opts := x509.VerifyOptions{
+				Roots:         latestConfig.RootCAs,
+				CurrentTime:   t(),
+				DNSName:       latestConfig.ServerName,
+				Intermediates: x509.NewCertPool(),
+			}
+			for _, cert := range certs[1:] {
+				opts.Intermediates.AddCert(cert)
+			}
+			// Problem: these verified chains cannot be assigned to tls.Conn.verifiedChains.
+			_, err := certs[0].Verify(opts)
+			return err
 		}
 	}
-	ci.tlsConfig = tlsConfig
+	return tlsConfig
 }
 
 func (ci *certInfo) setAutoCertExp(exp time.Time) {
@@ -142,15 +190,15 @@ func (cm *CertManager) SetAutoCertInterval(interval time.Duration) {
 }
 
 func (cm *CertManager) ServerTLS() *tls.Config {
-	return cm.serverTLS.getTLS()
+	return cm.serverTLS.getServerTLS()
 }
 
 func (cm *CertManager) ClusterTLS() *tls.Config {
-	return cm.clusterTLS.getTLS()
+	return cm.clusterTLS.getClientTLS()
 }
 
 func (cm *CertManager) SQLTLS() *tls.Config {
-	return cm.sqlTLS.getTLS()
+	return cm.sqlTLS.getClientTLS()
 }
 
 // The proxy is supposed to be always online, so it should reload certs automatically,
