@@ -35,16 +35,15 @@ const (
 // Security configurations don't support dynamically updating now.
 type certInfo struct {
 	cfg         config.TLSConfig
-	tlsConfig   atomic.Pointer[tls.Config]
+	tlsConfig   *tls.Config
 	certificate atomic.Pointer[tls.Certificate]
 	autoCert    bool
 	autoCertExp time.Time
 }
 
 func (ci *certInfo) getTLS() *tls.Config {
-	tlsConfig := ci.tlsConfig.Load()
-	if tlsConfig != nil {
-		return tlsConfig.Clone()
+	if ci.tlsConfig != nil {
+		return ci.tlsConfig.Clone()
 	}
 	return nil
 }
@@ -64,7 +63,7 @@ func (ci *certInfo) setTLS(tlsConfig *tls.Config) {
 			tlsConfig.Certificates = nil
 		}
 	}
-	ci.tlsConfig.Store(tlsConfig)
+	ci.tlsConfig = tlsConfig
 }
 
 func (ci *certInfo) setAutoCertExp(exp time.Time) {
