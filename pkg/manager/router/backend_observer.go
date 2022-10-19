@@ -161,7 +161,6 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMa
 				Time:    10 * time.Second,
 				Timeout: 3 * time.Second,
 			}),
-			grpc.WithBlock(),
 			grpc.WithConnectParams(grpc.ConnectParams{
 				Backoff: backoff.Config{
 					BaseDelay:  time.Second,
