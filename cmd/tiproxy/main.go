@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/sctx"
 	"github.com/pingcap/TiProxy/pkg/server"
 	"github.com/spf13/cobra"
 )
@@ -60,16 +61,19 @@ func main() {
 			cfg.Log.Level = *logLevel
 		}
 
-		cfg.Cluster = config.Cluster{
-			PubAddr:           *pubAddr,
-			ClusterName:       *clusterName,
-			NodeName:          *nodeName,
-			BootstrapDurl:     *bootstrapDiscoveryUrl,
-			BootstrapDdns:     *bootstrapDiscoveryDNS,
-			BootstrapClusters: *bootstrapClusters,
+		sctx := &sctx.Context{
+			Config: cfg,
+			Cluster: sctx.Cluster{
+				PubAddr:           *pubAddr,
+				ClusterName:       *clusterName,
+				NodeName:          *nodeName,
+				BootstrapDurl:     *bootstrapDiscoveryUrl,
+				BootstrapDdns:     *bootstrapDiscoveryDNS,
+				BootstrapClusters: *bootstrapClusters,
+			},
 		}
 
-		srv, err := server.NewServer(cmd.Context(), cfg)
+		srv, err := server.NewServer(cmd.Context(), sctx)
 		if err != nil {
 			return errors.Wrapf(err, "fail to create server")
 		}

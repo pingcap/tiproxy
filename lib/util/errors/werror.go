@@ -50,7 +50,11 @@ func (e *WError) Error() string {
 }
 
 func (e *WError) Is(s error) bool {
-	return errors.Is(e.cerr, s)
+	r := errors.Is(e.cerr, s)
+	if r {
+		return r
+	}
+	return errors.Is(e.uerr, s)
 }
 
 func (e *WError) Unwrap() error {
@@ -60,7 +64,7 @@ func (e *WError) Unwrap() error {
 // Wrap is used to wrapping unknown errors. A typical example is that:
 // 1. have a function `ReadMyConfig()`
 // 2. it got errors returned from external libraries
-// 3. you want to wrap these errors, expect `Unwrap(err) == ErrExternalErrors && Is(err, ErrReadMyConfig)`.
+// 3. you want to wrap these errors, expect `Unwrap(err) == ErrExternalErrors && Is(err, ErrReadMyConfig) && Is(err, ErrExternalErrors)`.
 // 4. then you are finding `err := Wrap(ErrReadMyConfig, ErrExternalErrors)`
 // Note that wrap nil error will get nil error.
 func Wrap(cerr error, uerr error) error {

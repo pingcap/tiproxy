@@ -30,8 +30,9 @@ var testProxyConfig = Config{
 		WatchInterval:        "30m",
 	},
 	Proxy: ProxyServer{
-		Addr:    "0.0.0.0:4000",
-		PDAddrs: "127.0.0.1:4089",
+		Addr:              "0.0.0.0:4000",
+		PDAddrs:           "127.0.0.1:4089",
+		RequireBackendTLS: true,
 		ProxyServerOnline: ProxyServerOnline{
 			MaxConnections: 1,
 			TCPKeepAlive:   true,

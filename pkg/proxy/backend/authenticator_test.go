@@ -79,7 +79,7 @@ func TestUnsupportedCapability(t *testing.T) {
 	for _, cfgs := range cfgOverriders {
 		ts, clean := newTestSuite(t, tc, cfgs...)
 		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
-			if ts.mb.backendConfig.capability&requiredBackendCaps.Uint32() != requiredBackendCaps.Uint32() {
+			if ts.mb.backendConfig.capability&defRequiredBackendCaps.Uint32() != defRequiredBackendCaps.Uint32() {
 				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
 			} else if ts.mc.clientConfig.capability&requiredFrontendCaps.Uint32() != requiredFrontendCaps.Uint32() {
 				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
