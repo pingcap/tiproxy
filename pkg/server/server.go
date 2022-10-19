@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy"
+	"github.com/pingcap/TiProxy/pkg/sctx"
 	"github.com/pingcap/TiProxy/pkg/server/api"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -60,13 +61,15 @@ type Server struct {
 	Proxy *proxy.SQLServer
 }
 
-func NewServer(ctx context.Context, cfg *config.Config) (srv *Server, err error) {
+func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error) {
 	srv = &Server{
 		ConfigManager:    mgrcfg.NewConfigManager(),
 		MetricsManager:   metrics.NewMetricsManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
 		CertManager:      cert.NewCertManager(),
 	}
+
+	cfg := sctx.Config
 
 	// set up logger
 	var lg *zap.Logger
@@ -114,7 +117,7 @@ func NewServer(ctx context.Context, cfg *config.Config) (srv *Server, err error)
 		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
 		api.Register(engine.Group("/api"), cfg.API, lg.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		srv.Etcd, err = buildEtcd(cfg, lg.Named("etcd"), engine)
+		srv.Etcd, err = buildEtcd(sctx, lg.Named("etcd"), engine)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -245,26 +248,27 @@ func (s *Server) Close() error {
 	return errors.Collect(ErrCloseServer, errs...)
 }
 
-func buildEtcd(cfg *config.Config, logger *zap.Logger, engine *gin.Engine) (srv *embed.Etcd, err error) {
-	if cfg.Cluster.ClusterName == "" {
+func buildEtcd(ctx *sctx.Context, logger *zap.Logger, engine *gin.Engine) (srv *embed.Etcd, err error) {
+	cfg := ctx.Config
+	if ctx.Cluster.ClusterName == "" {
 		return nil, errors.New("cluster_name can not be empty")
 	}
-	if cfg.Cluster.NodeName == "" {
+	if ctx.Cluster.NodeName == "" {
 		hname, err := os.Hostname()
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
-		cfg.Cluster.NodeName = fmt.Sprintf("%s-%s", cfg.Cluster.ClusterName, hname)
+		ctx.Cluster.NodeName = fmt.Sprintf("%s-%s", ctx.Cluster.ClusterName, hname)
 	}
 
 	cnt := 0
-	if len(cfg.Cluster.BootstrapClusters) != 0 {
+	if len(ctx.Cluster.BootstrapClusters) != 0 {
 		cnt++
 	}
-	if cfg.Cluster.BootstrapDurl != "" {
+	if ctx.Cluster.BootstrapDurl != "" {
 		cnt++
 	}
-	if cfg.Cluster.BootstrapDdns != "" {
+	if ctx.Cluster.BootstrapDdns != "" {
 		cnt++
 	}
 	if cnt > 1 {
@@ -288,7 +292,7 @@ func buildEtcd(cfg *config.Config, logger *zap.Logger, engine *gin.Engine) (srv 
 	}
 	etcd_cfg.LCUrls = []url.URL{*apiAddr}
 	apiAddrAdvertise := *apiAddr
-	apiAddrAdvertise.Host = fmt.Sprintf("%s:%s", cfg.Cluster.PubAddr, apiAddrAdvertise.Port())
+	apiAddrAdvertise.Host = fmt.Sprintf("%s:%s", ctx.Cluster.PubAddr, apiAddrAdvertise.Port())
 	etcd_cfg.ACUrls = []url.URL{apiAddrAdvertise}
 
 	peerPort := cfg.Advance.PeerPort
@@ -308,28 +312,28 @@ func buildEtcd(cfg *config.Config, logger *zap.Logger, engine *gin.Engine) (srv 
 	peerAddr.Host = fmt.Sprintf("%s:%s", peerAddr.Hostname(), peerPort)
 	etcd_cfg.LPUrls = []url.URL{peerAddr}
 	peerAddrAdvertise := peerAddr
-	peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", cfg.Cluster.PubAddr, peerPort)
+	peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", ctx.Cluster.PubAddr, peerPort)
 	etcd_cfg.APUrls = []url.URL{peerAddrAdvertise}
 
-	etcd_cfg.Name = cfg.Cluster.NodeName
+	etcd_cfg.Name = ctx.Cluster.NodeName
 	if cnt == 0 {
-		etcd_cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Cluster.NodeName, peerAddrAdvertise.String())
-		etcd_cfg.InitialClusterToken = cfg.Cluster.ClusterName
-	} else if len(cfg.Cluster.BootstrapClusters) > 0 {
-		for i := range cfg.Cluster.BootstrapClusters {
+		etcd_cfg.InitialCluster = fmt.Sprintf("%s=%s", ctx.Cluster.NodeName, peerAddrAdvertise.String())
+		etcd_cfg.InitialClusterToken = ctx.Cluster.ClusterName
+	} else if len(ctx.Cluster.BootstrapClusters) > 0 {
+		for i := range ctx.Cluster.BootstrapClusters {
 			if etcd_cfg.PeerTLSInfo.Empty() {
-				cfg.Cluster.BootstrapClusters[i] = strings.Replace(cfg.Cluster.BootstrapClusters[i], "=", "=http://", 1)
+				ctx.Cluster.BootstrapClusters[i] = strings.Replace(ctx.Cluster.BootstrapClusters[i], "=", "=http://", 1)
 			} else {
-				cfg.Cluster.BootstrapClusters[i] = strings.Replace(cfg.Cluster.BootstrapClusters[i], "=", "=https://", 1)
+				ctx.Cluster.BootstrapClusters[i] = strings.Replace(ctx.Cluster.BootstrapClusters[i], "=", "=https://", 1)
 			}
 		}
-		etcd_cfg.InitialCluster = strings.Join(append(cfg.Cluster.BootstrapClusters, fmt.Sprintf("%s=%s", cfg.Cluster.NodeName, peerAddrAdvertise.String())), ",")
-		etcd_cfg.InitialClusterToken = cfg.Cluster.ClusterName
-	} else if cfg.Cluster.BootstrapDurl != "" {
-		etcd_cfg.Durl = cfg.Cluster.BootstrapDurl
-	} else if cfg.Cluster.BootstrapDdns != "" {
-		etcd_cfg.DNSCluster = cfg.Cluster.BootstrapDdns
-		etcd_cfg.DNSClusterServiceName = cfg.Cluster.ClusterName
+		etcd_cfg.InitialCluster = strings.Join(append(ctx.Cluster.BootstrapClusters, fmt.Sprintf("%s=%s", ctx.Cluster.NodeName, peerAddrAdvertise.String())), ",")
+		etcd_cfg.InitialClusterToken = ctx.Cluster.ClusterName
+	} else if ctx.Cluster.BootstrapDurl != "" {
+		etcd_cfg.Durl = ctx.Cluster.BootstrapDurl
+	} else if ctx.Cluster.BootstrapDdns != "" {
+		etcd_cfg.DNSCluster = ctx.Cluster.BootstrapDdns
+		etcd_cfg.DNSClusterServiceName = ctx.Cluster.ClusterName
 	}
 
 	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")

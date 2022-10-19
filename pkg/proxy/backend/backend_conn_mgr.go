@@ -85,12 +85,12 @@ type BackendConnManager struct {
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(logger *zap.Logger, connectionID uint64, proxyProtocol bool) *BackendConnManager {
+func NewBackendConnManager(logger *zap.Logger, connectionID uint64, proxyProtocol, requireBackendTLS bool) *BackendConnManager {
 	return &BackendConnManager{
 		logger:         logger,
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
-		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities, proxyProtocol: proxyProtocol},
+		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities, proxyProtocol: proxyProtocol, requireBackendTLS: requireBackendTLS},
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}

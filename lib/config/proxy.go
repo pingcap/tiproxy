@@ -35,16 +35,6 @@ type Config struct {
 	Security Security    `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
 	Metrics  Metrics     `yaml:"metrics,omitempty" toml:"metrics,omitempty" json:"metrics,omitempty"`
 	Log      Log         `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
-	Cluster  Cluster     `yaml:"-" toml:"-" json:"-"`
-}
-
-type Cluster struct {
-	PubAddr           string
-	ClusterName       string
-	NodeName          string
-	BootstrapDurl     string
-	BootstrapDdns     string
-	BootstrapClusters []string
 }
 
 type Metrics struct {
@@ -61,6 +51,7 @@ type ProxyServerOnline struct {
 type ProxyServer struct {
 	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
 	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
+	RequireBackendTLS bool   `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
 	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
@@ -121,6 +112,7 @@ type Security struct {
 func NewConfig(data []byte) (*Config, error) {
 	var cfg Config
 	cfg.Advance.IgnoreWrongNamespace = true
+	cfg.Proxy.RequireBackendTLS = true
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}

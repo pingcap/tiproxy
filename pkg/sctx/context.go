@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package net
+package sctx
 
-import "go.uber.org/atomic"
+import "github.com/pingcap/TiProxy/lib/config"
 
-type PacketIOption = func(*PacketIO)
-
-func WithProxy(pi *PacketIO) {
-	pi.proxyInited = atomic.NewBool(true)
+type Cluster struct {
+	PubAddr           string
+	ClusterName       string
+	NodeName          string
+	BootstrapDurl     string
+	BootstrapDdns     string
+	BootstrapClusters []string
 }
 
-func WithWrapError(err error) func(pi *PacketIO) {
-	return func(pi *PacketIO) {
-		pi.wrap = err
-	}
+type Context struct {
+	Config  *config.Config
+	Cluster Cluster
 }

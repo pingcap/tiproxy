@@ -32,14 +32,14 @@ var (
 )
 
 const requiredFrontendCaps = pnet.ClientProtocol41
-const requiredBackendCaps = pnet.ClientDeprecateEOF | pnet.ClientSSL
+const defRequiredBackendCaps = pnet.ClientDeprecateEOF
 
 // Other server capabilities are not supported. ClientDeprecateEOF is supported but TiDB 6.2.0 doesn't support it now.
 const supportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientConnectWithDB |
-	pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientInteractive | pnet.ClientLongFlag |
+	pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientInteractive | pnet.ClientLongFlag | pnet.ClientSSL |
 	pnet.ClientTransactions | pnet.ClientReserved | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
 	pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientPluginAuthLenencClientData |
-	requiredFrontendCaps | requiredBackendCaps
+	requiredFrontendCaps | defRequiredBackendCaps
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
@@ -52,6 +52,7 @@ type Authenticator struct {
 	capability                  uint32 // client capability
 	collation                   uint8
 	proxyProtocol               bool
+	requireBackendTLS           bool
 }
 
 func (auth *Authenticator) String() string {
@@ -140,11 +141,16 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 		return err
 	}
 	backendCapability := pnet.Capability(backendCapabilityU)
+	requiredBackendCaps := defRequiredBackendCaps
+	if auth.requireBackendTLS {
+		requiredBackendCaps |= pnet.ClientSSL
+	}
+
 	if commonCaps := backendCapability & requiredBackendCaps; commonCaps != requiredBackendCaps {
 		// The error cannot be sent to the client because the client only expects an initial handshake packet.
 		// The only way is to log it and disconnect.
-		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps))
-		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps&^commonCaps)
+		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps^commonCaps))
+		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps^commonCaps)
 	}
 	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
 		// TODO: need to do negotiation with backend
@@ -158,28 +164,34 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 		logger.Info("backend does not support capabilities from proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
 	}
 
-	resp.Capability = auth.capability | mysql.ClientSSL
 	// Send an unknown auth plugin so that the backend will request the auth data again.
 	resp.AuthPlugin = "auth_unknown_plugin"
-	pkt = pnet.MakeHandshakeResponse(resp)
-	// write SSL Packet
-	if err := backendIO.WritePacket(pkt[:32], true); err != nil {
-		return err
-	}
-	auth.backendTLSConfig = backendTLSConfig.Clone()
-	addr := backendIO.RemoteAddr().String()
-	if auth.serverAddr != "" {
-		// NOTE: should use DNS name as much as possible
-		// Usually certs are signed with domain instead of IP addrs
-		// And `RemoteAddr()` will return IP addr
-		addr = auth.serverAddr
-	}
-	host, _, err := net.SplitHostPort(addr)
-	if err == nil {
-		auth.backendTLSConfig.ServerName = host
-	}
-	if err = backendIO.ClientTLSHandshake(auth.backendTLSConfig); err != nil {
-		return err
+	resp.Capability = auth.capability
+
+	if backendCapability&pnet.ClientSSL != 0 {
+		resp.Capability |= mysql.ClientSSL
+		pkt = pnet.MakeHandshakeResponse(resp)
+		// write SSL Packet
+		if err := backendIO.WritePacket(pkt[:32], true); err != nil {
+			return err
+		}
+		auth.backendTLSConfig = backendTLSConfig.Clone()
+		addr := backendIO.RemoteAddr().String()
+		if auth.serverAddr != "" {
+			// NOTE: should use DNS name as much as possible
+			// Usually certs are signed with domain instead of IP addrs
+			// And `RemoteAddr()` will return IP addr
+			addr = auth.serverAddr
+		}
+		host, _, err := net.SplitHostPort(addr)
+		if err == nil {
+			auth.backendTLSConfig.ServerName = host
+		}
+		if err = backendIO.ClientTLSHandshake(auth.backendTLSConfig); err != nil {
+			return err
+		}
+	} else {
+		pkt = pnet.MakeHandshakeResponse(resp)
 	}
 
 	// forward client handshake resp

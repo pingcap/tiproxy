@@ -54,7 +54,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
 		proxyConfig:        cfg,
 		logger:             logger.CreateLoggerForTest(t).Named("mockProxy"),
-		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), 0, false),
+		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), 0, false, false),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp

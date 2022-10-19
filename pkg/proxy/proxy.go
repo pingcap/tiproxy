@@ -40,11 +40,12 @@ type serverState struct {
 }
 
 type SQLServer struct {
-	listener net.Listener
-	logger   *zap.Logger
-	certMgr  *cert.CertManager
-	nsmgr    *mgrns.NamespaceManager
-	wg       waitgroup.WaitGroup
+	listener          net.Listener
+	logger            *zap.Logger
+	certMgr           *cert.CertManager
+	nsmgr             *mgrns.NamespaceManager
+	requireBackendTLS bool
+	wg                waitgroup.WaitGroup
 
 	mu serverState
 }
@@ -54,9 +55,10 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 	var err error
 
 	s := &SQLServer{
-		logger:  logger,
-		certMgr: certMgr,
-		nsmgr:   nsmgr,
+		logger:            logger,
+		certMgr:           certMgr,
+		nsmgr:             nsmgr,
+		requireBackendTLS: cfg.RequireBackendTLS,
 		mu: serverState{
 			connID:  0,
 			clients: make(map[uint64]*client.ClientConnection),
@@ -122,7 +124,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
-	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(), s.nsmgr, connID, s.mu.proxyProtocol)
+	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(), s.nsmgr, connID, s.mu.proxyProtocol, s.requireBackendTLS)
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 

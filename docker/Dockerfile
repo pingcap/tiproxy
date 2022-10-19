@@ -1,10 +1,10 @@
-FROM alpine:latest
+FROM alpine:edge
 
 EXPOSE 3080
 EXPOSE 3081
 EXPOSE 6000
 
-ADD . https://raw.githubusercontent.com/njhallett/apk-fastest-mirror/main/apk-fastest-mirror.sh /proxy
+ADD . https://raw.githubusercontent.com/njhallett/apk-fastest-mirror/c4ca44caef3385d830fea34df2dbc2ba4a17e021/apk-fastest-mirror.sh /proxy
 RUN sh ./proxy/apk-fastest-mirror.sh -t 50 && apk add --no-cache --progress git make go
 ARG BUILDFLAGS
 ARG GOPROXY
