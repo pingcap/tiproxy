@@ -36,7 +36,7 @@ import (
 
 const DefaultCertExpiration = 10 * 365 * 24 * time.Hour
 
-func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
+func createTLSCertificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
 	logger = logger.With(zap.String("cert", certpath), zap.String("key", keypath), zap.String("ca", capath), zap.Int("rsaKeySize", rsaKeySize))
 
 	_, e1 := os.Stat(certpath)

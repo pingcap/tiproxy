@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package cert
 
 import (
@@ -93,20 +97,14 @@ func (ci *certInfo) getClientTLS() *tls.Config {
 			}
 
 			latestConfig := ci.tlsConfig.Load()
-			t := latestConfig.Time
-			if t == nil {
-				t = time.Now
-			}
 			opts := x509.VerifyOptions{
 				Roots:         latestConfig.RootCAs,
-				CurrentTime:   t(),
 				DNSName:       latestConfig.ServerName,
 				Intermediates: x509.NewCertPool(),
 			}
 			for _, cert := range certs[1:] {
 				opts.Intermediates.AddCert(cert)
 			}
-			// Problem: these verified chains cannot be assigned to tls.Conn.verifiedChains.
 			_, err := certs[0].Verify(opts)
 			return err
 		}
