@@ -79,9 +79,8 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 	return nil
 }
 
-func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, getBackendIO func(*Authenticator) (*pnet.PacketIO, error), frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
-	backendIO.ResetSequence()
 
 	proxyCapability := auth.supportedServerCapabilities
 	if frontendTLSConfig == nil {
@@ -130,6 +129,12 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, back
 	auth.collation = resp.Collation
 	auth.attrs = resp.Attrs
 
+	backendIO, err := getBackendIO(auth)
+	if err != nil {
+		return err
+	}
+
+	backendIO.ResetSequence()
 	// write proxy header
 	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
 		return err

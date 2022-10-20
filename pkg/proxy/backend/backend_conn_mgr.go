@@ -29,6 +29,7 @@ import (
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -81,19 +82,45 @@ type BackendConnManager struct {
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc   context.CancelFunc
 	backendConn  *BackendConnection
+	nsmgr        *namespace.NamespaceManager
+	getBackendIO func(*Authenticator) (*pnet.PacketIO, error)
 	connectionID uint64
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(logger *zap.Logger, connectionID uint64, proxyProtocol, requireBackendTLS bool) *BackendConnManager {
-	return &BackendConnManager{
+func NewBackendConnManager(logger *zap.Logger, nsmgr *namespace.NamespaceManager, connectionID uint64, proxyProtocol, requireBackendTLS bool) *BackendConnManager {
+	mgr := &BackendConnManager{
 		logger:         logger,
 		connectionID:   connectionID,
 		cmdProcessor:   NewCmdProcessor(),
+		nsmgr:          nsmgr,
 		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities, proxyProtocol: proxyProtocol, requireBackendTLS: requireBackendTLS},
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
+	mgr.getBackendIO = func(auth *Authenticator) (*pnet.PacketIO, error) {
+		ns, ok := mgr.nsmgr.GetNamespaceByUser(auth.user)
+		if !ok {
+			ns, ok = mgr.nsmgr.GetNamespace("default")
+		}
+		if !ok {
+			return nil, errors.New("failed to find a namespace")
+		}
+		router := ns.GetRouter()
+		addr, err := router.Route(mgr)
+		if err != nil {
+			return nil, err
+		}
+		mgr.logger.Info("found", zap.String("namespace", ns.Name()), zap.String("addr", addr))
+		mgr.backendConn = NewBackendConnection(addr)
+		if err := mgr.backendConn.Connect(); err != nil {
+			return nil, err
+		}
+		backendIO := mgr.backendConn.PacketIO()
+		auth.serverAddr = addr
+		return backendIO, nil
+	}
+	return mgr
 }
 
 // ConnectionID implements RedirectableConn.ConnectionID interface.
@@ -103,18 +130,15 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 }
 
 // Connect connects to the first backend and then start watching redirection signals.
-func (mgr *BackendConnManager) Connect(ctx context.Context, serverAddr string, clientIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.PacketIO, getBackendIO func(auth *Authenticator) (*pnet.PacketIO, error), frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
-	mgr.backendConn = NewBackendConnection(serverAddr)
-	if err := mgr.backendConn.Connect(); err != nil {
-		return err
+	if getBackendIO == nil {
+		getBackendIO = mgr.getBackendIO
 	}
-	backendIO := mgr.backendConn.PacketIO()
 
-	mgr.authenticator.serverAddr = serverAddr
-	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, backendIO, frontendTLSConfig, backendTLSConfig); err != nil {
+	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, getBackendIO, frontendTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}
 

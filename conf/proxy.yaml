@@ -3,8 +3,8 @@ proxy:
   addr: "0.0.0.0:6000"
   tcp-keep-alive: true
   max-connections: 1000
-  pd-addrs: "127.0.0.1:2379"
   # require-backend-tls: true
+  # pd-addrs: "127.0.0.1:2379"
   # proxy-protocol: "v2"
 metrics:
 api:

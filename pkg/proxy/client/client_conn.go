@@ -37,13 +37,11 @@ type ClientConnection struct {
 	frontendTLSConfig *tls.Config    // the TLS config to connect to clients.
 	backendTLSConfig  *tls.Config    // the TLS config to connect to TiDB server.
 	pkt               *pnet.PacketIO // a helper to read and write data in packet format.
-	nsmgr             *namespace.NamespaceManager
-	ns                *namespace.Namespace
 	connMgr           *backend.BackendConnManager
 }
 
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, nsmgr *namespace.NamespaceManager, connID uint64, proxyProtocol, requireBackendTLS bool) *ClientConnection {
-	bemgr := backend.NewBackendConnManager(logger.Named("be"), connID, proxyProtocol, requireBackendTLS)
+	bemgr := backend.NewBackendConnManager(logger.Named("be"), nsmgr, connID, proxyProtocol, requireBackendTLS)
 	opts := make([]pnet.PacketIOption, 0, 2)
 	opts = append(opts, pnet.WithWrapError(ErrClientConn))
 	if proxyProtocol {
@@ -55,39 +53,27 @@ func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *t
 		frontendTLSConfig: frontendTLSConfig,
 		backendTLSConfig:  backendTLSConfig,
 		pkt:               pkt,
-		nsmgr:             nsmgr,
 		connMgr:           bemgr,
 	}
 }
 
-func (cc *ClientConnection) connectBackend(ctx context.Context) error {
-	ns, ok := cc.nsmgr.GetNamespace("default")
-	if !ok {
-		return errors.New("failed to find a namespace")
-	}
-	cc.ns = ns
-	router := ns.GetRouter()
-	addr, err := router.Route(cc.connMgr)
-	if err != nil {
-		return err
-	}
-	if err = cc.connMgr.Connect(ctx, addr, cc.pkt, cc.frontendTLSConfig, cc.backendTLSConfig); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (cc *ClientConnection) Run(ctx context.Context) {
-	if err := cc.connectBackend(ctx); err != nil {
-		cc.logger.Info("new connection fails", zap.Error(err))
-		return
+	var err error
+	var msg string
+
+	if err = cc.connMgr.Connect(ctx, cc.pkt, nil, cc.frontendTLSConfig, cc.backendTLSConfig); err != nil {
+		msg = "new connection failed"
+		goto clean
+	}
+	if err = cc.processMsg(ctx); err != nil {
+		msg = "fails to relay the connection"
+		goto clean
 	}
 
-	if err := cc.processMsg(ctx); err != nil {
-		clientErr := errors.Is(err, ErrClientConn)
-		if !(clientErr && errors.Is(err, io.EOF)) {
-			cc.logger.Info("process message fails", zap.Error(err), zap.Bool("clientErr", clientErr), zap.Bool("serverErr", !clientErr))
-		}
+clean:
+	clientErr := errors.Is(err, ErrClientConn)
+	if !(clientErr && errors.Is(err, io.EOF)) {
+		cc.logger.Info(msg, zap.Error(err), zap.Bool("clientErr", clientErr), zap.Bool("serverErr", !clientErr))
 	}
 }
 

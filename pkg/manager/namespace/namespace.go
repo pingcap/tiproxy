@@ -21,11 +21,16 @@ import (
 
 type Namespace struct {
 	name   string
+	user   string
 	router router.Router
 }
 
 func (n *Namespace) Name() string {
 	return n.name
+}
+
+func (n *Namespace) User() string {
+	return n.user
 }
 
 func (n *Namespace) GetRouter() router.Router {
