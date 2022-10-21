@@ -36,7 +36,7 @@ import (
 
 const DefaultCertExpiration = 10 * 365 * 24 * time.Hour
 
-func createTLSConfigificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
+func createTLSCertificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
 	logger = logger.With(zap.String("cert", certpath), zap.String("key", keypath), zap.String("ca", capath), zap.Int("rsaKeySize", rsaKeySize))
 
 	_, e1 := os.Stat(certpath)
@@ -93,7 +93,7 @@ func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, m
 	if autoca {
 		scfg.CA = filepath.Join(workdir, mod, "ca.pem")
 	}
-	if err := createTLSConfigificates(logger, scfg.Cert, scfg.Key, scfg.CA, keySize, DefaultCertExpiration); err != nil {
+	if err := createTLSCertificates(logger, scfg.Cert, scfg.Key, scfg.CA, keySize, DefaultCertExpiration); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil

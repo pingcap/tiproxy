@@ -32,51 +32,6 @@ const (
 	defaultAutoCertInterval = 30 * 24 * time.Hour
 )
 
-// Security configurations don't support dynamically updating now.
-type certInfo struct {
-	cfg         config.TLSConfig
-	tlsConfig   *tls.Config
-	certificate atomic.Pointer[tls.Certificate]
-	autoCert    bool
-	autoCertExp time.Time
-}
-
-func (ci *certInfo) getTLS() *tls.Config {
-	if ci.tlsConfig != nil {
-		return ci.tlsConfig.Clone()
-	}
-	return nil
-}
-
-func (ci *certInfo) setTLS(tlsConfig *tls.Config) {
-	if tlsConfig != nil {
-		tlsConfig = tlsConfig.Clone()
-		if tlsConfig.Certificates != nil {
-			ci.certificate.Store(&tlsConfig.Certificates[0])
-			// Doesn't support rotating CA now. It needs overwriting InsecureSkipVerify and VerifyPeerCertificate.
-			tlsConfig.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return ci.certificate.Load(), nil
-			}
-			tlsConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-				return ci.certificate.Load(), nil
-			}
-			tlsConfig.Certificates = nil
-		}
-	}
-	ci.tlsConfig = tlsConfig
-}
-
-func (ci *certInfo) setAutoCertExp(exp time.Time) {
-	ci.autoCertExp = exp
-}
-
-func (ci *certInfo) needRecreateCert(now time.Time) bool {
-	if !ci.autoCert {
-		return false
-	}
-	return now.After(ci.autoCertExp)
-}
-
 // CertManager reloads certs and offers interfaces for fetching TLS configs.
 // Currently, all the namespaces share the same certs but there might be per-namespace
 // certs in the future.
@@ -109,6 +64,7 @@ func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger) error {
 	cm.serverTLS = certInfo{
 		cfg:      cfg.Security.ServerTLS,
 		autoCert: !cfg.Security.ServerTLS.HasCert() && cfg.Security.ServerTLS.AutoCerts,
+		isServer: true,
 	}
 	cm.peerTLS = certInfo{
 		cfg:      cfg.Security.PeerTLS,
@@ -185,12 +141,10 @@ func (cm *CertManager) load() error {
 		needReloadServer = true
 	}
 	if needReloadServer {
-		var tlsConfig *tls.Config
-		if tlsConfig, err = security.BuildServerTLSConfig(cm.logger, cm.serverTLS.cfg); err != nil {
+		if err = cm.serverTLS.buildTLSConfig(cm.logger); err != nil {
 			cm.logger.Error("loading server certs failed", zap.Error(err))
 			errs = append(errs, err)
 		} else {
-			cm.serverTLS.setTLS(tlsConfig)
 			cm.serverTLS.setAutoCertExp(now.Add(time.Duration(cm.autoCertInterval.Load())))
 		}
 	}
@@ -205,18 +159,14 @@ func (cm *CertManager) load() error {
 		}
 	}
 
-	if tlsConfig, err := security.BuildClientTLSConfig(cm.logger, cm.sqlTLS.cfg); err != nil {
+	if err = cm.sqlTLS.buildTLSConfig(cm.logger); err != nil {
 		cm.logger.Error("loading sql certs failed", zap.Error(err))
 		errs = append(errs, err)
-	} else {
-		cm.sqlTLS.setTLS(tlsConfig)
 	}
 
-	if tlsConfig, err := security.BuildClientTLSConfig(cm.logger, cm.clusterTLS.cfg); err != nil {
+	if err = cm.clusterTLS.buildTLSConfig(cm.logger); err != nil {
 		cm.logger.Error("loading cluster certs failed", zap.Error(err))
 		errs = append(errs, err)
-	} else {
-		cm.clusterTLS.setTLS(tlsConfig)
 	}
 
 	if len(errs) != 0 {
