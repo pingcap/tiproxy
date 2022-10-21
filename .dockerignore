@@ -9,3 +9,4 @@
 **/work
 **/.vscode/
 **/.cover*
+docker/Dockerfile
