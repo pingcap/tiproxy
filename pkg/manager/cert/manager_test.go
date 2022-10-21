@@ -110,33 +110,28 @@ func TestReloadCerts(t *testing.T) {
 	}
 }
 
-func getRawCertificate(t *testing.T, ci *certInfo, server bool) [][]byte {
-	var tlsConfig *tls.Config
-	if server {
-		tlsConfig = ci.getServerTLS()
-		if tlsConfig == nil {
-			return nil
-		}
-		tlsConfig, err := tlsConfig.GetConfigForClient(nil)
-		require.NoError(t, err)
-		return tlsConfig.Certificates[0].Certificate
-	} else {
-		tlsConfig = ci.getClientTLS()
-		if tlsConfig == nil {
-			return nil
-		}
-		cert, err := tlsConfig.GetClientCertificate(nil)
-		require.NoError(t, err)
-		return cert.Certificate
+func getRawCertificate(t *testing.T, ci *certInfo) [][]byte {
+	tlsConfig := ci.getTLS()
+	if tlsConfig == nil {
+		return nil
 	}
+	var cert *tls.Certificate
+	var err error
+	if ci.isServer {
+		cert, err = tlsConfig.GetCertificate(nil)
+	} else {
+		cert, err = tlsConfig.GetClientCertificate(nil)
+	}
+	require.NoError(t, err)
+	return cert.Certificate
 }
 
 func getAllCertificates(t *testing.T, certMgr *CertManager) [4][][]byte {
 	return [4][][]byte{
-		getRawCertificate(t, &certMgr.serverTLS, true),
-		getRawCertificate(t, &certMgr.peerTLS, false),
-		getRawCertificate(t, &certMgr.sqlTLS, false),
-		getRawCertificate(t, &certMgr.clusterTLS, false),
+		getRawCertificate(t, &certMgr.serverTLS),
+		getRawCertificate(t, &certMgr.peerTLS),
+		getRawCertificate(t, &certMgr.sqlTLS),
+		getRawCertificate(t, &certMgr.clusterTLS),
 	}
 }
 
@@ -183,7 +178,7 @@ func TestRotateCACert(t *testing.T) {
 	// Connecting with fake CA should not work.
 	stls := certMgr.ServerTLS()
 	ctls := certMgr.SQLTLS()
-	clientErr, serverErr := connectWithTLS(ctls, stls)
+	clientErr, serverErr := connectWithTLS(ctls, stls, "")
 	require.ErrorContains(t, clientErr, "certificate signed by unknown authority")
 	require.Error(t, serverErr)
 
@@ -196,7 +191,7 @@ func TestRotateCACert(t *testing.T) {
 		case <-timer.C:
 			t.Fatal("timeout")
 		case <-time.After(100 * time.Millisecond):
-			clientErr, serverErr := connectWithTLS(ctls, stls)
+			clientErr, serverErr := connectWithTLS(ctls, stls, "example.golang")
 			if clientErr == nil && serverErr == nil {
 				return
 			}
@@ -204,11 +199,11 @@ func TestRotateCACert(t *testing.T) {
 	}
 }
 
-func connectWithTLS(ctls, stls *tls.Config) (clientErr, serverErr error) {
+func connectWithTLS(ctls, stls *tls.Config, serverName string) (clientErr, serverErr error) {
 	client, server := net.Pipe()
 	var wg waitgroup.WaitGroup
 	wg.Run(func() {
-		ctls.ServerName = "example.golang"
+		ctls.ServerName = serverName
 		tlsConn := tls.Client(client, ctls)
 		clientErr = tlsConn.Handshake()
 		_ = client.Close()

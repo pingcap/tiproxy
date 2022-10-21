@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package cert
 
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"sync/atomic"
 	"time"
 
@@ -36,92 +31,6 @@ const (
 	defaultRetryInterval    = 1 * time.Hour
 	defaultAutoCertInterval = 30 * 24 * time.Hour
 )
-
-// Security configurations don't support dynamically updating now.
-type certInfo struct {
-	cfg         config.TLSConfig
-	tlsConfig   atomic.Pointer[tls.Config]
-	certificate atomic.Pointer[tls.Certificate]
-	autoCert    bool
-	autoCertExp time.Time
-}
-
-func (ci *certInfo) setTLS(tlsConfig *tls.Config) {
-	ci.tlsConfig.Store(tlsConfig)
-	if tlsConfig == nil {
-		return
-	}
-	if len(tlsConfig.Certificates) > 0 {
-		ci.certificate.Store(&tlsConfig.Certificates[0])
-	}
-}
-
-// Some methods to rotate server config:
-// - For certs: customize GetCertificate / GetConfigForClient.
-// - For CA: customize ClientAuth + VerifyPeerCertificate / GetConfigForClient
-func (ci *certInfo) getServerTLS() *tls.Config {
-	tlsConfig := ci.tlsConfig.Load()
-	if tlsConfig == nil {
-		return nil
-	}
-	tlsConfig = tlsConfig.Clone()
-	tlsConfig.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
-		return ci.tlsConfig.Load(), nil
-	}
-	return tlsConfig
-}
-
-// Some methods to rotate client config:
-// - For certs: customize GetClientCertificate
-// - For CA: customize InsecureSkipVerify + VerifyPeerCertificate
-func (ci *certInfo) getClientTLS() *tls.Config {
-	tlsConfig := ci.tlsConfig.Load()
-	if tlsConfig == nil {
-		return nil
-	}
-	tlsConfig = tlsConfig.Clone()
-	tlsConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-		return ci.certificate.Load(), nil
-	}
-	if !tlsConfig.InsecureSkipVerify {
-		tlsConfig.InsecureSkipVerify = true
-		// The following code is modified from tls.Conn.verifyServerCertificate().
-		tlsConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-			certs := make([]*x509.Certificate, len(rawCerts))
-			for i, asn1Data := range rawCerts {
-				cert, err := x509.ParseCertificate(asn1Data)
-				if err != nil {
-					return errors.New("tls: failed to parse certificate from server: " + err.Error())
-				}
-				certs[i] = cert
-			}
-
-			latestConfig := ci.tlsConfig.Load()
-			opts := x509.VerifyOptions{
-				Roots:         latestConfig.RootCAs,
-				DNSName:       latestConfig.ServerName,
-				Intermediates: x509.NewCertPool(),
-			}
-			for _, cert := range certs[1:] {
-				opts.Intermediates.AddCert(cert)
-			}
-			_, err := certs[0].Verify(opts)
-			return err
-		}
-	}
-	return tlsConfig
-}
-
-func (ci *certInfo) setAutoCertExp(exp time.Time) {
-	ci.autoCertExp = exp
-}
-
-func (ci *certInfo) needRecreateCert(now time.Time) bool {
-	if !ci.autoCert {
-		return false
-	}
-	return now.After(ci.autoCertExp)
-}
 
 // CertManager reloads certs and offers interfaces for fetching TLS configs.
 // Currently, all the namespaces share the same certs but there might be per-namespace
@@ -155,6 +64,7 @@ func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger) error {
 	cm.serverTLS = certInfo{
 		cfg:      cfg.Security.ServerTLS,
 		autoCert: !cfg.Security.ServerTLS.HasCert() && cfg.Security.ServerTLS.AutoCerts,
+		isServer: true,
 	}
 	cm.peerTLS = certInfo{
 		cfg:      cfg.Security.PeerTLS,
@@ -188,15 +98,15 @@ func (cm *CertManager) SetAutoCertInterval(interval time.Duration) {
 }
 
 func (cm *CertManager) ServerTLS() *tls.Config {
-	return cm.serverTLS.getServerTLS()
+	return cm.serverTLS.getTLS()
 }
 
 func (cm *CertManager) ClusterTLS() *tls.Config {
-	return cm.clusterTLS.getClientTLS()
+	return cm.clusterTLS.getTLS()
 }
 
 func (cm *CertManager) SQLTLS() *tls.Config {
-	return cm.sqlTLS.getClientTLS()
+	return cm.sqlTLS.getTLS()
 }
 
 // The proxy is supposed to be always online, so it should reload certs automatically,
@@ -231,12 +141,10 @@ func (cm *CertManager) load() error {
 		needReloadServer = true
 	}
 	if needReloadServer {
-		var tlsConfig *tls.Config
-		if tlsConfig, err = security.BuildServerTLSConfig(cm.logger, cm.serverTLS.cfg); err != nil {
+		if err = cm.serverTLS.buildTLSConfig(cm.logger); err != nil {
 			cm.logger.Error("loading server certs failed", zap.Error(err))
 			errs = append(errs, err)
 		} else {
-			cm.serverTLS.setTLS(tlsConfig)
 			cm.serverTLS.setAutoCertExp(now.Add(time.Duration(cm.autoCertInterval.Load())))
 		}
 	}
@@ -251,18 +159,14 @@ func (cm *CertManager) load() error {
 		}
 	}
 
-	if tlsConfig, err := security.BuildClientTLSConfig(cm.logger, cm.sqlTLS.cfg); err != nil {
+	if err = cm.sqlTLS.buildTLSConfig(cm.logger); err != nil {
 		cm.logger.Error("loading sql certs failed", zap.Error(err))
 		errs = append(errs, err)
-	} else {
-		cm.sqlTLS.setTLS(tlsConfig)
 	}
 
-	if tlsConfig, err := security.BuildClientTLSConfig(cm.logger, cm.clusterTLS.cfg); err != nil {
+	if err = cm.clusterTLS.buildTLSConfig(cm.logger); err != nil {
 		cm.logger.Error("loading cluster certs failed", zap.Error(err))
 		errs = append(errs, err)
-	} else {
-		cm.clusterTLS.setTLS(tlsConfig)
 	}
 
 	if len(errs) != 0 {
