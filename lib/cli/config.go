@@ -16,7 +16,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 
@@ -40,15 +39,14 @@ func getConfigCmd(ctx *Context, pathSuffix string) *cobra.Command {
 		}
 		input := setProxy.Flags().String("input", "", "specify the input json file for proxy config")
 		setProxy.RunE = func(cmd *cobra.Command, args []string) error {
-			var b io.Reader
+			b := cmd.InOrStdin()
 			if *input != "" {
 				f, err := os.Open(*input)
 				if err != nil {
 					return err
 				}
 				defer f.Close()
-			} else {
-				b = os.Stdin
+				b = f
 			}
 
 			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, path, b)

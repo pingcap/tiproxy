@@ -130,10 +130,10 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 		putNamespace := &cobra.Command{
 			Use: "put",
 		}
-		ns := putNamespace.Flags().String("ns", "-", "file")
+		ns := putNamespace.Flags().String("ns", "", "file, or stdin")
 		putNamespace.RunE = func(cmd *cobra.Command, _ []string) error {
 			in := cmd.InOrStdin()
-			if *ns != "-" {
+			if *ns != "" {
 				f, err := os.Open(*ns)
 				if err != nil {
 					return err
