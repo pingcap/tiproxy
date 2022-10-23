@@ -5,6 +5,7 @@ RUN sh /apk-fastest-mirror.sh -t 50 && apk add --no-cache --progress git make go
 ARG BUILDFLAGS
 ARG GOPROXY
 ADD . /proxy
+RUN export BUILDFLAGS=${BUILDFLAGS} && export GOPROXY=${GOPROXY} && cd /proxy && go mod download
 RUN export BUILDFLAGS=${BUILDFLAGS} && export GOPROXY=${GOPROXY} && cd /proxy && make cmd
 
 FROM alpine:latest
