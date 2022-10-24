@@ -22,6 +22,7 @@ type Namespace struct {
 }
 
 type FrontendNamespace struct {
+	User     string    `yaml:"user" json:"user" toml:"user"`
 	Security TLSConfig `yaml:"security" json:"security" toml:"security"`
 }
 

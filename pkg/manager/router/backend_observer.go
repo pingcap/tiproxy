@@ -188,9 +188,6 @@ func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver
 // NewBackendObserver creates a BackendObserver.
 func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client,
 	config *HealthCheckConfig, staticAddrs []string) (*BackendObserver, error) {
-	if client == nil && len(staticAddrs) == 0 {
-		return nil, ErrNoInstanceToSelect
-	}
 	if httpCli == nil {
 		httpCli = http.DefaultClient
 	}
@@ -234,11 +231,6 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 // This is only for test. For a production cluster, the PD address should always be configured.
 func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
 	for ctx.Err() == nil {
-		select {
-		case <-time.After(bo.config.healthCheckInterval):
-		case <-ctx.Done():
-			return
-		}
 		backendInfo := make(map[string]BackendStatus)
 		for _, addr := range bo.staticAddrs {
 			backendInfo[addr] = StatusHealthy
@@ -246,6 +238,11 @@ func (bo *BackendObserver) observeStaticAddrs(ctx context.Context) {
 		// The status port is not configured, so we skip checking health now.
 		//bo.checkHealth(ctx, backendInfo)
 		bo.notifyIfChanged(backendInfo)
+		select {
+		case <-time.After(bo.config.healthCheckInterval):
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

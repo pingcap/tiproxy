@@ -48,6 +48,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	}
 	return &Namespace{
 		name:   cfg.Namespace,
+		user:   cfg.Frontend.User,
 		router: rt,
 	}, nil
 }
@@ -95,6 +96,18 @@ func (n *NamespaceManager) GetNamespace(nm string) (*Namespace, bool) {
 
 	ns, ok := n.nsm[nm]
 	return ns, ok
+}
+
+func (n *NamespaceManager) GetNamespaceByUser(user string) (*Namespace, bool) {
+	n.RLock()
+	defer n.RUnlock()
+
+	for _, ns := range n.nsm {
+		if ns.User() == user {
+			return ns, true
+		}
+	}
+	return nil, false
 }
 
 func (n *NamespaceManager) RedirectConnections() []error {
