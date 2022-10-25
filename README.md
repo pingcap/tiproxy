@@ -1,40 +1,84 @@
-# Weir
+## What is TiProxy?
 
-Weir is a database proxy middleware platform, mainly providing traffic management for TiDB.
+TiProxy is a database proxy that is based on TiDB. It keeps client connections alive while the TiDB server upgrades, restarts, scales in, and scales out.
 
-Weir is maintained by [伴鱼](https://www.ipalfish.com/) and [PingCAP](https://pingcap.com/).
-
-[中文文档](README-CN.md)
+TiProxy is forked from [Weir](https://github.com/tidb-incubator/weir).
 
 ## Features
 
-- __L7 Proxy__
+### Connection Management
 
-Weir provides application layer proxy for MySQL Protocol, and it is compatible with TiDB 4.0.
+When a TiDB instance restarts or shuts down, TiProxy migrates backend connections on this instance to other instances. In this way, the clients won't be disconnected.
 
-- __Connection Management__
+### Load Balance
 
-Weir uses connection pool for backend connection management, and supports load balancing.
+TiProxy routes new connections to backends based on their scores to keep load balanced. The score is basically calculated from the connections on each backend.
 
-- __Multi-tenant Management__
+Besides, when the clients create or close connections, TiProxy also migrates backend connections to keep the backends balanced.
 
-Weir supports multi-tenant management. All the namespaces can be dynamic reloaded in runtime.
+### Service Discovery
 
-- __Fault Tolerance__
+When a new TiDB instance starts, the TiProxy detects the new TiDB instance and migrates backend connections to the instance.
 
-Weir supports rate limiting and circuit breaking to protect both clients and TiDB servers.
+The TiProxy also checks health on TiDB instances to ensure they are alive, and migrates the backend connections to other TiDB instances if any instance is down.
 
 ## Architecture
 
-There are three core components in Weir platform: proxy, controller and UI dashboard.
+For more details, see [Design Doc](https://github.com/pingcap/tidb/blob/master/docs/design/2022-07-20-session-manager.md).
 
-<img src="docs/en/assets/weir-architecture.png" style="zoom:80%;" />
+## Build
 
-## Roadmap
+Build the binary in local:
 
-- Web Application Firewall (WAF) for SQL
-- Database Mesh for TiDB
-- SQL audit
+```shell
+$ make
+```
+
+Build a docker image:
+
+```shell
+$ make docker
+```
+
+## Usage
+
+1. Generate a self-signed certificate, which is used for the token-based authentication between TiDB and TiProxy.
+
+Put the certs and keys to all the TiDB servers. Make sure all the TiDB instances use the same certificate.
+
+2. Update the `config.toml` of TiDB instances:
+
+```toml
+security.auto-tls=true
+security.session-token-signing-cert={path/to/cert.pem}
+security.session-token-signing-key={path/to/key.pem}
+graceful-wait-before-shutdown=10
+```
+
+Where the `session-token-signing-cert` and `session-token-signing-key` are the paths to the certs generated in the 1st step.
+
+And then start the TiDB cluster with the config.toml.
+
+3. Update the `proxy.yaml` of TiProxy:
+
+```yaml
+proxy:
+    pd-addrs: "127.0.0.1:2379"
+```
+
+Where the `pd-addrs` contains the addresses of all PD instances.
+
+And then start TiProxy:
+
+```shell
+$ bin/tiproxy --config=conf/proxy.yaml
+```
+
+4. Connect to TiProxy with your client. The default port is 6000:
+
+```shell
+$ mysql -h127.0.0.1 -uroot -P6000
+```
 
 ## Code of Conduct
 
@@ -42,4 +86,4 @@ This project is for everyone. We ask that our users and contributors take a few 
 
 ## License
 
-Weir is under the Apache 2.0 license. See the [LICENSE](./LICENSE) file for details.
+TiProxy is under the Apache 2.0 license. See the [LICENSE](./LICENSE) file for details.
