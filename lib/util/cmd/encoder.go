@@ -16,8 +16,10 @@ package cmd
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -35,7 +37,7 @@ type tidbEncoder struct {
 	openNamespaces int
 }
 
-func NewTiDBEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
+func NewTiDBEncoder(cfg zapcore.EncoderConfig) *tidbEncoder {
 	if cfg.ConsoleSeparator == "" {
 		cfg.ConsoleSeparator = "\t"
 	}
@@ -45,12 +47,18 @@ func NewTiDBEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 	return &tidbEncoder{_pool.Get(), cfg, 0}
 }
 
-func (c tidbEncoder) clone() *tidbEncoder {
-	return &tidbEncoder{_pool.Get(), c.EncoderConfig, 0}
+func (c tidbEncoder) clone(keepOld bool) *tidbEncoder {
+	newbuf := _pool.Get()
+	if keepOld {
+		newbuf.AppendString(c.line.String())
+	}
+	return &tidbEncoder{newbuf, c.EncoderConfig, 0}
 }
 
 func (c tidbEncoder) Clone() zapcore.Encoder {
-	return c.clone()
+	// this API is called on logger.With/Named or any other log deriviation action
+	// thus old fields must be kept
+	return c.clone(true)
 }
 
 func (c *tidbEncoder) beginQuoteFiled() {
@@ -62,20 +70,11 @@ func (c *tidbEncoder) beginQuoteFiled() {
 func (c *tidbEncoder) endQuoteFiled() {
 	c.line.AppendByte(']')
 }
-func (c *tidbEncoder) encodeError(f zapcore.Field) {
-	err := f.Interface.(error)
-	basic := err.Error()
-	c.AddString(f.Key, basic)
-	if e, isFormatter := err.(fmt.Formatter); isFormatter {
-		verbose := fmt.Sprintf("%+v", e)
-		if verbose != basic {
-			// This is a rich error type, like those produced by github.com/pkg/errors.
-			c.AddString(f.Key+"Verbose", verbose)
-		}
-	}
-}
 func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
-	c := e.clone()
+	// clone here to ensure concurrent safety, note that:
+	// 1. the buffer will be used/freed by caller
+	// 2. we want to start with time format.. etc, so we don't copy old fields
+	c := e.clone(false)
 	if c.TimeKey != "" {
 		c.beginQuoteFiled()
 		if c.EncodeTime != nil {
@@ -121,16 +120,10 @@ func (e *tidbEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*b
 		c.line.AppendByte(' ')
 	}
 
-	// append the old fields
-	c.line.WriteString(e.line.String())
+	// append old fields
+	c.line.AppendString(e.line.String())
 
 	for _, f := range fields {
-		if f.Type == zapcore.ErrorType {
-			// handle ErrorType in pingcap/log to fix "[key=?,keyVerbose=?]" problem.
-			// see more detail at https://github.com/pingcap/log/pull/5
-			c.encodeError(f)
-			continue
-		}
 		f.AddTo(c)
 	}
 
@@ -162,7 +155,6 @@ outerloop:
 			break outerloop
 		}
 	}
-
 	if needQuotes {
 		f.line.AppendByte('"')
 	}
@@ -173,9 +165,12 @@ outerloop:
 			f.line.AppendString(`\ufffd`)
 		} else if size == 1 {
 			switch r {
-			case '\\', '"', '\n', '\r', '\t':
-				f.line.AppendByte('\\')
-				f.line.AppendByte(s[i])
+			case '"':
+				f.line.AppendString("\\\"")
+			case '\n':
+				f.line.AppendString("\\n")
+			case '\r':
+				f.line.AppendString("\\r")
 			default:
 				if r >= 0x20 {
 					f.line.AppendByte(s[i])
@@ -291,7 +286,7 @@ func (s *tidbEncoder) AddInt64(key string, val int64) {
 func (s *tidbEncoder) AddString(key string, val string) {
 	s.beginQuoteFiled()
 	s.addKey(key)
-	s.AppendString(val)
+	s.safeAddString(val)
 	s.endQuoteFiled()
 }
 func (s *tidbEncoder) AddTime(key string, val time.Time) {
@@ -339,11 +334,7 @@ func (s *tidbEncoder) AddUintptr(key string, val uintptr) {
 func (s *tidbEncoder) AddReflected(key string, obj interface{}) error {
 	s.beginQuoteFiled()
 	s.addKey(key)
-	enc := json.NewEncoder(s.line)
-	if err := enc.Encode(obj); err != nil {
-		return err
-	}
-	s.line.TrimNewline()
+	s.AppendReflected(obj)
 	s.endQuoteFiled()
 	return nil
 }
@@ -390,8 +381,12 @@ func (s *tidbEncoder) AppendObject(v zapcore.ObjectMarshaler) error {
 }
 func (s *tidbEncoder) AppendReflected(v interface{}) error {
 	s.addElementSeparator()
-	_, err := fmt.Fprint(s.line, v)
-	return err
+	bytes, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	s.safeAddString(strings.TrimSpace(string(bytes)))
+	return nil
 }
 func (s *tidbEncoder) AppendBool(v bool) {
 	s.addElementSeparator()
@@ -399,7 +394,8 @@ func (s *tidbEncoder) AppendBool(v bool) {
 }
 func (s *tidbEncoder) AppendByteString(v []byte) {
 	s.addElementSeparator()
-	fmt.Fprint(s.line, v)
+	fmt.Fprint(s.line, "0x")
+	fmt.Fprint(s.line, hex.EncodeToString(v))
 }
 func (s *tidbEncoder) AppendComplex128(v complex128) {
 	s.addElementSeparator()
