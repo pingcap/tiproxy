@@ -47,6 +47,6 @@ func TestEncoder(t *testing.T) {
 
 	// test append reflected
 	enc = enc.clone(false)
-	enc.AddReflected("ff", struct{ A string }{"\""})
+	require.NoError(t, enc.AddReflected("ff", struct{ A string }{"\""}))
 	require.Equal(t, "[ff=\"{\\\"A\\\":\\\"\\\\\"\\\"}\"]", enc.line.String())
 }

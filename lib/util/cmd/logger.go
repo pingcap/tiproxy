@@ -16,7 +16,6 @@ package cmd
 
 import (
 	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -24,10 +23,10 @@ import (
 func buildEncoder(cfg *config.Log) (zapcore.Encoder, error) {
 	encfg := zap.NewProductionEncoderConfig()
 	switch cfg.Encoder {
-	case "tidb":
-		return log.NewTextEncoder(&log.Config{})
-	case "newtidb":
-		fallthrough
+	case "json":
+		return zapcore.NewJSONEncoder(encfg), nil
+	case "console":
+		return zapcore.NewConsoleEncoder(encfg), nil
 	default:
 		return NewTiDBEncoder(encfg), nil
 	}

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"go.uber.org/zap/buffer"
@@ -171,12 +172,14 @@ outerloop:
 				f.line.AppendString("\\n")
 			case '\r':
 				f.line.AppendString("\\r")
+			case '\t':
+				f.line.AppendString("\\t")
 			default:
-				if r >= 0x20 {
-					f.line.AppendByte(s[i])
-				} else {
+				if unicode.IsControl(r) {
 					f.line.AppendString(`\u`)
-					fmt.Fprintf(f.line, "%4x", r)
+					fmt.Fprintf(f.line, "%04x", r)
+				} else {
+					f.line.AppendByte(s[i])
 				}
 			}
 		} else {
@@ -334,9 +337,11 @@ func (s *tidbEncoder) AddUintptr(key string, val uintptr) {
 func (s *tidbEncoder) AddReflected(key string, obj interface{}) error {
 	s.beginQuoteFiled()
 	s.addKey(key)
-	s.AppendReflected(obj)
-	s.endQuoteFiled()
-	return nil
+	err := s.AppendReflected(obj)
+	if err == nil {
+		s.endQuoteFiled()
+	}
+	return err
 }
 func (s *tidbEncoder) OpenNamespace(key string) {
 	s.addKey(key)
