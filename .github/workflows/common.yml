@@ -59,6 +59,13 @@ jobs:
           key: ${{ runner.os }}-go-${{ inputs.target == 'cache' && github.run_id || hashFiles('**/go.sum')}}
           restore-keys: |
             ${{ runner.os }}-go-
+      - name : "tidy mod if needed"
+        if: ${{ inputs.target == 'cmd' }}
+        uses: evantorrie/mott-the-tidier@v1-beta
+        with:
+          gomods: |
+            go.mod
+            **/go.mod
       - name: make ${{ inputs.target }} 
         run: make ${{ inputs.target }}
       - name: "set up tmate session if necessary"
