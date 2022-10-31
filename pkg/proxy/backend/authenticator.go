@@ -79,6 +79,22 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 	return nil
 }
 
+func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapability pnet.Capability) error {
+	requiredBackendCaps := defRequiredBackendCaps
+	if auth.requireBackendTLS {
+		requiredBackendCaps |= pnet.ClientSSL
+	}
+
+	if commonCaps := backendCapability & requiredBackendCaps; commonCaps != requiredBackendCaps {
+		// The error cannot be sent to the client because the client only expects an initial handshake packet.
+		// The only way is to log it and disconnect.
+		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps^commonCaps))
+		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps^commonCaps)
+	}
+
+	return nil
+}
+
 func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, getBackendIO func(*Authenticator) (*pnet.PacketIO, error), frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
 
@@ -146,17 +162,11 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 		return err
 	}
 	backendCapability := pnet.Capability(backendCapabilityU)
-	requiredBackendCaps := defRequiredBackendCaps
-	if auth.requireBackendTLS {
-		requiredBackendCaps |= pnet.ClientSSL
+
+	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
+		return err
 	}
 
-	if commonCaps := backendCapability & requiredBackendCaps; commonCaps != requiredBackendCaps {
-		// The error cannot be sent to the client because the client only expects an initial handshake packet.
-		// The only way is to log it and disconnect.
-		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps^commonCaps))
-		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps^commonCaps)
-	}
 	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
 		// TODO: need to do negotiation with backend
 		// 1. proxyCapability &= backendCapability
@@ -232,7 +242,7 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 	return
 }
 
-func (auth *Authenticator) handshakeSecondTime(clientIO, backendIO *pnet.PacketIO, sessionToken string) error {
+func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, sessionToken string) error {
 	if len(sessionToken) == 0 {
 		return errors.New("session token is empty")
 	}
@@ -246,12 +256,13 @@ func (auth *Authenticator) handshakeSecondTime(clientIO, backendIO *pnet.PacketI
 	if err != nil {
 		return err
 	}
-	if serverCapability&mysql.ClientSSL == 0 {
-		return errors.New("the TiDB server must enable TLS")
+
+	if err := auth.verifyBackendCaps(logger, pnet.Capability(serverCapability)); err != nil {
+		return err
 	}
 
 	tokenBytes := hack.Slice(sessionToken)
-	if err = auth.writeAuthHandshake(backendIO, tokenBytes); err != nil {
+	if err = auth.writeAuthHandshake(backendIO, tokenBytes, serverCapability&mysql.ClientSSL != 0); err != nil {
 		return err
 	}
 
@@ -270,7 +281,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 	return
 }
 
-func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte) error {
+func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte, tls bool) error {
 	// Always handshake with SSL enabled and enable auth_plugin.
 	resp := &pnet.HandshakeResp{
 		User:       auth.user,
@@ -283,14 +294,17 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 	}
 	data := pnet.MakeHandshakeResponse(resp)
 
-	// write SSL req
-	if err := backendIO.WritePacket(data[:32], true); err != nil {
-		return err
+	if tls {
+		// write SSL req
+		if err := backendIO.WritePacket(data[:32], true); err != nil {
+			return err
+		}
+		// Send TLS / SSL request packet. The server must have supported TLS.
+		if err := backendIO.ClientTLSHandshake(auth.backendTLSConfig); err != nil {
+			return err
+		}
 	}
-	// Send TLS / SSL request packet. The server must have supported TLS.
-	if err := backendIO.ClientTLSHandshake(auth.backendTLSConfig); err != nil {
-		return err
-	}
+
 	// write handshake resp
 	return backendIO.WritePacket(data, true)
 }
