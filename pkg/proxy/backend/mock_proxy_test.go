@@ -67,7 +67,7 @@ func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) e
 }
 
 func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeSecondTime(clientIO, backendIO, mp.sessionToken)
+	return mp.authenticator.handshakeSecondTime(mp.logger, clientIO, backendIO, mp.sessionToken)
 }
 
 func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {

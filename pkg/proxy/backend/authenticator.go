@@ -79,6 +79,22 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 	return nil
 }
 
+func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapability pnet.Capability) error {
+	requiredBackendCaps := defRequiredBackendCaps
+	if auth.requireBackendTLS {
+		requiredBackendCaps |= pnet.ClientSSL
+	}
+
+	if commonCaps := backendCapability & requiredBackendCaps; commonCaps != requiredBackendCaps {
+		// The error cannot be sent to the client because the client only expects an initial handshake packet.
+		// The only way is to log it and disconnect.
+		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps^commonCaps))
+		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps^commonCaps)
+	}
+
+	return nil
+}
+
 func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, getBackendIO func(*Authenticator) (*pnet.PacketIO, error), frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
 
@@ -146,17 +162,11 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 		return err
 	}
 	backendCapability := pnet.Capability(backendCapabilityU)
-	requiredBackendCaps := defRequiredBackendCaps
-	if auth.requireBackendTLS {
-		requiredBackendCaps |= pnet.ClientSSL
+
+	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
+		return err
 	}
 
-	if commonCaps := backendCapability & requiredBackendCaps; commonCaps != requiredBackendCaps {
-		// The error cannot be sent to the client because the client only expects an initial handshake packet.
-		// The only way is to log it and disconnect.
-		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps^commonCaps))
-		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps^commonCaps)
-	}
 	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
 		// TODO: need to do negotiation with backend
 		// 1. proxyCapability &= backendCapability
@@ -232,7 +242,7 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 	return
 }
 
-func (auth *Authenticator) handshakeSecondTime(clientIO, backendIO *pnet.PacketIO, sessionToken string) error {
+func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, sessionToken string) error {
 	if len(sessionToken) == 0 {
 		return errors.New("session token is empty")
 	}
@@ -244,6 +254,10 @@ func (auth *Authenticator) handshakeSecondTime(clientIO, backendIO *pnet.PacketI
 
 	_, serverCapability, err := auth.readInitialHandshake(backendIO)
 	if err != nil {
+		return err
+	}
+
+	if err := auth.verifyBackendCaps(logger, pnet.Capability(serverCapability)); err != nil {
 		return err
 	}
 

@@ -298,7 +298,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.P
 	if rs.err = newConn.Connect(); rs.err != nil {
 		return
 	}
-	if rs.err = mgr.authenticator.handshakeSecondTime(clientIO, newConn.PacketIO(), sessionToken); rs.err == nil {
+	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, clientIO, newConn.PacketIO(), sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
 	}
 	if rs.err != nil {
