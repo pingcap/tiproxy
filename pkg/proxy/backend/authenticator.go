@@ -246,12 +246,9 @@ func (auth *Authenticator) handshakeSecondTime(clientIO, backendIO *pnet.PacketI
 	if err != nil {
 		return err
 	}
-	if serverCapability&mysql.ClientSSL == 0 {
-		return errors.New("the TiDB server must enable TLS")
-	}
 
 	tokenBytes := hack.Slice(sessionToken)
-	if err = auth.writeAuthHandshake(backendIO, tokenBytes); err != nil {
+	if err = auth.writeAuthHandshake(backendIO, tokenBytes, serverCapability&mysql.ClientSSL != 0); err != nil {
 		return err
 	}
 
@@ -270,7 +267,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 	return
 }
 
-func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte) error {
+func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData []byte, tls bool) error {
 	// Always handshake with SSL enabled and enable auth_plugin.
 	resp := &pnet.HandshakeResp{
 		User:       auth.user,
@@ -283,14 +280,17 @@ func (auth *Authenticator) writeAuthHandshake(backendIO *pnet.PacketIO, authData
 	}
 	data := pnet.MakeHandshakeResponse(resp)
 
-	// write SSL req
-	if err := backendIO.WritePacket(data[:32], true); err != nil {
-		return err
+	if tls {
+		// write SSL req
+		if err := backendIO.WritePacket(data[:32], true); err != nil {
+			return err
+		}
+		// Send TLS / SSL request packet. The server must have supported TLS.
+		if err := backendIO.ClientTLSHandshake(auth.backendTLSConfig); err != nil {
+			return err
+		}
 	}
-	// Send TLS / SSL request packet. The server must have supported TLS.
-	if err := backendIO.ClientTLSHandshake(auth.backendTLSConfig); err != nil {
-		return err
-	}
+
 	// write handshake resp
 	return backendIO.WritePacket(data, true)
 }
