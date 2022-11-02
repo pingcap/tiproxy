@@ -15,6 +15,8 @@
 package cmd
 
 import (
+	"time"
+
 	"github.com/pingcap/TiProxy/lib/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -22,6 +24,12 @@ import (
 
 func buildEncoder(cfg *config.Log) (zapcore.Encoder, error) {
 	encfg := zap.NewProductionEncoderConfig()
+	encfg.EncodeTime = func(t time.Time, pae zapcore.PrimitiveArrayEncoder) {
+		pae.AppendString(t.Format("2006/01/02 15:04:05.000 -07:00"))
+	}
+	encfg.EncodeLevel = func(l zapcore.Level, pae zapcore.PrimitiveArrayEncoder) {
+		pae.AppendString(l.CapitalString())
+	}
 	switch cfg.Encoder {
 	case "json":
 		return zapcore.NewJSONEncoder(encfg), nil
@@ -57,5 +65,5 @@ func BuildLogger(cfg *config.Log) (*zap.Logger, *AtomicWriteSyncer, zap.AtomicLe
 	if err != nil {
 		return nil, nil, level, err
 	}
-	return zap.New(zapcore.NewCore(encoder, syncer, level), zap.ErrorOutput(syncer), zap.AddStacktrace(zapcore.FatalLevel)), syncer, level, nil
+	return zap.New(zapcore.NewCore(encoder, syncer, level), zap.ErrorOutput(syncer), zap.AddStacktrace(zapcore.FatalLevel), zap.AddCaller()), syncer, level, nil
 }
