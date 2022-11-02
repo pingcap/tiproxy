@@ -29,6 +29,8 @@ func TestStacktrace(t *testing.T) {
 	require.Contains(t, fmt.Sprintf("%+v", e), t.Name(), "stacktrace must contain test name")
 	require.Contains(t, fmt.Sprintf("%v", e), t.Name(), "stacktrace must contain test name")
 	require.Contains(t, fmt.Sprintf("%+s", e), t.Name(), "stacktrace must contain test name")
+
+	require.Nil(t, serr.WithStack(nil), "wrap nil got nil")
 }
 
 func TestUnwrap(t *testing.T) {

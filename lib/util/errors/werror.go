@@ -69,6 +69,9 @@ func (e *WError) Unwrap() error {
 // Note that wrap nil error will get nil error.
 func Wrap(cerr error, uerr error) error {
 	if cerr == nil {
+		return uerr
+	}
+	if uerr == nil {
 		return nil
 	}
 	return &WError{
