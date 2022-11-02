@@ -103,12 +103,7 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 }
 
 func (p *PacketIO) wrapErr(err error) error {
-	e := err
-	if p.wrap != nil {
-		e = errors.Wrap(p.wrap, err)
-	}
-	e = errors.WithStack(e)
-	return e
+	return errors.WithStack(errors.Wrap(p.wrap, err))
 }
 
 // Proxy returned parsed proxy header from clients if any.
@@ -248,9 +243,6 @@ func (p *PacketIO) Flush() error {
 
 func (p *PacketIO) Close() error {
 	var errs []error
-	if p.wrap != nil {
-		errs = append(errs, p.wrap)
-	}
 	/*
 		TODO: flush when we want to smoothly exit
 		if err := p.Flush(); err != nil {
@@ -262,5 +254,5 @@ func (p *PacketIO) Close() error {
 			errs = append(errs, err)
 		}
 	}
-	return errors.Collect(ErrCloseConn, errs...)
+	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))
 }

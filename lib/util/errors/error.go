@@ -35,6 +35,9 @@ type Error struct {
 
 // WithStack will wrapping an error with stacktrace, given a default stack depth.
 func WithStack(err error) error {
+	if err == nil {
+		return nil
+	}
 	e := &Error{err: err}
 	e.withStackDepth(1, defaultStackDepth)
 	return e
