@@ -183,7 +183,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	resp.AuthPlugin = "auth_unknown_plugin"
 	resp.Capability = auth.capability
 
-	if backendCapability&pnet.ClientSSL != 0 && auth.backendTLSConfig != nil {
+	if backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil {
 		resp.Capability |= mysql.ClientSSL
 		pkt = pnet.MakeHandshakeResponse(resp)
 		// write SSL Packet
