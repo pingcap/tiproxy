@@ -26,6 +26,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var emptyCert = new(tls.Certificate)
+
 // Security configurations don't support dynamically updating now.
 type certInfo struct {
 	cfg         config.TLSConfig
@@ -124,7 +126,12 @@ func (ci *certInfo) customizeTLSConfig(tlsConfig *tls.Config) *tls.Config {
 		}
 	} else {
 		tlsConfig.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-			return ci.getCertificate(), nil
+			cert := ci.getCertificate()
+			if cert == nil {
+				// GetClientCertificate must return a non-nil Certificate.
+				return emptyCert, nil
+			}
+			return cert, nil
 		}
 		if !tlsConfig.InsecureSkipVerify {
 			tlsConfig.InsecureSkipVerify = true
