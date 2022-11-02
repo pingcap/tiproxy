@@ -171,7 +171,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		if !IsMySQLError(err) {
 			return err
 		} else {
-			mgr.logger.Debug("got a mysql error", zap.String("error", fmt.Sprintf("%+v", err)))
+			mgr.logger.Debug("got a mysql error", zap.Error(err))
 		}
 	}
 	if err == nil {
