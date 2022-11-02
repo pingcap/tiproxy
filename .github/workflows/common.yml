@@ -59,6 +59,17 @@ jobs:
           key: ${{ runner.os }}-go-${{ inputs.target == 'cache' && github.run_id || hashFiles('**/go.sum')}}
           restore-keys: |
             ${{ runner.os }}-go-
+      - name : "tidy mod if needed"
+        id: tidy
+        if: ${{ inputs.target == 'cmd' }}
+        uses: evantorrie/mott-the-tidier@v1-beta
+        with:
+          gomods: |
+            go.mod
+            **/go.mod
+      - name: "fail if there are untidy files"
+        if: ${{ steps.tidy.outputs.changedfiles != '' }}
+        run: exit 2
       - name: make ${{ inputs.target }} 
         run: make ${{ inputs.target }}
       - name: "set up tmate session if necessary"
