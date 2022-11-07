@@ -282,8 +282,6 @@ func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) error {
 }
 
 func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
-	// Currently, TiDB responses with an OK or Err packet. But according to the MySQL doc, the server may send a
-	// switch auth request.
 	for {
 		response, err := forwardOnePacket(clientIO, backendIO, true)
 		if err != nil {
