@@ -167,8 +167,12 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	if !holdRequest {
 		addCmdMetrics(cmd, mgr.backendConn.Addr(), startTime)
 	}
-	if err != nil && !IsMySQLError(err) {
-		return err
+	if err != nil {
+		if !IsMySQLError(err) {
+			return err
+		} else {
+			mgr.logger.Debug("got a mysql error", zap.Error(err))
+		}
 	}
 	if err == nil {
 		switch cmd {
