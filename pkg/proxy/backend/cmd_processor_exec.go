@@ -44,15 +44,21 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 		}
 		return true, err
 	}
-
-	if err = backendIO.WritePacket(request, true); err != nil {
-		return false, err
-	}
 	return false, cp.forwardCommand(clientIO, backendIO, request)
 }
 
 func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) error {
 	cmd := request[0]
+	if cmd != mysql.ComChangeUser {
+		if err := backendIO.WritePacket(request, true); err != nil {
+			return err
+		}
+	} else {
+		user, db := pnet.ParseChangeUser(request)
+		if err := backendIO.WritePacket(pnet.MakeChangeUser(user, db, unknownAuthPlugin, nil), true); err != nil {
+			return err
+		}
+	}
 	switch cmd {
 	case mysql.ComStmtPrepare:
 		return cp.forwardPrepareCmd(clientIO, backendIO)
@@ -276,8 +282,6 @@ func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) error {
 }
 
 func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
-	// Currently, TiDB responses with an OK or Err packet. But according to the MySQL doc, the server may send a
-	// switch auth request.
 	for {
 		response, err := forwardOnePacket(clientIO, backendIO, true)
 		if err != nil {

@@ -216,7 +216,7 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 }
 
 // MakeChangeUser creates the data of COM_CHANGE_USER. It's only used for testing.
-func MakeChangeUser(username, db string, authData []byte) []byte {
+func MakeChangeUser(username, db, authPlugin string, authData []byte) []byte {
 	length := 1 + len(username) + 1 + len(authData) + 1 + len(db) + 1
 	data := make([]byte, 0, length)
 	data = append(data, mysql.ComChangeUser)
@@ -225,6 +225,13 @@ func MakeChangeUser(username, db string, authData []byte) []byte {
 	data = append(data, byte(len(authData)))
 	data = append(data, authData...)
 	data = append(data, []byte(db)...)
+	data = append(data, 0x00)
+
+	// character set
+	data = append(data, 0x00)
+	data = append(data, 0x00)
+
+	data = append(data, []byte(authPlugin)...)
 	data = append(data, 0x00)
 	return data
 }

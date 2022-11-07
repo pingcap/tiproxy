@@ -169,7 +169,7 @@ func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
 }
 
 func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
-	data := pnet.MakeChangeUser(mc.username, mc.dbName, mc.authData)
+	data := pnet.MakeChangeUser(mc.username, mc.dbName, mysql.AuthNativePassword, mc.authData)
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}

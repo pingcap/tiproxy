@@ -31,6 +31,7 @@ var (
 	ErrCapabilityNegotiation = errors.New("capability negotiation failed")
 )
 
+const unknownAuthPlugin = "auth_unknown_plugin"
 const requiredFrontendCaps = pnet.ClientProtocol41
 const defRequiredBackendCaps = pnet.ClientDeprecateEOF
 
@@ -180,7 +181,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	}
 
 	// Send an unknown auth plugin so that the backend will request the auth data again.
-	resp.AuthPlugin = "auth_unknown_plugin"
+	resp.AuthPlugin = unknownAuthPlugin
 	resp.Capability = auth.capability
 
 	if backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil {
