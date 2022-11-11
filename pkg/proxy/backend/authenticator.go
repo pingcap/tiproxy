@@ -50,6 +50,7 @@ type Authenticator struct {
 	serverAddr                  string
 	user                        string
 	attrs                       []byte // no need to parse
+	salt                        []byte
 	capability                  uint32 // client capability
 	collation                   uint8
 	proxyProtocol               bool
@@ -104,7 +105,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 		proxyCapability ^= pnet.ClientSSL
 	}
 
-	if err := clientIO.WriteInitialHandshake(proxyCapability.Uint32(), make([]byte, 20), mysql.AuthNativePassword); err != nil {
+	if err := clientIO.WriteInitialHandshake(proxyCapability.Uint32(), auth.salt, mysql.AuthNativePassword); err != nil {
 		return err
 	}
 	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()

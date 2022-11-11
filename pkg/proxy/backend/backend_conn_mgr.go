@@ -90,11 +90,16 @@ type BackendConnManager struct {
 // NewBackendConnManager creates a BackendConnManager.
 func NewBackendConnManager(logger *zap.Logger, nsmgr *namespace.NamespaceManager, connectionID uint64, proxyProtocol, requireBackendTLS bool) *BackendConnManager {
 	mgr := &BackendConnManager{
-		logger:         logger,
-		connectionID:   connectionID,
-		cmdProcessor:   NewCmdProcessor(),
-		nsmgr:          nsmgr,
-		authenticator:  &Authenticator{supportedServerCapabilities: supportedServerCapabilities, proxyProtocol: proxyProtocol, requireBackendTLS: requireBackendTLS},
+		logger:       logger,
+		connectionID: connectionID,
+		cmdProcessor: NewCmdProcessor(),
+		nsmgr:        nsmgr,
+		authenticator: &Authenticator{
+			supportedServerCapabilities: supportedServerCapabilities,
+			proxyProtocol:               proxyProtocol,
+			requireBackendTLS:           requireBackendTLS,
+			salt:                        GenerateSalt(20),
+		},
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
