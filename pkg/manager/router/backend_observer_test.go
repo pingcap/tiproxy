@@ -16,7 +16,6 @@ package router
 
 import (
 	"context"
-	"golang.org/x/exp/slices"
 	"net"
 	"net/http"
 	"sync"
@@ -29,6 +28,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/atomic"
+	"golang.org/x/exp/slices"
 )
 
 type mockEventReceiver struct {
