@@ -71,10 +71,20 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMa
 	return etcdClient, errors.Wrapf(err, "init etcd client failed")
 }
 
+type pdBackendInfo struct {
+	// The TopologyInfo received from the /info path.
+	*infosync.TopologyInfo
+	// The TTL time in the topology info.
+	ttl []byte
+	// Last time the TTL time is refreshed.
+	// If the TTL stays unchanged for a long time, the backend might be a tombstone.
+	lastUpdate time.Time
+}
+
 // PDFetcher fetches backend list from PD.
 type PDFetcher struct {
 	// All the backend info in the topology, including tombstones.
-	backendInfo map[string]*BackendInfo
+	backendInfo map[string]*pdBackendInfo
 	client      *clientv3.Client
 	logger      *zap.Logger
 	config      *HealthCheckConfig
@@ -82,7 +92,7 @@ type PDFetcher struct {
 
 func NewPDFetcher(client *clientv3.Client, logger *zap.Logger, config *HealthCheckConfig) *PDFetcher {
 	return &PDFetcher{
-		backendInfo: make(map[string]*BackendInfo),
+		backendInfo: make(map[string]*pdBackendInfo),
 		client:      client,
 		logger:      logger,
 		config:      config,
@@ -115,7 +125,7 @@ func (pf *PDFetcher) fetchBackendList(ctx context.Context) {
 		return
 	}
 
-	allBackendInfo := make(map[string]*BackendInfo, len(response.Kvs))
+	allBackendInfo := make(map[string]*pdBackendInfo, len(response.Kvs))
 	now := time.Now()
 	for _, kv := range response.Kvs {
 		key := string(kv.Key)
@@ -133,7 +143,7 @@ func (pf *PDFetcher) fetchBackendList(ctx context.Context) {
 				}
 			} else {
 				// A new backend.
-				info = &BackendInfo{
+				info = &pdBackendInfo{
 					lastUpdate: now,
 					ttl:        kv.Value,
 				}
@@ -156,7 +166,7 @@ func (pf *PDFetcher) fetchBackendList(ctx context.Context) {
 			if ok {
 				info.TopologyInfo = topo
 			} else {
-				info = &BackendInfo{
+				info = &pdBackendInfo{
 					TopologyInfo: topo,
 				}
 			}
@@ -179,7 +189,10 @@ func (pf *PDFetcher) filterTombstoneBackends() map[string]*BackendInfo {
 		if info.lastUpdate.Add(pf.config.tombstoneThreshold).Before(now) {
 			continue
 		}
-		aliveBackends[addr] = info
+		aliveBackends[addr] = &BackendInfo{
+			IP:         info.IP,
+			StatusPort: info.StatusPort,
+		}
 	}
 	return aliveBackends
 }
@@ -197,22 +210,6 @@ func NewStaticFetcher(staticAddrs []string) *StaticFetcher {
 
 func (sf *StaticFetcher) GetBackendList(context.Context) map[string]*BackendInfo {
 	return sf.backends
-}
-
-// ExternalFetcher fetches backend list from a given callback.
-type ExternalFetcher struct {
-	backendGetter func() []string
-}
-
-func NewExternalFetcher(backendGetter func() []string) *ExternalFetcher {
-	return &ExternalFetcher{
-		backendGetter: backendGetter,
-	}
-}
-
-func (ef *ExternalFetcher) GetBackendList(context.Context) map[string]*BackendInfo {
-	addrs := ef.backendGetter()
-	return backendListToMap(addrs)
 }
 
 func backendListToMap(addrs []string) map[string]*BackendInfo {

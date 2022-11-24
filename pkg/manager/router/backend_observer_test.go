@@ -155,7 +155,8 @@ func TestExternalFetcher(t *testing.T) {
 
 	backendChan := make(chan map[string]BackendStatus, 1)
 	mer := newMockEventReceiver(backendChan)
-	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, nil, newHealthCheckConfigForTest(), nil, backendGetter)
+	fetcher := NewExternalFetcher(backendGetter)
+	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, nil, newHealthCheckConfigForTest(), nil, fetcher)
 	require.NoError(t, err)
 	bo.Start()
 	defer bo.Close()
@@ -287,4 +288,20 @@ func startListener(t *testing.T, addr string) (net.Listener, string) {
 	listener, err := net.Listen("tcp", addr)
 	require.NoError(t, err)
 	return listener, listener.Addr().String()
+}
+
+// ExternalFetcher fetches backend list from a given callback.
+type ExternalFetcher struct {
+	backendGetter func() []string
+}
+
+func NewExternalFetcher(backendGetter func() []string) *ExternalFetcher {
+	return &ExternalFetcher{
+		backendGetter: backendGetter,
+	}
+}
+
+func (ef *ExternalFetcher) GetBackendList(context.Context) map[string]*BackendInfo {
+	addrs := ef.backendGetter()
+	return backendListToMap(addrs)
 }

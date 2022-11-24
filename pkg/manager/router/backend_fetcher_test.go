@@ -43,7 +43,7 @@ func TestTombstoneBackends(t *testing.T) {
 
 	now := time.Now()
 	oldTTL, newTTL := []byte("123456789"), []byte("999999999")
-	pf.backendInfo = map[string]*BackendInfo{
+	pf.backendInfo = map[string]*pdBackendInfo{
 		"dead_addr": {
 			TopologyInfo: &infosync.TopologyInfo{},
 			ttl:          oldTTL,

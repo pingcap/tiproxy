@@ -24,7 +24,6 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/tidb/domain/infosync"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -105,15 +104,10 @@ type BackendEventReceiver interface {
 	OnBackendChanged(backends map[string]BackendStatus)
 }
 
-// BackendInfo stores the ttl and status info of each backend.
+// BackendInfo stores the status info of each backend.
 type BackendInfo struct {
-	// The TopologyInfo received from the /info path.
-	*infosync.TopologyInfo
-	// The TTL time in the topology info.
-	ttl []byte
-	// Last time the TTL time is refreshed.
-	// If the TTL stays unchanged for a long time, the backend might be a tombstone.
-	lastUpdate time.Time
+	IP         string
+	StatusPort uint
 }
 
 // BackendObserver refreshes backend list and notifies BackendEventReceiver.
@@ -132,8 +126,8 @@ type BackendObserver struct {
 
 // StartBackendObserver creates a BackendObserver and starts watching.
 func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client,
-	config *HealthCheckConfig, staticAddrs []string, backendGetter func() []string) (*BackendObserver, error) {
-	bo, err := NewBackendObserver(logger, eventReceiver, client, httpCli, config, staticAddrs, backendGetter)
+	config *HealthCheckConfig, staticAddrs []string, customBackendFetcher BackendFetcher) (*BackendObserver, error) {
+	bo, err := NewBackendObserver(logger, eventReceiver, client, httpCli, config, staticAddrs, customBackendFetcher)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +137,7 @@ func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver
 
 // NewBackendObserver creates a BackendObserver.
 func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client,
-	config *HealthCheckConfig, staticAddrs []string, backendGetter func() []string) (*BackendObserver, error) {
+	config *HealthCheckConfig, staticAddrs []string, customBackendFetcher BackendFetcher) (*BackendObserver, error) {
 	if httpCli == nil {
 		httpCli = http.DefaultClient
 	}
@@ -159,8 +153,8 @@ func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, 
 		httpTLS:        httpTLS,
 		eventReceiver:  eventReceiver,
 	}
-	if backendGetter != nil {
-		bo.fetcher = NewExternalFetcher(backendGetter)
+	if customBackendFetcher != nil {
+		bo.fetcher = customBackendFetcher
 	} else if client != nil {
 		bo.fetcher = NewPDFetcher(client, logger.Named("be_fetcher"), config)
 	} else {
@@ -221,7 +215,7 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 		}
 
 		// Skip checking the status port if it's not fetched.
-		if info.TopologyInfo != nil {
+		if info != nil && len(info.IP) > 0 {
 			// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
 			// new connections, so we must check the status port first.
 			schema := "http"
