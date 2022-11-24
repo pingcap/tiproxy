@@ -124,7 +124,7 @@ func NewScoreBasedRouter(logger *zap.Logger, cfg *config.BackendNamespace, clien
 	}
 	router.Lock()
 	defer router.Unlock()
-	observer, err := StartBackendObserver(logger.Named("observer"), router, client, httpCli, newDefaultHealthCheckConfig(), cfg.Instances)
+	observer, err := StartBackendObserver(logger.Named("observer"), router, client, httpCli, newDefaultHealthCheckConfig(), cfg.Instances, nil)
 	if err != nil {
 		return nil, err
 	}
