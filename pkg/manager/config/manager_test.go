@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
@@ -55,7 +54,7 @@ func testConfigManager(t *testing.T, cfg *config.Config) (*ConfigManager, contex
 	}
 
 	cfgmgr := NewConfigManager()
-	require.NoError(t, cfgmgr.Init(ctx, etcd.Server.KV(), cfg, logger))
+	require.NoError(t, cfgmgr.Init(ctx, cfg, logger))
 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())
@@ -84,7 +83,7 @@ func TestBase(t *testing.T) {
 		ns := getNs(i)
 		for j := 0; j < valNum; j++ {
 			k := getKey(j)
-			require.NoError(t, cfgmgr.set(ctx, ns, k, k))
+			require.NoError(t, cfgmgr.set(ctx, ns, k, []byte(k)))
 		}
 	}
 
@@ -95,7 +94,7 @@ func TestBase(t *testing.T) {
 			k := getKey(j)
 			v, err := cfgmgr.get(ctx, ns, k)
 			require.NoError(t, err)
-			require.Equal(t, string(v.Key), path.Join(DefaultEtcdPath, ns, k))
+			require.Equal(t, string(v.Key), path.Join(ns, k))
 			require.Equal(t, string(v.Value), k)
 		}
 	}
@@ -117,7 +116,7 @@ func TestBase(t *testing.T) {
 		ns := getNs(i)
 		for j := 0; j < valNum; j++ {
 			k := getKey(j)
-			require.NoError(t, cfgmgr.set(ctx, ns, k, k))
+			require.NoError(t, cfgmgr.set(ctx, ns, k, nil))
 
 			require.NoError(t, cfgmgr.del(ctx, ns, k))
 		}
@@ -135,7 +134,7 @@ func TestBaseConcurrency(t *testing.T) {
 	for i := 0; i < batchNum; i++ {
 		k := fmt.Sprint(i)
 		wg.Run(func() {
-			require.NoError(t, cfgmgr.set(ctx, k, "1", "1"))
+			require.NoError(t, cfgmgr.set(ctx, k, "1", []byte("1")))
 		})
 
 		wg.Run(func() {
@@ -148,14 +147,14 @@ func TestBaseConcurrency(t *testing.T) {
 	for i := 0; i < batchNum; i++ {
 		k := fmt.Sprint(i)
 
-		require.NoError(t, cfgmgr.set(ctx, k, "1", "1"))
+		require.NoError(t, cfgmgr.set(ctx, k, "1", []byte("1")))
 	}
 
 	for i := 0; i < batchNum; i++ {
 		k := fmt.Sprint(i)
 
 		wg.Run(func() {
-			require.NoError(t, cfgmgr.set(ctx, k, "1", "1"))
+			require.NoError(t, cfgmgr.set(ctx, k, "1", []byte("1")))
 		})
 
 		wg.Run(func() {
@@ -170,12 +169,12 @@ func TestBaseWatch(t *testing.T) {
 	cfgmgr, ctx := testConfigManager(t, &config.Config{})
 
 	ch := make(chan string, 1)
-	cfgmgr.watch(ctx, "test", "t", func(_ *zap.Logger, e mvccpb.Event) {
-		ch <- string(e.Kv.Value)
+	cfgmgr.Watch("test", func(_ *zap.Logger, e KVEvent) {
+		ch <- string(e.Value)
 	})
 
 	// set it
-	require.NoError(t, cfgmgr.set(ctx, "test", "t", "1"))
+	require.NoError(t, cfgmgr.set(ctx, "test", "t", []byte("1")))
 	// now the only way to check watch is to wait
 	select {
 	case <-time.After(5 * time.Second):

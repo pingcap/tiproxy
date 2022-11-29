@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/sctx"
 	"github.com/pingcap/TiProxy/pkg/server"
 	"github.com/spf13/cobra"
@@ -78,15 +77,11 @@ func main() {
 			return errors.Wrapf(err, "fail to create server")
 		}
 
-		var wg waitgroup.WaitGroup
-		wg.Run(func() { srv.Run(cmd.Context()) })
-
 		<-cmd.Context().Done()
 		if e := srv.Close(); e != nil {
 			err = errors.Wrapf(err, "shutdown with errors")
 		}
 
-		wg.Wait()
 		return err
 	}
 

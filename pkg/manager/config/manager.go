@@ -17,136 +17,123 @@ package config
 import (
 	"context"
 	"path"
-	"time"
+	"strings"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
-	"go.etcd.io/etcd/api/v3/mvccpb"
+	"github.com/tidwall/btree"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/lease"
-	"go.etcd.io/etcd/server/v3/mvcc"
 	"go.uber.org/zap"
 )
 
 const (
-	DefaultEtcdDialTimeout = 3 * time.Second
-	DefaultEtcdPath        = "/config"
-
-	pathPrefixNamespace   = "ns"
-	pathPrefixProxyServer = "proxy"
-	pathPrefixLog         = "log"
+	pathPrefixNamespace = "ns"
+	pathPrefixConfig    = "config"
 )
 
 var (
-	ErrNoOrMultiResults = errors.Errorf("has no results or multiple results")
+	ErrNoResults   = errors.Errorf("has no results")
+	ErrFail2Update = errors.Errorf("failed to update")
 )
 
+type KVValue struct {
+	Key   string
+	Value []byte
+}
+
+type KVEventType byte
+
+const (
+	KVEventPut KVEventType = iota
+	KVEventDel
+)
+
+type KVEvent struct {
+	KVValue
+	Type KVEventType
+}
+
+type kvListener struct {
+	key string
+	wfn func(*zap.Logger, KVEvent)
+}
+
 type ConfigManager struct {
-	wg                   waitgroup.WaitGroup
-	kv                   mvcc.WatchableKV
-	cancel               context.CancelFunc
-	logger               *zap.Logger
-	basePath             string
-	watchInterval        time.Duration
-	ignoreWrongNamespace bool
-	metas                map[mKeyType]imeta
+	wg        waitgroup.WaitGroup
+	cancel    context.CancelFunc
+	kv        *btree.BTreeG[KVValue]
+	events    chan KVEvent
+	listeners []kvListener
+	logger    *zap.Logger
 }
 
 func NewConfigManager() *ConfigManager {
 	return &ConfigManager{}
 }
 
-func (srv *ConfigManager) Init(ctx context.Context, kv mvcc.WatchableKV, cfg *config.Config, logger *zap.Logger) error {
+func (srv *ConfigManager) Init(ctx context.Context, cfg *config.Config, logger *zap.Logger) error {
 	srv.logger = logger
-	srv.ignoreWrongNamespace = cfg.Advance.IgnoreWrongNamespace
-	// slash appended to distinguish '/dir'(file) and '/dir/'(directory)
-	srv.basePath = appendSlashToDirPath(DefaultEtcdPath)
+	srv.events = make(chan KVEvent, 256)
+	srv.kv = btree.NewBTreeG(func(a, b KVValue) bool {
+		return a.Key < b.Key
+	})
 
-	srv.kv = kv
-	srv.initMetas()
-
-	ctx, cancel := context.WithCancel(ctx)
-	srv.cancel = cancel
-
-	return srv.watchConfig(ctx, cfg)
-}
-
-func (e *ConfigManager) watch(ctx context.Context, ns, key string, f func(*zap.Logger, mvccpb.Event)) {
-	wkey := []byte(path.Join(e.basePath, ns, key))
-	logger := e.logger.With(zap.String("component", string(wkey)))
-	retryInterval := 5 * time.Second
-	rev := e.kv.Rev()
-	e.wg.Run(func() {
-		wch := e.kv.NewWatchStream()
-		defer wch.Close()
-		for {
-			if _, err := wch.Watch(mvcc.AutoWatchID, wkey, getPrefix(wkey), rev); err == nil {
-				break
-			}
-			if k := retryInterval * 2; k < e.watchInterval {
-				retryInterval = k
-			}
-			logger.Warn("failed to watch, will try again later", zap.Duration("sleep", retryInterval))
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(retryInterval):
-			}
-		}
+	var nctx context.Context
+	nctx, srv.cancel = context.WithCancel(ctx)
+	srv.wg.Run(func() {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-nctx.Done():
 				return
-			case res := <-wch.Chan():
-				for _, evt := range res.Events {
-					f(logger, evt)
+			case ev := <-srv.events:
+				for _, lsn := range srv.listeners {
+					lsn.wfn(srv.logger, ev)
 				}
 			}
 		}
 	})
+	return nil
 }
 
-func (e *ConfigManager) get(ctx context.Context, ns, key string) (*mvccpb.KeyValue, error) {
-	resp, err := e.kv.Range(ctx, []byte(path.Join(e.basePath, ns, key)), nil, mvcc.RangeOptions{Rev: 0})
-	if err != nil {
-		return nil, err
-	}
-	if len(resp.KVs) != 1 {
-		return nil, ErrNoOrMultiResults
-	}
-	return &resp.KVs[0], nil
+func (e *ConfigManager) Watch(key string, handler func(*zap.Logger, KVEvent)) {
+	e.listeners = append(e.listeners, kvListener{key, handler})
 }
 
-func getPrefix(key []byte) []byte {
-	end := make([]byte, len(key))
-	copy(end, key)
-	for i := len(end) - 1; i >= 0; i-- {
-		if end[i] < 0xff {
-			end[i] = end[i] + 1
-			end = end[:i+1]
-			return end
+func (e *ConfigManager) get(ctx context.Context, ns, key string) (KVValue, error) {
+	nkey := path.Clean(path.Join(ns, key))
+	v, ok := e.kv.Get(KVValue{Key: nkey})
+	if !ok {
+		return v, errors.WithStack(errors.Wrapf(ErrNoResults, "key=%s", nkey))
+	}
+	return v, nil
+}
+
+func (e *ConfigManager) list(ctx context.Context, ns string, ops ...clientv3.OpOption) ([]KVValue, error) {
+	k := path.Clean(ns)
+	var resp []KVValue
+	e.kv.Ascend(KVValue{Key: k}, func(item KVValue) bool {
+		if !strings.HasPrefix(item.Key, k) {
+			return false
 		}
-	}
-	return []byte{0}
+		resp = append(resp, item)
+		return true
+	})
+	return resp, nil
 }
 
-func (e *ConfigManager) list(ctx context.Context, ns string, ops ...clientv3.OpOption) ([]mvccpb.KeyValue, error) {
-	k := []byte(path.Join(e.basePath, ns))
-	resp, err := e.kv.Range(ctx, k, getPrefix(k), mvcc.RangeOptions{Rev: 0})
-	if err != nil {
-		return nil, err
-	}
-	return resp.KVs, nil
-}
-
-func (e *ConfigManager) set(ctx context.Context, ns, key, val string) error {
-	_ = e.kv.Put([]byte(path.Join(e.basePath, ns, key)), []byte(val), lease.NoLease)
+func (e *ConfigManager) set(ctx context.Context, ns, key string, val []byte) error {
+	v := KVValue{Key: path.Clean(path.Join(ns, key)), Value: val}
+	_, _ = e.kv.Set(v)
+	e.events <- KVEvent{Type: KVEventPut, KVValue: v}
 	return nil
 }
 
 func (e *ConfigManager) del(ctx context.Context, ns, key string) error {
-	_, _ = e.kv.DeleteRange([]byte(path.Join(e.basePath, ns, key)), nil)
+	v, ok := e.kv.Delete(KVValue{Key: path.Clean(path.Join(ns, key))})
+	if ok {
+		e.events <- KVEvent{Type: KVEventPut, KVValue: v}
+	}
 	return nil
 }
 

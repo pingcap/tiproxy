@@ -28,14 +28,18 @@ type configHttpHandler struct {
 	cfgmgr *mgrcfg.ConfigManager
 }
 
-func setConfig[T mgrcfg.OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
+type OnlineCfgTypes interface {
+	config.ProxyServerOnline | config.LogOnline
+}
+
+func setConfig[T OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
 	cfg := new(T)
 	if c.ShouldBindJSON(cfg) != nil {
 		c.JSON(http.StatusBadRequest, "bad config json")
 		return
 	}
 
-	if err := mgrcfg.SetConfig(c, h.cfgmgr, cfg); err != nil {
+	if err := h.cfgmgr.SetConfig(c, cfg); err != nil {
 		h.logger.Error("can not update config", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, "can not update config")
 		return
@@ -44,9 +48,9 @@ func setConfig[T mgrcfg.OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func getConfig[T mgrcfg.OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
+func getConfig[T OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
 	var cfg T
-	err := mgrcfg.GetConfig(c, h.cfgmgr, &cfg)
+	err := h.cfgmgr.GetConfig(c, &cfg)
 	if err != nil {
 		h.logger.Error("can not get config", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, "can not get config")

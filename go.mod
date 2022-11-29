@@ -86,6 +86,7 @@ require (
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stathat/consistent v1.0.0 // indirect
+	github.com/tidwall/btree v1.5.2 // indirect
 	github.com/tikv/client-go/v2 v2.0.1-0.20220906094532-f867f498456f // indirect
 	github.com/tikv/pd/client v0.0.0-20220725055910-7187a7ab72db // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
