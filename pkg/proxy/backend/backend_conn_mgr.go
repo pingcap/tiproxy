@@ -55,6 +55,8 @@ type redirectResult struct {
 	to   string
 }
 
+type backendIOGetter func(auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
+
 // BackendConnManager migrates a session from one BackendConnection to another.
 //
 // The signal processing goroutine tries to migrate the session once it receives a signal.
@@ -80,22 +82,25 @@ type BackendConnManager struct {
 	// redirectResCh is used to notify the event receiver asynchronously.
 	redirectResCh chan *redirectResult
 	// cancelFunc is used to cancel the signal processing goroutine.
-	cancelFunc   context.CancelFunc
-	backendConn  *BackendConnection
-	nsmgr        *namespace.NamespaceManager
-	getBackendIO func(*Authenticator) (*pnet.PacketIO, error)
-	connectionID uint64
+	cancelFunc       context.CancelFunc
+	backendConn      *BackendConnection
+	nsmgr            *namespace.NamespaceManager
+	handshakeHandler HandshakeHandler
+	getBackendIO     backendIOGetter
+	connectionID     uint64
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(logger *zap.Logger, nsmgr *namespace.NamespaceManager, connectionID uint64, proxyProtocol, requireBackendTLS bool) *BackendConnManager {
+func NewBackendConnManager(logger *zap.Logger, nsmgr *namespace.NamespaceManager, handshakeHandler HandshakeHandler,
+	connectionID uint64, proxyProtocol, requireBackendTLS bool) *BackendConnManager {
 	mgr := &BackendConnManager{
-		logger:       logger,
-		connectionID: connectionID,
-		cmdProcessor: NewCmdProcessor(),
-		nsmgr:        nsmgr,
+		logger:           logger,
+		connectionID:     connectionID,
+		cmdProcessor:     NewCmdProcessor(),
+		nsmgr:            nsmgr,
+		handshakeHandler: handshakeHandler,
 		authenticator: &Authenticator{
-			supportedServerCapabilities: supportedServerCapabilities,
+			supportedServerCapabilities: handshakeHandler.GetCapability(),
 			proxyProtocol:               proxyProtocol,
 			requireBackendTLS:           requireBackendTLS,
 			salt:                        GenerateSalt(20),
@@ -103,13 +108,10 @@ func NewBackendConnManager(logger *zap.Logger, nsmgr *namespace.NamespaceManager
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
-	mgr.getBackendIO = func(auth *Authenticator) (*pnet.PacketIO, error) {
-		ns, ok := mgr.nsmgr.GetNamespaceByUser(auth.user)
-		if !ok {
-			ns, ok = mgr.nsmgr.GetNamespace("default")
-		}
-		if !ok {
-			return nil, errors.New("failed to find a namespace")
+	mgr.getBackendIO = func(auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+		ns, err := handshakeHandler.GetNamespace(nsmgr, resp)
+		if err != nil {
+			return nil, err
 		}
 		router := ns.GetRouter()
 		addr, err := router.Route(mgr)
@@ -135,7 +137,8 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 }
 
 // Connect connects to the first backend and then start watching redirection signals.
-func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.PacketIO, getBackendIO func(auth *Authenticator) (*pnet.PacketIO, error), frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.PacketIO, getBackendIO backendIOGetter,
+	frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
@@ -143,7 +146,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 		getBackendIO = mgr.getBackendIO
 	}
 
-	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, getBackendIO, frontendTLSConfig, backendTLSConfig); err != nil {
+	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, mgr.handshakeHandler,
+		getBackendIO, frontendTLSConfig, backendTLSConfig); err != nil {
 		return err
 	}
 

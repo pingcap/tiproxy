@@ -35,7 +35,10 @@
 
 package net
 
-import "bytes"
+import (
+	"bytes"
+	"io"
+)
 
 func ParseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	switch b[0] {
@@ -73,6 +76,23 @@ func ParseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	num = uint64(b[0])
 	n = 1
 	return
+}
+
+func ParseLengthEncodedBytes(b []byte) ([]byte, bool, int, error) {
+	// Get length
+	num, isNull, n := ParseLengthEncodedInt(b)
+	if num < 1 {
+		return nil, isNull, n, nil
+	}
+
+	n += int(num)
+
+	// Check data length
+	if len(b) >= n {
+		return b[n-int(num) : n], false, n, nil
+	}
+
+	return nil, false, n, io.EOF
 }
 
 func ParseNullTermString(b []byte) (str []byte, remain []byte) {

@@ -15,6 +15,7 @@
 package backend
 
 import (
+	"net"
 	"strings"
 	"testing"
 
@@ -162,7 +163,7 @@ func TestCapability(t *testing.T) {
 			},
 			func(cfg *testConfig) {
 				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientConnectAtts
-				cfg.clientConfig.attrs = []byte(strings.Repeat("x", 512))
+				cfg.clientConfig.attrs = map[string]string{"key": "value"}
 			},
 		},
 		{
@@ -206,4 +207,28 @@ func TestSecondHandshake(t *testing.T) {
 		ts.authenticateSecondTime(t, nil)
 		clean()
 	}
+}
+
+func TestCustomAuth(t *testing.T) {
+	tc := newTCPConnSuite(t)
+	handler := &CustomHandshakeHandler{
+		outUsername: "rewritten_user",
+		outAttrs:    map[string]string{"key": "value"},
+	}
+	ts, clean := newTestSuite(t, tc, func(cfg *testConfig) {
+		cfg.proxyConfig.handler = handler
+	})
+	checker := func() {
+		require.Equal(t, ts.mc.username, handler.inUsername)
+		require.Equal(t, handler.outUsername, ts.mb.username)
+		require.Equal(t, handler.outAttrs, ts.mb.attrs)
+		host, _, err := net.SplitHostPort(handler.inAddr)
+		require.NoError(t, err)
+		require.Equal(t, host, "::1")
+	}
+	ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {})
+	checker()
+	ts.authenticateSecondTime(t, func(t *testing.T, ts *testSuite) {})
+	checker()
+	clean()
 }

@@ -59,8 +59,8 @@ type mockBackend struct {
 	// Outputs that received from the client and will be checked by the test.
 	username         string
 	db               string
+	attrs            map[string]string
 	authData         []byte
-	attrs            []byte
 	clientCapability uint32
 }
 

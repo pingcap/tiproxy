@@ -29,8 +29,8 @@ type clientConfig struct {
 	username   string
 	dbName     string
 	authPlugin string
+	attrs      map[string]string
 	dataBytes  []byte
-	attrs      []byte
 	authData   []byte
 	filePkts   int
 	prepStmtID int
@@ -49,7 +49,7 @@ func newClientConfig() *clientConfig {
 		dbName:     mockDBName,
 		authPlugin: mysql.AuthCachingSha2Password,
 		authData:   mockAuthData,
-		attrs:      make([]byte, 0),
+		attrs:      nil,
 		cmd:        mysql.ComQuery,
 		dataBytes:  mockCmdBytes,
 		sql:        mockCmdStr,

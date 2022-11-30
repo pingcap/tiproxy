@@ -35,8 +35,9 @@ const unknownAuthPlugin = "auth_unknown_plugin"
 const requiredFrontendCaps = pnet.ClientProtocol41
 const defRequiredBackendCaps = pnet.ClientDeprecateEOF
 
-// Other server capabilities are not supported. ClientDeprecateEOF is supported but TiDB 6.2.0 doesn't support it now.
-const supportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientConnectWithDB |
+// SupportedServerCapabilities is the default supported capabilities. Other server capabilities are not supported.
+// TiDB supports ClientDeprecateEOF since v6.3.0.
+const SupportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientConnectWithDB |
 	pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientInteractive | pnet.ClientLongFlag | pnet.ClientSSL |
 	pnet.ClientTransactions | pnet.ClientReserved | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
 	pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientPluginAuthLenencClientData |
@@ -49,7 +50,7 @@ type Authenticator struct {
 	dbname                      string // default database name
 	serverAddr                  string
 	user                        string
-	attrs                       []byte // no need to parse
+	attrs                       map[string]string
 	salt                        []byte
 	capability                  uint32 // client capability
 	collation                   uint8
@@ -72,7 +73,7 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 				Version:    pnet.ProxyVersion2,
 			}
 		}
-		// either from another proxy or directly from clients, we are actings as a proxy
+		// either from another proxy or directly from clients, we are acting as a proxy
 		proxy.Command = pnet.ProxyCommandProxy
 		if err := backendIO.WriteProxyV2(proxy); err != nil {
 			return err
@@ -82,7 +83,7 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 }
 
 func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapability pnet.Capability) error {
-	requiredBackendCaps := defRequiredBackendCaps
+	requiredBackendCaps := defRequiredBackendCaps & pnet.Capability(auth.capability)
 	if auth.requireBackendTLS {
 		requiredBackendCaps |= pnet.ClientSSL
 	}
@@ -97,7 +98,8 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 	return nil
 }
 
-func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, getBackendIO func(*Authenticator) (*pnet.PacketIO, error), frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
+	getBackend backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
 
 	proxyCapability := auth.supportedServerCapabilities
@@ -140,14 +142,18 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	if frontendCapability^commonCaps != 0 {
 		logger.Debug("frontend send capabilities unsupported by proxy", zap.Stringer("common", commonCaps), zap.Stringer("frontend", frontendCapability^commonCaps), zap.Stringer("proxy", proxyCapability^commonCaps))
 	}
-	resp := pnet.ParseHandshakeResponse(pkt)
 	auth.capability = commonCaps.Uint32()
+
+	resp := pnet.ParseHandshakeResponse(pkt)
+	if err = handshakeHandler.HandleHandshakeResp(resp, clientIO.SourceAddr().String()); err != nil {
+		return err
+	}
 	auth.user = resp.User
 	auth.dbname = resp.DB
 	auth.collation = resp.Collation
 	auth.attrs = resp.Attrs
 
-	backendIO, err := getBackendIO(auth)
+	backendIO, err := getBackend(auth, resp)
 	if err != nil {
 		return err
 	}

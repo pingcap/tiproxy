@@ -64,10 +64,10 @@ func ParseInitialHandshake(data []byte) uint32 {
 
 // HandshakeResp indicates the response read from the client.
 type HandshakeResp struct {
+	Attrs      map[string]string
 	User       string
 	DB         string
 	AuthPlugin string
-	Attrs      []byte
 	AuthData   []byte
 	Capability uint32
 	Collation  uint8
@@ -137,17 +137,56 @@ func ParseHandshakeResponse(data []byte) *HandshakeResp {
 	if resp.Capability&mysql.ClientConnectAtts > 0 {
 		if num, null, off := ParseLengthEncodedInt(data[pos:]); !null {
 			pos += off
-			resp.Attrs = data[pos : pos+int(num)]
+			row := data[pos : pos+int(num)]
+			attrs, err := parseAttrs(row)
+			if err != nil {
+				return nil
+			}
+			resp.Attrs = attrs
 		}
 	}
 	return resp
 }
 
+func parseAttrs(data []byte) (map[string]string, error) {
+	attrs := make(map[string]string)
+	pos := 0
+	for pos < len(data) {
+		key, _, off, err := ParseLengthEncodedBytes(data[pos:])
+		if err != nil {
+			return attrs, err
+		}
+		pos += off
+		value, _, off, err := ParseLengthEncodedBytes(data[pos:])
+		if err != nil {
+			return attrs, err
+		}
+		pos += off
+
+		attrs[string(key)] = string(value)
+	}
+	return attrs, nil
+}
+
+func dumpAttrs(attrs map[string]string) []byte {
+	var buf bytes.Buffer
+	var keyBuf []byte
+	for k, v := range attrs {
+		keyBuf = keyBuf[0:0]
+		keyBuf = DumpLengthEncodedString(keyBuf, []byte(k))
+		buf.Write(keyBuf)
+		keyBuf = keyBuf[0:0]
+		keyBuf = DumpLengthEncodedString(keyBuf, []byte(v))
+		buf.Write(keyBuf)
+	}
+	return buf.Bytes()
+}
+
 func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 	// encode length of the auth data
 	var (
-		authRespBuf, attrRespBuf [9]byte
-		authResp, attrResp       []byte
+		authRespBuf, attrLenBuf  [9]byte
+		authResp, attrs, attrBuf []byte
 	)
 	authResp = DumpLengthEncodedInt(authRespBuf[:0], uint64(len(resp.AuthData)))
 	capability := resp.Capability
@@ -157,10 +196,11 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 		capability &= ^mysql.ClientPluginAuthLenencClientData
 	}
 	if capability&mysql.ClientConnectAtts > 0 {
-		attrResp = DumpLengthEncodedInt(attrRespBuf[:0], uint64(len(resp.Attrs)))
+		attrs = dumpAttrs(resp.Attrs)
+		attrBuf = DumpLengthEncodedInt(attrLenBuf[:0], uint64(len(attrs)))
 	}
 
-	length := 4 + 4 + 1 + 23 + len(resp.User) + 1 + len(authResp) + len(resp.AuthData) + len(resp.DB) + 1 + len(resp.AuthPlugin) + 1 + len(attrResp) + len(resp.Attrs)
+	length := 4 + 4 + 1 + 23 + len(resp.User) + 1 + len(authResp) + len(resp.AuthData) + len(resp.DB) + 1 + len(resp.AuthPlugin) + 1 + len(attrBuf) + len(attrs)
 	data := make([]byte, length)
 	pos := 0
 	// capability [32 bit]
@@ -209,8 +249,8 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 
 	// attrs
 	if capability&mysql.ClientConnectAtts > 0 {
-		pos += copy(data[pos:], attrResp)
-		pos += copy(data[pos:], resp.Attrs)
+		pos += copy(data[pos:], attrBuf)
+		pos += copy(data[pos:], attrs)
 	}
 	return data[:pos]
 }

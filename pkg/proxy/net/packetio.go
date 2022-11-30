@@ -122,6 +122,14 @@ func (p *PacketIO) RemoteAddr() net.Addr {
 	return p.conn.RemoteAddr()
 }
 
+// SourceAddr returns the source address if proxy protocol is enabled.
+func (p *PacketIO) SourceAddr() net.Addr {
+	if proxy := p.Proxy(); proxy != nil {
+		return proxy.SrcAddress
+	}
+	return p.conn.RemoteAddr()
+}
+
 func (p *PacketIO) ResetSequence() {
 	p.sequence = 0
 }
