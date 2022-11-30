@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
@@ -212,8 +213,9 @@ func TestSecondHandshake(t *testing.T) {
 func TestCustomAuth(t *testing.T) {
 	tc := newTCPConnSuite(t)
 	handler := &CustomHandshakeHandler{
-		outUsername: "rewritten_user",
-		outAttrs:    map[string]string{"key": "value"},
+		outUsername:   "rewritten_user",
+		outAttrs:      map[string]string{"key": "value"},
+		outCapability: SupportedServerCapabilities & ^pnet.ClientDeprecateEOF,
 	}
 	ts, clean := newTestSuite(t, tc, func(cfg *testConfig) {
 		cfg.proxyConfig.handler = handler
@@ -222,6 +224,7 @@ func TestCustomAuth(t *testing.T) {
 		require.Equal(t, ts.mc.username, handler.inUsername)
 		require.Equal(t, handler.outUsername, ts.mb.username)
 		require.Equal(t, handler.outAttrs, ts.mb.attrs)
+		require.Equal(t, handler.outCapability&pnet.ClientDeprecateEOF, pnet.Capability(ts.mb.capability)&pnet.ClientDeprecateEOF)
 		host, _, err := net.SplitHostPort(handler.inAddr)
 		require.NoError(t, err)
 		require.Equal(t, host, "::1")

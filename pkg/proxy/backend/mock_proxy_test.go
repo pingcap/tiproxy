@@ -64,9 +64,13 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeFirstTime(mp.logger, clientIO, mp.handshakeHandler, func(*Authenticator, *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+	if err := mp.authenticator.handshakeFirstTime(mp.logger, clientIO, mp.handshakeHandler, func(*Authenticator, *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 		return backendIO, nil
-	}, mp.frontendTLSConfig, mp.backendTLSConfig)
+	}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
+		return err
+	}
+	mp.cmdProcessor.capability = mp.authenticator.capability
+	return nil
 }
 
 func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO *pnet.PacketIO) error {
@@ -96,10 +100,11 @@ func (mp *mockProxy) directQuery(_, backendIO *pnet.PacketIO) error {
 }
 
 type CustomHandshakeHandler struct {
-	inUsername  string
-	inAddr      string
-	outUsername string
-	outAttrs    map[string]string
+	inUsername    string
+	inAddr        string
+	outCapability pnet.Capability
+	outUsername   string
+	outAttrs      map[string]string
 }
 
 func (handler *CustomHandshakeHandler) GetNamespace(nsMgr *namespace.NamespaceManager, resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
@@ -115,5 +120,5 @@ func (handler *CustomHandshakeHandler) HandleHandshakeResp(resp *pnet.HandshakeR
 }
 
 func (handler *CustomHandshakeHandler) GetCapability() pnet.Capability {
-	return SupportedServerCapabilities & ^pnet.ClientDeprecateEOF
+	return handler.outCapability
 }
