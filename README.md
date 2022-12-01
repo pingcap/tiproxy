@@ -44,6 +44,13 @@ $ make docker
 
 1. Generate a self-signed certificate, which is used for the token-based authentication between TiDB and TiProxy.
 
+For example, if you use openssl:
+
+```
+openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+  -keyout key.pem -out cert.pem -subj "/CN=example.com"
+```
+
 Put the certs and keys to all the TiDB servers. Make sure all the TiDB instances use the same certificate.
 
 2. Update the `config.toml` of TiDB instances:
@@ -59,7 +66,7 @@ Where the `session-token-signing-cert` and `session-token-signing-key` are the p
 
 And then start the TiDB cluster with the config.toml.
 
-3. Update the `proxy.yaml` of TiProxy:
+3. Update the [`proxy.yaml`](/conf/proxy.yaml) of TiProxy:
 
 ```yaml
 proxy:
