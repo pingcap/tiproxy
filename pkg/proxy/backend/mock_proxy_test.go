@@ -36,7 +36,7 @@ type proxyConfig struct {
 
 func newProxyConfig() *proxyConfig {
 	return &proxyConfig{
-		handler:      NewDefaultHandshakeHandler(),
+		handler:      NewDefaultHandshakeHandler(nil),
 		capability:   defaultTestBackendCapability,
 		sessionToken: mockToken,
 	}
@@ -107,7 +107,7 @@ type CustomHandshakeHandler struct {
 	outAttrs      map[string]string
 }
 
-func (handler *CustomHandshakeHandler) GetNamespace(nsMgr *namespace.NamespaceManager, resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
+func (handler *CustomHandshakeHandler) GetNamespace(resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
 	return &namespace.Namespace{}, nil
 }
 

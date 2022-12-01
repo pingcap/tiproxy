@@ -25,14 +25,17 @@ var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 type HandshakeHandler interface {
 	HandleHandshakeResp(resp *pnet.HandshakeResp, sourceAddr string) error
 	GetCapability() pnet.Capability
-	GetNamespace(nsMgr *namespace.NamespaceManager, resp *pnet.HandshakeResp) (*namespace.Namespace, error)
+	GetNamespace(resp *pnet.HandshakeResp) (*namespace.Namespace, error)
 }
 
 type DefaultHandshakeHandler struct {
+	nsManager *namespace.NamespaceManager
 }
 
-func NewDefaultHandshakeHandler() *DefaultHandshakeHandler {
-	return &DefaultHandshakeHandler{}
+func NewDefaultHandshakeHandler(nsManager *namespace.NamespaceManager) *DefaultHandshakeHandler {
+	return &DefaultHandshakeHandler{
+		nsManager: nsManager,
+	}
 }
 
 func (handler *DefaultHandshakeHandler) HandleHandshakeResp(*pnet.HandshakeResp, string) error {
@@ -43,10 +46,10 @@ func (handler *DefaultHandshakeHandler) GetCapability() pnet.Capability {
 	return SupportedServerCapabilities
 }
 
-func (handler *DefaultHandshakeHandler) GetNamespace(nsMgr *namespace.NamespaceManager, resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
-	ns, ok := nsMgr.GetNamespaceByUser(resp.User)
+func (handler *DefaultHandshakeHandler) GetNamespace(resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
+	ns, ok := handler.nsManager.GetNamespaceByUser(resp.User)
 	if !ok {
-		ns, ok = nsMgr.GetNamespace("default")
+		ns, ok = handler.nsManager.GetNamespace("default")
 	}
 	if !ok {
 		return nil, errors.New("failed to find a namespace")

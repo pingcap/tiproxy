@@ -109,7 +109,7 @@ func NewBackendConnManager(logger *zap.Logger, nsmgr *namespace.NamespaceManager
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
 	mgr.getBackendIO = func(auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
-		ns, err := handshakeHandler.GetNamespace(nsmgr, resp)
+		ns, err := handshakeHandler.GetNamespace(resp)
 		if err != nil {
 			return nil, err
 		}
