@@ -20,6 +20,7 @@ import (
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/logger"
+	"github.com/pingcap/TiProxy/pkg/manager/namespace"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
@@ -27,6 +28,7 @@ import (
 type proxyConfig struct {
 	frontendTLSConfig *tls.Config
 	backendTLSConfig  *tls.Config
+	handler           HandshakeHandler
 	sessionToken      string
 	capability        uint32
 	waitRedirect      bool
@@ -34,6 +36,7 @@ type proxyConfig struct {
 
 func newProxyConfig() *proxyConfig {
 	return &proxyConfig{
+		handler:      NewDefaultHandshakeHandler(),
 		capability:   defaultTestBackendCapability,
 		sessionToken: mockToken,
 	}
@@ -54,16 +57,20 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
 		proxyConfig:        cfg,
 		logger:             logger.CreateLoggerForTest(t).Named("mockProxy"),
-		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), nil, 0, false, false),
+		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), nil, cfg.handler, 0, false, false),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeFirstTime(mp.logger, clientIO, func(_ *Authenticator) (*pnet.PacketIO, error) {
+	if err := mp.authenticator.handshakeFirstTime(mp.logger, clientIO, mp.handshakeHandler, func(*Authenticator, *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 		return backendIO, nil
-	}, mp.frontendTLSConfig, mp.backendTLSConfig)
+	}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
+		return err
+	}
+	mp.cmdProcessor.capability = mp.authenticator.capability
+	return nil
 }
 
 func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO *pnet.PacketIO) error {
@@ -90,4 +97,28 @@ func (mp *mockProxy) directQuery(_, backendIO *pnet.PacketIO) error {
 	rs, _, err := mp.cmdProcessor.query(backendIO, mockCmdStr)
 	mp.rs = rs
 	return err
+}
+
+type CustomHandshakeHandler struct {
+	inUsername    string
+	inAddr        string
+	outCapability pnet.Capability
+	outUsername   string
+	outAttrs      map[string]string
+}
+
+func (handler *CustomHandshakeHandler) GetNamespace(nsMgr *namespace.NamespaceManager, resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
+	return &namespace.Namespace{}, nil
+}
+
+func (handler *CustomHandshakeHandler) HandleHandshakeResp(resp *pnet.HandshakeResp, addr string) error {
+	handler.inUsername = resp.User
+	resp.User = handler.outUsername
+	handler.inAddr = addr
+	resp.Attrs = handler.outAttrs
+	return nil
+}
+
+func (handler *CustomHandshakeHandler) GetCapability() pnet.Capability {
+	return handler.outCapability
 }

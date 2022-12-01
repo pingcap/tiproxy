@@ -91,12 +91,12 @@ type backendMgrTester struct {
 	closed bool
 }
 
-func newBackendMgrTester(t *testing.T) *backendMgrTester {
+func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 	tc := newTCPConnSuite(t)
-	cfg := func(cfg *testConfig) {
+	cfg = append(cfg, func(cfg *testConfig) {
 		cfg.testSuiteConfig.initBackendConn = false
-	}
-	ts, clean := newTestSuite(t, tc, cfg)
+	})
+	ts, clean := newTestSuite(t, tc, cfg...)
 	tester := &backendMgrTester{
 		testSuite: ts,
 		t:         t,
@@ -116,7 +116,7 @@ func newBackendMgrTester(t *testing.T) *backendMgrTester {
 	return tester
 }
 
-func (ts *backendMgrTester) getBackendIO(auth *Authenticator) (*pnet.PacketIO, error) {
+func (ts *backendMgrTester) getBackendIO(auth *Authenticator, _ *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 	addr := ts.tc.backendListener.Addr().String()
 	ts.mp.backendConn = NewBackendConnection(addr)
 	if err := ts.mp.backendConn.Connect(); err != nil {
@@ -500,7 +500,7 @@ func TestSpecialCmds(t *testing.T) {
 				require.Equal(t, "another_user", ts.mb.username)
 				require.Equal(t, "session_db", ts.mb.db)
 				expectCap := pnet.Capability(ts.mp.authenticator.supportedServerCapabilities.Uint32() &^ (mysql.ClientMultiStatements | mysql.ClientPluginAuthLenencClientData))
-				gotCap := pnet.Capability(ts.mb.clientCapability &^ mysql.ClientPluginAuthLenencClientData)
+				gotCap := pnet.Capability(ts.mb.capability &^ mysql.ClientPluginAuthLenencClientData)
 				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
 				return nil
 			},
@@ -542,6 +542,53 @@ func TestCloseWhileRedirect(t *testing.T) {
 				eventReceiver.checkEvent(t, eventClose)
 				return nil
 			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestCustomHandshake(t *testing.T) {
+	handler := &CustomHandshakeHandler{
+		outUsername:   "rewritten_user",
+		outAttrs:      map[string]string{"key": "value"},
+		outCapability: SupportedServerCapabilities & ^pnet.ClientDeprecateEOF,
+	}
+	ts := newBackendMgrTester(t, func(cfg *testConfig) {
+		//cfg.clientConfig.capability = handler.outCapability
+		cfg.proxyConfig.handler = handler
+	})
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// query
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.sql = "select 1"
+				return ts.mc.request(packetIO)
+			},
+			proxy: ts.forwardCmd4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				ts.mb.respondType = responseTypeResultSet
+				ts.mb.columns = 1
+				ts.mb.rows = 1
+				return ts.mb.respond(packetIO)
+			},
+		},
+		// 2nd handshake
+		{
+			client: nil,
+			proxy: func(_, _ *pnet.PacketIO) error {
+				backend1 := ts.mp.backendConn
+				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
+				require.NotEqual(t, backend1, ts.mp.backendConn)
+				return nil
+			},
+			backend: ts.redirectSucceed4Backend,
 		},
 	}
 	ts.runTests(runners)

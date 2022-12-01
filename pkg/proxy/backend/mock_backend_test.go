@@ -57,11 +57,10 @@ type mockBackend struct {
 	// Inputs that assigned by the test and will be sent to the client.
 	*backendConfig
 	// Outputs that received from the client and will be checked by the test.
-	username         string
-	db               string
-	authData         []byte
-	attrs            []byte
-	clientCapability uint32
+	username string
+	db       string
+	attrs    map[string]string
+	authData []byte
 }
 
 func newMockBackend(cfg *backendConfig) *mockBackend {
@@ -101,7 +100,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	mb.db = resp.DB
 	mb.authData = resp.AuthData
 	mb.attrs = resp.Attrs
-	mb.clientCapability = resp.Capability
+	mb.capability = resp.Capability
 	// verify password
 	return mb.verifyPassword(packetIO, resp)
 }

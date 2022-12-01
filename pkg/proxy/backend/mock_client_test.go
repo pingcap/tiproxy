@@ -29,8 +29,8 @@ type clientConfig struct {
 	username   string
 	dbName     string
 	authPlugin string
+	attrs      map[string]string
 	dataBytes  []byte
-	attrs      []byte
 	authData   []byte
 	filePkts   int
 	prepStmtID int
@@ -49,7 +49,7 @@ func newClientConfig() *clientConfig {
 		dbName:     mockDBName,
 		authPlugin: mysql.AuthCachingSha2Password,
 		authData:   mockAuthData,
-		attrs:      make([]byte, 0),
+		attrs:      make(map[string]string),
 		cmd:        mysql.ComQuery,
 		dataBytes:  mockCmdBytes,
 		sql:        mockCmdStr,
@@ -74,9 +74,12 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 	if mc.abnormalExit {
 		return packetIO.Close()
 	}
-	if _, err := packetIO.ReadPacket(); err != nil {
+	pkt, err := packetIO.ReadPacket()
+	if err != nil {
 		return err
 	}
+	serverCap := pnet.ParseInitialHandshake(pkt)
+	mc.capability = mc.capability & serverCap
 
 	resp := &pnet.HandshakeResp{
 		User:       mc.username,
@@ -87,7 +90,7 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 		Capability: mc.capability,
 		Collation:  mc.collation,
 	}
-	pkt := pnet.MakeHandshakeResponse(resp)
+	pkt = pnet.MakeHandshakeResponse(resp)
 	if mc.capability&mysql.ClientSSL > 0 {
 		if err := packetIO.WritePacket(pkt[:32], true); err != nil {
 			return err
