@@ -42,7 +42,13 @@ func NewNamespaceManager() *NamespaceManager {
 func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
-	rt, err := router.NewScoreBasedRouter(logger.Named("router"), &cfg.Backend, mgr.client, mgr.httpCli)
+	var fetcher router.BackendFetcher
+	if mgr.client != nil {
+		fetcher = router.NewPDFetcher(mgr.client, logger.Named("be_fetcher"), router.NewDefaultHealthCheckConfig())
+	} else {
+		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
+	}
+	rt, err := router.NewScoreBasedRouter(logger.Named("router"), mgr.httpCli, fetcher)
 	if err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
