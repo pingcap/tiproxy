@@ -183,7 +183,7 @@ func runETCDTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *Back
 	kv := clientv3.NewKV(client)
 	backendChan := make(chan map[string]BackendStatus, 1)
 	mer := newMockEventReceiver(backendChan)
-	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), NewDefaultHealthCheckConfig())
+	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), newHealthCheckConfigForTest())
 	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
 	f(etcd, kv, bo, backendChan)
