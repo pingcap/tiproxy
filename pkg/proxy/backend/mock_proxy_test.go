@@ -20,7 +20,7 @@ import (
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/logger"
-	"github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
@@ -107,8 +107,8 @@ type CustomHandshakeHandler struct {
 	outAttrs      map[string]string
 }
 
-func (handler *CustomHandshakeHandler) GetNamespace(resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
-	return &namespace.Namespace{}, nil
+func (handler *CustomHandshakeHandler) GetRouter(resp *pnet.HandshakeResp) (router.Router, error) {
+	return nil, nil
 }
 
 func (handler *CustomHandshakeHandler) HandleHandshakeResp(resp *pnet.HandshakeResp, addr string) error {
