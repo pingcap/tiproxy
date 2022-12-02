@@ -36,7 +36,7 @@ type proxyConfig struct {
 
 func newProxyConfig() *proxyConfig {
 	return &proxyConfig{
-		handler:      NewDefaultHandshakeHandler(),
+		handler:      NewDefaultHandshakeHandler(nil),
 		capability:   defaultTestBackendCapability,
 		sessionToken: mockToken,
 	}
@@ -57,7 +57,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
 		proxyConfig:        cfg,
 		logger:             logger.CreateLoggerForTest(t).Named("mockProxy"),
-		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), nil, cfg.handler, 0, false, false),
+		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), cfg.handler, 0, false, false),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
@@ -107,7 +107,7 @@ type CustomHandshakeHandler struct {
 	outAttrs      map[string]string
 }
 
-func (handler *CustomHandshakeHandler) GetNamespace(nsMgr *namespace.NamespaceManager, resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
+func (handler *CustomHandshakeHandler) GetNamespace(resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
 	return &namespace.Namespace{}, nil
 }
 
