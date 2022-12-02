@@ -23,8 +23,8 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/cert"
-	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/metrics"
+	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
@@ -43,7 +43,7 @@ type SQLServer struct {
 	listener          net.Listener
 	logger            *zap.Logger
 	certMgr           *cert.CertManager
-	nsmgr             *mgrns.NamespaceManager
+	hsHandler         backend.HandshakeHandler
 	requireBackendTLS bool
 	wg                waitgroup.WaitGroup
 
@@ -51,13 +51,13 @@ type SQLServer struct {
 }
 
 // NewSQLServer creates a new SQLServer.
-func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.CertManager, nsmgr *mgrns.NamespaceManager) (*SQLServer, error) {
+func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.CertManager, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
 	var err error
 
 	s := &SQLServer{
 		logger:            logger,
 		certMgr:           certMgr,
-		nsmgr:             nsmgr,
+		hsHandler:         hsHandler,
 		requireBackendTLS: cfg.RequireBackendTLS,
 		mu: serverState{
 			connID:  0,
@@ -124,7 +124,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
-	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(), s.nsmgr, connID, s.mu.proxyProtocol, s.requireBackendTLS)
+	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(), s.hsHandler, connID, s.mu.proxyProtocol, s.requireBackendTLS)
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 

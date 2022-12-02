@@ -29,7 +29,6 @@ import (
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
-	"github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -84,20 +83,18 @@ type BackendConnManager struct {
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc       context.CancelFunc
 	backendConn      *BackendConnection
-	nsmgr            *namespace.NamespaceManager
 	handshakeHandler HandshakeHandler
 	getBackendIO     backendIOGetter
 	connectionID     uint64
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(logger *zap.Logger, nsmgr *namespace.NamespaceManager, handshakeHandler HandshakeHandler,
+func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler,
 	connectionID uint64, proxyProtocol, requireBackendTLS bool) *BackendConnManager {
 	mgr := &BackendConnManager{
 		logger:           logger,
 		connectionID:     connectionID,
 		cmdProcessor:     NewCmdProcessor(),
-		nsmgr:            nsmgr,
 		handshakeHandler: handshakeHandler,
 		authenticator: &Authenticator{
 			supportedServerCapabilities: handshakeHandler.GetCapability(),
