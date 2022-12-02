@@ -24,7 +24,6 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -88,7 +87,8 @@ type HealthCheckConfig struct {
 	tombstoneThreshold       time.Duration
 }
 
-func newDefaultHealthCheckConfig() *HealthCheckConfig {
+// NewDefaultHealthCheckConfig creates a default HealthCheckConfig.
+func NewDefaultHealthCheckConfig() *HealthCheckConfig {
 	return &HealthCheckConfig{
 		healthCheckInterval:      healthCheckInterval,
 		healthCheckMaxRetries:    healthCheckMaxRetries,
@@ -125,9 +125,9 @@ type BackendObserver struct {
 }
 
 // StartBackendObserver creates a BackendObserver and starts watching.
-func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client,
-	config *HealthCheckConfig, staticAddrs []string, customBackendFetcher BackendFetcher) (*BackendObserver, error) {
-	bo, err := NewBackendObserver(logger, eventReceiver, client, httpCli, config, staticAddrs, customBackendFetcher)
+func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, httpCli *http.Client,
+	config *HealthCheckConfig, backendFetcher BackendFetcher) (*BackendObserver, error) {
+	bo, err := NewBackendObserver(logger, eventReceiver, httpCli, config, backendFetcher)
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +136,8 @@ func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver
 }
 
 // NewBackendObserver creates a BackendObserver.
-func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, client *clientv3.Client, httpCli *http.Client,
-	config *HealthCheckConfig, staticAddrs []string, customBackendFetcher BackendFetcher) (*BackendObserver, error) {
+func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, httpCli *http.Client,
+	config *HealthCheckConfig, backendFetcher BackendFetcher) (*BackendObserver, error) {
 	if httpCli == nil {
 		httpCli = http.DefaultClient
 	}
@@ -153,13 +153,7 @@ func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, 
 		httpTLS:        httpTLS,
 		eventReceiver:  eventReceiver,
 	}
-	if customBackendFetcher != nil {
-		bo.fetcher = customBackendFetcher
-	} else if client != nil {
-		bo.fetcher = NewPDFetcher(client, logger.Named("be_fetcher"), config)
-	} else {
-		bo.fetcher = NewStaticFetcher(staticAddrs)
-	}
+	bo.fetcher = backendFetcher
 	return bo, nil
 }
 

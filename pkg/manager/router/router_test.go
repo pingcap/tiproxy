@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/metrics"
@@ -520,12 +519,12 @@ func TestRebalanceCornerCase(t *testing.T) {
 
 // Test all kinds of events occur concurrently.
 func TestConcurrency(t *testing.T) {
-	cfg := &config.BackendNamespace{}
 	// Router.observer doesn't work because the etcd is always empty.
 	// We create other goroutines to change backends easily.
 	etcd := createEtcdServer(t, "127.0.0.1:0")
 	client := createEtcdClient(t, etcd)
-	router, err := NewScoreBasedRouter(logger.CreateLoggerForTest(t), cfg, client, nil)
+	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), newHealthCheckConfigForTest())
+	router, err := NewScoreBasedRouter(logger.CreateLoggerForTest(t), nil, fetcher)
 	require.NoError(t, err)
 
 	var wg waitgroup.WaitGroup
