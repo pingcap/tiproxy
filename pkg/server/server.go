@@ -16,19 +16,14 @@ package server
 
 import (
 	"context"
-	"fmt"
+	"crypto/tls"
+	"net"
 	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
@@ -41,12 +36,12 @@ import (
 	"github.com/pingcap/TiProxy/pkg/sctx"
 	"github.com/pingcap/TiProxy/pkg/server/api"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
 type Server struct {
+	wg waitgroup.WaitGroup
 	// managers
 	ConfigManager    *mgrcfg.ConfigManager
 	NamespaceManager *mgrns.NamespaceManager
@@ -56,10 +51,11 @@ type Server struct {
 	ObserverClient   *clientv3.Client
 	// HTTP client
 	Http *http.Client
-	// HTTP/GRPC services
-	Etcd *embed.Etcd
+	// HTTP server
+	HTTPListener net.Listener
 	// L7 proxy
-	Proxy *proxy.SQLServer
+	Proxy   *proxy.SQLServer
+	proxyCh <-chan *config.ProxyServerOnline
 }
 
 func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error) {
@@ -68,6 +64,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		MetricsManager:   metrics.NewMetricsManager(),
 		NamespaceManager: mgrns.NewNamespaceManager(),
 		CertManager:      cert.NewCertManager(),
+		wg:               waitgroup.WaitGroup{},
 	}
 
 	cfg := sctx.Config
@@ -93,11 +90,12 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup gin and etcd
 	{
+		slogger := lg.Named("gin")
 		gin.SetMode(gin.ReleaseMode)
 		engine := gin.New()
 		engine.Use(
 			gin.Recovery(),
-			ginzap.Ginzap(lg.Named("gin"), "", true),
+			ginzap.Ginzap(slogger, "", true),
 			func(c *gin.Context) {
 				if !ready.Load() {
 					c.Abort()
@@ -106,31 +104,19 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			},
 		)
 
-		// This is the tricky part. While HTTP services rely on managers, managers also rely on the etcd server.
-		// Etcd server is used to bring up the config manager and HTTP services itself.
-		// That means we have cyclic dependencies. Here's the solution:
-		// 1. create managers first, and pass them down
-		// 2. start etcd and HTTP, but HTTP will wait for managers to init
-		// 3. init managers using bootstrapped etcd
-		//
-		// We have some alternative solution, for example:
-		// 1. globally lazily creation of managers. It introduced racing/chaos-management/hard-code-reading as in TiDB.
-		// 2. pass down '*Server' struct such that the underlying relies on the pointer only. But it does not work well for golang. To avoid cyclic imports between 'api' and `server` packages, two packages needs to be merged. That is basically what happened to TiDB '*Session'.
 		api.Register(engine.Group("/api"), cfg.API, lg.Named("api"), srv.NamespaceManager, srv.ConfigManager)
 
-		srv.Etcd, err = buildEtcd(sctx, lg.Named("etcd"), engine)
+		srv.HTTPListener, err = net.Listen("tcp", cfg.API.Addr)
 		if err != nil {
-			err = errors.WithStack(err)
-			return
+			return nil, err
+		}
+		if tlscfg := srv.CertManager.ServerTLS(); tlscfg != nil {
+			srv.HTTPListener = tls.NewListener(srv.HTTPListener, tlscfg)
 		}
 
-		// wait for etcd server
-		select {
-		case <-ctx.Done():
-			err = fmt.Errorf("timeout on creating etcd")
-			return
-		case <-srv.Etcd.Server.ReadyNotify():
-		}
+		srv.wg.Run(func() {
+			slogger.Info("HTTP closed", zap.Error(engine.RunListener(srv.HTTPListener)))
+		})
 	}
 
 	// general cluster HTTP client
@@ -144,12 +130,13 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup config manager
 	{
-		err = srv.ConfigManager.Init(ctx, srv.Etcd.Server.KV(), cfg, lg.Named("config"))
+		err = srv.ConfigManager.Init(ctx, cfg, lg.Named("config"))
 		if err != nil {
 			err = errors.WithStack(err)
 			return
 		}
-		srv.LoggerManager.Init(srv.ConfigManager.GetLogConfigWatch())
+
+		srv.LoggerManager.Init(mgrcfg.MakeConfigChan(srv.ConfigManager, &cfg.Log.LogOnline))
 
 		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
 		if nerr != nil {
@@ -201,20 +188,25 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			err = errors.WithStack(err)
 			return
 		}
+
+		srv.proxyCh = mgrcfg.MakeConfigChan(srv.ConfigManager, &cfg.Proxy.ProxyServerOnline)
+
+		srv.wg.Run(func() {
+			srv.Proxy.Run(ctx, srv.proxyCh)
+		})
 	}
 
 	ready.Toggle()
 	return
 }
 
-func (s *Server) Run(ctx context.Context) {
-	s.Proxy.Run(ctx, s.ConfigManager.GetProxyConfigWatch())
-}
-
 func (s *Server) Close() error {
 	errs := make([]error, 0, 4)
 	if s.Proxy != nil {
 		errs = append(errs, s.Proxy.Close())
+	}
+	if s.HTTPListener != nil {
+		s.HTTPListener.Close()
 	}
 	if s.NamespaceManager != nil {
 		errs = append(errs, s.NamespaceManager.Close())
@@ -225,20 +217,6 @@ func (s *Server) Close() error {
 	if s.ObserverClient != nil {
 		errs = append(errs, s.ObserverClient.Close())
 	}
-	if s.Etcd != nil {
-		var wg waitgroup.WaitGroup
-		wg.Run(func() {
-			for {
-				err, ok := <-s.Etcd.Err()
-				if !ok {
-					break
-				}
-				errs = append(errs, err)
-			}
-		})
-		s.Etcd.Close()
-		wg.Wait()
-	}
 	if s.MetricsManager != nil {
 		s.MetricsManager.Close()
 	}
@@ -247,102 +225,6 @@ func (s *Server) Close() error {
 			errs = append(errs, err)
 		}
 	}
+	s.wg.Wait()
 	return errors.Collect(ErrCloseServer, errs...)
-}
-
-func buildEtcd(ctx *sctx.Context, logger *zap.Logger, engine *gin.Engine) (srv *embed.Etcd, err error) {
-	cfg := ctx.Config
-	if ctx.Cluster.ClusterName == "" {
-		return nil, errors.New("cluster_name can not be empty")
-	}
-	if ctx.Cluster.NodeName == "" {
-		hname, err := os.Hostname()
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		ctx.Cluster.NodeName = fmt.Sprintf("%s-%s", ctx.Cluster.ClusterName, hname)
-	}
-
-	cnt := 0
-	if len(ctx.Cluster.BootstrapClusters) != 0 {
-		cnt++
-	}
-	if ctx.Cluster.BootstrapDurl != "" {
-		cnt++
-	}
-	if ctx.Cluster.BootstrapDdns != "" {
-		cnt++
-	}
-	if cnt > 1 {
-		return nil, errors.New("you can only pass one 'bootstrap_xxx' to bootstrap the node, or leave them empty to start a single-node cluster")
-	}
-
-	etcd_cfg := embed.NewConfig()
-
-	if etcd_cfg.ClientTLSInfo, etcd_cfg.PeerTLSInfo, err = security.BuildEtcdTLSConfig(logger, cfg.Security.ServerTLS, cfg.Security.PeerTLS); err != nil {
-		return
-	}
-
-	apiAddr, err := url.Parse(fmt.Sprintf("http://%s", cfg.API.Addr))
-	if err != nil {
-		return nil, err
-	}
-	if etcd_cfg.ClientTLSInfo.Empty() {
-		apiAddr.Scheme = "http"
-	} else {
-		apiAddr.Scheme = "https"
-	}
-	etcd_cfg.LCUrls = []url.URL{*apiAddr}
-	apiAddrAdvertise := *apiAddr
-	apiAddrAdvertise.Host = fmt.Sprintf("%s:%s", ctx.Cluster.PubAddr, apiAddrAdvertise.Port())
-	etcd_cfg.ACUrls = []url.URL{apiAddrAdvertise}
-
-	peerPort := cfg.Advance.PeerPort
-	if peerPort == "" {
-		peerPortNum, err := strconv.Atoi(apiAddr.Port())
-		if err != nil {
-			return nil, err
-		}
-		peerPort = strconv.Itoa(peerPortNum + 1)
-	}
-	peerAddr := *apiAddr
-	if etcd_cfg.PeerTLSInfo.Empty() {
-		peerAddr.Scheme = "http"
-	} else {
-		peerAddr.Scheme = "https"
-	}
-	peerAddr.Host = fmt.Sprintf("%s:%s", peerAddr.Hostname(), peerPort)
-	etcd_cfg.LPUrls = []url.URL{peerAddr}
-	peerAddrAdvertise := peerAddr
-	peerAddrAdvertise.Host = fmt.Sprintf("%s:%s", ctx.Cluster.PubAddr, peerPort)
-	etcd_cfg.APUrls = []url.URL{peerAddrAdvertise}
-
-	etcd_cfg.Name = ctx.Cluster.NodeName
-	if cnt == 0 {
-		etcd_cfg.InitialCluster = fmt.Sprintf("%s=%s", ctx.Cluster.NodeName, peerAddrAdvertise.String())
-		etcd_cfg.InitialClusterToken = ctx.Cluster.ClusterName
-	} else if len(ctx.Cluster.BootstrapClusters) > 0 {
-		for i := range ctx.Cluster.BootstrapClusters {
-			if etcd_cfg.PeerTLSInfo.Empty() {
-				ctx.Cluster.BootstrapClusters[i] = strings.Replace(ctx.Cluster.BootstrapClusters[i], "=", "=http://", 1)
-			} else {
-				ctx.Cluster.BootstrapClusters[i] = strings.Replace(ctx.Cluster.BootstrapClusters[i], "=", "=https://", 1)
-			}
-		}
-		etcd_cfg.InitialCluster = strings.Join(append(ctx.Cluster.BootstrapClusters, fmt.Sprintf("%s=%s", ctx.Cluster.NodeName, peerAddrAdvertise.String())), ",")
-		etcd_cfg.InitialClusterToken = ctx.Cluster.ClusterName
-	} else if ctx.Cluster.BootstrapDurl != "" {
-		etcd_cfg.Durl = ctx.Cluster.BootstrapDurl
-	} else if ctx.Cluster.BootstrapDdns != "" {
-		etcd_cfg.DNSCluster = ctx.Cluster.BootstrapDdns
-		etcd_cfg.DNSClusterServiceName = ctx.Cluster.ClusterName
-	}
-
-	etcd_cfg.Dir = filepath.Join(cfg.Workdir, "etcd")
-	etcd_cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(logger)
-
-	etcd_cfg.UserHandlers = map[string]http.Handler{
-		"/api/": engine,
-	}
-	return embed.StartEtcd(etcd_cfg)
 }

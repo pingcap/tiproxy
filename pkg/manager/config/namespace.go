@@ -20,16 +20,15 @@ import (
 	"errors"
 
 	"github.com/pingcap/TiProxy/lib/config"
-	"go.uber.org/zap"
 )
 
 func (e *ConfigManager) GetNamespace(ctx context.Context, ns string) (*config.Namespace, error) {
-	etcdKeyValue, err := e.get(ctx, pathPrefixNamespace, ns)
+	kv, err := e.get(ctx, pathPrefixNamespace, ns)
 	if err != nil {
 		return nil, err
 	}
 	var cfg config.Namespace
-	err = json.Unmarshal(etcdKeyValue.Value, &cfg)
+	err = json.Unmarshal(kv.Value, &cfg)
 	return &cfg, err
 }
 
@@ -43,12 +42,7 @@ func (e *ConfigManager) ListAllNamespace(ctx context.Context) ([]*config.Namespa
 	for _, kv := range etcdKeyValues {
 		var nsCfg config.Namespace
 		if err := json.Unmarshal(kv.Value, &nsCfg); err != nil {
-			if e.ignoreWrongNamespace {
-				e.logger.Warn("parse namespace config error", zap.Error(err), zap.ByteString("namespace", kv.Key))
-				continue
-			} else {
-				return nil, err
-			}
+			return nil, err
 		}
 		ret = append(ret, &nsCfg)
 	}
@@ -64,7 +58,7 @@ func (e *ConfigManager) SetNamespace(ctx context.Context, ns string, nsc *config
 	if err != nil {
 		return err
 	}
-	return e.set(ctx, pathPrefixNamespace, ns, string(r))
+	return e.set(ctx, pathPrefixNamespace, ns, r)
 }
 
 func (e *ConfigManager) DelNamespace(ctx context.Context, ns string) error {

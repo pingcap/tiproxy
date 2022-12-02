@@ -15,7 +15,7 @@ require (
 	github.com/siddontang/go v0.0.0-20180604090527-bdc77568d726
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.8.0
-	go.etcd.io/etcd/api/v3 v3.5.4
+	github.com/tidwall/btree v1.5.2
 	go.etcd.io/etcd/client/v3 v3.5.4
 	go.etcd.io/etcd/server/v3 v3.5.4
 	go.uber.org/atomic v1.10.0
@@ -96,6 +96,7 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
+	go.etcd.io/etcd/api/v3 v3.5.4 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.4 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.4 // indirect
 	go.etcd.io/etcd/pkg/v3 v3.5.4 // indirect

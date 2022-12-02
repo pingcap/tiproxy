@@ -17,170 +17,76 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"path"
 	"reflect"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.uber.org/zap"
 )
 
-type mKeyType reflect.Type
-
-type OnlineCfgTypes interface {
-	config.ProxyServerOnline | config.LogOnline
+var cfg2Path = map[reflect.Type]string{
+	reflect.TypeOf(config.ProxyServerOnline{}): "proxy",
+	reflect.TypeOf(config.LogOnline{}):         "log",
 }
 
-type imeta interface {
-	getPrefix() string
-	unmarshal(bytes []byte) (any, error)
-	addToCh(any)
-	getInitial(cfg *config.Config) any
-}
-
-type meta[T OnlineCfgTypes] struct {
-	prefix   string
-	initFunc func(cfg *config.Config) T
-	ch       chan *T
-}
-
-func newMeta[T OnlineCfgTypes](prefix string, initFunc func(cfg *config.Config) T) *meta[T] {
-	return &meta[T]{
-		prefix:   prefix,
-		initFunc: initFunc,
-		ch:       make(chan *T, 1),
+func (e *ConfigManager) SetConfig(ctx context.Context, val any) error {
+	rf := reflect.TypeOf(val)
+	if rf.Kind() == reflect.Pointer {
+		rf = rf.Elem()
 	}
-}
-
-func (m meta[T]) unmarshal(bytes []byte) (any, error) {
-	var t T
-	err := json.Unmarshal(bytes, &t)
-	return &t, err
-}
-
-func (m meta[T]) getPrefix() string {
-	return m.prefix
-}
-
-func (m meta[T]) addToCh(obj any) {
-	m.ch <- obj.(*T)
-}
-
-func (m meta[T]) getInitial(cfg *config.Config) any {
-	return m.initFunc(cfg)
-}
-
-func getMetaKey[T OnlineCfgTypes]() mKeyType {
-	return reflect.TypeOf(new(T))
-}
-
-func getMetaKeyByObj[T OnlineCfgTypes](t *T) mKeyType {
-	return reflect.TypeOf(t)
-}
-
-func (e *ConfigManager) initMetas() {
-	e.metas = map[mKeyType]imeta{
-		getMetaKey[config.ProxyServerOnline](): newMeta(pathPrefixProxyServer, func(cfg *config.Config) config.ProxyServerOnline {
-			return cfg.Proxy.ProxyServerOnline
-		}),
-		getMetaKey[config.LogOnline](): newMeta(pathPrefixLog, func(cfg *config.Config) config.LogOnline {
-			return cfg.Log.LogOnline
-		}),
+	p, ok := cfg2Path[rf]
+	if !ok {
+		return errors.WithStack(errors.New("invalid type"))
 	}
+	c, err := json.Marshal(val)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return e.set(ctx, pathPrefixConfig, p, c)
 }
 
-func (e *ConfigManager) watchConfig(ctx context.Context, cfg *config.Config) error {
-	for _, m := range e.metas {
-		if err := func(m imeta) error {
-			_, err := e.get(ctx, m.getPrefix(), "")
-			if err != nil && errors.Is(err, ErrNoOrMultiResults) {
-				value, err := json.Marshal(m.getInitial(cfg))
-				if err != nil {
-					return err
-				}
-				if err = e.set(ctx, m.getPrefix(), "", string(value)); err != nil {
-					return err
-				}
+func (e *ConfigManager) GetConfig(ctx context.Context, val any) error {
+	rf := reflect.TypeOf(val)
+	if rf.Kind() == reflect.Pointer {
+		rf = rf.Elem()
+	}
+	p, ok := cfg2Path[rf]
+	if !ok {
+		return errors.WithStack(errors.New("invalid type"))
+	}
+
+	c, err := e.get(ctx, pathPrefixConfig, p)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(c.Value, val)
+}
+
+func MakeConfigChan[T any](e *ConfigManager, initval *T) <-chan *T {
+	cfgchan := make(chan *T, 64)
+	rf := reflect.TypeOf(initval)
+	if rf.Kind() == reflect.Pointer {
+		rf = rf.Elem()
+	}
+	p, ok := cfg2Path[rf]
+	if !ok {
+		panic(errors.WithStack(errors.New("invalid type")))
+	}
+
+	_ = e.SetConfig(context.Background(), initval)
+
+	e.Watch(path.Join(pathPrefixConfig, p), func(_ *zap.Logger, k KVEvent) {
+		var v T
+		if k.Type == KVEventDel {
+			cfgchan <- &v
+		} else {
+			e := json.Unmarshal(k.Value, &v)
+			if e == nil {
+				cfgchan <- &v
 			}
-			e.watch(ctx, m.getPrefix(), "", func(logger *zap.Logger, evt mvccpb.Event) {
-				if obj, err := m.unmarshal(evt.Kv.Value); err != nil {
-					logger.Warn("failed unmarshal proxy config", zap.Error(err))
-					return
-				} else {
-					m.addToCh(obj)
-				}
-			})
-			return nil
-		}(m); err != nil {
-			return err
 		}
-	}
-	return nil
-}
-
-func (e *ConfigManager) getCfg(ctx context.Context, metaKey reflect.Type) (any, error) {
-	m := e.metas[metaKey]
-	val, err := e.get(ctx, m.getPrefix(), "")
-	if err != nil {
-		return nil, err
-	}
-	return m.unmarshal(val.Value)
-}
-
-func (e *ConfigManager) setCfg(ctx context.Context, metaKey mKeyType, obj any) error {
-	m := e.metas[metaKey]
-	value, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	return e.set(ctx, m.getPrefix(), "", string(value))
-}
-
-// GetConfig queries the configuration from the config center.
-func GetConfig[T OnlineCfgTypes](ctx context.Context, e *ConfigManager, t *T) error {
-	obj, err := e.getCfg(ctx, getMetaKeyByObj(t))
-	if err != nil {
-		return err
-	}
-	*t = *obj.(*T)
-	return nil
-}
-
-// SetConfig sets a configuration to the config center.
-func SetConfig[T OnlineCfgTypes](ctx context.Context, e *ConfigManager, t *T) error {
-	return e.setCfg(ctx, getMetaKeyByObj(t), t)
-}
-
-// GetCfgWatch returns the channel that contains updated configuration.
-func GetCfgWatch[T OnlineCfgTypes](e *ConfigManager) chan *T {
-	mt := e.metas[getMetaKey[T]()].(*meta[T])
-	return mt.ch
-}
-
-func (e *ConfigManager) GetProxyConfigWatch() <-chan *config.ProxyServerOnline {
-	return GetCfgWatch[config.ProxyServerOnline](e)
-}
-
-func (e *ConfigManager) GetProxyConfig(ctx context.Context) (*config.ProxyServerOnline, error) {
-	var pso config.ProxyServerOnline
-	err := GetConfig(ctx, e, &pso)
-	return &pso, err
-}
-
-func (e *ConfigManager) SetProxyConfig(ctx context.Context, proxy *config.ProxyServerOnline) error {
-	return SetConfig(ctx, e, proxy)
-}
-
-func (e *ConfigManager) GetLogConfigWatch() <-chan *config.LogOnline {
-	return GetCfgWatch[config.LogOnline](e)
-}
-
-func (e *ConfigManager) GetLogConfig(ctx context.Context) (*config.LogOnline, error) {
-	var co config.LogOnline
-	err := GetConfig(ctx, e, &co)
-	return &co, err
-}
-
-func (e *ConfigManager) SetLogConfig(ctx context.Context, log *config.LogOnline) error {
-	return SetConfig(ctx, e, log)
+	})
+	return cfgchan
 }
