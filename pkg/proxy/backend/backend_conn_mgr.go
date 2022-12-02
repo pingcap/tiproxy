@@ -106,16 +106,12 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
 	mgr.getBackendIO = func(auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
-		ns, err := handshakeHandler.GetNamespace(resp)
-		if err != nil {
-			return nil, err
-		}
-		router := ns.GetRouter()
+		router, err := handshakeHandler.GetRouter(resp)
 		addr, err := router.Route(mgr)
 		if err != nil {
 			return nil, err
 		}
-		mgr.logger.Info("found", zap.String("namespace", ns.Name()), zap.String("addr", addr))
+		mgr.logger.Info("found", zap.String("addr", addr))
 		mgr.backendConn = NewBackendConnection(addr)
 		if err := mgr.backendConn.Connect(); err != nil {
 			return nil, err

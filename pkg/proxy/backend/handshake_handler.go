@@ -17,6 +17,7 @@ package backend
 import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
@@ -25,7 +26,7 @@ var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 type HandshakeHandler interface {
 	HandleHandshakeResp(resp *pnet.HandshakeResp, sourceAddr string) error
 	GetCapability() pnet.Capability
-	GetNamespace(resp *pnet.HandshakeResp) (*namespace.Namespace, error)
+	GetRouter(resp *pnet.HandshakeResp) (router.Router, error)
 }
 
 type DefaultHandshakeHandler struct {
@@ -46,7 +47,7 @@ func (handler *DefaultHandshakeHandler) GetCapability() pnet.Capability {
 	return SupportedServerCapabilities
 }
 
-func (handler *DefaultHandshakeHandler) GetNamespace(resp *pnet.HandshakeResp) (*namespace.Namespace, error) {
+func (handler *DefaultHandshakeHandler) GetRouter(resp *pnet.HandshakeResp) (router.Router, error) {
 	ns, ok := handler.nsManager.GetNamespaceByUser(resp.User)
 	if !ok {
 		ns, ok = handler.nsManager.GetNamespace("default")
@@ -54,5 +55,5 @@ func (handler *DefaultHandshakeHandler) GetNamespace(resp *pnet.HandshakeResp) (
 	if !ok {
 		return nil, errors.New("failed to find a namespace")
 	}
-	return ns, nil
+	return ns.GetRouter(), nil
 }
