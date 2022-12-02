@@ -107,6 +107,9 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 	}
 	mgr.getBackendIO = func(auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 		router, err := handshakeHandler.GetRouter(resp)
+		if err != nil {
+			return nil, err
+		}
 		addr, err := router.Route(mgr)
 		if err != nil {
 			return nil, err
