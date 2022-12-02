@@ -75,7 +75,8 @@ func MakeConfigChan[T any](e *ConfigManager, initval *T) <-chan *T {
 		panic(errors.WithStack(errors.New("invalid type")))
 	}
 
-	e.SetConfig(context.Background(), initval)
+	_ = e.SetConfig(context.Background(), initval)
+
 	e.Watch(path.Join(pathPrefixConfig, p), func(_ *zap.Logger, k KVEvent) {
 		var v T
 		if k.Type == KVEventDel {
