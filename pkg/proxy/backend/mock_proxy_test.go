@@ -15,6 +15,7 @@
 package backend
 
 import (
+	"context"
 	"crypto/tls"
 	"testing"
 
@@ -107,14 +108,14 @@ type CustomHandshakeHandler struct {
 	outAttrs      map[string]string
 }
 
-func (handler *CustomHandshakeHandler) GetRouter(resp *pnet.HandshakeResp) (router.Router, error) {
+func (handler *CustomHandshakeHandler) GetRouter(ctx context.Context, resp *pnet.HandshakeResp) (router.Router, error) {
 	return nil, nil
 }
 
-func (handler *CustomHandshakeHandler) HandleHandshakeResp(resp *pnet.HandshakeResp, addr string) error {
+func (handler *CustomHandshakeHandler) HandleHandshakeResp(ctx context.Context, resp *pnet.HandshakeResp) error {
 	handler.inUsername = resp.User
 	resp.User = handler.outUsername
-	handler.inAddr = addr
+	handler.inAddr = ctx.Value(ContextKeyClientAddr).(string)
 	resp.Attrs = handler.outAttrs
 	return nil
 }
