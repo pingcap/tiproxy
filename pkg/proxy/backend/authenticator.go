@@ -15,6 +15,7 @@
 package backend
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
@@ -145,7 +146,8 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	auth.capability = commonCaps.Uint32()
 
 	resp := pnet.ParseHandshakeResponse(pkt)
-	if err = handshakeHandler.HandleHandshakeResp(resp, clientIO.SourceAddr().String()); err != nil {
+	ctx := context.WithValue(context.Background(), ContextKeyClientAddr, clientIO.SourceAddr().String())
+	if err = handshakeHandler.HandleHandshakeResp(ctx, resp); err != nil {
 		return err
 	}
 	auth.user = resp.User
@@ -153,7 +155,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	auth.collation = resp.Collation
 	auth.attrs = resp.Attrs
 
-	backendIO, err := getBackend(auth, resp)
+	backendIO, err := getBackend(ctx, auth, resp)
 	if err != nil {
 		return err
 	}

@@ -15,18 +15,31 @@
 package backend
 
 import (
+	"context"
+
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
+type contextKey string
+
+func (k contextKey) String() string {
+	return "handler context key " + string(k)
+}
+
+// Context keys.
+var (
+	ContextKeyClientAddr = contextKey("client_addr")
+)
+
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 
 type HandshakeHandler interface {
-	HandleHandshakeResp(resp *pnet.HandshakeResp, sourceAddr string) error
+	HandleHandshakeResp(ctx context.Context, resp *pnet.HandshakeResp) error
 	GetCapability() pnet.Capability
-	GetRouter(resp *pnet.HandshakeResp) (router.Router, error)
+	GetRouter(ctx context.Context, resp *pnet.HandshakeResp) (router.Router, error)
 }
 
 type DefaultHandshakeHandler struct {
@@ -39,7 +52,7 @@ func NewDefaultHandshakeHandler(nsManager *namespace.NamespaceManager) *DefaultH
 	}
 }
 
-func (handler *DefaultHandshakeHandler) HandleHandshakeResp(*pnet.HandshakeResp, string) error {
+func (handler *DefaultHandshakeHandler) HandleHandshakeResp(context.Context, *pnet.HandshakeResp) error {
 	return nil
 }
 
@@ -47,7 +60,7 @@ func (handler *DefaultHandshakeHandler) GetCapability() pnet.Capability {
 	return SupportedServerCapabilities
 }
 
-func (handler *DefaultHandshakeHandler) GetRouter(resp *pnet.HandshakeResp) (router.Router, error) {
+func (handler *DefaultHandshakeHandler) GetRouter(ctx context.Context, resp *pnet.HandshakeResp) (router.Router, error) {
 	ns, ok := handler.nsManager.GetNamespaceByUser(resp.User)
 	if !ok {
 		ns, ok = handler.nsManager.GetNamespace("default")

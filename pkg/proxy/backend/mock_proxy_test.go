@@ -15,6 +15,7 @@
 package backend
 
 import (
+	"context"
 	"crypto/tls"
 	"testing"
 
@@ -64,7 +65,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	if err := mp.authenticator.handshakeFirstTime(mp.logger, clientIO, mp.handshakeHandler, func(*Authenticator, *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+	if err := mp.authenticator.handshakeFirstTime(mp.logger, clientIO, mp.handshakeHandler, func(context.Context, *Authenticator, *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 		return backendIO, nil
 	}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
 		return err
@@ -107,14 +108,14 @@ type CustomHandshakeHandler struct {
 	outAttrs      map[string]string
 }
 
-func (handler *CustomHandshakeHandler) GetRouter(resp *pnet.HandshakeResp) (router.Router, error) {
+func (handler *CustomHandshakeHandler) GetRouter(ctx context.Context, resp *pnet.HandshakeResp) (router.Router, error) {
 	return nil, nil
 }
 
-func (handler *CustomHandshakeHandler) HandleHandshakeResp(resp *pnet.HandshakeResp, addr string) error {
+func (handler *CustomHandshakeHandler) HandleHandshakeResp(ctx context.Context, resp *pnet.HandshakeResp) error {
 	handler.inUsername = resp.User
 	resp.User = handler.outUsername
-	handler.inAddr = addr
+	handler.inAddr = ctx.Value(ContextKeyClientAddr).(string)
 	resp.Attrs = handler.outAttrs
 	return nil
 }
