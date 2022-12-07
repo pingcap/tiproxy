@@ -176,7 +176,7 @@ func TestRotateCACert(t *testing.T) {
 	stls := certMgr.ServerTLS()
 	ctls := certMgr.SQLTLS()
 	clientErr, serverErr := connectWithTLS(ctls, stls, "")
-	require.ErrorContains(t, clientErr, "certificate signed by unknown authority", fmt.Sprintf("%t, %t", certMgr.SQLTLS().InsecureSkipVerify, certMgr.serverTLSConfig.InsecureSkipVerify))
+	require.ErrorContains(t, clientErr, "certificate signed by unknown authority", fmt.Sprintf("%t, %t, %+v", certMgr.SQLTLS().InsecureSkipVerify, certMgr.serverTLSConfig.InsecureSkipVerify, clientErr))
 	require.Error(t, serverErr)
 
 	// Overwrite the cert files with right CA and it works with the same tls.Config.

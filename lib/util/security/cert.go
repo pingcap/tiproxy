@@ -216,7 +216,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		}
 		ci.updateMinExpire(cp.NotAfter.Unix())
 	}
-	ci.cert.Store(cert)
+	ci.cert.Store(&cert)
 
 	if len(caPEM) != 0 {
 		cas, err := ci.loadCA(caPEM)
@@ -277,7 +277,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 		}
 		ci.updateMinExpire(cp.NotAfter.Unix())
 	}
-	ci.cert.Store(cert)
+	ci.cert.Store(&cert)
 
 	return tcfg, nil
 }
