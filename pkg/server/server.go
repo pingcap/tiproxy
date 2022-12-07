@@ -116,7 +116,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		}
 
 		if handler != nil {
-			handler.RegisterHTTP(engine)
+			if err := handler.RegisterHTTP(engine); err != nil {
+				return nil, errors.WithStack(err)
+			}
 		}
 
 		srv.wg.Run(func() {

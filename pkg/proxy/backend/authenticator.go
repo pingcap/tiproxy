@@ -47,6 +47,7 @@ const SupportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRo
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
 	backendTLSConfig            *tls.Config
+	ctxmap                      sync.Map
 	supportedServerCapabilities pnet.Capability
 	dbname                      string // default database name
 	serverAddr                  string
@@ -57,7 +58,6 @@ type Authenticator struct {
 	collation                   uint8
 	proxyProtocol               bool
 	requireBackendTLS           bool
-	ctxmap sync.Map
 }
 
 func (auth *Authenticator) String() string {
