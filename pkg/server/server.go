@@ -68,6 +68,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	}
 
 	cfg := sctx.Config
+	handler := sctx.Handler
 
 	// set up logger
 	var lg *zap.Logger
@@ -112,6 +113,10 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		}
 		if tlscfg := srv.CertManager.ServerTLS(); tlscfg != nil {
 			srv.HTTPListener = tls.NewListener(srv.HTTPListener, tlscfg)
+		}
+
+		if handler != nil {
+			handler.RegisterHTTP(engine)
 		}
 
 		srv.wg.Run(func() {
@@ -182,7 +187,12 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup proxy server
 	{
-		hsHandler := backend.NewDefaultHandshakeHandler(srv.NamespaceManager)
+		var hsHandler backend.HandshakeHandler
+		if handler != nil {
+			hsHandler = handler
+		} else {
+			hsHandler = backend.NewDefaultHandshakeHandler(srv.NamespaceManager)
+		}
 		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, srv.CertManager, hsHandler)
 		if err != nil {
 			err = errors.WithStack(err)
