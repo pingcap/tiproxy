@@ -49,7 +49,6 @@ type CertManager struct {
 	wg               waitgroup.WaitGroup
 	retryInterval    atomic.Int64
 	autoCertInterval atomic.Int64
-	cfg              *config.Security
 	logger           *zap.Logger
 }
 
@@ -122,6 +121,7 @@ func (cm *CertManager) reloadLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-time.After(time.Duration(cm.retryInterval.Load())):
+				cm.reload()
 			}
 		}
 	})

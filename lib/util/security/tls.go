@@ -99,7 +99,7 @@ func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, m
 	return nil
 }
 
-func CreateTempTLS(rsaKeySize int, expiration time.Duration) ([]byte,[]byte,[]byte, error) {
+func CreateTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []byte, error) {
 	if rsaKeySize < 1024 {
 		rsaKeySize = 1024
 	}
