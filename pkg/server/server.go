@@ -37,7 +37,13 @@ import (
 	"github.com/pingcap/TiProxy/pkg/server/api"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
+	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
+)
+
+const (
+	// DefAPILimit is the global API limit per second.
+	DefAPILimit = 100
 )
 
 type Server struct {
@@ -94,6 +100,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		slogger := lg.Named("gin")
 		gin.SetMode(gin.ReleaseMode)
 		engine := gin.New()
+		limit := ratelimit.New(DefAPILimit)
 		engine.Use(
 			gin.Recovery(),
 			ginzap.Ginzap(slogger, "", true),
@@ -102,6 +109,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 					c.Abort()
 					c.JSON(http.StatusInternalServerError, "service not ready")
 				}
+				_ = limit.Take()
 			},
 		)
 
