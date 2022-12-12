@@ -54,7 +54,7 @@ type redirectResult struct {
 	to   string
 }
 
-type backendIOGetter func(ctx context.Context, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
+type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
 
 // BackendConnManager migrates a session from one BackendConnection to another.
 //
@@ -105,7 +105,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
-	mgr.getBackendIO = func(ctx context.Context, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+	mgr.getBackendIO = func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 		router, err := handshakeHandler.GetRouter(ctx, resp)
 		if err != nil {
 			return nil, err

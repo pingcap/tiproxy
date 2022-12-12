@@ -116,7 +116,7 @@ func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 	return tester
 }
 
-func (ts *backendMgrTester) getBackendIO(ctx context.Context, auth *Authenticator, _ *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+func (ts *backendMgrTester) getBackendIO(ctx ConnContext, auth *Authenticator, _ *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 	addr := ts.tc.backendListener.Addr().String()
 	ts.mp.backendConn = NewBackendConnection(addr)
 	if err := ts.mp.backendConn.Connect(); err != nil {
