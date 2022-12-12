@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"time"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
@@ -44,6 +45,8 @@ import (
 const (
 	// DefAPILimit is the global API limit per second.
 	DefAPILimit = 100
+	// DefConnTimeout is used as timeout duration in the HTTP server.
+	DefConnTimeout = 30 * time.Second
 )
 
 type Server struct {
@@ -105,11 +108,11 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			gin.Recovery(),
 			ginzap.Ginzap(slogger, "", true),
 			func(c *gin.Context) {
+				_ = limit.Take()
 				if !ready.Load() {
 					c.Abort()
 					c.JSON(http.StatusInternalServerError, "service not ready")
 				}
-				_ = limit.Take()
 			},
 		)
 
@@ -130,7 +133,13 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		}
 
 		srv.wg.Run(func() {
-			slogger.Info("HTTP closed", zap.Error(engine.RunListener(srv.HTTPListener)))
+			hsrv := http.Server{
+				Handler:           engine.Handler(),
+				ReadHeaderTimeout: DefConnTimeout,
+				WriteTimeout:      DefConnTimeout,
+				IdleTimeout:       DefConnTimeout,
+			}
+			slogger.Info("HTTP closed", zap.Error(hsrv.Serve(srv.HTTPListener)))
 		})
 	}
 
