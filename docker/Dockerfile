@@ -1,8 +1,7 @@
 FROM alpine:edge as builder
 
-#ADD docker/apk-fastest-mirror.sh /
-#RUN sh /apk-fastest-mirror.sh -t 50 && apk add --no-cache --progress git make go
-RUN apk add --no-cache --progress git make go
+ADD https://raw.githubusercontent.com/njhallett/apk-fastest-mirror/main/apk-fastest-mirror.sh /
+RUN sh /apk-fastest-mirror.sh -t 50 && apk add --no-cache --progress git make go
 ARG BUILDFLAGS
 ARG GOPROXY
 ADD . /proxy
