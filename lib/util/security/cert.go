@@ -148,7 +148,7 @@ func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 			continue
 		}
 
-		ci.updateMinExpire(cert.NotBefore.Unix())
+		ci.updateMinExpire(cert.NotAfter.Unix())
 
 		pool.AddCert(cert)
 	}
