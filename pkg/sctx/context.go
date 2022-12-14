@@ -14,18 +14,18 @@
 
 package sctx
 
-import "github.com/pingcap/TiProxy/lib/config"
-
-type Cluster struct {
-	PubAddr           string
-	ClusterName       string
-	NodeName          string
-	BootstrapDurl     string
-	BootstrapDdns     string
-	BootstrapClusters []string
-}
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/pkg/proxy/backend"
+)
 
 type Context struct {
 	Config  *config.Config
-	Cluster Cluster
+	Handler ServerHandler
+}
+
+type ServerHandler interface {
+	backend.HandshakeHandler
+	RegisterHTTP(c *gin.Engine) error
 }

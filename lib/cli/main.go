@@ -16,7 +16,9 @@ package cli
 
 import (
 	"crypto/tls"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/cmd"
@@ -72,6 +74,14 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 			Transport: &http.Transport{
 				Proxy:           http.ProxyFromEnvironment,
 				TLSClientConfig: tlsConfig,
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				MaxIdleConns:          100,
+				IdleConnTimeout:       30 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
 			},
 		}
 		ctx.CUrls = *curls

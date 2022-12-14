@@ -35,12 +35,12 @@ func main() {
 	configFile := rootCmd.PersistentFlags().String("config", "conf/proxy.yaml", "proxy config file path")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
-	clusterName := rootCmd.PersistentFlags().String("cluster_name", "tiproxy", "default cluster name, used to generate node name and differential clusters in dns discovery")
-	nodeName := rootCmd.PersistentFlags().String("node_name", "", "by default, it is generate prefixed by cluster-name")
-	pubAddr := rootCmd.PersistentFlags().String("pub_addr", "127.0.0.1", "IP or domain, will be used as the accessible addr for others")
-	bootstrapClusters := rootCmd.PersistentFlags().StringSlice("bootstrap_clusters", []string{}, "lists of other nodes in the cluster, e.g. 'n1=xxx,n2=xxx', where xx are IPs or domains")
-	bootstrapDiscoveryUrl := rootCmd.PersistentFlags().String("bootstrap_discovery_etcd", "", "etcd discovery service url")
-	bootstrapDiscoveryDNS := rootCmd.PersistentFlags().String("bootstrap_discovery_dns", "", "dns srv discovery")
+	_ = rootCmd.PersistentFlags().String("cluster_name", "tiproxy", "default cluster name, used to generate node name and differential clusters in dns discovery")
+	_ = rootCmd.PersistentFlags().String("node_name", "", "by default, it is generate prefixed by cluster-name")
+	_ = rootCmd.PersistentFlags().String("pub_addr", "127.0.0.1", "IP or domain, will be used as the accessible addr for others")
+	_ = rootCmd.PersistentFlags().StringSlice("bootstrap_clusters", []string{}, "lists of other nodes in the cluster, e.g. 'n1=xxx,n2=xxx', where xx are IPs or domains")
+	_ = rootCmd.PersistentFlags().String("bootstrap_discovery_etcd", "", "etcd discovery service url")
+	_ = rootCmd.PersistentFlags().String("bootstrap_discovery_dns", "", "dns srv discovery")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		proxyConfigData, err := os.ReadFile(*configFile)
@@ -62,14 +62,6 @@ func main() {
 
 		sctx := &sctx.Context{
 			Config: cfg,
-			Cluster: sctx.Cluster{
-				PubAddr:           *pubAddr,
-				ClusterName:       *clusterName,
-				NodeName:          *nodeName,
-				BootstrapDurl:     *bootstrapDiscoveryUrl,
-				BootstrapDdns:     *bootstrapDiscoveryDNS,
-				BootstrapClusters: *bootstrapClusters,
-			},
 		}
 
 		srv, err := server.NewServer(cmd.Context(), sctx)

@@ -15,11 +15,11 @@
 package backend
 
 import (
-	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
@@ -47,6 +47,7 @@ const SupportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRo
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
 	backendTLSConfig            *tls.Config
+	ctxmap                      sync.Map
 	supportedServerCapabilities pnet.Capability
 	dbname                      string // default database name
 	serverAddr                  string
@@ -146,8 +147,8 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	auth.capability = commonCaps.Uint32()
 
 	resp := pnet.ParseHandshakeResponse(pkt)
-	ctx := context.WithValue(context.Background(), ContextKeyClientAddr, clientIO.SourceAddr().String())
-	if err = handshakeHandler.HandleHandshakeResp(ctx, resp); err != nil {
+	auth.SetValue(ContextKeyClientAddr, clientIO.SourceAddr().String())
+	if err = handshakeHandler.HandleHandshakeResp(auth, resp); err != nil {
 		return err
 	}
 	auth.user = resp.User
@@ -155,7 +156,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	auth.collation = resp.Collation
 	auth.attrs = resp.Attrs
 
-	backendIO, err := getBackend(ctx, auth, resp)
+	backendIO, err := getBackend(auth, auth, resp)
 	if err != nil {
 		return err
 	}
@@ -346,4 +347,16 @@ func (auth *Authenticator) changeUser(username, db string) {
 // The proxy cannot send the original dbname to TiDB in the second handshake because the original db may be dropped.
 func (auth *Authenticator) updateCurrentDB(db string) {
 	auth.dbname = db
+}
+
+func (auth *Authenticator) SetValue(key, val any) {
+	auth.ctxmap.Store(key, val)
+}
+
+func (auth *Authenticator) Value(key any) any {
+	v, ok := auth.ctxmap.Load(key)
+	if !ok {
+		return nil
+	}
+	return v
 }

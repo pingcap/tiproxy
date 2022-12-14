@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"time"
 
 	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
@@ -37,7 +38,15 @@ import (
 	"github.com/pingcap/TiProxy/pkg/server/api"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
+	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
+)
+
+const (
+	// DefAPILimit is the global API limit per second.
+	DefAPILimit = 100
+	// DefConnTimeout is used as timeout duration in the HTTP server.
+	DefConnTimeout = 30 * time.Second
 )
 
 type Server struct {
@@ -68,6 +77,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	}
 
 	cfg := sctx.Config
+	handler := sctx.Handler
 
 	// set up logger
 	var lg *zap.Logger
@@ -93,10 +103,12 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		slogger := lg.Named("gin")
 		gin.SetMode(gin.ReleaseMode)
 		engine := gin.New()
+		limit := ratelimit.New(DefAPILimit)
 		engine.Use(
 			gin.Recovery(),
 			ginzap.Ginzap(slogger, "", true),
 			func(c *gin.Context) {
+				_ = limit.Take()
 				if !ready.Load() {
 					c.Abort()
 					c.JSON(http.StatusInternalServerError, "service not ready")
@@ -114,8 +126,20 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			srv.HTTPListener = tls.NewListener(srv.HTTPListener, tlscfg)
 		}
 
+		if handler != nil {
+			if err := handler.RegisterHTTP(engine); err != nil {
+				return nil, errors.WithStack(err)
+			}
+		}
+
 		srv.wg.Run(func() {
-			slogger.Info("HTTP closed", zap.Error(engine.RunListener(srv.HTTPListener)))
+			hsrv := http.Server{
+				Handler:           engine.Handler(),
+				ReadHeaderTimeout: DefConnTimeout,
+				WriteTimeout:      DefConnTimeout,
+				IdleTimeout:       DefConnTimeout,
+			}
+			slogger.Info("HTTP closed", zap.Error(hsrv.Serve(srv.HTTPListener)))
 		})
 	}
 
@@ -182,7 +206,12 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup proxy server
 	{
-		hsHandler := backend.NewDefaultHandshakeHandler(srv.NamespaceManager)
+		var hsHandler backend.HandshakeHandler
+		if handler != nil {
+			hsHandler = handler
+		} else {
+			hsHandler = backend.NewDefaultHandshakeHandler(srv.NamespaceManager)
+		}
 		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, srv.CertManager, hsHandler)
 		if err != nil {
 			err = errors.WithStack(err)
