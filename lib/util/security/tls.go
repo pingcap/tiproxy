@@ -71,14 +71,14 @@ func createTLSCertificates(logger *zap.Logger, certpath, keypath, capath string,
 		return err
 	}
 
-	if err := os.WriteFile(certpath, certPEM.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(certpath, certPEM, 0600); err != nil {
 		return err
 	}
-	if err := os.WriteFile(keypath, keyPEM.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(keypath, keyPEM, 0600); err != nil {
 		return err
 	}
 	if capath != "" {
-		if err := os.WriteFile(capath, caPEM.Bytes(), 0600); err != nil {
+		if err := os.WriteFile(capath, caPEM, 0600); err != nil {
 			return err
 		}
 	}
@@ -99,7 +99,7 @@ func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, m
 	return nil
 }
 
-func CreateTempTLS(rsaKeySize int, expiration time.Duration) (*bytes.Buffer, *bytes.Buffer, *bytes.Buffer, error) {
+func CreateTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []byte, error) {
 	if rsaKeySize < 1024 {
 		rsaKeySize = 1024
 	}
@@ -189,7 +189,7 @@ func CreateTempTLS(rsaKeySize int, expiration time.Duration) (*bytes.Buffer, *by
 		return nil, nil, nil, err
 	}
 
-	return certPEM, keyPEM, caPEM, nil
+	return certPEM.Bytes(), keyPEM.Bytes(), caPEM.Bytes(), nil
 }
 
 // CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
@@ -200,7 +200,7 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 		return
 	}
 
-	serverCert, uerr := tls.X509KeyPair(certPEM.Bytes(), keyPEM.Bytes())
+	serverCert, uerr := tls.X509KeyPair(certPEM, keyPEM)
 	if uerr != nil {
 		err = uerr
 		return
@@ -212,7 +212,7 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	}
 
 	certpool := x509.NewCertPool()
-	certpool.AppendCertsFromPEM(caPEM.Bytes())
+	certpool.AppendCertsFromPEM(caPEM)
 	clientTLSConf = &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true,
