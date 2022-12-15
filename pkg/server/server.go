@@ -136,7 +136,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			hsrv := http.Server{
 				Handler:           engine.Handler(),
 				ReadHeaderTimeout: DefConnTimeout,
-				WriteTimeout:      DefConnTimeout,
 				IdleTimeout:       DefConnTimeout,
 			}
 			slogger.Info("HTTP closed", zap.Error(hsrv.Serve(srv.HTTPListener)))
