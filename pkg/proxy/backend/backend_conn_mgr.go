@@ -405,8 +405,6 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.processLock.Unlock()
 
-	mgr.handshakeHandler.Close()
-
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
 		// Notify the receiver if there's any event.
