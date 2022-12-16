@@ -106,15 +106,15 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
 	mgr.getBackendIO = func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
-		router, err := handshakeHandler.GetRouter(ctx, resp)
+		r, err := handshakeHandler.GetRouter(ctx, resp)
 		if err != nil {
 			return nil, err
 		}
 		// wait for initialize
 		var addr string
 		for start := time.Now(); time.Since(start) < time.Second*5; {
-			addr, err = router.Route(mgr)
-			if err == nil {
+			addr, err = r.Route(mgr)
+			if !errors.Is(err, router.ErrNoInstanceToSelect) {
 				break
 			}
 			time.Sleep(time.Millisecond * 200)
