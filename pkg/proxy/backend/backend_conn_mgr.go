@@ -416,5 +416,5 @@ func (mgr *BackendConnManager) Close() error {
 			}
 		}
 	}
-	return errors.Collect(ErrCapabilityNegotiation, connErr, handErr)
+	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
