@@ -23,6 +23,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"encoding/pem"
+	"fmt"
 	"net"
 	"os"
 	"testing"
@@ -110,28 +111,24 @@ func TestReloadCerts(t *testing.T) {
 	}
 }
 
-func getRawCertificate(t *testing.T, ci *certInfo) [][]byte {
-	tlsConfig := ci.getTLS()
+func getRawCertificate(t *testing.T, tlsConfig *tls.Config) [][]byte {
 	if tlsConfig == nil {
 		return nil
 	}
-	var cert *tls.Certificate
-	var err error
-	if ci.isServer {
-		cert, err = tlsConfig.GetCertificate(nil)
-	} else {
-		cert, err = tlsConfig.GetClientCertificate(nil)
-	}
+	cert, err := tlsConfig.GetCertificate(nil)
 	require.NoError(t, err)
-	return cert.Certificate
+	if cert != nil {
+		return cert.Certificate
+	}
+	return nil
 }
 
 func getAllCertificates(t *testing.T, certMgr *CertManager) [4][][]byte {
 	return [4][][]byte{
-		getRawCertificate(t, &certMgr.serverTLS),
-		getRawCertificate(t, &certMgr.peerTLS),
-		getRawCertificate(t, &certMgr.sqlTLS),
-		getRawCertificate(t, &certMgr.clusterTLS),
+		getRawCertificate(t, certMgr.ServerTLS()),
+		getRawCertificate(t, certMgr.PeerTLS()),
+		getRawCertificate(t, certMgr.SQLTLS()),
+		getRawCertificate(t, certMgr.ClusterTLS()),
 	}
 }
 
@@ -145,10 +142,10 @@ func TestReloadEmptyCerts(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(certMgr.Close)
 
-	rawCerts := getAllCertificates(t, certMgr)
-	for i := 0; i < len(rawCerts); i++ {
-		require.Nil(t, rawCerts[i])
-	}
+	require.Nil(t, certMgr.ServerTLS())
+	require.Nil(t, certMgr.ClusterTLS())
+	require.Nil(t, certMgr.PeerTLS())
+	require.Nil(t, certMgr.SQLTLS())
 }
 
 // Test that rotating CA works.
@@ -179,7 +176,7 @@ func TestRotateCACert(t *testing.T) {
 	stls := certMgr.ServerTLS()
 	ctls := certMgr.SQLTLS()
 	clientErr, serverErr := connectWithTLS(ctls, stls, "")
-	require.ErrorContains(t, clientErr, "certificate signed by unknown authority")
+	require.ErrorContains(t, clientErr, "certificate signed by unknown authority", fmt.Sprintf("%t, %t, %+v", certMgr.SQLTLS().InsecureSkipVerify, certMgr.serverTLSConfig.InsecureSkipVerify, clientErr))
 	require.Error(t, serverErr)
 
 	// Overwrite the cert files with right CA and it works with the same tls.Config.

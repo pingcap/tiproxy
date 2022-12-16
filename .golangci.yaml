@@ -18,6 +18,10 @@ issues:
       linters:
         - gosec
       text: "G402:"
+    - path: util/security/cert.go
+      linters:
+        - gosec
+      text: "G402:"
 
 linters:
   enable:

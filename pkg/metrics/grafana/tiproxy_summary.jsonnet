@@ -107,6 +107,21 @@ local connectionP = graphPanel.new(
   )
 );
 
+local goroutineP = graphPanel.new(
+  title='Goroutine Count',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy current goroutine counts.',
+  format='short',
+  stack=true,
+)
+.addTarget(
+  prometheus.target(
+    'go_goroutines{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}',
+    legendFormat='{{instance}}',
+  )
+);
+
 local cpuP = graphPanel.new(
   title='CPU Usage',
   datasource=myDS,
@@ -280,9 +295,10 @@ local rightPanelPos = {x:panelW, y:0, w:panelW, h:panelH};
 newDash
 .addPanel(
   serverRow
+  .addPanel(cpuP, gridPos=leftPanelPos)
+  .addPanel(memP, gridPos=rightPanelPos)
   .addPanel(connectionP, gridPos=leftPanelPos)
-  .addPanel(cpuP, gridPos=rightPanelPos)
-  .addPanel(memP, gridPos=leftPanelPos)
+  .addPanel(goroutineP, gridPos=rightPanelPos)
   ,
   gridPos=rowPos
 )

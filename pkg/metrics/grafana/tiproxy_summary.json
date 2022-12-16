@@ -37,7 +37,7 @@
                "dashLength": 10,
                "dashes": false,
                "datasource": "${DS_TEST-CLUSTER}",
-               "description": "TiProxy current connection counts.",
+               "description": "TiProxy CPU usage calculated with process CPU running seconds.",
                "fill": 1,
                "fillGradient": 0,
                "gridPos": {
@@ -47,6 +47,185 @@
                   "y": 0
                },
                "id": 3,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "rate(process_cpu_seconds_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}[1m])",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "CPU Usage",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "percentunit",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "percentunit",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy process rss memory usage.TiProxy heap memory size in use.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 12,
+                  "y": 0
+               },
+               "id": 4,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "process-{{instance}}",
+                     "refId": "A"
+                  },
+                  {
+                     "expr": "go_memory_classes_heap_objects_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"} + go_memory_classes_heap_unused_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "HeapInuse-{{instance}}",
+                     "refId": "B"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Memory Usage",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "bytes",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "bytes",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy current connection counts.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 5,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -130,7 +309,7 @@
                "dashLength": 10,
                "dashes": false,
                "datasource": "${DS_TEST-CLUSTER}",
-               "description": "TiProxy CPU usage calculated with process CPU running seconds.",
+               "description": "TiProxy current goroutine counts.",
                "fill": 1,
                "fillGradient": 0,
                "gridPos": {
@@ -139,7 +318,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 4,
+               "id": 6,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -163,11 +342,11 @@
                "repeat": null,
                "seriesOverrides": [ ],
                "spaceLength": 10,
-               "stack": false,
+               "stack": true,
                "steppedLine": false,
                "targets": [
                   {
-                     "expr": "rate(process_cpu_seconds_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}[1m])",
+                     "expr": "go_goroutines{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
                      "format": "time_series",
                      "intervalFactor": 2,
                      "legendFormat": "{{instance}}",
@@ -177,7 +356,7 @@
                "thresholds": [ ],
                "timeFrom": null,
                "timeShift": null,
-               "title": "CPU Usage",
+               "title": "Goroutine Count",
                "tooltip": {
                   "shared": true,
                   "sort": 0,
@@ -193,7 +372,7 @@
                },
                "yaxes": [
                   {
-                     "format": "percentunit",
+                     "format": "short",
                      "label": null,
                      "logBase": 1,
                      "max": null,
@@ -201,100 +380,7 @@
                      "show": true
                   },
                   {
-                     "format": "percentunit",
-                     "label": null,
-                     "logBase": 1,
-                     "max": null,
-                     "min": null,
-                     "show": true
-                  }
-               ]
-            },
-            {
-               "aliasColors": { },
-               "bars": false,
-               "dashLength": 10,
-               "dashes": false,
-               "datasource": "${DS_TEST-CLUSTER}",
-               "description": "TiProxy process rss memory usage.TiProxy heap memory size in use.",
-               "fill": 1,
-               "fillGradient": 0,
-               "gridPos": {
-                  "h": 6,
-                  "w": 12,
-                  "x": 0,
-                  "y": 0
-               },
-               "id": 5,
-               "legend": {
-                  "alignAsTable": false,
-                  "avg": false,
-                  "current": false,
-                  "max": false,
-                  "min": false,
-                  "rightSide": true,
-                  "show": true,
-                  "sideWidth": null,
-                  "total": false,
-                  "values": false
-               },
-               "lines": true,
-               "linewidth": 1,
-               "links": [ ],
-               "nullPointMode": "null",
-               "percentage": false,
-               "pointradius": 5,
-               "points": false,
-               "renderer": "flot",
-               "repeat": null,
-               "seriesOverrides": [ ],
-               "spaceLength": 10,
-               "stack": false,
-               "steppedLine": false,
-               "targets": [
-                  {
-                     "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
-                     "format": "time_series",
-                     "intervalFactor": 2,
-                     "legendFormat": "process-{{instance}}",
-                     "refId": "A"
-                  },
-                  {
-                     "expr": "go_memory_classes_heap_objects_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"} + go_memory_classes_heap_unused_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
-                     "format": "time_series",
-                     "intervalFactor": 2,
-                     "legendFormat": "HeapInuse-{{instance}}",
-                     "refId": "B"
-                  }
-               ],
-               "thresholds": [ ],
-               "timeFrom": null,
-               "timeShift": null,
-               "title": "Memory Usage",
-               "tooltip": {
-                  "shared": true,
-                  "sort": 0,
-                  "value_type": "individual"
-               },
-               "type": "graph",
-               "xaxis": {
-                  "buckets": null,
-                  "mode": "time",
-                  "name": null,
-                  "show": true,
-                  "values": [ ]
-               },
-               "yaxes": [
-                  {
-                     "format": "bytes",
-                     "label": null,
-                     "logBase": 1,
-                     "max": null,
-                     "min": null,
-                     "show": true
-                  },
-                  {
-                     "format": "bytes",
+                     "format": "short",
                      "label": null,
                      "logBase": 1,
                      "max": null,
@@ -321,7 +407,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 6,
+         "id": 7,
          "panels": [
             {
                "aliasColors": { },
@@ -338,7 +424,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 7,
+               "id": 8,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -438,7 +524,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 8,
+               "id": 9,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -524,7 +610,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 9,
+               "id": 10,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -610,7 +696,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 10,
+               "id": 11,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -699,7 +785,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 11,
+         "id": 12,
          "panels": [
             {
                "aliasColors": { },
@@ -716,7 +802,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 12,
+               "id": 13,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -802,7 +888,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 13,
+               "id": 14,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -888,7 +974,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 14,
+               "id": 15,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,

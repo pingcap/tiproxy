@@ -86,11 +86,13 @@ type LogFile struct {
 }
 
 type TLSConfig struct {
-	Cert      string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
-	Key       string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
-	CA        string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
-	AutoCerts bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty"`
-	SkipCA    bool   `yaml:"skip-ca,omitempty" toml:"skip-ca,omitempty" json:"skip-ca,omitempty"`
+	Cert               string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
+	Key                string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
+	CA                 string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
+	AutoCerts          bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty"`
+	RSAKeySize         int    `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
+	AutoExpireDuration string `yaml:"autocert-expire-duration,omitempty" toml:"autocert-expire-duration,omitempty" json:"autocert-expire-duration,omitempty"`
+	SkipCA             bool   `yaml:"skip-ca,omitempty" toml:"skip-ca,omitempty" json:"skip-ca,omitempty"`
 }
 
 func (c TLSConfig) HasCert() bool {

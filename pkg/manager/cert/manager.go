@@ -36,16 +36,19 @@ const (
 // Currently, all the namespaces share the same certs but there might be per-namespace
 // certs in the future.
 type CertManager struct {
-	serverTLS        certInfo // client / proxyctl -> proxy
-	peerTLS          certInfo // proxy -> proxy
-	clusterTLS       certInfo // proxy -> pd / tidb status port
-	sqlTLS           certInfo // proxy -> tidb sql port
-	autoCertDir      string
+	serverTLS        *security.CertInfo // client / proxyctl -> proxy
+	serverTLSConfig  *tls.Config
+	peerTLS          *security.CertInfo // proxy -> proxy
+	peerTLSConfig    *tls.Config
+	clusterTLS       *security.CertInfo // proxy -> pd / tidb status port
+	clusterTLSConfig *tls.Config
+	sqlTLS           *security.CertInfo // proxy -> tidb sql port
+	sqlTLSConfig     *tls.Config
+
 	cancel           context.CancelFunc
 	wg               waitgroup.WaitGroup
 	retryInterval    atomic.Int64
 	autoCertInterval atomic.Int64
-	cfg              *config.Security
 	logger           *zap.Logger
 }
 
@@ -58,33 +61,27 @@ func NewCertManager() *CertManager {
 }
 
 func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger) error {
-	cm.cfg = &cfg.Security
+	var err error
 	cm.logger = logger
-	cm.autoCertDir = cfg.Workdir
-	cm.serverTLS = certInfo{
-		cfg:      cfg.Security.ServerTLS,
-		autoCert: !cfg.Security.ServerTLS.HasCert() && cfg.Security.ServerTLS.AutoCerts,
-		isServer: true,
+	cm.serverTLS, cm.serverTLSConfig, err = security.NewCert(logger, cfg.Security.ServerTLS, true)
+	if err != nil {
+		return err
 	}
-	cm.peerTLS = certInfo{
-		cfg:      cfg.Security.PeerTLS,
-		autoCert: !cfg.Security.PeerTLS.HasCert() && cfg.Security.PeerTLS.AutoCerts,
+	cm.peerTLS, cm.peerTLSConfig, err = security.NewCert(logger, cfg.Security.PeerTLS, false)
+	if err != nil {
+		return err
 	}
-	cm.clusterTLS = certInfo{
-		cfg: cfg.Security.ClusterTLS,
+	cm.clusterTLS, cm.clusterTLSConfig, err = security.NewCert(logger, cfg.Security.ClusterTLS, false)
+	if err != nil {
+		return err
 	}
-	cm.sqlTLS = certInfo{
-		cfg: cfg.Security.SQLTLS,
-	}
-
-	if err := cm.load(); err != nil {
+	cm.sqlTLS, cm.sqlTLSConfig, err = security.NewCert(logger, cfg.Security.SQLTLS, false)
+	if err != nil {
 		return err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cm.wg.Run(func() {
-		cm.reloadLoop(ctx)
-	})
+	cm.reloadLoop(ctx)
 	cm.cancel = cancel
 	return nil
 }
@@ -98,15 +95,19 @@ func (cm *CertManager) SetAutoCertInterval(interval time.Duration) {
 }
 
 func (cm *CertManager) ServerTLS() *tls.Config {
-	return cm.serverTLS.getTLS()
+	return cm.serverTLSConfig
 }
 
 func (cm *CertManager) ClusterTLS() *tls.Config {
-	return cm.clusterTLS.getTLS()
+	return cm.clusterTLSConfig
+}
+
+func (cm *CertManager) PeerTLS() *tls.Config {
+	return cm.peerTLSConfig
 }
 
 func (cm *CertManager) SQLTLS() *tls.Config {
-	return cm.sqlTLS.getTLS()
+	return cm.sqlTLSConfig
 }
 
 // The proxy is supposed to be always online, so it should reload certs automatically,
@@ -114,65 +115,37 @@ func (cm *CertManager) SQLTLS() *tls.Config {
 // The proxy checks expiration time periodically and reloads certs in advance. If reloading
 // fails or the cert is not replaced, it will retry in the next round.
 func (cm *CertManager) reloadLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Duration(cm.retryInterval.Load())):
-			_ = cm.load()
+	cm.wg.Run(func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Duration(cm.retryInterval.Load())):
+				cm.reload()
+			}
 		}
-	}
+	})
 }
 
-func (cm *CertManager) load() error {
-	errs := make([]error, 0, 4)
+func (cm *CertManager) reload() {
 	now := time.Now()
-	var err error
-	needReloadServer := false
-	if cm.serverTLS.autoCert && cm.serverTLS.needRecreateCert(now) {
-		if err = security.AutoTLS(cm.logger, &cm.serverTLS.cfg, false, cm.autoCertDir, "server",
-			cm.cfg.RSAKeySize); err != nil {
-			cm.logger.Error("creating server certs failed", zap.Error(err))
-			errs = append(errs, err)
-		} else {
-			needReloadServer = true
-		}
-	} else if !cm.serverTLS.autoCert {
-		needReloadServer = true
-	}
-	if needReloadServer {
-		if err = cm.serverTLS.buildTLSConfig(cm.logger); err != nil {
-			cm.logger.Error("loading server certs failed", zap.Error(err))
-			errs = append(errs, err)
-		} else {
-			cm.serverTLS.setAutoCertExp(now.Add(time.Duration(cm.autoCertInterval.Load())))
-		}
-	}
-
-	if cm.peerTLS.autoCert && cm.peerTLS.needRecreateCert(now) {
-		if err := security.AutoTLS(cm.logger, &cm.peerTLS.cfg, true, cm.autoCertDir, "peer",
-			cm.cfg.RSAKeySize); err != nil {
-			cm.logger.Error("creating peer certs failed", zap.Error(err))
-			errs = append(errs, err)
-		} else {
-			cm.peerTLS.setAutoCertExp(now.Add(time.Duration(cm.autoCertInterval.Load())))
-		}
-	}
-
-	if err = cm.sqlTLS.buildTLSConfig(cm.logger); err != nil {
-		cm.logger.Error("loading sql certs failed", zap.Error(err))
+	errs := make([]error, 0, 4)
+	if err := cm.serverTLS.Reload(cm.logger, now); err != nil {
 		errs = append(errs, err)
 	}
-
-	if err = cm.clusterTLS.buildTLSConfig(cm.logger); err != nil {
-		cm.logger.Error("loading cluster certs failed", zap.Error(err))
+	if err := cm.peerTLS.Reload(cm.logger, now); err != nil {
 		errs = append(errs, err)
 	}
-
-	if len(errs) != 0 {
-		return errors.Collect(errors.New("loading certs"), errs...)
+	if err := cm.clusterTLS.Reload(cm.logger, now); err != nil {
+		errs = append(errs, err)
 	}
-	return nil
+	if err := cm.sqlTLS.Reload(cm.logger, now); err != nil {
+		errs = append(errs, err)
+	}
+	err := errors.Collect(errors.New("loading certs"), errs...)
+	if err != nil {
+		cm.logger.Error("failed to reload some certs", zap.Error(err))
+	}
 }
 
 func (cm *CertManager) Close() {
