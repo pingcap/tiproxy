@@ -36,6 +36,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrCloseConnMgr = errors.New("failed to close connection manager")
+)
+
 const (
 	sqlQueryState    = "SHOW SESSION_STATES"
 	sqlSetState      = "SET SESSION_STATES '%s'"
@@ -387,15 +391,17 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.wg.Wait()
 
-	var err error
+	var connErr error
 	var addr string
 	mgr.processLock.Lock()
 	if mgr.backendConn != nil {
 		addr = mgr.backendConn.address
-		err = mgr.backendConn.Close()
+		connErr = mgr.backendConn.Close()
 		mgr.backendConn = nil
 	}
 	mgr.processLock.Unlock()
+
+	handErr := mgr.handshakeHandler.OnConnClose(mgr.authenticator)
 
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
@@ -410,5 +416,5 @@ func (mgr *BackendConnManager) Close() error {
 			}
 		}
 	}
-	return err
+	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
