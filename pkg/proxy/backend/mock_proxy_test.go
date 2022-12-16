@@ -122,3 +122,7 @@ func (handler *CustomHandshakeHandler) HandleHandshakeResp(ctx ConnContext, resp
 func (handler *CustomHandshakeHandler) GetCapability() pnet.Capability {
 	return handler.outCapability
 }
+
+func (handler *CustomHandshakeHandler) Close() error {
+	return nil
+}

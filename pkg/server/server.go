@@ -211,7 +211,8 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		} else {
 			hsHandler = backend.NewDefaultHandshakeHandler(srv.NamespaceManager)
 		}
-		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, srv.CertManager, hsHandler)
+		newHandlerFunc := func() backend.HandshakeHandler { return hsHandler }
+		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, srv.CertManager, newHandlerFunc)
 		if err != nil {
 			err = errors.WithStack(err)
 			return

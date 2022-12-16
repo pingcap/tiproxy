@@ -43,6 +43,7 @@ type HandshakeHandler interface {
 	HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error
 	GetCapability() pnet.Capability
 	GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error)
+	Close() error
 }
 
 type DefaultHandshakeHandler struct {
@@ -72,4 +73,8 @@ func (handler *DefaultHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Ha
 		return nil, errors.New("failed to find a namespace")
 	}
 	return ns.GetRouter(), nil
+}
+
+func (handler *DefaultHandshakeHandler) Close() error {
+	return nil
 }
