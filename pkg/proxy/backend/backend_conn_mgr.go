@@ -110,7 +110,15 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		if err != nil {
 			return nil, err
 		}
-		addr, err := router.Route(mgr)
+		// wait for initialize
+		var addr string
+		for start := time.Now(); time.Since(start) < time.Second*5; {
+			addr, err = router.Route(mgr)
+			if err == nil {
+				break
+			}
+			time.Sleep(time.Millisecond * 200)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -396,6 +404,8 @@ func (mgr *BackendConnManager) Close() error {
 		mgr.backendConn = nil
 	}
 	mgr.processLock.Unlock()
+
+	mgr.handshakeHandler.Close()
 
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
