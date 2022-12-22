@@ -30,7 +30,7 @@ import (
 type Router interface {
 	Route(RedirectableConn) (string, error)
 	RedirectConnections() error
-	HasConns() bool
+	ConnCount() int
 	Close()
 }
 
@@ -419,14 +419,15 @@ func (router *ScoreBasedRouter) removeBackendIfEmpty(be *list.Element) bool {
 	return false
 }
 
-func (router *ScoreBasedRouter) HasConns() bool {
+func (router *ScoreBasedRouter) ConnCount() int {
+	router.Lock()
+	defer router.Unlock()
+	j := 0
 	for be := router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value.(*backendWrapper)
-		if backend.connList.Len() > 0 {
-			return true
-		}
+		j += backend.connList.Len()
 	}
-	return false
+	return j
 }
 
 // Close implements Router.Close interface.
