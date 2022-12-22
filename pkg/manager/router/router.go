@@ -30,8 +30,11 @@ import (
 type Router interface {
 	Route(RedirectableConn) (string, error)
 	RedirectConnections() error
+	ConnCount() int
 	Close()
 }
+
+var _ Router = &ScoreBasedRouter{}
 
 var (
 	ErrNoInstanceToSelect = errors.New("no instances to route")
@@ -414,6 +417,17 @@ func (router *ScoreBasedRouter) removeBackendIfEmpty(be *list.Element) bool {
 		return true
 	}
 	return false
+}
+
+func (router *ScoreBasedRouter) ConnCount() int {
+	router.Lock()
+	defer router.Unlock()
+	j := 0
+	for be := router.backends.Front(); be != nil; be = be.Next() {
+		backend := be.Value.(*backendWrapper)
+		j += backend.connList.Len()
+	}
+	return j
 }
 
 // Close implements Router.Close interface.
