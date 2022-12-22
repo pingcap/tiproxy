@@ -90,6 +90,7 @@ type BackendConnManager struct {
 	handshakeHandler HandshakeHandler
 	getBackendIO     backendIOGetter
 	connectionID     uint64
+	handshaked       bool
 }
 
 // NewBackendConnManager creates a BackendConnManager.
@@ -165,6 +166,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.wg.Run(func() {
 		mgr.processSignals(childCtx, clientIO)
 	})
+	mgr.handshaked = true
 	return nil
 }
 
@@ -409,7 +411,7 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.processLock.Unlock()
 
-	handErr := mgr.handshakeHandler.OnConnClose(mgr.authenticator)
+	handErr := mgr.handshakeHandler.OnConnClose(mgr.authenticator, mgr.handshaked)
 
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
