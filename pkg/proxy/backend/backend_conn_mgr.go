@@ -26,6 +26,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/cenkalti/backoff/v4"
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
@@ -90,7 +91,6 @@ type BackendConnManager struct {
 	handshakeHandler HandshakeHandler
 	getBackendIO     backendIOGetter
 	connectionID     uint64
-	handshaked       bool
 }
 
 // NewBackendConnManager creates a BackendConnManager.
@@ -116,17 +116,26 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 			return nil, err
 		}
 		// wait for initialize
-		var addr string
-		for start := time.Now(); time.Since(start) < time.Second*5; {
-			addr, err = r.Route(mgr)
-			if !errors.Is(err, router.ErrNoInstanceToSelect) {
-				break
-			}
-			time.Sleep(time.Millisecond * 200)
-		}
+		bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		addr, err := backoff.RetryNotifyWithData(
+			func() (string, error) {
+				addr, err := r.Route(mgr)
+				if !errors.Is(err, router.ErrNoInstanceToSelect) {
+					return addr, backoff.Permanent(err)
+				}
+				return addr, err
+			},
+			backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
+			func(err error, d time.Duration) {
+				mgr.handshakeHandler.OnHandshake(ctx, err)
+			},
+		)
+		cancel()
 		if err != nil {
 			return nil, err
 		}
+		mgr.handshakeHandler.OnHandshake(ctx, nil)
+
 		mgr.logger.Info("found", zap.String("addr", addr))
 		mgr.backendConn = NewBackendConnection(addr)
 		if err := mgr.backendConn.Connect(); err != nil {
@@ -166,7 +175,6 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.wg.Run(func() {
 		mgr.processSignals(childCtx, clientIO)
 	})
-	mgr.handshaked = true
 	return nil
 }
 
@@ -411,7 +419,7 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.processLock.Unlock()
 
-	handErr := mgr.handshakeHandler.OnConnClose(mgr.authenticator, mgr.handshaked)
+	handErr := mgr.handshakeHandler.OnConnClose(mgr.authenticator)
 
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {

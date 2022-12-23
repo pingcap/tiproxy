@@ -42,7 +42,8 @@ type ConnContext interface {
 type HandshakeHandler interface {
 	HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error
 	GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error)
-	OnConnClose(ctx ConnContext, handshaked bool) error
+	OnHandshake(ctx ConnContext, err error)
+	OnConnClose(ctx ConnContext) error
 	GetCapability() pnet.Capability
 }
 
@@ -71,7 +72,11 @@ func (handler *DefaultHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Ha
 	return ns.GetRouter(), nil
 }
 
-func (handler *DefaultHandshakeHandler) OnConnClose(ConnContext, bool) error {
+func (handler *DefaultHandshakeHandler) OnHandshake(ConnContext, error) {
+	return
+}
+
+func (handler *DefaultHandshakeHandler) OnConnClose(ConnContext) error {
 	return nil
 }
 
