@@ -73,7 +73,6 @@ func (handler *DefaultHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Ha
 }
 
 func (handler *DefaultHandshakeHandler) OnHandshake(ConnContext, error) {
-	return
 }
 
 func (handler *DefaultHandshakeHandler) OnConnClose(ConnContext) error {
