@@ -51,6 +51,7 @@ type Authenticator struct {
 	supportedServerCapabilities pnet.Capability
 	dbname                      string // default database name
 	serverAddr                  string
+	clientAddr                  string
 	user                        string
 	attrs                       map[string]string
 	salt                        []byte
@@ -103,6 +104,7 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
 	getBackend backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
+	auth.clientAddr = clientIO.SourceAddr().String()
 
 	proxyCapability := auth.supportedServerCapabilities
 	if frontendTLSConfig == nil {
@@ -147,7 +149,6 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	auth.capability = commonCaps.Uint32()
 
 	resp := pnet.ParseHandshakeResponse(pkt)
-	auth.SetValue(ContextKeyClientAddr, clientIO.SourceAddr().String())
 	if err = handshakeHandler.HandleHandshakeResp(auth, resp); err != nil {
 		return err
 	}
@@ -347,6 +348,14 @@ func (auth *Authenticator) changeUser(username, db string) {
 // The proxy cannot send the original dbname to TiDB in the second handshake because the original db may be dropped.
 func (auth *Authenticator) updateCurrentDB(db string) {
 	auth.dbname = db
+}
+
+func (auth *Authenticator) ClientAddr() string {
+	return auth.clientAddr
+}
+
+func (auth *Authenticator) ServerAddr() string {
+	return auth.serverAddr
 }
 
 func (auth *Authenticator) SetValue(key, val any) {

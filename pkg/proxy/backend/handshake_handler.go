@@ -21,20 +21,12 @@ import (
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
-type contextKey string
-
-func (k contextKey) String() string {
-	return "handler context key " + string(k)
-}
-
 // Context keys.
-var (
-	ContextKeyClientAddr contextKey = "client_addr"
-)
-
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 
 type ConnContext interface {
+	ClientAddr() string
+	ServerAddr() string
 	SetValue(key, val any)
 	Value(key any) any
 }

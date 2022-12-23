@@ -134,15 +134,16 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		if err != nil {
 			return nil, err
 		}
-		mgr.handshakeHandler.OnHandshake(ctx, nil)
 
 		mgr.logger.Info("found", zap.String("addr", addr))
 		mgr.backendConn = NewBackendConnection(addr)
 		if err := mgr.backendConn.Connect(); err != nil {
 			return nil, err
 		}
-		backendIO := mgr.backendConn.PacketIO()
+
 		auth.serverAddr = addr
+		backendIO := mgr.backendConn.PacketIO()
+		mgr.handshakeHandler.OnHandshake(ctx, nil)
 		return backendIO, nil
 	}
 	return mgr
@@ -329,6 +330,9 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.P
 	if rs.err = newConn.Connect(); rs.err != nil {
 		return
 	}
+	mgr.authenticator.serverAddr = rs.to
+	mgr.authenticator.clientAddr = clientIO.SourceAddr().String()
+	mgr.handshakeHandler.OnHandshake(mgr.authenticator, nil)
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, clientIO, newConn.PacketIO(), sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
 	}
