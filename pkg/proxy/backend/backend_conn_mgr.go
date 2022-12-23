@@ -127,7 +127,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 			},
 			backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 			func(err error, d time.Duration) {
-				mgr.handshakeHandler.OnHandshake(ctx, err)
+				mgr.handshakeHandler.OnConnect(ctx, err)
 			},
 		)
 		cancel()
@@ -143,7 +143,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 
 		auth.serverAddr = addr
 		backendIO := mgr.backendConn.PacketIO()
-		mgr.handshakeHandler.OnHandshake(ctx, nil)
+		mgr.handshakeHandler.OnConnect(ctx, nil)
 		return backendIO, nil
 	}
 	return mgr
@@ -332,7 +332,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.P
 	}
 	mgr.authenticator.serverAddr = rs.to
 	mgr.authenticator.clientAddr = clientIO.SourceAddr().String()
-	mgr.handshakeHandler.OnHandshake(mgr.authenticator, nil)
+	mgr.handshakeHandler.OnConnect(mgr.authenticator, nil)
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, clientIO, newConn.PacketIO(), sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
 	}
