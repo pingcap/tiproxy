@@ -18,7 +18,9 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
@@ -192,7 +194,7 @@ func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO *pnet.P
 	// The buffer size of channel signalReceived is 0, so after the second redirect signal is sent,
 	// we can ensure that the first signal is already processed.
 	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
-	ts.mp.signalReceived <- struct{}{}
+	ts.mp.signalReceived <- signalTypeRedirect
 	// The backend connection is still the same.
 	require.Equal(ts.t, backend1, ts.mp.backendConn)
 	return nil
@@ -215,6 +217,17 @@ func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketI
 	require.Equal(ts.t, backend1, ts.mp.backendConn)
 	require.Len(ts.t, ts.mp.GetRedirectingAddr(), 0)
 	return nil
+}
+
+func (ts *backendMgrTester) checkConnClosed(_, _ *pnet.PacketIO) error {
+	for i := 0; i < 30; i++ {
+		switch ts.mp.connStatus.Load() {
+		case statusClosing, statusClosed:
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return errors.New("timeout")
 }
 
 func (ts *backendMgrTester) runTests(runners []runner) {
@@ -589,6 +602,68 @@ func TestCustomHandshake(t *testing.T) {
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestGracefulCloseWhenIdle(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// graceful close
+		{
+			proxy: func(_, _ *pnet.PacketIO) error {
+				ts.mp.GracefulClose()
+				return nil
+			},
+		},
+		// really closed
+		{
+			proxy: ts.checkConnClosed,
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestGracefulCloseWhenActive(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// start a transaction to make it active
+		{
+			client:  ts.mc.request,
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.startTxn4Backend,
+		},
+		// try to gracefully close but it doesn't close
+		{
+			proxy: func(_, _ *pnet.PacketIO) error {
+				ts.mp.GracefulClose()
+				time.Sleep(300 * time.Millisecond)
+				require.Equal(t, statusNotifyClose, ts.mp.connStatus.Load())
+				return nil
+			},
+		},
+		// finish the transaction
+		{
+			client:  ts.mc.request,
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		// it will then automatically close
+		{
+			proxy: ts.checkConnClosed,
 		},
 	}
 	ts.runTests(runners)

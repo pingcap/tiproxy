@@ -6,6 +6,7 @@ proxy:
   pd-addrs: "127.0.0.1:2379"
   # require-backend-tls: true
   # proxy-protocol: "v2"
+  # graceful-wait-before-shutdown: 10
 metrics:
 api:
   addr: "0.0.0.0:3080"

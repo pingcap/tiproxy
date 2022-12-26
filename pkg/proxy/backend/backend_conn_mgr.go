@@ -49,6 +49,14 @@ const (
 	currentDBKey     = "current-db"
 )
 
+type signalType int
+
+const (
+	signalTypeRedirect signalType = iota
+	signalTypeGracefulClose
+	signalTypeNums
+)
+
 type signalRedirect struct {
 	newAddr string
 }
@@ -58,6 +66,14 @@ type redirectResult struct {
 	from string
 	to   string
 }
+
+const (
+	statusConnected int32 = iota
+	statusHandshaked
+	statusNotifyClose // notified to graceful close
+	statusClosing     // really closing
+	statusClosed
+)
 
 type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
 
@@ -75,7 +91,7 @@ type BackendConnManager struct {
 	processLock sync.Mutex
 	wg          waitgroup.WaitGroup
 	// signalReceived is used to notify the signal processing goroutine.
-	signalReceived chan struct{}
+	signalReceived chan signalType
 	authenticator  *Authenticator
 	cmdProcessor   *CmdProcessor
 	eventReceiver  unsafe.Pointer
@@ -85,6 +101,7 @@ type BackendConnManager struct {
 	signal unsafe.Pointer
 	// redirectResCh is used to notify the event receiver asynchronously.
 	redirectResCh chan *redirectResult
+	connStatus    atomic.Int32
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc       context.CancelFunc
 	backendConn      *BackendConnection
@@ -107,7 +124,8 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 			requireBackendTLS:           requireBackendTLS,
 			salt:                        GenerateSalt(20),
 		},
-		signalReceived: make(chan struct{}, 1),
+		// There are 2 types of signals, which may be sent concurrently.
+		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
 	mgr.getBackendIO = func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
@@ -142,6 +160,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 			return nil, err
 		}
 
+		mgr.connStatus.Store(statusConnected)
 		auth.serverAddr = addr
 		backendIO := mgr.backendConn.PacketIO()
 		return backendIO, nil
@@ -172,6 +191,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 		return err
 	}
 
+	mgr.connStatus.Store(statusHandshaked)
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
@@ -192,6 +212,10 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
+	switch mgr.connStatus.Load() {
+	case statusClosing, statusClosed:
+		return nil
+	}
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
 	holdRequest, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), waitingRedirect)
 	if !holdRequest {
@@ -227,15 +251,19 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		}
 	}
 	// Even if it meets an MySQL error, it may have changed the status, such as when executing multi-statements.
-	if waitingRedirect && mgr.cmdProcessor.canRedirect() {
-		mgr.tryRedirect(ctx, clientIO)
-		// Execute the held request no matter redirection succeeds or not.
-		if holdRequest {
+	if mgr.cmdProcessor.finishedTxn() {
+		if waitingRedirect && holdRequest {
+			mgr.tryRedirect(ctx, clientIO)
+			// Execute the held request no matter redirection succeeds or not.
 			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendConn.PacketIO(), false)
 			addCmdMetrics(cmd, mgr.backendConn.Addr(), startTime)
-		}
-		if err != nil && !IsMySQLError(err) {
-			return err
+			if err != nil && !IsMySQLError(err) {
+				return err
+			}
+		} else if mgr.connStatus.Load() == statusNotifyClose {
+			mgr.tryGracefulClose(ctx, clientIO)
+		} else if waitingRedirect {
+			mgr.tryRedirect(ctx, clientIO)
 		}
 	}
 	// Ignore MySQL errors, only return unexpected errors.
@@ -284,10 +312,15 @@ func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken
 func (mgr *BackendConnManager) processSignals(ctx context.Context, clientIO *pnet.PacketIO) {
 	for {
 		select {
-		case <-mgr.signalReceived:
-			// Redirect the session immediately just in case the session is idle.
+		case s := <-mgr.signalReceived:
+			// Redirect the session immediately just in case the session is finishedTxn.
 			mgr.processLock.Lock()
-			mgr.tryRedirect(ctx, clientIO)
+			switch s {
+			case signalTypeGracefulClose:
+				mgr.tryGracefulClose(ctx, clientIO)
+			case signalTypeRedirect:
+				mgr.tryRedirect(ctx, clientIO)
+			}
 			mgr.processLock.Unlock()
 		case rs := <-mgr.redirectResCh:
 			mgr.notifyRedirectResult(ctx, rs)
@@ -300,11 +333,15 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context, clientIO *pne
 // tryRedirect tries to migrate the session if the session is redirect-able.
 // NOTE: processLock should be held before calling this function.
 func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.PacketIO) {
+	switch mgr.connStatus.Load() {
+	case statusNotifyClose, statusClosing, statusClosed:
+		return
+	}
 	signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
 	if signal == nil {
 		return
 	}
-	if !mgr.cmdProcessor.canRedirect() {
+	if !mgr.cmdProcessor.finishedTxn() {
 		return
 	}
 
@@ -371,14 +408,17 @@ func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []b
 // Redirect implements RedirectableConn.Redirect interface. It redirects the current session to the newAddr.
 // Note that the caller requires the function to be non-blocking.
 func (mgr *BackendConnManager) Redirect(newAddr string) {
-	// We do not use `chan signalRedirect` to avoid blocking. We cannot discard the signal when it blocks,
-	// because only the latest signal matters.
 	// NOTE: BackendConnManager may be closing concurrently because of no lock.
+	// The eventReceiver may read the new address even after BackendConnManager is closed.
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
 	}))
-	// Generally, it won't wait because the caller won't send another signal because the last one finishes.
-	mgr.signalReceived <- struct{}{}
+	switch mgr.connStatus.Load() {
+	case statusNotifyClose, statusClosing, statusClosed:
+		return
+	}
+	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
+	mgr.signalReceived <- signalTypeRedirect
 }
 
 // GetRedirectingAddr implements RedirectableConn.GetRedirectingAddr interface.
@@ -410,8 +450,29 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 	}
 }
 
+// GracefulClose waits for the end of the transaction and closes the session.
+func (mgr *BackendConnManager) GracefulClose() {
+	mgr.connStatus.Store(statusNotifyClose)
+	mgr.signalReceived <- signalTypeGracefulClose
+}
+
+func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context, clientIO *pnet.PacketIO) {
+	if mgr.connStatus.Load() != statusNotifyClose {
+		return
+	}
+	if !mgr.cmdProcessor.finishedTxn() {
+		return
+	}
+	// Closing clientIO will cause the whole connection to be closed.
+	if err := clientIO.GracefulClose(); err != nil {
+		mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", clientIO.SourceAddr()), zap.Error(err))
+	}
+	mgr.connStatus.Store(statusClosing)
+}
+
 // Close releases all resources.
 func (mgr *BackendConnManager) Close() error {
+	mgr.connStatus.Store(statusClosing)
 	if mgr.cancelFunc != nil {
 		mgr.cancelFunc()
 		mgr.cancelFunc = nil
@@ -443,5 +504,6 @@ func (mgr *BackendConnManager) Close() error {
 			}
 		}
 	}
+	mgr.connStatus.Store(statusClosed)
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }

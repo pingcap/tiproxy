@@ -108,7 +108,7 @@ func (cp *CmdProcessor) updatePrepStmtStatus(request []byte, serverStatus uint16
 	}
 }
 
-func (cp *CmdProcessor) canRedirect() bool {
+func (cp *CmdProcessor) finishedTxn() bool {
 	if cp.serverStatus&(StatusInTrans|StatusQuit) > 0 {
 		return false
 	}

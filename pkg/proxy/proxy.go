@@ -18,6 +18,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -37,6 +38,8 @@ type serverState struct {
 	maxConnections uint64
 	tcpKeepAlive   bool
 	proxyProtocol  bool
+	gracefulWait   int
+	inShutdown     bool
 }
 
 type SQLServer struct {
@@ -80,6 +83,7 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.tcpKeepAlive = cfg.TCPKeepAlive
 	s.mu.maxConnections = cfg.MaxConnections
 	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
+	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
 	s.mu.Unlock()
 }
 
@@ -120,6 +124,11 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
 		return
 	}
+	if s.mu.inShutdown {
+		s.mu.Unlock()
+		s.logger.Warn("in shutdown", zap.String("addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+		return
+	}
 
 	connID := s.mu.connID
 	s.mu.connID++
@@ -155,8 +164,39 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	clientConn.Run(ctx)
 }
 
+// Graceful shutdown doesn't close the listener but rejects new connections.
+// Whether this affects NLB is to be tested.
+func (s *SQLServer) gracefulShutdown() {
+	s.mu.Lock()
+	s.mu.inShutdown = true
+	gracefulWait := s.mu.gracefulWait
+	for _, conn := range s.mu.clients {
+		conn.GracefulClose()
+	}
+	s.mu.Unlock()
+	s.logger.Info("SQL server is shutting down", zap.Int("graceful_wait", gracefulWait))
+
+	timer := time.NewTimer(time.Duration(gracefulWait) * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return
+		case <-time.After(100 * time.Millisecond):
+			s.mu.Lock()
+			allClosed := len(s.mu.clients) == 0
+			s.mu.Unlock()
+			if allClosed {
+				return
+			}
+		}
+	}
+}
+
 // Close closes the server.
 func (s *SQLServer) Close() error {
+	s.gracefulShutdown()
+
 	errs := make([]error, 0, 4)
 	if s.listener != nil {
 		errs = append(errs, s.listener.Close())

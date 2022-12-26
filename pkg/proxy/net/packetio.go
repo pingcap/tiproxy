@@ -40,6 +40,7 @@ import (
 	"bytes"
 	"io"
 	"net"
+	"time"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/tidb/errno"
@@ -249,6 +250,13 @@ func (p *PacketIO) Flush() error {
 	return nil
 }
 
+func (p *PacketIO) GracefulClose() error {
+	if p.conn != nil {
+		return p.conn.SetDeadline(time.Now())
+	}
+	return nil
+}
+
 func (p *PacketIO) Close() error {
 	var errs []error
 	/*
@@ -261,6 +269,7 @@ func (p *PacketIO) Close() error {
 		if err := p.conn.Close(); err != nil {
 			errs = append(errs, err)
 		}
+		p.conn = nil
 	}
 	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))
 }
