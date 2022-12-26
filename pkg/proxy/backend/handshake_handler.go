@@ -21,20 +21,12 @@ import (
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
-type contextKey string
-
-func (k contextKey) String() string {
-	return "handler context key " + string(k)
-}
-
 // Context keys.
-var (
-	ContextKeyClientAddr contextKey = "client_addr"
-)
-
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 
 type ConnContext interface {
+	ClientAddr() string
+	ServerAddr() string
 	SetValue(key, val any)
 	Value(key any) any
 }
@@ -42,7 +34,8 @@ type ConnContext interface {
 type HandshakeHandler interface {
 	HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error
 	GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error)
-	OnConnClose(ctx ConnContext, handshaked bool) error
+	OnHandshake(ctx ConnContext, to string, err error)
+	OnConnClose(ctx ConnContext) error
 	GetCapability() pnet.Capability
 }
 
@@ -71,7 +64,10 @@ func (handler *DefaultHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Ha
 	return ns.GetRouter(), nil
 }
 
-func (handler *DefaultHandshakeHandler) OnConnClose(ConnContext, bool) error {
+func (handler *DefaultHandshakeHandler) OnHandshake(ConnContext, string, error) {
+}
+
+func (handler *DefaultHandshakeHandler) OnConnClose(ConnContext) error {
 	return nil
 }
 

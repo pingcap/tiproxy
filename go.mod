@@ -3,6 +3,7 @@ module github.com/pingcap/TiProxy
 go 1.19
 
 require (
+	github.com/cenkalti/backoff/v4 v4.2.0
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-contrib/zap v0.0.2
 	github.com/gin-gonic/gin v1.8.1
@@ -31,7 +32,6 @@ require (
 	github.com/andres-erbsen/clock v0.0.0-20160526145045-9e14626cd129 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cockroachdb/datadriven v1.0.0 // indirect
 	github.com/coocood/freecache v1.2.1 // indirect

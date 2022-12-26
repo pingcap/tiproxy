@@ -111,14 +111,17 @@ func (handler *CustomHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Han
 	return nil, nil
 }
 
-func (handler *CustomHandshakeHandler) OnConnClose(ctx ConnContext, _ bool) error {
+func (handler *CustomHandshakeHandler) OnHandshake(ctx ConnContext, _ string, _ error) {
+}
+
+func (handler *CustomHandshakeHandler) OnConnClose(ctx ConnContext) error {
 	return nil
 }
 
 func (handler *CustomHandshakeHandler) HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error {
 	handler.inUsername = resp.User
 	resp.User = handler.outUsername
-	handler.inAddr = ctx.Value(ContextKeyClientAddr).(string)
+	handler.inAddr = ctx.ClientAddr()
 	resp.Attrs = handler.outAttrs
 	return nil
 }
