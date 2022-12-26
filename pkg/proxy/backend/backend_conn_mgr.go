@@ -418,15 +418,14 @@ func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []b
 // Redirect implements RedirectableConn.Redirect interface. It redirects the current session to the newAddr.
 // Note that the caller requires the function to be non-blocking.
 func (mgr *BackendConnManager) Redirect(newAddr string) {
-	if mgr.hasStatus(statusClosing | statusClosed) {
-		return
-	}
-	// We do not use `chan signalRedirect` to avoid blocking. We cannot discard the signal when it blocks,
-	// because only the latest signal matters.
 	// NOTE: BackendConnManager may be closing concurrently because of no lock.
+	// The eventReceiver may read the new address even after BackendConnManager is closed.
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
 	}))
+	if mgr.hasStatus(statusClosing | statusClosed) {
+		return
+	}
 	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
 	mgr.signalReceived <- signalTypeRedirect
 }

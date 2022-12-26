@@ -98,7 +98,7 @@ func TestGracefulShutdown(t *testing.T) {
 		},
 	}, nil, hsHandler)
 	require.NoError(t, err)
-	clientConn = createClientConn()
+	createClientConn()
 	go func() {
 		require.NoError(t, server.Close())
 		finish <- struct{}{}
