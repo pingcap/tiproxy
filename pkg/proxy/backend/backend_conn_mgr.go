@@ -26,7 +26,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/cenkalti/backoff/v4"
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
@@ -59,8 +58,6 @@ type redirectResult struct {
 	to   string
 }
 
-type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
-
 // BackendConnManager migrates a session from one BackendConnection to another.
 //
 // The signal processing goroutine tries to migrate the session once it receives a signal.
@@ -89,7 +86,6 @@ type BackendConnManager struct {
 	cancelFunc       context.CancelFunc
 	backendConn      *BackendConnection
 	handshakeHandler HandshakeHandler
-	getBackendIO     backendIOGetter
 	connectionID     uint64
 }
 
@@ -110,42 +106,6 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		signalReceived: make(chan struct{}, 1),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
-	mgr.getBackendIO = func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
-		r, err := handshakeHandler.GetRouter(ctx, resp)
-		if err != nil {
-			return nil, err
-		}
-		// wait for initialize
-		bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		addr, err := backoff.RetryNotifyWithData(
-			func() (string, error) {
-				addr, err := r.Route(mgr)
-				if !errors.Is(err, router.ErrNoInstanceToSelect) {
-					return addr, backoff.Permanent(err)
-				}
-				return addr, err
-			},
-			backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
-			func(err error, d time.Duration) {
-				mgr.handshakeHandler.OnHandshake(ctx, "", err)
-			},
-		)
-		cancel()
-		if err != nil {
-			return nil, err
-		}
-
-		mgr.logger.Info("found", zap.String("addr", addr))
-		mgr.backendConn = NewBackendConnection(addr)
-		if err := mgr.backendConn.Connect(); err != nil {
-			mgr.handshakeHandler.OnHandshake(ctx, addr, err)
-			return nil, err
-		}
-
-		auth.serverAddr = addr
-		backendIO := mgr.backendConn.PacketIO()
-		return backendIO, nil
-	}
 	return mgr
 }
 
@@ -156,17 +116,11 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 }
 
 // Connect connects to the first backend and then start watching redirection signals.
-func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.PacketIO, getBackendIO backendIOGetter,
-	frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
-	if getBackendIO == nil {
-		getBackendIO = mgr.getBackendIO
-	}
-
-	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, mgr.handshakeHandler,
-		getBackendIO, frontendTLSConfig, backendTLSConfig)
+	err := mgr.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, nil, mgr.handshakeHandler, frontendTLSConfig, backendTLSConfig)
 	mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, err)
 	if err != nil {
 		return err

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
@@ -127,6 +128,9 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 		config.proxyConfig.backendTLSConfig = tc.clientTLSConfig
 		config.proxyConfig.frontendTLSConfig = tc.backendTLSConfig
 		config.clientConfig.tlsConfig = tc.clientTLSConfig
+		config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+			return router.NewStaticRouter(ts.tc.backendListener.Addr().String()), nil
+		}
 	})...)
 	ts.mb = newMockBackend(cfg.backendConfig)
 	ts.mp = newMockProxy(t, cfg.proxyConfig)

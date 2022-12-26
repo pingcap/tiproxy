@@ -15,13 +15,17 @@
 package backend
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/hack"
@@ -101,8 +105,9 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 	return nil
 }
 
-func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
-	getBackend backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, handshakeHandler HandshakeHandler, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+	auth := mgr.authenticator
+
 	clientIO.ResetSequence()
 	auth.clientAddr = clientIO.SourceAddr().String()
 
@@ -157,12 +162,43 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	auth.collation = resp.Collation
 	auth.attrs = resp.Attrs
 
-	backendIO, err := getBackend(auth, auth, resp)
-	if err != nil {
-		return err
-	}
+	if backendIO == nil {
+		r, err := handshakeHandler.GetRouter(auth, resp)
+		if err != nil {
+			return err
+		}
+		// wait for initialize
+		bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		addr, err := backoff.RetryNotifyWithData(
+			func() (string, error) {
+				addr, err := r.Route(mgr)
+				if !errors.Is(err, router.ErrNoInstanceToSelect) {
+					return addr, backoff.Permanent(err)
+				}
+				return addr, err
+			},
+			backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
+			func(err error, d time.Duration) {
+				mgr.handshakeHandler.OnHandshake(auth, "", err)
+			},
+		)
+		cancel()
+		if err != nil {
+			return err
+		}
 
+		mgr.logger.Info("found", zap.String("addr", addr))
+		mgr.backendConn = NewBackendConnection(addr)
+		if err := mgr.backendConn.Connect(); err != nil {
+			mgr.handshakeHandler.OnHandshake(auth, addr, err)
+			return err
+		}
+
+		auth.serverAddr = addr
+		backendIO = mgr.backendConn.PacketIO()
+	}
 	backendIO.ResetSequence()
+
 	// write proxy header
 	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
 		return err
