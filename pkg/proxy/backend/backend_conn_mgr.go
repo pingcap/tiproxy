@@ -26,6 +26,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/cenkalti/backoff/v4"
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
@@ -120,7 +121,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
-	err := mgr.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, nil, mgr.handshakeHandler, frontendTLSConfig, backendTLSConfig)
+	err := mgr.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, nil, frontendTLSConfig, backendTLSConfig)
 	mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, err)
 	if err != nil {
 		return err
@@ -133,6 +134,42 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 		mgr.processSignals(childCtx, clientIO)
 	})
 	return nil
+}
+
+func (mgr *BackendConnManager) getBackendIO(resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+	r, err := mgr.handshakeHandler.GetRouter(mgr.authenticator, resp)
+	if err != nil {
+		return nil, err
+	}
+	// wait for initialize
+	bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	addr, err := backoff.RetryNotifyWithData(
+		func() (string, error) {
+			addr, err := r.Route(mgr)
+			if !errors.Is(err, router.ErrNoInstanceToSelect) {
+				return addr, backoff.Permanent(err)
+			}
+			return addr, err
+		},
+		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
+		func(err error, d time.Duration) {
+			mgr.handshakeHandler.OnHandshake(mgr.authenticator, "", err)
+		},
+	)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+
+	mgr.logger.Info("found", zap.String("addr", addr))
+	mgr.backendConn = NewBackendConnection(addr)
+	if err := mgr.backendConn.Connect(); err != nil {
+		mgr.handshakeHandler.OnHandshake(mgr.authenticator, addr, err)
+		return nil, err
+	}
+
+	mgr.authenticator.serverAddr = addr
+	return mgr.backendConn.PacketIO(), nil
 }
 
 // ExecuteCmd forwards messages between the client and the backend.

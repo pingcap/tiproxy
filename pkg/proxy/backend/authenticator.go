@@ -15,17 +15,13 @@
 package backend
 
 import (
-	"context"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
-	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/hack"
@@ -105,7 +101,7 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 	return nil
 }
 
-func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, handshakeHandler HandshakeHandler, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	auth := mgr.authenticator
 
 	clientIO.ResetSequence()
@@ -154,7 +150,7 @@ func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, 
 	auth.capability = commonCaps.Uint32()
 
 	resp := pnet.ParseHandshakeResponse(pkt)
-	if err = handshakeHandler.HandleHandshakeResp(auth, resp); err != nil {
+	if err = mgr.handshakeHandler.HandleHandshakeResp(auth, resp); err != nil {
 		return err
 	}
 	auth.user = resp.User
@@ -164,39 +160,10 @@ func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, 
 
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	if backendIO == nil {
-		r, err := handshakeHandler.GetRouter(auth, resp)
+		backendIO, err = mgr.getBackendIO(resp)
 		if err != nil {
 			return err
 		}
-		// wait for initialize
-		bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		addr, err := backoff.RetryNotifyWithData(
-			func() (string, error) {
-				addr, err := r.Route(mgr)
-				if !errors.Is(err, router.ErrNoInstanceToSelect) {
-					return addr, backoff.Permanent(err)
-				}
-				return addr, err
-			},
-			backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
-			func(err error, d time.Duration) {
-				mgr.handshakeHandler.OnHandshake(auth, "", err)
-			},
-		)
-		cancel()
-		if err != nil {
-			return err
-		}
-
-		mgr.logger.Info("found", zap.String("addr", addr))
-		mgr.backendConn = NewBackendConnection(addr)
-		if err := mgr.backendConn.Connect(); err != nil {
-			mgr.handshakeHandler.OnHandshake(auth, addr, err)
-			return err
-		}
-
-		auth.serverAddr = addr
-		backendIO = mgr.backendConn.PacketIO()
 	}
 	backendIO.ResetSequence()
 
