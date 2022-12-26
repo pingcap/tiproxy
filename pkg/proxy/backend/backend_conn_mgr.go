@@ -127,7 +127,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 			},
 			backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 			func(err error, d time.Duration) {
-				mgr.handshakeHandler.OnConnect(ctx, "", err)
+				mgr.handshakeHandler.OnHandshake(ctx, "", err)
 			},
 		)
 		cancel()
@@ -138,13 +138,12 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		mgr.logger.Info("found", zap.String("addr", addr))
 		mgr.backendConn = NewBackendConnection(addr)
 		if err := mgr.backendConn.Connect(); err != nil {
-			mgr.handshakeHandler.OnConnect(ctx, addr, err)
+			mgr.handshakeHandler.OnHandshake(ctx, addr, err)
 			return nil, err
 		}
 
 		auth.serverAddr = addr
 		backendIO := mgr.backendConn.PacketIO()
-		mgr.handshakeHandler.OnConnect(ctx, auth.serverAddr, nil)
 		return backendIO, nil
 	}
 	return mgr
@@ -166,8 +165,10 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 		getBackendIO = mgr.getBackendIO
 	}
 
-	if err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, mgr.handshakeHandler,
-		getBackendIO, frontendTLSConfig, backendTLSConfig); err != nil {
+	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, mgr.handshakeHandler,
+		getBackendIO, frontendTLSConfig, backendTLSConfig)
+	if err != nil {
+		mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, err)
 		return err
 	}
 
@@ -177,6 +178,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.wg.Run(func() {
 		mgr.processSignals(childCtx, clientIO)
 	})
+	mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, nil)
 	return nil
 }
 
@@ -329,16 +331,16 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.P
 
 	newConn := NewBackendConnection(rs.to)
 	if rs.err = newConn.Connect(); rs.err != nil {
-		mgr.handshakeHandler.OnConnect(mgr.authenticator, rs.to, rs.err)
+		mgr.handshakeHandler.OnHandshake(mgr.authenticator, rs.to, rs.err)
 		return
 	}
 	mgr.authenticator.serverAddr = rs.to
 	mgr.authenticator.clientAddr = clientIO.SourceAddr().String()
-	mgr.handshakeHandler.OnConnect(mgr.authenticator, mgr.authenticator.serverAddr, nil)
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, clientIO, newConn.PacketIO(), sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newConn.PacketIO(), sessionStates)
 	}
 	if rs.err != nil {
+		mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, rs.err)
 		if ignoredErr := newConn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 			mgr.logger.Error("close new backend connection failed", zap.Error(ignoredErr))
 		}
@@ -348,6 +350,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.P
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendConn = newConn
+	mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, nil)
 }
 
 // The original db in the auth info may be dropped during the session, so we need to authenticate with the current db.

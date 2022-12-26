@@ -111,7 +111,7 @@ func (handler *CustomHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Han
 	return nil, nil
 }
 
-func (handler *CustomHandshakeHandler) OnConnect(ctx ConnContext, _ string, _ error) {
+func (handler *CustomHandshakeHandler) OnHandshake(ctx ConnContext, _ string, _ error) {
 }
 
 func (handler *CustomHandshakeHandler) OnConnClose(ctx ConnContext) error {
