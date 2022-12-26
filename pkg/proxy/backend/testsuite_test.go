@@ -110,13 +110,13 @@ type testSuite struct {
 }
 
 type testSuiteConfig struct {
-	initBackendConn bool
+	// When true, routing logic in handshakeFirstTime is enabled.
+	// When false, a manual created backendIO is passed to handler to skip the routing logic.
+	enableRouteLogic bool
 }
 
 func newTestSuiteConfig() *testSuiteConfig {
-	return &testSuiteConfig{
-		initBackendConn: true,
-	}
+	return &testSuiteConfig{}
 }
 
 type checker func(t *testing.T, ts *testSuite)
@@ -137,7 +137,7 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 	ts.mc = newMockClient(cfg.clientConfig)
 	ts.tc = tc
 	ts.testSuiteConfig = cfg.testSuiteConfig
-	clean := tc.newConn(t, ts.initBackendConn)
+	clean := tc.newConn(t, ts.enableRouteLogic)
 	return ts, clean
 }
 

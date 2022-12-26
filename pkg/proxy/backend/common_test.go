@@ -55,9 +55,9 @@ func newTCPConnSuite(t *testing.T) *tcpConnSuite {
 	return r
 }
 
-func (tc *tcpConnSuite) newConn(t *testing.T, withBackend bool) func() {
+func (tc *tcpConnSuite) newConn(t *testing.T, enableRoute bool) func() {
 	var wg waitgroup.WaitGroup
-	if withBackend {
+	if !enableRoute {
 		wg.Run(func() {
 			conn, err := tc.backendListener.Accept()
 			require.NoError(t, err)
@@ -65,7 +65,7 @@ func (tc *tcpConnSuite) newConn(t *testing.T, withBackend bool) func() {
 		})
 	}
 	wg.Run(func() {
-		if withBackend {
+		if !enableRoute {
 			backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
 			require.NoError(t, err)
 			tc.proxyBIO = pnet.NewPacketIO(backendConn)

@@ -94,7 +94,7 @@ type backendMgrTester struct {
 func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 	tc := newTCPConnSuite(t)
 	cfg = append(cfg, func(cfg *testConfig) {
-		cfg.testSuiteConfig.initBackendConn = false
+		cfg.testSuiteConfig.enableRouteLogic = true
 	})
 	ts, clean := newTestSuite(t, tc, cfg...)
 	tester := &backendMgrTester{
