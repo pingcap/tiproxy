@@ -162,6 +162,7 @@ func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, 
 	auth.collation = resp.Collation
 	auth.attrs = resp.Attrs
 
+	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	if backendIO == nil {
 		r, err := handshakeHandler.GetRouter(auth, resp)
 		if err != nil {
