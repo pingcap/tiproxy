@@ -68,9 +68,10 @@ type redirectResult struct {
 }
 
 const (
-	statusConnected = 1 << iota
+	statusConnected int32 = iota
 	statusHandshaked
-	statusClosing // graceful close
+	statusNotifyClose // notified to graceful close
+	statusClosing     // really closing
 	statusClosed
 )
 
@@ -159,25 +160,12 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 			return nil, err
 		}
 
-		mgr.setStatus(statusConnected)
+		mgr.connStatus.Store(statusConnected)
 		auth.serverAddr = addr
 		backendIO := mgr.backendConn.PacketIO()
 		return backendIO, nil
 	}
 	return mgr
-}
-
-func (mgr *BackendConnManager) setStatus(status int32) {
-	for {
-		old := mgr.connStatus.Load()
-		if mgr.connStatus.CompareAndSwap(old, old|status) {
-			break
-		}
-	}
-}
-
-func (mgr *BackendConnManager) hasStatus(status int32) bool {
-	return mgr.connStatus.Load()&status > 0
 }
 
 // ConnectionID implements RedirectableConn.ConnectionID interface.
@@ -203,7 +191,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 		return err
 	}
 
-	mgr.setStatus(statusHandshaked)
+	mgr.connStatus.Store(statusHandshaked)
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
@@ -224,7 +212,8 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
-	if mgr.hasStatus(statusClosed) {
+	switch mgr.connStatus.Load() {
+	case statusClosing, statusClosed:
 		return nil
 	}
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
@@ -271,7 +260,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 			if err != nil && !IsMySQLError(err) {
 				return err
 			}
-		} else if mgr.hasStatus(statusClosing) {
+		} else if mgr.connStatus.Load() == statusNotifyClose {
 			mgr.tryGracefulClose(ctx, clientIO)
 		} else if waitingRedirect {
 			mgr.tryRedirect(ctx, clientIO)
@@ -344,7 +333,8 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context, clientIO *pne
 // tryRedirect tries to migrate the session if the session is redirect-able.
 // NOTE: processLock should be held before calling this function.
 func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.PacketIO) {
-	if mgr.hasStatus(statusClosing | statusClosed) {
+	switch mgr.connStatus.Load() {
+	case statusNotifyClose, statusClosing, statusClosed:
 		return
 	}
 	signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
@@ -423,7 +413,8 @@ func (mgr *BackendConnManager) Redirect(newAddr string) {
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
 	}))
-	if mgr.hasStatus(statusClosing | statusClosed) {
+	switch mgr.connStatus.Load() {
+	case statusNotifyClose, statusClosing, statusClosed:
 		return
 	}
 	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
@@ -461,12 +452,12 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 
 // GracefulClose waits for the end of the transaction and closes the session.
 func (mgr *BackendConnManager) GracefulClose() {
-	mgr.setStatus(statusClosing)
+	mgr.connStatus.Store(statusNotifyClose)
 	mgr.signalReceived <- signalTypeGracefulClose
 }
 
 func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context, clientIO *pnet.PacketIO) {
-	if !mgr.hasStatus(statusClosing) || mgr.hasStatus(statusClosed) {
+	if mgr.connStatus.Load() != statusNotifyClose {
 		return
 	}
 	if !mgr.cmdProcessor.finishedTxn() {
@@ -476,12 +467,12 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context, clientIO *p
 	if err := clientIO.GracefulClose(); err != nil {
 		mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", clientIO.SourceAddr()), zap.Error(err))
 	}
-	mgr.setStatus(statusClosed)
+	mgr.connStatus.Store(statusClosing)
 }
 
 // Close releases all resources.
 func (mgr *BackendConnManager) Close() error {
-	mgr.setStatus(statusClosed)
+	mgr.connStatus.Store(statusClosing)
 	if mgr.cancelFunc != nil {
 		mgr.cancelFunc()
 		mgr.cancelFunc = nil
@@ -513,5 +504,6 @@ func (mgr *BackendConnManager) Close() error {
 			}
 		}
 	}
+	mgr.connStatus.Store(statusClosed)
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }

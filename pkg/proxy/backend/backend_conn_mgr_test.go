@@ -221,7 +221,8 @@ func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketI
 
 func (ts *backendMgrTester) checkConnClosed(_, _ *pnet.PacketIO) error {
 	for i := 0; i < 30; i++ {
-		if ts.mp.hasStatus(statusClosed) {
+		switch ts.mp.connStatus.Load() {
+		case statusClosing, statusClosed:
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -650,7 +651,7 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 			proxy: func(_, _ *pnet.PacketIO) error {
 				ts.mp.GracefulClose()
 				time.Sleep(300 * time.Millisecond)
-				require.False(t, ts.mp.hasStatus(statusClosed))
+				require.Equal(t, statusNotifyClose, ts.mp.connStatus.Load())
 				return nil
 			},
 		},
