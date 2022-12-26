@@ -108,13 +108,6 @@ func (h *CustomHandshakeHandler) HandleHandshakeResp(ctx ConnContext, resp *pnet
 		return h.handleHandshakeResp(ctx, resp)
 	}
 	return nil
-	/*
-	h.inUsername = resp.User
-	resp.User = h.outUsername
-	h.inAddr = ctx.ClientAddr()
-	resp.Attrs = h.outAttrs
-	return nil
-	*/
 }
 
 func (h *CustomHandshakeHandler) GetCapability() pnet.Capability {
