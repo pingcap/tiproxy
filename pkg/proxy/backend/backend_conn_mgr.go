@@ -167,8 +167,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, mgr.handshakeHandler,
 		getBackendIO, frontendTLSConfig, backendTLSConfig)
+	mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, err)
 	if err != nil {
-		mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, err)
 		return err
 	}
 
@@ -178,7 +178,6 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.wg.Run(func() {
 		mgr.processSignals(childCtx, clientIO)
 	})
-	mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, nil)
 	return nil
 }
 
