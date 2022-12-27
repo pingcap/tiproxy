@@ -139,7 +139,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
-	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, nil, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
+	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, err)
 	if err != nil {
 		return err
