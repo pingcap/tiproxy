@@ -174,14 +174,14 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		VerifyPeerCertificate: ci.verifyPeerCertificate,
 	}
 
-	var certPEM, keyPEM, caPEM []byte
+	var certPEM, keyPEM []byte
 	var err error
 	if autoCerts {
 		dur, err := time.ParseDuration(ci.cfg.AutoExpireDuration)
 		if err != nil {
 			dur = DefaultCertExpiration
 		}
-		certPEM, keyPEM, caPEM, err = CreateTempTLS(ci.cfg.RSAKeySize, dur)
+		certPEM, keyPEM, _, err = CreateTempTLS(ci.cfg.RSAKeySize, dur)
 		if err != nil {
 			return nil, err
 		}
@@ -193,15 +193,6 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		keyPEM, err = os.ReadFile(ci.cfg.Key)
 		if err != nil {
 			return nil, err
-		}
-		if !ci.cfg.HasCA() {
-			lg.Warn("no CA, server will not authenticate clients (connection is still secured)")
-			return tcfg, nil
-		} else {
-			caPEM, err = os.ReadFile(ci.cfg.CA)
-			if err != nil {
-				return nil, err
-			}
 		}
 	}
 
@@ -218,14 +209,23 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 	ci.cert.Store(&cert)
 
-	if len(caPEM) != 0 {
-		cas, err := ci.loadCA(caPEM)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		ci.ca.Store(cas)
-		tcfg.ClientAuth = tls.RequireAnyClientCert
+	if !ci.cfg.HasCA() {
+		lg.Warn("no CA, server will not authenticate clients (connection is still secured)")
+		return tcfg, nil
 	}
+
+	caPEM, err := os.ReadFile(ci.cfg.CA)
+	if err != nil {
+		return nil, err
+	}
+
+	cas, err := ci.loadCA(caPEM)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	ci.ca.Store(cas)
+	tcfg.ClientAuth = tls.RequireAnyClientCert
+
 	return tcfg, nil
 }
 
