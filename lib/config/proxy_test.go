@@ -34,9 +34,10 @@ var testProxyConfig = Config{
 		PDAddrs:           "127.0.0.1:4089",
 		RequireBackendTLS: true,
 		ProxyServerOnline: ProxyServerOnline{
-			MaxConnections: 1,
-			TCPKeepAlive:   true,
-			ProxyProtocol:  "v2",
+			MaxConnections:             1,
+			TCPKeepAlive:               true,
+			ProxyProtocol:              "v2",
+			GracefulWaitBeforeShutdown: 10,
 		},
 	},
 	API: API{
