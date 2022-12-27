@@ -194,15 +194,6 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !ci.cfg.HasCA() {
-			lg.Warn("no CA, server will not authenticate clients (connection is still secured)")
-			return tcfg, nil
-		} else {
-			caPEM, err = os.ReadFile(ci.cfg.CA)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
@@ -218,14 +209,23 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 	ci.cert.Store(&cert)
 
-	if len(caPEM) != 0 {
-		cas, err := ci.loadCA(caPEM)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		ci.ca.Store(cas)
-		tcfg.ClientAuth = tls.RequireAnyClientCert
+	if !ci.cfg.HasCA() {
+		lg.Warn("no CA, server will not authenticate clients (connection is still secured)")
+		return tcfg, nil
 	}
+
+	caPEM, err = os.ReadFile(ci.cfg.CA)
+	if err != nil {
+		return nil, err
+	}
+
+	cas, err := ci.loadCA(caPEM)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	ci.ca.Store(cas)
+	tcfg.ClientAuth = tls.RequireAnyClientCert
+
 	return tcfg, nil
 }
 
