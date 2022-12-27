@@ -68,8 +68,9 @@ type redirectResult struct {
 }
 
 const (
-	statusNotifyClose int32 = iota // notified to graceful close
-	statusClosing                  // really closing
+	statusActive      int32 = iota
+	statusNotifyClose       // notified to graceful close
+	statusClosing           // really closing
 	statusClosed
 )
 
@@ -185,7 +186,6 @@ func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator
 	}
 
 	auth.serverAddr = addr
-	mgr.connStatus.Store(statusConnected)
 	return mgr.backendConn.PacketIO(), nil
 }
 
