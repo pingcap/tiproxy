@@ -42,14 +42,14 @@ func createTLSCertificates(logger *zap.Logger, certpath, keypath, capath string,
 	_, e1 := os.Stat(certpath)
 	_, e2 := os.Stat(keypath)
 	if errors.Is(e1, os.ErrExist) || errors.Is(e2, os.ErrExist) {
-		logger.Warn("either cert or key exists")
+		logger.Info("either cert or key exists")
 		return nil
 	}
 
 	if capath != "" {
 		_, e3 := os.Stat(capath)
 		if errors.Is(e3, os.ErrExist) {
-			logger.Warn("ca exists")
+			logger.Info("ca exists")
 			return nil
 		}
 	}
@@ -225,7 +225,7 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config, error) {
 	logger = logger.With(zap.String("tls", "server"))
 	if !cfg.HasCert() {
-		logger.Warn("require certificates to secure clients connections, disable TLS")
+		logger.Info("require certificates to secure clients connections, disable TLS")
 		return nil, nil
 	}
 
@@ -239,7 +239,7 @@ func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	tcfg.Certificates = append(tcfg.Certificates, cert)
 
 	if !cfg.HasCA() {
-		logger.Warn("no CA, server will not authenticate clients (connection is still secured)")
+		logger.Info("no CA, server will not authenticate clients (connection is still secured)")
 		return tcfg, nil
 	}
 
@@ -265,7 +265,7 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 				MinVersion:         tls.VersionTLS12,
 			}, nil
 		}
-		logger.Warn("no CA to verify server connections, disable TLS")
+		logger.Info("no CA to verify server connections, disable TLS")
 		return nil, nil
 	}
 
@@ -282,7 +282,7 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	}
 
 	if !cfg.HasCert() {
-		logger.Warn("no certificates, server may reject the connection")
+		logger.Info("no certificates, server may reject the connection")
 		return tcfg, nil
 	}
 	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
@@ -306,7 +306,7 @@ func BuildEtcdTLSConfig(logger *zap.Logger, server, peer config.TLSConfig) (clie
 			clientInfo.TrustedCAFile = server.CA
 			clientInfo.ClientCertAuth = true
 		} else if !server.SkipCA {
-			logger.Warn("no CA, proxy will not authenticate etcd clients (connection is still secured)")
+			logger.Info("no CA, proxy will not authenticate etcd clients (connection is still secured)")
 		}
 	}
 

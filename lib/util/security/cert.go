@@ -162,7 +162,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		if ci.cfg.AutoCerts {
 			autoCerts = true
 		} else {
-			lg.Warn("require certificates to secure clients connections, disable TLS")
+			lg.Info("require certificates to secure clients connections, disable TLS")
 			return nil, nil
 		}
 	}
@@ -210,7 +210,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	ci.cert.Store(&cert)
 
 	if !ci.cfg.HasCA() {
-		lg.Warn("no CA, server will not authenticate clients (connection is still secured)")
+		lg.Info("no CA, server will not authenticate clients (connection is still secured)")
 		return tcfg, nil
 	}
 
@@ -239,7 +239,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 				MinVersion:         tls.VersionTLS12,
 			}, nil
 		}
-		lg.Warn("no CA to verify server connections, disable TLS")
+		lg.Info("no CA to verify server connections, disable TLS")
 		return nil, nil
 	}
 
@@ -262,7 +262,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	ci.ca.Store(cas)
 
 	if !ci.cfg.HasCert() {
-		lg.Warn("no certificates, server may reject the connection")
+		lg.Info("no certificates, server may reject the connection")
 		return tcfg, nil
 	}
 
