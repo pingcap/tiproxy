@@ -174,14 +174,14 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		VerifyPeerCertificate: ci.verifyPeerCertificate,
 	}
 
-	var certPEM, keyPEM, caPEM []byte
+	var certPEM, keyPEM []byte
 	var err error
 	if autoCerts {
 		dur, err := time.ParseDuration(ci.cfg.AutoExpireDuration)
 		if err != nil {
 			dur = DefaultCertExpiration
 		}
-		certPEM, keyPEM, caPEM, err = CreateTempTLS(ci.cfg.RSAKeySize, dur)
+		certPEM, keyPEM, _, err = CreateTempTLS(ci.cfg.RSAKeySize, dur)
 		if err != nil {
 			return nil, err
 		}
@@ -214,7 +214,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		return tcfg, nil
 	}
 
-	caPEM, err = os.ReadFile(ci.cfg.CA)
+	caPEM, err := os.ReadFile(ci.cfg.CA)
 	if err != nil {
 		return nil, err
 	}
