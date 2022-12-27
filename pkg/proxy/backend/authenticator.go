@@ -106,7 +106,6 @@ type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.Hands
 func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
 	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
-	auth.serverAddr = backendIO.SourceAddr().String()
 	auth.clientAddr = clientIO.SourceAddr().String()
 
 	proxyCapability := auth.supportedServerCapabilities
