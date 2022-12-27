@@ -74,3 +74,45 @@ func (handler *DefaultHandshakeHandler) OnConnClose(ConnContext) error {
 func (handler *DefaultHandshakeHandler) GetCapability() pnet.Capability {
 	return SupportedServerCapabilities
 }
+
+type CustomHandshakeHandler struct {
+	getRouter           func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error)
+	onHandshake         func(ConnContext, string, error)
+	onConnClose         func(ConnContext) error
+	handleHandshakeResp func(ctx ConnContext, resp *pnet.HandshakeResp) error
+	getCapability       func() pnet.Capability
+}
+
+func (h *CustomHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+	if h.getRouter != nil {
+		return h.getRouter(ctx, resp)
+	}
+	return nil, errors.New("no router")
+}
+
+func (h *CustomHandshakeHandler) OnHandshake(ctx ConnContext, addr string, err error) {
+	if h.onHandshake != nil {
+		h.onHandshake(ctx, addr, err)
+	}
+}
+
+func (h *CustomHandshakeHandler) OnConnClose(ctx ConnContext) error {
+	if h.onConnClose != nil {
+		return h.onConnClose(ctx)
+	}
+	return nil
+}
+
+func (h *CustomHandshakeHandler) HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error {
+	if h.handleHandshakeResp != nil {
+		return h.handleHandshakeResp(ctx, resp)
+	}
+	return nil
+}
+
+func (h *CustomHandshakeHandler) GetCapability() pnet.Capability {
+	if h.getCapability != nil {
+		return h.getCapability()
+	}
+	return SupportedServerCapabilities
+}

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
@@ -109,13 +110,13 @@ type testSuite struct {
 }
 
 type testSuiteConfig struct {
-	initBackendConn bool
+	// When true, routing logic in handshakeFirstTime is enabled.
+	// When false, a manual created backendIO is passed to handler to skip the routing logic.
+	enableRouteLogic bool
 }
 
 func newTestSuiteConfig() *testSuiteConfig {
-	return &testSuiteConfig{
-		initBackendConn: true,
-	}
+	return &testSuiteConfig{}
 }
 
 type checker func(t *testing.T, ts *testSuite)
@@ -127,13 +128,16 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 		config.proxyConfig.backendTLSConfig = tc.clientTLSConfig
 		config.proxyConfig.frontendTLSConfig = tc.backendTLSConfig
 		config.clientConfig.tlsConfig = tc.clientTLSConfig
+		config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+			return router.NewStaticRouter(ts.tc.backendListener.Addr().String()), nil
+		}
 	})...)
 	ts.mb = newMockBackend(cfg.backendConfig)
 	ts.mp = newMockProxy(t, cfg.proxyConfig)
 	ts.mc = newMockClient(cfg.clientConfig)
 	ts.tc = tc
 	ts.testSuiteConfig = cfg.testSuiteConfig
-	clean := tc.newConn(t, ts.initBackendConn)
+	clean := tc.newConn(t, ts.enableRouteLogic)
 	return ts, clean
 }
 

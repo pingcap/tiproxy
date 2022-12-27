@@ -62,7 +62,7 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 	var err error
 	var msg string
 
-	if err = cc.connMgr.Connect(ctx, cc.pkt, nil, cc.frontendTLSConfig, cc.backendTLSConfig); err != nil {
+	if err = cc.connMgr.Connect(ctx, cc.pkt, cc.frontendTLSConfig, cc.backendTLSConfig); err != nil {
 		msg = "new connection failed"
 		goto clean
 	}

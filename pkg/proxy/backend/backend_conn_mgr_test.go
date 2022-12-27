@@ -96,7 +96,7 @@ type backendMgrTester struct {
 func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 	tc := newTCPConnSuite(t)
 	cfg = append(cfg, func(cfg *testConfig) {
-		cfg.testSuiteConfig.initBackendConn = false
+		cfg.testSuiteConfig.enableRouteLogic = true
 	})
 	ts, clean := newTestSuite(t, tc, cfg...)
 	tester := &backendMgrTester{
@@ -118,20 +118,9 @@ func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 	return tester
 }
 
-func (ts *backendMgrTester) getBackendIO(ctx ConnContext, auth *Authenticator, _ *pnet.HandshakeResp) (*pnet.PacketIO, error) {
-	addr := ts.tc.backendListener.Addr().String()
-	ts.mp.backendConn = NewBackendConnection(addr)
-	if err := ts.mp.backendConn.Connect(); err != nil {
-		return nil, err
-	}
-	backendIO := ts.mp.backendConn.PacketIO()
-	auth.serverAddr = addr
-	return backendIO, nil
-}
-
 // Define some common runners here to reduce code redundancy.
 func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	err := ts.mp.Connect(context.Background(), clientIO, ts.getBackendIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+	err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
 	require.NoError(ts.t, err)
 	mer := newMockEventReceiver()
 	ts.mp.SetEventReceiver(mer)
@@ -384,7 +373,7 @@ func TestConnectFail(t *testing.T) {
 		{
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				return ts.mp.Connect(context.Background(), clientIO, ts.getBackendIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				return ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
 			},
 			backend: func(_ *pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()
@@ -561,14 +550,16 @@ func TestCloseWhileRedirect(t *testing.T) {
 }
 
 func TestCustomHandshake(t *testing.T) {
-	handler := &CustomHandshakeHandler{
-		outUsername:   "rewritten_user",
-		outAttrs:      map[string]string{"key": "value"},
-		outCapability: SupportedServerCapabilities & ^pnet.ClientDeprecateEOF,
-	}
 	ts := newBackendMgrTester(t, func(cfg *testConfig) {
-		//cfg.clientConfig.capability = handler.outCapability
-		cfg.proxyConfig.handler = handler
+		handler := cfg.proxyConfig.handler
+		handler.handleHandshakeResp = func(ctx ConnContext, resp *pnet.HandshakeResp) error {
+			resp.User = "rewritten_user"
+			resp.Attrs = map[string]string{"key": "value"}
+			return nil
+		}
+		handler.getCapability = func() pnet.Capability {
+			return SupportedServerCapabilities & ^pnet.ClientDeprecateEOF
+		}
 	})
 	runners := []runner{
 		// 1st handshake

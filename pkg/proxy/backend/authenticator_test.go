@@ -212,20 +212,30 @@ func TestSecondHandshake(t *testing.T) {
 
 func TestCustomAuth(t *testing.T) {
 	tc := newTCPConnSuite(t)
-	handler := &CustomHandshakeHandler{
-		outUsername:   "rewritten_user",
-		outAttrs:      map[string]string{"key": "value"},
-		outCapability: SupportedServerCapabilities & ^pnet.ClientDeprecateEOF,
-	}
+	reUser := "rewritten_user"
+	reAttrs := map[string]string{"key": "value"}
+	reCap := SupportedServerCapabilities & ^pnet.ClientDeprecateEOF
+	inUser := ""
+	inAddr := ""
 	ts, clean := newTestSuite(t, tc, func(cfg *testConfig) {
-		cfg.proxyConfig.handler = handler
+		handler := cfg.proxyConfig.handler
+		handler.handleHandshakeResp = func(ctx ConnContext, resp *pnet.HandshakeResp) error {
+			inUser = resp.User
+			inAddr = ctx.ClientAddr()
+			resp.User = reUser
+			resp.Attrs = reAttrs
+			return nil
+		}
+		handler.getCapability = func() pnet.Capability {
+			return reCap
+		}
 	})
 	checker := func() {
-		require.Equal(t, ts.mc.username, handler.inUsername)
-		require.Equal(t, handler.outUsername, ts.mb.username)
-		require.Equal(t, handler.outAttrs, ts.mb.attrs)
-		require.Equal(t, handler.outCapability&pnet.ClientDeprecateEOF, pnet.Capability(ts.mb.capability)&pnet.ClientDeprecateEOF)
-		host, _, err := net.SplitHostPort(handler.inAddr)
+		require.Equal(t, ts.mc.username, inUser)
+		require.Equal(t, reUser, ts.mb.username)
+		require.Equal(t, reAttrs, ts.mb.attrs)
+		require.Equal(t, reCap&pnet.ClientDeprecateEOF, pnet.Capability(ts.mb.capability)&pnet.ClientDeprecateEOF)
+		host, _, err := net.SplitHostPort(inAddr)
 		require.NoError(t, err)
 		require.Equal(t, host, "::1")
 	}

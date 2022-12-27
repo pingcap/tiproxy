@@ -101,8 +101,10 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 	return nil
 }
 
+type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
+
 func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
-	getBackend backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
 	auth.clientAddr = clientIO.SourceAddr().String()
 
@@ -157,12 +159,13 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	auth.collation = resp.Collation
 	auth.attrs = resp.Attrs
 
-	backendIO, err := getBackend(auth, auth, resp)
+	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
+	backendIO, err := getBackendIO(auth, auth, resp)
 	if err != nil {
 		return err
 	}
-
 	backendIO.ResetSequence()
+
 	// write proxy header
 	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
 		return err

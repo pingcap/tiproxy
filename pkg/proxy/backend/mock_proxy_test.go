@@ -20,7 +20,6 @@ import (
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/logger"
-	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
@@ -28,7 +27,7 @@ import (
 type proxyConfig struct {
 	frontendTLSConfig *tls.Config
 	backendTLSConfig  *tls.Config
-	handler           HandshakeHandler
+	handler           *CustomHandshakeHandler
 	sessionToken      string
 	capability        uint32
 	waitRedirect      bool
@@ -36,7 +35,7 @@ type proxyConfig struct {
 
 func newProxyConfig() *proxyConfig {
 	return &proxyConfig{
-		handler:      NewDefaultHandshakeHandler(nil),
+		handler:      &CustomHandshakeHandler{},
 		capability:   defaultTestBackendCapability,
 		sessionToken: mockToken,
 	}
@@ -97,35 +96,4 @@ func (mp *mockProxy) directQuery(_, backendIO *pnet.PacketIO) error {
 	rs, _, err := mp.cmdProcessor.query(backendIO, mockCmdStr)
 	mp.rs = rs
 	return err
-}
-
-type CustomHandshakeHandler struct {
-	inUsername    string
-	inAddr        string
-	outCapability pnet.Capability
-	outUsername   string
-	outAttrs      map[string]string
-}
-
-func (handler *CustomHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
-	return nil, nil
-}
-
-func (handler *CustomHandshakeHandler) OnHandshake(ctx ConnContext, _ string, _ error) {
-}
-
-func (handler *CustomHandshakeHandler) OnConnClose(ctx ConnContext) error {
-	return nil
-}
-
-func (handler *CustomHandshakeHandler) HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error {
-	handler.inUsername = resp.User
-	resp.User = handler.outUsername
-	handler.inAddr = ctx.ClientAddr()
-	resp.Attrs = handler.outAttrs
-	return nil
-}
-
-func (handler *CustomHandshakeHandler) GetCapability() pnet.Capability {
-	return handler.outCapability
 }

@@ -20,8 +20,8 @@ import (
 	"testing"
 
 	"github.com/pingcap/TiProxy/lib/util/security"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/tidb/util"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,9 +55,9 @@ func newTCPConnSuite(t *testing.T) *tcpConnSuite {
 	return r
 }
 
-func (tc *tcpConnSuite) newConn(t *testing.T, withBackend bool) func() {
-	var wg util.WaitGroupWrapper
-	if withBackend {
+func (tc *tcpConnSuite) newConn(t *testing.T, enableRoute bool) func() {
+	var wg waitgroup.WaitGroup
+	if !enableRoute {
 		wg.Run(func() {
 			conn, err := tc.backendListener.Accept()
 			require.NoError(t, err)
@@ -65,7 +65,7 @@ func (tc *tcpConnSuite) newConn(t *testing.T, withBackend bool) func() {
 		})
 	}
 	wg.Run(func() {
-		if withBackend {
+		if !enableRoute {
 			backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
 			require.NoError(t, err)
 			tc.proxyBIO = pnet.NewPacketIO(backendConn)
@@ -92,7 +92,7 @@ func (tc *tcpConnSuite) newConn(t *testing.T, withBackend bool) func() {
 }
 
 func (tc *tcpConnSuite) run(clientRunner, backendRunner func(*pnet.PacketIO) error, proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) (cerr, berr, perr error) {
-	var wg util.WaitGroupWrapper
+	var wg waitgroup.WaitGroup
 	if clientRunner != nil {
 		wg.Run(func() {
 			cerr = clientRunner(tc.clientIO)
