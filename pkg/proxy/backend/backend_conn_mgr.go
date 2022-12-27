@@ -121,7 +121,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
-	err := mgr.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, nil, frontendTLSConfig, backendTLSConfig)
+	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), clientIO, nil, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	mgr.handshakeHandler.OnHandshake(mgr.authenticator, mgr.authenticator.serverAddr, err)
 	if err != nil {
 		return err
@@ -136,8 +136,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	return nil
 }
 
-func (mgr *BackendConnManager) getBackendIO(resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
-	r, err := mgr.handshakeHandler.GetRouter(mgr.authenticator, resp)
+func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+	r, err := mgr.handshakeHandler.GetRouter(auth, resp)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (mgr *BackendConnManager) getBackendIO(resp *pnet.HandshakeResp) (*pnet.Pac
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
-			mgr.handshakeHandler.OnHandshake(mgr.authenticator, "", err)
+			mgr.handshakeHandler.OnHandshake(auth, "", err)
 		},
 	)
 	cancel()
@@ -164,11 +164,11 @@ func (mgr *BackendConnManager) getBackendIO(resp *pnet.HandshakeResp) (*pnet.Pac
 	mgr.logger.Info("found", zap.String("addr", addr))
 	mgr.backendConn = NewBackendConnection(addr)
 	if err := mgr.backendConn.Connect(); err != nil {
-		mgr.handshakeHandler.OnHandshake(mgr.authenticator, addr, err)
+		mgr.handshakeHandler.OnHandshake(auth, addr, err)
 		return nil, err
 	}
 
-	mgr.authenticator.serverAddr = addr
+	auth.serverAddr = addr
 	return mgr.backendConn.PacketIO(), nil
 }
 

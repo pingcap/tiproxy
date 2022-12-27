@@ -63,7 +63,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	if err := mp.handshakeFirstTime(mp.logger, clientIO, backendIO, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
+	if err := mp.authenticator.handshakeFirstTime(mp.logger, clientIO, backendIO, mp.handshakeHandler, nil, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
 		return err
 	}
 	mp.cmdProcessor.capability = mp.authenticator.capability

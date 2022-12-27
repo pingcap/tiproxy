@@ -101,10 +101,12 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 	return nil
 }
 
-func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
-	auth := mgr.authenticator
+type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
 
+func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
+	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
+	auth.serverAddr = backendIO.SourceAddr().String()
 	auth.clientAddr = clientIO.SourceAddr().String()
 
 	proxyCapability := auth.supportedServerCapabilities
@@ -150,7 +152,7 @@ func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, 
 	auth.capability = commonCaps.Uint32()
 
 	resp := pnet.ParseHandshakeResponse(pkt)
-	if err = mgr.handshakeHandler.HandleHandshakeResp(auth, resp); err != nil {
+	if err = handshakeHandler.HandleHandshakeResp(auth, resp); err != nil {
 		return err
 	}
 	auth.user = resp.User
@@ -160,7 +162,7 @@ func (mgr *BackendConnManager) handshakeFirstTime(logger *zap.Logger, clientIO, 
 
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	if backendIO == nil {
-		backendIO, err = mgr.getBackendIO(resp)
+		backendIO, err = getBackendIO(auth, auth, resp)
 		if err != nil {
 			return err
 		}
