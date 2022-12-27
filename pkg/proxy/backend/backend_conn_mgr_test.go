@@ -210,7 +210,7 @@ func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketI
 
 func (ts *backendMgrTester) checkConnClosed(_, _ *pnet.PacketIO) error {
 	for i := 0; i < 30; i++ {
-		switch ts.mp.connStatus.Load() {
+		switch ts.mp.closeStatus.Load() {
 		case statusClosing, statusClosed:
 			return nil
 		}
@@ -642,7 +642,7 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 			proxy: func(_, _ *pnet.PacketIO) error {
 				ts.mp.GracefulClose()
 				time.Sleep(300 * time.Millisecond)
-				require.Equal(t, statusNotifyClose, ts.mp.connStatus.Load())
+				require.Equal(t, statusNotifyClose, ts.mp.closeStatus.Load())
 				return nil
 			},
 		},
@@ -651,6 +651,30 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 			client:  ts.mc.request,
 			proxy:   ts.forwardCmd4Proxy,
 			backend: ts.respondWithNoTxn4Backend,
+		},
+		// it will then automatically close
+		{
+			proxy: ts.checkConnClosed,
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestGracefulCloseBeforeHandshake(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// try to gracefully close before handshake
+		{
+			proxy: func(_, _ *pnet.PacketIO) error {
+				ts.mp.GracefulClose()
+				return nil
+			},
+		},
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
 		},
 		// it will then automatically close
 		{
