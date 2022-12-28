@@ -97,6 +97,23 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
+				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
+				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, ci.cert.Load())
+			},
+			err: "",
+		},
+		{
+			server: true,
+			TLSConfig: config.TLSConfig{
+				Cert:   certPath,
+				Key:    keyPath,
+				CA:     caPath,
+				SkipCA: true,
+			},
+			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
+				require.NotNil(t, c)
+				require.Equal(t, tls.VerifyClientCertIfGiven, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
 			},
@@ -110,6 +127,7 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
+				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
 			},
