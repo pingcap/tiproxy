@@ -72,14 +72,12 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 	}
 
 clean:
-	// graceful close
-	if errors.Is(err, os.ErrDeadlineExceeded) {
+	clientErr := errors.Is(err, ErrClientConn)
+	// EOF: client closes; DeadlineExceeded: graceful shutdown; Closed: shut down.
+	if clientErr && (errors.Is(err, io.EOF) || errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, net.ErrClosed)) {
 		return
 	}
-	clientErr := errors.Is(err, ErrClientConn)
-	if !(clientErr && errors.Is(err, io.EOF)) {
-		cc.logger.Info(msg, zap.Error(err), zap.Bool("clientErr", clientErr), zap.Bool("serverErr", !clientErr))
-	}
+	cc.logger.Info(msg, zap.Error(err), zap.Bool("clientErr", clientErr), zap.Bool("serverErr", !clientErr))
 }
 
 func (cc *ClientConnection) processMsg(ctx context.Context) error {

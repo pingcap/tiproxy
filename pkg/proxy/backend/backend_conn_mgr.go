@@ -68,10 +68,9 @@ type redirectResult struct {
 }
 
 const (
-	statusConnected int32 = iota
-	statusHandshaked
-	statusNotifyClose // notified to graceful close
-	statusClosing     // really closing
+	statusActive      int32 = iota
+	statusNotifyClose       // notified to graceful close
+	statusClosing           // really closing
 	statusClosed
 )
 
@@ -99,7 +98,7 @@ type BackendConnManager struct {
 	signal unsafe.Pointer
 	// redirectResCh is used to notify the event receiver asynchronously.
 	redirectResCh chan *redirectResult
-	connStatus    atomic.Int32
+	closeStatus   atomic.Int32
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc       context.CancelFunc
 	backendConn      *BackendConnection
@@ -145,7 +144,6 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 		return err
 	}
 
-	mgr.connStatus.Store(statusHandshaked)
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
@@ -188,7 +186,6 @@ func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator
 	}
 
 	auth.serverAddr = addr
-	mgr.connStatus.Store(statusConnected)
 	return mgr.backendConn.PacketIO(), nil
 }
 
@@ -203,7 +200,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
-	switch mgr.connStatus.Load() {
+	switch mgr.closeStatus.Load() {
 	case statusClosing, statusClosed:
 		return nil
 	}
@@ -251,7 +248,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 			if err != nil && !IsMySQLError(err) {
 				return err
 			}
-		} else if mgr.connStatus.Load() == statusNotifyClose {
+		} else if mgr.closeStatus.Load() == statusNotifyClose {
 			mgr.tryGracefulClose(ctx, clientIO)
 		} else if waitingRedirect {
 			mgr.tryRedirect(ctx, clientIO)
@@ -324,7 +321,7 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context, clientIO *pne
 // tryRedirect tries to migrate the session if the session is redirect-able.
 // NOTE: processLock should be held before calling this function.
 func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.PacketIO) {
-	switch mgr.connStatus.Load() {
+	switch mgr.closeStatus.Load() {
 	case statusNotifyClose, statusClosing, statusClosed:
 		return
 	}
@@ -404,7 +401,7 @@ func (mgr *BackendConnManager) Redirect(newAddr string) {
 	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
 		newAddr: newAddr,
 	}))
-	switch mgr.connStatus.Load() {
+	switch mgr.closeStatus.Load() {
 	case statusNotifyClose, statusClosing, statusClosed:
 		return
 	}
@@ -443,12 +440,12 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 
 // GracefulClose waits for the end of the transaction and closes the session.
 func (mgr *BackendConnManager) GracefulClose() {
-	mgr.connStatus.Store(statusNotifyClose)
+	mgr.closeStatus.Store(statusNotifyClose)
 	mgr.signalReceived <- signalTypeGracefulClose
 }
 
 func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context, clientIO *pnet.PacketIO) {
-	if mgr.connStatus.Load() != statusNotifyClose {
+	if mgr.closeStatus.Load() != statusNotifyClose {
 		return
 	}
 	if !mgr.cmdProcessor.finishedTxn() {
@@ -458,12 +455,12 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context, clientIO *p
 	if err := clientIO.GracefulClose(); err != nil {
 		mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", clientIO.SourceAddr()), zap.Error(err))
 	}
-	mgr.connStatus.Store(statusClosing)
+	mgr.closeStatus.Store(statusClosing)
 }
 
 // Close releases all resources.
 func (mgr *BackendConnManager) Close() error {
-	mgr.connStatus.Store(statusClosing)
+	mgr.closeStatus.Store(statusClosing)
 	if mgr.cancelFunc != nil {
 		mgr.cancelFunc()
 		mgr.cancelFunc = nil
@@ -495,6 +492,6 @@ func (mgr *BackendConnManager) Close() error {
 			}
 		}
 	}
-	mgr.connStatus.Store(statusClosed)
+	mgr.closeStatus.Store(statusClosed)
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
