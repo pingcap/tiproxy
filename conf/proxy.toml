@@ -38,12 +38,11 @@ rsa-key-size = 4_096
 #   skip-ca = trure
 # client object:
 #   1. requires: ca or skip-ca(skip verify server certs)
-#   2. optionally: cert/key will be used if server asks
+#   2. optionally: cert/key will be used if server asks, i.e. server-side client verification
 #   3. useless/forbid: auto-certs
 # server object:
 #   1. requires: cert/key or auto-certs(generate a temporary cert, mostly for testing)
-#   2. optionally: ca will enable server-side client verification.
-#   3. useless/forbid: skip-ca
+#   2. optionally: ca will enable server-side client verification. If skip-ca is true with non-empty ca, server will only verify clients if it can provide any cert. Otherwise, clients must provide a cert.
 # peer object:
 #   1. requires: cert/key/ca or auto-certs
 #   2. useless/forbid: skip-ca

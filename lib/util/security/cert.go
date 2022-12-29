@@ -181,7 +181,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		if err != nil {
 			dur = DefaultCertExpiration
 		}
-		certPEM, keyPEM, _, err = CreateTempTLS(ci.cfg.RSAKeySize, dur)
+		certPEM, keyPEM, _, err = createTempTLS(ci.cfg.RSAKeySize, dur)
 		if err != nil {
 			return nil, err
 		}
@@ -224,13 +224,22 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		return nil, errors.WithStack(err)
 	}
 	ci.ca.Store(cas)
-	tcfg.ClientAuth = tls.RequireAnyClientCert
+
+	if ci.cfg.SkipCA {
+		tcfg.ClientAuth = tls.VerifyClientCertIfGiven
+	} else {
+		tcfg.ClientAuth = tls.RequireAnyClientCert
+	}
 
 	return tcfg, nil
 }
 
 func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg))
+	if ci.cfg.AutoCerts {
+		lg.Info("specified auto-certs in a client tls config, ignored")
+	}
+
 	if !ci.cfg.HasCA() {
 		if ci.cfg.SkipCA {
 			// still enable TLS without verify server certs

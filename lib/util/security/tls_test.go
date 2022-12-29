@@ -22,7 +22,7 @@ import (
 
 func BenchmarkCreateTLS(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, _, _, err := CreateTempTLS(0, DefaultCertExpiration)
+		_, _, _, err := createTempTLS(0, DefaultCertExpiration)
 		require.Nil(b, err)
 	}
 }
