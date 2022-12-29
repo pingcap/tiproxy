@@ -72,8 +72,8 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 	}
 
 clean:
-	// graceful close
-	if errors.Is(err, os.ErrDeadlineExceeded) {
+	// graceful close or force close when shutting down
+	if errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, net.ErrClosed) {
 		return
 	}
 	clientErr := errors.Is(err, ErrClientConn)

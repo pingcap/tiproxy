@@ -49,6 +49,7 @@ type SQLServer struct {
 	hsHandler         backend.HandshakeHandler
 	requireBackendTLS bool
 	wg                waitgroup.WaitGroup
+	cancelFunc        context.CancelFunc
 
 	mu serverState
 }
@@ -88,6 +89,8 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 }
 
 func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.ProxyServerOnline) {
+	// Create another context because it still needs to run after graceful shutdown.
+	ctx, s.cancelFunc = context.WithCancel(context.Background())
 	for {
 		select {
 		case <-ctx.Done():
@@ -168,8 +171,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 // Whether this affects NLB is to be tested.
 func (s *SQLServer) gracefulShutdown() {
 	s.mu.Lock()
-	s.mu.inShutdown = true
 	gracefulWait := s.mu.gracefulWait
+	if gracefulWait == 0 {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.inShutdown = true
 	for _, conn := range s.mu.clients {
 		conn.GracefulClose()
 	}
@@ -197,6 +204,10 @@ func (s *SQLServer) gracefulShutdown() {
 func (s *SQLServer) Close() error {
 	s.gracefulShutdown()
 
+	if s.cancelFunc != nil {
+		s.cancelFunc()
+		s.cancelFunc = nil
+	}
 	errs := make([]error, 0, 4)
 	if s.listener != nil {
 		errs = append(errs, s.listener.Close())
