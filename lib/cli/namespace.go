@@ -18,14 +18,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -69,12 +70,11 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				if err := json.Unmarshal([]byte(resp), &nscs); err != nil {
 					return err
 				}
-				nscsbytes, err := yaml.Marshal(&nscs)
-				if err != nil {
-					return err
+				nscsmap := make(map[string]config.Namespace, len(nscs))
+				for _, nsc := range nscs {
+					nscsmap[nsc.Namespace] = nsc
 				}
-				cmd.Println(string(nscsbytes))
-				return nil
+				return toml.NewEncoder(cmd.OutOrStdout()).Encode(nscsmap)
 			},
 		},
 	)
@@ -115,7 +115,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 			if err := json.Unmarshal([]byte(resp), &nsc); err != nil {
 				return err
 			}
-			nscbytes, err := yaml.Marshal(&nsc)
+			nscbytes, err := nsc.ToBytes()
 			if err != nil {
 				return err
 			}
@@ -141,11 +141,15 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				defer f.Close()
 				in = f
 			}
-			var nsc config.Namespace
-			if err := yaml.NewDecoder(in).Decode(&nsc); err != nil {
+			nscbytes, err := io.ReadAll(in)
+			if err != nil {
 				return err
 			}
-			nscbytes, err := json.Marshal(&nsc)
+			nsc, err := config.NewNamespace(nscbytes)
+			if err != nil {
+				return err
+			}
+			nscbytes, err = json.Marshal(nsc)
 			if err != nil {
 				return err
 			}
@@ -171,7 +175,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return cmd.Help()
 			}
 
-			nFiles, err := listAllFiles(args[0], ".yaml")
+			nFiles, err := listAllFiles(args[0], ".toml")
 			if err != nil {
 				return err
 			}
@@ -181,11 +185,11 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				var nsc config.Namespace
-				if err := yaml.Unmarshal(fileData, &nsc); err != nil {
+				nsc, err := config.NewNamespace(fileData)
+				if err != nil {
 					return err
 				}
-				nscbytes, err := json.Marshal(&nsc)
+				nscbytes, err := json.Marshal(nsc)
 				if err != nil {
 					return err
 				}

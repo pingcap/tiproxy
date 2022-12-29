@@ -1,9 +1,0 @@
-namespace: "ns2"
-frontend:
-  user: "xhe"
-  security:
-backend:
-  instances:
-    - "127.0.0.1:7000"
-  selector-type: "random"
-  security:

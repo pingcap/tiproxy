@@ -15,6 +15,12 @@
 
 package config
 
+import (
+	"bytes"
+
+	"github.com/BurntSushi/toml"
+)
+
 type Namespace struct {
 	Namespace string            `yaml:"namespace" json:"namespace" toml:"namespace"`
 	Frontend  FrontendNamespace `yaml:"frontend" json:"frontend" toml:"frontend"`
@@ -30,4 +36,18 @@ type BackendNamespace struct {
 	Instances    []string  `yaml:"instances" json:"instances" toml:"instances"`
 	SelectorType string    `yaml:"selector-type" json:"selector-type" toml:"selector-type"`
 	Security     TLSConfig `yaml:"security" json:"security" toml:"security"`
+}
+
+func NewNamespace(data []byte) (*Namespace, error) {
+	var cfg Namespace
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+func (cfg *Namespace) ToBytes() ([]byte, error) {
+	b := new(bytes.Buffer)
+	err := toml.NewEncoder(b).Encode(cfg)
+	return b.Bytes(), err
 }

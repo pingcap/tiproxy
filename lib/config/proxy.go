@@ -16,11 +16,12 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 
+	"github.com/BurntSushi/toml"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -116,7 +117,7 @@ func NewConfig(data []byte) (*Config, error) {
 	var cfg Config
 	cfg.Advance.IgnoreWrongNamespace = true
 	cfg.Proxy.RequireBackendTLS = true
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
 	if err := cfg.Check(); err != nil {
@@ -143,5 +144,7 @@ func (cfg *Config) Check() error {
 }
 
 func (cfg *Config) ToBytes() ([]byte, error) {
-	return yaml.Marshal(cfg)
+	b := new(bytes.Buffer)
+	err := toml.NewEncoder(b).Encode(cfg)
+	return b.Bytes(), err
 }
