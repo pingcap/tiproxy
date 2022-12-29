@@ -36,7 +36,7 @@ import (
 
 const DefaultCertExpiration = 10 * 365 * 24 * time.Hour
 
-func createTLSCertificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
+func CreateTLSCertificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
 	logger = logger.With(zap.String("cert", certpath), zap.String("key", keypath), zap.String("ca", capath), zap.Int("rsaKeySize", rsaKeySize))
 
 	_, e1 := os.Stat(certpath)
@@ -66,7 +66,7 @@ func createTLSCertificates(logger *zap.Logger, certpath, keypath, capath string,
 		}
 	}
 
-	certPEM, keyPEM, caPEM, err := CreateTempTLS(rsaKeySize, expiration)
+	certPEM, keyPEM, caPEM, err := createTempTLS(rsaKeySize, expiration)
 	if err != nil {
 		return err
 	}
@@ -87,19 +87,7 @@ func createTLSCertificates(logger *zap.Logger, certpath, keypath, capath string,
 	return nil
 }
 
-func AutoTLS(logger *zap.Logger, scfg *config.TLSConfig, autoca bool, workdir, mod string, keySize int) error {
-	scfg.Cert = filepath.Join(workdir, mod, "cert.pem")
-	scfg.Key = filepath.Join(workdir, mod, "key.pem")
-	if autoca {
-		scfg.CA = filepath.Join(workdir, mod, "ca.pem")
-	}
-	if err := createTLSCertificates(logger, scfg.Cert, scfg.Key, scfg.CA, keySize, DefaultCertExpiration); err != nil {
-		return errors.WithStack(err)
-	}
-	return nil
-}
-
-func CreateTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []byte, error) {
+func createTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []byte, error) {
 	if rsaKeySize < 1024 {
 		rsaKeySize = 1024
 	}
@@ -194,7 +182,7 @@ func CreateTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []
 
 // CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
 func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, err error) {
-	certPEM, keyPEM, caPEM, uerr := CreateTempTLS(0, DefaultCertExpiration)
+	certPEM, keyPEM, caPEM, uerr := createTempTLS(0, DefaultCertExpiration)
 	if uerr != nil {
 		err = uerr
 		return

@@ -32,7 +32,7 @@ func TestCertServer(t *testing.T) {
 	keyPath := filepath.Join(tmpdir, "key")
 	caPath := filepath.Join(tmpdir, "ca")
 
-	require.NoError(t, createTLSCertificates(logger, certPath, keyPath, caPath, 0, time.Hour))
+	require.NoError(t, CreateTLSCertificates(logger, certPath, keyPath, caPath, 0, time.Hour))
 
 	type certCase struct {
 		config.TLSConfig

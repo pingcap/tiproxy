@@ -28,8 +28,7 @@ import (
 )
 
 const (
-	defaultRetryInterval    = 1 * time.Hour
-	defaultAutoCertInterval = 30 * 24 * time.Hour
+	defaultRetryInterval = 1 * time.Hour
 )
 
 // CertManager reloads certs and offers interfaces for fetching TLS configs.
@@ -45,18 +44,16 @@ type CertManager struct {
 	sqlTLS           *security.CertInfo // proxy -> tidb sql port
 	sqlTLSConfig     *tls.Config
 
-	cancel           context.CancelFunc
-	wg               waitgroup.WaitGroup
-	retryInterval    atomic.Int64
-	autoCertInterval atomic.Int64
-	logger           *zap.Logger
+	cancel        context.CancelFunc
+	wg            waitgroup.WaitGroup
+	retryInterval atomic.Int64
+	logger        *zap.Logger
 }
 
 // NewCertManager creates a new CertManager.
 func NewCertManager() *CertManager {
 	cm := &CertManager{}
 	cm.SetRetryInterval(defaultRetryInterval)
-	cm.SetAutoCertInterval(defaultAutoCertInterval)
 	return cm
 }
 
@@ -88,10 +85,6 @@ func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger) error {
 
 func (cm *CertManager) SetRetryInterval(interval time.Duration) {
 	cm.retryInterval.Store(int64(interval))
-}
-
-func (cm *CertManager) SetAutoCertInterval(interval time.Duration) {
-	cm.autoCertInterval.Store(int64(interval))
 }
 
 func (cm *CertManager) ServerTLS() *tls.Config {

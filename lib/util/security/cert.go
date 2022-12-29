@@ -181,7 +181,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		if err != nil {
 			dur = DefaultCertExpiration
 		}
-		certPEM, keyPEM, _, err = CreateTempTLS(ci.cfg.RSAKeySize, dur)
+		certPEM, keyPEM, _, err = createTempTLS(ci.cfg.RSAKeySize, dur)
 		if err != nil {
 			return nil, err
 		}
