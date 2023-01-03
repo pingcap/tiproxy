@@ -19,11 +19,11 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -33,7 +33,7 @@ type CertInfo struct {
 	cfg    config.TLSConfig
 	ca     atomic.Value
 	cert   atomic.Value
-	expire int64
+	expire atomic.Int64
 	server bool
 }
 
@@ -47,7 +47,7 @@ func NewCert(lg *zap.Logger, cfg config.TLSConfig, server bool) (*CertInfo, *tls
 }
 
 func (ci *CertInfo) Reload(lg *zap.Logger, n time.Time) error {
-	if n.Unix() <= atomic.LoadInt64(&ci.expire) {
+	if n.Unix() <= ci.expire.Load() {
 		return nil
 	}
 	_, err := ci.reload(lg)
@@ -126,7 +126,7 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 }
 
 func (ci *CertInfo) updateMinExpire(n int64) {
-	for o := atomic.LoadInt64(&ci.expire); o > n && !atomic.CompareAndSwapInt64(&ci.expire, o, n); o = atomic.LoadInt64(&ci.expire) {
+	for o := ci.expire.Load(); o > n && !ci.expire.CAS(o, n); o = ci.expire.Load() {
 	}
 }
 
