@@ -113,12 +113,6 @@ type Security struct {
 func NewConfig(data []byte) (*Config, error) {
 	var cfg Config
 
-	d, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	cfg.Workdir = filepath.Clean(d)
-
 	cfg.Proxy.Addr = "0.0.0.0:6000"
 	cfg.Proxy.TCPKeepAlive = true
 	cfg.Proxy.RequireBackendTLS = true
@@ -147,6 +141,14 @@ func NewConfig(data []byte) (*Config, error) {
 }
 
 func (cfg *Config) Check() error {
+	if cfg.Workdir == "" {
+		d, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		cfg.Workdir = filepath.Clean(d)
+	}
+
 	switch cfg.Proxy.ProxyProtocol {
 	case "v2":
 	case "":
