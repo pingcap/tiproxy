@@ -1,40 +1,66 @@
-workdir = "./work"
+# workdir = "./work"
 
 [proxy]
-addr = "0.0.0.0:6000"
-tcp-keep-alive = true
-max-connections = 1000
-pd-addrs = "127.0.0.1:2379"
+# addr = "0.0.0.0:6000"
+# tcp-keep-alive = true
 # require-backend-tls = true
-# proxy-protocol = "v2"
-# graceful-wait-before-shutdown = 10
 
-[metrics]
+# possible values:
+#   "" => disable proxy protocol.
+#   "v2" => accept proxy protocol if any, require backends to support proxy protocol.
+# proxy-protocol = ""
+
+# possible values:
+# 	0 => disable graceful shutdown.
+# 	30 => graceful shutdown waiting time in 30 seconds.
+# graceful-wait-before-shutdown = 0
+
+# possible values:
+#		"" => enable static routing.
+#		"pd-addr:pd-port" => automatically tidb discovery.
+# pd-addrs = "127.0.0.1:2379"
+
+# possible values:
+#		0 => no limitation.
+#		100 => accept as many as 100 connections.
+# max-connections = 0
 
 [api]
-addr = "0.0.0.0:3080"
-enable-basic-auth = false
-user = ""
-password = ""
+# addr = "0.0.0.0:3080"
+
+# enable HTTP basic auth or not.
+#
+# enable-basic-auth = false
+# user = ""
+# password = ""
 
 [log]
-level = "info"
-encoder = "tidb"
+
+# level = "info"
+
+# possible values:
+# 	"tidb" => formats used by tidb, check https://github.com/tikv/rfcs/blob/master/text/0018-unified-log-format.md.
+# 	"json" => structured json formats.
+# 	"console" => log format for human.
+# encoder = "tidb"
 
 [log.log-file]
-filename = ""
-max-size = 300
-max-days = 1
-max-backups = 1
+# non-empty filename will enable logging to file.
+#
+# filename = ""
+# max-size = 300
+# max-days = 3
+# max-backups = 3
 
 [security]
-rsa-key-size = 4_096
 # tls object is either of type server, client, or peer
 # [xxxx]
 #   ca = "ca.pem"
 #   cert = "c.pem"
 #   key = "k.pem"
-#   auto-certs = true
+#   auto-certs = true # mostly used by tests. It will generate certs if no cert/key is specified.
+# 	rsa-key-size = 4096 # generated RSA keysize if auto-certs is enabled.
+# 	autocert-expire-duration = "72h" # default expire duration for auto certs.
 #   skip-ca = trure
 # client object:
 #   1. requires: ca or skip-ca(skip verify server certs)
@@ -67,7 +93,12 @@ rsa-key-size = 4_096
 	# internal communication between proxies
 	# auto-certs: true
 
+[metrics]
+
+# WARNING: know what you are doing, these two are for debugging.
+# metrics-addr = ""
+# metrics-interval = 0
+
 [advance]
+
 # ignore-wrong-namespace = true
-# peer-port = "3081"
-# watch-interval = "10m"

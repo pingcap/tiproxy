@@ -34,7 +34,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const DefaultCertExpiration = 10 * 365 * 24 * time.Hour
+const DefaultCertExpiration = 24 * 90 * time.Hour
 
 func CreateTLSCertificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
 	logger = logger.With(zap.String("cert", certpath), zap.String("key", keypath), zap.String("ca", capath), zap.Int("rsaKeySize", rsaKeySize))

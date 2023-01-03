@@ -32,7 +32,7 @@ func main() {
 		Short: "start the proxy server",
 	}
 
-	configFile := rootCmd.PersistentFlags().String("config", "conf/proxy.toml", "proxy config file path")
+	configFile := rootCmd.PersistentFlags().String("config", "", "proxy config file path")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
 	_ = rootCmd.PersistentFlags().String("cluster_name", "tiproxy", "default cluster name, used to generate node name and differential clusters in dns discovery")
@@ -43,9 +43,14 @@ func main() {
 	_ = rootCmd.PersistentFlags().String("bootstrap_discovery_dns", "", "dns srv discovery")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		proxyConfigData, err := os.ReadFile(*configFile)
-		if err != nil {
-			return err
+		var proxyConfigData []byte
+
+		if *configFile != "" {
+			var err error
+			proxyConfigData, err = os.ReadFile(*configFile)
+			if err != nil {
+				return err
+			}
 		}
 
 		cfg, err := config.NewConfig(proxyConfigData)
