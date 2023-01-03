@@ -33,7 +33,7 @@ type CertInfo struct {
 	cfg    config.TLSConfig
 	ca     atomic.Value
 	cert   atomic.Value
-	expire atomic.Int64
+	expire int64
 	server bool
 }
 
@@ -47,7 +47,7 @@ func NewCert(lg *zap.Logger, cfg config.TLSConfig, server bool) (*CertInfo, *tls
 }
 
 func (ci *CertInfo) Reload(lg *zap.Logger, n time.Time) error {
-	if n.Unix() <= ci.expire.Load() {
+	if n.Unix() <= atomic.LoadInt64(&ci.expire) {
 		return nil
 	}
 	_, err := ci.reload(lg)
@@ -126,7 +126,7 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 }
 
 func (ci *CertInfo) updateMinExpire(n int64) {
-	for o := ci.expire.Load(); o > n && !ci.expire.CompareAndSwap(o, n); o = ci.expire.Load() {
+	for o := atomic.LoadInt64(&ci.expire); o > n && !atomic.CompareAndSwapInt64(&ci.expire, o, n); o = atomic.LoadInt64(&ci.expire) {
 	}
 }
 
