@@ -129,7 +129,7 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 		config.proxyConfig.frontendTLSConfig = tc.backendTLSConfig
 		config.clientConfig.tlsConfig = tc.clientTLSConfig
 		config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
-			return router.NewStaticRouter(ts.tc.backendListener.Addr().String()), nil
+			return router.NewStaticRouter([]string{ts.tc.backendListener.Addr().String()}), nil
 		}
 	})...)
 	ts.mb = newMockBackend(cfg.backendConfig)

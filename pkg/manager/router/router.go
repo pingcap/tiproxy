@@ -37,7 +37,7 @@ type Router interface {
 	// Router will handle connection events to balance connections if possible.
 	ConnEventReceiver
 
-	Route(RedirectableConn) (string, error)
+	Route() BackendSelector
 	RedirectConnections() error
 	ConnCount() int
 	Close()

@@ -160,11 +160,12 @@ func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator
 	}
 	// wait for initialize
 	bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	selector := r.Route()
 	addr, err := backoff.RetryNotifyWithData(
 		func() (string, error) {
-			addr, err := r.Route(mgr)
-			if !errors.Is(err, router.ErrNoInstanceToSelect) {
-				return addr, backoff.Permanent(err)
+			addr := selector.Next()
+			if len(addr) == 0 {
+				return "", router.ErrNoInstanceToSelect
 			}
 			return addr, err
 		},
@@ -178,15 +179,31 @@ func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator
 		return nil, err
 	}
 
-	mgr.logger.Info("found", zap.String("addr", addr))
-	mgr.backendConn = NewBackendConnection(addr)
-	if err := mgr.backendConn.Connect(); err != nil {
-		mgr.handshakeHandler.OnHandshake(auth, addr, err)
-		return nil, err
+	// Try to connect to all backup backends one by one until success.
+	maxRetries := 3
+	for retries := 0; retries < maxRetries; retries++ {
+		for len(addr) > 0 {
+			backendConn := NewBackendConnection(addr)
+			err = backendConn.Connect()
+			mgr.handshakeHandler.OnHandshake(auth, addr, err)
+			if err == nil {
+				if err := selector.Succeed(mgr); err == nil {
+					mgr.logger.Info("connected to backend", zap.String("addr", addr))
+					mgr.backendConn = backendConn
+					auth.serverAddr = addr
+					return mgr.backendConn.PacketIO(), nil
+				}
+				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
+				if ignoredErr := backendConn.Close(); ignoredErr != nil {
+					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
+				}
+			}
+			addr = selector.Next()
+		}
+		selector.Reset()
+		addr = selector.Next()
 	}
-
-	auth.serverAddr = addr
-	return mgr.backendConn.PacketIO(), nil
+	return nil, err
 }
 
 // ExecuteCmd forwards messages between the client and the backend.

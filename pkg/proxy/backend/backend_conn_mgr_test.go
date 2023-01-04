@@ -16,11 +16,14 @@ package backend
 
 import (
 	"context"
+	"net"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
@@ -682,4 +685,43 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 		},
 	}
 	ts.runTests(runners)
+}
+
+func TestGetBackendIO(t *testing.T) {
+	listeners := make([]net.Listener, 0, 3)
+	addrs := make([]string, 0, 3)
+	for i := 0; i < 3; i++ {
+		listener, err := net.Listen("tcp", "0.0.0.0:0")
+		require.NoError(t, err)
+		listeners = append(listeners, listener)
+		addrs = append(addrs, listener.Addr().String())
+	}
+	rt := router.NewStaticRouter(addrs)
+	badAddrs := make(map[string]struct{}, 3)
+	handler := &CustomHandshakeHandler{
+		getRouter: func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+			return rt, nil
+		},
+		onHandshake: func(connContext ConnContext, s string, err error) {
+			if err != nil && len(s) > 0 {
+				badAddrs[s] = struct{}{}
+			}
+		},
+	}
+	mgr := NewBackendConnManager(logger.CreateLoggerForTest(t), handler, 0, false, false)
+	auth := &Authenticator{}
+	for i := 0; i <= len(listeners); i++ {
+		io, err := mgr.getBackendIO(auth, auth, nil)
+		if i < len(listeners) {
+			require.NoError(t, err)
+			err = io.Close()
+			require.NoError(t, err)
+			err = listeners[i].Close()
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, syscall.ECONNREFUSED)
+		}
+		require.True(t, len(badAddrs) <= i)
+		badAddrs = make(map[string]struct{}, 3)
+	}
 }
