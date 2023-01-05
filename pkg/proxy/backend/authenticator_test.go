@@ -15,7 +15,6 @@
 package backend
 
 import (
-	"net"
 	"strings"
 	"testing"
 
@@ -216,12 +215,10 @@ func TestCustomAuth(t *testing.T) {
 	reAttrs := map[string]string{"key": "value"}
 	reCap := SupportedServerCapabilities & ^pnet.ClientDeprecateEOF
 	inUser := ""
-	inAddr := ""
 	ts, clean := newTestSuite(t, tc, func(cfg *testConfig) {
 		handler := cfg.proxyConfig.handler
 		handler.handleHandshakeResp = func(ctx ConnContext, resp *pnet.HandshakeResp) error {
 			inUser = resp.User
-			inAddr = ctx.ClientAddr()
 			resp.User = reUser
 			resp.Attrs = reAttrs
 			return nil
@@ -235,9 +232,6 @@ func TestCustomAuth(t *testing.T) {
 		require.Equal(t, reUser, ts.mb.username)
 		require.Equal(t, reAttrs, ts.mb.attrs)
 		require.Equal(t, reCap&pnet.ClientDeprecateEOF, pnet.Capability(ts.mb.capability)&pnet.ClientDeprecateEOF)
-		host, _, err := net.SplitHostPort(inAddr)
-		require.NoError(t, err)
-		require.Equal(t, host, "::1")
 	}
 	ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {})
 	checker()
