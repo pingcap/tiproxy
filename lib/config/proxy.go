@@ -65,9 +65,7 @@ type API struct {
 }
 
 type Advance struct {
-	PeerPort             string `yaml:"peer-port,omitempty" toml:"peer-port,omitempty" json:"peer-port,omitempty"`
-	WatchInterval        string `yaml:"watch-interval,omitempty" toml:"watch-interval,omitempty" json:"watch-interval,omitempty"`
-	IgnoreWrongNamespace bool   `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
+	IgnoreWrongNamespace bool `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
 }
 
 type LogOnline struct {
@@ -110,16 +108,32 @@ type Security struct {
 	PeerTLS    TLSConfig `yaml:"peer-tls,omitempty" toml:"peer-tls,omitempty" json:"peer-tls,omitempty"`
 	ClusterTLS TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
 	SQLTLS     TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
-	RSAKeySize int       `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
 }
 
 func NewConfig(data []byte) (*Config, error) {
 	var cfg Config
-	cfg.Advance.IgnoreWrongNamespace = true
+
+	cfg.Proxy.Addr = "0.0.0.0:6000"
+	cfg.Proxy.TCPKeepAlive = true
 	cfg.Proxy.RequireBackendTLS = true
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
+
+	cfg.API.Addr = "0.0.0.0:3080"
+
+	cfg.Log.Level = "info"
+	cfg.Log.Encoder = "tidb"
+	cfg.Log.LogFile.MaxSize = 300
+	cfg.Log.LogFile.MaxDays = 3
+	cfg.Log.LogFile.MaxBackups = 3
+
+	cfg.Advance.IgnoreWrongNamespace = true
+
+	if len(data) > 0 {
+		if err := toml.Unmarshal(data, &cfg); err != nil {
+			return nil, err
+		}
 	}
+
 	if err := cfg.Check(); err != nil {
 		return nil, err
 	}
@@ -134,6 +148,7 @@ func (cfg *Config) Check() error {
 		}
 		cfg.Workdir = filepath.Clean(d)
 	}
+
 	switch cfg.Proxy.ProxyProtocol {
 	case "v2":
 	case "":

@@ -25,9 +25,7 @@ import (
 var testProxyConfig = Config{
 	Workdir: "./wd",
 	Advance: Advance{
-		PeerPort:             "343",
 		IgnoreWrongNamespace: true,
-		WatchInterval:        "30m",
 	},
 	Proxy: ProxyServer{
 		Addr:              "0.0.0.0:4000",
@@ -63,7 +61,6 @@ var testProxyConfig = Config{
 		},
 	},
 	Security: Security{
-		RSAKeySize: 64,
 		ServerTLS: TLSConfig{
 			CA:        "a",
 			Cert:      "b",
@@ -83,10 +80,12 @@ var testProxyConfig = Config{
 			Key:    "c",
 		},
 		SQLTLS: TLSConfig{
-			CA:     "a",
-			SkipCA: true,
-			Cert:   "b",
-			Key:    "c",
+			CA:                 "a",
+			RSAKeySize:         0,
+			AutoExpireDuration: "1y",
+			SkipCA:             true,
+			Cert:               "b",
+			Key:                "c",
 		},
 	},
 }

@@ -19,11 +19,11 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -126,7 +126,7 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 }
 
 func (ci *CertInfo) updateMinExpire(n int64) {
-	for o := ci.expire.Load(); o > n && !ci.expire.CompareAndSwap(o, n); o = ci.expire.Load() {
+	for o := ci.expire.Load(); o > n && !ci.expire.CAS(o, n); o = ci.expire.Load() {
 	}
 }
 
