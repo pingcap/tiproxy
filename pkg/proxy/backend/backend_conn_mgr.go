@@ -153,21 +153,41 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	return nil
 }
 
-func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(auth, resp)
 	if err != nil {
 		return nil, err
 	}
-	// wait for initialize
-	bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Reasons to wait:
+	// - The TiDB instances may not be initialized yet
+	// - One TiDB may be just shut down and another is just started but not ready yet
+	bctx, cancel := context.WithTimeout(context.Background(), timeout)
 	selector := r.Route()
-	addr, err := backoff.RetryNotifyWithData(
-		func() (string, error) {
-			addr := selector.Next()
-			if len(addr) == 0 {
-				return "", router.ErrNoInstanceToSelect
+	io, err := backoff.RetryNotifyWithData(
+		func() (*pnet.PacketIO, error) {
+			// Try to connect to all backup backends one by one.
+			selector.Reset()
+			for {
+				addr := selector.Next()
+				if len(addr) == 0 {
+					return nil, router.ErrNoInstanceToSelect
+				}
+				backendConn := NewBackendConnection(addr)
+				err := backendConn.Connect()
+				mgr.handshakeHandler.OnHandshake(auth, addr, err)
+				if err == nil {
+					if err = selector.Succeed(mgr); err == nil {
+						mgr.logger.Info("connected to backend", zap.String("addr", addr))
+						mgr.backendConn = backendConn
+						auth.serverAddr = addr
+						return mgr.backendConn.PacketIO(), nil
+					}
+					// Bad luck: the backend has been recycled or shut down just after the selector returns it.
+					if ignoredErr := backendConn.Close(); ignoredErr != nil {
+						mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
+					}
+				}
 			}
-			return addr, err
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
@@ -175,35 +195,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator
 		},
 	)
 	cancel()
-	if err != nil {
-		return nil, err
-	}
-
-	// Try to connect to all backup backends one by one until success.
-	maxRetries := 3
-	for retries := 0; retries < maxRetries; retries++ {
-		for len(addr) > 0 {
-			backendConn := NewBackendConnection(addr)
-			err = backendConn.Connect()
-			mgr.handshakeHandler.OnHandshake(auth, addr, err)
-			if err == nil {
-				if err := selector.Succeed(mgr); err == nil {
-					mgr.logger.Info("connected to backend", zap.String("addr", addr))
-					mgr.backendConn = backendConn
-					auth.serverAddr = addr
-					return mgr.backendConn.PacketIO(), nil
-				}
-				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
-				if ignoredErr := backendConn.Close(); ignoredErr != nil {
-					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
-				}
-			}
-			addr = selector.Next()
-		}
-		selector.Reset()
-		addr = selector.Next()
-	}
-	return nil, err
+	return io, err
 }
 
 // ExecuteCmd forwards messages between the client and the backend.

@@ -18,7 +18,6 @@ import (
 	"context"
 	"net"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -709,17 +708,17 @@ func TestGetBackendIO(t *testing.T) {
 		},
 	}
 	mgr := NewBackendConnManager(logger.CreateLoggerForTest(t), handler, 0, false, false)
-	auth := &Authenticator{}
 	for i := 0; i <= len(listeners); i++ {
-		io, err := mgr.getBackendIO(auth, auth, nil)
+		io, err := mgr.getBackendIO(mgr.authenticator, mgr.authenticator, nil, time.Second)
+		if err == nil {
+			require.NoError(t, io.Close())
+		}
 		if i < len(listeners) {
-			require.NoError(t, err)
-			err = io.Close()
 			require.NoError(t, err)
 			err = listeners[i].Close()
 			require.NoError(t, err)
 		} else {
-			require.ErrorIs(t, err, syscall.ECONNREFUSED)
+			require.ErrorIs(t, err, context.DeadlineExceeded)
 		}
 		require.True(t, len(badAddrs) <= i)
 		badAddrs = make(map[string]struct{}, 3)
