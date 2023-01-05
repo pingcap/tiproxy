@@ -162,7 +162,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator
 	// - The TiDB instances may not be initialized yet
 	// - One TiDB may be just shut down and another is just started but not ready yet
 	bctx, cancel := context.WithTimeout(context.Background(), timeout)
-	selector := r.Route()
+	selector := r.GetBackendSelector()
 	io, err := backoff.RetryNotifyWithData(
 		func() (*pnet.PacketIO, error) {
 			// Try to connect to all backup backends one by one.

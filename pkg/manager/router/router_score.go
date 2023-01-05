@@ -61,8 +61,8 @@ func NewScoreBasedRouter(logger *zap.Logger, httpCli *http.Client, fetcher Backe
 	return router, nil
 }
 
-// Route implements Router.Route interface.
-func (router *ScoreBasedRouter) Route() BackendSelector {
+// GetBackendSelector implements Router.GetBackendSelector interface.
+func (router *ScoreBasedRouter) GetBackendSelector() BackendSelector {
 	return BackendSelector{
 		routeOnce: router.routeOnce,
 		addConn:   router.addNewConn,

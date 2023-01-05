@@ -172,7 +172,7 @@ func (tester *routerTester) checkBackendOrder() {
 }
 
 func (tester *routerTester) simpleRoute(conn RedirectableConn) string {
-	selector := tester.router.Route()
+	selector := tester.router.GetBackendSelector()
 	addr := selector.Next()
 	if len(addr) > 0 {
 		err := selector.Succeed(conn)
@@ -378,7 +378,7 @@ func TestNoBackends(t *testing.T) {
 func TestSelectorReturnOrder(t *testing.T) {
 	tester := newRouterTester(t)
 	tester.addBackends(3)
-	selector := tester.router.Route()
+	selector := tester.router.GetBackendSelector()
 	for i := 0; i < 3; i++ {
 		addrs := make(map[string]struct{}, 3)
 		for j := 0; j < 3; j++ {
@@ -624,7 +624,7 @@ func TestConcurrency(t *testing.T) {
 							t:      t,
 							connID: connID,
 						}
-						selector := router.Route()
+						selector := router.GetBackendSelector()
 						addr := selector.Next()
 						if len(addr) == 0 {
 							conn = nil

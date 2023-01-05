@@ -25,7 +25,7 @@ func NewStaticRouter(addr []string) *StaticRouter {
 	return &StaticRouter{addr: addr}
 }
 
-func (r *StaticRouter) Route() BackendSelector {
+func (r *StaticRouter) GetBackendSelector() BackendSelector {
 	return BackendSelector{
 		routeOnce: func(excluded []string) string {
 			for _, addr := range r.addr {
