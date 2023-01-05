@@ -178,32 +178,32 @@ func (ts *backendMgrTester) startTxn4Backend(packetIO *pnet.PacketIO) error {
 func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO *pnet.PacketIO) error {
 	signal := (*signalRedirect)(atomic.LoadPointer(&ts.mp.signal))
 	require.Nil(ts.t, signal)
-	backend1 := ts.mp.backendConn
+	backend1 := ts.mp.backendIO
 	// There is no other way to verify it's not redirected.
 	// The buffer size of channel signalReceived is 0, so after the second redirect signal is sent,
 	// we can ensure that the first signal is already processed.
 	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 	ts.mp.signalReceived <- signalTypeRedirect
 	// The backend connection is still the same.
-	require.Equal(ts.t, backend1, ts.mp.backendConn)
+	require.Equal(ts.t, backend1, ts.mp.backendIO)
 	return nil
 }
 
 func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	backend1 := ts.mp.backendConn
+	backend1 := ts.mp.backendIO
 	err := ts.forwardCmd4Proxy(clientIO, backendIO)
 	require.NoError(ts.t, err)
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
-	require.NotEqual(ts.t, backend1, ts.mp.backendConn)
+	require.NotEqual(ts.t, backend1, ts.mp.backendIO)
 	require.Len(ts.t, ts.mp.GetRedirectingAddr(), 0)
 	return nil
 }
 
 func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	backend1 := ts.mp.backendConn
+	backend1 := ts.mp.backendIO
 	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
-	require.Equal(ts.t, backend1, ts.mp.backendConn)
+	require.Equal(ts.t, backend1, ts.mp.backendIO)
 	require.Len(ts.t, ts.mp.GetRedirectingAddr(), 0)
 	return nil
 }
@@ -239,10 +239,10 @@ func TestNormalRedirect(t *testing.T) {
 		{
 			client: nil,
 			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
+				backend1 := ts.mp.backendIO
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendConn)
+				require.NotEqual(t, backend1, ts.mp.backendIO)
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,
@@ -342,11 +342,11 @@ func TestRedirectInTxn(t *testing.T) {
 				return ts.mc.request(packetIO)
 			},
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
+				backend1 := ts.mp.backendIO
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(t, err)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventFail)
-				require.Equal(t, backend1, ts.mp.backendConn)
+				require.Equal(t, backend1, ts.mp.backendIO)
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
@@ -490,10 +490,10 @@ func TestSpecialCmds(t *testing.T) {
 		{
 			client: nil,
 			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
+				backend1 := ts.mp.backendIO
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendConn)
+				require.NotEqual(t, backend1, ts.mp.backendIO)
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
@@ -501,8 +501,8 @@ func TestSpecialCmds(t *testing.T) {
 				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
 				require.Equal(t, "another_user", ts.mb.username)
 				require.Equal(t, "session_db", ts.mb.db)
-				expectCap := pnet.Capability(ts.mp.authenticator.supportedServerCapabilities.Uint32() &^ (mysql.ClientMultiStatements | mysql.ClientPluginAuthLenencClientData))
-				gotCap := pnet.Capability(ts.mb.capability &^ mysql.ClientPluginAuthLenencClientData)
+				expectCap := pnet.Capability(ts.mp.handshakeHandler.GetCapability() &^ (pnet.ClientMultiStatements | pnet.ClientPluginAuthLenencClientData))
+				gotCap := pnet.Capability(ts.mb.capability &^ pnet.ClientPluginAuthLenencClientData)
 				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
 				return nil
 			},
@@ -586,10 +586,10 @@ func TestCustomHandshake(t *testing.T) {
 		{
 			client: nil,
 			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
+				backend1 := ts.mp.backendIO
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendConn)
+				require.NotEqual(t, backend1, ts.mp.backendIO)
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,

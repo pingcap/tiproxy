@@ -34,7 +34,7 @@ type clientConfig struct {
 	authData   []byte
 	filePkts   int
 	prepStmtID int
-	capability uint32
+	capability pnet.Capability
 	collation  uint8
 	// for cmd
 	cmd byte
@@ -87,11 +87,11 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 		AuthPlugin: mc.authPlugin,
 		Attrs:      mc.attrs,
 		AuthData:   mc.authData,
-		Capability: mc.capability,
+		Capability: mc.capability.Uint32(),
 		Collation:  mc.collation,
 	}
 	pkt = pnet.MakeHandshakeResponse(resp)
-	if mc.capability&mysql.ClientSSL > 0 {
+	if mc.capability&pnet.ClientSSL > 0 {
 		if err := packetIO.WritePacket(pkt[:32], true); err != nil {
 			return err
 		}
@@ -208,7 +208,7 @@ func (mc *mockClient) requestPrepare(packetIO *pnet.PacketIO) error {
 		numColumns := binary.LittleEndian.Uint16(response[5:])
 		numParams := binary.LittleEndian.Uint16(response[7:])
 		expectedPacketNum = int(numColumns) + int(numParams)
-		if mc.capability&mysql.ClientDeprecateEOF == 0 {
+		if mc.capability&pnet.ClientDeprecateEOF == 0 {
 			if numColumns > 0 {
 				expectedPacketNum++
 			}
@@ -270,7 +270,7 @@ func (mc *mockClient) readUntilResultEnd(packetIO *pnet.PacketIO) (pkt []byte, e
 		if pkt[0] == mysql.ErrHeader {
 			return
 		}
-		if mc.capability&mysql.ClientDeprecateEOF == 0 {
+		if mc.capability&pnet.ClientDeprecateEOF == 0 {
 			if pnet.IsEOFPacket(pkt) {
 				break
 			}
@@ -331,7 +331,7 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 			}
 		default:
 			// read result set
-			if mc.capability&mysql.ClientDeprecateEOF == 0 {
+			if mc.capability&pnet.ClientDeprecateEOF == 0 {
 				if pkt, err = mc.readUntilResultEnd(packetIO); err != nil {
 					return err
 				}
@@ -349,7 +349,7 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 			if pkt[0] == mysql.ErrHeader {
 				return nil
 			}
-			if mc.capability&mysql.ClientDeprecateEOF == 0 {
+			if mc.capability&pnet.ClientDeprecateEOF == 0 {
 				serverStatus = binary.LittleEndian.Uint16(pkt[3:])
 			} else {
 				rs := pnet.ParseOKPacket(pkt)
