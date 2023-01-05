@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
@@ -101,7 +102,7 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 	return nil
 }
 
-type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
+type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error)
 
 func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
 	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
@@ -160,7 +161,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, clientIO *pnet
 	auth.attrs = resp.Attrs
 
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
-	backendIO, err := getBackendIO(auth, auth, resp)
+	backendIO, err := getBackendIO(auth, auth, resp, 5*time.Second)
 	if err != nil {
 		return err
 	}

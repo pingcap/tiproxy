@@ -61,27 +61,54 @@ func NewScoreBasedRouter(logger *zap.Logger, httpCli *http.Client, fetcher Backe
 	return router, nil
 }
 
-// Route implements Router.Route interface.
-func (router *ScoreBasedRouter) Route(conn RedirectableConn) (string, error) {
+// GetBackendSelector implements Router.GetBackendSelector interface.
+func (router *ScoreBasedRouter) GetBackendSelector() BackendSelector {
+	return BackendSelector{
+		routeOnce: router.routeOnce,
+		addConn:   router.addNewConn,
+	}
+}
+
+func (router *ScoreBasedRouter) routeOnce(excluded []string) string {
 	router.Lock()
 	defer router.Unlock()
-	be := router.backends.Back()
-	if be == nil {
-		return "", ErrNoInstanceToSelect
+	for be := router.backends.Back(); be != nil; be = be.Prev() {
+		backend := be.Value.(*backendWrapper)
+		// These backends may be recycled, so we should not connect to them again.
+		switch backend.status {
+		case StatusCannotConnect, StatusSchemaOutdated:
+			continue
+		}
+		found := false
+		for _, ex := range excluded {
+			if ex == backend.addr {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return backend.addr
+		}
 	}
-	backend := be.Value.(*backendWrapper)
-	switch backend.status {
-	case StatusCannotConnect, StatusSchemaOutdated:
-		return "", ErrNoInstanceToSelect
-	}
+	return ""
+}
+
+func (router *ScoreBasedRouter) addNewConn(addr string, conn RedirectableConn) error {
 	connWrapper := &connWrapper{
 		RedirectableConn: conn,
 		phase:            phaseNotRedirected,
 	}
+	router.Lock()
+	be := router.lookupBackend(addr, true)
+	if be == nil {
+		router.Unlock()
+		return errors.WithStack(errors.Errorf("backend %s is not found in the router", addr))
+	}
 	router.addConn(be, connWrapper)
-	addBackendConnMetrics(backend.addr)
+	router.Unlock()
+	addBackendConnMetrics(addr)
 	conn.SetEventReceiver(router)
-	return backend.addr, nil
+	return nil
 }
 
 func (router *ScoreBasedRouter) removeConn(be *list.Element, ce *list.Element) {

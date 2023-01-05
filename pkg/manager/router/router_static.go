@@ -17,16 +17,36 @@ package router
 var _ Router = &StaticRouter{}
 
 type StaticRouter struct {
-	addr string
+	addr []string
 	cnt  int
 }
 
-func NewStaticRouter(addr string) *StaticRouter {
+func NewStaticRouter(addr []string) *StaticRouter {
 	return &StaticRouter{addr: addr}
 }
 
-func (r *StaticRouter) Route(c RedirectableConn) (string, error) {
-	return r.addr, nil
+func (r *StaticRouter) GetBackendSelector() BackendSelector {
+	return BackendSelector{
+		routeOnce: func(excluded []string) string {
+			for _, addr := range r.addr {
+				found := false
+				for _, e := range excluded {
+					if e == addr {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return addr
+				}
+			}
+			return ""
+		},
+		addConn: func(addr string, conn RedirectableConn) error {
+			r.cnt++
+			return nil
+		},
+	}
 }
 
 func (r *StaticRouter) RedirectConnections() error {
@@ -34,7 +54,6 @@ func (r *StaticRouter) RedirectConnections() error {
 }
 
 func (r *StaticRouter) ConnCount() int {
-	r.cnt++
 	return r.cnt
 }
 
