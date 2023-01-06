@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	DialTimeout = 5 * time.Second
+	DialTimeout = 2 * time.Second
 )
 
 type BackendConnection struct {

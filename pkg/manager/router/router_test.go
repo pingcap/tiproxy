@@ -668,3 +668,52 @@ func TestConcurrency(t *testing.T) {
 	cancel()
 	router.Close()
 }
+
+// Test that the backends are refreshed immediately after it's empty.
+func TestRefresh(t *testing.T) {
+	backends := make([]string, 0)
+	var m sync.Mutex
+	fetcher := NewExternalFetcher(func() []string {
+		m.Lock()
+		defer m.Unlock()
+		return backends
+	})
+	// Create a router with a very long health check interval.
+	lg := logger.CreateLoggerForTest(t)
+	rt := &ScoreBasedRouter{
+		logger:   lg,
+		backends: list.New(),
+	}
+	cfg := NewDefaultHealthCheckConfig()
+	cfg.healthCheckInterval = time.Minute
+	observer, err := StartBackendObserver(lg, rt, nil, cfg, fetcher)
+	require.NoError(t, err)
+	rt.Lock()
+	rt.observer = observer
+	rt.Unlock()
+	defer rt.Close()
+	// The initial backends are empty.
+	selector := rt.GetBackendSelector()
+	addr := selector.Next()
+	require.True(t, len(addr) == 0)
+	// Create a new backend and add to the list.
+	server := newBackendServer(t)
+	m.Lock()
+	backends = append(backends, server.sqlAddr)
+	m.Unlock()
+	defer server.close()
+	// The backends are refreshed very soon.
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			t.Fatal("timeout")
+		case <-time.After(100 * time.Millisecond):
+			addr = selector.Next()
+			if len(addr) > 0 {
+				return
+			}
+		}
+	}
+}
