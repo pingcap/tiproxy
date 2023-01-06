@@ -78,7 +78,7 @@ type PacketIO struct {
 	buf         *bufio.ReadWriter
 	proxyInited *atomic.Bool
 	proxy       *Proxy
-	readdr      net.Addr
+	remoteAddr  net.Addr
 	wrap        error
 	sequence    uint8
 }
@@ -121,8 +121,8 @@ func (p *PacketIO) LocalAddr() net.Addr {
 }
 
 func (p *PacketIO) RemoteAddr() net.Addr {
-	if p.readdr != nil {
-		return p.readdr
+	if p.remoteAddr != nil {
+		return p.remoteAddr
 	}
 	return p.conn.RemoteAddr()
 }

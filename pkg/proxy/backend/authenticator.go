@@ -277,8 +277,6 @@ func (auth *Authenticator) writeAuthHandshake(
 		User:  auth.user,
 		DB:    auth.dbname,
 		Attrs: auth.attrs,
-		//mysql.AuthTiDBSessionToken,
-		//mysql.ClientPluginAuth,
 		Collation:  auth.collation,
 		AuthData:   authData,
 		Capability: auth.capability | authCap,

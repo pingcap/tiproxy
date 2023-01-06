@@ -49,6 +49,6 @@ func (o *oriRemoteAddr) String() string {
 
 func WithRemoteAddr(readdr string) func(pi *PacketIO) {
 	return func(pi *PacketIO) {
-		pi.readdr = &oriRemoteAddr{addr: readdr}
+		pi.remoteAddr = &oriRemoteAddr{addr: readdr}
 	}
 }
