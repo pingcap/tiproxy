@@ -163,20 +163,46 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	return nil
 }
 
-func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
-	r, err := mgr.handshakeHandler.GetRouter(mgr, resp)
+func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
+	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
 		return nil, err
 	}
-	// wait for initialize
-	bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	addr, err := backoff.RetryNotifyWithData(
-		func() (string, error) {
-			addr, err := r.Route(mgr)
-			if !errors.Is(err, router.ErrNoInstanceToSelect) {
-				return addr, backoff.Permanent(err)
+	// Reasons to wait:
+	// - The TiDB instances may not be initialized yet
+	// - One TiDB may be just shut down and another is just started but not ready yet
+	bctx, cancel := context.WithTimeout(context.Background(), timeout)
+	selector := r.GetBackendSelector()
+	io, err := backoff.RetryNotifyWithData(
+		func() (*pnet.PacketIO, error) {
+			// Try to connect to all backup backends one by one.
+			selector.Reset()
+			for {
+				addr := selector.Next()
+				if len(addr) == 0 {
+					return nil, router.ErrNoInstanceToSelect
+				}
+
+				cn, err := net.DialTimeout("tcp", addr, DialTimeout)
+				if err != nil {
+					mgr.handshakeHandler.OnHandshake(mgr, addr, err)
+					return nil, errors.Wrapf(err, "dial backend error")
+				}
+
+				mgr.handshakeHandler.OnHandshake(cctx, addr, err)
+				if err = selector.Succeed(mgr); err == nil {
+					mgr.logger.Info("connected to backend", zap.String("addr", addr))
+					// NOTE: should use DNS name as much as possible
+					// Usually certs are signed with domain instead of IP addrs
+					// And `RemoteAddr()` will return IP addr
+					mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr))
+					return mgr.backendIO, nil
+				}
+				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
+				if ignoredErr := cn.Close(); ignoredErr != nil {
+					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
+				}
 			}
-			return addr, err
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
@@ -184,24 +210,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx ConnContext, auth *Authenticator
 		},
 	)
 	cancel()
-	if err != nil {
-		return nil, err
-	}
-
-	mgr.logger.Info("found", zap.String("addr", addr))
-
-	cn, err := net.DialTimeout("tcp", addr, DialTimeout)
-	if err != nil {
-		mgr.handshakeHandler.OnHandshake(mgr, addr, err)
-		return nil, errors.Wrapf(err, "dial backend error")
-	}
-
-	// NOTE: should use DNS name as much as possible
-	// Usually certs are signed with domain instead of IP addrs
-	// And `RemoteAddr()` will return IP addr
-	mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr))
-
-	return mgr.backendIO, nil
+	return io, err
 }
 
 // ExecuteCmd forwards messages between the client and the backend.

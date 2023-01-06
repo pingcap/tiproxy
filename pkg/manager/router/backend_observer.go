@@ -122,6 +122,7 @@ type BackendObserver struct {
 	eventReceiver  BackendEventReceiver
 	wg             waitgroup.WaitGroup
 	cancelFunc     context.CancelFunc
+	refreshChan    chan struct{}
 }
 
 // StartBackendObserver creates a BackendObserver and starts watching.
@@ -152,6 +153,7 @@ func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, 
 		httpCli:        httpCli,
 		httpTLS:        httpTLS,
 		eventReceiver:  eventReceiver,
+		refreshChan:    make(chan struct{}),
 	}
 	bo.fetcher = backendFetcher
 	return bo, nil
@@ -166,6 +168,15 @@ func (bo *BackendObserver) Start() {
 	})
 }
 
+// Refresh indicates the observer to refresh immediately.
+func (bo *BackendObserver) Refresh() {
+	// If the observer happens to be refreshing, skip this round.
+	select {
+	case bo.refreshChan <- struct{}{}:
+	default:
+	}
+}
+
 func (bo *BackendObserver) observe(ctx context.Context) {
 	for ctx.Err() == nil {
 		backendInfo := bo.fetcher.GetBackendList(ctx)
@@ -176,6 +187,7 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 		bo.notifyIfChanged(backendStatus)
 		select {
 		case <-time.After(bo.config.healthCheckInterval):
+		case <-bo.refreshChan:
 		case <-ctx.Done():
 			return
 		}

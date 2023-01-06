@@ -171,11 +171,21 @@ func (tester *routerTester) checkBackendOrder() {
 	}
 }
 
+func (tester *routerTester) simpleRoute(conn RedirectableConn) string {
+	selector := tester.router.GetBackendSelector()
+	addr := selector.Next()
+	if len(addr) > 0 {
+		err := selector.Succeed(conn)
+		require.NoError(tester.t, err)
+	}
+	return addr
+}
+
 func (tester *routerTester) addConnections(num int) {
 	for i := 0; i < num; i++ {
 		conn := tester.createConn()
-		addr, err := tester.router.Route(conn)
-		require.NoError(tester.t, err)
+		addr := tester.simpleRoute(conn)
+		require.True(tester.t, len(addr) > 0)
 		conn.from = addr
 		tester.conns[conn.connID] = conn
 	}
@@ -355,13 +365,49 @@ func TestConnBalanced(t *testing.T) {
 func TestNoBackends(t *testing.T) {
 	tester := newRouterTester(t)
 	conn := tester.createConn()
-	_, err := tester.router.Route(conn)
-	require.ErrorIs(t, err, ErrNoInstanceToSelect)
+	addr := tester.simpleRoute(conn)
+	require.True(t, len(addr) == 0)
 	tester.addBackends(1)
 	tester.addConnections(10)
 	tester.killBackends(1)
-	_, err = tester.router.Route(conn)
-	require.ErrorIs(t, err, ErrNoInstanceToSelect)
+	addr = tester.simpleRoute(conn)
+	require.True(t, len(addr) == 0)
+}
+
+// Test that the backends returned by the BackendSelector are complete and different.
+func TestSelectorReturnOrder(t *testing.T) {
+	tester := newRouterTester(t)
+	tester.addBackends(3)
+	selector := tester.router.GetBackendSelector()
+	for i := 0; i < 3; i++ {
+		addrs := make(map[string]struct{}, 3)
+		for j := 0; j < 3; j++ {
+			addr := selector.Next()
+			addrs[addr] = struct{}{}
+		}
+		// All 3 addresses are different.
+		require.Equal(t, 3, len(addrs))
+		addr := selector.Next()
+		require.True(t, len(addr) == 0)
+		selector.Reset()
+	}
+
+	tester.killBackends(1)
+	for i := 0; i < 2; i++ {
+		addr := selector.Next()
+		require.True(t, len(addr) > 0)
+	}
+	addr := selector.Next()
+	require.True(t, len(addr) == 0)
+	selector.Reset()
+
+	tester.addBackends(1)
+	for i := 0; i < 3; i++ {
+		addr := selector.Next()
+		require.True(t, len(addr) > 0)
+	}
+	addr = selector.Next()
+	require.True(t, len(addr) == 0)
 }
 
 // Test that the backends are balanced during rolling restart.
@@ -578,12 +624,14 @@ func TestConcurrency(t *testing.T) {
 							t:      t,
 							connID: connID,
 						}
-						addr, err := router.Route(conn)
-						if err != nil {
-							require.ErrorIs(t, err, ErrNoInstanceToSelect)
+						selector := router.GetBackendSelector()
+						addr := selector.Next()
+						if len(addr) == 0 {
 							conn = nil
 							continue
 						}
+						err = selector.Succeed(conn)
+						require.NoError(t, err)
 						conn.from = addr
 					} else if len(conn.GetRedirectingAddr()) > 0 {
 						// redirecting, 70% success, 20% fail, 10% close
@@ -619,4 +667,53 @@ func TestConcurrency(t *testing.T) {
 	wg.Wait()
 	cancel()
 	router.Close()
+}
+
+// Test that the backends are refreshed immediately after it's empty.
+func TestRefresh(t *testing.T) {
+	backends := make([]string, 0)
+	var m sync.Mutex
+	fetcher := NewExternalFetcher(func() []string {
+		m.Lock()
+		defer m.Unlock()
+		return backends
+	})
+	// Create a router with a very long health check interval.
+	lg := logger.CreateLoggerForTest(t)
+	rt := &ScoreBasedRouter{
+		logger:   lg,
+		backends: list.New(),
+	}
+	cfg := NewDefaultHealthCheckConfig()
+	cfg.healthCheckInterval = time.Minute
+	observer, err := StartBackendObserver(lg, rt, nil, cfg, fetcher)
+	require.NoError(t, err)
+	rt.Lock()
+	rt.observer = observer
+	rt.Unlock()
+	defer rt.Close()
+	// The initial backends are empty.
+	selector := rt.GetBackendSelector()
+	addr := selector.Next()
+	require.True(t, len(addr) == 0)
+	// Create a new backend and add to the list.
+	server := newBackendServer(t)
+	m.Lock()
+	backends = append(backends, server.sqlAddr)
+	m.Unlock()
+	defer server.close()
+	// The backends are refreshed very soon.
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			t.Fatal("timeout")
+		case <-time.After(100 * time.Millisecond):
+			addr = selector.Next()
+			if len(addr) > 0 {
+				return
+			}
+		}
+	}
 }
