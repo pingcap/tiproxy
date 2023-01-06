@@ -63,8 +63,7 @@ type Server struct {
 	// HTTP server
 	HTTPListener net.Listener
 	// L7 proxy
-	Proxy   *proxy.SQLServer
-	proxyCh <-chan *config.ProxyServerOnline
+	Proxy *proxy.SQLServer
 }
 
 func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error) {
@@ -216,7 +215,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			err = errors.WithStack(err)
 			return
 		}
-
 
 		srv.wg.Run(func() {
 			srv.Proxy.Run(ctx, srv.ConfigManager.WatchConfig(ctx))

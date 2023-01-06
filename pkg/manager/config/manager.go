@@ -80,7 +80,9 @@ func (srv *ConfigManager) Init(ctx context.Context, cfg *config.Config, logger *
 	})
 
 	// init config for other components
-	srv.SetConfig(ctx, cfg)
+	if err := srv.SetConfig(ctx, cfg); err != nil {
+		return err
+	}
 
 	var nctx context.Context
 	nctx, srv.cancel = context.WithCancel(ctx)
