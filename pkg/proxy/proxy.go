@@ -88,15 +88,15 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.Unlock()
 }
 
-func (s *SQLServer) Run(ctx context.Context, onlineProxyConfig <-chan *config.ProxyServerOnline) {
+func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 	// Create another context because it still needs to run after graceful shutdown.
 	ctx, s.cancelFunc = context.WithCancel(context.Background())
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case och := <-onlineProxyConfig:
-			s.reset(och)
+		case ach := <-cfgch:
+			s.reset(&ach.Proxy.ProxyServerOnline)
 		default:
 			conn, err := s.listener.Accept()
 			if err != nil {

@@ -79,6 +79,9 @@ func (srv *ConfigManager) Init(ctx context.Context, cfg *config.Config, logger *
 		return a.Key < b.Key
 	})
 
+	// init config for other components
+	srv.SetConfig(ctx, cfg)
+
 	var nctx context.Context
 	nctx, srv.cancel = context.WithCancel(ctx)
 	srv.wg.Run(func() {

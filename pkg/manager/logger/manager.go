@@ -51,20 +51,23 @@ func NewLoggerManager(cfg *config.Log) (*LoggerManager, *zap.Logger, error) {
 }
 
 // Init starts a goroutine to watch configuration.
-func (lm *LoggerManager) Init(cfgCh <-chan *config.LogOnline) {
+func (lm *LoggerManager) Init(cfgch <-chan *config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
-	lm.wg.Run(func() {
-		lm.watchCfg(ctx, cfgCh)
-	})
 	lm.cancel = cancel
+
+	lm.wg.Run(func() {
+		lm.watchCfg(ctx, cfgch)
+	})
 }
 
-func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh <-chan *config.LogOnline) {
+func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Config) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case cfg := <-cfgCh:
+		case acfg := <-cfgch:
+			cfg := &acfg.Log.LogOnline
+
 			err := lm.updateLoggerCfg(cfg)
 			if err != nil {
 				bytes, merr := json.Marshal(cfg)
