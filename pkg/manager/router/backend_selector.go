@@ -26,10 +26,10 @@ func (bs *BackendSelector) Reset() {
 }
 
 func (bs *BackendSelector) Next() string {
-	if len(bs.cur) > 0 {
+	bs.cur = bs.routeOnce(bs.excluded)
+	if bs.cur != "" {
 		bs.excluded = append(bs.excluded, bs.cur)
 	}
-	bs.cur = bs.routeOnce(bs.excluded)
 	return bs.cur
 }
 

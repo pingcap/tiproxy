@@ -271,6 +271,8 @@ func (p *PacketIO) parseProxyV2() (*Proxy, error) {
 		buf = buf[3+length:]
 	}
 
+	// set RemoteAddr in case of proxy.
+	p.remoteAddr = m.SrcAddress
 	return m, nil
 }
 

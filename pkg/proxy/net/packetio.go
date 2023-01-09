@@ -78,6 +78,7 @@ type PacketIO struct {
 	buf         *bufio.ReadWriter
 	proxyInited *atomic.Bool
 	proxy       *Proxy
+	remoteAddr  net.Addr
 	wrap        error
 	sequence    uint8
 }
@@ -120,13 +121,8 @@ func (p *PacketIO) LocalAddr() net.Addr {
 }
 
 func (p *PacketIO) RemoteAddr() net.Addr {
-	return p.conn.RemoteAddr()
-}
-
-// SourceAddr returns the source address if proxy protocol is enabled.
-func (p *PacketIO) SourceAddr() net.Addr {
-	if proxy := p.Proxy(); proxy != nil {
-		return proxy.SrcAddress
+	if p.remoteAddr != nil {
+		return p.remoteAddr
 	}
 	return p.conn.RemoteAddr()
 }

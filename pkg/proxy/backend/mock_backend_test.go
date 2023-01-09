@@ -34,7 +34,7 @@ type backendConfig struct {
 	rows          int
 	respondType   respondType
 	stmtNum       int
-	capability    uint32
+	capability    pnet.Capability
 	status        uint16
 	authSucceed   bool
 	abnormalExit  bool
@@ -85,7 +85,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	}
 	// upgrade to TLS
 	capability := binary.LittleEndian.Uint16(clientPkt[:2])
-	sslEnabled := uint32(capability)&mysql.ClientSSL > 0 && mb.capability&mysql.ClientSSL > 0
+	sslEnabled := uint32(capability)&mysql.ClientSSL > 0 && mb.capability&pnet.ClientSSL > 0
 	if sslEnabled {
 		if _, err = packetIO.ServerTLSHandshake(mb.tlsConfig); err != nil {
 			return err
@@ -100,7 +100,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	mb.db = resp.DB
 	mb.authData = resp.AuthData
 	mb.attrs = resp.Attrs
-	mb.capability = resp.Capability
+	mb.capability = pnet.Capability(resp.Capability)
 	// verify password
 	return mb.verifyPassword(packetIO, resp)
 }
@@ -216,7 +216,7 @@ func (mb *mockBackend) respondColumns(packetIO *pnet.PacketIO) error {
 }
 
 func (mb *mockBackend) writeResultEndPacket(packetIO *pnet.PacketIO, status uint16) error {
-	if mb.capability&mysql.ClientDeprecateEOF > 0 {
+	if mb.capability&pnet.ClientDeprecateEOF > 0 {
 		return packetIO.WriteOKPacket(status, mysql.EOFHeader)
 	}
 	return packetIO.WriteEOFPacket(status)
@@ -272,7 +272,7 @@ func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, v
 		}
 
 		if status&mysql.ServerStatusCursorExists == 0 {
-			if mb.capability&mysql.ClientDeprecateEOF == 0 {
+			if mb.capability&pnet.ClientDeprecateEOF == 0 {
 				if err := packetIO.WriteEOFPacket(status); err != nil {
 					return err
 				}
@@ -344,7 +344,7 @@ func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
 				return err
 			}
 		}
-		if mb.capability&mysql.ClientDeprecateEOF == 0 {
+		if mb.capability&pnet.ClientDeprecateEOF == 0 {
 			if err := packetIO.WriteEOFPacket(mb.status); err != nil {
 				return err
 			}
@@ -356,7 +356,7 @@ func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
 				return err
 			}
 		}
-		if mb.capability&mysql.ClientDeprecateEOF == 0 {
+		if mb.capability&pnet.ClientDeprecateEOF == 0 {
 			if err := packetIO.WriteEOFPacket(mb.status); err != nil {
 				return err
 			}

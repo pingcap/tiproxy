@@ -21,7 +21,6 @@ import (
 
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,12 +33,12 @@ import (
 // sent from the server and vice versa.
 
 const (
-	defaultTestBackendCapability = mysql.ClientLongPassword | mysql.ClientFoundRows | mysql.ClientLongFlag |
-		mysql.ClientConnectWithDB | mysql.ClientNoSchema | mysql.ClientODBC | mysql.ClientLocalFiles | mysql.ClientIgnoreSpace |
-		mysql.ClientProtocol41 | mysql.ClientInteractive | mysql.ClientSSL | mysql.ClientIgnoreSigpipe |
-		mysql.ClientTransactions | mysql.ClientReserved | mysql.ClientSecureConnection | mysql.ClientMultiStatements |
-		mysql.ClientMultiResults | mysql.ClientPluginAuth | mysql.ClientConnectAtts | mysql.ClientPluginAuthLenencClientData |
-		mysql.ClientDeprecateEOF
+	defaultTestBackendCapability = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientLongFlag |
+		pnet.ClientConnectWithDB | pnet.ClientNoSchema | pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientIgnoreSpace |
+		pnet.ClientProtocol41 | pnet.ClientInteractive | pnet.ClientSSL | pnet.ClientIgnoreSigpipe |
+		pnet.ClientTransactions | pnet.ClientReserved | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
+		pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientPluginAuthLenencClientData |
+		pnet.ClientDeprecateEOF
 	defaultTestClientCapability = defaultTestBackendCapability
 )
 
