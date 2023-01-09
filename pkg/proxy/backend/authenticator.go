@@ -275,9 +275,9 @@ func (auth *Authenticator) writeAuthHandshake(
 ) error {
 	// Always handshake with SSL enabled and enable auth_plugin.
 	resp := &pnet.HandshakeResp{
-		User:  auth.user,
-		DB:    auth.dbname,
-		Attrs: auth.attrs,
+		User:       auth.user,
+		DB:         auth.dbname,
+		Attrs:      auth.attrs,
 		Collation:  auth.collation,
 		AuthData:   authData,
 		Capability: auth.capability | authCap,

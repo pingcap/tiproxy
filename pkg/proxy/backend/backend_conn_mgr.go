@@ -173,40 +173,44 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	// - One TiDB may be just shut down and another is just started but not ready yet
 	bctx, cancel := context.WithTimeout(context.Background(), timeout)
 	selector := r.GetBackendSelector()
+	var addr string
 	io, err := backoff.RetryNotifyWithData(
 		func() (*pnet.PacketIO, error) {
 			// Try to connect to all backup backends one by one.
-			selector.Reset()
-			for {
-				addr := selector.Next()
-				if len(addr) == 0 {
+			addr := selector.Next()
+
+			// if all addrs are enumerated, reset and try again
+			if addr == "" {
+				selector.Reset()
+				addr = selector.Next()
+				if addr == "" {
 					return nil, router.ErrNoInstanceToSelect
 				}
+			}
 
-				cn, err := net.DialTimeout("tcp", addr, DialTimeout)
-				if err != nil {
-					mgr.handshakeHandler.OnHandshake(mgr, addr, err)
-					return nil, errors.Wrapf(err, "dial backend error")
-				}
+			cn, err := net.DialTimeout("tcp", addr, DialTimeout)
+			if err != nil {
+				return nil, errors.Wrapf(err, "dial backend %s error", addr)
+			}
 
-				mgr.handshakeHandler.OnHandshake(cctx, addr, err)
-				if err = selector.Succeed(mgr); err == nil {
-					mgr.logger.Info("connected to backend", zap.String("addr", addr))
-					// NOTE: should use DNS name as much as possible
-					// Usually certs are signed with domain instead of IP addrs
-					// And `RemoteAddr()` will return IP addr
-					mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr))
-					return mgr.backendIO, nil
-				}
+			if err := selector.Succeed(mgr); err != nil {
 				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
 				if ignoredErr := cn.Close(); ignoredErr != nil {
 					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
 				}
+				return nil, err
 			}
+
+			mgr.logger.Info("connected to backend", zap.String("addr", addr))
+			// NOTE: should use DNS name as much as possible
+			// Usually certs are signed with domain instead of IP addrs
+			// And `RemoteAddr()` will return IP addr
+			mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr))
+			return mgr.backendIO, nil
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
-			mgr.handshakeHandler.OnHandshake(mgr, "", err)
+			mgr.handshakeHandler.OnHandshake(cctx, addr, err)
 		},
 	)
 	cancel()

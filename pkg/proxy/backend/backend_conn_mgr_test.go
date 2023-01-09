@@ -16,6 +16,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -687,14 +688,16 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 }
 
 func TestGetBackendIO(t *testing.T) {
-	listeners := make([]net.Listener, 0, 3)
 	addrs := make([]string, 0, 3)
-	for i := 0; i < 3; i++ {
+	listeners := make([]net.Listener, 0, cap(addrs))
+
+	for i := 0; i < cap(addrs); i++ {
 		listener, err := net.Listen("tcp", "0.0.0.0:0")
 		require.NoError(t, err)
 		listeners = append(listeners, listener)
 		addrs = append(addrs, listener.Addr().String())
 	}
+
 	rt := router.NewStaticRouter(addrs)
 	badAddrs := make(map[string]struct{}, 3)
 	handler := &CustomHandshakeHandler{
@@ -708,19 +711,29 @@ func TestGetBackendIO(t *testing.T) {
 		},
 	}
 	mgr := NewBackendConnManager(logger.CreateLoggerForTest(t), handler, 0, false, false)
+	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
+		wg.Run(func() {
+			if i < len(listeners) {
+				cn, err := listeners[i].Accept()
+				require.NoError(t, err)
+				require.NoError(t, cn.Close())
+			}
+		})
 		io, err := mgr.getBackendIO(mgr, mgr.authenticator, nil, time.Second)
 		if err == nil {
 			require.NoError(t, io.Close())
 		}
+		message := fmt.Sprintf("%d: %s, %+v\n", i, badAddrs, err)
 		if i < len(listeners) {
-			require.NoError(t, err)
+			require.NoError(t, err, message)
 			err = listeners[i].Close()
-			require.NoError(t, err)
+			require.NoError(t, err, message)
 		} else {
-			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.ErrorIs(t, err, context.DeadlineExceeded, message)
 		}
-		require.True(t, len(badAddrs) <= i)
+		require.True(t, len(badAddrs) <= i, message)
 		badAddrs = make(map[string]struct{}, 3)
+		wg.Wait()
 	}
 }

@@ -17,18 +17,18 @@ package router
 var _ Router = &StaticRouter{}
 
 type StaticRouter struct {
-	addr []string
-	cnt  int
+	addrs []string
+	cnt   int
 }
 
 func NewStaticRouter(addr []string) *StaticRouter {
-	return &StaticRouter{addr: addr}
+	return &StaticRouter{addrs: addr}
 }
 
 func (r *StaticRouter) GetBackendSelector() BackendSelector {
 	return BackendSelector{
 		routeOnce: func(excluded []string) string {
-			for _, addr := range r.addr {
+			for _, addr := range r.addrs {
 				found := false
 				for _, e := range excluded {
 					if e == addr {
