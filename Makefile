@@ -14,11 +14,13 @@
 # limitations under the License.
 
 GOBIN := $(shell pwd)/bin
+VERSION ?= $(shell git rev-parse --abbrev-ref HEAD)
+COMMIT ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)
 DEBUG ?=
 DOCKERPREFIX ?=
 BUILD_TAGS ?=
 LDFLAGS ?= 
-BUILDFLAGS := $(BUILDFLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '${BUILD_TAGS}'
+BUILDFLAGS := $(BUILDFLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS) -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)' -tags '$(BUILD_TAGS)'
 ifneq ("$(DEBUG)", "")
 	BUILDFLAGS += -race
 endif
