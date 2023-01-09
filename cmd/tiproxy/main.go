@@ -34,8 +34,8 @@ var (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   os.Args[0],
-		Short: "start the proxy server",
+		Use:     os.Args[0],
+		Short:   "start the proxy server",
 		Version: fmt.Sprintf("%s, commit %s", Version, Commit),
 	}
 
