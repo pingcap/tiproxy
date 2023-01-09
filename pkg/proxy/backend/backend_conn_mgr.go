@@ -502,14 +502,14 @@ func (mgr *BackendConnManager) ServerAddr() string {
 	return mgr.backendIO.RemoteAddr().String()
 }
 
-func (mgr *BackendConnManager) InBytes() uint64 {
+func (mgr *BackendConnManager) ClientInBytes() uint64 {
 	if mgr.clientIO == nil {
 		return 0
 	}
 	return mgr.clientIO.InBytes()
 }
 
-func (mgr *BackendConnManager) OutBytes() uint64 {
+func (mgr *BackendConnManager) ClientOutBytes() uint64 {
 	if mgr.clientIO == nil {
 		return 0
 	}

@@ -225,8 +225,8 @@ func (ts *backendMgrTester) checkConnClosed(_, _ *pnet.PacketIO) error {
 func (ts *backendMgrTester) runTests(runners []runner) {
 	for _, runner := range runners {
 		ts.runAndCheck(ts.t, nil, runner.client, runner.backend, runner.proxy)
-		require.Equal(ts.t, ts.tc.clientIO.InBytes(), ts.mp.OutBytes())
-		require.Equal(ts.t, ts.tc.clientIO.OutBytes(), ts.mp.InBytes())
+		require.Equal(ts.t, ts.tc.clientIO.InBytes(), ts.mp.ClientOutBytes())
+		require.Equal(ts.t, ts.tc.clientIO.OutBytes(), ts.mp.ClientInBytes())
 	}
 }
 
