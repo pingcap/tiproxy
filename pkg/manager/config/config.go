@@ -15,44 +15,80 @@
 package config
 
 import (
-	"context"
-	"encoding/json"
-	"path"
+	"os"
+	"time"
 
+	"github.com/BurntSushi/toml"
+	"github.com/fsnotify/fsnotify"
 	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/errors"
 	"go.uber.org/zap"
 )
 
-func (e *ConfigManager) SetConfig(ctx context.Context, val *config.Config) error {
-	c, err := json.Marshal(val)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	return e.set(ctx, pathPrefixConfig, "all", c)
-}
-
-func (e *ConfigManager) GetConfig(ctx context.Context, val *config.Config) error {
-	c, err := e.get(ctx, pathPrefixConfig, "all")
+func (e *ConfigManager) reloadConfigFile(file string) error {
+	proxyConfigData, err := os.ReadFile(file)
 	if err != nil {
 		return err
 	}
 
-	return json.Unmarshal(c.Value, val)
+	return e.SetTOMLConfig(proxyConfigData)
 }
 
-func (e *ConfigManager) WatchConfig(ctx context.Context) <-chan *config.Config {
-	ch := make(chan *config.Config)
-	e.Watch(path.Join(pathPrefixConfig, "all"), func(_ *zap.Logger, k KVEvent) {
-		var c config.Config
-		if k.Type == KVEventDel {
-			ch <- &c
-		} else {
-			e := json.Unmarshal(k.Value, &c)
-			if e == nil {
-				ch <- &c
+func (e *ConfigManager) handleFSEvent(ev fsnotify.Event) {
+	switch {
+	case ev.Has(fsnotify.Create), ev.Has(fsnotify.Write), ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
+		// in case of remove/rename the file
+		if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
+			// rewatching may be too fast, sleep for a while
+			time.Sleep(50 * time.Millisecond)
+
+			nerr := e.wch.Add(ev.Name)
+			if nerr != nil {
+				e.logger.Error("failed to re-watch file", zap.String("file", ev.Name), zap.Error(nerr))
 			}
 		}
-	})
+
+		// try to reload it
+		e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(ev.Name)), zap.Any("cfg", e.GetConfig()))
+	}
+}
+
+func (e *ConfigManager) SetTOMLConfig(data []byte) error {
+	e.sts.Lock()
+	defer e.sts.Unlock()
+
+	base := e.sts.current
+	if base == nil {
+		base = config.NewConfig()
+	}
+
+	if err := toml.Unmarshal(data, base); err != nil {
+		return err
+	}
+
+	if err := base.Check(); err != nil {
+		return err
+	}
+
+	e.sts.current = base
+
+	for _, list := range e.sts.listeners {
+		list <- base.Clone()
+	}
+
+	return nil
+}
+
+func (e *ConfigManager) GetConfig() *config.Config {
+	e.sts.Lock()
+	v := e.sts.current
+	e.sts.Unlock()
+	return v
+}
+
+func (e *ConfigManager) WatchConfig() <-chan *config.Config {
+	ch := make(chan *config.Config)
+	e.sts.Lock()
+	e.sts.listeners = append(e.sts.listeners, ch)
+	e.sts.Unlock()
 	return ch
 }

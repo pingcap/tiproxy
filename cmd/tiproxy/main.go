@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/sctx"
@@ -38,44 +37,16 @@ func main() {
 		Short:   "start the proxy server",
 		Version: fmt.Sprintf("%s, commit %s", Version, Commit),
 	}
+	rootCmd.SetOutput(os.Stdout)
+	rootCmd.SetErr(os.Stderr)
 
-	configFile := rootCmd.PersistentFlags().String("config", "", "proxy config file path")
-	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
-	logLevel := rootCmd.PersistentFlags().String("log_level", "", "log level")
-	_ = rootCmd.PersistentFlags().String("cluster_name", "tiproxy", "default cluster name, used to generate node name and differential clusters in dns discovery")
-	_ = rootCmd.PersistentFlags().String("node_name", "", "by default, it is generate prefixed by cluster-name")
-	_ = rootCmd.PersistentFlags().String("pub_addr", "127.0.0.1", "IP or domain, will be used as the accessible addr for others")
-	_ = rootCmd.PersistentFlags().StringSlice("bootstrap_clusters", []string{}, "lists of other nodes in the cluster, e.g. 'n1=xxx,n2=xxx', where xx are IPs or domains")
-	_ = rootCmd.PersistentFlags().String("bootstrap_discovery_etcd", "", "etcd discovery service url")
-	_ = rootCmd.PersistentFlags().String("bootstrap_discovery_dns", "", "dns srv discovery")
+	sctx := &sctx.Context{}
+
+	rootCmd.PersistentFlags().StringVar(&sctx.ConfigFile, "config", "", "proxy config file path")
+	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Log.Encoder, "log_encoder", "", "log in format of tidb, console, or json")
+	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Log.Level, "log_level", "", "log level")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		var proxyConfigData []byte
-
-		if *configFile != "" {
-			var err error
-			proxyConfigData, err = os.ReadFile(*configFile)
-			if err != nil {
-				return err
-			}
-		}
-
-		cfg, err := config.NewConfig(proxyConfigData)
-		if err != nil {
-			return err
-		}
-
-		if *logEncoder != "" {
-			cfg.Log.Encoder = *logEncoder
-		}
-		if *logLevel != "" {
-			cfg.Log.Level = *logLevel
-		}
-
-		sctx := &sctx.Context{
-			Config: cfg,
-		}
-
 		srv, err := server.NewServer(cmd.Context(), sctx)
 		if err != nil {
 			return errors.Wrapf(err, "fail to create server")

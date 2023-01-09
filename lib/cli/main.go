@@ -18,6 +18,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
@@ -32,6 +33,8 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 		Short:        "cli",
 		SilenceUsage: true,
 	}
+	rootCmd.SetOutput(os.Stdout)
+	rootCmd.SetErr(os.Stderr)
 
 	ctx := &Context{}
 

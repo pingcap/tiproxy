@@ -91,28 +91,40 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 	// Create another context because it still needs to run after graceful shutdown.
 	ctx, s.cancelFunc = context.WithCancel(context.Background())
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ach := <-cfgch:
-			s.reset(&ach.Proxy.ProxyServerOnline)
-		default:
-			conn, err := s.listener.Accept()
-			if err != nil {
-				if errors.Is(err, net.ErrClosed) {
-					return
+
+	s.wg.Run(func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ach := <-cfgch:
+				s.reset(&ach.Proxy.ProxyServerOnline)
+			}
+		}
+	})
+
+	s.wg.Run(func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				conn, err := s.listener.Accept()
+				if err != nil {
+					if errors.Is(err, net.ErrClosed) {
+						return
+					}
+
+					s.logger.Error("accept failed", zap.Error(err))
+					continue
 				}
 
-				s.logger.Error("accept failed", zap.Error(err))
-				continue
+				s.wg.Run(func() {
+					s.onConn(ctx, conn)
+				})
 			}
-
-			s.wg.Run(func() {
-				s.onConn(ctx, conn)
-			})
 		}
-	}
+	})
 }
 
 func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {

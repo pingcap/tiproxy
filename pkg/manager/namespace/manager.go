@@ -86,14 +86,14 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nss []*config.Namespace, client *clientv3.Client, httpCli *http.Client) error {
+func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, client *clientv3.Client, httpCli *http.Client) error {
 	mgr.Lock()
 	mgr.client = client
 	mgr.httpCli = httpCli
 	mgr.logger = logger
 	mgr.Unlock()
 
-	return mgr.CommitNamespaces(nss, nil)
+	return mgr.CommitNamespaces(nscs, nil)
 }
 
 func (n *NamespaceManager) GetNamespace(nm string) (*Namespace, bool) {

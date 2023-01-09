@@ -36,7 +36,7 @@ func GetConfigCmd(ctx *Context) *cobra.Command {
 		setProxy := &cobra.Command{
 			Use: "set",
 		}
-		input := setProxy.Flags().String("input", "", "specify the input json file for proxy config")
+		input := setProxy.Flags().String("input", "", "specify the input toml file for proxy config")
 		setProxy.RunE = func(cmd *cobra.Command, args []string) error {
 			b := cmd.InOrStdin()
 			if *input != "" {

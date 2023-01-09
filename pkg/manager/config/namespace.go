@@ -17,10 +17,46 @@ package config
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"path"
+	"strings"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
+
+func (e *ConfigManager) get(ctx context.Context, ns, key string) (KVValue, error) {
+	nkey := path.Clean(path.Join(ns, key))
+	v, ok := e.kv.Get(KVValue{Key: nkey})
+	if !ok {
+		return v, errors.WithStack(errors.Wrapf(ErrNoResults, "key=%s", nkey))
+	}
+	return v, nil
+}
+
+func (e *ConfigManager) list(ctx context.Context, ns string, ops ...clientv3.OpOption) ([]KVValue, error) {
+	k := path.Clean(ns)
+	var resp []KVValue
+	e.kv.Ascend(KVValue{Key: k}, func(item KVValue) bool {
+		if !strings.HasPrefix(item.Key, k) {
+			return false
+		}
+		resp = append(resp, item)
+		return true
+	})
+	return resp, nil
+}
+
+func (e *ConfigManager) set(ctx context.Context, ns, key string, val []byte) error {
+	v := KVValue{Key: path.Clean(path.Join(ns, key)), Value: val}
+	_, _ = e.kv.Set(v)
+	return nil
+}
+
+func (e *ConfigManager) del(ctx context.Context, ns, key string) error {
+	_, _ = e.kv.Delete(KVValue{Key: path.Clean(path.Join(ns, key))})
+	return nil
+}
 
 func (e *ConfigManager) GetNamespace(ctx context.Context, ns string) (*config.Namespace, error) {
 	kv, err := e.get(ctx, pathPrefixNamespace, ns)
