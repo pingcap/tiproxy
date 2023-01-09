@@ -74,6 +74,8 @@ func (f *rdbufConn) Read(b []byte) (int, error) {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
+	inBytes     uint64
+	outBytes    uint64
 	conn        net.Conn
 	buf         *bufio.ReadWriter
 	proxyInited *atomic.Bool
@@ -142,6 +144,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	if _, err := io.ReadFull(p.conn, header[:]); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
+	p.inBytes += 4
 
 	// probe proxy V2
 	refill := false
@@ -164,6 +167,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 		if _, err := io.ReadFull(p.conn, header[:]); err != nil {
 			return nil, false, errors.Wrap(ErrReadConn, err)
 		}
+		p.inBytes += 4
 	}
 
 	sequence := header[3]
@@ -177,6 +181,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	if _, err := io.ReadFull(p.conn, data); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
+	p.inBytes += uint64(length)
 	return data, length == mysql.MaxPayloadLen, nil
 }
 
@@ -214,10 +219,12 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 	if _, err := io.Copy(p.buf, bytes.NewReader(header[:])); err != nil {
 		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
+	p.outBytes += 4
 
 	if _, err := io.Copy(p.buf, bytes.NewReader(data[:length])); err != nil {
 		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
+	p.outBytes += uint64(length)
 
 	return length, more, nil
 }
@@ -237,6 +244,14 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 		return p.Flush()
 	}
 	return nil
+}
+
+func (p *PacketIO) InBytes() uint64 {
+	return p.inBytes
+}
+
+func (p *PacketIO) OutBytes() uint64 {
+	return p.outBytes
 }
 
 func (p *PacketIO) Flush() error {

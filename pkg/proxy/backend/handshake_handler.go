@@ -27,6 +27,8 @@ var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 type ConnContext interface {
 	ClientAddr() string
 	ServerAddr() string
+	InBytes() uint64
+	OutBytes() uint64
 	SetValue(key, val any)
 	Value(key any) any
 }

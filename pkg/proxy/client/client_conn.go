@@ -87,7 +87,7 @@ func (cc *ClientConnection) processMsg(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = cc.connMgr.ExecuteCmd(ctx, clientPkt, cc.pkt)
+		err = cc.connMgr.ExecuteCmd(ctx, clientPkt)
 		if err != nil {
 			return err
 		}
