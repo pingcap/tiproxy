@@ -171,6 +171,8 @@ func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendR
 			// Ensure all the packets are forwarded.
 			msg := fmt.Sprintf("cmd:%d responseType:%d", ts.mc.cmd, ts.mb.respondType)
 			require.Equal(t, ts.tc.backendIO.GetSequence(), ts.tc.clientIO.GetSequence(), msg)
+			require.Equal(t, ts.tc.clientIO.OutBytes(), ts.tc.proxyCIO.InBytes(), msg)
+			require.Equal(t, ts.tc.clientIO.InBytes(), ts.tc.proxyCIO.OutBytes(), msg)
 		}
 	} else {
 		c(t, ts)

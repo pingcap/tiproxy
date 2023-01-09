@@ -167,12 +167,14 @@ func (p *PacketIO) parseProxyV2() (*Proxy, error) {
 	if err != nil {
 		return nil, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
+	p.inBytes += 8
 
 	var hdr [4]byte
 
 	if _, err := io.ReadFull(p.buf, hdr[:]); err != nil {
 		return nil, errors.WithStack(err)
 	}
+	p.inBytes += 4
 
 	m := &Proxy{}
 	m.Version = ProxyVersion(hdr[0] >> 4)
@@ -182,6 +184,7 @@ func (p *PacketIO) parseProxyV2() (*Proxy, error) {
 	if _, err := io.ReadFull(p.buf, buf); err != nil {
 		return nil, errors.WithStack(err)
 	}
+	p.inBytes += uint64(len(buf))
 
 	addressFamily := ProxyAddressFamily(hdr[1] >> 4)
 	network := ProxyNetwork(hdr[1] & 0xF)
@@ -285,6 +288,7 @@ func (p *PacketIO) WriteProxyV2(m *Proxy) error {
 	if _, err := io.Copy(p.buf, bytes.NewReader(buf)); err != nil {
 		return errors.Wrap(ErrWriteConn, err)
 	}
+	p.outBytes += uint64(len(buf))
 	// according to the spec, we better flush to avoid server hanging
 	return p.Flush()
 }

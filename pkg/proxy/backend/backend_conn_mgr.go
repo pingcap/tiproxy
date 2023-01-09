@@ -106,11 +106,11 @@ type BackendConnManager struct {
 	closeStatus   atomic.Int32
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc       context.CancelFunc
+	clientIO         *pnet.PacketIO
 	backendIO        *pnet.PacketIO
 	backendTLS       *tls.Config
 	handshakeHandler HandshakeHandler
 	ctxmap           sync.Map
-	clientAddr       string
 	connectionID     uint64
 }
 
@@ -147,7 +147,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 
 	mgr.backendTLS = backendTLSConfig
 
-	mgr.clientAddr = clientIO.RemoteAddr().String()
+	mgr.clientIO = clientIO
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
 	if err != nil {
@@ -158,7 +158,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
 	mgr.wg.Run(func() {
-		mgr.processSignals(childCtx, clientIO)
+		mgr.processSignals(childCtx)
 	})
 	return nil
 }
@@ -219,7 +219,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 
 // ExecuteCmd forwards messages between the client and the backend.
 // If it finds that the session is ready for redirection, it migrates the session.
-func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, clientIO *pnet.PacketIO) error {
+func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) error {
 	if len(request) < 1 {
 		return mysql.ErrMalformPacket
 	}
@@ -233,7 +233,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 		return nil
 	}
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
-	holdRequest, err := mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendIO, waitingRedirect)
+	holdRequest, err := mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO, waitingRedirect)
 	if !holdRequest {
 		addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 	}
@@ -269,17 +269,17 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte, c
 	// Even if it meets an MySQL error, it may have changed the status, such as when executing multi-statements.
 	if mgr.cmdProcessor.finishedTxn() {
 		if waitingRedirect && holdRequest {
-			mgr.tryRedirect(ctx, clientIO)
+			mgr.tryRedirect(ctx)
 			// Execute the held request no matter redirection succeeds or not.
-			_, err = mgr.cmdProcessor.executeCmd(request, clientIO, mgr.backendIO, false)
+			_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO, false)
 			addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 			if err != nil && !IsMySQLError(err) {
 				return err
 			}
 		} else if mgr.closeStatus.Load() == statusNotifyClose {
-			mgr.tryGracefulClose(ctx, clientIO)
+			mgr.tryGracefulClose(ctx)
 		} else if waitingRedirect {
-			mgr.tryRedirect(ctx, clientIO)
+			mgr.tryRedirect(ctx)
 		}
 	}
 	// Ignore MySQL errors, only return unexpected errors.
@@ -325,7 +325,7 @@ func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken
 // processSignals runs in a goroutine to:
 // - Receive redirection signals and then try to migrate the session.
 // - Send redirection results to the event receiver.
-func (mgr *BackendConnManager) processSignals(ctx context.Context, clientIO *pnet.PacketIO) {
+func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 	for {
 		select {
 		case s := <-mgr.signalReceived:
@@ -333,9 +333,9 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context, clientIO *pne
 			mgr.processLock.Lock()
 			switch s {
 			case signalTypeGracefulClose:
-				mgr.tryGracefulClose(ctx, clientIO)
+				mgr.tryGracefulClose(ctx)
 			case signalTypeRedirect:
-				mgr.tryRedirect(ctx, clientIO)
+				mgr.tryRedirect(ctx)
 			}
 			mgr.processLock.Unlock()
 		case rs := <-mgr.redirectResCh:
@@ -348,7 +348,7 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context, clientIO *pne
 
 // tryRedirect tries to migrate the session if the session is redirect-able.
 // NOTE: processLock should be held before calling this function.
-func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.PacketIO) {
+func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	switch mgr.closeStatus.Load() {
 	case statusNotifyClose, statusClosing, statusClosed:
 		return
@@ -389,8 +389,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context, clientIO *pnet.P
 	}
 	newBackendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(rs.to))
 
-	mgr.clientAddr = clientIO.RemoteAddr().String()
-	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
+	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)
 	} else {
 		mgr.handshakeHandler.OnHandshake(mgr, newBackendIO.RemoteAddr().String(), rs.err)
@@ -475,7 +474,7 @@ func (mgr *BackendConnManager) GracefulClose() {
 	mgr.signalReceived <- signalTypeGracefulClose
 }
 
-func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context, clientIO *pnet.PacketIO) {
+func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 	if mgr.closeStatus.Load() != statusNotifyClose {
 		return
 	}
@@ -483,18 +482,38 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context, clientIO *p
 		return
 	}
 	// Closing clientIO will cause the whole connection to be closed.
-	if err := clientIO.GracefulClose(); err != nil {
-		mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", clientIO.RemoteAddr()), zap.Error(err))
+	if err := mgr.clientIO.GracefulClose(); err != nil {
+		mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
 	}
 	mgr.closeStatus.Store(statusClosing)
 }
 
 func (mgr *BackendConnManager) ClientAddr() string {
-	return mgr.clientAddr
+	if mgr.clientIO == nil {
+		return ""
+	}
+	return mgr.clientIO.RemoteAddr().String()
 }
 
 func (mgr *BackendConnManager) ServerAddr() string {
+	if mgr.backendIO == nil {
+		return ""
+	}
 	return mgr.backendIO.RemoteAddr().String()
+}
+
+func (mgr *BackendConnManager) ClientInBytes() uint64 {
+	if mgr.clientIO == nil {
+		return 0
+	}
+	return mgr.clientIO.InBytes()
+}
+
+func (mgr *BackendConnManager) ClientOutBytes() uint64 {
+	if mgr.clientIO == nil {
+		return 0
+	}
+	return mgr.clientIO.OutBytes()
 }
 
 func (mgr *BackendConnManager) SetValue(key, val any) {
