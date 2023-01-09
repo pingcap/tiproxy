@@ -59,9 +59,9 @@ func TestUpdateCfg(t *testing.T) {
 				cfg.LogFile.MaxBackups = 2
 			},
 			action: func(log *zap.Logger) {
-				msg := strings.Repeat("a", 800*1024)
+				msg := strings.Repeat("a", 600*1024)
 				log.Info(msg)
-				msg = strings.Repeat("b", 800*1024)
+				msg = strings.Repeat("b", 600*1024)
 				log.Error(msg)
 			},
 			check: func(files []os.FileInfo) bool {
