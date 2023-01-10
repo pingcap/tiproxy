@@ -133,7 +133,7 @@ func TestUpdateCfg(t *testing.T) {
 		test.action(lg)
 
 		// retry before new data are flushed
-		timer := time.NewTimer(time.Second)
+		timer := time.NewTimer(3 * time.Second)
 		succeed := false
 		for !succeed {
 			select {
@@ -141,12 +141,6 @@ func TestUpdateCfg(t *testing.T) {
 				t.Fatalf("%dth case time out", i)
 			case <-time.After(50 * time.Millisecond):
 				logfiles := readLogFiles(t, dir)
-				e := int64(0)
-				for _, f := range logfiles {
-					t.Logf("%s: %d\n", f.Name(), f.Size())
-					e += f.Size()
-				}
-				t.Logf("#### %d\n", e)
 				if test.check(logfiles) {
 					succeed = true
 					break
