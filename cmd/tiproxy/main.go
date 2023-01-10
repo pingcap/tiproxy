@@ -16,6 +16,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/pingcap/TiProxy/lib/config"
@@ -26,10 +27,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	Version = "test"
+	Commit  = "test commit"
+)
+
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   os.Args[0],
-		Short: "start the proxy server",
+		Use:     os.Args[0],
+		Short:   "start the proxy server",
+		Version: fmt.Sprintf("%s, commit %s", Version, Commit),
 	}
 
 	configFile := rootCmd.PersistentFlags().String("config", "", "proxy config file path")
