@@ -130,13 +130,33 @@ func TestUpdateCfg(t *testing.T) {
 		err := os.RemoveAll(dir)
 		require.NoError(t, err)
 
+		bstr := new(strings.Builder)
+
+		bstr.Reset()
+		logfiles := readLogFiles(t, dir)
+		e := int64(0)
+		for _, f := range logfiles {
+			fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
+			e += f.Size()
+		}
+		fmt.Fprintf(bstr, "#### %d\n", e)
+
 		// write new data
 		test.action(lg)
+
+		bstr.Reset()
+		logfiles = readLogFiles(t, dir)
+		e = 0
+		for _, f := range logfiles {
+			fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
+			e += f.Size()
+		}
+		fmt.Fprintf(bstr, "#### %d\n", e)
 
 		// retry before new data are flushed
 		timer := time.NewTimer(time.Second)
 		succeed := false
-		bstr := new(strings.Builder)
+		bstr.Reset()
 		for !succeed {
 			select {
 			case <-timer.C:
