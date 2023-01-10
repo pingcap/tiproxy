@@ -71,11 +71,11 @@ func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Conf
 			err := lm.updateLoggerCfg(cfg)
 			if err != nil {
 				bytes, merr := json.Marshal(cfg)
-				if merr != nil {
-					lm.logger.Error("update logger configuration failed", zap.NamedError("marshal_err", merr), zap.Error(err))
-					continue
-				}
-				lm.logger.Error("update logger configuration failed", zap.String("cfg", string(bytes)), zap.Error(err))
+				lm.logger.Error("update logger configuration failed",
+					zap.NamedError("update error", err),
+					zap.String("cfg", string(bytes)),
+					zap.NamedError("cfg marshal error", merr),
+				)
 			}
 		}
 	}

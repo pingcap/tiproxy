@@ -114,14 +114,7 @@ func (ws *AtomicWriteSyncer) setOutput(output closableSyncer) error {
 
 // Close closes logger.
 func (ws *AtomicWriteSyncer) Close() error {
-	var err error
-	ws.Lock()
-	if ws.output != nil {
-		err = ws.output.Close()
-		ws.output = nil
-	}
-	ws.Unlock()
-	return err
+	return ws.setOutput(nil)
 }
 
 // initFileLog initializes file based logging options.

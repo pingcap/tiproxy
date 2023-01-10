@@ -83,7 +83,7 @@ func TestUpdateCfg(t *testing.T) {
 				if len(files) != 1 {
 					return false
 				}
-				return files[0].Size() >= int64(5 * 500*1024)
+				return files[0].Size() >= int64(5*500*1024)
 			},
 		},
 		{
@@ -117,24 +117,29 @@ func TestUpdateCfg(t *testing.T) {
 	// Make sure the latest config also applies to cloned loggers.
 	lg = lg.Named("another").With(zap.String("field", "test_field"))
 	for i, test := range tests {
-		err := os.RemoveAll(dir)
-		require.NoError(t, err)
-
 		clonedCfg := cfg.Clone()
 		test.updateCfg(&clonedCfg.Log.LogOnline)
 		ch <- clonedCfg
-		time.Sleep(200 * time.Millisecond)
+
+		// 2rd will block since update channels of size 1
+		// this ensured all old data are flushed
+		ch <- clonedCfg
+
+		// delete dir after flush
+		err := os.RemoveAll(dir)
+		require.NoError(t, err)
+
+		// write new data
 		test.action(lg)
 
-		// Backup files are removed by another goroutine, so there will be some delay.
-		// We check it multiple times until it succeeds.
-		timer := time.NewTimer(3 * time.Second)
+		// wait for new data to flush
+		timer := time.NewTimer(time.Second)
 		succeed := false
 		for !succeed {
 			select {
 			case <-timer.C:
 				t.Fatalf("%dth case time out", i)
-			case <-time.After(10 * time.Millisecond):
+			case <-time.After(100 * time.Millisecond):
 				logfiles := readLogFiles(t, dir)
 				if test.check(logfiles) {
 					succeed = true

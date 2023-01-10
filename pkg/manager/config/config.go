@@ -42,7 +42,7 @@ func (e *ConfigManager) GetConfig(ctx context.Context, val *config.Config) error
 }
 
 func (e *ConfigManager) WatchConfig(ctx context.Context) <-chan *config.Config {
-	ch := make(chan *config.Config, 16)
+	ch := make(chan *config.Config)
 	e.Watch(path.Join(pathPrefixConfig, "all"), func(_ *zap.Logger, k KVEvent) {
 		var c config.Config
 		if k.Type == KVEventDel {
