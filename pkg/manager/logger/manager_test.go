@@ -118,6 +118,8 @@ func TestUpdateCfg(t *testing.T) {
 	// Make sure the latest config also applies to cloned loggers.
 	lg = lg.Named("another").With(zap.String("field", "test_field"))
 	for i, test := range tests {
+		require.NoError(t, lg.Sync())
+
 		clonedCfg := cfg.Clone()
 		test.updateCfg(&clonedCfg.Log.LogOnline)
 		ch <- clonedCfg
@@ -139,7 +141,7 @@ func TestUpdateCfg(t *testing.T) {
 			fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
 			e += f.Size()
 		}
-		fmt.Fprintf(bstr, "#### %d\n", e)
+		fmt.Fprintf(bstr, "1#### %d\n", e)
 
 		// write new data
 		test.action(lg)
@@ -151,7 +153,7 @@ func TestUpdateCfg(t *testing.T) {
 			fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
 			e += f.Size()
 		}
-		fmt.Fprintf(bstr, "#### %d\n", e)
+		fmt.Fprintf(bstr, "2#### %d\n", e)
 
 		// retry before new data are flushed
 		timer := time.NewTimer(time.Second)
@@ -173,7 +175,7 @@ func TestUpdateCfg(t *testing.T) {
 					fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
 					e += f.Size()
 				}
-				fmt.Fprintf(bstr, "#### %d\n", e)
+				fmt.Fprintf(bstr, "3#### %d\n", e)
 			}
 		}
 		timer.Stop()
