@@ -16,6 +16,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -133,18 +134,26 @@ func TestUpdateCfg(t *testing.T) {
 		test.action(lg)
 
 		// retry before new data are flushed
-		timer := time.NewTimer(3 * time.Second)
+		timer := time.NewTimer(time.Second)
 		succeed := false
+		bstr := new(strings.Builder)
 		for !succeed {
 			select {
 			case <-timer.C:
-				t.Fatalf("%dth case time out", i)
+				t.Fatalf("%dth case time out:\n%s", i, bstr.String())
 			case <-time.After(50 * time.Millisecond):
 				logfiles := readLogFiles(t, dir)
 				if test.check(logfiles) {
 					succeed = true
 					break
 				}
+
+				e := int64(0)
+				for _, f := range logfiles {
+					fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
+					e += f.Size()
+				}
+				fmt.Fprintf(bstr, "#### %d\n", e)
 			}
 		}
 		timer.Stop()
