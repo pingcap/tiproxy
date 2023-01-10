@@ -80,7 +80,10 @@ func TestUpdateCfg(t *testing.T) {
 				}
 			},
 			check: func(files []os.FileInfo) bool {
-				return len(files) == 1
+				if len(files) != 1 {
+					return false
+				}
+				return files[0].Size() >= int64(5 * 500*1024)
 			},
 		},
 		{
@@ -120,8 +123,8 @@ func TestUpdateCfg(t *testing.T) {
 		clonedCfg := cfg.Clone()
 		test.updateCfg(&clonedCfg.Log.LogOnline)
 		ch <- clonedCfg
+		time.Sleep(500 * time.Millisecond)
 		test.action(lg)
-		require.NoError(t, lg.Sync())
 
 		// Backup files are removed by another goroutine, so there will be some delay.
 		// We check it multiple times until it succeeds.
