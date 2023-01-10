@@ -123,7 +123,7 @@ func TestUpdateCfg(t *testing.T) {
 		clonedCfg := cfg.Clone()
 		test.updateCfg(&clonedCfg.Log.LogOnline)
 		ch <- clonedCfg
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 		test.action(lg)
 
 		// Backup files are removed by another goroutine, so there will be some delay.
