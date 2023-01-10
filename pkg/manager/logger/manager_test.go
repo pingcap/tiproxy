@@ -121,25 +121,25 @@ func TestUpdateCfg(t *testing.T) {
 		test.updateCfg(&clonedCfg.Log.LogOnline)
 		ch <- clonedCfg
 
-		// 2rd will block since update channels of size 1
-		// this ensured all old data are flushed
+		// 2rd will block due to watch channel of size 1
+		// this ensured all old data are flushed by closing the older file logger
 		ch <- clonedCfg
 
-		// delete dir after flush
+		// delete old data after flushed
 		err := os.RemoveAll(dir)
 		require.NoError(t, err)
 
 		// write new data
 		test.action(lg)
 
-		// wait for new data to flush
+		// retry before new data are flushed
 		timer := time.NewTimer(time.Second)
 		succeed := false
 		for !succeed {
 			select {
 			case <-timer.C:
 				t.Fatalf("%dth case time out", i)
-			case <-time.After(100 * time.Millisecond):
+			case <-time.After(50 * time.Millisecond):
 				logfiles := readLogFiles(t, dir)
 				if test.check(logfiles) {
 					succeed = true
