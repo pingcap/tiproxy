@@ -102,6 +102,8 @@ func NewDefaultHealthCheckConfig() *HealthCheckConfig {
 type BackendEventReceiver interface {
 	// OnBackendChanged is called when the backend list changes.
 	OnBackendChanged(backends map[string]BackendStatus)
+	// OnObserveError is called when observing backends fails after success or succeeds after failure.
+	OnObserveError(err error)
 }
 
 // BackendInfo stores the status info of each backend.
@@ -178,13 +180,23 @@ func (bo *BackendObserver) Refresh() {
 }
 
 func (bo *BackendObserver) observe(ctx context.Context) {
+	var lastErr error
 	for ctx.Err() == nil {
-		backendInfo := bo.fetcher.GetBackendList(ctx)
-		backendStatus := bo.checkHealth(ctx, backendInfo)
-		if ctx.Err() != nil {
-			return
+		backendInfo, err := bo.fetcher.GetBackendList(ctx)
+		if err == nil {
+			if lastErr != nil {
+				bo.eventReceiver.OnObserveError(err)
+			}
+			backendStatus := bo.checkHealth(ctx, backendInfo)
+			if ctx.Err() != nil {
+				return
+			}
+			bo.notifyIfChanged(backendStatus)
+		} else if lastErr == nil {
+			bo.logger.Warn("fetching backends encounters error", zap.Error(err))
+			bo.eventReceiver.OnObserveError(err)
 		}
-		bo.notifyIfChanged(backendStatus)
+		lastErr = err
 		select {
 		case <-time.After(bo.config.healthCheckInterval):
 		case <-bo.refreshChan:

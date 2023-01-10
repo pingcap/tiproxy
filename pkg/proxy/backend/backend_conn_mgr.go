@@ -177,12 +177,17 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	io, err := backoff.RetryNotifyWithData(
 		func() (*pnet.PacketIO, error) {
 			// Try to connect to all backup backends one by one.
-			addr := selector.Next()
+			addr, err := selector.Next()
+			if err != nil {
+				return nil, backoff.Permanent(err)
+			}
 
 			// if all addrs are enumerated, reset and try again
 			if addr == "" {
 				selector.Reset()
-				addr = selector.Next()
+				if addr, err = selector.Next(); err != nil {
+					return nil, backoff.Permanent(err)
+				}
 				if addr == "" {
 					return nil, router.ErrNoInstanceToSelect
 				}
