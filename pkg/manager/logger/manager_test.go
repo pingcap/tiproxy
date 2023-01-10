@@ -142,6 +142,7 @@ func TestUpdateCfg(t *testing.T) {
 			e += f.Size()
 		}
 		fmt.Fprintf(bstr, "1#### %d\n", e)
+		t.Logf(bstr.String())
 
 		// write new data
 		test.action(lg)
@@ -154,6 +155,7 @@ func TestUpdateCfg(t *testing.T) {
 			e += f.Size()
 		}
 		fmt.Fprintf(bstr, "2#### %d\n", e)
+		t.Logf(bstr.String())
 
 		// retry before new data are flushed
 		timer := time.NewTimer(time.Second)
