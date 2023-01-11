@@ -73,5 +73,5 @@ jobs:
       - name: make ${{ inputs.target }} 
         run: make ${{ inputs.target }}
       - name: "set up tmate session if necessary"
-        if: ${{ inputs.debug }}
+        if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3
