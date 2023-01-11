@@ -134,7 +134,6 @@ func TestUpdateCfg(t *testing.T) {
 
 		bstr := new(strings.Builder)
 
-		bstr.Reset()
 		logfiles := readLogFiles(t, dir)
 		e := int64(0)
 		for _, f := range logfiles {
@@ -142,12 +141,10 @@ func TestUpdateCfg(t *testing.T) {
 			e += f.Size()
 		}
 		fmt.Fprintf(bstr, "1#### %d\n", e)
-		t.Logf(bstr.String())
 
 		// write new data
 		test.action(lg)
 
-		bstr.Reset()
 		logfiles = readLogFiles(t, dir)
 		e = 0
 		for _, f := range logfiles {
@@ -155,10 +152,9 @@ func TestUpdateCfg(t *testing.T) {
 			e += f.Size()
 		}
 		fmt.Fprintf(bstr, "2#### %d\n", e)
-		t.Logf(bstr.String())
 
 		// retry before new data are flushed
-		timer := time.NewTimer(time.Second)
+		timer := time.NewTimer(3 * time.Second)
 		succeed := false
 		bstr.Reset()
 		for !succeed {
