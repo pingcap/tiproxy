@@ -15,7 +15,6 @@
 package cli
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 
@@ -23,16 +22,16 @@ import (
 )
 
 const (
-	configPrefix = "/api/admin/config"
+	configPrefix = "/api/admin/config/"
 )
 
-func getConfigCmd(ctx *Context, pathSuffix string) *cobra.Command {
+func GetConfigCmd(ctx *Context) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use: pathSuffix,
+		Use:   "config",
+		Short: "",
 	}
-	path := fmt.Sprintf("%s/%s", configPrefix, pathSuffix)
 
-	// set config proxy
+	// set config
 	{
 		setProxy := &cobra.Command{
 			Use: "set",
@@ -49,7 +48,7 @@ func getConfigCmd(ctx *Context, pathSuffix string) *cobra.Command {
 				b = f
 			}
 
-			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, path, b)
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, configPrefix, b)
 			if err != nil {
 				return err
 			}
@@ -60,13 +59,13 @@ func getConfigCmd(ctx *Context, pathSuffix string) *cobra.Command {
 		rootCmd.AddCommand(setProxy)
 	}
 
-	// get config proxy
+	// get config
 	{
 		getProxy := &cobra.Command{
 			Use: "get",
 		}
 		getProxy.RunE = func(cmd *cobra.Command, args []string) error {
-			resp, err := doRequest(cmd.Context(), ctx, http.MethodGet, path, nil)
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodGet, configPrefix, nil)
 			if err != nil {
 				return err
 			}
@@ -77,15 +76,5 @@ func getConfigCmd(ctx *Context, pathSuffix string) *cobra.Command {
 		rootCmd.AddCommand(getProxy)
 	}
 
-	return rootCmd
-}
-
-func GetConfigCmd(ctx *Context) *cobra.Command {
-	rootCmd := &cobra.Command{
-		Use:   "config",
-		Short: "",
-	}
-	rootCmd.AddCommand(getConfigCmd(ctx, "proxy"))
-	rootCmd.AddCommand(getConfigCmd(ctx, "log"))
 	return rootCmd
 }

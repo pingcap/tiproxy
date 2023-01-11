@@ -140,6 +140,11 @@ func NewConfig(data []byte) (*Config, error) {
 	return &cfg, nil
 }
 
+func (cfg *Config) Clone() *Config {
+	newCfg := *cfg
+	return &newCfg
+}
+
 func (cfg *Config) Check() error {
 	if cfg.Workdir == "" {
 		d, err := os.Getwd()

@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	"go.uber.org/zap"
 )
@@ -28,12 +29,8 @@ type configHttpHandler struct {
 	cfgmgr *mgrcfg.ConfigManager
 }
 
-type OnlineCfgTypes interface {
-	config.ProxyServerOnline | config.LogOnline
-}
-
-func setConfig[T OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
-	cfg := new(T)
+func (h *configHttpHandler) HandleSetConfig(c *gin.Context) {
+	cfg := new(config.Config)
 	if c.ShouldBindJSON(cfg) != nil {
 		c.JSON(http.StatusBadRequest, "bad config json")
 		return
@@ -48,10 +45,10 @@ func setConfig[T OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func getConfig[T OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
-	var cfg T
+func (h *configHttpHandler) HandleGetConfig(c *gin.Context) {
+	var cfg config.Config
 	err := h.cfgmgr.GetConfig(c, &cfg)
-	if err != nil {
+	if err != nil && !errors.Is(err, mgrcfg.ErrNoResults) {
 		h.logger.Error("can not get config", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, "can not get config")
 		return
@@ -62,16 +59,6 @@ func getConfig[T OnlineCfgTypes](h *configHttpHandler, c *gin.Context) {
 
 func registerConfig(group *gin.RouterGroup, logger *zap.Logger, cfgmgr *mgrcfg.ConfigManager) {
 	h := &configHttpHandler{logger, cfgmgr}
-	group.PUT("/proxy", func(c *gin.Context) {
-		setConfig[config.ProxyServerOnline](h, c)
-	})
-	group.GET("/proxy", func(c *gin.Context) {
-		getConfig[config.ProxyServerOnline](h, c)
-	})
-	group.PUT("/log", func(c *gin.Context) {
-		setConfig[config.LogOnline](h, c)
-	})
-	group.GET("/log", func(c *gin.Context) {
-		getConfig[config.LogOnline](h, c)
-	})
+	group.PUT("/", h.HandleSetConfig)
+	group.GET("/", h.HandleGetConfig)
 }

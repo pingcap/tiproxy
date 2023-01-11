@@ -18,45 +18,22 @@ import (
 	"context"
 	"encoding/json"
 	"path"
-	"reflect"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"go.uber.org/zap"
 )
 
-var cfg2Path = map[reflect.Type]string{
-	reflect.TypeOf(config.ProxyServerOnline{}): "proxy",
-	reflect.TypeOf(config.LogOnline{}):         "log",
-}
-
-func (e *ConfigManager) SetConfig(ctx context.Context, val any) error {
-	rf := reflect.TypeOf(val)
-	if rf.Kind() == reflect.Pointer {
-		rf = rf.Elem()
-	}
-	p, ok := cfg2Path[rf]
-	if !ok {
-		return errors.WithStack(errors.New("invalid type"))
-	}
+func (e *ConfigManager) SetConfig(ctx context.Context, val *config.Config) error {
 	c, err := json.Marshal(val)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	return e.set(ctx, pathPrefixConfig, p, c)
+	return e.set(ctx, pathPrefixConfig, "all", c)
 }
 
-func (e *ConfigManager) GetConfig(ctx context.Context, val any) error {
-	rf := reflect.TypeOf(val)
-	if rf.Kind() == reflect.Pointer {
-		rf = rf.Elem()
-	}
-	p, ok := cfg2Path[rf]
-	if !ok {
-		return errors.WithStack(errors.New("invalid type"))
-	}
-
-	c, err := e.get(ctx, pathPrefixConfig, p)
+func (e *ConfigManager) GetConfig(ctx context.Context, val *config.Config) error {
+	c, err := e.get(ctx, pathPrefixConfig, "all")
 	if err != nil {
 		return err
 	}
@@ -64,29 +41,18 @@ func (e *ConfigManager) GetConfig(ctx context.Context, val any) error {
 	return json.Unmarshal(c.Value, val)
 }
 
-func MakeConfigChan[T any](e *ConfigManager, initval *T) <-chan *T {
-	cfgchan := make(chan *T, 64)
-	rf := reflect.TypeOf(initval)
-	if rf.Kind() == reflect.Pointer {
-		rf = rf.Elem()
-	}
-	p, ok := cfg2Path[rf]
-	if !ok {
-		panic(errors.WithStack(errors.New("invalid type")))
-	}
-
-	_ = e.SetConfig(context.Background(), initval)
-
-	e.Watch(path.Join(pathPrefixConfig, p), func(_ *zap.Logger, k KVEvent) {
-		var v T
+func (e *ConfigManager) WatchConfig(ctx context.Context) <-chan *config.Config {
+	ch := make(chan *config.Config)
+	e.Watch(path.Join(pathPrefixConfig, "all"), func(_ *zap.Logger, k KVEvent) {
+		var c config.Config
 		if k.Type == KVEventDel {
-			cfgchan <- &v
+			ch <- &c
 		} else {
-			e := json.Unmarshal(k.Value, &v)
+			e := json.Unmarshal(k.Value, &c)
 			if e == nil {
-				cfgchan <- &v
+				ch <- &c
 			}
 		}
 	})
-	return cfgchan
+	return ch
 }

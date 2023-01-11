@@ -17,6 +17,7 @@ package logger
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/cmd"
@@ -51,28 +52,32 @@ func NewLoggerManager(cfg *config.Log) (*LoggerManager, *zap.Logger, error) {
 }
 
 // Init starts a goroutine to watch configuration.
-func (lm *LoggerManager) Init(cfgCh <-chan *config.LogOnline) {
+func (lm *LoggerManager) Init(cfgch <-chan *config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
-	lm.wg.Run(func() {
-		lm.watchCfg(ctx, cfgCh)
-	})
 	lm.cancel = cancel
+
+	lm.wg.Run(func() {
+		lm.watchCfg(ctx, cfgch)
+	})
 }
 
-func (lm *LoggerManager) watchCfg(ctx context.Context, cfgCh <-chan *config.LogOnline) {
+func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Config) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case cfg := <-cfgCh:
+		case acfg := <-cfgch:
+			cfg := &acfg.Log.LogOnline
+
 			err := lm.updateLoggerCfg(cfg)
 			if err != nil {
 				bytes, merr := json.Marshal(cfg)
-				if merr != nil {
-					lm.logger.Error("update logger configuration failed", zap.NamedError("marshal_err", merr), zap.Error(err))
-					continue
-				}
-				lm.logger.Error("update logger configuration failed", zap.String("cfg", string(bytes)), zap.Error(err))
+				fmt.Printf("ggg %+v %+v\n", cfg, err)
+				lm.logger.Error("update logger configuration failed",
+					zap.NamedError("update error", err),
+					zap.String("cfg", string(bytes)),
+					zap.NamedError("cfg marshal error", merr),
+				)
 			}
 		}
 	}

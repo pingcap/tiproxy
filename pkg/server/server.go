@@ -63,8 +63,7 @@ type Server struct {
 	// HTTP server
 	HTTPListener net.Listener
 	// L7 proxy
-	Proxy   *proxy.SQLServer
-	proxyCh <-chan *config.ProxyServerOnline
+	Proxy *proxy.SQLServer
 }
 
 func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error) {
@@ -159,7 +158,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			return
 		}
 
-		srv.LoggerManager.Init(mgrcfg.MakeConfigChan(srv.ConfigManager, &cfg.Log.LogOnline))
+		srv.LoggerManager.Init(srv.ConfigManager.WatchConfig(ctx))
 
 		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
 		if nerr != nil {
@@ -217,10 +216,8 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			return
 		}
 
-		srv.proxyCh = mgrcfg.MakeConfigChan(srv.ConfigManager, &cfg.Proxy.ProxyServerOnline)
-
 		srv.wg.Run(func() {
-			srv.Proxy.Run(ctx, srv.proxyCh)
+			srv.Proxy.Run(ctx, srv.ConfigManager.WatchConfig(ctx))
 		})
 	}
 
