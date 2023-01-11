@@ -146,8 +146,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 
 	clientResp := pnet.ParseHandshakeResponse(pkt)
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
-		WriteUnknownError(clientIO, err, logger)
-		return err
+		return WrapUserError(err, err.Error())
 	}
 	auth.user = clientResp.User
 	auth.dbname = clientResp.DB
@@ -157,8 +156,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	backendIO, err := getBackendIO(cctx, auth, clientResp, 5*time.Second)
 	if err != nil {
-		WriteUnknownError(clientIO, err, logger)
-		return err
+		return WrapUserError(err, connectErrMsg)
 	}
 	backendIO.ResetSequence()
 
@@ -174,7 +172,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 
 	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
-		return err
+		return WrapUserError(err, capabilityErrMsg)
 	}
 
 	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {

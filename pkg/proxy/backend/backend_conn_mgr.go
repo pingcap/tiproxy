@@ -151,6 +151,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
 	if err != nil {
+		WriteUserError(clientIO, err, mgr.logger)
 		return err
 	}
 
@@ -166,7 +167,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
-		return nil, err
+		return nil, WrapUserError(err, err.Error())
 	}
 	// Reasons to wait:
 	// - The TiDB instances may not be initialized yet
@@ -180,6 +181,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			// Try to connect to all backup backends one by one.
 			addr, origErr = selector.Next()
 			if origErr != nil {
+				origErr = WrapUserError(origErr, origErr.Error())
 				return nil, backoff.Permanent(origErr)
 			}
 
@@ -187,6 +189,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			if addr == "" {
 				selector.Reset()
 				if addr, origErr = selector.Next(); origErr != nil {
+					origErr = WrapUserError(origErr, origErr.Error())
 					return nil, backoff.Permanent(origErr)
 				}
 				if addr == "" {
@@ -198,15 +201,16 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			var cn net.Conn
 			cn, origErr = net.DialTimeout("tcp", addr, DialTimeout)
 			if origErr != nil {
-				return nil, errors.Wrapf(origErr, "dial backend %s error", addr)
+				origErr = errors.Wrapf(origErr, "dial backend %s error", addr)
+				return nil, origErr
 			}
 
-			if err := selector.Succeed(mgr); err != nil {
+			if origErr := selector.Succeed(mgr); origErr != nil {
 				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
 				if ignoredErr := cn.Close(); ignoredErr != nil {
 					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
 				}
-				return nil, err
+				return nil, origErr
 			}
 
 			mgr.logger.Info("connected to backend", zap.String("addr", addr))

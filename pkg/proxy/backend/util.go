@@ -16,10 +16,6 @@ package backend
 
 import (
 	_ "unsafe"
-
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/tidb/parser/mysql"
-	"go.uber.org/zap"
 )
 
 //go:linkname Uint32N runtime.fastrandn
@@ -36,13 +32,4 @@ func GenerateSalt(size int) []byte {
 		}
 	}
 	return buf
-}
-
-// WriteUnknownError writes an unknown error to the client.
-func WriteUnknownError(clientIO *pnet.PacketIO, err error, lg *zap.Logger) {
-	if err != nil {
-		if writeErr := clientIO.WriteErrPacket(mysql.NewErrf(mysql.ErrUnknown, "%s", nil, err.Error())); writeErr != nil {
-			lg.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
-		}
-	}
 }
