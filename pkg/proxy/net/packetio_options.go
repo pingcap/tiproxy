@@ -14,7 +14,11 @@
 
 package net
 
-import "go.uber.org/atomic"
+import (
+	"net"
+
+	"go.uber.org/atomic"
+)
 
 type PacketIOption = func(*PacketIO)
 
@@ -25,5 +29,26 @@ func WithProxy(pi *PacketIO) {
 func WithWrapError(err error) func(pi *PacketIO) {
 	return func(pi *PacketIO) {
 		pi.wrap = err
+	}
+}
+
+// WithRemoteAddr
+var _ net.Addr = &oriRemoteAddr{}
+
+type oriRemoteAddr struct {
+	addr string
+}
+
+func (o *oriRemoteAddr) Network() string {
+	return "tcp"
+}
+
+func (o *oriRemoteAddr) String() string {
+	return o.addr
+}
+
+func WithRemoteAddr(readdr string) func(pi *PacketIO) {
+	return func(pi *PacketIO) {
+		pi.remoteAddr = &oriRemoteAddr{addr: readdr}
 	}
 }

@@ -27,7 +27,7 @@ var (
 
 // WriteInitialHandshake writes an initial handshake as a server.
 // It's used for tenant-aware routing and testing.
-func (p *PacketIO) WriteInitialHandshake(capability uint32, salt []byte, authPlugin string) error {
+func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, authPlugin string) error {
 	saltLen := len(salt)
 	if saltLen < 8 {
 		return ErrSaltNotLongEnough
