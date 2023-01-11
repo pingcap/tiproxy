@@ -185,6 +185,7 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 		backendInfo, err := bo.fetcher.GetBackendList(ctx)
 		if err == nil {
 			if lastErr != nil {
+				bo.logger.Info("fetching backends succeeds now")
 				bo.eventReceiver.OnObserveError(err)
 			}
 			backendStatus := bo.checkHealth(ctx, backendInfo)
@@ -192,8 +193,10 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 				return
 			}
 			bo.notifyIfChanged(backendStatus)
-		} else if lastErr == nil {
-			bo.logger.Warn("fetching backends encounters error", zap.Error(err))
+		} else {
+			if lastErr == nil {
+				bo.logger.Warn("fetching backends encounters error", zap.Error(err))
+			}
 			bo.eventReceiver.OnObserveError(err)
 		}
 		lastErr = err
