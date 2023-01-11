@@ -37,12 +37,12 @@ type mockEventReceiver struct {
 	errChan     chan error
 }
 
-func (mer *mockEventReceiver) OnBackendChanged(backends map[string]BackendStatus) {
-	mer.backendChan <- backends
-}
-
-func (mer *mockEventReceiver) OnObserveError(err error) {
-	mer.errChan <- err
+func (mer *mockEventReceiver) OnBackendChanged(backends map[string]BackendStatus, err error) {
+	if err != nil {
+		mer.errChan <- err
+	} else if len(backends) > 0 {
+		mer.backendChan <- backends
+	}
 }
 
 func newMockEventReceiver(backendChan chan map[string]BackendStatus, errChan chan error) *mockEventReceiver {

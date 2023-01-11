@@ -120,7 +120,7 @@ func (tester *routerTester) addBackends(num int) {
 		backends[addr] = StatusHealthy
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
-	tester.router.OnBackendChanged(backends)
+	tester.router.OnBackendChanged(backends, nil)
 	tester.checkBackendOrder()
 }
 
@@ -138,7 +138,7 @@ func (tester *routerTester) killBackends(num int) {
 		}
 		backends[backend.addr] = StatusCannotConnect
 	}
-	tester.router.OnBackendChanged(backends)
+	tester.router.OnBackendChanged(backends, nil)
 	tester.checkBackendOrder()
 }
 
@@ -146,7 +146,7 @@ func (tester *routerTester) updateBackendStatusByAddr(addr string, status Backen
 	backends := map[string]BackendStatus{
 		addr: status,
 	}
-	tester.router.OnBackendChanged(backends)
+	tester.router.OnBackendChanged(backends, nil)
 	tester.checkBackendOrder()
 }
 
@@ -589,7 +589,7 @@ func TestConcurrency(t *testing.T) {
 		"1": StatusHealthy,
 		"2": StatusHealthy,
 	}
-	router.OnBackendChanged(backends)
+	router.OnBackendChanged(backends, nil)
 	for addr, status := range backends {
 		func(addr string, status BackendStatus) {
 			wg.Run(func() {
@@ -607,7 +607,7 @@ func TestConcurrency(t *testing.T) {
 					}
 					router.OnBackendChanged(map[string]BackendStatus{
 						addr: status,
-					})
+					}, nil)
 				}
 			})
 		}(addr, status)

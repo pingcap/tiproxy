@@ -282,10 +282,10 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 }
 
 // OnBackendChanged implements BackendEventReceiver.OnBackendChanged interface.
-func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStatus) {
+func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStatus, err error) {
 	router.Lock()
 	defer router.Unlock()
-	router.observeError = nil
+	router.observeError = err
 	for addr, status := range backends {
 		be := router.lookupBackend(addr, true)
 		if be == nil && status != StatusCannotConnect {
@@ -307,13 +307,6 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 			router.adjustBackendList(be)
 		}
 	}
-}
-
-// OnObserveError implements BackendEventReceiver.OnObserveError interface.
-func (router *ScoreBasedRouter) OnObserveError(err error) {
-	router.Lock()
-	router.observeError = err
-	router.Unlock()
 }
 
 func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
