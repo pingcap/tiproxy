@@ -101,7 +101,7 @@ func NewDefaultHealthCheckConfig() *HealthCheckConfig {
 // BackendEventReceiver receives the event of backend status change.
 type BackendEventReceiver interface {
 	// OnBackendChanged is called when the backend list changes.
-	OnBackendChanged(backends map[string]BackendStatus)
+	OnBackendChanged(backends map[string]BackendStatus, err error)
 }
 
 // BackendInfo stores the status info of each backend.
@@ -179,12 +179,17 @@ func (bo *BackendObserver) Refresh() {
 
 func (bo *BackendObserver) observe(ctx context.Context) {
 	for ctx.Err() == nil {
-		backendInfo := bo.fetcher.GetBackendList(ctx)
-		backendStatus := bo.checkHealth(ctx, backendInfo)
-		if ctx.Err() != nil {
-			return
+		backendInfo, err := bo.fetcher.GetBackendList(ctx)
+		if err != nil {
+			bo.logger.Warn("fetching backends encounters error", zap.Error(err))
+			bo.eventReceiver.OnBackendChanged(nil, err)
+		} else {
+			backendStatus := bo.checkHealth(ctx, backendInfo)
+			if ctx.Err() != nil {
+				return
+			}
+			bo.notifyIfChanged(backendStatus)
 		}
-		bo.notifyIfChanged(backendStatus)
 		select {
 		case <-time.After(bo.config.healthCheckInterval):
 		case <-bo.refreshChan:
@@ -286,9 +291,8 @@ func (bo *BackendObserver) notifyIfChanged(backendStatus map[string]BackendStatu
 			}
 		}
 	}
-	if len(updatedBackends) > 0 {
-		bo.eventReceiver.OnBackendChanged(updatedBackends)
-	}
+	// Notify it even when the updatedBackends is empty, in order to clear the last error.
+	bo.eventReceiver.OnBackendChanged(updatedBackends, nil)
 	bo.curBackendInfo = backendStatus
 }
 

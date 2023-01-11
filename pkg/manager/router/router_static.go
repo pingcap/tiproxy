@@ -27,7 +27,7 @@ func NewStaticRouter(addr []string) *StaticRouter {
 
 func (r *StaticRouter) GetBackendSelector() BackendSelector {
 	return BackendSelector{
-		routeOnce: func(excluded []string) string {
+		routeOnce: func(excluded []string) (string, error) {
 			for _, addr := range r.addrs {
 				found := false
 				for _, e := range excluded {
@@ -37,10 +37,10 @@ func (r *StaticRouter) GetBackendSelector() BackendSelector {
 					}
 				}
 				if !found {
-					return addr
+					return addr, nil
 				}
 			}
-			return ""
+			return "", nil
 		},
 		addConn: func(addr string, conn RedirectableConn) error {
 			r.cnt++

@@ -17,7 +17,7 @@ package router
 type BackendSelector struct {
 	excluded  []string
 	cur       string
-	routeOnce func(excluded []string) string
+	routeOnce func(excluded []string) (string, error)
 	addConn   func(addr string, conn RedirectableConn) error
 }
 
@@ -25,12 +25,16 @@ func (bs *BackendSelector) Reset() {
 	bs.excluded = bs.excluded[:0]
 }
 
-func (bs *BackendSelector) Next() string {
-	bs.cur = bs.routeOnce(bs.excluded)
+func (bs *BackendSelector) Next() (string, error) {
+	addr, err := bs.routeOnce(bs.excluded)
+	if err != nil {
+		return addr, err
+	}
+	bs.cur = addr
 	if bs.cur != "" {
 		bs.excluded = append(bs.excluded, bs.cur)
 	}
-	return bs.cur
+	return bs.cur, nil
 }
 
 func (bs *BackendSelector) Succeed(conn RedirectableConn) error {
