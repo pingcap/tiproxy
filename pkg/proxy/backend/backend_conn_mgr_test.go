@@ -16,6 +16,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -158,7 +159,7 @@ func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO *pnet.PacketIO)
 	require.NoError(ts.t, err)
 	prevCounter, err := readCmdCounter(request[0], ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
-	rsErr := ts.mp.ExecuteCmd(context.Background(), request, clientIO)
+	rsErr := ts.mp.ExecuteCmd(context.Background(), request)
 	curCounter, err := readCmdCounter(request[0], ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	require.Equal(ts.t, prevCounter+1, curCounter)
@@ -180,32 +181,32 @@ func (ts *backendMgrTester) startTxn4Backend(packetIO *pnet.PacketIO) error {
 func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO *pnet.PacketIO) error {
 	signal := (*signalRedirect)(atomic.LoadPointer(&ts.mp.signal))
 	require.Nil(ts.t, signal)
-	backend1 := ts.mp.backendConn
+	backend1 := ts.mp.backendIO
 	// There is no other way to verify it's not redirected.
 	// The buffer size of channel signalReceived is 0, so after the second redirect signal is sent,
 	// we can ensure that the first signal is already processed.
 	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 	ts.mp.signalReceived <- signalTypeRedirect
 	// The backend connection is still the same.
-	require.Equal(ts.t, backend1, ts.mp.backendConn)
+	require.Equal(ts.t, backend1, ts.mp.backendIO)
 	return nil
 }
 
 func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	backend1 := ts.mp.backendConn
+	backend1 := ts.mp.backendIO
 	err := ts.forwardCmd4Proxy(clientIO, backendIO)
 	require.NoError(ts.t, err)
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
-	require.NotEqual(ts.t, backend1, ts.mp.backendConn)
+	require.NotEqual(ts.t, backend1, ts.mp.backendIO)
 	require.Len(ts.t, ts.mp.GetRedirectingAddr(), 0)
 	return nil
 }
 
 func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	backend1 := ts.mp.backendConn
+	backend1 := ts.mp.backendIO
 	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
-	require.Equal(ts.t, backend1, ts.mp.backendConn)
+	require.Equal(ts.t, backend1, ts.mp.backendIO)
 	require.Len(ts.t, ts.mp.GetRedirectingAddr(), 0)
 	return nil
 }
@@ -224,6 +225,8 @@ func (ts *backendMgrTester) checkConnClosed(_, _ *pnet.PacketIO) error {
 func (ts *backendMgrTester) runTests(runners []runner) {
 	for _, runner := range runners {
 		ts.runAndCheck(ts.t, nil, runner.client, runner.backend, runner.proxy)
+		require.Equal(ts.t, ts.tc.clientIO.InBytes(), ts.mp.ClientOutBytes())
+		require.Equal(ts.t, ts.tc.clientIO.OutBytes(), ts.mp.ClientInBytes())
 	}
 }
 
@@ -241,10 +244,10 @@ func TestNormalRedirect(t *testing.T) {
 		{
 			client: nil,
 			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
+				backend1 := ts.mp.backendIO
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendConn)
+				require.NotEqual(t, backend1, ts.mp.backendIO)
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,
@@ -344,11 +347,11 @@ func TestRedirectInTxn(t *testing.T) {
 				return ts.mc.request(packetIO)
 			},
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
+				backend1 := ts.mp.backendIO
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(t, err)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventFail)
-				require.Equal(t, backend1, ts.mp.backendConn)
+				require.Equal(t, backend1, ts.mp.backendIO)
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
@@ -492,10 +495,10 @@ func TestSpecialCmds(t *testing.T) {
 		{
 			client: nil,
 			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
+				backend1 := ts.mp.backendIO
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendConn)
+				require.NotEqual(t, backend1, ts.mp.backendIO)
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
@@ -503,8 +506,8 @@ func TestSpecialCmds(t *testing.T) {
 				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
 				require.Equal(t, "another_user", ts.mb.username)
 				require.Equal(t, "session_db", ts.mb.db)
-				expectCap := pnet.Capability(ts.mp.authenticator.supportedServerCapabilities.Uint32() &^ (mysql.ClientMultiStatements | mysql.ClientPluginAuthLenencClientData))
-				gotCap := pnet.Capability(ts.mb.capability &^ mysql.ClientPluginAuthLenencClientData)
+				expectCap := pnet.Capability(ts.mp.handshakeHandler.GetCapability() &^ (pnet.ClientMultiStatements | pnet.ClientPluginAuthLenencClientData))
+				gotCap := pnet.Capability(ts.mb.capability &^ pnet.ClientPluginAuthLenencClientData)
 				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
 				return nil
 			},
@@ -588,10 +591,10 @@ func TestCustomHandshake(t *testing.T) {
 		{
 			client: nil,
 			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendConn
+				backend1 := ts.mp.backendIO
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendConn)
+				require.NotEqual(t, backend1, ts.mp.backendIO)
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,
@@ -687,14 +690,16 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 }
 
 func TestGetBackendIO(t *testing.T) {
-	listeners := make([]net.Listener, 0, 3)
 	addrs := make([]string, 0, 3)
-	for i := 0; i < 3; i++ {
+	listeners := make([]net.Listener, 0, cap(addrs))
+
+	for i := 0; i < cap(addrs); i++ {
 		listener, err := net.Listen("tcp", "0.0.0.0:0")
 		require.NoError(t, err)
 		listeners = append(listeners, listener)
 		addrs = append(addrs, listener.Addr().String())
 	}
+
 	rt := router.NewStaticRouter(addrs)
 	badAddrs := make(map[string]struct{}, 3)
 	handler := &CustomHandshakeHandler{
@@ -708,19 +713,29 @@ func TestGetBackendIO(t *testing.T) {
 		},
 	}
 	mgr := NewBackendConnManager(logger.CreateLoggerForTest(t), handler, 0, false, false)
+	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
-		io, err := mgr.getBackendIO(mgr.authenticator, mgr.authenticator, nil, time.Second)
+		wg.Run(func() {
+			if i < len(listeners) {
+				cn, err := listeners[i].Accept()
+				require.NoError(t, err)
+				require.NoError(t, cn.Close())
+			}
+		})
+		io, err := mgr.getBackendIO(mgr, mgr.authenticator, nil, time.Second)
 		if err == nil {
 			require.NoError(t, io.Close())
 		}
+		message := fmt.Sprintf("%d: %s, %+v\n", i, badAddrs, err)
 		if i < len(listeners) {
-			require.NoError(t, err)
+			require.NoError(t, err, message)
 			err = listeners[i].Close()
-			require.NoError(t, err)
+			require.NoError(t, err, message)
 		} else {
-			require.ErrorIs(t, err, context.DeadlineExceeded)
+			require.ErrorIs(t, err, context.DeadlineExceeded, message)
 		}
-		require.True(t, len(badAddrs) <= i)
+		require.True(t, len(badAddrs) <= i, message)
 		badAddrs = make(map[string]struct{}, 3)
+		wg.Wait()
 	}
 }

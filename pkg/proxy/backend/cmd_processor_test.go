@@ -86,7 +86,7 @@ func TestForwardCommands(t *testing.T) {
 	// Test every respond type for every command.
 	for cmd, respondTypes := range cmdResponseTypes {
 		for _, respondType := range respondTypes {
-			for _, capability := range []uint32{defaultTestBackendCapability &^ mysql.ClientDeprecateEOF, defaultTestBackendCapability | mysql.ClientDeprecateEOF} {
+			for _, capability := range []pnet.Capability{defaultTestBackendCapability &^ pnet.ClientDeprecateEOF, defaultTestBackendCapability | pnet.ClientDeprecateEOF} {
 				cfgOvr := func(cfg *testConfig) {
 					cfg.clientConfig.cmd = cmd
 					cfg.backendConfig.respondType = respondType
@@ -161,7 +161,7 @@ func TestDirectQuery(t *testing.T) {
 		},
 		{
 			cfg: func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestBackendCapability &^ mysql.ClientDeprecateEOF
+				cfg.clientConfig.capability = defaultTestBackendCapability &^ pnet.ClientDeprecateEOF
 				cfg.proxyConfig.capability = cfg.clientConfig.capability
 				cfg.backendConfig.capability = cfg.clientConfig.capability
 				cfg.backendConfig.columns = 2
