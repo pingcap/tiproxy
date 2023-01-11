@@ -41,7 +41,7 @@ func GenerateSalt(size int) []byte {
 // WriteUnknownError writes an unknown error to the client.
 func WriteUnknownError(clientIO *pnet.PacketIO, err error, lg *zap.Logger) {
 	if err != nil {
-		if writeErr := clientIO.WriteErrPacket(mysql.NewErr(mysql.ErrUnknown, err.Error())); writeErr != nil {
+		if writeErr := clientIO.WriteErrPacket(mysql.NewErrf(mysql.ErrUnknown, "%s", nil, err.Error())); writeErr != nil {
 			lg.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
 		}
 	}
