@@ -30,7 +30,7 @@ type proxyConfig struct {
 	backendTLSConfig  *tls.Config
 	handler           *CustomHandshakeHandler
 	sessionToken      string
-	capability        uint32
+	capability        pnet.Capability
 	waitRedirect      bool
 }
 
@@ -43,8 +43,9 @@ func newProxyConfig() *proxyConfig {
 }
 
 type mockProxy struct {
-	*proxyConfig
 	*BackendConnManager
+
+	*proxyConfig
 	// outputs that received from the server.
 	rs *gomysql.Result
 	// execution results
@@ -59,12 +60,12 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 		logger:             logger.CreateLoggerForTest(t).Named("mockProxy"),
 		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), cfg.handler, 0, false, false),
 	}
-	mp.cmdProcessor.capability = cfg.capability
+	mp.cmdProcessor.capability = cfg.capability.Uint32()
 	return mp
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	if err := mp.authenticator.handshakeFirstTime(mp.logger, clientIO, mp.handshakeHandler, func(ConnContext, *Authenticator, *pnet.HandshakeResp, time.Duration) (*pnet.PacketIO, error) {
+	if err := mp.authenticator.handshakeFirstTime(mp.logger, mp, clientIO, mp.handshakeHandler, func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 		return backendIO, nil
 	}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
 		return err
@@ -74,7 +75,7 @@ func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) e
 }
 
 func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeSecondTime(mp.logger, clientIO, backendIO, mp.sessionToken)
+	return mp.authenticator.handshakeSecondTime(mp.logger, clientIO, backendIO, mp.backendTLSConfig, mp.sessionToken)
 }
 
 func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {

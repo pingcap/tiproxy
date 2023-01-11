@@ -36,7 +36,7 @@ var (
 )
 
 // ParseInitialHandshake parses the initial handshake received from the server.
-func ParseInitialHandshake(data []byte) uint32 {
+func ParseInitialHandshake(data []byte) Capability {
 	// skip mysql version
 	pos := 1 + bytes.IndexByte(data[1:], 0x00) + 1
 	// skip connection id
@@ -59,7 +59,7 @@ func ParseInitialHandshake(data []byte) uint32 {
 		// skip salt second part
 		// skip auth plugin
 	}
-	return capability
+	return Capability(capability)
 }
 
 // HandshakeResp indicates the response read from the client.

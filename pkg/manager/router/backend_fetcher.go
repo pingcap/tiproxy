@@ -32,9 +32,12 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
+var _ BackendFetcher = (*PDFetcher)(nil)
+var _ BackendFetcher = (*StaticFetcher)(nil)
+
 // BackendFetcher is an interface to fetch the backend list.
 type BackendFetcher interface {
-	GetBackendList(context.Context) map[string]*BackendInfo
+	GetBackendList(context.Context) (map[string]*BackendInfo, error)
 }
 
 // InitEtcdClient initializes an etcd client that fetches TiDB instance topology from PD.
@@ -99,10 +102,10 @@ func NewPDFetcher(client *clientv3.Client, logger *zap.Logger, config *HealthChe
 	}
 }
 
-func (pf *PDFetcher) GetBackendList(ctx context.Context) map[string]*BackendInfo {
+func (pf *PDFetcher) GetBackendList(ctx context.Context) (map[string]*BackendInfo, error) {
 	pf.fetchBackendList(ctx)
 	backendInfo := pf.filterTombstoneBackends()
-	return backendInfo
+	return backendInfo, nil
 }
 
 func (pf *PDFetcher) fetchBackendList(ctx context.Context) {
@@ -208,8 +211,8 @@ func NewStaticFetcher(staticAddrs []string) *StaticFetcher {
 	}
 }
 
-func (sf *StaticFetcher) GetBackendList(context.Context) map[string]*BackendInfo {
-	return sf.backends
+func (sf *StaticFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
+	return sf.backends, nil
 }
 
 func backendListToMap(addrs []string) map[string]*BackendInfo {

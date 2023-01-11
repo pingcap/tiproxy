@@ -88,8 +88,11 @@ func TestPacketIO(t *testing.T) {
 			// send anything
 			require.NoError(t, cli.WritePacket(expectMsg, true))
 
+			outBytes := len(expectMsg) + 4
 			for _, l := range pktLengths {
 				require.NoError(t, cli.WritePacket(make([]byte, l), true))
+				outBytes += l + (l/(mysql.MaxPayloadLen)+1)*4
+				require.Equal(t, uint64(outBytes), cli.OutBytes())
 			}
 
 			// skip handshake
@@ -116,10 +119,13 @@ func TestPacketIO(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, expectMsg, msg)
 
+			inBytes := len(expectMsg) + 4
 			for _, l := range pktLengths {
 				msg, err = srv.ReadPacket()
 				require.NoError(t, err)
 				require.Equal(t, l, len(msg))
+				inBytes += l + (l/(mysql.MaxPayloadLen)+1)*4
+				require.Equal(t, uint64(inBytes), srv.InBytes())
 			}
 
 			// send handshake
@@ -176,5 +182,25 @@ func TestTLS(t *testing.T) {
 			require.NoError(t, err)
 		},
 		500, // unable to reproduce stably, loop 500 times
+	)
+}
+
+func TestPacketIOClose(t *testing.T) {
+	testTCPConn(t,
+		func(t *testing.T, cli *PacketIO) {
+			require.NoError(t, cli.Close())
+			require.NoError(t, cli.Close())
+			require.NoError(t, cli.GracefulClose())
+			require.NotEqual(t, cli.LocalAddr(), "")
+			require.NotEqual(t, cli.RemoteAddr(), "")
+		},
+		func(t *testing.T, srv *PacketIO) {
+			require.NoError(t, srv.GracefulClose())
+			require.NoError(t, srv.Close())
+			require.NoError(t, srv.Close())
+			require.NotEqual(t, srv.LocalAddr(), "")
+			require.NotEqual(t, srv.RemoteAddr(), "")
+		},
+		1,
 	)
 }

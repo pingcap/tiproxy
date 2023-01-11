@@ -15,7 +15,6 @@
 package backend
 
 import (
-	"net"
 	"strings"
 	"testing"
 
@@ -28,50 +27,50 @@ func TestUnsupportedCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientSSL
+				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientSSL
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientSSL
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability & ^mysql.ClientSSL
-			},
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability | mysql.ClientSSL
+				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientSSL
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability & ^mysql.ClientDeprecateEOF
+				cfg.backendConfig.capability = defaultTestBackendCapability & ^pnet.ClientSSL
 			},
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability | mysql.ClientDeprecateEOF
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientProtocol41
-			},
-			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientProtocol41
+				cfg.backendConfig.capability = defaultTestBackendCapability | pnet.ClientSSL
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestClientCapability & ^mysql.ClientPSMultiResults
+				cfg.backendConfig.capability = defaultTestBackendCapability & ^pnet.ClientDeprecateEOF
 			},
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestClientCapability | mysql.ClientPSMultiResults
+				cfg.backendConfig.capability = defaultTestBackendCapability | pnet.ClientDeprecateEOF
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientPSMultiResults
+				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientProtocol41
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientPSMultiResults
+				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientProtocol41
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability = defaultTestClientCapability & ^pnet.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability = defaultTestClientCapability | pnet.ClientPSMultiResults
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientPSMultiResults
 			},
 		},
 	}
@@ -81,9 +80,9 @@ func TestUnsupportedCapability(t *testing.T) {
 	for _, cfgs := range cfgOverriders {
 		ts, clean := newTestSuite(t, tc, cfgs...)
 		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
-			if ts.mb.backendConfig.capability&defRequiredBackendCaps.Uint32() != defRequiredBackendCaps.Uint32() {
+			if ts.mb.backendConfig.capability&defRequiredBackendCaps != defRequiredBackendCaps {
 				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
-			} else if ts.mc.clientConfig.capability&requiredFrontendCaps.Uint32() != requiredFrontendCaps.Uint32() {
+			} else if ts.mc.clientConfig.capability&requiredFrontendCaps != requiredFrontendCaps {
 				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
 			} else {
 				require.NoError(t, ts.mc.err)
@@ -107,10 +106,10 @@ func TestAuthPlugin(t *testing.T) {
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientPluginAuth
+				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientPluginAuth
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientPluginAuth
+				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientPluginAuth
 			},
 		},
 		{
@@ -152,27 +151,27 @@ func TestCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientConnectWithDB
+				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientConnectWithDB
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientConnectWithDB
+				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientConnectWithDB
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientConnectAtts
+				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientConnectAttrs
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientConnectAtts
+				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientConnectAttrs
 				cfg.clientConfig.attrs = map[string]string{"key": "value"}
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^mysql.ClientSecureConnection
+				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientSecureConnection
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | mysql.ClientSecureConnection
+				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientSecureConnection
 			},
 		},
 	}
@@ -216,12 +215,10 @@ func TestCustomAuth(t *testing.T) {
 	reAttrs := map[string]string{"key": "value"}
 	reCap := SupportedServerCapabilities & ^pnet.ClientDeprecateEOF
 	inUser := ""
-	inAddr := ""
 	ts, clean := newTestSuite(t, tc, func(cfg *testConfig) {
 		handler := cfg.proxyConfig.handler
 		handler.handleHandshakeResp = func(ctx ConnContext, resp *pnet.HandshakeResp) error {
 			inUser = resp.User
-			inAddr = ctx.ClientAddr()
 			resp.User = reUser
 			resp.Attrs = reAttrs
 			return nil
@@ -235,9 +232,6 @@ func TestCustomAuth(t *testing.T) {
 		require.Equal(t, reUser, ts.mb.username)
 		require.Equal(t, reAttrs, ts.mb.attrs)
 		require.Equal(t, reCap&pnet.ClientDeprecateEOF, pnet.Capability(ts.mb.capability)&pnet.ClientDeprecateEOF)
-		host, _, err := net.SplitHostPort(inAddr)
-		require.NoError(t, err)
-		require.Equal(t, host, "::1")
 	}
 	ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {})
 	checker()

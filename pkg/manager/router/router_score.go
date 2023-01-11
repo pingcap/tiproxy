@@ -37,7 +37,8 @@ type ScoreBasedRouter struct {
 	cancelFunc context.CancelFunc
 	wg         waitgroup.WaitGroup
 	// A list of *backendWrapper. The backends are in descending order of scores.
-	backends *list.List
+	backends     *list.List
+	observeError error
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
@@ -69,9 +70,12 @@ func (router *ScoreBasedRouter) GetBackendSelector() BackendSelector {
 	}
 }
 
-func (router *ScoreBasedRouter) routeOnce(excluded []string) string {
+func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 	router.Lock()
 	defer router.Unlock()
+	if router.observeError != nil {
+		return "", router.observeError
+	}
 	for be := router.backends.Back(); be != nil; be = be.Prev() {
 		backend := be.Value.(*backendWrapper)
 		// These backends may be recycled, so we should not connect to them again.
@@ -87,7 +91,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) string {
 			}
 		}
 		if !found {
-			return backend.addr
+			return backend.addr, nil
 		}
 	}
 	// No available backends, maybe the health check result is outdated during rolling restart.
@@ -95,7 +99,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) string {
 	if router.observer != nil {
 		router.observer.Refresh()
 	}
-	return ""
+	return "", nil
 }
 
 func (router *ScoreBasedRouter) addNewConn(addr string, conn RedirectableConn) error {
@@ -278,9 +282,10 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 }
 
 // OnBackendChanged implements BackendEventReceiver.OnBackendChanged interface.
-func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStatus) {
+func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStatus, err error) {
 	router.Lock()
 	defer router.Unlock()
+	router.observeError = err
 	for addr, status := range backends {
 		be := router.lookupBackend(addr, true)
 		if be == nil && status != StatusCannotConnect {
