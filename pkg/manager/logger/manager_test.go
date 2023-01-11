@@ -165,7 +165,7 @@ func TestUpdateCfg(t *testing.T) {
 func setupLogManager(t *testing.T, cfg *config.Config) (*zap.Logger, chan<- *config.Config) {
 	lm, lg, err := NewLoggerManager(&cfg.Log)
 	require.NoError(t, err)
-	ch := make(chan *config.Config, 32)
+	ch := make(chan *config.Config)
 	lm.Init(ch)
 	t.Cleanup(func() {
 		require.NoError(t, lm.Close())
