@@ -132,26 +132,8 @@ func TestUpdateCfg(t *testing.T) {
 		err := os.RemoveAll(dir)
 		require.NoError(t, err)
 
-		bstr := new(strings.Builder)
-
-		logfiles := readLogFiles(t, dir)
-		e := int64(0)
-		for _, f := range logfiles {
-			fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
-			e += f.Size()
-		}
-		fmt.Fprintf(bstr, "1#### %d\n", e)
-
 		// write new data
 		test.action(lg)
-
-		logfiles = readLogFiles(t, dir)
-		e = 0
-		for _, f := range logfiles {
-			fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
-			e += f.Size()
-		}
-		fmt.Fprintf(bstr, "2#### %d\n", e)
 
 		// retry before new data are flushed
 		timer := time.NewTimer(3 * time.Second)
@@ -159,6 +141,14 @@ func TestUpdateCfg(t *testing.T) {
 		for !succeed {
 			select {
 			case <-timer.C:
+				bstr := new(strings.Builder)
+				logfiles := readLogFiles(t, dir)
+				e := int64(0)
+				for _, f := range logfiles {
+					fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
+					e += f.Size()
+				}
+				fmt.Fprintf(bstr, "3#### %d\n", e)
 				t.Fatalf("%dth case time out:\n%s", i, bstr.String())
 			case <-time.After(50 * time.Millisecond):
 				logfiles := readLogFiles(t, dir)
@@ -166,13 +156,6 @@ func TestUpdateCfg(t *testing.T) {
 					succeed = true
 					break
 				}
-
-				e := int64(0)
-				for _, f := range logfiles {
-					fmt.Fprintf(bstr, "%s: %d\n", f.Name(), f.Size())
-					e += f.Size()
-				}
-				fmt.Fprintf(bstr, "3#### %d\n", e)
 			}
 		}
 		timer.Stop()
