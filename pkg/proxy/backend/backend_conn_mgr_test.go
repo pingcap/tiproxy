@@ -689,6 +689,39 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 	ts.runTests(runners)
 }
 
+func TestHandlerReturnError(t *testing.T) {
+	cfgs := []cfgOverrider{
+		func(config *testConfig) {
+			config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+				return nil, errors.New("mocked error")
+			}
+		},
+		func(config *testConfig) {
+			config.proxyConfig.handler.handleHandshakeResp = func(ctx ConnContext, resp *pnet.HandshakeResp) error {
+				return errors.New("mocked error")
+			}
+		},
+	}
+	for _, cfg := range cfgs {
+		ts := newBackendMgrTester(t, cfg)
+		rn := runner{
+			client: func(packetIO *pnet.PacketIO) error {
+				err := ts.mc.authenticate(packetIO)
+				require.NoError(t, err)
+				require.ErrorContains(t, ts.mc.mysqlErr, "mocked error")
+				return nil
+			},
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				require.Error(t, err)
+				return nil
+			},
+			backend: nil,
+		}
+		ts.runAndCheck(ts.t, func(t *testing.T, ts *testSuite) {}, rn.client, rn.backend, rn.proxy)
+	}
+}
+
 func TestGetBackendIO(t *testing.T) {
 	addrs := make([]string, 0, 3)
 	listeners := make([]net.Listener, 0, cap(addrs))

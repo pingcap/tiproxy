@@ -62,6 +62,7 @@ type mockClient struct {
 	*clientConfig
 	// Outputs that received from the server and will be checked by the test.
 	authSucceed bool
+	mysqlErr    error
 }
 
 func newMockClient(cfg *clientConfig) *mockClient {
@@ -117,6 +118,7 @@ func (mc *mockClient) writePassword(packetIO *pnet.PacketIO) error {
 			return nil
 		case mysql.ErrHeader:
 			mc.authSucceed = false
+			mc.mysqlErr = pnet.ParseErrorPacket(serverPkt)
 			return nil
 		case mysql.AuthSwitchRequest, pnet.ShaCommand:
 			if err := packetIO.WritePacket(mc.authData, true); err != nil {
@@ -182,7 +184,10 @@ func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
 			return err
 		}
 		switch resp[0] {
-		case mysql.OKHeader, mysql.ErrHeader:
+		case mysql.OKHeader:
+			return nil
+		case mysql.ErrHeader:
+			mc.mysqlErr = pnet.ParseErrorPacket(resp)
 			return nil
 		default:
 			if err := packetIO.WritePacket(mc.authData, true); err != nil {
@@ -268,6 +273,7 @@ func (mc *mockClient) readUntilResultEnd(packetIO *pnet.PacketIO) (pkt []byte, e
 			return
 		}
 		if pkt[0] == mysql.ErrHeader {
+			mc.mysqlErr = pnet.ParseErrorPacket(pkt)
 			return
 		}
 		if mc.capability&pnet.ClientDeprecateEOF == 0 {
@@ -311,6 +317,7 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 		case mysql.OKHeader:
 			serverStatus = binary.LittleEndian.Uint16(pkt[3:])
 		case mysql.ErrHeader:
+			mc.mysqlErr = pnet.ParseErrorPacket(pkt)
 			return nil
 		case mysql.LocalInFileHeader:
 			for i := 0; i < mc.filePkts; i++ {

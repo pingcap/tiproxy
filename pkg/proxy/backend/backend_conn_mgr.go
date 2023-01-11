@@ -166,6 +166,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
+		if mgr.clientIO != nil {
+			WriteUnknownError(mgr.clientIO, err, mgr.logger)
+		}
 		return nil, err
 	}
 	// Reasons to wait:
@@ -174,28 +177,31 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	bctx, cancel := context.WithTimeout(context.Background(), timeout)
 	selector := r.GetBackendSelector()
 	var addr string
+	var origErr error
 	io, err := backoff.RetryNotifyWithData(
 		func() (*pnet.PacketIO, error) {
 			// Try to connect to all backup backends one by one.
-			addr, err := selector.Next()
-			if err != nil {
-				return nil, backoff.Permanent(err)
+			addr, origErr = selector.Next()
+			if origErr != nil {
+				return nil, backoff.Permanent(origErr)
 			}
 
 			// if all addrs are enumerated, reset and try again
 			if addr == "" {
 				selector.Reset()
-				if addr, err = selector.Next(); err != nil {
-					return nil, backoff.Permanent(err)
+				if addr, origErr = selector.Next(); origErr != nil {
+					return nil, backoff.Permanent(origErr)
 				}
 				if addr == "" {
-					return nil, router.ErrNoInstanceToSelect
+					origErr = router.ErrNoInstanceToSelect
+					return nil, origErr
 				}
 			}
 
-			cn, err := net.DialTimeout("tcp", addr, DialTimeout)
-			if err != nil {
-				return nil, errors.Wrapf(err, "dial backend %s error", addr)
+			var cn net.Conn
+			cn, origErr = net.DialTimeout("tcp", addr, DialTimeout)
+			if origErr != nil {
+				return nil, errors.Wrapf(origErr, "dial backend %s error", addr)
 			}
 
 			if err := selector.Succeed(mgr); err != nil {
@@ -219,6 +225,13 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		},
 	)
 	cancel()
+	// Replace the deadline exceed error with a more readable error.
+	if err != nil && origErr != nil {
+		err = origErr
+	}
+	if err != nil && mgr.clientIO != nil {
+		WriteUnknownError(mgr.clientIO, err, mgr.logger)
+	}
 	return io, err
 }
 

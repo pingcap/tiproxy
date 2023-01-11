@@ -146,6 +146,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 
 	clientResp := pnet.ParseHandshakeResponse(pkt)
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
+		WriteUnknownError(clientIO, err, logger)
 		return err
 	}
 	auth.user = clientResp.User
