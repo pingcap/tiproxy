@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/metrics"
@@ -119,7 +120,7 @@ func (tester *routerTester) addBackends(num int) {
 		backends[addr] = StatusHealthy
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
-	tester.router.OnBackendChanged(backends)
+	tester.router.OnBackendChanged(backends, nil)
 	tester.checkBackendOrder()
 }
 
@@ -137,7 +138,7 @@ func (tester *routerTester) killBackends(num int) {
 		}
 		backends[backend.addr] = StatusCannotConnect
 	}
-	tester.router.OnBackendChanged(backends)
+	tester.router.OnBackendChanged(backends, nil)
 	tester.checkBackendOrder()
 }
 
@@ -145,7 +146,7 @@ func (tester *routerTester) updateBackendStatusByAddr(addr string, status Backen
 	backends := map[string]BackendStatus{
 		addr: status,
 	}
-	tester.router.OnBackendChanged(backends)
+	tester.router.OnBackendChanged(backends, nil)
 	tester.checkBackendOrder()
 }
 
@@ -173,7 +174,8 @@ func (tester *routerTester) checkBackendOrder() {
 
 func (tester *routerTester) simpleRoute(conn RedirectableConn) string {
 	selector := tester.router.GetBackendSelector()
-	addr := selector.Next()
+	addr, err := selector.Next()
+	require.NoError(tester.t, err)
 	if len(addr) > 0 {
 		err := selector.Succeed(conn)
 		require.NoError(tester.t, err)
@@ -382,31 +384,37 @@ func TestSelectorReturnOrder(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		addrs := make(map[string]struct{}, 3)
 		for j := 0; j < 3; j++ {
-			addr := selector.Next()
+			addr, err := selector.Next()
+			require.NoError(t, err)
 			addrs[addr] = struct{}{}
 		}
 		// All 3 addresses are different.
 		require.Equal(t, 3, len(addrs))
-		addr := selector.Next()
+		addr, err := selector.Next()
+		require.NoError(t, err)
 		require.True(t, len(addr) == 0)
 		selector.Reset()
 	}
 
 	tester.killBackends(1)
 	for i := 0; i < 2; i++ {
-		addr := selector.Next()
+		addr, err := selector.Next()
+		require.NoError(t, err)
 		require.True(t, len(addr) > 0)
 	}
-	addr := selector.Next()
+	addr, err := selector.Next()
+	require.NoError(t, err)
 	require.True(t, len(addr) == 0)
 	selector.Reset()
 
 	tester.addBackends(1)
 	for i := 0; i < 3; i++ {
-		addr := selector.Next()
+		addr, err := selector.Next()
+		require.NoError(t, err)
 		require.True(t, len(addr) > 0)
 	}
-	addr = selector.Next()
+	addr, err = selector.Next()
+	require.NoError(t, err)
 	require.True(t, len(addr) == 0)
 }
 
@@ -581,7 +589,7 @@ func TestConcurrency(t *testing.T) {
 		"1": StatusHealthy,
 		"2": StatusHealthy,
 	}
-	router.OnBackendChanged(backends)
+	router.OnBackendChanged(backends, nil)
 	for addr, status := range backends {
 		func(addr string, status BackendStatus) {
 			wg.Run(func() {
@@ -599,7 +607,7 @@ func TestConcurrency(t *testing.T) {
 					}
 					router.OnBackendChanged(map[string]BackendStatus{
 						addr: status,
-					})
+					}, nil)
 				}
 			})
 		}(addr, status)
@@ -625,7 +633,8 @@ func TestConcurrency(t *testing.T) {
 							connID: connID,
 						}
 						selector := router.GetBackendSelector()
-						addr := selector.Next()
+						addr, err := selector.Next()
+						require.NoError(t, err)
 						if len(addr) == 0 {
 							conn = nil
 							continue
@@ -673,10 +682,10 @@ func TestConcurrency(t *testing.T) {
 func TestRefresh(t *testing.T) {
 	backends := make([]string, 0)
 	var m sync.Mutex
-	fetcher := NewExternalFetcher(func() []string {
+	fetcher := NewExternalFetcher(func() ([]string, error) {
 		m.Lock()
 		defer m.Unlock()
-		return backends
+		return backends, nil
 	})
 	// Create a router with a very long health check interval.
 	lg := logger.CreateLoggerForTest(t)
@@ -694,7 +703,8 @@ func TestRefresh(t *testing.T) {
 	defer rt.Close()
 	// The initial backends are empty.
 	selector := rt.GetBackendSelector()
-	addr := selector.Next()
+	addr, err := selector.Next()
+	require.NoError(t, err)
 	require.True(t, len(addr) == 0)
 	// Create a new backend and add to the list.
 	server := newBackendServer(t)
@@ -703,15 +713,81 @@ func TestRefresh(t *testing.T) {
 	m.Unlock()
 	defer server.close()
 	// The backends are refreshed very soon.
-	timer := time.NewTimer(3 * time.Second)
+	finally(t, func() bool {
+		addr, err = selector.Next()
+		require.NoError(t, err)
+		return len(addr) > 0
+	}, 100*time.Millisecond, 3*time.Second)
+}
+
+func TestObserveError(t *testing.T) {
+	backends := make([]string, 0)
+	var observeError error
+	var m sync.Mutex
+	fetcher := NewExternalFetcher(func() ([]string, error) {
+		m.Lock()
+		defer m.Unlock()
+		return backends, observeError
+	})
+	// Create a router with a very short health check interval.
+	lg := logger.CreateLoggerForTest(t)
+	rt := &ScoreBasedRouter{
+		logger:   lg,
+		backends: list.New(),
+	}
+	observer, err := StartBackendObserver(lg, rt, nil, newHealthCheckConfigForTest(), fetcher)
+	require.NoError(t, err)
+	rt.Lock()
+	rt.observer = observer
+	rt.Unlock()
+	defer rt.Close()
+	// No backends and no error.
+	selector := rt.GetBackendSelector()
+	addr, err := selector.Next()
+	require.NoError(t, err)
+	require.True(t, len(addr) == 0)
+	// Create a new backend and add to the list.
+	server := newBackendServer(t)
+	m.Lock()
+	backends = append(backends, server.sqlAddr)
+	m.Unlock()
+	defer server.close()
+	// The backends are refreshed very soon.
+	finally(t, func() bool {
+		selector.Reset()
+		addr, err = selector.Next()
+		require.NoError(t, err)
+		return len(addr) > 0
+	}, 100*time.Millisecond, 3*time.Second)
+	// Mock an observe error.
+	m.Lock()
+	observeError = errors.New("mock observe error")
+	m.Unlock()
+	finally(t, func() bool {
+		selector.Reset()
+		addr, err = selector.Next()
+		return len(addr) == 0 && err != nil
+	}, 100*time.Millisecond, 3*time.Second)
+	// Clear the observe error.
+	m.Lock()
+	observeError = nil
+	m.Unlock()
+	finally(t, func() bool {
+		selector.Reset()
+		addr, err = selector.Next()
+		return len(addr) > 0 && err == nil
+	}, 100*time.Millisecond, 3*time.Second)
+}
+
+func finally(t *testing.T, checker func() bool, checkInterval, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {
 		select {
 		case <-timer.C:
 			t.Fatal("timeout")
-		case <-time.After(100 * time.Millisecond):
-			addr = selector.Next()
-			if len(addr) > 0 {
+		case <-time.After(checkInterval):
+			if checker() {
 				return
 			}
 		}

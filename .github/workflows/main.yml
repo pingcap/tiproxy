@@ -31,7 +31,7 @@ jobs:
     if: ${{ github.event_name != 'push' }}
     uses: ./.github/workflows/common.yml
     with:
-      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug == 'true' }}
+      debug: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
       ref: ${{ inputs.ref || github.ref }}
       target: "cmd"
       all_platform: true
@@ -41,18 +41,20 @@ jobs:
     needs: cmd
     uses: ./.github/workflows/common.yml
     with:
-      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug == 'true' }}
+      debug: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
       ref: ${{ inputs.ref || github.ref }}
       target: "lint"
+      all_platform: false
 
   test:
     if: ${{ github.event_name != 'push' }}
     needs: cmd
     uses: ./.github/workflows/common.yml
     with:
-      debug: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug == 'true' }}
+      debug: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
       ref: ${{ inputs.ref || github.ref }}
       target: "test"
+      all_platform: false
 
   cache:
     if: ${{ github.event_name == 'push' }}
@@ -61,3 +63,4 @@ jobs:
       ref: ${{ inputs.ref || github.ref }}
       debug: false
       target: "lint test"
+      all_platform: false

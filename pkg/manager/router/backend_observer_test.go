@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
@@ -33,15 +34,21 @@ import (
 
 type mockEventReceiver struct {
 	backendChan chan map[string]BackendStatus
+	errChan     chan error
 }
 
-func (mer *mockEventReceiver) OnBackendChanged(backends map[string]BackendStatus) {
-	mer.backendChan <- backends
+func (mer *mockEventReceiver) OnBackendChanged(backends map[string]BackendStatus, err error) {
+	if err != nil {
+		mer.errChan <- err
+	} else if len(backends) > 0 {
+		mer.backendChan <- backends
+	}
 }
 
-func newMockEventReceiver(backendChan chan map[string]BackendStatus) *mockEventReceiver {
+func newMockEventReceiver(backendChan chan map[string]BackendStatus, errChan chan error) *mockEventReceiver {
 	return &mockEventReceiver{
 		backendChan: backendChan,
+		errChan:     errChan,
 	}
 }
 
@@ -94,7 +101,8 @@ func TestCancelObserver(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			backends = append(backends, addBackend(t, kv))
 		}
-		backendInfo := bo.fetcher.GetBackendList(context.Background())
+		backendInfo, err := bo.fetcher.GetBackendList(context.Background())
+		require.NoError(t, err)
 		require.Equal(t, 3, len(backendInfo))
 
 		// Try 10 times.
@@ -133,11 +141,12 @@ func TestEtcdUnavailable(t *testing.T) {
 // Test that the notified backend status is correct for external fetcher.
 func TestExternalFetcher(t *testing.T) {
 	backendAddrs := make([]string, 0)
+	var observeError error
 	var mutex sync.Mutex
-	backendGetter := func() []string {
+	backendGetter := func() ([]string, error) {
 		mutex.Lock()
 		defer mutex.Unlock()
-		return backendAddrs
+		return backendAddrs, observeError
 	}
 	addBackend := func() *backendServer {
 		backend := newBackendServer(t)
@@ -152,9 +161,15 @@ func TestExternalFetcher(t *testing.T) {
 		backendAddrs = append(backendAddrs[:idx], backendAddrs[idx+1:]...)
 		mutex.Unlock()
 	}
+	mockError := func() {
+		mutex.Lock()
+		observeError = errors.New("mock observe error")
+		mutex.Unlock()
+	}
 
 	backendChan := make(chan map[string]BackendStatus, 1)
-	mer := newMockEventReceiver(backendChan)
+	errChan := make(chan error, 1)
+	mer := newMockEventReceiver(backendChan, errChan)
 	fetcher := NewExternalFetcher(backendGetter)
 	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
@@ -175,6 +190,12 @@ func TestExternalFetcher(t *testing.T) {
 	backend2.close()
 	checkStatus(t, backendChan, backend2, StatusCannotConnect)
 	removeBackend(backend2)
+
+	// returns observe error
+	require.Len(t, errChan, 0)
+	mockError()
+	err = <-errChan
+	require.Error(t, err)
 }
 
 func runETCDTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus)) {
@@ -182,7 +203,7 @@ func runETCDTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *Back
 	client := createEtcdClient(t, etcd)
 	kv := clientv3.NewKV(client)
 	backendChan := make(chan map[string]BackendStatus, 1)
-	mer := newMockEventReceiver(backendChan)
+	mer := newMockEventReceiver(backendChan, make(chan error, 1))
 	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), newHealthCheckConfigForTest())
 	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
@@ -293,16 +314,16 @@ func startListener(t *testing.T, addr string) (net.Listener, string) {
 
 // ExternalFetcher fetches backend list from a given callback.
 type ExternalFetcher struct {
-	backendGetter func() []string
+	backendGetter func() ([]string, error)
 }
 
-func NewExternalFetcher(backendGetter func() []string) *ExternalFetcher {
+func NewExternalFetcher(backendGetter func() ([]string, error)) *ExternalFetcher {
 	return &ExternalFetcher{
 		backendGetter: backendGetter,
 	}
 }
 
-func (ef *ExternalFetcher) GetBackendList(context.Context) map[string]*BackendInfo {
-	addrs := ef.backendGetter()
-	return backendListToMap(addrs)
+func (ef *ExternalFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
+	addrs, err := ef.backendGetter()
+	return backendListToMap(addrs), err
 }

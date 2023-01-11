@@ -262,8 +262,8 @@ func (p *PacketIO) Flush() error {
 }
 
 func (p *PacketIO) GracefulClose() error {
-	if p.conn != nil {
-		return p.conn.SetDeadline(time.Now())
+	if err := p.conn.SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
+		return err
 	}
 	return nil
 }
@@ -276,11 +276,8 @@ func (p *PacketIO) Close() error {
 			errs = append(errs, err)
 		}
 	*/
-	if p.conn != nil {
-		if err := p.conn.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		p.conn = nil
+	if err := p.conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		errs = append(errs, err)
 	}
 	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))
 }

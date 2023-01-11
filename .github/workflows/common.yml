@@ -17,7 +17,7 @@ on:
       all_platform:
         type: boolean
         description: "test on all platforms or not"
-        default: false
+        required: true
 
 defaults:
   run:
