@@ -156,7 +156,6 @@ func TestUpdateCfg(t *testing.T) {
 		// retry before new data are flushed
 		timer := time.NewTimer(3 * time.Second)
 		succeed := false
-		bstr.Reset()
 		for !succeed {
 			select {
 			case <-timer.C:
