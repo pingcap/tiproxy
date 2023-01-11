@@ -184,3 +184,23 @@ func TestTLS(t *testing.T) {
 		500, // unable to reproduce stably, loop 500 times
 	)
 }
+
+func TestPacketIOClose(t *testing.T) {
+	testTCPConn(t,
+		func(t *testing.T, cli *PacketIO) {
+			require.NoError(t, cli.Close())
+			require.NoError(t, cli.Close())
+			require.NoError(t, cli.GracefulClose())
+			require.NotEqual(t, cli.LocalAddr(), "")
+			require.NotEqual(t, cli.RemoteAddr(), "")
+		},
+		func(t *testing.T, srv *PacketIO) {
+			require.NoError(t, srv.GracefulClose())
+			require.NoError(t, srv.Close())
+			require.NoError(t, srv.Close())
+			require.NotEqual(t, srv.LocalAddr(), "")
+			require.NotEqual(t, srv.RemoteAddr(), "")
+		},
+		1,
+	)
+}
