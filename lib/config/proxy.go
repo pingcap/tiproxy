@@ -115,7 +115,7 @@ func NewConfig(data []byte) (*Config, error) {
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
 	cfg.Proxy.TCPKeepAlive = true
-	cfg.Proxy.RequireBackendTLS = true
+	cfg.Proxy.RequireBackendTLS = false
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 
 	cfg.API.Addr = "0.0.0.0:3080"
