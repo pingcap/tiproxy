@@ -17,7 +17,7 @@ on:
       all_platform:
         type: boolean
         description: "test on all platforms or not"
-        default: false
+        required: true
 
 defaults:
   run:
@@ -73,5 +73,5 @@ jobs:
       - name: make ${{ inputs.target }} 
         run: make ${{ inputs.target }}
       - name: "set up tmate session if necessary"
-        if: ${{ failure() && inputs.debug }}
+        if: ${{ inputs.debug }}
         uses: mxschmitt/action-tmate@v3
