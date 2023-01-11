@@ -166,9 +166,6 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
-		if mgr.clientIO != nil {
-			WriteUnknownError(mgr.clientIO, err, mgr.logger)
-		}
 		return nil, err
 	}
 	// Reasons to wait:
@@ -228,9 +225,6 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	// Replace the deadline exceed error with a more readable error.
 	if err != nil && origErr != nil {
 		err = origErr
-	}
-	if err != nil && mgr.clientIO != nil {
-		WriteUnknownError(mgr.clientIO, err, mgr.logger)
 	}
 	return io, err
 }
