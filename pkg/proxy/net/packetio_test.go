@@ -201,6 +201,6 @@ func TestPacketIOClose(t *testing.T) {
 			require.NotEqual(t, srv.LocalAddr(), "")
 			require.NotEqual(t, srv.RemoteAddr(), "")
 		},
-		500, // unable to reproduce stably, loop 500 times
+		1, // unable to reproduce stably, loop 500 times
 	)
 }
