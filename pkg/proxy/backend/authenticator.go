@@ -162,7 +162,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 
 	// write proxy header
 	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
-		return err
+		return WrapUserError(err, handshakeErrMsg)
 	}
 
 	// read backend initial handshake
@@ -193,7 +193,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		// send an unknown auth plugin so that the backend will request the auth data again.
 		unknownAuthPlugin, nil, 0,
 	); err != nil {
-		return err
+		return WrapUserError(err, handshakeErrMsg)
 	}
 
 	// forward other packets

@@ -23,6 +23,7 @@ import (
 
 const (
 	connectErrMsg    = "No available TiDB instances, please check TiDB cluster"
+	handshakeErrMsg  = "TiProxy fails to connect to TiDB, please check network"
 	capabilityErrMsg = "Verify TiDB capability failed, please upgrade TiDB"
 )
 

@@ -180,22 +180,18 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		func() (*pnet.PacketIO, error) {
 			// Try to connect to all backup backends one by one.
 			addr, origErr = selector.Next()
+			// If all addrs are enumerated, reset and try again.
+			if origErr == nil && addr == "" {
+				selector.Reset()
+				addr, origErr = selector.Next()
+			}
 			if origErr != nil {
 				origErr = WrapUserError(origErr, origErr.Error())
 				return nil, backoff.Permanent(origErr)
 			}
-
-			// if all addrs are enumerated, reset and try again
 			if addr == "" {
-				selector.Reset()
-				if addr, origErr = selector.Next(); origErr != nil {
-					origErr = WrapUserError(origErr, origErr.Error())
-					return nil, backoff.Permanent(origErr)
-				}
-				if addr == "" {
-					origErr = router.ErrNoInstanceToSelect
-					return nil, origErr
-				}
+				origErr = router.ErrNoInstanceToSelect
+				return nil, origErr
 			}
 
 			var cn net.Conn
@@ -205,7 +201,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 				return nil, origErr
 			}
 
-			if origErr := selector.Succeed(mgr); origErr != nil {
+			if origErr = selector.Succeed(mgr); origErr != nil {
 				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
 				if ignoredErr := cn.Close(); ignoredErr != nil {
 					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
@@ -226,7 +222,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		},
 	)
 	cancel()
-	// Replace the deadline exceed error with a more readable error.
+	// Replace the deadline exceed error with the last internal error.
 	if err != nil && origErr != nil {
 		err = origErr
 	}
