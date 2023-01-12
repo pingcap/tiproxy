@@ -765,7 +765,7 @@ func TestGetBackendIO(t *testing.T) {
 			err = listeners[i].Close()
 			require.NoError(t, err, message)
 		} else {
-			require.Error(t, err)
+			require.Error(t, err, message)
 		}
 		require.True(t, len(badAddrs) <= i, message)
 		badAddrs = make(map[string]struct{}, 3)

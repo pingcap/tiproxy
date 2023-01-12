@@ -46,10 +46,6 @@ func WrapUserError(err error, userMsg string) *UserError {
 	}
 }
 
-func (ue *UserError) Unwrap() error {
-	return ue.err
-}
-
 func (ue *UserError) UserMsg() string {
 	return ue.userMsg
 }

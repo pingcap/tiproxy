@@ -14,9 +14,7 @@
 
 package backend
 
-import (
-	_ "unsafe"
-)
+import _ "unsafe"
 
 //go:linkname Uint32N runtime.fastrandn
 func Uint32N(a uint64) uint64
