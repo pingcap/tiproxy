@@ -34,10 +34,6 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 }
 
 func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
-	if ev.Name != f {
-		return
-	}
-
 	switch {
 	case ev.Has(fsnotify.Create), ev.Has(fsnotify.Write), ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
 		// in case of remove/rename the file
