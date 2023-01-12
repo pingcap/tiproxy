@@ -179,34 +179,31 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	io, err := backoff.RetryNotifyWithData(
 		func() (*pnet.PacketIO, error) {
 			// Try to connect to all backup backends one by one.
-			addr, origErr = selector.Next()
+			addr, err = selector.Next()
 			// If all addrs are enumerated, reset and try again.
-			if origErr == nil && addr == "" {
+			if err == nil && addr == "" {
 				selector.Reset()
-				addr, origErr = selector.Next()
+				addr, err = selector.Next()
 			}
-			if origErr != nil {
-				origErr = WrapUserError(origErr, origErr.Error())
-				return nil, backoff.Permanent(origErr)
+			if err != nil {
+				return nil, backoff.Permanent(WrapUserError(err, err.Error()))
 			}
 			if addr == "" {
-				origErr = router.ErrNoInstanceToSelect
-				return nil, origErr
+				return nil, router.ErrNoInstanceToSelect
 			}
 
 			var cn net.Conn
-			cn, origErr = net.DialTimeout("tcp", addr, DialTimeout)
-			if origErr != nil {
-				origErr = errors.Wrapf(origErr, "dial backend %s error", addr)
-				return nil, origErr
+			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
+			if err != nil {
+				return nil, errors.Wrapf(err, "dial backend %s error", addr)
 			}
 
-			if origErr = selector.Succeed(mgr); origErr != nil {
+			if err = selector.Succeed(mgr); err != nil {
 				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
 				if ignoredErr := cn.Close(); ignoredErr != nil {
 					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
 				}
-				return nil, origErr
+				return nil, err
 			}
 
 			mgr.logger.Info("connected to backend", zap.String("addr", addr))
@@ -218,13 +215,15 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
+			origErr = err
 			mgr.handshakeHandler.OnHandshake(cctx, addr, err)
 		},
 	)
 	cancel()
-	// Replace the deadline exceed error with the last internal error.
-	if err != nil && origErr != nil {
-		err = origErr
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		if origErr != nil {
+			err = origErr
+		}
 	}
 	return io, err
 }
