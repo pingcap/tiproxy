@@ -51,6 +51,10 @@ func (ue *UserError) UserMsg() string {
 	return ue.userMsg
 }
 
+func (ue *UserError) Unwrap() error {
+	return ue.err
+}
+
 func (ue *UserError) Error() string {
 	return ue.err.Error()
 }
