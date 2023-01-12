@@ -690,25 +690,43 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 }
 
 func TestHandlerReturnError(t *testing.T) {
-	cfgs := []cfgOverrider{
-		func(config *testConfig) {
-			config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
-				return nil, errors.New("mocked error")
-			}
+	tests := []struct {
+		cfg    cfgOverrider
+		errMsg string
+	}{
+		{
+			cfg: func(config *testConfig) {
+				config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+					return nil, errors.New("mocked error")
+				}
+			},
+			errMsg: "mocked error",
 		},
-		func(config *testConfig) {
-			config.proxyConfig.handler.handleHandshakeResp = func(ctx ConnContext, resp *pnet.HandshakeResp) error {
-				return errors.New("mocked error")
-			}
+		{
+			cfg: func(config *testConfig) {
+				config.proxyConfig.handler.handleHandshakeResp = func(ctx ConnContext, resp *pnet.HandshakeResp) error {
+					return errors.New("mocked error")
+				}
+			},
+			errMsg: "mocked error",
+		},
+		{
+			// TODO: make it fail faster.
+			cfg: func(config *testConfig) {
+				config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+					return router.NewStaticRouter(nil), nil
+				}
+			},
+			errMsg: connectErrMsg,
 		},
 	}
-	for _, cfg := range cfgs {
-		ts := newBackendMgrTester(t, cfg)
+	for _, test := range tests {
+		ts := newBackendMgrTester(t, test.cfg)
 		rn := runner{
 			client: func(packetIO *pnet.PacketIO) error {
 				err := ts.mc.authenticate(packetIO)
 				require.NoError(t, err)
-				require.ErrorContains(t, ts.mc.mysqlErr, "mocked error")
+				require.ErrorContains(t, ts.mc.mysqlErr, test.errMsg)
 				return nil
 			},
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
