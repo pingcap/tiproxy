@@ -22,7 +22,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func Register(group *gin.RouterGroup, cfg config.API, logger *zap.Logger, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
+func register(group *gin.RouterGroup, cfg config.API, logger *zap.Logger, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
 	{
 		adminGroup := group.Group("admin")
 		if cfg.EnableBasicAuth {

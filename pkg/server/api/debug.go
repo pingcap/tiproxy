@@ -28,6 +28,10 @@ type debugHttpHandler struct {
 	nsmgr  *mgrns.NamespaceManager
 }
 
+func (h *debugHttpHandler) Health(c *gin.Context) {
+	c.JSON(http.StatusOK, "")
+}
+
 func (h *debugHttpHandler) Redirect(c *gin.Context) {
 	errs := h.nsmgr.RedirectConnections()
 	if len(errs) != 0 {
@@ -48,5 +52,6 @@ func (h *debugHttpHandler) Redirect(c *gin.Context) {
 func registerDebug(group *gin.RouterGroup, logger *zap.Logger, nsmgr *mgrns.NamespaceManager) {
 	handler := &debugHttpHandler{logger, nsmgr}
 	group.POST("/redirect", handler.Redirect)
+	group.GET("/health", handler.Health)
 	pprof.RouteRegister(group, "/pprof")
 }
