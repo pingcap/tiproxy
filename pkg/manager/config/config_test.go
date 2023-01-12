@@ -25,24 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func waitRetry(t *testing.T, f func(*config.Config) bool, cfgmgr *ConfigManager, msg string) {
-	if f != nil {
-		timer := time.NewTimer(time.Second)
-		for {
-			select {
-			case <-timer.C:
-				t.Fatalf("timeout waiting chan, %s", msg)
-			default:
-				time.Sleep(100 * time.Millisecond)
-				if f(cfgmgr.GetConfig()) {
-					return
-				}
-			}
-		}
-	}
-}
-
-func TestConfig(t *testing.T) {
+func TestConfigReload(t *testing.T) {
 	tmpdir := t.TempDir()
 	tmpcfg := filepath.Join(tmpdir, "cfg")
 
@@ -149,6 +132,34 @@ func TestConfig(t *testing.T) {
 		}
 
 		require.NoError(t, os.WriteFile(tmpcfg, []byte(tc.postcfg), 0644), msg)
-		waitRetry(t, tc.postcheck, cfgmgr1, msg+" postcheck")
+		if tc.postcheck != nil {
+			require.Eventually(t, func() bool { return tc.postcheck(cfgmgr1.GetConfig()) }, time.Second, 100*time.Millisecond, msg)
+		}
 	}
+}
+
+func TestConfigRemove(t *testing.T) {
+	tmpdir := t.TempDir()
+	tmpcfg := filepath.Join(tmpdir, "cfg")
+
+	f, err := os.Create(tmpcfg)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	cfgmgr, _ := testConfigManager(t, tmpcfg)
+
+	// remove and recreate the file in a very short time
+	require.NoError(t, os.Remove(tmpcfg))
+	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "gg"`), 0644))
+
+	// check that reload still works
+	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "gg" }, time.Second, 100*time.Millisecond)
+
+	// remove again but with a long sleep
+	require.NoError(t, os.Remove(tmpcfg))
+	time.Sleep(200 * time.Millisecond)
+
+	// but eventually re-watched the file again
+	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "vv"`), 0644))
+	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "vv" }, time.Second, 100*time.Millisecond)
 }

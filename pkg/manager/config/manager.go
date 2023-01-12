@@ -16,7 +16,9 @@ package config
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/pingcap/TiProxy/lib/config"
@@ -75,10 +77,12 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 		return errors.WithStack(err)
 	}
 	e.wch = wch
+	parentDir := filepath.Dir(configFile)
 
 	var nctx context.Context
 	nctx, e.cancel = context.WithCancel(ctx)
 	e.wg.Run(func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
 		for {
 			select {
 			case <-nctx.Done():
@@ -86,7 +90,11 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 			case err := <-e.wch.Errors:
 				e.logger.Info("failed to watch config file", zap.Error(err))
 			case ev := <-e.wch.Events:
-				e.handleFSEvent(ev)
+				e.handleFSEvent(ev, configFile)
+			case <-ticker.C:
+				if err := e.wch.Add(parentDir); err != nil {
+					e.logger.Info("failed to rewatch config file", zap.Error(err))
+				}
 			}
 		}
 	})
@@ -103,7 +111,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 		if err := e.reloadConfigFile(configFile); err != nil {
 			return errors.WithStack(err)
 		}
-		if err := e.wch.Add(configFile); err != nil {
+		if err := e.wch.Add(parentDir); err != nil {
 			return errors.WithStack(err)
 		}
 	} else {

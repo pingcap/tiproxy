@@ -143,7 +143,7 @@ func (cfg *Config) Check() error {
 		if err != nil {
 			return err
 		}
-		cfg.Workdir = filepath.Join(filepath.Join(d, "work"))
+		cfg.Workdir = filepath.Clean(filepath.Join(d, "work"))
 	}
 
 	switch cfg.Proxy.ProxyProtocol {

@@ -33,22 +33,20 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 	return e.SetTOMLConfig(proxyConfigData)
 }
 
-func (e *ConfigManager) handleFSEvent(ev fsnotify.Event) {
+func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
+	if ev.Name != f {
+		return
+	}
+
 	switch {
 	case ev.Has(fsnotify.Create), ev.Has(fsnotify.Write), ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
 		// in case of remove/rename the file
 		if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
-			// rewatching may be too fast, sleep for a while
+			// may be too fast, sleep for a while
 			time.Sleep(50 * time.Millisecond)
-
-			nerr := e.wch.Add(ev.Name)
-			if nerr != nil {
-				e.logger.Error("failed to re-watch file", zap.String("file", ev.Name), zap.Error(nerr))
-			}
 		}
-
 		// try to reload it
-		e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(ev.Name)), zap.Any("cfg", e.GetConfig()))
+		e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(f)), zap.Any("cfg", e.GetConfig()))
 	}
 }
 
