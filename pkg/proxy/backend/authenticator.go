@@ -172,8 +172,9 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 			if writeErr := clientIO.WritePacket(serverPkt, true); writeErr != nil {
 				err = writeErr
 			}
+			return err
 		}
-		return err
+		return WrapUserError(err, handshakeErrMsg)
 	}
 
 	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
