@@ -169,7 +169,9 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	serverPkt, backendCapability, err := auth.readInitialHandshake(backendIO)
 	if err != nil {
 		if IsMySQLError(err) {
-			err = clientIO.WritePacket(serverPkt, true)
+			if writeErr := clientIO.WritePacket(serverPkt, true); writeErr != nil {
+				err = writeErr
+			}
 		}
 		return err
 	}
