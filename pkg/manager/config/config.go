@@ -48,16 +48,18 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 
 // SetTOMLConfig will do partial config update. Usually, user will expect config changes
 // only when they specified a config item. It is, however, impossible to tell a struct
-//  `c.max-conns == 0` means no user-input, or it specified `0`.
+// `c.max-conns == 0` means no user-input, or it specified `0`.
 // So we always update the current config with a TOML string, which only overwrite fields
 // that are specified by users.
 func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 	e.sts.Lock()
 	defer e.sts.Unlock()
 
-	base := e.sts.current.Clone()
+	base := e.sts.current
 	if base == nil {
 		base = config.NewConfig()
+	} else {
+		base = base.Clone()
 	}
 
 	if err := toml.Unmarshal(data, base); err != nil {
