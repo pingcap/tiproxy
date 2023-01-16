@@ -55,7 +55,7 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 	e.sts.Lock()
 	defer e.sts.Unlock()
 
-	base := e.sts.current
+	base := e.sts.current.Clone()
 	if base == nil {
 		base = config.NewConfig()
 	}
