@@ -1,12 +1,13 @@
 FROM alpine:edge as builder
 
-ADD https://raw.githubusercontent.com/njhallett/apk-fastest-mirror/main/apk-fastest-mirror.sh /
+ADD https://raw.fastgit.org/njhallett/apk-fastest-mirror/main/apk-fastest-mirror.sh /
 RUN sed -i 's/https/http/g' /apk-fastest-mirror.sh && sh /apk-fastest-mirror.sh -t 50 && apk add --no-cache --progress git make go
-ARG BUILDFLAGS
+ARG VERSION
+ARG COMMIT
 ARG GOPROXY
 ADD . /proxy
-RUN export BUILDFLAGS=${BUILDFLAGS} && export GOPROXY=${GOPROXY} && cd /proxy && go mod download -x
-RUN export BUILDFLAGS=${BUILDFLAGS} && export GOPROXY=${GOPROXY} && cd /proxy && make cmd
+RUN export GOPROXY=${GOPROXY} && cd /proxy && go mod download -x
+RUN export VERSION=${VERSION} && export COMMIT=${COMMIT} && export GOPROXY=${GOPROXY} && cd /proxy && make cmd
 
 FROM alpine:latest
 
