@@ -51,7 +51,7 @@ type ConfigManager struct {
 	kv *btree.BTreeG[KVValue]
 
 	wch     *fsnotify.Watcher
-	overlay string
+	overlay []byte
 	sts     struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
@@ -64,6 +64,10 @@ func NewConfigManager() *ConfigManager {
 }
 
 func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, overlay *config.Config) error {
+	var err error
+	var nctx context.Context
+	nctx, e.cancel = context.WithCancel(ctx)
+
 	e.logger = logger
 
 	// for namespace persistence
@@ -72,48 +76,44 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 	})
 
 	// for config watch
-	wch, err := fsnotify.NewWatcher()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	e.wch = wch
-	parentDir := filepath.Dir(configFile)
-
-	var nctx context.Context
-	nctx, e.cancel = context.WithCancel(ctx)
-	e.wg.Run(func() {
-		ticker := time.NewTicker(200 * time.Millisecond)
-		for {
-			select {
-			case <-nctx.Done():
-				return
-			case err := <-e.wch.Errors:
-				e.logger.Info("failed to watch config file", zap.Error(err))
-			case ev := <-e.wch.Events:
-				e.handleFSEvent(ev, configFile)
-			case <-ticker.C:
-				if err := e.wch.Add(parentDir); err != nil {
-					e.logger.Info("failed to rewatch config file", zap.Error(err))
-				}
-			}
-		}
-	})
-
 	if overlay != nil {
-		ob, err := overlay.ToBytes()
+		e.overlay, err = overlay.ToBytes()
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		e.overlay = string(ob)
 	}
 
 	if configFile != "" {
+		e.wch, err = fsnotify.NewWatcher()
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		parentDir := filepath.Dir(configFile)
+
 		if err := e.reloadConfigFile(configFile); err != nil {
 			return errors.WithStack(err)
 		}
 		if err := e.wch.Add(parentDir); err != nil {
 			return errors.WithStack(err)
 		}
+
+		e.wg.Run(func() {
+			ticker := time.NewTicker(200 * time.Millisecond)
+			for {
+				select {
+				case <-nctx.Done():
+					return
+				case err := <-e.wch.Errors:
+					e.logger.Info("failed to watch config file", zap.Error(err))
+				case ev := <-e.wch.Events:
+					e.handleFSEvent(ev, configFile)
+				case <-ticker.C:
+					if err := e.wch.Add(parentDir); err != nil {
+						e.logger.Info("failed to rewatch config file", zap.Error(err))
+					}
+				}
+			}
+		})
 	} else {
 		if err := e.SetTOMLConfig(nil); err != nil {
 			return errors.WithStack(err)

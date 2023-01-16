@@ -59,6 +59,10 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 		return err
 	}
 
+	if err := toml.Unmarshal(e.overlay, base); err != nil {
+		return err
+	}
+
 	if err := base.Check(); err != nil {
 		return err
 	}
