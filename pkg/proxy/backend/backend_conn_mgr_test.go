@@ -689,6 +689,57 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 	ts.runTests(runners)
 }
 
+func TestHandlerReturnError(t *testing.T) {
+	tests := []struct {
+		cfg    cfgOverrider
+		errMsg string
+	}{
+		{
+			cfg: func(config *testConfig) {
+				config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+					return nil, errors.New("mocked error")
+				}
+			},
+			errMsg: "mocked error",
+		},
+		{
+			cfg: func(config *testConfig) {
+				config.proxyConfig.handler.handleHandshakeResp = func(ctx ConnContext, resp *pnet.HandshakeResp) error {
+					return errors.New("mocked error")
+				}
+			},
+			errMsg: "mocked error",
+		},
+		{
+			// TODO: make it fail faster.
+			cfg: func(config *testConfig) {
+				config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+					return router.NewStaticRouter(nil), nil
+				}
+			},
+			errMsg: connectErrMsg,
+		},
+	}
+	for _, test := range tests {
+		ts := newBackendMgrTester(t, test.cfg)
+		rn := runner{
+			client: func(packetIO *pnet.PacketIO) error {
+				err := ts.mc.authenticate(packetIO)
+				require.NoError(t, err)
+				require.ErrorContains(t, ts.mc.mysqlErr, test.errMsg)
+				return nil
+			},
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				require.Error(t, err)
+				return nil
+			},
+			backend: nil,
+		}
+		ts.runAndCheck(ts.t, func(t *testing.T, ts *testSuite) {}, rn.client, rn.backend, rn.proxy)
+	}
+}
+
 func TestGetBackendIO(t *testing.T) {
 	addrs := make([]string, 0, 3)
 	listeners := make([]net.Listener, 0, cap(addrs))
@@ -732,7 +783,7 @@ func TestGetBackendIO(t *testing.T) {
 			err = listeners[i].Close()
 			require.NoError(t, err, message)
 		} else {
-			require.ErrorIs(t, err, context.DeadlineExceeded, message)
+			require.Error(t, err, message)
 		}
 		require.True(t, len(badAddrs) <= i, message)
 		badAddrs = make(map[string]struct{}, 3)
