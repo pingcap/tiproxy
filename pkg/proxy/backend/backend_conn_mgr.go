@@ -151,6 +151,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
 	if err != nil {
+		WriteUserError(clientIO, err, mgr.logger)
 		return err
 	}
 
@@ -166,7 +167,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
-		return nil, err
+		return nil, WrapUserError(err, err.Error())
 	}
 	// Reasons to wait:
 	// - The TiDB instances may not be initialized yet
@@ -174,31 +175,30 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	bctx, cancel := context.WithTimeout(context.Background(), timeout)
 	selector := r.GetBackendSelector()
 	var addr string
+	var origErr error
 	io, err := backoff.RetryNotifyWithData(
 		func() (*pnet.PacketIO, error) {
 			// Try to connect to all backup backends one by one.
-			addr, err := selector.Next()
-			if err != nil {
-				return nil, backoff.Permanent(err)
-			}
-
-			// if all addrs are enumerated, reset and try again
-			if addr == "" {
+			addr, err = selector.Next()
+			// If all addrs are enumerated, reset and try again.
+			if err == nil && addr == "" {
 				selector.Reset()
-				if addr, err = selector.Next(); err != nil {
-					return nil, backoff.Permanent(err)
-				}
-				if addr == "" {
-					return nil, router.ErrNoInstanceToSelect
-				}
+				addr, err = selector.Next()
+			}
+			if err != nil {
+				return nil, backoff.Permanent(WrapUserError(err, err.Error()))
+			}
+			if addr == "" {
+				return nil, router.ErrNoInstanceToSelect
 			}
 
-			cn, err := net.DialTimeout("tcp", addr, DialTimeout)
+			var cn net.Conn
+			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
 			if err != nil {
 				return nil, errors.Wrapf(err, "dial backend %s error", addr)
 			}
 
-			if err := selector.Succeed(mgr); err != nil {
+			if err = selector.Succeed(mgr); err != nil {
 				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
 				if ignoredErr := cn.Close(); ignoredErr != nil {
 					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
@@ -215,10 +215,16 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
+			origErr = err
 			mgr.handshakeHandler.OnHandshake(cctx, addr, err)
 		},
 	)
 	cancel()
+	if err != nil && errors.Is(err, context.DeadlineExceeded) {
+		if origErr != nil {
+			err = origErr
+		}
+	}
 	return io, err
 }
 

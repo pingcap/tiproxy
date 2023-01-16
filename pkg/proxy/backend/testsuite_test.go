@@ -122,7 +122,7 @@ type checker func(t *testing.T, ts *testSuite)
 
 func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*testSuite, func()) {
 	ts := &testSuite{}
-	cfg := newTestConfig(append(overriders, func(config *testConfig) {
+	overriders = append([]cfgOverrider{func(config *testConfig) {
 		config.backendConfig.tlsConfig = tc.backendTLSConfig
 		config.proxyConfig.backendTLSConfig = tc.clientTLSConfig
 		config.proxyConfig.frontendTLSConfig = tc.backendTLSConfig
@@ -130,7 +130,8 @@ func newTestSuite(t *testing.T, tc *tcpConnSuite, overriders ...cfgOverrider) (*
 		config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
 			return router.NewStaticRouter([]string{ts.tc.backendListener.Addr().String()}), nil
 		}
-	})...)
+	}}, overriders...)
+	cfg := newTestConfig(overriders...)
 	ts.mb = newMockBackend(cfg.backendConfig)
 	ts.mp = newMockProxy(t, cfg.proxyConfig)
 	ts.mc = newMockClient(cfg.clientConfig)

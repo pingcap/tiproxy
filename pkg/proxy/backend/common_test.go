@@ -87,7 +87,9 @@ func (tc *tcpConnSuite) newConn(t *testing.T, enableRoute bool) func() {
 		if tc.proxyBIO != nil {
 			_ = tc.proxyBIO.Close()
 		}
-		_ = tc.backendIO.Close()
+		if tc.backendIO != nil {
+			_ = tc.backendIO.Close()
+		}
 	}
 }
 

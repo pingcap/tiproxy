@@ -146,7 +146,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 
 	clientResp := pnet.ParseHandshakeResponse(pkt)
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
-		return err
+		return WrapUserError(err, err.Error())
 	}
 	auth.user = clientResp.User
 	auth.dbname = clientResp.DB
@@ -156,23 +156,29 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	backendIO, err := getBackendIO(cctx, auth, clientResp, 5*time.Second)
 	if err != nil {
-		return err
+		return WrapUserError(err, connectErrMsg)
 	}
 	backendIO.ResetSequence()
 
 	// write proxy header
 	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
-		return err
+		return WrapUserError(err, handshakeErrMsg)
 	}
 
 	// read backend initial handshake
-	_, backendCapability, err := auth.readInitialHandshake(backendIO)
+	serverPkt, backendCapability, err := auth.readInitialHandshake(backendIO)
 	if err != nil {
-		return err
+		if IsMySQLError(err) {
+			if writeErr := clientIO.WritePacket(serverPkt, true); writeErr != nil {
+				err = writeErr
+			}
+			return err
+		}
+		return WrapUserError(err, handshakeErrMsg)
 	}
 
 	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
-		return err
+		return WrapUserError(err, capabilityErrMsg)
 	}
 
 	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
@@ -193,7 +199,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		// send an unknown auth plugin so that the backend will request the auth data again.
 		unknownAuthPlugin, nil, 0,
 	); err != nil {
-		return err
+		return WrapUserError(err, handshakeErrMsg)
 	}
 
 	// forward other packets
