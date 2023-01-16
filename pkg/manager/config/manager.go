@@ -124,8 +124,11 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 }
 
 func (e *ConfigManager) Close() error {
+	var wcherr error
 	e.cancel()
-	wcherr := e.wch.Close()
+	if e.wch != nil {
+		wcherr = e.wch.Close()
+	}
 	e.wg.Wait()
 	return wcherr
 }
