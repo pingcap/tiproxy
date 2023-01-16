@@ -36,9 +36,9 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 	switch {
 	case ev.Has(fsnotify.Create), ev.Has(fsnotify.Write), ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
-		// in case of remove/rename the file
 		if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
-			// may be too fast, sleep for a while
+			// in case of remove/rename the file, files are not present at filesystem for a while
+			// it may be too fast to read the config file now, sleep for a while
 			time.Sleep(50 * time.Millisecond)
 		}
 		// try to reload it
@@ -46,6 +46,11 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 	}
 }
 
+// SetTOMLConfig will do partial config update. Usually, user will expect config changes
+// only when they specified a config item. It is, however, impossible to tell a struct
+//  `c.max-conns == 0` means no user-input, or it specified `0`.
+// So we always update the current config with a TOML string, which only overwrite fields
+// that are specified by users.
 func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 	e.sts.Lock()
 	defer e.sts.Unlock()

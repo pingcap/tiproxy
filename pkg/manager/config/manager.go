@@ -88,6 +88,10 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 		if err != nil {
 			return errors.WithStack(err)
 		}
+
+		// Watch the parent dir, because vim/k8s or other apps may not edit files in-place:
+		// e.g. k8s configmap is a symlink of a symlink to a file, which will only trigger
+		// a remove event for the file.
 		parentDir := filepath.Dir(configFile)
 
 		if err := e.reloadConfigFile(configFile); err != nil {
@@ -98,6 +102,9 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 		}
 
 		e.wg.Run(func() {
+			// Some apps will trigger rename/remove events, which means they will re-create/rename
+			// the new file to the directory. Watch possibly stopped after rename/remove events.
+			// So, we use a tick to repeatedly add the parent dir to re-watch files.
 			ticker := time.NewTicker(200 * time.Millisecond)
 			for {
 				select {
