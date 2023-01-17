@@ -16,13 +16,8 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
-	"net"
 	"net/http"
-	"time"
 
-	ginzap "github.com/gin-contrib/zap"
-	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
@@ -38,15 +33,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/server/api"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
-	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
-)
-
-const (
-	// DefAPILimit is the global API limit per second.
-	DefAPILimit = 100
-	// DefConnTimeout is used as timeout duration in the HTTP server.
-	DefConnTimeout = 30 * time.Second
 )
 
 type Server struct {
@@ -61,7 +48,7 @@ type Server struct {
 	// HTTP client
 	Http *http.Client
 	// HTTP server
-	HTTPListener net.Listener
+	HTTPServer *api.HTTPServer
 	// L7 proxy
 	Proxy *proxy.SQLServer
 }
@@ -83,6 +70,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	if srv.LoggerManager, lg, err = logger.NewLoggerManager(&sctx.Overlay.Log); err != nil {
 		return
 	}
+	srv.LoggerManager.Init(srv.ConfigManager.WatchConfig())
 
 	// setup config manager
 	if err = srv.ConfigManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, &sctx.Overlay); err != nil {
@@ -90,9 +78,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 	cfg := srv.ConfigManager.GetConfig()
-
-	// also hook logger
-	srv.LoggerManager.Init(srv.ConfigManager.WatchConfig())
 
 	// setup metrics
 	srv.MetricsManager.Init(ctx, lg.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
@@ -102,48 +87,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 
-	// setup gin
-	{
-		slogger := lg.Named("gin")
-		gin.SetMode(gin.ReleaseMode)
-		engine := gin.New()
-		limit := ratelimit.New(DefAPILimit)
-		engine.Use(
-			gin.Recovery(),
-			ginzap.Ginzap(slogger, "", true),
-			func(c *gin.Context) {
-				_ = limit.Take()
-				if !ready.Load() {
-					c.Abort()
-					c.JSON(http.StatusInternalServerError, "service not ready")
-				}
-			},
-		)
-
-		api.Register(engine.Group("/api"), cfg.API, lg.Named("api"), srv.NamespaceManager, srv.ConfigManager)
-
-		srv.HTTPListener, err = net.Listen("tcp", cfg.API.Addr)
-		if err != nil {
-			return nil, err
-		}
-		if tlscfg := srv.CertManager.ServerTLS(); tlscfg != nil {
-			srv.HTTPListener = tls.NewListener(srv.HTTPListener, tlscfg)
-		}
-
-		if handler != nil {
-			if err := handler.RegisterHTTP(engine); err != nil {
-				return nil, errors.WithStack(err)
-			}
-		}
-
-		srv.wg.Run(func() {
-			hsrv := http.Server{
-				Handler:           engine.Handler(),
-				ReadHeaderTimeout: DefConnTimeout,
-				IdleTimeout:       DefConnTimeout,
-			}
-			slogger.Info("HTTP closed", zap.Error(hsrv.Serve(srv.HTTPListener)))
-		})
+	// setup http
+	if srv.HTTPServer, err = api.NewHTTPServer(cfg.API, lg.Named("api"), srv.NamespaceManager, srv.ConfigManager, srv.CertManager, handler, ready); err != nil {
+		return
 	}
 
 	// general cluster HTTP client
@@ -217,8 +163,8 @@ func (s *Server) Close() error {
 	if s.Proxy != nil {
 		errs = append(errs, s.Proxy.Close())
 	}
-	if s.HTTPListener != nil {
-		s.HTTPListener.Close()
+	if s.HTTPServer != nil {
+		s.HTTPServer.Close()
 	}
 	if s.NamespaceManager != nil {
 		errs = append(errs, s.NamespaceManager.Close())
