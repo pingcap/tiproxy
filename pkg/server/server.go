@@ -70,6 +70,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	if srv.LoggerManager, lg, err = logger.NewLoggerManager(&sctx.Overlay.Log); err != nil {
 		return
 	}
+	srv.LoggerManager.Init(srv.ConfigManager.WatchConfig())
 
 	// setup config manager
 	if err = srv.ConfigManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, &sctx.Overlay); err != nil {
@@ -77,9 +78,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 	cfg := srv.ConfigManager.GetConfig()
-
-	// also hook logger
-	srv.LoggerManager.Init(srv.ConfigManager.WatchConfig())
 
 	// setup metrics
 	srv.MetricsManager.Init(ctx, lg.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
