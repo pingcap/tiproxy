@@ -15,8 +15,9 @@
 package cli
 
 import (
-	"github.com/spf13/cobra"
 	"net/http"
+
+	"github.com/spf13/cobra"
 )
 
 const (
