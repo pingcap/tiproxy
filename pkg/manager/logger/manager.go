@@ -17,7 +17,6 @@ package logger
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/cmd"
@@ -40,6 +39,9 @@ type LoggerManager struct {
 func NewLoggerManager(cfg *config.Log) (*LoggerManager, *zap.Logger, error) {
 	lm := &LoggerManager{}
 	var err error
+	if cfg == nil {
+		cfg = &config.NewConfig().Log
+	}
 	mainLogger, syncer, level, err := cmd.BuildLogger(cfg)
 	if err != nil {
 		return nil, nil, err
@@ -72,7 +74,6 @@ func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Conf
 			err := lm.updateLoggerCfg(cfg)
 			if err != nil {
 				bytes, merr := json.Marshal(cfg)
-				fmt.Printf("ggg %+v %+v\n", cfg, err)
 				lm.logger.Error("update logger configuration failed",
 					zap.NamedError("update error", err),
 					zap.String("cfg", string(bytes)),

@@ -3,7 +3,9 @@ module github.com/pingcap/TiProxy
 go 1.19
 
 require (
+	github.com/BurntSushi/toml v1.2.1
 	github.com/cenkalti/backoff/v4 v4.2.0
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-contrib/zap v0.0.2
 	github.com/gin-gonic/gin v1.8.1
@@ -27,8 +29,7 @@ require (
 )
 
 require (
-	cloud.google.com/go/compute/metadata v0.2.0 // indirect
-	github.com/BurntSushi/toml v1.2.1 // indirect
+	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	github.com/andres-erbsen/clock v0.0.0-20160526145045-9e14626cd129 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -80,7 +81,7 @@ require (
 	github.com/ngaut/sync2 v0.0.0-20141008032647-7a24ed77b2ef // indirect
 	github.com/opentracing/basictracer-go v1.0.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/pelletier/go-toml/v2 v2.0.2 // indirect
+	github.com/pelletier/go-toml/v2 v2.0.5 // indirect
 	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0 // indirect
 	github.com/pingcap/errors v0.11.5-0.20221009092201-b66cddb77c32 // indirect
 	github.com/pingcap/failpoint v0.0.0-20220423142525-ae43b7f4e5c3 // indirect

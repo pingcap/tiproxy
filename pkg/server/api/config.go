@@ -15,11 +15,10 @@
 package api
 
 import (
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/errors"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	"go.uber.org/zap"
 )
@@ -30,13 +29,14 @@ type configHttpHandler struct {
 }
 
 func (h *configHttpHandler) HandleSetConfig(c *gin.Context) {
-	cfg := new(config.Config)
-	if c.ShouldBindJSON(cfg) != nil {
-		c.JSON(http.StatusBadRequest, "bad config json")
+	data, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		h.logger.Error("fail to read config", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, "fail to read config")
 		return
 	}
 
-	if err := h.cfgmgr.SetConfig(c, cfg); err != nil {
+	if err := h.cfgmgr.SetTOMLConfig(data); err != nil {
 		h.logger.Error("can not update config", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, "can not update config")
 		return
@@ -46,15 +46,7 @@ func (h *configHttpHandler) HandleSetConfig(c *gin.Context) {
 }
 
 func (h *configHttpHandler) HandleGetConfig(c *gin.Context) {
-	var cfg config.Config
-	err := h.cfgmgr.GetConfig(c, &cfg)
-	if err != nil && !errors.Is(err, mgrcfg.ErrNoResults) {
-		h.logger.Error("can not get config", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, "can not get config")
-		return
-	}
-
-	c.JSON(http.StatusOK, &cfg)
+	c.TOML(http.StatusOK, h.cfgmgr.GetConfig())
 }
 
 func registerConfig(group *gin.RouterGroup, logger *zap.Logger, cfgmgr *mgrcfg.ConfigManager) {

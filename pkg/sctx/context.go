@@ -21,8 +21,9 @@ import (
 )
 
 type Context struct {
-	Config  *config.Config
-	Handler ServerHandler
+	Overlay    config.Config
+	ConfigFile string
+	Handler    ServerHandler
 }
 
 type ServerHandler interface {

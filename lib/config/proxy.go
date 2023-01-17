@@ -110,7 +110,7 @@ type Security struct {
 	SQLTLS     TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
 }
 
-func NewConfig(data []byte) (*Config, error) {
+func NewConfig() *Config {
 	var cfg Config
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
@@ -128,16 +128,7 @@ func NewConfig(data []byte) (*Config, error) {
 
 	cfg.Advance.IgnoreWrongNamespace = true
 
-	if len(data) > 0 {
-		if err := toml.Unmarshal(data, &cfg); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := cfg.Check(); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
+	return &cfg
 }
 
 func (cfg *Config) Clone() *Config {
@@ -146,12 +137,13 @@ func (cfg *Config) Clone() *Config {
 }
 
 func (cfg *Config) Check() error {
+
 	if cfg.Workdir == "" {
 		d, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		cfg.Workdir = filepath.Clean(d)
+		cfg.Workdir = filepath.Clean(filepath.Join(d, "work"))
 	}
 
 	switch cfg.Proxy.ProxyProtocol {
@@ -160,6 +152,7 @@ func (cfg *Config) Check() error {
 	default:
 		return errors.Wrapf(ErrUnsupportedProxyProtocolVersion, "%s", cfg.Proxy.ProxyProtocol)
 	}
+
 	return nil
 }
 

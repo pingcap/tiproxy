@@ -75,29 +75,34 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		wg:               waitgroup.WaitGroup{},
 	}
 
-	cfg := sctx.Config
 	handler := sctx.Handler
+	ready := atomic.NewBool(false)
 
 	// set up logger
 	var lg *zap.Logger
-	if srv.LoggerManager, lg, err = logger.NewLoggerManager(&cfg.Log); err != nil {
+	if srv.LoggerManager, lg, err = logger.NewLoggerManager(&sctx.Overlay.Log); err != nil {
 		return
 	}
 
-	// setup certs
-	{
-		clogger := lg.Named("cert")
-		if err = srv.CertManager.Init(cfg, clogger); err != nil {
-			return
-		}
+	// setup config manager
+	if err = srv.ConfigManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, &sctx.Overlay); err != nil {
+		err = errors.WithStack(err)
+		return
 	}
+	cfg := srv.ConfigManager.GetConfig()
 
-	ready := atomic.NewBool(false)
+	// also hook logger
+	srv.LoggerManager.Init(srv.ConfigManager.WatchConfig())
 
 	// setup metrics
 	srv.MetricsManager.Init(ctx, lg.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
 
-	// setup gin and etcd
+	// setup certs
+	if err = srv.CertManager.Init(cfg, lg.Named("cert")); err != nil {
+		return
+	}
+
+	// setup gin
 	{
 		slogger := lg.Named("gin")
 		gin.SetMode(gin.ReleaseMode)
@@ -150,21 +155,20 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		}
 	}
 
-	// setup config manager
+	// setup namespace manager
 	{
-		err = srv.ConfigManager.Init(ctx, cfg, lg.Named("config"))
+		srv.ObserverClient, err = router.InitEtcdClient(lg.Named("pd"), cfg, srv.CertManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
 		}
-
-		srv.LoggerManager.Init(srv.ConfigManager.WatchConfig(ctx))
 
 		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
 		if nerr != nil {
 			err = errors.WithStack(nerr)
 			return
 		}
+
 		if len(nscs) == 0 {
 			// no existed namespace
 			nsc := &config.Namespace{
@@ -177,25 +181,10 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			if err = srv.ConfigManager.SetNamespace(ctx, nsc.Namespace, nsc); err != nil {
 				return
 			}
-		}
-	}
-
-	// setup namespace manager
-	{
-		srv.ObserverClient, err = router.InitEtcdClient(lg.Named("pd"), cfg, srv.CertManager)
-		if err != nil {
-			err = errors.WithStack(err)
-			return
+			nscs = append(nscs, nsc)
 		}
 
-		var nss []*config.Namespace
-		nss, err = srv.ConfigManager.ListAllNamespace(ctx)
-		if err != nil {
-			err = errors.WithStack(err)
-			return
-		}
-
-		err = srv.NamespaceManager.Init(lg.Named("nsmgr"), nss, srv.ObserverClient, srv.Http)
+		err = srv.NamespaceManager.Init(lg.Named("nsmgr"), nscs, srv.ObserverClient, srv.Http)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -216,9 +205,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			return
 		}
 
-		srv.wg.Run(func() {
-			srv.Proxy.Run(ctx, srv.ConfigManager.WatchConfig(ctx))
-		})
+		srv.Proxy.Run(ctx, srv.ConfigManager.WatchConfig())
 	}
 
 	ready.Toggle()

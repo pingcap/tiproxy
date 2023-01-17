@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,7 +94,8 @@ var testProxyConfig = Config{
 func TestProxyConfig(t *testing.T) {
 	data1, err := testProxyConfig.ToBytes()
 	require.NoError(t, err)
-	cfg, err := NewConfig(data1)
+	var cfg Config
+	err = toml.Unmarshal(data1, &cfg)
 	require.NoError(t, err)
 	data2, err := cfg.ToBytes()
 	require.NoError(t, err)
@@ -113,7 +115,7 @@ func TestProxyCheck(t *testing.T) {
 			post: func(t *testing.T, c *Config) {
 				cwd, err := os.Getwd()
 				require.NoError(t, err)
-				require.Equal(t, filepath.Clean(cwd), c.Workdir)
+				require.Equal(t, filepath.Clean(filepath.Join(cwd, "work")), c.Workdir)
 			},
 		},
 		{
