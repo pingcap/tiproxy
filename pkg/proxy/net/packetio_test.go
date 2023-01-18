@@ -226,9 +226,7 @@ func TestPeerActive(t *testing.T) {
 			require.NoError(t, cli.WritePacket([]byte("456"), true))
 			require.True(t, cli.IsPeerActive())
 			// upgrade to TLS and try again
-			println("begin cli tls")
 			require.NoError(t, cli.ClientTLSHandshake(ctls))
-			println("end cli tls")
 			require.True(t, cli.IsPeerActive())
 			data, err = cli.ReadPacket()
 			require.NoError(t, err)
@@ -250,9 +248,7 @@ func TestPeerActive(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "456", string(data))
 			// upgrade to TLS and try again
-			println("begin srv tls")
 			_, err = srv.ServerTLSHandshake(stls)
-			println("end srv tls")
 			require.NoError(t, err)
 			err = srv.WritePacket([]byte("123"), true)
 			require.NoError(t, err)
