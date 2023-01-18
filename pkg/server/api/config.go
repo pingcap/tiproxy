@@ -19,25 +19,25 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
-	"go.uber.org/zap"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
-type configHttpHandler struct {
-	logger *zap.Logger
-	cfgmgr *mgrcfg.ConfigManager
-}
-
-func (h *configHttpHandler) HandleSetConfig(c *gin.Context) {
+func (h *HTTPServer) ConfigSet(c *gin.Context) {
 	data, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		h.logger.Error("fail to read config", zap.Error(err))
+		c.Errors = append(c.Errors, &gin.Error{
+			Type: gin.ErrorTypePrivate,
+			Err:  errors.Errorf("fail to read config: %+v", err),
+		})
 		c.JSON(http.StatusInternalServerError, "fail to read config")
 		return
 	}
 
-	if err := h.cfgmgr.SetTOMLConfig(data); err != nil {
-		h.logger.Error("can not update config", zap.Error(err))
+	if err := h.mgr.cfg.SetTOMLConfig(data); err != nil {
+		c.Errors = append(c.Errors, &gin.Error{
+			Type: gin.ErrorTypePrivate,
+			Err:  errors.Errorf("can not update config: %+v", err),
+		})
 		c.JSON(http.StatusInternalServerError, "can not update config")
 		return
 	}
@@ -45,12 +45,11 @@ func (h *configHttpHandler) HandleSetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *configHttpHandler) HandleGetConfig(c *gin.Context) {
-	c.TOML(http.StatusOK, h.cfgmgr.GetConfig())
+func (h *HTTPServer) ConfigGet(c *gin.Context) {
+	c.TOML(http.StatusOK, h.mgr.cfg.GetConfig())
 }
 
-func registerConfig(group *gin.RouterGroup, logger *zap.Logger, cfgmgr *mgrcfg.ConfigManager) {
-	h := &configHttpHandler{logger, cfgmgr}
-	group.PUT("/", h.HandleSetConfig)
-	group.GET("/", h.HandleGetConfig)
+func (h *HTTPServer) registerConfig(group *gin.RouterGroup) {
+	group.PUT("/", h.ConfigSet)
+	group.GET("/", h.ConfigGet)
 }

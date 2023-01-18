@@ -1,4 +1,4 @@
-// Copyright 2022 PingCAP, Inc.
+// Copyright 2023 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package config
 
-import (
-	"github.com/gin-gonic/gin"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-)
-
-func (h *HTTPServer) registerMetrics(group *gin.RouterGroup) {
-	group.GET("/", gin.WrapF(promhttp.Handler().ServeHTTP))
+type HealthInfo struct {
+	ConfigVersion uint32
 }

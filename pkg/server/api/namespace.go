@@ -19,27 +19,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/lib/config"
-	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
-	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
-	"go.uber.org/zap"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
-type namespaceHttpHandler struct {
-	logger *zap.Logger
-	cfgmgr *mgrcfg.ConfigManager
-	nsmgr  *mgrns.NamespaceManager
-}
-
-func (h *namespaceHttpHandler) HandleGetNamespace(c *gin.Context) {
+func (h *HTTPServer) NamespaceGet(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
 		c.JSON(http.StatusBadRequest, "bad namespace parameter")
 		return
 	}
 
-	nsc, err := h.cfgmgr.GetNamespace(c, ns)
+	nsc, err := h.mgr.cfg.GetNamespace(c, ns)
 	if err != nil {
-		h.logger.Error("can not get namespace", zap.String("namespace", ns), zap.Error(err))
+		c.Errors = append(c.Errors, &gin.Error{
+			Type: gin.ErrorTypePrivate,
+			Err:  errors.Errorf("can not get namespace[%s]: %+v", ns, err),
+		})
 		c.JSON(http.StatusInternalServerError, "can not get namespace")
 		return
 	}
@@ -47,7 +42,7 @@ func (h *namespaceHttpHandler) HandleGetNamespace(c *gin.Context) {
 	c.JSON(http.StatusOK, nsc)
 }
 
-func (h *namespaceHttpHandler) HandleUpsertNamesapce(c *gin.Context) {
+func (h *HTTPServer) NamespaceUpsert(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
 		c.JSON(http.StatusBadRequest, "bad namespace parameter")
@@ -61,7 +56,11 @@ func (h *namespaceHttpHandler) HandleUpsertNamesapce(c *gin.Context) {
 		return
 	}
 
-	if err := h.cfgmgr.SetNamespace(c, nsc.Namespace, nsc); err != nil {
+	if err := h.mgr.cfg.SetNamespace(c, nsc.Namespace, nsc); err != nil {
+		c.Errors = append(c.Errors, &gin.Error{
+			Type: gin.ErrorTypePrivate,
+			Err:  errors.Errorf("can not update namespace[%s]: %+v", ns, err),
+		})
 		c.JSON(http.StatusInternalServerError, "can not update config")
 		return
 	}
@@ -69,14 +68,18 @@ func (h *namespaceHttpHandler) HandleUpsertNamesapce(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *namespaceHttpHandler) HandleRemoveNamespace(c *gin.Context) {
+func (h *HTTPServer) NamespaceRemove(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
 		c.JSON(http.StatusBadRequest, "bad namespace parameter")
 		return
 	}
 
-	if err := h.cfgmgr.DelNamespace(c, ns); err != nil {
+	if err := h.mgr.cfg.DelNamespace(c, ns); err != nil {
+		c.Errors = append(c.Errors, &gin.Error{
+			Type: gin.ErrorTypePrivate,
+			Err:  errors.Errorf("can not update namespace[%s]: %+v", ns, err),
+		})
 		c.JSON(http.StatusInternalServerError, "can not update config")
 		return
 	}
@@ -84,29 +87,33 @@ func (h *namespaceHttpHandler) HandleRemoveNamespace(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *namespaceHttpHandler) HandleCommit(c *gin.Context) {
+func (h *HTTPServer) NamespaceCommit(c *gin.Context) {
 	ns_names := c.QueryArray("namespace")
 
 	var nss []*config.Namespace
 	var nss_delete []bool
 	var err error
 	if len(ns_names) == 0 {
-		nss, err = h.cfgmgr.ListAllNamespace(c)
+		nss, err = h.mgr.cfg.ListAllNamespace(c)
 		if err != nil {
-			errMsg := "failed to list all namespaces"
-			h.logger.Error(errMsg, zap.Error(err), zap.Any("namespaces", nss))
-			c.JSON(http.StatusInternalServerError, errMsg)
+			c.Errors = append(c.Errors, &gin.Error{
+				Type: gin.ErrorTypePrivate,
+				Err:  errors.Errorf("failed to list all namespace: %+v", err),
+			})
+			c.JSON(http.StatusInternalServerError, "failed to list all namespaces")
 			return
 		}
 	} else {
 		nss = make([]*config.Namespace, len(ns_names))
 		nss_delete = make([]bool, len(ns_names))
 		for i, ns_name := range ns_names {
-			ns, err := h.cfgmgr.GetNamespace(c, ns_name)
+			ns, err := h.mgr.cfg.GetNamespace(c, ns_name)
 			if err != nil {
-				errMsg := "failed to get namespace"
-				h.logger.Error(errMsg, zap.Error(err), zap.Any("namespaces", nss))
-				c.JSON(http.StatusInternalServerError, errMsg)
+				c.Errors = append(c.Errors, &gin.Error{
+					Type: gin.ErrorTypePrivate,
+					Err:  errors.Errorf("failed to get namespace[%s]: %+v", ns_name, err),
+				})
+				c.JSON(http.StatusInternalServerError, "failed to get namespace")
 				return
 			}
 			nss[i] = ns
@@ -114,33 +121,36 @@ func (h *namespaceHttpHandler) HandleCommit(c *gin.Context) {
 		}
 	}
 
-	if err := h.nsmgr.CommitNamespaces(nss, nss_delete); err != nil {
-		errMsg := "commit reload namespace error"
-		h.logger.Error(errMsg, zap.Error(err), zap.Any("namespaces", nss))
-		c.JSON(http.StatusInternalServerError, errMsg)
+	if err := h.mgr.ns.CommitNamespaces(nss, nss_delete); err != nil {
+		c.Errors = append(c.Errors, &gin.Error{
+			Type: gin.ErrorTypePrivate,
+			Err:  errors.Errorf("failed to reload namespaces: %v, %+v", nss, err),
+		})
+		c.JSON(http.StatusInternalServerError, "failed to reload namespaces")
 		return
 	}
 
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *namespaceHttpHandler) HandleList(c *gin.Context) {
-	nscs, err := h.cfgmgr.ListAllNamespace(c)
+func (h *HTTPServer) NamespaceList(c *gin.Context) {
+	nscs, err := h.mgr.cfg.ListAllNamespace(c)
 	if err != nil {
-		errMsg := "failed to list namespaces"
-		h.logger.Error(errMsg, zap.Error(err))
-		c.JSON(http.StatusInternalServerError, errMsg)
+		c.Errors = append(c.Errors, &gin.Error{
+			Type: gin.ErrorTypePrivate,
+			Err:  errors.Errorf("failed to list namespaces: %+v", err),
+		})
+		c.JSON(http.StatusInternalServerError, "failed to list namespaces")
 		return
 	}
 
 	c.JSON(http.StatusOK, nscs)
 }
 
-func registerNamespace(group *gin.RouterGroup, logger *zap.Logger, mgrcfg *mgrcfg.ConfigManager, mgrns *mgrns.NamespaceManager) {
-	h := &namespaceHttpHandler{logger, mgrcfg, mgrns}
-	group.GET("/", h.HandleList)
-	group.POST("/commit", h.HandleCommit)
-	group.GET("/:namespace", h.HandleGetNamespace)
-	group.PUT("/:namespace", h.HandleUpsertNamesapce)
-	group.DELETE("/:namespace", h.HandleRemoveNamespace)
+func (h *HTTPServer) registerNamespace(group *gin.RouterGroup) {
+	group.GET("/", h.NamespaceList)
+	group.POST("/commit", h.NamespaceCommit)
+	group.GET("/:namespace", h.NamespaceGet)
+	group.PUT("/:namespace", h.NamespaceUpsert)
+	group.DELETE("/:namespace", h.NamespaceRemove)
 }

@@ -19,39 +19,32 @@ import (
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
-	"go.uber.org/zap"
+	"github.com/pingcap/TiProxy/lib/config"
 )
 
-type debugHttpHandler struct {
-	logger *zap.Logger
-	nsmgr  *mgrns.NamespaceManager
+func (h *HTTPServer) DebugHealth(c *gin.Context) {
+	c.JSON(http.StatusOK, config.HealthInfo{
+		ConfigVersion: h.mgr.cfg.GetConfigVersion(),
+	})
 }
 
-func (h *debugHttpHandler) Health(c *gin.Context) {
-	c.JSON(http.StatusOK, "")
-}
-
-func (h *debugHttpHandler) Redirect(c *gin.Context) {
-	errs := h.nsmgr.RedirectConnections()
+func (h *HTTPServer) DebugRedirect(c *gin.Context) {
+	errs := h.mgr.ns.RedirectConnections()
 	if len(errs) != 0 {
-		errMsg := "redirect connections error"
-
-		var err_fields []zap.Field
 		for _, err := range errs {
-			err_fields = append(err_fields, zap.Error(err))
+			c.Errors = append(c.Errors, &gin.Error{
+				Err:  err,
+				Type: gin.ErrorTypePrivate,
+			})
 		}
-		h.logger.Error(errMsg, err_fields...)
-
-		c.JSON(http.StatusInternalServerError, errMsg)
+		c.JSON(http.StatusInternalServerError, "redirect connections error")
 	} else {
 		c.JSON(http.StatusOK, "")
 	}
 }
 
-func registerDebug(group *gin.RouterGroup, logger *zap.Logger, nsmgr *mgrns.NamespaceManager) {
-	handler := &debugHttpHandler{logger, nsmgr}
-	group.POST("/redirect", handler.Redirect)
-	group.GET("/health", handler.Health)
+func (h *HTTPServer) registerDebug(group *gin.RouterGroup) {
+	group.POST("/redirect", h.DebugRedirect)
+	group.GET("/health", h.DebugHealth)
 	pprof.RouteRegister(group, "/pprof")
 }

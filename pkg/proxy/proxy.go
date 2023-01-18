@@ -98,6 +98,10 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 			case <-ctx.Done():
 				return
 			case ach := <-cfgch:
+				if ach == nil {
+					// prevent panic on closing chan
+					return
+				}
 				s.reset(&ach.Proxy.ProxyServerOnline)
 			}
 		}

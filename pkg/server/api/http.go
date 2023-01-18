@@ -18,9 +18,9 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
-	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -31,6 +31,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -44,16 +45,31 @@ type HTTPHandler interface {
 	RegisterHTTP(c *gin.Engine) error
 }
 
+type managers struct {
+	cfg *mgrcfg.ConfigManager
+	ns  *mgrns.NamespaceManager
+	crt *mgrcrt.CertManager
+}
+
 type HTTPServer struct {
 	listener net.Listener
 	wg       waitgroup.WaitGroup
+	limit    ratelimit.Limiter
+	ready    *atomic.Bool
+	lg       *zap.Logger
+	mgr      managers
 }
 
 func NewHTTPServer(cfg config.API, lg *zap.Logger,
 	nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager,
 	crtmgr *mgrcrt.CertManager, handler HTTPHandler,
 	ready *atomic.Bool) (*HTTPServer, error) {
-	h := &HTTPServer{}
+	h := &HTTPServer{
+		limit: ratelimit.New(DefAPILimit),
+		ready: ready,
+		lg:    lg,
+		mgr:   managers{cfgmgr, nsmgr, crtmgr},
+	}
 
 	var err error
 	h.listener, err = net.Listen("tcp", cfg.Addr)
@@ -63,29 +79,14 @@ func NewHTTPServer(cfg config.API, lg *zap.Logger,
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
-	limit := ratelimit.New(DefAPILimit)
 	engine.Use(
 		gin.Recovery(),
-		ginzap.GinzapWithConfig(lg.Named("gin"), &ginzap.Config{
-			UTC: true,
-			SkipPaths: []string{
-				"/api/debug/health",
-			},
-		}),
-		func(c *gin.Context) {
-			_ = limit.Take()
-			if !ready.Load() {
-				c.Abort()
-				c.JSON(http.StatusInternalServerError, "service not ready")
-			}
-		},
+		h.rateLimit,
+		h.attachLogger,
+		h.readyState,
 	)
 
-	register(engine.Group("/api"), cfg, lg, nsmgr, cfgmgr)
-
-	if tlscfg := crtmgr.ServerTLS(); tlscfg != nil {
-		h.listener = tls.NewListener(h.listener, tlscfg)
-	}
+	h.register(engine.Group("/api"), cfg, nsmgr, cfgmgr)
 
 	if handler != nil {
 		if err := handler.RegisterHTTP(engine); err != nil {
@@ -93,16 +94,84 @@ func NewHTTPServer(cfg config.API, lg *zap.Logger,
 		}
 	}
 
+	if tlscfg := crtmgr.ServerTLS(); tlscfg != nil {
+		h.listener = tls.NewListener(h.listener, tlscfg)
+	}
+
+	hsrv := http.Server{
+		Handler:           engine.Handler(),
+		ReadHeaderTimeout: DefConnTimeout,
+		IdleTimeout:       DefConnTimeout,
+	}
+
 	h.wg.Run(func() {
-		hsrv := http.Server{
-			Handler:           engine.Handler(),
-			ReadHeaderTimeout: DefConnTimeout,
-			IdleTimeout:       DefConnTimeout,
-		}
 		lg.Info("HTTP closed", zap.Error(hsrv.Serve(h.listener)))
 	})
 
 	return h, nil
+}
+
+func (h *HTTPServer) rateLimit(c *gin.Context) {
+	_ = h.limit.Take()
+}
+
+func (h *HTTPServer) attachLogger(c *gin.Context) {
+	path := c.Request.URL.Path
+	if strings.HasPrefix(path, "/api/debug/health") {
+		return
+	}
+
+	fields := make([]zapcore.Field, 0, 9)
+
+	fields = append(fields,
+		zap.Int("status", c.Writer.Status()),
+		zap.String("method", c.Request.Method),
+		zap.String("path", path),
+		zap.String("query", c.Request.URL.RawQuery),
+		zap.String("ip", c.ClientIP()),
+		zap.String("user-agent", c.Request.UserAgent()),
+	)
+
+	start := time.Now().UTC()
+	c.Next()
+	end := time.Now().UTC()
+	latency := end.Sub(start)
+
+	fields = append(fields,
+		zap.Duration("latency", latency),
+		zap.String("time", end.Format("")),
+	)
+
+	if len(c.Errors) > 0 {
+		errs := make([]error, 0, len(c.Errors))
+		for _, e := range c.Errors {
+			errs = append(errs, e)
+		}
+		fields = append(fields, zap.Errors("errs", errs))
+	}
+
+	h.lg.Info(path, fields...)
+}
+
+func (h *HTTPServer) readyState(c *gin.Context) {
+	if !h.ready.Load() {
+		c.Abort()
+		c.JSON(http.StatusInternalServerError, "service not ready")
+	}
+}
+
+func (h *HTTPServer) register(group *gin.RouterGroup, cfg config.API, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
+	{
+		adminGroup := group.Group("admin")
+		if cfg.EnableBasicAuth {
+			adminGroup.Use(gin.BasicAuth(gin.Accounts{cfg.User: cfg.Password}))
+		}
+		h.registerNamespace(adminGroup.Group("namespace"))
+		h.registerConfig(adminGroup.Group("config"))
+	}
+
+	h.registerMetrics(group.Group("metrics"))
+	h.registerDebug(group.Group("debug"))
 }
 
 func (h *HTTPServer) Close() error {
