@@ -15,6 +15,7 @@
 package net
 
 import (
+	"bufio"
 	"crypto/tls"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -28,6 +29,8 @@ func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionStat
 	}
 	p.conn = tlsConn
 	p.buf.Writer.Reset(p.conn)
+	// Wrap it with another buffer to enable Peek.
+	p.buf = bufio.NewReadWriter(bufio.NewReaderSize(p.conn, defaultReaderSize), p.buf.Writer)
 	return tlsConn.ConnectionState(), nil
 }
 
@@ -39,5 +42,7 @@ func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 	}
 	p.conn = tlsConn
 	p.buf.Writer.Reset(p.conn)
+	// Wrap it with another buffer to enable Peek.
+	p.buf = bufio.NewReadWriter(bufio.NewReaderSize(p.conn, defaultReaderSize), p.buf.Writer)
 	return nil
 }

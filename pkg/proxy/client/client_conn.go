@@ -42,7 +42,10 @@ type ClientConnection struct {
 
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config,
 	hsHandler backend.HandshakeHandler, connID uint64, proxyProtocol, requireBackendTLS bool) *ClientConnection {
-	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, connID, proxyProtocol, requireBackendTLS)
+	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, connID, &backend.BCConfig{
+		ProxyProtocol:     proxyProtocol,
+		RequireBackendTLS: requireBackendTLS,
+	})
 	opts := make([]pnet.PacketIOption, 0, 2)
 	opts = append(opts, pnet.WithWrapError(ErrClientConn))
 	if proxyProtocol {

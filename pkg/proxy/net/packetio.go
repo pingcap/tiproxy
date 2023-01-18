@@ -141,7 +141,7 @@ func (p *PacketIO) GetSequence() uint8 {
 func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	var header [4]byte
 
-	if _, err := io.ReadFull(p.conn, header[:]); err != nil {
+	if _, err := io.ReadFull(p.buf, header[:]); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 	p.inBytes += 4
@@ -164,7 +164,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 
 	// refill mysql headers
 	if refill {
-		if _, err := io.ReadFull(p.conn, header[:]); err != nil {
+		if _, err := io.ReadFull(p.buf, header[:]); err != nil {
 			return nil, false, errors.Wrap(ErrReadConn, err)
 		}
 		p.inBytes += 4
@@ -178,7 +178,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	length := int(uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16)
 
 	data := make([]byte, length)
-	if _, err := io.ReadFull(p.conn, data); err != nil {
+	if _, err := io.ReadFull(p.buf, data); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 	p.inBytes += uint64(length)
@@ -259,6 +259,24 @@ func (p *PacketIO) Flush() error {
 		return p.wrapErr(errors.Wrap(ErrFlushConn, err))
 	}
 	return nil
+}
+
+// IsPeerActive checks if the peer connection is still active.
+// This function cannot be called concurrently with other functions of PacketIO.
+// This function normally costs 1ms, so don't call it too frequently.
+// This function may incorrectly return true if the system is extremely slow.
+func (p *PacketIO) IsPeerActive() bool {
+	if err := p.conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+		return false
+	}
+	active := true
+	if _, err := p.buf.Peek(1); err != nil {
+		active = !errors.Is(err, io.EOF)
+	}
+	if err := p.conn.SetReadDeadline(time.Time{}); err != nil {
+		return false
+	}
+	return active
 }
 
 func (p *PacketIO) GracefulClose() error {

@@ -26,19 +26,21 @@ import (
 )
 
 type proxyConfig struct {
-	frontendTLSConfig *tls.Config
-	backendTLSConfig  *tls.Config
-	handler           *CustomHandshakeHandler
-	sessionToken      string
-	capability        pnet.Capability
-	waitRedirect      bool
+	frontendTLSConfig    *tls.Config
+	backendTLSConfig     *tls.Config
+	handler              *CustomHandshakeHandler
+	checkBackendInterval time.Duration
+	sessionToken         string
+	capability           pnet.Capability
+	waitRedirect         bool
 }
 
 func newProxyConfig() *proxyConfig {
 	return &proxyConfig{
-		handler:      &CustomHandshakeHandler{},
-		capability:   defaultTestBackendCapability,
-		sessionToken: mockToken,
+		handler:              &CustomHandshakeHandler{},
+		capability:           defaultTestBackendCapability,
+		sessionToken:         mockToken,
+		checkBackendInterval: CheckBackendInterval,
 	}
 }
 
@@ -56,9 +58,11 @@ type mockProxy struct {
 
 func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
-		proxyConfig:        cfg,
-		logger:             logger.CreateLoggerForTest(t).Named("mockProxy"),
-		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), cfg.handler, 0, false, false),
+		proxyConfig: cfg,
+		logger:      logger.CreateLoggerForTest(t).Named("mockProxy"),
+		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), cfg.handler, 0, &BCConfig{
+			CheckBackendInterval: cfg.checkBackendInterval,
+		}),
 	}
 	mp.cmdProcessor.capability = cfg.capability.Uint32()
 	return mp
