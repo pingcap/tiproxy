@@ -56,6 +56,7 @@ type ConfigManager struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
 		current   *config.Config
+		version   uint32
 	}
 }
 
@@ -136,6 +137,11 @@ func (e *ConfigManager) Close() error {
 	if e.wch != nil {
 		wcherr = e.wch.Close()
 	}
+	e.sts.Lock()
+	for _, ch := range e.sts.listeners {
+		close(ch)
+	}
+	e.sts.Unlock()
 	e.wg.Wait()
 	return wcherr
 }

@@ -69,8 +69,12 @@ func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Conf
 		case <-ctx.Done():
 			return
 		case acfg := <-cfgch:
-			cfg := &acfg.Log.LogOnline
+			if acfg == nil {
+				// prevent panic on closing chan
+				return
+			}
 
+			cfg := &acfg.Log.LogOnline
 			err := lm.updateLoggerCfg(cfg)
 			if err != nil {
 				bytes, merr := json.Marshal(cfg)

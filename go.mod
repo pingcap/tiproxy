@@ -7,7 +7,6 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.0
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gin-contrib/pprof v1.4.0
-	github.com/gin-contrib/zap v0.0.2
 	github.com/gin-gonic/gin v1.8.1
 	github.com/go-mysql-org/go-mysql v1.6.0
 	github.com/pingcap/TiProxy/lib v0.0.0-00010101000000-000000000000

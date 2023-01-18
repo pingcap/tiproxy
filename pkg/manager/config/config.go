@@ -75,6 +75,7 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 	}
 
 	e.sts.current = base
+	e.sts.version++
 
 	for _, list := range e.sts.listeners {
 		list <- base.Clone()
@@ -86,6 +87,13 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 func (e *ConfigManager) GetConfig() *config.Config {
 	e.sts.Lock()
 	v := e.sts.current
+	e.sts.Unlock()
+	return v
+}
+
+func (e *ConfigManager) GetConfigVersion() uint32 {
+	e.sts.Lock()
+	v := e.sts.version
 	e.sts.Unlock()
 	return v
 }
