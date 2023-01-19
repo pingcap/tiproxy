@@ -15,5 +15,5 @@
 package config
 
 type HealthInfo struct {
-	ConfigVersion uint32
+	ConfigVersion uint32 `json:"config_version"`
 }
