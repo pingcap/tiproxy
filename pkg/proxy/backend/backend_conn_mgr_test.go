@@ -211,15 +211,15 @@ func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketI
 	return nil
 }
 
-func (ts *backendMgrTester) checkConnClosed(_, _ *pnet.PacketIO) error {
-	for i := 0; i < 30; i++ {
+func (ts *backendMgrTester) checkConnClosed4Proxy(_, _ *pnet.PacketIO) error {
+	require.Eventually(ts.t, func() bool {
 		switch ts.mp.closeStatus.Load() {
 		case statusClosing, statusClosed:
-			return nil
+			return true
 		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return errors.New("timeout")
+		return false
+	}, 3*time.Second, 100*time.Millisecond)
+	return nil
 }
 
 func (ts *backendMgrTester) runTests(runners []runner) {
@@ -621,7 +621,7 @@ func TestGracefulCloseWhenIdle(t *testing.T) {
 		},
 		// really closed
 		{
-			proxy: ts.checkConnClosed,
+			proxy: ts.checkConnClosed4Proxy,
 		},
 	}
 	ts.runTests(runners)
@@ -659,7 +659,7 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 		},
 		// it will then automatically close
 		{
-			proxy: ts.checkConnClosed,
+			proxy: ts.checkConnClosed4Proxy,
 		},
 	}
 	ts.runTests(runners)
@@ -683,7 +683,7 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 		},
 		// it will then automatically close
 		{
-			proxy: ts.checkConnClosed,
+			proxy: ts.checkConnClosed4Proxy,
 		},
 	}
 	ts.runTests(runners)
@@ -763,7 +763,7 @@ func TestGetBackendIO(t *testing.T) {
 			}
 		},
 	}
-	mgr := NewBackendConnManager(logger.CreateLoggerForTest(t), handler, 0, false, false)
+	mgr := NewBackendConnManager(logger.CreateLoggerForTest(t), handler, 0, &BCConfig{})
 	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
 		wg.Run(func() {
@@ -789,4 +789,82 @@ func TestGetBackendIO(t *testing.T) {
 		badAddrs = make(map[string]struct{}, 3)
 		wg.Wait()
 	}
+}
+
+func TestBackendInactive(t *testing.T) {
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.checkBackendInterval = 10 * time.Millisecond
+	})
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// do some queries and the interval is less than checkBackendInterval
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				for i := 0; i < 10; i++ {
+					time.Sleep(5 * time.Millisecond)
+					if err := ts.mc.request(packetIO); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				for i := 0; i < 10; i++ {
+					if err := ts.forwardCmd4Proxy(clientIO, backendIO); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			backend: func(packetIO *pnet.PacketIO) error {
+				for i := 0; i < 10; i++ {
+					if err := ts.respondWithNoTxn4Backend(packetIO); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+		},
+		// do some queries and the interval is longer than checkBackendInterval
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				for i := 0; i < 5; i++ {
+					time.Sleep(30 * time.Millisecond)
+					if err := ts.mc.request(packetIO); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				for i := 0; i < 5; i++ {
+					if err := ts.forwardCmd4Proxy(clientIO, backendIO); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+			backend: func(packetIO *pnet.PacketIO) error {
+				for i := 0; i < 5; i++ {
+					if err := ts.respondWithNoTxn4Backend(packetIO); err != nil {
+						return err
+					}
+				}
+				return nil
+			},
+		},
+		// close the backend and the client connection will close
+		{
+			proxy: ts.checkConnClosed4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				return packetIO.Close()
+			},
+		},
+	}
+	ts.runTests(runners)
 }

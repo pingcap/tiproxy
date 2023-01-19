@@ -204,3 +204,61 @@ func TestPacketIOClose(t *testing.T) {
 		1,
 	)
 }
+
+func TestPeerActive(t *testing.T) {
+	stls, ctls, err := security.CreateTLSConfigForTest()
+	require.NoError(t, err)
+	ch := make(chan struct{})
+	testTCPConn(t,
+		func(t *testing.T, cli *PacketIO) {
+			// It's active at the beginning.
+			require.True(t, cli.IsPeerActive())
+			ch <- struct{}{} // let srv write packet
+			// ReadPacket still reads the whole data after checking.
+			ch <- struct{}{}
+			require.True(t, cli.IsPeerActive())
+			data, err := cli.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, "123", string(data))
+			// IsPeerActive works after reading data.
+			require.True(t, cli.IsPeerActive())
+			// IsPeerActive works after writing data.
+			require.NoError(t, cli.WritePacket([]byte("456"), true))
+			require.True(t, cli.IsPeerActive())
+			// upgrade to TLS and try again
+			require.NoError(t, cli.ClientTLSHandshake(ctls))
+			require.True(t, cli.IsPeerActive())
+			data, err = cli.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, "123", string(data))
+			require.True(t, cli.IsPeerActive())
+			require.NoError(t, cli.WritePacket([]byte("456"), true))
+			require.True(t, cli.IsPeerActive())
+			// It's not active after the peer closes.
+			ch <- struct{}{}
+			ch <- struct{}{}
+			require.False(t, cli.IsPeerActive())
+		},
+		func(t *testing.T, srv *PacketIO) {
+			<-ch
+			err := srv.WritePacket([]byte("123"), true)
+			require.NoError(t, err)
+			<-ch
+			data, err := srv.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, "456", string(data))
+			// upgrade to TLS and try again
+			_, err = srv.ServerTLSHandshake(stls)
+			require.NoError(t, err)
+			err = srv.WritePacket([]byte("123"), true)
+			require.NoError(t, err)
+			data, err = srv.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, "456", string(data))
+			<-ch
+			require.NoError(t, srv.Close())
+			<-ch
+		},
+		10,
+	)
+}

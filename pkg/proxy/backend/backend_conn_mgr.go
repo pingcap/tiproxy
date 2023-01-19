@@ -43,7 +43,8 @@ var (
 )
 
 const (
-	DialTimeout = 5 * time.Second
+	DialTimeout          = 5 * time.Second
+	CheckBackendInterval = time.Minute
 )
 
 const (
@@ -79,6 +80,18 @@ const (
 	statusClosed
 )
 
+type BCConfig struct {
+	ProxyProtocol        bool
+	RequireBackendTLS    bool
+	CheckBackendInterval time.Duration
+}
+
+func (cfg *BCConfig) check() {
+	if cfg.CheckBackendInterval == time.Duration(0) {
+		cfg.CheckBackendInterval = CheckBackendInterval
+	}
+}
+
 // BackendConnManager migrates a session from one BackendConnection to another.
 //
 // The signal processing goroutine tries to migrate the session once it receives a signal.
@@ -97,13 +110,15 @@ type BackendConnManager struct {
 	authenticator  *Authenticator
 	cmdProcessor   *CmdProcessor
 	eventReceiver  unsafe.Pointer
+	config         *BCConfig
 	logger         *zap.Logger
 	// type *signalRedirect, it saves the last signal if there are multiple signals.
 	// It will be set to nil after migration.
 	signal unsafe.Pointer
 	// redirectResCh is used to notify the event receiver asynchronously.
-	redirectResCh chan *redirectResult
-	closeStatus   atomic.Int32
+	redirectResCh      chan *redirectResult
+	closeStatus        atomic.Int32
+	checkBackendTicker *time.Ticker
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc       context.CancelFunc
 	clientIO         *pnet.PacketIO
@@ -115,16 +130,17 @@ type BackendConnManager struct {
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler,
-	connectionID uint64, proxyProtocol, requireBackendTLS bool) *BackendConnManager {
+func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler, connectionID uint64, config *BCConfig) *BackendConnManager {
+	config.check()
 	mgr := &BackendConnManager{
 		logger:           logger,
+		config:           config,
 		connectionID:     connectionID,
 		cmdProcessor:     NewCmdProcessor(),
 		handshakeHandler: handshakeHandler,
 		authenticator: &Authenticator{
-			proxyProtocol:     proxyProtocol,
-			requireBackendTLS: requireBackendTLS,
+			proxyProtocol:     config.ProxyProtocol,
+			requireBackendTLS: config.RequireBackendTLS,
 			salt:              GenerateSalt(20),
 		},
 		// There are 2 types of signals, which may be sent concurrently.
@@ -158,6 +174,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
+	mgr.resetCheckBackendTicker()
 	mgr.wg.Run(func() {
 		mgr.processSignals(childCtx)
 	})
@@ -243,6 +260,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) e
 	case statusClosing, statusClosed:
 		return nil
 	}
+	defer mgr.resetCheckBackendTicker()
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
 	holdRequest, err := mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO, waitingRedirect)
 	if !holdRequest {
@@ -336,6 +354,7 @@ func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken
 // processSignals runs in a goroutine to:
 // - Receive redirection signals and then try to migrate the session.
 // - Send redirection results to the event receiver.
+// - Check if the backend is still alive.
 func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 	for {
 		select {
@@ -351,6 +370,8 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 			mgr.processLock.Unlock()
 		case rs := <-mgr.redirectResCh:
 			mgr.notifyRedirectResult(ctx, rs)
+		case <-mgr.checkBackendTicker.C:
+			mgr.checkBackendActive()
 		case <-ctx.Done():
 			return
 		}
@@ -499,6 +520,34 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 	mgr.closeStatus.Store(statusClosing)
 }
 
+func (mgr *BackendConnManager) checkBackendActive() {
+	switch mgr.closeStatus.Load() {
+	case statusClosing, statusClosed:
+		return
+	}
+
+	mgr.processLock.Lock()
+	defer mgr.processLock.Unlock()
+	if !mgr.backendIO.IsPeerActive() {
+		mgr.logger.Info("backend connection is closed, close client connection", zap.Stringer("client", mgr.clientIO.RemoteAddr()),
+			zap.Stringer("backend", mgr.backendIO.RemoteAddr()))
+		if err := mgr.clientIO.GracefulClose(); err != nil {
+			mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+		}
+		mgr.closeStatus.Store(statusClosing)
+	}
+}
+
+// Checking backend is expensive, so only check it when the client is idle for some time.
+// This function should be called within the lock.
+func (mgr *BackendConnManager) resetCheckBackendTicker() {
+	if mgr.checkBackendTicker == nil {
+		mgr.checkBackendTicker = time.NewTicker(mgr.config.CheckBackendInterval)
+	} else {
+		mgr.checkBackendTicker.Reset(mgr.config.CheckBackendInterval)
+	}
+}
+
 func (mgr *BackendConnManager) ClientAddr() string {
 	if mgr.clientIO == nil {
 		return ""
@@ -542,6 +591,9 @@ func (mgr *BackendConnManager) Value(key any) any {
 // Close releases all resources.
 func (mgr *BackendConnManager) Close() error {
 	mgr.closeStatus.Store(statusClosing)
+	if mgr.checkBackendTicker != nil {
+		mgr.checkBackendTicker.Stop()
+	}
 	if mgr.cancelFunc != nil {
 		mgr.cancelFunc()
 		mgr.cancelFunc = nil
