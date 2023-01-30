@@ -144,6 +144,9 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 	auth.capability = commonCaps.Uint32()
 
+	if isSSL {
+		cctx.SetValue(ConnContextKeyTLSState, clientIO.TLSConnectionState())
+	}
 	clientResp := pnet.ParseHandshakeResponse(pkt)
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
 		return WrapUserError(err, err.Error())
@@ -290,10 +293,14 @@ func (auth *Authenticator) writeAuthHandshake(
 		AuthPlugin: authPlugin,
 	}
 
+	if len(resp.Attrs) > 0 {
+		resp.Capability |= mysql.ClientConnectAtts
+	}
+
 	var pkt []byte
 	if backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil {
-		pkt = pnet.MakeHandshakeResponse(resp)
 		resp.Capability |= mysql.ClientSSL
+		pkt = pnet.MakeHandshakeResponse(resp)
 		// write SSL Packet
 		if err := backendIO.WritePacket(pkt[:32], true); err != nil {
 			return err
@@ -309,6 +316,7 @@ func (auth *Authenticator) writeAuthHandshake(
 			return err
 		}
 	} else {
+		resp.Capability &= ^mysql.ClientSSL
 		pkt = pnet.MakeHandshakeResponse(resp)
 	}
 

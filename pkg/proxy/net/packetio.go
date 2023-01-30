@@ -38,6 +38,7 @@ package net
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"io"
 	"net"
 	"time"
@@ -252,6 +253,13 @@ func (p *PacketIO) InBytes() uint64 {
 
 func (p *PacketIO) OutBytes() uint64 {
 	return p.outBytes
+}
+
+func (p *PacketIO) TLSConnectionState() tls.ConnectionState {
+	if tlsConn, ok := p.conn.(*tls.Conn); ok {
+		return tlsConn.ConnectionState()
+	}
+	return tls.ConnectionState{}
 }
 
 func (p *PacketIO) Flush() error {
