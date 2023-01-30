@@ -144,6 +144,9 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 	auth.capability = commonCaps.Uint32()
 
+	if isSSL {
+		cctx.SetValue(ConnContextKeyTLSState, clientIO.TLSConnectionState())
+	}
 	clientResp := pnet.ParseHandshakeResponse(pkt)
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
 		return WrapUserError(err, err.Error())
@@ -152,6 +155,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	auth.dbname = clientResp.DB
 	auth.collation = clientResp.Collation
 	auth.attrs = clientResp.Attrs
+	auth.capability &= clientResp.Capability
 
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	backendIO, err := getBackendIO(cctx, auth, clientResp, 5*time.Second)

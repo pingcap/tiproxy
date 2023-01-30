@@ -22,6 +22,12 @@ import (
 )
 
 // Context keys.
+type ConnContextKey string
+
+const (
+	ConnContextKeyTLSState ConnContextKey = "tls-state"
+)
+
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 
 type ConnContext interface {
