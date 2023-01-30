@@ -19,7 +19,7 @@ COMMIT ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)
 DEBUG ?=
 DOCKERPREFIX ?=
 BUILD_TAGS ?=
-LDFLAGS ?= 
+LDFLAGS ?=
 BUILDFLAGS ?= -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS) -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)' -tags '$(BUILD_TAGS)'
 ifneq ("$(DEBUG)", "")
 	BUILDFLAGS += -race
