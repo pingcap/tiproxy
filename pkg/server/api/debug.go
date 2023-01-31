@@ -24,7 +24,7 @@ import (
 
 func (h *HTTPServer) DebugHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, config.HealthInfo{
-		ConfigVersion: h.mgr.cfg.GetConfigVersion(),
+		ConfigChecksum: h.mgr.cfg.GetConfigChecksum(),
 	})
 }
 

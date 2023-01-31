@@ -163,3 +163,18 @@ func TestConfigRemove(t *testing.T) {
 	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "vv"`), 0644))
 	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "vv" }, time.Second, 100*time.Millisecond)
 }
+
+func TestChecksum(t *testing.T) {
+	cfgmgr, _ := testConfigManager(t, "")
+	c1 := cfgmgr.GetConfigChecksum()
+	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
+	c2 := cfgmgr.GetConfigChecksum()
+	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "vv"`)))
+	c3 := cfgmgr.GetConfigChecksum()
+	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr="gg"`)))
+	c4 := cfgmgr.GetConfigChecksum()
+	require.Equal(t, c2, c4)
+	require.NotEqual(t, c1, c2)
+	require.NotEqual(t, c1, c3)
+	require.NotEqual(t, c2, c3)
+}

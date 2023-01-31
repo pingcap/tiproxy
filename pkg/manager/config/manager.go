@@ -57,6 +57,7 @@ type ConfigManager struct {
 		listeners []chan<- *config.Config
 		current   *config.Config
 		version   uint32
+		checksum  uint32
 	}
 }
 

@@ -15,11 +15,13 @@
 package config
 
 import (
+	"hash/crc32"
 	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/fsnotify/fsnotify"
+	gotoml "github.com/pelletier/go-toml/v2"
 	"github.com/pingcap/TiProxy/lib/config"
 	"go.uber.org/zap"
 )
@@ -74,13 +76,25 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 		return err
 	}
 
-	e.sts.current = base
-	e.sts.version++
+	if err := e.setCurrentConfig(base); err != nil {
+		return err
+	}
 
 	for _, list := range e.sts.listeners {
 		list <- base.Clone()
 	}
 
+	return nil
+}
+
+func (e *ConfigManager) setCurrentConfig(cfg *config.Config) error {
+	e.sts.current = cfg
+	e.sts.version++
+	bytes, err := gotoml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	e.sts.checksum = crc32.ChecksumIEEE(bytes)
 	return nil
 }
 
@@ -96,6 +110,13 @@ func (e *ConfigManager) GetConfigVersion() uint32 {
 	v := e.sts.version
 	e.sts.Unlock()
 	return v
+}
+
+func (e *ConfigManager) GetConfigChecksum() uint32 {
+	e.sts.Lock()
+	c := e.sts.checksum
+	e.sts.Unlock()
+	return c
 }
 
 func (e *ConfigManager) WatchConfig() <-chan *config.Config {
