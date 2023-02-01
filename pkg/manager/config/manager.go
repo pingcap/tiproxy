@@ -56,7 +56,7 @@ type ConfigManager struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
 		current   *config.Config
-		version   uint32
+		checksum  uint32
 	}
 }
 

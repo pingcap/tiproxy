@@ -15,6 +15,8 @@
 package config
 
 import (
+	"bytes"
+	"hash/crc32"
 	"os"
 	"time"
 
@@ -74,13 +76,24 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 		return err
 	}
 
-	e.sts.current = base
-	e.sts.version++
+	if err := e.setCurrentConfig(base); err != nil {
+		return err
+	}
 
 	for _, list := range e.sts.listeners {
 		list <- base.Clone()
 	}
 
+	return nil
+}
+
+func (e *ConfigManager) setCurrentConfig(cfg *config.Config) error {
+	e.sts.current = cfg
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+		return err
+	}
+	e.sts.checksum = crc32.ChecksumIEEE(buf.Bytes())
 	return nil
 }
 
@@ -91,11 +104,11 @@ func (e *ConfigManager) GetConfig() *config.Config {
 	return v
 }
 
-func (e *ConfigManager) GetConfigVersion() uint32 {
+func (e *ConfigManager) GetConfigChecksum() uint32 {
 	e.sts.Lock()
-	v := e.sts.version
+	c := e.sts.checksum
 	e.sts.Unlock()
-	return v
+	return c
 }
 
 func (e *ConfigManager) WatchConfig() <-chan *config.Config {
