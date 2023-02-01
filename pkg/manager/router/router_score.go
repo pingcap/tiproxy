@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"go.uber.org/zap"
@@ -42,14 +43,14 @@ type ScoreBasedRouter struct {
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
-func NewScoreBasedRouter(logger *zap.Logger, httpCli *http.Client, fetcher BackendFetcher) (*ScoreBasedRouter, error) {
+func NewScoreBasedRouter(logger *zap.Logger, httpCli *http.Client, fetcher BackendFetcher, cfg *config.HealthCheck) (*ScoreBasedRouter, error) {
 	router := &ScoreBasedRouter{
 		logger:   logger,
 		backends: list.New(),
 	}
 	router.Lock()
 	defer router.Unlock()
-	observer, err := StartBackendObserver(logger.Named("observer"), router, httpCli, NewDefaultHealthCheckConfig(), fetcher)
+	observer, err := StartBackendObserver(logger.Named("observer"), router, httpCli, cfg, fetcher)
 	if err != nil {
 		return nil, err
 	}

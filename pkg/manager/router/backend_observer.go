@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
@@ -76,25 +77,15 @@ const (
 	statusPathSuffix         = "/status"
 )
 
-// HealthCheckConfig contains some configurations for health check.
-// Some general configurations of them may be exposed to users in the future.
-// We can use shorter durations to speed up unit tests.
-type HealthCheckConfig struct {
-	healthCheckInterval      time.Duration
-	healthCheckMaxRetries    int
-	healthCheckRetryInterval time.Duration
-	healthCheckTimeout       time.Duration
-	tombstoneThreshold       time.Duration
-}
-
-// NewDefaultHealthCheckConfig creates a default HealthCheckConfig.
-func NewDefaultHealthCheckConfig() *HealthCheckConfig {
-	return &HealthCheckConfig{
-		healthCheckInterval:      healthCheckInterval,
-		healthCheckMaxRetries:    healthCheckMaxRetries,
-		healthCheckRetryInterval: healthCheckRetryInterval,
-		healthCheckTimeout:       healthCheckTimeout,
-		tombstoneThreshold:       tombstoneThreshold,
+// NewDefaultHealthCheckConfig creates a default HealthCheck.
+func NewDefaultHealthCheckConfig() *config.HealthCheck {
+	return &config.HealthCheck{
+		Enable:             true,
+		Interval:           healthCheckInterval,
+		MaxRetries:         healthCheckMaxRetries,
+		RetryInterval:      healthCheckRetryInterval,
+		DialTimeout:        healthCheckTimeout,
+		TombstoneThreshold: tombstoneThreshold,
 	}
 }
 
@@ -112,8 +103,8 @@ type BackendInfo struct {
 
 // BackendObserver refreshes backend list and notifies BackendEventReceiver.
 type BackendObserver struct {
-	logger *zap.Logger
-	config *HealthCheckConfig
+	logger            *zap.Logger
+	healthCheckConfig *config.HealthCheck
 	// The current backend status synced to the receiver.
 	curBackendInfo map[string]BackendStatus
 	fetcher        BackendFetcher
@@ -127,7 +118,7 @@ type BackendObserver struct {
 
 // StartBackendObserver creates a BackendObserver and starts watching.
 func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, httpCli *http.Client,
-	config *HealthCheckConfig, backendFetcher BackendFetcher) (*BackendObserver, error) {
+	config *config.HealthCheck, backendFetcher BackendFetcher) (*BackendObserver, error) {
 	bo, err := NewBackendObserver(logger, eventReceiver, httpCli, config, backendFetcher)
 	if err != nil {
 		return nil, err
@@ -138,7 +129,7 @@ func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver
 
 // NewBackendObserver creates a BackendObserver.
 func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, httpCli *http.Client,
-	config *HealthCheckConfig, backendFetcher BackendFetcher) (*BackendObserver, error) {
+	config *config.HealthCheck, backendFetcher BackendFetcher) (*BackendObserver, error) {
 	if httpCli == nil {
 		httpCli = http.DefaultClient
 	}
@@ -147,13 +138,13 @@ func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, 
 		httpTLS = true
 	}
 	bo := &BackendObserver{
-		logger:         logger,
-		config:         config,
-		curBackendInfo: make(map[string]BackendStatus),
-		httpCli:        httpCli,
-		httpTLS:        httpTLS,
-		eventReceiver:  eventReceiver,
-		refreshChan:    make(chan struct{}),
+		logger:            logger,
+		healthCheckConfig: config,
+		curBackendInfo:    make(map[string]BackendStatus),
+		httpCli:           httpCli,
+		httpTLS:           httpTLS,
+		eventReceiver:     eventReceiver,
+		refreshChan:       make(chan struct{}),
 	}
 	bo.fetcher = backendFetcher
 	return bo, nil
@@ -191,7 +182,7 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 			bo.notifyIfChanged(backendStatus)
 		}
 		select {
-		case <-time.After(bo.config.healthCheckInterval):
+		case <-time.After(bo.healthCheckConfig.Interval):
 		case <-bo.refreshChan:
 		case <-ctx.Done():
 			return
@@ -202,13 +193,17 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]BackendStatus {
 	curBackendStatus := make(map[string]BackendStatus, len(backends))
 	for addr, info := range backends {
+		if !bo.healthCheckConfig.Enable {
+			curBackendStatus[addr] = StatusHealthy
+			continue
+		}
 		if ctx.Err() != nil {
 			return nil
 		}
 		retriedTimes := 0
 		connectWithRetry := func(connect func() error) error {
 			var err error
-			for ; retriedTimes < bo.config.healthCheckMaxRetries; retriedTimes++ {
+			for ; retriedTimes < bo.healthCheckConfig.MaxRetries; retriedTimes++ {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
@@ -218,8 +213,8 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 				if !isRetryableError(err) {
 					break
 				}
-				if retriedTimes < bo.config.healthCheckMaxRetries-1 {
-					time.Sleep(bo.config.healthCheckRetryInterval)
+				if retriedTimes < bo.healthCheckConfig.MaxRetries-1 {
+					time.Sleep(bo.healthCheckConfig.RetryInterval)
 				}
 			}
 			return err
@@ -251,7 +246,7 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 
 		// Also dial the SQL port just in case that the SQL port hangs.
 		err := connectWithRetry(func() error {
-			conn, err := net.DialTimeout("tcp", addr, bo.config.healthCheckTimeout)
+			conn, err := net.DialTimeout("tcp", addr, bo.healthCheckConfig.DialTimeout)
 			if err == nil {
 				if err := conn.Close(); err != nil && !pnet.IsDisconnectError(err) {
 					bo.logger.Error("close connection in health check failed", zap.Error(err))

@@ -577,8 +577,9 @@ func TestConcurrency(t *testing.T) {
 	// We create other goroutines to change backends easily.
 	etcd := createEtcdServer(t, "127.0.0.1:0")
 	client := createEtcdClient(t, etcd)
-	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), newHealthCheckConfigForTest())
-	router, err := NewScoreBasedRouter(logger.CreateLoggerForTest(t), nil, fetcher)
+	healthCheckConfig := newHealthCheckConfigForTest()
+	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), healthCheckConfig)
+	router, err := NewScoreBasedRouter(logger.CreateLoggerForTest(t), nil, fetcher, healthCheckConfig)
 	require.NoError(t, err)
 
 	var wg waitgroup.WaitGroup
@@ -694,7 +695,7 @@ func TestRefresh(t *testing.T) {
 		backends: list.New(),
 	}
 	cfg := NewDefaultHealthCheckConfig()
-	cfg.healthCheckInterval = time.Minute
+	cfg.Interval = time.Minute
 	observer, err := StartBackendObserver(lg, rt, nil, cfg, fetcher)
 	require.NoError(t, err)
 	rt.Lock()

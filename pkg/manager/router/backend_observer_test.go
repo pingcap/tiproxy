@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
@@ -52,13 +53,14 @@ func newMockEventReceiver(backendChan chan map[string]BackendStatus, errChan cha
 	}
 }
 
-func newHealthCheckConfigForTest() *HealthCheckConfig {
-	return &HealthCheckConfig{
-		healthCheckInterval:      500 * time.Millisecond,
-		healthCheckMaxRetries:    healthCheckMaxRetries,
-		healthCheckRetryInterval: 100 * time.Millisecond,
-		healthCheckTimeout:       100 * time.Millisecond,
-		tombstoneThreshold:       tombstoneThreshold,
+func newHealthCheckConfigForTest() *config.HealthCheck {
+	return &config.HealthCheck{
+		Enable:             true,
+		Interval:           500 * time.Millisecond,
+		MaxRetries:         healthCheckMaxRetries,
+		RetryInterval:      100 * time.Millisecond,
+		DialTimeout:        100 * time.Millisecond,
+		TombstoneThreshold: tombstoneThreshold,
 	}
 }
 
@@ -133,7 +135,7 @@ func TestEtcdUnavailable(t *testing.T) {
 		<-etcd.Server.StopNotify()
 		// The observer will retry indefinitely. We verify it won't panic or hang here.
 		// There's no other way than modifying the code or just sleeping.
-		time.Sleep(bo.config.healthCheckInterval + bo.config.healthCheckTimeout + bo.config.healthCheckRetryInterval)
+		time.Sleep(bo.healthCheckConfig.Interval + bo.healthCheckConfig.DialTimeout + bo.healthCheckConfig.RetryInterval)
 		require.Equal(t, 0, len(backendChan))
 	})
 }
