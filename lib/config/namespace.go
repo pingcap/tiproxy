@@ -17,6 +17,7 @@ package config
 
 import (
 	"bytes"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -36,6 +37,19 @@ type BackendNamespace struct {
 	Instances    []string  `yaml:"instances" json:"instances" toml:"instances"`
 	SelectorType string    `yaml:"selector-type" json:"selector-type" toml:"selector-type"`
 	Security     TLSConfig `yaml:"security" json:"security" toml:"security"`
+	//HealthCheck  HealthCheck `yaml:"health-check" json:"health-check" toml:"health-check"`
+}
+
+// HealthCheck contains some configurations for health check.
+// Some general configurations of them may be exposed to users in the future.
+// We can use shorter durations to speed up unit tests.
+type HealthCheck struct {
+	Enable             bool          `yaml:"enable" json:"enable" toml:"enable"`
+	Interval           time.Duration `yaml:"interval" json:"interval" toml:"interval"`
+	MaxRetries         int           `yaml:"max-retries" json:"max-retries" toml:"max-retries"`
+	RetryInterval      time.Duration `yaml:"retry-interval" json:"retry-interval" toml:"retry-interval"`
+	DialTimeout        time.Duration `yaml:"dial-timeout" json:"dial-timeout" toml:"dial-timeout"`
+	TombstoneThreshold time.Duration `yaml:"tombstone-threshold" json:"tombstone-threshold" toml:"tombstone-threshold"`
 }
 
 func NewNamespace(data []byte) (*Namespace, error) {

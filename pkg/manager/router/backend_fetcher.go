@@ -90,10 +90,10 @@ type PDFetcher struct {
 	backendInfo map[string]*pdBackendInfo
 	client      *clientv3.Client
 	logger      *zap.Logger
-	config      *HealthCheckConfig
+	config      *config.HealthCheck
 }
 
-func NewPDFetcher(client *clientv3.Client, logger *zap.Logger, config *HealthCheckConfig) *PDFetcher {
+func NewPDFetcher(client *clientv3.Client, logger *zap.Logger, config *config.HealthCheck) *PDFetcher {
 	return &PDFetcher{
 		backendInfo: make(map[string]*pdBackendInfo),
 		client:      client,
@@ -121,7 +121,7 @@ func (pf *PDFetcher) fetchBackendList(ctx context.Context) {
 			break
 		}
 		pf.logger.Error("fetch backend list failed, will retry later", zap.Error(err))
-		time.Sleep(pf.config.healthCheckRetryInterval)
+		time.Sleep(pf.config.RetryInterval)
 	}
 
 	if ctx.Err() != nil {
@@ -189,7 +189,7 @@ func (pf *PDFetcher) filterTombstoneBackends() map[string]*BackendInfo {
 		// After running for a long time, there might be many tombstones because failed TiDB instances
 		// don't delete themselves from the Etcd. Checking their health is a waste of time, leading to
 		// longer and longer checking interval. So tombstones won't be added to aliveBackends.
-		if info.lastUpdate.Add(pf.config.tombstoneThreshold).Before(now) {
+		if info.lastUpdate.Add(pf.config.TombstoneThreshold).Before(now) {
 			continue
 		}
 		aliveBackends[addr] = &BackendInfo{

@@ -47,12 +47,12 @@ func TestTombstoneBackends(t *testing.T) {
 		"dead_addr": {
 			TopologyInfo: &infosync.TopologyInfo{},
 			ttl:          oldTTL,
-			lastUpdate:   now.Add(-pf.config.tombstoneThreshold * 2),
+			lastUpdate:   now.Add(-pf.config.TombstoneThreshold * 2),
 		},
 		"restart_addr": {
 			TopologyInfo: &infosync.TopologyInfo{},
 			ttl:          oldTTL,
-			lastUpdate:   now.Add(-pf.config.tombstoneThreshold * 2),
+			lastUpdate:   now.Add(-pf.config.TombstoneThreshold * 2),
 		},
 		"removed_addr": {
 			TopologyInfo: &infosync.TopologyInfo{},
