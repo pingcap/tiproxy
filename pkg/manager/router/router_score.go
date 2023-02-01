@@ -17,11 +17,11 @@ package router
 import (
 	"container/list"
 	"context"
-	"github.com/pingcap/TiProxy/lib/config"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"go.uber.org/zap"
