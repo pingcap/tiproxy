@@ -157,7 +157,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	auth.attrs = clientResp.Attrs
 
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
-	backendIO, err := getBackendIO(cctx, auth, clientResp, 5*time.Second)
+	backendIO, err := getBackendIO(cctx, auth, clientResp, 15*time.Second)
 	if err != nil {
 		return WrapUserError(err, connectErrMsg)
 	}
