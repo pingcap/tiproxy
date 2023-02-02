@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
@@ -694,7 +695,7 @@ func TestRefresh(t *testing.T) {
 		logger:   lg,
 		backends: list.New(),
 	}
-	cfg := NewDefaultHealthCheckConfig()
+	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
 	observer, err := StartBackendObserver(lg, rt, nil, cfg, fetcher)
 	require.NoError(t, err)
@@ -714,11 +715,11 @@ func TestRefresh(t *testing.T) {
 	m.Unlock()
 	defer server.close()
 	// The backends are refreshed very soon.
-	finally(t, func() bool {
+	require.Eventually(t, func() bool {
 		addr, err = selector.Next()
 		require.NoError(t, err)
 		return len(addr) > 0
-	}, 100*time.Millisecond, 3*time.Second)
+	}, 3*time.Second, 100*time.Millisecond)
 }
 
 func TestObserveError(t *testing.T) {
@@ -754,43 +755,60 @@ func TestObserveError(t *testing.T) {
 	m.Unlock()
 	defer server.close()
 	// The backends are refreshed very soon.
-	finally(t, func() bool {
+	require.Eventually(t, func() bool {
 		selector.Reset()
 		addr, err = selector.Next()
 		require.NoError(t, err)
 		return len(addr) > 0
-	}, 100*time.Millisecond, 3*time.Second)
+	}, 3*time.Second, 100*time.Millisecond)
 	// Mock an observe error.
 	m.Lock()
 	observeError = errors.New("mock observe error")
 	m.Unlock()
-	finally(t, func() bool {
+	require.Eventually(t, func() bool {
 		selector.Reset()
 		addr, err = selector.Next()
 		return len(addr) == 0 && err != nil
-	}, 100*time.Millisecond, 3*time.Second)
+	}, 3*time.Second, 100*time.Millisecond)
 	// Clear the observe error.
 	m.Lock()
 	observeError = nil
 	m.Unlock()
-	finally(t, func() bool {
+	require.Eventually(t, func() bool {
 		selector.Reset()
 		addr, err = selector.Next()
 		return len(addr) > 0 && err == nil
-	}, 100*time.Millisecond, 3*time.Second)
+	}, 3*time.Second, 100*time.Millisecond)
 }
 
-func finally(t *testing.T, checker func() bool, checkInterval, timeout time.Duration) {
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	for {
-		select {
-		case <-timer.C:
-			t.Fatal("timeout")
-		case <-time.After(checkInterval):
-			if checker() {
-				return
-			}
-		}
-	}
+func TestDisableHealthCheck(t *testing.T) {
+	backends := []string{"127.0.0.1:4000"}
+	var m sync.Mutex
+	fetcher := NewExternalFetcher(func() ([]string, error) {
+		m.Lock()
+		defer m.Unlock()
+		return backends, nil
+	})
+	// Create a router with a very short health check interval.
+	lg := logger.CreateLoggerForTest(t)
+	rt, err := NewScoreBasedRouter(lg, nil, fetcher, &config.HealthCheck{Enable: false})
+	require.NoError(t, err)
+	defer rt.Close()
+	// No backends and no error.
+	selector := rt.GetBackendSelector()
+	// The backends are refreshed very soon.
+	require.Eventually(t, func() bool {
+		addr, err := selector.Next()
+		require.NoError(t, err)
+		return addr == "127.0.0.1:4000"
+	}, 3*time.Second, 100*time.Millisecond)
+	// Replace the backend.
+	m.Lock()
+	backends[0] = "127.0.0.1:5000"
+	m.Unlock()
+	require.Eventually(t, func() bool {
+		addr, err := selector.Next()
+		require.NoError(t, err)
+		return addr == "127.0.0.1:5000"
+	}, 3*time.Second, 100*time.Millisecond)
 }

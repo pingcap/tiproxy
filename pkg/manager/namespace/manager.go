@@ -44,11 +44,11 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 
 	var fetcher router.BackendFetcher
 	if mgr.client != nil {
-		fetcher = router.NewPDFetcher(mgr.client, logger.Named("be_fetcher"), router.NewDefaultHealthCheckConfig())
+		fetcher = router.NewPDFetcher(mgr.client, logger.Named("be_fetcher"), config.NewDefaultHealthCheckConfig())
 	} else {
 		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
 	}
-	rt, err := router.NewScoreBasedRouter(logger.Named("router"), mgr.httpCli, fetcher, router.NewDefaultHealthCheckConfig())
+	rt, err := router.NewScoreBasedRouter(logger.Named("router"), mgr.httpCli, fetcher, config.NewDefaultHealthCheckConfig())
 	if err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
