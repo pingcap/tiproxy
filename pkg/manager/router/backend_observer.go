@@ -67,27 +67,10 @@ var statusScores = map[BackendStatus]int{
 }
 
 const (
-	healthCheckInterval      = 3 * time.Second
-	healthCheckMaxRetries    = 3
-	healthCheckRetryInterval = 1 * time.Second
-	healthCheckTimeout       = 2 * time.Second
-	tombstoneThreshold       = 5 * time.Minute
-	ttlPathSuffix            = "/ttl"
-	infoPathSuffix           = "/info"
-	statusPathSuffix         = "/status"
+	ttlPathSuffix    = "/ttl"
+	infoPathSuffix   = "/info"
+	statusPathSuffix = "/status"
 )
-
-// NewDefaultHealthCheckConfig creates a default HealthCheck.
-func NewDefaultHealthCheckConfig() *config.HealthCheck {
-	return &config.HealthCheck{
-		Enable:             true,
-		Interval:           healthCheckInterval,
-		MaxRetries:         healthCheckMaxRetries,
-		RetryInterval:      healthCheckRetryInterval,
-		DialTimeout:        healthCheckTimeout,
-		TombstoneThreshold: tombstoneThreshold,
-	}
-}
 
 // BackendEventReceiver receives the event of backend status change.
 type BackendEventReceiver interface {

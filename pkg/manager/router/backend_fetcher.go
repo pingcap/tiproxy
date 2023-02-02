@@ -94,6 +94,7 @@ type PDFetcher struct {
 }
 
 func NewPDFetcher(client *clientv3.Client, logger *zap.Logger, config *config.HealthCheck) *PDFetcher {
+	config.Check()
 	return &PDFetcher{
 		backendInfo: make(map[string]*pdBackendInfo),
 		client:      client,

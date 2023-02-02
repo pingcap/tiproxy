@@ -48,8 +48,7 @@ func NewScoreBasedRouter(logger *zap.Logger, httpCli *http.Client, fetcher Backe
 		logger:   logger,
 		backends: list.New(),
 	}
-	router.Lock()
-	defer router.Unlock()
+	cfg.Check()
 	observer, err := StartBackendObserver(logger.Named("observer"), router, httpCli, cfg, fetcher)
 	if err != nil {
 		return nil, err
@@ -393,8 +392,6 @@ func (router *ScoreBasedRouter) ConnCount() int {
 
 // Close implements Router.Close interface.
 func (router *ScoreBasedRouter) Close() {
-	router.Lock()
-	defer router.Unlock()
 	if router.cancelFunc != nil {
 		router.cancelFunc()
 		router.cancelFunc = nil

@@ -57,10 +57,10 @@ func newHealthCheckConfigForTest() *config.HealthCheck {
 	return &config.HealthCheck{
 		Enable:             true,
 		Interval:           500 * time.Millisecond,
-		MaxRetries:         healthCheckMaxRetries,
+		MaxRetries:         3,
 		RetryInterval:      100 * time.Millisecond,
 		DialTimeout:        100 * time.Millisecond,
-		TombstoneThreshold: tombstoneThreshold,
+		TombstoneThreshold: 5 * time.Minute,
 	}
 }
 
