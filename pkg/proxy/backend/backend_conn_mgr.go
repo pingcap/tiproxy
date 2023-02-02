@@ -43,7 +43,7 @@ var (
 )
 
 const (
-	DialTimeout          = 5 * time.Second
+	DialTimeout          = 1 * time.Second
 	CheckBackendInterval = time.Minute
 )
 
