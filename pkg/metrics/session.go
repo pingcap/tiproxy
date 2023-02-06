@@ -39,4 +39,13 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled queries.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 29), // 0.5ms ~ 1.5days
 		}, []string{LblBackend, LblCmdType})
+
+	GetBackendHistogram = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelSession,
+			Name:      "get_backend_duration_millis",
+			Help:      "Bucketed histogram of time (ms) for getting an available backend.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 26), // 1us ~ 30s
+		})
 )
