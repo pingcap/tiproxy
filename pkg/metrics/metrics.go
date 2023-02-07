@@ -120,6 +120,7 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(BackendConnGauge)
 	prometheus.MustRegister(QueryTotalCounter)
 	prometheus.MustRegister(QueryDurationHistogram)
+	prometheus.MustRegister(GetBackendHistogram)
 	prometheus.MustRegister(MigrateCounter)
 	prometheus.MustRegister(MigrateDurationHistogram)
 }

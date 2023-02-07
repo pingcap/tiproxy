@@ -282,6 +282,34 @@ local bMigDurP = graphPanel.new(
   )
 );
 
+// Backend Summary
+local backendRow = row.new(collapse=true, title='Backend');
+local bGetDurP = graphPanel.new(
+  title='Get Backend Duration',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Duration of getting an available backend.',
+  format='s',
+)
+.addTarget(
+  prometheus.target(
+    'histogram_quantile(0.99, sum(rate(tiproxy_session_get_backend_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    legendFormat='99',
+  )
+)
+.addTarget(
+  prometheus.target(
+    'histogram_quantile(0.95, sum(rate(tiproxy_session_get_backend_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    legendFormat='95',
+  )
+)
+.addTarget(
+  prometheus.target(
+    'sum(rate(tiproxy_session_get_backend_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_session_get_backend_duration_millis_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
+    legendFormat='avg',
+  )
+);
+
 // Merge together.
 local panelW = 12;
 local panelH = 6;
@@ -316,6 +344,12 @@ newDash
   .addPanel(bConnP, gridPos=leftPanelPos)
   .addPanel(bMigCounterP, gridPos=rightPanelPos)
   .addPanel(bMigDurP, gridPos=leftPanelPos)
+  ,
+  gridPos=rowPos
+)
+.addPanel(
+  backendRow
+  .addPanel(bGetDurP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )

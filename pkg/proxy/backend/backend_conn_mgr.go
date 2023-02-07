@@ -191,6 +191,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	// - One TiDB may be just shut down and another is just started but not ready yet
 	bctx, cancel := context.WithTimeout(context.Background(), timeout)
 	selector := r.GetBackendSelector()
+	startTime := time.Now()
 	var addr string
 	var origErr error
 	io, err := backoff.RetryNotifyWithData(
@@ -237,6 +238,15 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		},
 	)
 	cancel()
+
+	duration := time.Since(startTime)
+	addGetBackendMetrics(duration)
+	if err != nil {
+		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.NamedError("last_err", origErr))
+	} else if duration >= 3*time.Second {
+		mgr.logger.Warn("get backend slow", zap.Duration("duration", duration), zap.NamedError("last_err", origErr),
+			zap.Stringer("backend_addr", mgr.backendIO.RemoteAddr()))
+	}
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {
 		if origErr != nil {
 			err = origErr
