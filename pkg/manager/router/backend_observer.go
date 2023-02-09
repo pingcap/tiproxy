@@ -211,6 +211,7 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 			if bo.httpTLS {
 				schema = "https"
 			}
+			bo.httpCli.Timeout = bo.healthCheckConfig.DialTimeout
 			url := fmt.Sprintf("%s://%s:%d%s", schema, info.IP, info.StatusPort, statusPathSuffix)
 			var resp *http.Response
 			err := connectWithRetry(func() error {
