@@ -84,4 +84,8 @@ func TestProxyToBytes(t *testing.T) {
 	hdr.DstAddress = &net.UDPAddr{}
 	_, err = hdr.ToBytes()
 	require.ErrorIs(t, err, ErrAddressFamilyMismatch)
+
+	hdr.DstAddress = &originAddr{Addr: &net.TCPAddr{IP: make(net.IP, net.IPv6len), Port: 0}}
+	_, err = hdr.ToBytes()
+	require.NoError(t, err)
 }
