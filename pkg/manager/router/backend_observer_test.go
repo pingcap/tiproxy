@@ -80,6 +80,10 @@ func TestObserveBackends(t *testing.T) {
 		checkStatus(t, backendChan, backend1, StatusCannotConnect)
 		backend1.setHTTPResp(true)
 		checkStatus(t, backendChan, backend1, StatusHealthy)
+		backend1.setHTTPWait(bo.healthCheckConfig.DialTimeout + time.Second)
+		checkStatus(t, backendChan, backend1, StatusCannotConnect)
+		backend1.setHTTPWait(time.Duration(0))
+		checkStatus(t, backendChan, backend1, StatusHealthy)
 		backend1.stopHTTPServer()
 		checkStatus(t, backendChan, backend1, StatusCannotConnect)
 		backend1.startHTTPServer()
@@ -214,7 +218,12 @@ func runETCDTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *Back
 }
 
 func checkStatus(t *testing.T, backendChan chan map[string]BackendStatus, backend *backendServer, expectedStatus BackendStatus) {
-	backends := <-backendChan
+	var backends map[string]BackendStatus
+	select {
+	case backends = <-backendChan:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout")
+	}
 	require.Equal(t, 1, len(backends))
 	status, ok := backends[backend.sqlAddr]
 	require.True(t, ok)
@@ -228,8 +237,8 @@ type backendServer struct {
 	sqlAddr      string
 	statusServer *http.Server
 	statusAddr   string
-	httpHandler  *mockHttpHandler
-	wg           waitgroup.WaitGroup
+	*mockHttpHandler
+	wg waitgroup.WaitGroup
 }
 
 func newBackendServer(t *testing.T) *backendServer {
@@ -245,34 +254,41 @@ func newBackendServer(t *testing.T) *backendServer {
 type mockHttpHandler struct {
 	t      *testing.T
 	httpOK atomic.Bool
+	wait   atomic.Int64
 }
 
 func (handler *mockHttpHandler) setHTTPResp(succeed bool) {
 	handler.httpOK.Store(succeed)
 }
 
+func (handler *mockHttpHandler) setHTTPWait(wait time.Duration) {
+	handler.wait.Store(int64(wait))
+}
+
 func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !handler.httpOK.Load() {
+	wait := handler.wait.Load()
+	if wait > 0 {
+		time.Sleep(time.Duration(wait))
+	}
+	if handler.httpOK.Load() {
+		w.WriteHeader(http.StatusOK)
+	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 }
 
 func (srv *backendServer) startHTTPServer() {
-	if srv.httpHandler == nil {
-		srv.httpHandler = &mockHttpHandler{
+	if srv.mockHttpHandler == nil {
+		srv.mockHttpHandler = &mockHttpHandler{
 			t: srv.t,
 		}
 	}
 	var statusListener net.Listener
 	statusListener, srv.statusAddr = startListener(srv.t, srv.statusAddr)
-	srv.statusServer = &http.Server{Addr: srv.statusAddr, Handler: srv.httpHandler}
+	srv.statusServer = &http.Server{Addr: srv.statusAddr, Handler: srv.mockHttpHandler}
 	srv.wg.Run(func() {
 		_ = srv.statusServer.Serve(statusListener)
 	})
-}
-
-func (srv *backendServer) setHTTPResp(succeed bool) {
-	srv.httpHandler.setHTTPResp(succeed)
 }
 
 func (srv *backendServer) stopHTTPServer() {
