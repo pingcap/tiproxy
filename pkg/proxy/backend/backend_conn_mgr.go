@@ -228,7 +228,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			// NOTE: should use DNS name as much as possible
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
-			mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr))
+			mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr, cn.RemoteAddr()))
 			return mgr.backendIO, nil
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
@@ -429,7 +429,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err)
 		return
 	}
-	newBackendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(rs.to))
+	newBackendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(rs.to, cn.RemoteAddr()))
 
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)
