@@ -113,7 +113,7 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
-				require.Equal(t, tls.VerifyClientCertIfGiven, c.ClientAuth)
+				require.Equal(t, tls.RequestClientCert, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
 			},
