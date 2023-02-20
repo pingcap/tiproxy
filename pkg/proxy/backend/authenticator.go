@@ -143,6 +143,12 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		logger.Debug("frontend send capabilities unsupported by proxy", zap.Stringer("common", commonCaps), zap.Stringer("frontend", frontendCapability^commonCaps), zap.Stringer("proxy", proxyCapability^commonCaps))
 	}
 	auth.capability = commonCaps.Uint32()
+	if auth.capability&mysql.ClientPluginAuth == 0 {
+		logger.Warn("frontend may not support plugin auth", zap.Stringer("capability", commonCaps))
+		// Some clients (e.g. node/mysql) support ClientAuthPlugin but don't have the capability set correctly.
+		// Always set it to ensure capability.
+		auth.capability |= mysql.ClientPluginAuth
+	}
 
 	if isSSL {
 		cctx.SetValue(ConnContextKeyTLSState, clientIO.TLSConnectionState())
