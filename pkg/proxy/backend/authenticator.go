@@ -144,7 +144,10 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 	auth.capability = commonCaps.Uint32()
 	if auth.capability&mysql.ClientPluginAuth == 0 {
-		logger.Warn("frontend does not support plugin auth", zap.Stringer("capability", commonCaps))
+		logger.Warn("frontend may not support plugin auth", zap.Stringer("capability", commonCaps))
+		// Some clients (e.g. node/mysql) support ClientAuthPlugin but don't have the capability set correctly.
+		// Always set it to ensure capability.
+		auth.capability |= mysql.ClientPluginAuth
 	}
 
 	if isSSL {
@@ -203,9 +206,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	if err := auth.writeAuthHandshake(
 		backendIO, backendTLSConfig, backendCapability,
 		// send an unknown auth plugin so that the backend will request the auth data again.
-		unknownAuthPlugin, nil,
-		// Some clients (e.g. node/mysql) support ClientPluginAuth but don't have the capability set correctly. Always set it to ensure capability.
-		mysql.ClientPluginAuth,
+		unknownAuthPlugin, nil, 0,
 	); err != nil {
 		return WrapUserError(err, handshakeErrMsg)
 	}
