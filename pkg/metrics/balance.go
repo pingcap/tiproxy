@@ -58,7 +58,7 @@ var (
 			Namespace: ModuleProxy,
 			Subsystem: LabelBalance,
 			Name:      "migrate_duration_millis",
-			Help:      "Bucketed histogram of migrating time (s) of sessions.",
+			Help:      "Bucketed histogram of migrating time (ms) of sessions.",
 			Buckets:   prometheus.ExponentialBuckets(0.1, 2, 26), // 0.1ms ~ 1h
 		}, []string{LblFrom, LblTo, LblMigrateResult})
 )

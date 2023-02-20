@@ -211,11 +211,13 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 			if bo.httpTLS {
 				schema = "https"
 			}
+			httpCli := *bo.httpCli
+			httpCli.Timeout = bo.healthCheckConfig.DialTimeout
 			url := fmt.Sprintf("%s://%s:%d%s", schema, info.IP, info.StatusPort, statusPathSuffix)
 			var resp *http.Response
 			err := connectWithRetry(func() error {
 				var err error
-				if resp, err = bo.httpCli.Get(url); err == nil {
+				if resp, err = httpCli.Get(url); err == nil {
 					if err := resp.Body.Close(); err != nil {
 						bo.logger.Error("close http response in health check failed", zap.Error(err))
 					}

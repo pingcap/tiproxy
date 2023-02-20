@@ -61,3 +61,7 @@ func readCmdCounter(cmd byte, addr string) (int, error) {
 	}
 	return metrics.ReadCounter(metrics.QueryTotalCounter.WithLabelValues(addr, label))
 }
+
+func addGetBackendMetrics(duration time.Duration) {
+	metrics.GetBackendHistogram.Observe(float64(duration.Milliseconds()))
+}

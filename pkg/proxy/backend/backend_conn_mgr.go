@@ -191,6 +191,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	// - One TiDB may be just shut down and another is just started but not ready yet
 	bctx, cancel := context.WithTimeout(context.Background(), timeout)
 	selector := r.GetBackendSelector()
+	startTime := time.Now()
 	var addr string
 	var origErr error
 	io, err := backoff.RetryNotifyWithData(
@@ -227,7 +228,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			// NOTE: should use DNS name as much as possible
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
-			mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr))
+			mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr, cn.RemoteAddr()))
 			return mgr.backendIO, nil
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
@@ -237,6 +238,15 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		},
 	)
 	cancel()
+
+	duration := time.Since(startTime)
+	addGetBackendMetrics(duration)
+	if err != nil {
+		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.NamedError("last_err", origErr))
+	} else if duration >= 3*time.Second {
+		mgr.logger.Warn("get backend slow", zap.Duration("duration", duration), zap.NamedError("last_err", origErr),
+			zap.Stringer("backend_addr", mgr.backendIO.RemoteAddr()))
+	}
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {
 		if origErr != nil {
 			err = origErr
@@ -419,7 +429,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err)
 		return
 	}
-	newBackendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(rs.to))
+	newBackendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(rs.to, cn.RemoteAddr()))
 
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)

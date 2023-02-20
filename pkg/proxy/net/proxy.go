@@ -93,14 +93,18 @@ func (p *Proxy) ToBytes() ([]byte, error) {
 
 	addressFamily := ProxyAFUnspec
 	network := ProxyNetworkUnspec
-	switch sadd := p.SrcAddress.(type) {
+
+	srcAddr := unwrapOriginAddr(p.SrcAddress)
+	dstAddr := unwrapOriginAddr(p.DstAddress)
+
+	switch sadd := srcAddr.(type) {
 	case *net.TCPAddr:
 		addressFamily = ProxyAFINet
 		if len(sadd.IP) == net.IPv6len {
 			addressFamily = ProxyAFINet6
 		}
 		network = ProxyNetworkStream
-		dadd, ok := p.DstAddress.(*net.TCPAddr)
+		dadd, ok := dstAddr.(*net.TCPAddr)
 		if !ok {
 			return nil, ErrAddressFamilyMismatch
 		}
@@ -114,7 +118,7 @@ func (p *Proxy) ToBytes() ([]byte, error) {
 			addressFamily = ProxyAFINet6
 		}
 		network = ProxyNetworkDgram
-		dadd, ok := p.DstAddress.(*net.UDPAddr)
+		dadd, ok := dstAddr.(*net.UDPAddr)
 		if !ok {
 			return nil, ErrAddressFamilyMismatch
 		}
@@ -130,7 +134,7 @@ func (p *Proxy) ToBytes() ([]byte, error) {
 		case "unixdgram":
 			network = ProxyNetworkDgram
 		}
-		dadd, ok := p.DstAddress.(*net.UnixAddr)
+		dadd, ok := dstAddr.(*net.UnixAddr)
 		if !ok {
 			return nil, ErrAddressFamilyMismatch
 		}
