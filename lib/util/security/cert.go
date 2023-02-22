@@ -115,6 +115,10 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 	}
 	if ci.server {
 		opts.KeyUsages = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	} else {
+		// this is the default behavior of Verify()
+		// it is not necessary but explicit
+		opts.KeyUsages = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
 	}
 	// TODO: not implemented, maybe later
 	// opts.DNSName = ci.serverName
@@ -226,7 +230,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	ci.ca.Store(cas)
 
 	if ci.cfg.SkipCA {
-		tcfg.ClientAuth = tls.VerifyClientCertIfGiven
+		tcfg.ClientAuth = tls.RequestClientCert
 	} else {
 		tcfg.ClientAuth = tls.RequireAnyClientCert
 	}
