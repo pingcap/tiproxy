@@ -73,10 +73,11 @@ const (
 // RedirectableConn indicates a redirect-able connection.
 type RedirectableConn interface {
 	SetEventReceiver(receiver ConnEventReceiver)
+	SetValue(key, val any)
+	Value(key any) any
 	Redirect(addr string)
 	GetRedirectingAddr() string
 	NotifyBackendStatus(status BackendStatus)
-	ConnectionID() uint64
 }
 
 // backendWrapper contains the connections on the backend.
@@ -86,7 +87,6 @@ type backendWrapper struct {
 	// A list of *connWrapper and is ordered by the connecting or redirecting time.
 	// connList and connMap include moving out connections but not moving in connections.
 	connList *glist.List[*connWrapper]
-	connMap  map[uint64]*glist.Element[*connWrapper]
 }
 
 // score calculates the score of the backend. Larger score indicates higher load.

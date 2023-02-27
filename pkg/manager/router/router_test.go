@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
@@ -35,6 +34,7 @@ import (
 type mockRedirectableConn struct {
 	sync.Mutex
 	t        *testing.T
+	kv       map[any]any
 	connID   uint64
 	from, to string
 	status   BackendStatus
@@ -45,6 +45,19 @@ func (conn *mockRedirectableConn) SetEventReceiver(receiver ConnEventReceiver) {
 	conn.Lock()
 	conn.receiver = receiver
 	conn.Unlock()
+}
+
+func (conn *mockRedirectableConn) SetValue(k, v any) {
+	conn.Lock()
+	conn.kv[k] = v
+	conn.Unlock()
+}
+
+func (conn *mockRedirectableConn) Value(k any) any {
+	conn.Lock()
+	v := conn.kv[k]
+	conn.Unlock()
+	return v
 }
 
 func (conn *mockRedirectableConn) Redirect(addr string) {
@@ -100,10 +113,7 @@ type routerTester struct {
 }
 
 func newRouterTester(t *testing.T) *routerTester {
-	router := &ScoreBasedRouter{
-		logger:   logger.CreateLoggerForTest(t),
-		backends: glist.New[*backendWrapper](),
-	}
+	router := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
 	t.Cleanup(router.Close)
 	return &routerTester{
 		t:      t,
@@ -306,7 +316,7 @@ func (tester *routerTester) checkBackendConnMetrics() {
 
 func (tester *routerTester) clear() {
 	tester.conns = make(map[uint64]*mockRedirectableConn)
-	tester.router.backends = glist.New[*backendWrapper]()
+	tester.router.backends.Init()
 }
 
 // Test that the backends are always ordered by scores.
@@ -506,7 +516,7 @@ func TestRebalanceCornerCase(t *testing.T) {
 			tester.checkRedirectingNum(10)
 			tester.checkBackendNum(1)
 			backend := tester.getBackendByIndex(0)
-			require.Len(t, backend.connMap, 10)
+			require.Equal(t, 10, backend.connList.Len())
 		},
 		func() {
 			// Connections won't be redirected again before redirection finishes.
@@ -521,7 +531,7 @@ func TestRebalanceCornerCase(t *testing.T) {
 			tester.addBackends(1)
 			tester.rebalance(10)
 			tester.checkRedirectingNum(10)
-			require.Len(t, backend.connMap, 10)
+			require.Equal(t, 10, backend.connList.Len())
 		},
 		func() {
 			// After redirection fails, the connections are moved back to the unhealthy backends.
@@ -587,7 +597,8 @@ func TestConcurrency(t *testing.T) {
 	client := createEtcdClient(t, etcd)
 	healthCheckConfig := newHealthCheckConfigForTest()
 	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), healthCheckConfig)
-	router, err := NewScoreBasedRouter(logger.CreateLoggerForTest(t), nil, fetcher, healthCheckConfig)
+	router := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
+	err := router.Init(nil, fetcher, healthCheckConfig)
 	require.NoError(t, err)
 
 	var wg waitgroup.WaitGroup
@@ -698,10 +709,7 @@ func TestRefresh(t *testing.T) {
 	})
 	// Create a router with a very long health check interval.
 	lg := logger.CreateLoggerForTest(t)
-	rt := &ScoreBasedRouter{
-		logger:   lg,
-		backends: glist.New[*backendWrapper](),
-	}
+	rt := NewScoreBasedRouter(lg)
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
 	observer, err := StartBackendObserver(lg, rt, nil, cfg, fetcher)
@@ -740,10 +748,7 @@ func TestObserveError(t *testing.T) {
 	})
 	// Create a router with a very short health check interval.
 	lg := logger.CreateLoggerForTest(t)
-	rt := &ScoreBasedRouter{
-		logger:   lg,
-		backends: glist.New[*backendWrapper](),
-	}
+	rt := NewScoreBasedRouter(lg)
 	observer, err := StartBackendObserver(lg, rt, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
 	rt.Lock()
@@ -798,7 +803,8 @@ func TestDisableHealthCheck(t *testing.T) {
 	})
 	// Create a router with a very short health check interval.
 	lg := logger.CreateLoggerForTest(t)
-	rt, err := NewScoreBasedRouter(lg, nil, fetcher, &config.HealthCheck{Enable: false})
+	rt := NewScoreBasedRouter(lg)
+	err := rt.Init(nil, fetcher, &config.HealthCheck{Enable: false})
 	require.NoError(t, err)
 	defer rt.Close()
 	// No backends and no error.
