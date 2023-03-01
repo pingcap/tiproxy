@@ -131,8 +131,6 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 			common := frontendCapability & frontendCapabilityResponse
 			logger.Warn("frontend capabilities differs between SSL request and handshake response", zap.Stringer("common", common), zap.Stringer("ssl", frontendCapability^common), zap.Stringer("resp", frontendCapabilityResponse^common))
 		}
-	} else {
-		binary.LittleEndian.PutUint32(pkt, (frontendCapability | pnet.ClientSSL).Uint32())
 	}
 	if commonCaps := frontendCapability & requiredFrontendCaps; commonCaps != requiredFrontendCaps {
 		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredFrontendCaps))
