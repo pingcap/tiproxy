@@ -215,6 +215,14 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			if err != nil {
 				return nil, errors.Wrapf(err, "dial backend %s error", addr)
 			}
+			if tcpcn, ok := cn.(*net.TCPConn); ok {
+				if err := tcpcn.SetKeepAlive(true); err != nil {
+					mgr.logger.Warn("fail to set keepalive for backend", zap.Error(err))
+				}
+				if err := tcpcn.SetKeepAlivePeriod(15 * time.Second); err != nil {
+					mgr.logger.Warn("fail to set keepalive period for backend", zap.Error(err))
+				}
+			}
 
 			if err = selector.Succeed(mgr); err != nil {
 				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
@@ -428,6 +436,14 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	if rs.err != nil {
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err)
 		return
+	}
+	if tcpcn, ok := cn.(*net.TCPConn); ok {
+		if err := tcpcn.SetKeepAlive(true); err != nil {
+			mgr.logger.Warn("fail to set keepalive for backend", zap.Error(err))
+		}
+		if err := tcpcn.SetKeepAlivePeriod(15 * time.Second); err != nil {
+			mgr.logger.Warn("fail to set keepalive period for backend", zap.Error(err))
+		}
 	}
 	newBackendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(rs.to, cn.RemoteAddr()))
 
