@@ -17,6 +17,7 @@ package backend
 import (
 	"crypto/tls"
 	"encoding/binary"
+	"time"
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
@@ -28,6 +29,7 @@ type backendConfig struct {
 	authPlugin    string
 	sessionStates string
 	salt          []byte
+	blockTime     time.Duration
 	columns       int
 	loops         int
 	params        int
@@ -72,6 +74,9 @@ func newMockBackend(cfg *backendConfig) *mockBackend {
 func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	if mb.abnormalExit {
 		return packetIO.Close()
+	}
+	if mb.blockTime > 0 {
+		time.Sleep(mb.blockTime)
 	}
 	var err error
 	// write initial handshake
@@ -149,6 +154,9 @@ func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
 }
 
 func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
+	if mb.blockTime > 0 {
+		time.Sleep(mb.blockTime)
+	}
 	packetIO.ResetSequence()
 	pkt, err := packetIO.ReadPacket()
 	if err != nil {

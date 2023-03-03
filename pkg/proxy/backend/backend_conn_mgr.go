@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -43,8 +44,10 @@ var (
 )
 
 const (
-	DialTimeout          = 1 * time.Second
-	CheckBackendInterval = time.Minute
+	DialTimeout              = 1 * time.Second
+	CheckBackendInterval     = time.Minute
+	UnhealthyRedirectTimeout = 3 * time.Second
+	UnhealthyRespondTimeout  = 10 * time.Second
 )
 
 const (
@@ -81,14 +84,22 @@ const (
 )
 
 type BCConfig struct {
-	ProxyProtocol        bool
-	RequireBackendTLS    bool
-	CheckBackendInterval time.Duration
+	ProxyProtocol            bool
+	RequireBackendTLS        bool
+	CheckBackendInterval     time.Duration
+	UnhealthyRedirectTimeout time.Duration
+	UnhealthyRespondTimeout  time.Duration
 }
 
 func (cfg *BCConfig) check() {
 	if cfg.CheckBackendInterval == time.Duration(0) {
 		cfg.CheckBackendInterval = CheckBackendInterval
+	}
+	if cfg.UnhealthyRedirectTimeout == time.Duration(0) {
+		cfg.UnhealthyRedirectTimeout = UnhealthyRedirectTimeout
+	}
+	if cfg.UnhealthyRespondTimeout == time.Duration(0) {
+		cfg.UnhealthyRespondTimeout = UnhealthyRespondTimeout
 	}
 }
 
@@ -118,6 +129,7 @@ type BackendConnManager struct {
 	// redirectResCh is used to notify the event receiver asynchronously.
 	redirectResCh      chan *redirectResult
 	closeStatus        atomic.Int32
+	backendStatus      atomic.Int32
 	checkBackendTicker *time.Ticker
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc       context.CancelFunc
@@ -147,6 +159,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),
 	}
+	mgr.SetBackendStatus(router.StatusHealthy)
 	return mgr
 }
 
@@ -271,6 +284,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) e
 		return nil
 	}
 	defer mgr.resetCheckBackendTicker()
+	mgr.setRespondTimeout(false)
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
 	holdRequest, err := mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO, waitingRedirect)
 	if !holdRequest {
@@ -310,6 +324,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) e
 		if waitingRedirect && holdRequest {
 			mgr.tryRedirect(ctx)
 			// Execute the held request no matter redirection succeeds or not.
+			mgr.setRespondTimeout(false)
 			_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO, false)
 			addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 			if err != nil && !IsMySQLError(err) {
@@ -415,8 +430,15 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		// - Avoid the risk of deadlock
 		mgr.redirectResCh <- rs
 	}()
+	mgr.setRespondTimeout(true)
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(); rs.err != nil {
+		// If it's timeout, we cannot continue forwarding, because the next package may be the result of show session_states.
+		if errors.Is(rs.err, os.ErrDeadlineExceeded) || pnet.IsDisconnectError(rs.err) {
+			if err := mgr.clientIO.GracefulClose(); err != nil {
+				mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+			}
+		}
 		return
 	}
 	if rs.err = mgr.updateAuthInfoFromSessionStates(hack.Slice(sessionStates)); rs.err != nil {
@@ -447,6 +469,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	mgr.backendIO = newBackendIO
+	// Assume the new backend is healthy for now. If it's not, we'll get notified.
+	mgr.SetBackendStatus(router.StatusHealthy)
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
 }
 
@@ -556,6 +580,26 @@ func (mgr *BackendConnManager) resetCheckBackendTicker() {
 	} else {
 		mgr.checkBackendTicker.Reset(mgr.config.CheckBackendInterval)
 	}
+}
+
+// SetBackendStatus sets the status of the backend.
+func (mgr *BackendConnManager) SetBackendStatus(status router.BackendStatus) {
+	mgr.backendStatus.Store(int32(status))
+}
+
+// The request to the unhealthy backend may block sometimes, instead of fail immediately.
+// So we set the timeout for the reads/writes when we know it's unhealthy. This also affects user queries.
+// setRespondTimeout sets timeout for subsequent reads/writes, it doesn't affect the current reads/writes.
+func (mgr *BackendConnManager) setRespondTimeout(redirect bool) {
+	status := router.BackendStatus(mgr.backendStatus.Load())
+	timeout := time.Duration(0)
+	if status != router.StatusHealthy {
+		timeout = mgr.config.UnhealthyRespondTimeout
+		if redirect {
+			timeout = mgr.config.UnhealthyRedirectTimeout
+		}
+	}
+	mgr.backendIO.SetTimeout(timeout)
 }
 
 func (mgr *BackendConnManager) ClientAddr() string {

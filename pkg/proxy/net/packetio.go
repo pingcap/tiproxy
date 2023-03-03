@@ -77,6 +77,7 @@ func (f *rdbufConn) Read(b []byte) (int, error) {
 type PacketIO struct {
 	inBytes     uint64
 	outBytes    uint64
+	timeout     time.Duration
 	conn        net.Conn
 	buf         *bufio.ReadWriter
 	proxyInited *atomic.Bool
@@ -130,6 +131,27 @@ func (p *PacketIO) RemoteAddr() net.Addr {
 	return p.conn.RemoteAddr()
 }
 
+// SetTimeout sets timeout for all subsequent reads/writes, not only for the next one.
+// Make sure it won't be called after GracefulClose().
+func (p *PacketIO) SetTimeout(timeout time.Duration) error {
+	p.timeout = timeout
+	if timeout == 0 {
+		return p.conn.SetDeadline(time.Time{})
+	}
+	return nil
+}
+
+// Otherwise, add an extra flag to avoid overwriting the deadline.
+func (p *PacketIO) setDeadline() error {
+	if p.conn == nil {
+		return nil
+	}
+	if p.timeout > 0 {
+		return p.conn.SetDeadline(time.Now().Add(p.timeout))
+	}
+	return nil
+}
+
 func (p *PacketIO) ResetSequence() {
 	p.sequence = 0
 }
@@ -142,6 +164,10 @@ func (p *PacketIO) GetSequence() uint8 {
 func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	var header [4]byte
 
+	// For simplicity, just set the deadline for all the reads in this function.
+	if err := p.setDeadline(); err != nil {
+		return nil, false, err
+	}
 	if _, err := io.ReadFull(p.buf, header[:]); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
@@ -263,6 +289,9 @@ func (p *PacketIO) TLSConnectionState() tls.ConnectionState {
 }
 
 func (p *PacketIO) Flush() error {
+	if err := p.setDeadline(); err != nil {
+		return err
+	}
 	if err := p.buf.Flush(); err != nil {
 		return p.wrapErr(errors.Wrap(ErrFlushConn, err))
 	}

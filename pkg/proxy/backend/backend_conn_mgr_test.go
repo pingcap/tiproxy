@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -863,6 +864,41 @@ func TestBackendInactive(t *testing.T) {
 			proxy: ts.checkConnClosed4Proxy,
 			backend: func(packetIO *pnet.PacketIO) error {
 				return packetIO.Close()
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+// If the old backend is blocked, redirect should fail immediately.
+func TestBackendBlocked(t *testing.T) {
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.redirectTimeout = 100 * time.Millisecond
+	})
+	runners := []runner{
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		{
+			// Mock that the backend is unhealthy and respond too slowly.
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				ts.mp.SetBackendStatus(router.StatusCannotConnect)
+				return ts.redirectFail4Proxy(clientIO, backendIO)
+			},
+			backend: func(clientIO *pnet.PacketIO) error {
+				ts.mb.blockTime = time.Second
+				ts.mb.respondType = responseTypeResultSet
+				return ts.mb.respond(clientIO)
+			},
+		},
+		{
+			// The client connection should have closed.
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				_, err := clientIO.ReadPacket()
+				require.True(ts.t, errors.Is(err, os.ErrDeadlineExceeded))
+				return err
 			},
 		},
 	}

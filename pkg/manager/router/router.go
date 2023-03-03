@@ -75,6 +75,7 @@ type RedirectableConn interface {
 	SetEventReceiver(receiver ConnEventReceiver)
 	Redirect(addr string)
 	GetRedirectingAddr() string
+	SetBackendStatus(status BackendStatus)
 	ConnectionID() uint64
 }
 

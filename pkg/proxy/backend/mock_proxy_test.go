@@ -30,6 +30,7 @@ type proxyConfig struct {
 	backendTLSConfig     *tls.Config
 	handler              *CustomHandshakeHandler
 	checkBackendInterval time.Duration
+	redirectTimeout      time.Duration
 	sessionToken         string
 	capability           pnet.Capability
 	waitRedirect         bool
@@ -41,6 +42,7 @@ func newProxyConfig() *proxyConfig {
 		capability:           defaultTestBackendCapability,
 		sessionToken:         mockToken,
 		checkBackendInterval: CheckBackendInterval,
+		redirectTimeout:      UnhealthyRedirectTimeout,
 	}
 }
 
@@ -61,7 +63,8 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 		proxyConfig: cfg,
 		logger:      logger.CreateLoggerForTest(t).Named("mockProxy"),
 		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), cfg.handler, 0, &BCConfig{
-			CheckBackendInterval: cfg.checkBackendInterval,
+			CheckBackendInterval:     cfg.checkBackendInterval,
+			UnhealthyRedirectTimeout: cfg.redirectTimeout,
 		}),
 	}
 	mp.cmdProcessor.capability = cfg.capability.Uint32()
