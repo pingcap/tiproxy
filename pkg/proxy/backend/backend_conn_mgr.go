@@ -639,7 +639,7 @@ func (mgr *BackendConnManager) Close() error {
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
 
-func (mgr *BackendConnManager) dialNewBackend(addr string) (net.Conn,error) {
+func (mgr *BackendConnManager) dialNewBackend(addr string) (net.Conn, error) {
 	cn, err := net.DialTimeout("tcp", addr, DialTimeout)
 	if err != nil {
 		return cn, err
