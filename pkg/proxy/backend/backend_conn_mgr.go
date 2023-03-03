@@ -211,7 +211,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			}
 
 			var cn net.Conn
-			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
+			cn, err = mgr.dialNewBackend(addr)
 			if err != nil {
 				return nil, errors.Wrapf(err, "dial backend %s error", addr)
 			}
@@ -424,7 +424,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	var cn net.Conn
-	cn, rs.err = net.DialTimeout("tcp", rs.to, DialTimeout)
+	cn, rs.err = mgr.dialNewBackend(rs.to)
 	if rs.err != nil {
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err)
 		return
@@ -637,4 +637,20 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.closeStatus.Store(statusClosed)
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
+}
+
+func (mgr *BackendConnManager) dialNewBackend(addr string) (net.Conn, error) {
+	cn, err := net.DialTimeout("tcp", addr, DialTimeout)
+	if err != nil {
+		return cn, err
+	}
+	if tcpcn, ok := cn.(*net.TCPConn); ok {
+		if err := tcpcn.SetKeepAlive(true); err != nil {
+			mgr.logger.Warn("fail to set keepalive for backend", zap.Error(err))
+		}
+		if err := tcpcn.SetKeepAlivePeriod(15 * time.Second); err != nil {
+			mgr.logger.Warn("fail to set keepalive period for backend", zap.Error(err))
+		}
+	}
+	return cn, err
 }
