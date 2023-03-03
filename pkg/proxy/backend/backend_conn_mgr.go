@@ -599,7 +599,9 @@ func (mgr *BackendConnManager) setRespondTimeout(redirect bool) {
 			timeout = mgr.config.UnhealthyRedirectTimeout
 		}
 	}
-	mgr.backendIO.SetTimeout(timeout)
+	if err := mgr.backendIO.SetTimeout(timeout); err != nil && !errors.Is(err, net.ErrClosed) {
+		mgr.logger.Warn("set response timeout error", zap.Stringer("backend", mgr.backendIO.RemoteAddr()), zap.Error(err))
+	}
 }
 
 func (mgr *BackendConnManager) ClientAddr() string {
