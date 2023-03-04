@@ -37,10 +37,9 @@ type proxyConfig struct {
 
 func newProxyConfig() *proxyConfig {
 	return &proxyConfig{
-		handler:              &CustomHandshakeHandler{},
-		capability:           defaultTestBackendCapability,
-		sessionToken:         mockToken,
-		checkBackendInterval: CheckBackendInterval,
+		handler:      &CustomHandshakeHandler{},
+		capability:   defaultTestBackendCapability,
+		sessionToken: mockToken,
 	}
 }
 
