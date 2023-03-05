@@ -868,3 +868,32 @@ func TestBackendInactive(t *testing.T) {
 	}
 	ts.runTests(runners)
 }
+
+func TestKeepAlive(t *testing.T) {
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.checkBackendInterval = 10 * time.Millisecond
+	})
+	runners := []runner{
+		{
+			client: ts.mc.authenticate,
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				ts.mp.config.HealthyKeepAlive.Idle = time.Minute
+				ts.mp.config.UnhealthyKeepAlive.Idle = time.Second
+				require.NoError(t, ts.firstHandshake4Proxy(clientIO, backendIO))
+				require.Equal(t, time.Minute, ts.mp.backendIO.Load().LastKeepAlive().Idle)
+				return nil
+			},
+			backend: ts.handshake4Backend,
+		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				ts.mp.NotifyBackendStatus(router.StatusCannotConnect)
+				require.Equal(t, time.Second, ts.mp.backendIO.Load().LastKeepAlive().Idle)
+				ts.mp.NotifyBackendStatus(router.StatusHealthy)
+				require.Equal(t, time.Minute, ts.mp.backendIO.Load().LastKeepAlive().Idle)
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}

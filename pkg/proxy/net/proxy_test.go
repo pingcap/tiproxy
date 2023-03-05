@@ -48,7 +48,7 @@ func TestProxyParse(t *testing.T) {
 		func(t *testing.T, srv *PacketIO) {
 			// skip 4 bytes of magic
 			var hdr [4]byte
-			_, err := io.ReadFull(*srv.conn.Load(), hdr[:])
+			_, err := io.ReadFull(srv.conn, hdr[:])
 			require.NoError(t, err)
 
 			// try to parse V2

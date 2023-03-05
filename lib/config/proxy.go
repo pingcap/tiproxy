@@ -54,7 +54,8 @@ type KeepAlive struct {
 type ProxyServerOnline struct {
 	MaxConnections             uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
 	FrontendKeepalive          KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
-	BackendKeepalive           KeepAlive `yaml:"backend-keepalive" toml:"backend-keepalive" json:"backend-keepalive"`
+	BackendHealthyKeepalive    KeepAlive `yaml:"backend-healthy-keepalive" toml:"backend-healthy-keepalive" json:"backend-healthy-keepalive"`
+	BackendUnhealthyKeepalive  KeepAlive `yaml:"backend-unhealthy-keepalive" toml:"backend-unhealthy-keepalive" json:"backend-unhealthy-keepalive"`
 	ProxyProtocol              string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
 	GracefulWaitBeforeShutdown int       `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty"`
 }
@@ -119,12 +120,24 @@ type Security struct {
 	SQLTLS     TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
 }
 
+func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
+	frontend.Enabled = true
+	backendHealthy.Enabled = true
+	backendHealthy.Cnt = 5
+	backendHealthy.Idle = 60 * time.Second
+	backendHealthy.Intvl = 5 * time.Second
+	backendUnhealthy.Enabled = true
+	backendUnhealthy.Cnt = 2
+	backendUnhealthy.Idle = 1 * time.Second
+	backendUnhealthy.Intvl = 1 * time.Second
+	return
+}
+
 func NewConfig() *Config {
 	var cfg Config
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
-	cfg.Proxy.FrontendKeepalive.Enabled = true
-	cfg.Proxy.BackendKeepalive.Enabled = true
+	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnhealthyKeepalive = DefaultKeepAlive()
 	cfg.Proxy.RequireBackendTLS = true
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 

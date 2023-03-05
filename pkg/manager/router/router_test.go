@@ -37,6 +37,7 @@ type mockRedirectableConn struct {
 	t        *testing.T
 	connID   uint64
 	from, to string
+	status   BackendStatus
 	receiver ConnEventReceiver
 }
 
@@ -57,6 +58,12 @@ func (conn *mockRedirectableConn) GetRedirectingAddr() string {
 	conn.Lock()
 	defer conn.Unlock()
 	return conn.to
+}
+
+func (conn *mockRedirectableConn) NotifyBackendStatus(status BackendStatus) {
+	conn.Lock()
+	conn.status = status
+	conn.Unlock()
 }
 
 func (conn *mockRedirectableConn) ConnectionID() uint64 {
@@ -811,4 +818,18 @@ func TestDisableHealthCheck(t *testing.T) {
 		require.NoError(t, err)
 		return addr == "127.0.0.1:5000"
 	}, 3*time.Second, 100*time.Millisecond)
+}
+
+func TestSetBackendStatus(t *testing.T) {
+	tester := newRouterTester(t)
+	tester.addBackends(1)
+	tester.addConnections(10)
+	tester.killBackends(1)
+	for _, conn := range tester.conns {
+		require.Equal(t, StatusCannotConnect, conn.status)
+	}
+	tester.updateBackendStatusByAddr(tester.getBackendByIndex(0).addr, StatusHealthy)
+	for _, conn := range tester.conns {
+		require.Equal(t, StatusHealthy, conn.status)
+	}
 }

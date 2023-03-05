@@ -217,6 +217,7 @@ func (router *ScoreBasedRouter) OnRedirectSucceed(from, to string, conn Redirect
 	if !ok {
 		return errors.WithStack(errors.Errorf("connection %d is not found on the backend %s", conn.ConnectionID(), to))
 	}
+	conn.NotifyBackendStatus(toBackend.status)
 	connWrapper := e.Value.(*connWrapper)
 	connWrapper.phase = phaseRedirectEnd
 	addMigrateMetrics(from, to, true, connWrapper.lastRedirect)
@@ -250,6 +251,7 @@ func (router *ScoreBasedRouter) OnRedirectFail(from, to string, conn Redirectabl
 			connMap:  make(map[uint64]*list.Element),
 		})
 	}
+	conn.NotifyBackendStatus(be.Value.(*backendWrapper).status)
 	connWrapper := ce.Value.(*connWrapper)
 	connWrapper.phase = phaseRedirectFail
 	addMigrateMetrics(from, to, false, connWrapper.lastRedirect)
@@ -291,20 +293,27 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 		if be == nil && status != StatusCannotConnect {
 			router.logger.Info("find new backend", zap.String("addr", addr),
 				zap.String("status", status.String()))
-			be = router.backends.PushBack(&backendWrapper{
+			router.backends.PushBack(&backendWrapper{
 				status:   status,
 				addr:     addr,
 				connList: list.New(),
 				connMap:  make(map[uint64]*list.Element),
 			})
-		} else {
+		} else if be != nil {
 			backend := be.Value.(*backendWrapper)
 			router.logger.Info("update backend", zap.String("addr", addr),
 				zap.String("prev_status", backend.status.String()), zap.String("cur_status", status.String()))
 			backend.status = status
-		}
-		if !router.removeBackendIfEmpty(be) {
-			router.adjustBackendList(be)
+			if !router.removeBackendIfEmpty(be) {
+				router.adjustBackendList(be)
+				for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
+					conn := ele.Value.(*connWrapper)
+					// If it's redirecting, the current backend of the connection if not self.
+					if conn.phase != phaseRedirectNotify {
+						conn.NotifyBackendStatus(status)
+					}
+				}
+			}
 		}
 	}
 }
