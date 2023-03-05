@@ -16,10 +16,10 @@ package net
 
 import (
 	"encoding/binary"
-	"github.com/pingcap/TiProxy/lib/config"
 	"net"
 	"testing"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/tidb/parser/mysql"

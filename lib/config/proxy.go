@@ -138,7 +138,7 @@ func NewConfig() *Config {
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
 	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnhealthyKeepalive = DefaultKeepAlive()
-	cfg.Proxy.RequireBackendTLS = true
+	cfg.Proxy.RequireBackendTLS = false
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 
 	cfg.API.Addr = "0.0.0.0:3080"

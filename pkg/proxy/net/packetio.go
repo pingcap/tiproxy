@@ -296,6 +296,7 @@ func (p *PacketIO) SetKeepalive(cfg config.KeepAlive) error {
 	if cfg == p.lastKeepAlive {
 		return nil
 	}
+	println("set keep alive", cfg.Idle.Seconds())
 	p.lastKeepAlive = cfg
 	return keepalive.SetKeepalive(p.rawConn, cfg)
 }
