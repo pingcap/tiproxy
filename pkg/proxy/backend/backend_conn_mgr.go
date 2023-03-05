@@ -122,9 +122,8 @@ type BackendConnManager struct {
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc context.CancelFunc
 	clientIO   *pnet.PacketIO
-	// type *pnet.PacketIO. The backendIO may be written during redirection
-	// and be read in ExecuteCmd/Redirect/setTimeout/setKeepalive.
-	backendIO        unsafe.Pointer
+	// backendIO may be written during redirection and be read in ExecuteCmd/Redirect/setKeepalive.
+	backendIO        atomic.Pointer[pnet.PacketIO]
 	backendTLS       *tls.Config
 	handshakeHandler HandshakeHandler
 	ctxmap           sync.Map
@@ -231,7 +230,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
 			backendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr, cn.RemoteAddr()))
-			atomic.StorePointer(&mgr.backendIO, unsafe.Pointer(backendIO))
+			mgr.backendIO.Store(backendIO)
 			return backendIO, nil
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
@@ -275,7 +274,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) e
 	}
 	defer mgr.resetCheckBackendTicker()
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
-	holdRequest, err := mgr.cmdProcessor.executeCmd(request, mgr.clientIO, (*pnet.PacketIO)(atomic.LoadPointer(&mgr.backendIO)), waitingRedirect)
+	holdRequest, err := mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), waitingRedirect)
 	if !holdRequest {
 		addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 	}
@@ -313,7 +312,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) e
 		if waitingRedirect && holdRequest {
 			mgr.tryRedirect(ctx)
 			// Execute the held request no matter redirection succeeds or not.
-			_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, (*pnet.PacketIO)(atomic.LoadPointer(&mgr.backendIO)), false)
+			_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), false)
 			addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 			if err != nil && !IsMySQLError(err) {
 				return err
@@ -418,7 +417,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		// - Avoid the risk of deadlock
 		mgr.redirectResCh <- rs
 	}()
-	backendIO := (*pnet.PacketIO)(atomic.LoadPointer(&mgr.backendIO))
+	backendIO := mgr.backendIO.Load()
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
 		return
@@ -450,7 +449,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 
-	atomic.StorePointer(&mgr.backendIO, unsafe.Pointer(newBackendIO))
+	mgr.backendIO.Store(newBackendIO)
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
 }
 
@@ -542,7 +541,7 @@ func (mgr *BackendConnManager) checkBackendActive() {
 
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
-	backendIO := (*pnet.PacketIO)(atomic.LoadPointer(&mgr.backendIO))
+	backendIO := mgr.backendIO.Load()
 	if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection", zap.Stringer("client", mgr.clientIO.RemoteAddr()),
 			zap.Stringer("backend", backendIO.RemoteAddr()))
@@ -571,7 +570,7 @@ func (mgr *BackendConnManager) ClientAddr() string {
 }
 
 func (mgr *BackendConnManager) ServerAddr() string {
-	if backendIO := (*pnet.PacketIO)(atomic.LoadPointer(&mgr.backendIO)); backendIO != nil {
+	if backendIO := mgr.backendIO.Load(); backendIO != nil {
 		return backendIO.RemoteAddr().String()
 	}
 	return ""
@@ -618,7 +617,7 @@ func (mgr *BackendConnManager) Close() error {
 	var connErr error
 	var addr string
 	mgr.processLock.Lock()
-	if backendIO := (*pnet.PacketIO)(atomic.SwapPointer(&mgr.backendIO, nil)); backendIO != nil {
+	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
 		addr = backendIO.RemoteAddr().String()
 		connErr = backendIO.Close()
 	}
