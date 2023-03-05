@@ -34,7 +34,7 @@ var testProxyConfig = Config{
 		RequireBackendTLS: true,
 		ProxyServerOnline: ProxyServerOnline{
 			MaxConnections:             1,
-			FrontendKeepalive:          KeepAlive{Enabled: true},
+			FrontendKeepalive:          KeepAlive{Disabled: true},
 			ProxyProtocol:              "v2",
 			GracefulWaitBeforeShutdown: 10,
 		},
