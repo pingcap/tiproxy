@@ -16,6 +16,7 @@ package net
 
 import (
 	"encoding/binary"
+	"github.com/pingcap/TiProxy/lib/config"
 	"net"
 	"testing"
 
@@ -258,6 +259,25 @@ func TestPeerActive(t *testing.T) {
 			<-ch
 			require.NoError(t, srv.Close())
 			<-ch
+		},
+		10,
+	)
+}
+
+func TestKeepAlive(t *testing.T) {
+	stls, ctls, err := security.CreateTLSConfigForTest()
+	require.NoError(t, err)
+	frontend, backendHealthy, backendUnhealthy := config.DefaultKeepAlive()
+	testTCPConn(t,
+		func(t *testing.T, cli *PacketIO) {
+			require.NoError(t, cli.SetKeepalive(frontend))
+			require.NoError(t, cli.ClientTLSHandshake(ctls))
+		},
+		func(t *testing.T, srv *PacketIO) {
+			require.NoError(t, srv.SetKeepalive(backendHealthy))
+			_, err = srv.ServerTLSHandshake(stls)
+			require.NoError(t, err)
+			require.NoError(t, srv.SetKeepalive(backendUnhealthy))
 		},
 		10,
 	)

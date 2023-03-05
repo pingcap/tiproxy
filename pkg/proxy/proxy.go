@@ -89,7 +89,7 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
 	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
 	s.mu.healthyKeepAlive = cfg.BackendHealthyKeepalive
-	s.mu.unhealthyKeepAlive = cfg.BackendUnHealthyKeepalive
+	s.mu.unhealthyKeepAlive = cfg.BackendUnhealthyKeepalive
 	s.mu.Unlock()
 }
 
