@@ -26,7 +26,7 @@ var (
 )
 
 func SetKeepalive(conn net.Conn, cfg config.KeepAlive) error {
-	if cfg.Disabled {
+	if !cfg.Enabled {
 		return nil
 	}
 

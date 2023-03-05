@@ -45,10 +45,10 @@ type Metrics struct {
 }
 
 type KeepAlive struct {
-	Disabled bool          `yaml:"disabled,omitempty" toml:"disabled,omitempty" json:"disabled,omitempty"`
-	Cnt      int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
-	Idle     time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty"`
-	Intvl    time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty"`
+	Enabled bool          `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty"`
+	Cnt     int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
+	Idle    time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty"`
+	Intvl   time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty"`
 }
 
 type ProxyServerOnline struct {
@@ -123,6 +123,8 @@ func NewConfig() *Config {
 	var cfg Config
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
+	cfg.Proxy.FrontendKeepalive.Enabled = true
+	cfg.Proxy.BackendKeepalive.Enabled = true
 	cfg.Proxy.RequireBackendTLS = true
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 

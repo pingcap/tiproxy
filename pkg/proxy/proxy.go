@@ -81,7 +81,7 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 
 func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.Lock()
-	s.mu.tcpKeepAlive = !cfg.FrontendKeepalive.Disabled
+	s.mu.tcpKeepAlive = cfg.FrontendKeepalive.Enabled
 	s.mu.maxConnections = cfg.MaxConnections
 	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
 	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
