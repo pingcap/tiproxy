@@ -1,5 +1,4 @@
 //go:build linux || netbsd || freebsd || dragonfly || aix || windows
-// +build linux netbsd freebsd dragonfly aix windows
 
 // Copyright 2023 PingCAP, Inc.
 //
@@ -31,17 +30,23 @@ func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
 		if serr != nil {
 			return
 		}
-		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, int(cfg.Idle.Seconds()))
-		if serr != nil {
-			return
+		if val := cfg.Idle.Seconds(); val > 0 {
+			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, int(val))
+			if serr != nil {
+				return
+			}
 		}
-		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, cfg.Cnt)
-		if serr != nil {
-			return
+		if cfg.Cnt > 0 {
+			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, cfg.Cnt)
+			if serr != nil {
+				return
+			}
 		}
-		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, int(cfg.Intvl.Seconds()))
-		if serr != nil {
-			return
+		if val := cfg.Intvl.Seconds(); val > 0 {
+			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, int(val))
+			if serr != nil {
+				return
+			}
 		}
 	}))
 }

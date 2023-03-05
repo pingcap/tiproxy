@@ -1,5 +1,4 @@
 //go:build !(linux || netbsd || freebsd || dragonfly || aix || windows || darwin)
-// +build !(linux OR netbsd OR freebsd OR dragonfly OR aix OR windows OR darwin)
 
 // Copyright 2023 PingCAP, Inc.
 //

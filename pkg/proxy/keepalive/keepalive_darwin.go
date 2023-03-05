@@ -1,5 +1,4 @@
 //go:build darwin
-// +build darwin
 
 // Copyright 2023 PingCAP, Inc.
 //
@@ -36,17 +35,23 @@ func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
 		if serr != nil {
 			return
 		}
-		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, int(cfg.Idle.Seconds()))
-		if serr != nil {
-			return
+		if val := cfg.Idle.Seconds(); val > 0 {
+			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, int(val))
+			if serr != nil {
+				return
+			}
 		}
-		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, _TCP_KEEPCNT, cfg.Cnt)
-		if serr != nil {
-			return
+		if cfg.Cnt > 0 {
+			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, _TCP_KEEPCNT, cfg.Cnt)
+			if serr != nil {
+				return
+			}
 		}
-		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, _TCP_KEEPINTVL, int(cfg.Intvl.Seconds()))
-		if serr != nil {
-			return
+		if val := cfg.Intvl.Seconds(); val > 0 {
+			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, _TCP_KEEPINTVL, int(val))
+			if serr != nil {
+				return
+			}
 		}
 	}))
 }
