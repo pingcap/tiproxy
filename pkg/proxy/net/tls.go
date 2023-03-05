@@ -17,36 +17,34 @@ package net
 import (
 	"bufio"
 	"crypto/tls"
-
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"net"
 )
 
 func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error) {
-	p.Lock()
-	defer p.Unlock()
 	tlsConfig = tlsConfig.Clone()
-	tlsConn := tls.Server(p.conn, tlsConfig)
+	tlsConn := tls.Server(*p.conn.Load(), tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(ErrHandshakeTLS, err))
 	}
-	p.conn = tlsConn
-	p.buf.Writer.Reset(p.conn)
+	conn := (net.Conn)(tlsConn)
+	p.conn.Store(&conn)
+	p.buf.Writer.Reset(conn)
 	// Wrap it with another buffer to enable Peek.
-	p.buf = bufio.NewReadWriter(bufio.NewReaderSize(p.conn, defaultReaderSize), p.buf.Writer)
+	p.buf = bufio.NewReadWriter(bufio.NewReaderSize(conn, defaultReaderSize), p.buf.Writer)
 	return tlsConn.ConnectionState(), nil
 }
 
 func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
-	p.Lock()
-	defer p.Unlock()
 	tlsConfig = tlsConfig.Clone()
-	tlsConn := tls.Client(p.conn, tlsConfig)
+	tlsConn := tls.Client(*p.conn.Load(), tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
 	}
-	p.conn = tlsConn
-	p.buf.Writer.Reset(p.conn)
+	conn := (net.Conn)(tlsConn)
+	p.conn.Store(&conn)
+	p.buf.Writer.Reset(conn)
 	// Wrap it with another buffer to enable Peek.
-	p.buf = bufio.NewReadWriter(bufio.NewReaderSize(p.conn, defaultReaderSize), p.buf.Writer)
+	p.buf = bufio.NewReadWriter(bufio.NewReaderSize(conn, defaultReaderSize), p.buf.Writer)
 	return nil
 }
