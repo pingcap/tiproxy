@@ -41,13 +41,13 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/dbterror"
-	"go.uber.org/atomic"
 )
 
 var (
@@ -75,11 +75,12 @@ func (f *rdbufConn) Read(b []byte) (int, error) {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
-	inBytes     uint64
-	outBytes    uint64
-	conn        net.Conn
+	inBytes  uint64
+	outBytes uint64
+	// conn is written during TLS handshake and read during setting keep alive concurrently.
+	conn        atomic.Pointer[net.Conn]
 	buf         *bufio.ReadWriter
-	proxyInited *atomic.Bool
+	proxyInited atomic.Bool
 	proxy       *Proxy
 	remoteAddr  net.Addr
 	wrap        error
@@ -92,15 +93,16 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 		bufio.NewWriterSize(conn, defaultWriterSize),
 	)
 	p := &PacketIO{
-		conn: &rdbufConn{
-			conn,
-			buf.Reader,
-		},
 		sequence: 0,
-		// TODO: disable it by default now
-		proxyInited: atomic.NewBool(true),
-		buf:         buf,
+		buf:      buf,
 	}
+	// TODO: disable it by default now
+	p.proxyInited.Store(true)
+	cn := (net.Conn)(&rdbufConn{
+		conn,
+		buf.Reader,
+	})
+	p.conn.Store(&cn)
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -120,14 +122,14 @@ func (p *PacketIO) Proxy() *Proxy {
 }
 
 func (p *PacketIO) LocalAddr() net.Addr {
-	return p.conn.LocalAddr()
+	return (*p.conn.Load()).LocalAddr()
 }
 
 func (p *PacketIO) RemoteAddr() net.Addr {
 	if p.remoteAddr != nil {
 		return p.remoteAddr
 	}
-	return p.conn.RemoteAddr()
+	return (*p.conn.Load()).RemoteAddr()
 }
 
 func (p *PacketIO) ResetSequence() {
@@ -256,7 +258,7 @@ func (p *PacketIO) OutBytes() uint64 {
 }
 
 func (p *PacketIO) TLSConnectionState() tls.ConnectionState {
-	if tlsConn, ok := p.conn.(*tls.Conn); ok {
+	if tlsConn, ok := (*p.conn.Load()).(*tls.Conn); ok {
 		return tlsConn.ConnectionState()
 	}
 	return tls.ConnectionState{}
@@ -274,21 +276,21 @@ func (p *PacketIO) Flush() error {
 // This function normally costs 1ms, so don't call it too frequently.
 // This function may incorrectly return true if the system is extremely slow.
 func (p *PacketIO) IsPeerActive() bool {
-	if err := p.conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+	if err := (*p.conn.Load()).SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
 		return false
 	}
 	active := true
 	if _, err := p.buf.Peek(1); err != nil {
 		active = !errors.Is(err, io.EOF)
 	}
-	if err := p.conn.SetReadDeadline(time.Time{}); err != nil {
+	if err := (*p.conn.Load()).SetReadDeadline(time.Time{}); err != nil {
 		return false
 	}
 	return active
 }
 
 func (p *PacketIO) GracefulClose() error {
-	if err := p.conn.SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
+	if err := (*p.conn.Load()).SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
 	return nil
@@ -302,7 +304,7 @@ func (p *PacketIO) Close() error {
 			errs = append(errs, err)
 		}
 	*/
-	if err := p.conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+	if err := (*p.conn.Load()).Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		errs = append(errs, err)
 	}
 	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))

@@ -16,14 +16,12 @@ package net
 
 import (
 	"net"
-
-	"go.uber.org/atomic"
 )
 
 type PacketIOption = func(*PacketIO)
 
 func WithProxy(pi *PacketIO) {
-	pi.proxyInited = atomic.NewBool(true)
+	pi.proxyInited.Store(true)
 }
 
 func WithWrapError(err error) func(pi *PacketIO) {

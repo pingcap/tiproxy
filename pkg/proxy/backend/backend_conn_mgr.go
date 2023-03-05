@@ -120,9 +120,10 @@ type BackendConnManager struct {
 	closeStatus        atomic.Int32
 	checkBackendTicker *time.Ticker
 	// cancelFunc is used to cancel the signal processing goroutine.
-	cancelFunc       context.CancelFunc
-	clientIO         *pnet.PacketIO
-	backendIO        *pnet.PacketIO
+	cancelFunc context.CancelFunc
+	clientIO   *pnet.PacketIO
+	// backendIO may be written during redirection and be read in ExecuteCmd/Redirect/setKeepalive.
+	backendIO        atomic.Pointer[pnet.PacketIO]
 	backendTLS       *tls.Config
 	handshakeHandler HandshakeHandler
 	ctxmap           sync.Map
@@ -228,8 +229,9 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			// NOTE: should use DNS name as much as possible
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
-			mgr.backendIO = pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr, cn.RemoteAddr()))
-			return mgr.backendIO, nil
+			backendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr, cn.RemoteAddr()))
+			mgr.backendIO.Store(backendIO)
+			return backendIO, nil
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
@@ -245,7 +247,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.NamedError("last_err", origErr))
 	} else if duration >= 3*time.Second {
 		mgr.logger.Warn("get backend slow", zap.Duration("duration", duration), zap.NamedError("last_err", origErr),
-			zap.Stringer("backend_addr", mgr.backendIO.RemoteAddr()))
+			zap.String("backend_addr", mgr.ServerAddr()))
 	}
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {
 		if origErr != nil {
@@ -272,7 +274,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) e
 	}
 	defer mgr.resetCheckBackendTicker()
 	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
-	holdRequest, err := mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO, waitingRedirect)
+	holdRequest, err := mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), waitingRedirect)
 	if !holdRequest {
 		addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 	}
@@ -310,7 +312,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) e
 		if waitingRedirect && holdRequest {
 			mgr.tryRedirect(ctx)
 			// Execute the held request no matter redirection succeeds or not.
-			_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO, false)
+			_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), false)
 			addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 			if err != nil && !IsMySQLError(err) {
 				return err
@@ -348,10 +350,10 @@ func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessi
 	return err
 }
 
-func (mgr *BackendConnManager) querySessionStates() (sessionStates, sessionToken string, err error) {
+func (mgr *BackendConnManager) querySessionStates(backendIO *pnet.PacketIO) (sessionStates, sessionToken string, err error) {
 	// Do not lock here because the caller already locks.
 	var result *gomysql.Result
-	if result, _, err = mgr.cmdProcessor.query(mgr.backendIO, sqlQueryState); err != nil {
+	if result, _, err = mgr.cmdProcessor.query(backendIO, sqlQueryState); err != nil {
 		return
 	}
 	if sessionStates, err = result.GetStringByName(0, sessionStatesCol); err != nil {
@@ -415,8 +417,9 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		// - Avoid the risk of deadlock
 		mgr.redirectResCh <- rs
 	}()
+	backendIO := mgr.backendIO.Load()
 	var sessionStates, sessionToken string
-	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(); rs.err != nil {
+	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
 		return
 	}
 	if rs.err = mgr.updateAuthInfoFromSessionStates(hack.Slice(sessionStates)); rs.err != nil {
@@ -442,11 +445,11 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		}
 		return
 	}
-	if ignoredErr := mgr.backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+	if ignoredErr := backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 
-	mgr.backendIO = newBackendIO
+	mgr.backendIO.Store(newBackendIO)
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
 }
 
@@ -538,9 +541,10 @@ func (mgr *BackendConnManager) checkBackendActive() {
 
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
-	if !mgr.backendIO.IsPeerActive() {
+	backendIO := mgr.backendIO.Load()
+	if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection", zap.Stringer("client", mgr.clientIO.RemoteAddr()),
-			zap.Stringer("backend", mgr.backendIO.RemoteAddr()))
+			zap.Stringer("backend", backendIO.RemoteAddr()))
 		if err := mgr.clientIO.GracefulClose(); err != nil {
 			mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
 		}
@@ -566,10 +570,10 @@ func (mgr *BackendConnManager) ClientAddr() string {
 }
 
 func (mgr *BackendConnManager) ServerAddr() string {
-	if mgr.backendIO == nil {
-		return ""
+	if backendIO := mgr.backendIO.Load(); backendIO != nil {
+		return backendIO.RemoteAddr().String()
 	}
-	return mgr.backendIO.RemoteAddr().String()
+	return ""
 }
 
 func (mgr *BackendConnManager) ClientInBytes() uint64 {
@@ -613,10 +617,9 @@ func (mgr *BackendConnManager) Close() error {
 	var connErr error
 	var addr string
 	mgr.processLock.Lock()
-	if mgr.backendIO != nil {
-		addr = mgr.ServerAddr()
-		connErr = mgr.backendIO.Close()
-		mgr.backendIO = nil
+	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
+		addr = backendIO.RemoteAddr().String()
+		connErr = backendIO.Close()
 	}
 	mgr.processLock.Unlock()
 
