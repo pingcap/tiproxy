@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -215,7 +216,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			}
 
 			var cn net.Conn
-			cn, err = mgr.dialNewBackend(addr)
+			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
 			if err != nil {
 				return nil, errors.Wrapf(err, "dial backend %s error", addr)
 			}
@@ -234,6 +235,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			// And `RemoteAddr()` will return IP addr
 			backendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr, cn.RemoteAddr()))
 			mgr.backendIO.Store(backendIO)
+			mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
 			return backendIO, nil
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
@@ -423,6 +425,13 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	backendIO := mgr.backendIO.Load()
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
+		// If the backend connection is closed, also close the client connection.
+		// Otherwise, if the client is idle, the mgr will keep retrying.
+		if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
+			if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
+				mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
+			}
+		}
 		return
 	}
 	if rs.err = mgr.updateAuthInfoFromSessionStates(hack.Slice(sessionStates)); rs.err != nil {
@@ -430,7 +439,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	var cn net.Conn
-	cn, rs.err = mgr.dialNewBackend(rs.to)
+	cn, rs.err = net.DialTimeout("tcp", rs.to, DialTimeout)
 	if rs.err != nil {
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err)
 		return
@@ -451,8 +460,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	if ignoredErr := backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
-
 	mgr.backendIO.Store(newBackendIO)
+	mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
 }
 
@@ -649,31 +658,20 @@ func (mgr *BackendConnManager) Close() error {
 // The request to the unhealthy backend may block sometimes, instead of fail immediately.
 // So we set a shorter keep alive timeout for the unhealthy backends.
 func (mgr *BackendConnManager) NotifyBackendStatus(status router.BackendStatus) {
+	switch status {
+	case router.StatusHealthy:
+		mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
+	default:
+		mgr.setKeepAlive(mgr.config.UnhealthyKeepAlive)
+	}
+}
+
+func (mgr *BackendConnManager) setKeepAlive(cfg config.KeepAlive) {
 	backendIO := mgr.backendIO.Load()
 	if backendIO == nil {
 		return
 	}
-	cfg := mgr.config.HealthyKeepAlive
-	if status != router.StatusHealthy {
-		cfg = mgr.config.UnhealthyKeepAlive
-	}
 	if err := backendIO.SetKeepalive(cfg); err != nil {
-		mgr.logger.Warn("failed to set keepalive", zap.Error(err), zap.Stringer("backend status", &status))
+		mgr.logger.Warn("failed to set keepalive", zap.Error(err), zap.Stringer("backend", backendIO.RemoteAddr()))
 	}
-}
-
-func (mgr *BackendConnManager) dialNewBackend(addr string) (net.Conn, error) {
-	cn, err := net.DialTimeout("tcp", addr, DialTimeout)
-	if err != nil {
-		return cn, err
-	}
-	if tcpcn, ok := cn.(*net.TCPConn); ok {
-		if err := tcpcn.SetKeepAlive(true); err != nil {
-			mgr.logger.Warn("fail to set keepalive for backend", zap.Error(err))
-		}
-		if err := tcpcn.SetKeepAlivePeriod(15 * time.Second); err != nil {
-			mgr.logger.Warn("fail to set keepalive period for backend", zap.Error(err))
-		}
-	}
-	return cn, err
 }

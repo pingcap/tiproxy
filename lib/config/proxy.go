@@ -122,18 +122,14 @@ type Security struct {
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
 	frontend.Enabled = true
-	backendUnhealthy = KeepAlive{
-		Enabled: true,
-		Cnt:     5,
-		Idle:    60 * time.Second,
-		Intvl:   5 * time.Second,
-	}
-	backendUnhealthy = KeepAlive{
-		Enabled: true,
-		Cnt:     2,
-		Idle:    1 * time.Second,
-		Intvl:   1 * time.Second,
-	}
+	backendHealthy.Enabled = true
+	backendHealthy.Cnt = 5
+	backendHealthy.Idle = 60 * time.Second
+	backendHealthy.Intvl = 5 * time.Second
+	backendUnhealthy.Enabled = true
+	backendUnhealthy.Cnt = 2
+	backendUnhealthy.Idle = 1 * time.Second
+	backendUnhealthy.Intvl = 1 * time.Second
 	return
 }
 
