@@ -27,6 +27,7 @@ func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionStat
 	if err := tlsConn.Handshake(); err != nil {
 		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(ErrHandshakeTLS, err))
 	}
+	p.conn = tlsConn
 	p.buf.Writer.Reset(tlsConn)
 	// Wrap it with another buffer to enable Peek.
 	p.buf = bufio.NewReadWriter(bufio.NewReaderSize(tlsConn, defaultReaderSize), p.buf.Writer)
@@ -39,6 +40,7 @@ func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 	if err := tlsConn.Handshake(); err != nil {
 		return errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
 	}
+	p.conn = tlsConn
 	p.buf.Writer.Reset(tlsConn)
 	// Wrap it with another buffer to enable Peek.
 	p.buf = bufio.NewReadWriter(bufio.NewReaderSize(tlsConn, defaultReaderSize), p.buf.Writer)
