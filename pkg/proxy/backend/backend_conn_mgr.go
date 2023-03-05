@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/pingcap/TiProxy/lib/config"
 	"net"
 	"strings"
 	"sync"
@@ -29,7 +30,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
@@ -85,6 +85,8 @@ type BCConfig struct {
 	ProxyProtocol        bool
 	RequireBackendTLS    bool
 	CheckBackendInterval time.Duration
+	HealthyKeepAlive     *config.KeepAlive
+	UnhealthyKeepAlive   *config.KeepAlive
 }
 
 func (cfg *BCConfig) check() {
@@ -643,9 +645,20 @@ func (mgr *BackendConnManager) Close() error {
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
 
-func (mgr *BackendConnManager) SetKeepalive(cfg config.KeepAlive) {
-	if err := mgr.backendIO.Load().SetKeepalive(cfg); err != nil {
-		mgr.logger.Warn("failed to set keepalive", zap.Error(err))
+// NotifyBackendStatus notifies the backend status to mgr.
+// The request to the unhealthy backend may block sometimes, instead of fail immediately.
+// So we set a shorter keep alive timeout for the unhealthy backends.
+func (mgr *BackendConnManager) NotifyBackendStatus(status router.BackendStatus) {
+	backendIO := mgr.backendIO.Load()
+	if backendIO == nil {
+		return
+	}
+	cfg := mgr.config.HealthyKeepAlive
+	if status != router.StatusHealthy {
+		cfg = mgr.config.UnhealthyKeepAlive
+	}
+	if err := backendIO.SetKeepalive(cfg); err != nil {
+		mgr.logger.Warn("failed to set keepalive", zap.Error(err), zap.Stringer("backend status", &status))
 	}
 }
 

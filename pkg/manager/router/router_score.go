@@ -133,7 +133,6 @@ func (router *ScoreBasedRouter) removeConn(be *list.Element, ce *list.Element) {
 func (router *ScoreBasedRouter) addConn(be *list.Element, conn *connWrapper) {
 	backend := be.Value.(*backendWrapper)
 	ce := backend.connList.PushBack(conn)
-	router.setConnKeepalive(conn, backend.status == StatusHealthy)
 	backend.connMap[conn.ConnectionID()] = ce
 	router.adjustBackendList(be)
 }
@@ -218,6 +217,7 @@ func (router *ScoreBasedRouter) OnRedirectSucceed(from, to string, conn Redirect
 	if !ok {
 		return errors.WithStack(errors.Errorf("connection %d is not found on the backend %s", conn.ConnectionID(), to))
 	}
+	conn.NotifyBackendStatus(toBackend.status)
 	connWrapper := e.Value.(*connWrapper)
 	connWrapper.phase = phaseRedirectEnd
 	addMigrateMetrics(from, to, true, connWrapper.lastRedirect)
@@ -251,6 +251,7 @@ func (router *ScoreBasedRouter) OnRedirectFail(from, to string, conn Redirectabl
 			connMap:  make(map[uint64]*list.Element),
 		})
 	}
+	conn.NotifyBackendStatus(be.Value.(*backendWrapper).status)
 	connWrapper := ce.Value.(*connWrapper)
 	connWrapper.phase = phaseRedirectFail
 	addMigrateMetrics(from, to, false, connWrapper.lastRedirect)
@@ -282,26 +283,6 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 	return nil
 }
 
-func (router *ScoreBasedRouter) setConnKeepalive(conn *connWrapper, healthy bool) {
-	var opt config.KeepAlive
-	if healthy {
-		opt = config.KeepAlive{
-			Enabled: true,
-			Idle:    60 * time.Second,
-			Cnt:     5,
-			Intvl:   5 * time.Second,
-		}
-	} else {
-		opt = config.KeepAlive{
-			Enabled: true,
-			Idle:    1 * time.Second,
-			Cnt:     2,
-			Intvl:   1 * time.Second,
-		}
-	}
-	conn.SetKeepalive(opt)
-}
-
 // OnBackendChanged implements BackendEventReceiver.OnBackendChanged interface.
 func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStatus, err error) {
 	router.Lock()
@@ -326,7 +307,11 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 			if !router.removeBackendIfEmpty(be) {
 				router.adjustBackendList(be)
 				for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
-					router.setConnKeepalive(ele.Value.(*connWrapper), status == StatusHealthy)
+					conn := ele.Value.(*connWrapper)
+					// If it's redirecting, the current backend of the connection if not self.
+					if conn.phase != phaseRedirectNotify {
+						conn.NotifyBackendStatus(status)
+					}
 				}
 			}
 		}

@@ -34,13 +34,15 @@ import (
 
 type serverState struct {
 	sync.RWMutex
-	clients        map[uint64]*client.ClientConnection
-	connID         uint64
-	maxConnections uint64
-	tcpKeepAlive   bool
-	proxyProtocol  bool
-	gracefulWait   int
-	inShutdown     bool
+	clients            map[uint64]*client.ClientConnection
+	connID             uint64
+	maxConnections     uint64
+	tcpKeepAlive       bool
+	healthyKeepAlive   config.KeepAlive
+	unhealthyKeepAlive config.KeepAlive
+	proxyProtocol      bool
+	gracefulWait       int
+	inShutdown         bool
 }
 
 type SQLServer struct {
@@ -86,6 +88,8 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.maxConnections = cfg.MaxConnections
 	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
 	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
+	s.mu.healthyKeepAlive = cfg.BackendHealthyKeepalive
+	s.mu.unhealthyKeepAlive = cfg.BackendUnHealthyKeepalive
 	s.mu.Unlock()
 }
 
@@ -153,7 +157,8 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
-	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(), s.hsHandler, connID, s.mu.proxyProtocol, s.requireBackendTLS)
+	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(),
+		s.hsHandler, connID, s.mu.proxyProtocol, s.requireBackendTLS, s.mu.healthyKeepAlive, s.mu.unhealthyKeepAlive)
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 
