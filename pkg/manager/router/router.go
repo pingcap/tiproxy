@@ -18,6 +18,7 @@ import (
 	"container/list"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
@@ -75,6 +76,7 @@ type RedirectableConn interface {
 	SetEventReceiver(receiver ConnEventReceiver)
 	Redirect(addr string)
 	GetRedirectingAddr() string
+	SetKeepalive(config.KeepAlive)
 	ConnectionID() uint64
 }
 

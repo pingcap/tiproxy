@@ -44,7 +44,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/pkg/proxy/keepalive"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/dbterror"
@@ -287,6 +289,10 @@ func (p *PacketIO) IsPeerActive() bool {
 		return false
 	}
 	return active
+}
+
+func (p *PacketIO) SetKeepalive(cfg config.KeepAlive) error {
+	return keepalive.SetKeepalive(*p.conn.Load(), cfg)
 }
 
 func (p *PacketIO) GracefulClose() error {

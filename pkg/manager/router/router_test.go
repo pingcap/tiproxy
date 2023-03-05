@@ -46,6 +46,9 @@ func (conn *mockRedirectableConn) SetEventReceiver(receiver ConnEventReceiver) {
 	conn.Unlock()
 }
 
+func (conn *mockRedirectableConn) SetKeepalive(config.KeepAlive) {
+}
+
 func (conn *mockRedirectableConn) Redirect(addr string) {
 	conn.Lock()
 	require.Len(conn.t, conn.to, 0)

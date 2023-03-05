@@ -133,6 +133,7 @@ func (router *ScoreBasedRouter) removeConn(be *list.Element, ce *list.Element) {
 func (router *ScoreBasedRouter) addConn(be *list.Element, conn *connWrapper) {
 	backend := be.Value.(*backendWrapper)
 	ce := backend.connList.PushBack(conn)
+	router.setConnKeepalive(conn, backend.status == StatusHealthy)
 	backend.connMap[conn.ConnectionID()] = ce
 	router.adjustBackendList(be)
 }
@@ -281,6 +282,26 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 	return nil
 }
 
+func (router *ScoreBasedRouter) setConnKeepalive(conn *connWrapper, healthy bool) {
+	var opt config.KeepAlive
+	if healthy {
+		opt = config.KeepAlive{
+			Enabled: true,
+			Idle:    60 * time.Second,
+			Cnt:     5,
+			Intvl:   5 * time.Second,
+		}
+	} else {
+		opt = config.KeepAlive{
+			Enabled: true,
+			Idle:    1 * time.Second,
+			Cnt:     2,
+			Intvl:   1 * time.Second,
+		}
+	}
+	conn.SetKeepalive(opt)
+}
+
 // OnBackendChanged implements BackendEventReceiver.OnBackendChanged interface.
 func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStatus, err error) {
 	router.Lock()
@@ -297,14 +318,17 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 				connList: list.New(),
 				connMap:  make(map[uint64]*list.Element),
 			})
-		} else {
+		} else if be != nil {
 			backend := be.Value.(*backendWrapper)
 			router.logger.Info("update backend", zap.String("addr", addr),
 				zap.String("prev_status", backend.status.String()), zap.String("cur_status", status.String()))
 			backend.status = status
-		}
-		if !router.removeBackendIfEmpty(be) {
-			router.adjustBackendList(be)
+			if !router.removeBackendIfEmpty(be) {
+				router.adjustBackendList(be)
+				for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
+					router.setConnKeepalive(ele.Value.(*connWrapper), status == StatusHealthy)
+				}
+			}
 		}
 	}
 }

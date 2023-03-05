@@ -29,6 +29,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
@@ -640,6 +641,12 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.closeStatus.Store(statusClosed)
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
+}
+
+func (mgr *BackendConnManager) SetKeepalive(cfg config.KeepAlive) {
+	if err := mgr.backendIO.Load().SetKeepalive(cfg); err != nil {
+		mgr.logger.Warn("failed to set keepalive", zap.Error(err))
+	}
 }
 
 func (mgr *BackendConnManager) dialNewBackend(addr string) (net.Conn, error) {
