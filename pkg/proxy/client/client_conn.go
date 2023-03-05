@@ -17,11 +17,11 @@ package client
 import (
 	"context"
 	"crypto/tls"
-	"github.com/pingcap/TiProxy/lib/config"
 	"io"
 	"net"
 	"os"
 
+	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"

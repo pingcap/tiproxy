@@ -34,12 +34,12 @@ import (
 
 type serverState struct {
 	sync.RWMutex
+	healthyKeepAlive   config.KeepAlive
+	unhealthyKeepAlive config.KeepAlive
 	clients            map[uint64]*client.ClientConnection
 	connID             uint64
 	maxConnections     uint64
 	tcpKeepAlive       bool
-	healthyKeepAlive   config.KeepAlive
-	unhealthyKeepAlive config.KeepAlive
 	proxyProtocol      bool
 	gracefulWait       int
 	inShutdown         bool
