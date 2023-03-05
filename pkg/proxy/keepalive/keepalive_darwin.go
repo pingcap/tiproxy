@@ -48,5 +48,5 @@ func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
 		if serr != nil {
 			return
 		}
-	}
+	}))
 }

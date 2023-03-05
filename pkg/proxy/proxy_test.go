@@ -57,7 +57,7 @@ func TestGracefulShutdown(t *testing.T) {
 		}()
 		conn, err := server.listener.Accept()
 		require.NoError(t, err)
-		clientConn := client.NewClientConnection(lg, conn, nil, nil, hsHandler, 0, &backend.BCConfig{})
+		clientConn := client.NewClientConnection(lg, conn, nil, nil, hsHandler, 0, false, false)
 		server.mu.clients[1] = clientConn
 		server.mu.Unlock()
 		return clientConn

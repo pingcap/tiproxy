@@ -27,31 +27,29 @@ import (
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
-	"github.com/pingcap/TiProxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
 
 type serverState struct {
 	sync.RWMutex
-	clients           map[uint64]*client.ClientConnection
-	connID            uint64
-	maxConnections    uint64
-	requireBackendTLS bool
-	frontendKeepalive config.KeepAlive
-	backendKeepalive  config.KeepAlive
-	proxyProtocol     bool
-	gracefulWait      int
-	inShutdown        bool
+	clients        map[uint64]*client.ClientConnection
+	connID         uint64
+	maxConnections uint64
+	tcpKeepAlive   bool
+	proxyProtocol  bool
+	gracefulWait   int
+	inShutdown     bool
 }
 
 type SQLServer struct {
-	listener   net.Listener
-	logger     *zap.Logger
-	certMgr    *cert.CertManager
-	hsHandler  backend.HandshakeHandler
-	wg         waitgroup.WaitGroup
-	cancelFunc context.CancelFunc
+	listener          net.Listener
+	logger            *zap.Logger
+	certMgr           *cert.CertManager
+	hsHandler         backend.HandshakeHandler
+	requireBackendTLS bool
+	wg                waitgroup.WaitGroup
+	cancelFunc        context.CancelFunc
 
 	mu serverState
 }
@@ -61,9 +59,10 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 	var err error
 
 	s := &SQLServer{
-		logger:    logger,
-		certMgr:   certMgr,
-		hsHandler: hsHandler,
+		logger:            logger,
+		certMgr:           certMgr,
+		hsHandler:         hsHandler,
+		requireBackendTLS: cfg.RequireBackendTLS,
 		mu: serverState{
 			connID:  0,
 			clients: make(map[uint64]*client.ClientConnection),
@@ -82,8 +81,7 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 
 func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.Lock()
-	s.mu.frontendKeepalive = cfg.FrontendKeepalive
-	s.mu.backendKeepalive = cfg.BackendKeepalive
+	s.mu.tcpKeepAlive = cfg.FrontendKeepalive.Enabled
 	s.mu.maxConnections = cfg.MaxConnections
 	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
 	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
@@ -137,6 +135,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	s.mu.Lock()
 	conns := uint64(len(s.mu.clients))
 	maxConns := s.mu.maxConnections
+	tcpKeepAlive := s.mu.tcpKeepAlive
 
 	// 'maxConns == 0' => unlimited connections
 	if maxConns != 0 && conns >= maxConns {
@@ -153,12 +152,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
-	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(), s.hsHandler, connID, &backend.BCConfig{
-		ProxyProtocol:     s.mu.proxyProtocol,
-		RequireBackendTLS: s.mu.requireBackendTLS,
-		BackendKeepalive:  s.mu.backendKeepalive,
-	})
-	frontendKeepalive := s.mu.frontendKeepalive
+	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(), s.hsHandler, connID, s.mu.proxyProtocol, s.requireBackendTLS)
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 
@@ -178,7 +172,13 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		metrics.ConnGauge.Dec()
 	}()
 
-	logger.Warn("failed to enable keepalive", zap.Error(keepalive.SetKeepalive(conn, frontendKeepalive)))
+	if tcpKeepAlive {
+		if tcpConn, ok := conn.(*net.TCPConn); ok {
+			if err := tcpConn.SetKeepAlive(true); err != nil {
+				logger.Warn("failed to set tcp keep alive option", zap.Error(err))
+			}
+		}
+	}
 
 	clientConn.Run(ctx)
 }

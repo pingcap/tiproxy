@@ -41,18 +41,19 @@ type ClientConnection struct {
 }
 
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config,
-	hsHandler backend.HandshakeHandler, connID uint64, cfg *backend.BCConfig) *ClientConnection {
-	cfg.Check()
-	logger.Info("client connection config", zap.Any("cfg", cfg))
-	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, connID, cfg)
+	hsHandler backend.HandshakeHandler, connID uint64, proxyProtocol, requireBackendTLS bool) *ClientConnection {
+	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, connID, &backend.BCConfig{
+		ProxyProtocol:     proxyProtocol,
+		RequireBackendTLS: requireBackendTLS,
+	})
 	opts := make([]pnet.PacketIOption, 0, 2)
 	opts = append(opts, pnet.WithWrapError(ErrClientConn))
-	if cfg.ProxyProtocol {
+	if proxyProtocol {
 		opts = append(opts, pnet.WithProxy)
 	}
 	pkt := pnet.NewPacketIO(conn, opts...)
 	return &ClientConnection{
-		logger:            logger,
+		logger:            logger.With(zap.Bool("proxy-protocol", proxyProtocol)),
 		frontendTLSConfig: frontendTLSConfig,
 		backendTLSConfig:  backendTLSConfig,
 		pkt:               pkt,

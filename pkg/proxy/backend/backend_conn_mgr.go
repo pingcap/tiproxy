@@ -29,24 +29,22 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
-	"github.com/pingcap/TiProxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
 
-const (
-	DefDialTimeout          = 1 * time.Second
-	DefCheckBackendInterval = time.Minute
-)
-
 var (
 	ErrCloseConnMgr = errors.New("failed to close connection manager")
+)
+
+const (
+	DialTimeout          = 1 * time.Second
+	CheckBackendInterval = time.Minute
 )
 
 const (
@@ -85,17 +83,12 @@ const (
 type BCConfig struct {
 	ProxyProtocol        bool
 	RequireBackendTLS    bool
-	BackendKeepalive     config.KeepAlive
 	CheckBackendInterval time.Duration
-	DialTimeout          time.Duration
 }
 
-func (cfg *BCConfig) Check() {
+func (cfg *BCConfig) check() {
 	if cfg.CheckBackendInterval == time.Duration(0) {
-		cfg.CheckBackendInterval = DefCheckBackendInterval
-	}
-	if cfg.DialTimeout == 0 {
-		cfg.DialTimeout = DefDialTimeout
+		cfg.CheckBackendInterval = CheckBackendInterval
 	}
 }
 
@@ -138,7 +131,7 @@ type BackendConnManager struct {
 
 // NewBackendConnManager creates a BackendConnManager.
 func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler, connectionID uint64, config *BCConfig) *BackendConnManager {
-	config.Check()
+	config.check()
 	mgr := &BackendConnManager{
 		logger:           logger,
 		config:           config,
@@ -647,10 +640,17 @@ func (mgr *BackendConnManager) Close() error {
 }
 
 func (mgr *BackendConnManager) dialNewBackend(addr string) (net.Conn, error) {
-	cn, err := net.DialTimeout("tcp", addr, mgr.config.DialTimeout)
+	cn, err := net.DialTimeout("tcp", addr, DialTimeout)
 	if err != nil {
 		return cn, err
 	}
-	mgr.logger.Warn("failed to enable keepalive", zap.Error(keepalive.SetKeepalive(cn, mgr.config.BackendKeepalive)))
+	if tcpcn, ok := cn.(*net.TCPConn); ok {
+		if err := tcpcn.SetKeepAlive(true); err != nil {
+			mgr.logger.Warn("fail to set keepalive for backend", zap.Error(err))
+		}
+		if err := tcpcn.SetKeepAlivePeriod(15 * time.Second); err != nil {
+			mgr.logger.Warn("fail to set keepalive period for backend", zap.Error(err))
+		}
+	}
 	return cn, err
 }
