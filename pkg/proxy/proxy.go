@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
+	"github.com/pingcap/TiProxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
@@ -81,7 +82,7 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 
 func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.Lock()
-	s.mu.tcpKeepAlive = cfg.TCPKeepAlive
+	s.mu.tcpKeepAlive = cfg.FrontendKeepalive.Enabled
 	s.mu.maxConnections = cfg.MaxConnections
 	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
 	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
@@ -172,12 +173,8 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		metrics.ConnGauge.Dec()
 	}()
 
-	if tcpKeepAlive {
-		if tcpConn, ok := conn.(*net.TCPConn); ok {
-			if err := tcpConn.SetKeepAlive(true); err != nil {
-				logger.Warn("failed to set tcp keep alive option", zap.Error(err))
-			}
-		}
+	if err := keepalive.SetKeepalive(conn, config.KeepAlive{Enabled: tcpKeepAlive}); err != nil {
+		logger.Warn("failed to set tcp keep alive option", zap.Error(err))
 	}
 
 	clientConn.Run(ctx)

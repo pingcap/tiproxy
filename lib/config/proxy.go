@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -43,11 +44,19 @@ type Metrics struct {
 	MetricsInterval uint   `toml:"metrics-interval" json:"metrics-interval"`
 }
 
+type KeepAlive struct {
+	Enabled bool          `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty"`
+	Cnt     int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
+	Idle    time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty"`
+	Intvl   time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty"`
+}
+
 type ProxyServerOnline struct {
-	MaxConnections             uint64 `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
-	TCPKeepAlive               bool   `yaml:"tcp-keep-alive,omitempty" toml:"tcp-keep-alive,omitempty" json:"tcp-keep-alive,omitempty"`
-	ProxyProtocol              string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
-	GracefulWaitBeforeShutdown int    `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty"`
+	MaxConnections             uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
+	FrontendKeepalive          KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
+	BackendKeepalive           KeepAlive `yaml:"backend-keepalive" toml:"backend-keepalive" json:"backend-keepalive"`
+	ProxyProtocol              string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
+	GracefulWaitBeforeShutdown int       `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty"`
 }
 
 type ProxyServer struct {
@@ -114,7 +123,8 @@ func NewConfig() *Config {
 	var cfg Config
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
-	cfg.Proxy.TCPKeepAlive = true
+	cfg.Proxy.FrontendKeepalive.Enabled = true
+	cfg.Proxy.BackendKeepalive.Enabled = true
 	cfg.Proxy.RequireBackendTLS = true
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 
