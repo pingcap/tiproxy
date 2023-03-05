@@ -25,11 +25,15 @@ var (
 	ErrKeepAlive = errors.New("failed to set keepalive")
 )
 
-func SetKeepalive(conn net.Conn, cfg config.KeepAlive) error {
-	if !cfg.Enabled {
-		return nil
+func SetKeepalive(conn net.Conn, enabled bool) error {
+	tcpcn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return errors.Wrapf(ErrKeepAlive, "not net.TCPConn")
 	}
+	return errors.Wrap(ErrKeepAlive, tcpcn.SetKeepAlive(enabled))
+}
 
+func SetKeepaliveParams(conn net.Conn, cfg config.KeepAlive) error {
 	tcpcn, ok := conn.(*net.TCPConn)
 	if !ok {
 		return errors.Wrapf(ErrKeepAlive, "not net.TCPConn")

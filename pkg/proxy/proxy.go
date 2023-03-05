@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/proxy/client"
+	"github.com/pingcap/TiProxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
@@ -172,12 +173,8 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		metrics.ConnGauge.Dec()
 	}()
 
-	if tcpKeepAlive {
-		if tcpConn, ok := conn.(*net.TCPConn); ok {
-			if err := tcpConn.SetKeepAlive(true); err != nil {
-				logger.Warn("failed to set tcp keep alive option", zap.Error(err))
-			}
-		}
+	if err := keepalive.SetKeepalive(conn, tcpKeepAlive); err != nil {
+		logger.Warn("failed to set tcp keep alive option", zap.Error(err))
 	}
 
 	clientConn.Run(ctx)

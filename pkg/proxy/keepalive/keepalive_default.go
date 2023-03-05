@@ -23,11 +23,5 @@ import (
 )
 
 func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
-	var serr error
-	return errors.Collect(ErrKeepAlive, serr, syscn.Control(func(fd uintptr) {
-		serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_KEEPALIVE, 1)
-		if serr != nil {
-			return
-		}
-	}))
+	return nil
 }

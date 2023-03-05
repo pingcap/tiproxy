@@ -31,10 +31,6 @@ const (
 func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
 	var serr error
 	return errors.Collect(ErrKeepAlive, serr, syscn.Control(func(fd uintptr) {
-		serr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_KEEPALIVE, 1)
-		if serr != nil {
-			return
-		}
 		if val := cfg.Idle.Seconds(); val > 0 {
 			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, int(val))
 			if serr != nil {
