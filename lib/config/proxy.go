@@ -120,13 +120,28 @@ type Security struct {
 	SQLTLS     TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
 }
 
+func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
+	frontend.Enabled = true
+	backendUnhealthy = KeepAlive{
+		Enabled: true,
+		Cnt:     5,
+		Idle:    60 * time.Second,
+		Intvl:   5 * time.Second,
+	}
+	backendUnhealthy = KeepAlive{
+		Enabled: true,
+		Cnt:     2,
+		Idle:    1 * time.Second,
+		Intvl:   1 * time.Second,
+	}
+	return
+}
+
 func NewConfig() *Config {
 	var cfg Config
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
-	cfg.Proxy.FrontendKeepalive.Enabled = true
-	cfg.Proxy.BackendHealthyKeepalive.Enabled = true
-	cfg.Proxy.BackendUnHealthyKeepalive.Enabled = true
+	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnHealthyKeepalive = DefaultKeepAlive()
 	cfg.Proxy.RequireBackendTLS = true
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 
