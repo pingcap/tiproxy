@@ -41,6 +41,7 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -75,6 +76,9 @@ func (f *rdbufConn) Read(b []byte) (int, error) {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
+	// The lock only locks conn now.
+	// conn is written during TLS handshake and read during setting keep alive concurrently.
+	sync.RWMutex
 	inBytes     uint64
 	outBytes    uint64
 	conn        net.Conn
@@ -120,10 +124,15 @@ func (p *PacketIO) Proxy() *Proxy {
 }
 
 func (p *PacketIO) LocalAddr() net.Addr {
-	return p.conn.LocalAddr()
+	p.RLock()
+	addr := p.conn.LocalAddr()
+	p.RUnlock()
+	return addr
 }
 
 func (p *PacketIO) RemoteAddr() net.Addr {
+	p.RLock()
+	defer p.RUnlock()
 	if p.remoteAddr != nil {
 		return p.remoteAddr
 	}
@@ -256,6 +265,8 @@ func (p *PacketIO) OutBytes() uint64 {
 }
 
 func (p *PacketIO) TLSConnectionState() tls.ConnectionState {
+	p.RLock()
+	defer p.RUnlock()
 	if tlsConn, ok := p.conn.(*tls.Conn); ok {
 		return tlsConn.ConnectionState()
 	}
@@ -274,6 +285,8 @@ func (p *PacketIO) Flush() error {
 // This function normally costs 1ms, so don't call it too frequently.
 // This function may incorrectly return true if the system is extremely slow.
 func (p *PacketIO) IsPeerActive() bool {
+	p.RLock()
+	defer p.RUnlock()
 	if err := p.conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
 		return false
 	}
@@ -288,6 +301,8 @@ func (p *PacketIO) IsPeerActive() bool {
 }
 
 func (p *PacketIO) GracefulClose() error {
+	p.RLock()
+	defer p.RUnlock()
 	if err := p.conn.SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
@@ -302,8 +317,10 @@ func (p *PacketIO) Close() error {
 			errs = append(errs, err)
 		}
 	*/
+	p.RLock()
 	if err := p.conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		errs = append(errs, err)
 	}
+	p.RUnlock()
 	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))
 }

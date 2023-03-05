@@ -22,6 +22,8 @@ import (
 )
 
 func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error) {
+	p.Lock()
+	defer p.Unlock()
 	tlsConfig = tlsConfig.Clone()
 	tlsConn := tls.Server(p.conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
@@ -35,6 +37,8 @@ func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionStat
 }
 
 func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
+	p.Lock()
+	defer p.Unlock()
 	tlsConfig = tlsConfig.Clone()
 	tlsConn := tls.Client(p.conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {

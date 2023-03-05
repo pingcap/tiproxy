@@ -148,7 +148,7 @@ func TestPacketIO(t *testing.T) {
 func TestTLS(t *testing.T) {
 	stls, ctls, err := security.CreateTLSConfigForTest()
 	require.NoError(t, err)
-	message := []byte("hello wolrd")
+	message := []byte("hello world")
 	testTCPConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			data, err := cli.ReadPacket()
