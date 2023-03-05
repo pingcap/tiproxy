@@ -131,12 +131,13 @@ func (p *PacketIO) LocalAddr() net.Addr {
 }
 
 func (p *PacketIO) RemoteAddr() net.Addr {
-	p.RLock()
-	defer p.RUnlock()
 	if p.remoteAddr != nil {
 		return p.remoteAddr
 	}
-	return p.conn.RemoteAddr()
+	p.RLock()
+	addr := p.conn.RemoteAddr()
+	p.RUnlock()
+	return addr
 }
 
 func (p *PacketIO) ResetSequence() {
@@ -302,8 +303,9 @@ func (p *PacketIO) IsPeerActive() bool {
 
 func (p *PacketIO) GracefulClose() error {
 	p.RLock()
-	defer p.RUnlock()
-	if err := p.conn.SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
+	err := p.conn.SetDeadline(time.Now())
+	p.RUnlock()
+	if err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
 	return nil
