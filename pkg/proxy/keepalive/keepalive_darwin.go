@@ -36,7 +36,7 @@ func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
 		if serr != nil {
 			return
 		}
-		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, int(cfg.Idle))
+		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPALIVE, int(cfg.Idle.Seconds()))
 		if serr != nil {
 			return
 		}
@@ -44,7 +44,7 @@ func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
 		if serr != nil {
 			return
 		}
-		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, _TCP_KEEPINTVL, int(cfg.Intvl))
+		serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, _TCP_KEEPINTVL, int(cfg.Intvl.Seconds()))
 		if serr != nil {
 			return
 		}
