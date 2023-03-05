@@ -158,7 +158,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
 	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(),
-		s.hsHandler, connID, s.mu.proxyProtocol, s.requireBackendTLS, s.mu.healthyKeepAlive, s.mu.unhealthyKeepAlive)
+		s.hsHandler, connID, &backend.BCConfig{
+			ProxyProtocol:      s.mu.proxyProtocol,
+			RequireBackendTLS:  s.requireBackendTLS,
+			HealthyKeepAlive:   s.mu.healthyKeepAlive,
+			UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
+		})
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()
 

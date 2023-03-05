@@ -85,8 +85,8 @@ type BCConfig struct {
 	ProxyProtocol        bool
 	RequireBackendTLS    bool
 	CheckBackendInterval time.Duration
-	HealthyKeepAlive     *config.KeepAlive
-	UnhealthyKeepAlive   *config.KeepAlive
+	HealthyKeepAlive     config.KeepAlive
+	UnhealthyKeepAlive   config.KeepAlive
 }
 
 func (cfg *BCConfig) check() {

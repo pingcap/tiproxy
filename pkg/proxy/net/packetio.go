@@ -77,8 +77,9 @@ func (f *rdbufConn) Read(b []byte) (int, error) {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
-	inBytes  uint64
-	outBytes uint64
+	lastKeepAlive config.KeepAlive
+	inBytes       uint64
+	outBytes      uint64
 	// conn is written during TLS handshake and read during setting keep alive concurrently.
 	conn        atomic.Pointer[net.Conn]
 	buf         *bufio.ReadWriter
@@ -292,6 +293,10 @@ func (p *PacketIO) IsPeerActive() bool {
 }
 
 func (p *PacketIO) SetKeepalive(cfg config.KeepAlive) error {
+	if cfg == p.lastKeepAlive {
+		return nil
+	}
+	p.lastKeepAlive = cfg
 	return keepalive.SetKeepalive(*p.conn.Load(), cfg)
 }
 
