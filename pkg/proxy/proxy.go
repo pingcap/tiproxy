@@ -173,7 +173,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 		metrics.ConnGauge.Dec()
 	}()
 
-	if err := keepalive.SetKeepalive(conn, tcpKeepAlive); err != nil {
+	if err := keepalive.SetKeepalive(conn, config.KeepAlive{Enabled: tcpKeepAlive}); err != nil {
 		logger.Warn("failed to set tcp keep alive option", zap.Error(err))
 	}
 

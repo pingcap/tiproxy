@@ -20,6 +20,7 @@ import (
 	"syscall"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
 const (
