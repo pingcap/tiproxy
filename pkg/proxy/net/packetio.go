@@ -48,7 +48,6 @@ import (
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/dbterror"
-	goatomic "go.uber.org/atomic"
 )
 
 var (
@@ -81,7 +80,7 @@ type PacketIO struct {
 	// conn is written during TLS handshake and read during setting keep alive concurrently.
 	conn        atomic.Pointer[net.Conn]
 	buf         *bufio.ReadWriter
-	proxyInited *goatomic.Bool
+	proxyInited atomic.Bool
 	proxy       *Proxy
 	remoteAddr  net.Addr
 	wrap        error
@@ -95,10 +94,10 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 	)
 	p := &PacketIO{
 		sequence: 0,
-		// TODO: disable it by default now
-		proxyInited: goatomic.NewBool(true),
-		buf:         buf,
+		buf:      buf,
 	}
+	// TODO: disable it by default now
+	p.proxyInited.Store(true)
 	cn := (net.Conn)(&rdbufConn{
 		conn,
 		buf.Reader,
