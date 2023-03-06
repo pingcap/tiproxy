@@ -172,12 +172,14 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 
 	mgr.clientIO = clientIO
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
-	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
 	if err != nil {
 		mgr.setQuitSourceByErr(err)
+		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
 		WriteUserError(clientIO, err, mgr.logger)
 		return err
 	}
+	mgr.setQuitSourceByErr(nil)
+	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
@@ -244,6 +246,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
 			origErr = err
+			mgr.setQuitSourceByErr(err)
 			mgr.handshakeHandler.OnHandshake(cctx, addr, err)
 		},
 	)
@@ -449,9 +452,11 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		return
 	}
 
+	defer mgr.setQuitSourceByErr(nil)
 	var cn net.Conn
 	cn, rs.err = net.DialTimeout("tcp", rs.to, DialTimeout)
 	if rs.err != nil {
+		mgr.quitSource = SrcBackendQuit
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err)
 		return
 	}
@@ -460,6 +465,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)
 	} else {
+		mgr.setQuitSourceByErr(rs.err)
 		mgr.handshakeHandler.OnHandshake(mgr, newBackendIO.RemoteAddr().String(), rs.err)
 	}
 	if rs.err != nil {
@@ -693,8 +699,13 @@ func (mgr *BackendConnManager) setKeepAlive(cfg config.KeepAlive) {
 	}
 }
 
+// quitSource will be read by OnHandshake and OnConnClose, so setQuitSourceByErr should be called before them.
 func (mgr *BackendConnManager) setQuitSourceByErr(err error) {
+	// SrcClientQuit is by default.
+	// Sometimes ErrClientConn is caused by GracefulClose and the quitSource is already set.
+	// Error maybe set during handshake for OnHandshake. If handshake finally succeeds, we reset it.
 	if err == nil {
+		mgr.quitSource = SrcClientQuit
 		return
 	}
 	if errors.Is(err, ErrBackendConn) {
@@ -704,6 +715,4 @@ func (mgr *BackendConnManager) setQuitSourceByErr(err error) {
 	} else if !errors.Is(err, ErrClientConn) {
 		mgr.quitSource = SrcProxyErr
 	}
-	// SrcClientQuit is by default and we don't set it explicitly.
-	// Sometimes ErrClientConn is caused by GracefulClose and the quitSource is already set.
 }
