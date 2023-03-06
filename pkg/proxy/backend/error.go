@@ -27,6 +27,11 @@ const (
 	capabilityErrMsg = "Verify TiDB capability failed, please upgrade TiDB"
 )
 
+var (
+	ErrClientConn  = errors.New("this is an error from client")
+	ErrBackendConn = errors.New("this is an error from backend")
+)
+
 // UserError is returned to the client.
 // err is used to log and userMsg is used to report to the user.
 type UserError struct {

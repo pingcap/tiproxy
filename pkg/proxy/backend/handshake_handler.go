@@ -28,6 +28,41 @@ const (
 	ConnContextKeyTLSState ConnContextKey = "tls-state"
 )
 
+type ErrorSource int
+
+const (
+	// SrcClientQuit includes: client quit; bad client conn
+	SrcClientQuit ErrorSource = iota
+	// SrcClientErr includes: wrong password; mal format packet
+	SrcClientErr
+	// SrcProxyQuit includes: proxy graceful shutdown
+	SrcProxyQuit
+	// SrcProxyErr includes: cannot get backend list; capability negotiation
+	SrcProxyErr
+	// SrcBackendQuit includes: backend quit
+	SrcBackendQuit
+	// SrcBackendErr is reserved
+	SrcBackendErr
+)
+
+func (es ErrorSource) String() string {
+	switch es {
+	case SrcClientQuit:
+		return "client quit"
+	case SrcClientErr:
+		return "client error"
+	case SrcProxyQuit:
+		return "proxy shutdown"
+	case SrcProxyErr:
+		return "proxy error"
+	case SrcBackendQuit:
+		return "backend quit"
+	case SrcBackendErr:
+		return "backend error"
+	}
+	return "unknown"
+}
+
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 
 type ConnContext interface {
@@ -35,6 +70,7 @@ type ConnContext interface {
 	ServerAddr() string
 	ClientInBytes() uint64
 	ClientOutBytes() uint64
+	QuitSource() ErrorSource
 	SetValue(key, val any)
 	Value(key any) any
 }

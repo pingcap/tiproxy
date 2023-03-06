@@ -17,19 +17,13 @@ package client
 import (
 	"context"
 	"crypto/tls"
-	"io"
 	"net"
-	"os"
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"go.uber.org/zap"
-)
-
-var (
-	ErrClientConn = errors.New("this is an error from client")
 )
 
 type ClientConnection struct {
@@ -44,7 +38,7 @@ func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *t
 	hsHandler backend.HandshakeHandler, connID uint64, bcConfig *backend.BCConfig) *ClientConnection {
 	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, connID, bcConfig)
 	opts := make([]pnet.PacketIOption, 0, 2)
-	opts = append(opts, pnet.WithWrapError(ErrClientConn))
+	opts = append(opts, pnet.WithWrapError(backend.ErrClientConn))
 	if bcConfig.ProxyProtocol {
 		opts = append(opts, pnet.WithProxy)
 	}
@@ -72,12 +66,12 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 	}
 
 clean:
-	clientErr := errors.Is(err, ErrClientConn)
-	// EOF: client closes; DeadlineExceeded: graceful shutdown; Closed: shut down.
-	if clientErr && (errors.Is(err, io.EOF) || errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, net.ErrClosed)) {
-		return
+	src := cc.connMgr.QuitSource()
+	switch src {
+	case backend.SrcClientQuit, backend.SrcClientErr, backend.SrcProxyQuit:
+	default:
+		cc.logger.Info(msg, zap.Error(err), zap.Stringer("quit source", src))
 	}
-	cc.logger.Info(msg, zap.Error(err), zap.Bool("clientErr", clientErr), zap.Bool("serverErr", !clientErr))
 }
 
 func (cc *ClientConnection) processMsg(ctx context.Context) error {
