@@ -15,7 +15,6 @@
 package router
 
 import (
-	"container/list"
 	"context"
 	"math"
 	"math/rand"
@@ -24,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
@@ -102,7 +102,7 @@ type routerTester struct {
 func newRouterTester(t *testing.T) *routerTester {
 	router := &ScoreBasedRouter{
 		logger:   logger.CreateLoggerForTest(t),
-		backends: list.New(),
+		backends: glist.New[*backendWrapper](),
 	}
 	t.Cleanup(router.Close)
 	return &routerTester{
@@ -163,13 +163,13 @@ func (tester *routerTester) getBackendByIndex(index int) *backendWrapper {
 	for i := 0; be != nil && i < index; be, i = be.Next(), i+1 {
 	}
 	require.NotNil(tester.t, be)
-	return be.Value.(*backendWrapper)
+	return be.Value
 }
 
 func (tester *routerTester) checkBackendOrder() {
 	score := math.MaxInt
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
-		backend := be.Value.(*backendWrapper)
+		backend := be.Value
 		// Empty unhealthy backends should be removed.
 		if backend.status == StatusCannotConnect {
 			require.NotEqual(tester.t, 0, backend.connList.Len())
@@ -266,7 +266,7 @@ func (tester *routerTester) redirectFinish(num int, succeed bool) {
 func (tester *routerTester) checkBalanced() {
 	maxNum, minNum := 0, math.MaxInt
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
-		backend := be.Value.(*backendWrapper)
+		backend := be.Value
 		// Empty unhealthy backends should be removed.
 		require.Equal(tester.t, StatusHealthy, backend.status)
 		curScore := backend.score()
@@ -297,7 +297,7 @@ func (tester *routerTester) checkBackendNum(num int) {
 
 func (tester *routerTester) checkBackendConnMetrics() {
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
-		backend := be.Value.(*backendWrapper)
+		backend := be.Value
 		val, err := readBackendConnMetrics(backend.addr)
 		require.NoError(tester.t, err)
 		require.Equal(tester.t, backend.connList.Len(), val)
@@ -306,7 +306,7 @@ func (tester *routerTester) checkBackendConnMetrics() {
 
 func (tester *routerTester) clear() {
 	tester.conns = make(map[uint64]*mockRedirectableConn)
-	tester.router.backends = list.New()
+	tester.router.backends = glist.New[*backendWrapper]()
 }
 
 // Test that the backends are always ordered by scores.
@@ -700,7 +700,7 @@ func TestRefresh(t *testing.T) {
 	lg := logger.CreateLoggerForTest(t)
 	rt := &ScoreBasedRouter{
 		logger:   lg,
-		backends: list.New(),
+		backends: glist.New[*backendWrapper](),
 	}
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
@@ -742,7 +742,7 @@ func TestObserveError(t *testing.T) {
 	lg := logger.CreateLoggerForTest(t)
 	rt := &ScoreBasedRouter{
 		logger:   lg,
-		backends: list.New(),
+		backends: glist.New[*backendWrapper](),
 	}
 	observer, err := StartBackendObserver(lg, rt, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)

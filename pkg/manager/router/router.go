@@ -15,9 +15,9 @@
 package router
 
 import (
-	"container/list"
 	"time"
 
+	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
@@ -85,8 +85,8 @@ type backendWrapper struct {
 	addr   string
 	// A list of *connWrapper and is ordered by the connecting or redirecting time.
 	// connList and connMap include moving out connections but not moving in connections.
-	connList *list.List
-	connMap  map[uint64]*list.Element
+	connList *glist.List[*connWrapper]
+	connMap  map[uint64]*glist.Element[*connWrapper]
 }
 
 // score calculates the score of the backend. Larger score indicates higher load.
