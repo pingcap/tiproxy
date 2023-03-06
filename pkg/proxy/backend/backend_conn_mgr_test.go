@@ -799,6 +799,9 @@ func TestGetBackendIO(t *testing.T) {
 			if err != nil && len(s) > 0 {
 				badAddrs[s] = struct{}{}
 			}
+			if err != nil {
+				require.Equal(t, SrcProxyErr, connContext.QuitSource())
+			}
 		},
 	}
 	mgr := NewBackendConnManager(logger.CreateLoggerForTest(t), handler, 0, &BCConfig{})
