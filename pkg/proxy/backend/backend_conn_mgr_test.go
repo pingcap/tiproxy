@@ -388,6 +388,12 @@ func TestConnectFail(t *testing.T) {
 				return ts.mb.authenticate(ts.tc.backendIO)
 			},
 		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				require.Equal(t, SrcClientErr, ts.mp.QuitSource())
+				return nil
+			},
+		},
 	}
 	ts.runTests(runners)
 }
@@ -499,6 +505,7 @@ func TestSpecialCmds(t *testing.T) {
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
 				require.NotEqual(t, backend1, ts.mp.backendIO.Load())
+				require.Equal(t, SrcClientQuit, ts.mp.QuitSource())
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
@@ -599,6 +606,12 @@ func TestCustomHandshake(t *testing.T) {
 			},
 			backend: ts.redirectSucceed4Backend,
 		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				require.Equal(t, SrcClientQuit, ts.mp.QuitSource())
+				return nil
+			},
+		},
 	}
 	ts.runTests(runners)
 }
@@ -622,6 +635,12 @@ func TestGracefulCloseWhenIdle(t *testing.T) {
 		// really closed
 		{
 			proxy: ts.checkConnClosed4Proxy,
+		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
+				return nil
+			},
 		},
 	}
 	ts.runTests(runners)
@@ -661,6 +680,12 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 		{
 			proxy: ts.checkConnClosed4Proxy,
 		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
+				return nil
+			},
+		},
 	}
 	ts.runTests(runners)
 }
@@ -685,14 +710,21 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 		{
 			proxy: ts.checkConnClosed4Proxy,
 		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
+				return nil
+			},
+		},
 	}
 	ts.runTests(runners)
 }
 
 func TestHandlerReturnError(t *testing.T) {
 	tests := []struct {
-		cfg    cfgOverrider
-		errMsg string
+		cfg        cfgOverrider
+		errMsg     string
+		quitSource ErrorSource
 	}{
 		{
 			cfg: func(config *testConfig) {
@@ -700,7 +732,8 @@ func TestHandlerReturnError(t *testing.T) {
 					return nil, errors.New("mocked error")
 				}
 			},
-			errMsg: "mocked error",
+			errMsg:     "mocked error",
+			quitSource: SrcProxyErr,
 		},
 		{
 			cfg: func(config *testConfig) {
@@ -708,7 +741,8 @@ func TestHandlerReturnError(t *testing.T) {
 					return errors.New("mocked error")
 				}
 			},
-			errMsg: "mocked error",
+			errMsg:     "mocked error",
+			quitSource: SrcProxyErr,
 		},
 		{
 			// TODO: make it fail faster.
@@ -717,7 +751,8 @@ func TestHandlerReturnError(t *testing.T) {
 					return router.NewStaticRouter(nil), nil
 				}
 			},
-			errMsg: connectErrMsg,
+			errMsg:     connectErrMsg,
+			quitSource: SrcProxyErr,
 		},
 	}
 	for _, test := range tests {
@@ -732,6 +767,7 @@ func TestHandlerReturnError(t *testing.T) {
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
 				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
 				require.Error(t, err)
+				require.Equal(t, test.quitSource, ts.mp.QuitSource())
 				return nil
 			},
 			backend: nil,
@@ -863,6 +899,12 @@ func TestBackendInactive(t *testing.T) {
 			proxy: ts.checkConnClosed4Proxy,
 			backend: func(packetIO *pnet.PacketIO) error {
 				return packetIO.Close()
+			},
+		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				require.Equal(t, SrcBackendQuit, ts.mp.QuitSource())
+				return nil
 			},
 		},
 	}
