@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bahlo/generic-list-go"
+	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
@@ -102,7 +102,7 @@ type routerTester struct {
 func newRouterTester(t *testing.T) *routerTester {
 	router := &ScoreBasedRouter{
 		logger:   logger.CreateLoggerForTest(t),
-		backends: list.New[*backendWrapper](),
+		backends: glist.New[*backendWrapper](),
 	}
 	t.Cleanup(router.Close)
 	return &routerTester{
@@ -306,7 +306,7 @@ func (tester *routerTester) checkBackendConnMetrics() {
 
 func (tester *routerTester) clear() {
 	tester.conns = make(map[uint64]*mockRedirectableConn)
-	tester.router.backends = list.New[*backendWrapper]()
+	tester.router.backends = glist.New[*backendWrapper]()
 }
 
 // Test that the backends are always ordered by scores.
@@ -700,7 +700,7 @@ func TestRefresh(t *testing.T) {
 	lg := logger.CreateLoggerForTest(t)
 	rt := &ScoreBasedRouter{
 		logger:   lg,
-		backends: list.New[*backendWrapper](),
+		backends: glist.New[*backendWrapper](),
 	}
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
@@ -742,7 +742,7 @@ func TestObserveError(t *testing.T) {
 	lg := logger.CreateLoggerForTest(t)
 	rt := &ScoreBasedRouter{
 		logger:   lg,
-		backends: list.New[*backendWrapper](),
+		backends: glist.New[*backendWrapper](),
 	}
 	observer, err := StartBackendObserver(lg, rt, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
