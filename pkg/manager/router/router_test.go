@@ -41,6 +41,14 @@ type mockRedirectableConn struct {
 	receiver ConnEventReceiver
 }
 
+func newMockRedirectableConn(t *testing.T, id uint64) *mockRedirectableConn {
+	return &mockRedirectableConn{
+		t:      t,
+		connID: id,
+		kv:     make(map[any]any),
+	}
+}
+
 func (conn *mockRedirectableConn) SetEventReceiver(receiver ConnEventReceiver) {
 	conn.Lock()
 	conn.receiver = receiver
@@ -124,10 +132,7 @@ func newRouterTester(t *testing.T) *routerTester {
 
 func (tester *routerTester) createConn() *mockRedirectableConn {
 	tester.connID++
-	return &mockRedirectableConn{
-		t:      tester.t,
-		connID: tester.connID,
-	}
+	return newMockRedirectableConn(tester.t, tester.connID)
 }
 
 func (tester *routerTester) addBackends(num int) {
@@ -648,10 +653,7 @@ func TestConcurrency(t *testing.T) {
 
 					if conn == nil {
 						// not connected, connect
-						conn = &mockRedirectableConn{
-							t:      t,
-							connID: connID,
-						}
+						conn = newMockRedirectableConn(t, connID)
 						selector := router.GetBackendSelector()
 						addr, err := selector.Next()
 						require.NoError(t, err)
