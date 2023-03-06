@@ -248,6 +248,7 @@ func TestNormalRedirect(t *testing.T) {
 				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
 				require.NotEqual(t, backend1, ts.mp.backendIO.Load())
+				require.Equal(t, SrcClientQuit, ts.mp.QuitSource())
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,
@@ -352,6 +353,7 @@ func TestRedirectInTxn(t *testing.T) {
 				require.NoError(t, err)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventFail)
 				require.Equal(t, backend1, ts.mp.backendIO.Load())
+				require.Equal(t, SrcClientQuit, ts.mp.QuitSource())
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
