@@ -277,17 +277,21 @@ func TestKeepAlive(t *testing.T) {
 		func(t *testing.T, cli *PacketIO) {
 			require.NoError(t, cli.SetKeepalive(frontend))
 			require.NoError(t, cli.ClientTLSHandshake(ctls))
-			// timeout by keepalive + timeout
-			time.Sleep(backendUnhealthy.Timeout)
+			time.Sleep(3 * time.Second)
 			_, err := cli.ReadPacket()
-			require.Error(t, err)
+			require.NoError(t, err)
+			require.NoError(t, cli.WritePacket([]byte{0, 1, 2}, true))
 		},
 		func(t *testing.T, srv *PacketIO) {
 			require.NoError(t, srv.SetKeepalive(backendHealthy))
 			_, err = srv.ServerTLSHandshake(stls)
 			require.NoError(t, err)
 			require.NoError(t, srv.SetKeepalive(backendUnhealthy))
+			require.NoError(t, srv.WritePacket([]byte{0, 1, 2}, true))
+			time.Sleep(3*time.Second + 100*time.Millisecond)
+			_, err := srv.ReadPacket()
+			require.NoError(t, err)
 		},
-		2,
+		1,
 	)
 }
