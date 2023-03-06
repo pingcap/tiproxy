@@ -63,4 +63,4 @@ jobs:
       ref: ${{ inputs.ref || github.ref }}
       debug: false
       target: "lint test"
-      all_platform: false
+      all_platform: true

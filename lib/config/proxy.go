@@ -46,9 +46,10 @@ type Metrics struct {
 
 type KeepAlive struct {
 	Enabled bool          `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty"`
-	Cnt     int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
 	Idle    time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty"`
+	Cnt     int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
 	Intvl   time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty"`
+	Timeout time.Duration `yaml:"timeout,omitempty" toml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
 type ProxyServerOnline struct {
@@ -123,13 +124,15 @@ type Security struct {
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
 	frontend.Enabled = true
 	backendHealthy.Enabled = true
-	backendHealthy.Cnt = 5
 	backendHealthy.Idle = 60 * time.Second
+	backendHealthy.Cnt = 5
 	backendHealthy.Intvl = 5 * time.Second
+	backendHealthy.Timeout = 30 * time.Second
 	backendUnhealthy.Enabled = true
-	backendUnhealthy.Cnt = 2
 	backendUnhealthy.Idle = 1 * time.Second
+	backendUnhealthy.Cnt = 2
 	backendUnhealthy.Intvl = 1 * time.Second
+	backendUnhealthy.Timeout = 3 * time.Second
 	return
 }
 

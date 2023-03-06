@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	ErrKeepAlive = errors.New("failed to set keepalive")
+	ErrKeepAlive = errors.New("failed to set keepalive and timeout")
 )
 
 func SetKeepalive(conn net.Conn, cfg config.KeepAlive) error {
@@ -34,14 +34,17 @@ func SetKeepalive(conn net.Conn, cfg config.KeepAlive) error {
 	if err := tcpcn.SetKeepAlive(cfg.Enabled); err != nil {
 		return errors.Wrap(ErrKeepAlive, err)
 	}
-	if !cfg.Enabled {
-		return nil
-	}
 
 	syscn, err := tcpcn.SyscallConn()
 	if err != nil {
 		return errors.Wrap(ErrKeepAlive, err)
 	}
 
-	return setKeepalive(syscn, cfg)
+	var kerr, terr error
+	return errors.Collect(ErrKeepAlive, kerr, terr, syscn.Control(func(fd uintptr) {
+		if cfg.Enabled {
+			kerr = setKeepalive(fd, cfg)
+		}
+		terr = setTimeout(fd, cfg)
+	}))
 }

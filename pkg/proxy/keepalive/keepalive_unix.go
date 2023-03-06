@@ -20,29 +20,23 @@ import (
 	"syscall"
 
 	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/errors"
 )
 
-func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
-	var serr error
-	return errors.Collect(ErrKeepAlive, serr, syscn.Control(func(fd uintptr) {
-		if val := cfg.Idle.Seconds(); val > 0 {
-			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, int(val))
-			if serr != nil {
-				return
-			}
+func setKeepalive(fd uintptr, cfg config.KeepAlive) error {
+	if val := cfg.Idle.Seconds(); val > 0 {
+		if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPIDLE, int(val)); err != nil {
+			return err
 		}
-		if cfg.Cnt > 0 {
-			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, cfg.Cnt)
-			if serr != nil {
-				return
-			}
+	}
+	if cfg.Cnt > 0 {
+		if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPCNT, cfg.Cnt); err != nil {
+			return err
 		}
-		if val := cfg.Intvl.Seconds(); val > 0 {
-			serr = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, int(val))
-			if serr != nil {
-				return
-			}
+	}
+	if val := cfg.Intvl.Seconds(); val > 0 {
+		if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_KEEPINTVL, int(val)); err != nil {
+			return err
 		}
-	}))
+	}
+	return nil
 }
