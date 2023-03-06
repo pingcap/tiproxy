@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/security"
@@ -268,17 +269,29 @@ func TestKeepAlive(t *testing.T) {
 	stls, ctls, err := security.CreateTLSConfigForTest()
 	require.NoError(t, err)
 	frontend, backendHealthy, backendUnhealthy := config.DefaultKeepAlive()
+	backendUnhealthy.Timeout = 2 * time.Second
+	backendUnhealthy.Idle = time.Second
+	backendUnhealthy.Cnt = 1
+	backendUnhealthy.Intvl = time.Second
 	testTCPConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			require.NoError(t, cli.SetKeepalive(frontend))
 			require.NoError(t, cli.ClientTLSHandshake(ctls))
+			time.Sleep(3 * time.Second)
+			_, err := cli.ReadPacket()
+			require.NoError(t, err)
+			require.NoError(t, cli.WritePacket([]byte{0, 1, 2}, true))
 		},
 		func(t *testing.T, srv *PacketIO) {
 			require.NoError(t, srv.SetKeepalive(backendHealthy))
 			_, err = srv.ServerTLSHandshake(stls)
 			require.NoError(t, err)
 			require.NoError(t, srv.SetKeepalive(backendUnhealthy))
+			require.NoError(t, srv.WritePacket([]byte{0, 1, 2}, true))
+			time.Sleep(3*time.Second + 100*time.Millisecond)
+			_, err := srv.ReadPacket()
+			require.NoError(t, err)
 		},
-		10,
+		1,
 	)
 }

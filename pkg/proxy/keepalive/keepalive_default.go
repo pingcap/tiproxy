@@ -17,11 +17,9 @@
 package keepalive
 
 import (
-	"syscall"
-
 	"github.com/pingcap/TiProxy/lib/config"
 )
 
-func setKeepalive(syscn syscall.RawConn, cfg config.KeepAlive) error {
+func setKeepalive(fd uintptr, cfg config.KeepAlive) error {
 	return nil
 }
