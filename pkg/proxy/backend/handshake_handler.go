@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"go.uber.org/zap"
 )
 
 // Context keys.
@@ -71,6 +72,7 @@ type ConnContext interface {
 	ClientInBytes() uint64
 	ClientOutBytes() uint64
 	QuitSource() ErrorSource
+	UpdateLogger(fields ...zap.Field)
 	SetValue(key, val any)
 	Value(key any) any
 }
@@ -105,6 +107,7 @@ func (handler *DefaultHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Ha
 	if !ok {
 		return nil, errors.New("failed to find a namespace")
 	}
+	ctx.UpdateLogger(zap.String("ns", ns.Name()))
 	return ns.GetRouter(), nil
 }
 
