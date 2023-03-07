@@ -721,6 +721,6 @@ func (mgr *BackendConnManager) resetQuitSource() {
 	mgr.quitSource = SrcClientQuit
 }
 
-func (mgr *BackendConnManager) UpdateLogger(f func(logger *zap.Logger) *zap.Logger) {
-	mgr.logger = f(mgr.logger)
+func (mgr *BackendConnManager) UpdateLogger(fields ...zap.Field) {
+	mgr.logger = mgr.logger.With(fields...)
 }

@@ -72,7 +72,7 @@ type ConnContext interface {
 	ClientInBytes() uint64
 	ClientOutBytes() uint64
 	QuitSource() ErrorSource
-	UpdateLogger(func(logger *zap.Logger) *zap.Logger)
+	UpdateLogger(fields ...zap.Field)
 	SetValue(key, val any)
 	Value(key any) any
 }
@@ -107,9 +107,7 @@ func (handler *DefaultHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Ha
 	if !ok {
 		return nil, errors.New("failed to find a namespace")
 	}
-	ctx.UpdateLogger(func(logger *zap.Logger) *zap.Logger {
-		return logger.With(zap.String("ns", ns.Name()))
-	})
+	ctx.UpdateLogger(zap.String("ns", ns.Name()))
 	return ns.GetRouter(), nil
 }
 
