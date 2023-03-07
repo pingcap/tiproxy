@@ -143,6 +143,8 @@ spec:
         baseImage: {your-image}
 ```
 
+Note that if you have enabled `tlsCluster`, you don't need to set the signing certs, `additionalVolumes` and `additionalVolumeMounts`.
+
 4. Connect to TiProxy with your client. The default port is 6000:
 
 ```shell
