@@ -720,3 +720,7 @@ func (mgr *BackendConnManager) resetQuitSource() {
 	// Error maybe set during handshake for OnHandshake. If handshake finally succeeds, we reset it.
 	mgr.quitSource = SrcClientQuit
 }
+
+func (mgr *BackendConnManager) UpdateLogger(f func(logger *zap.Logger) *zap.Logger) {
+	mgr.logger = f(mgr.logger)
+}
