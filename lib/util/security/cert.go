@@ -27,13 +27,20 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// Recreate the auto certs one hour before it expires.
+	// It should be longer than defaultRetryInterval.
+	recreateAutoCertAdvance = 24 * time.Hour
+)
+
 var emptyCert = new(tls.Certificate)
 
 type CertInfo struct {
-	cfg    config.TLSConfig
-	ca     atomic.Value
-	cert   atomic.Value
-	server bool
+	cfg         config.TLSConfig
+	ca          atomic.Value
+	cert        atomic.Value
+	autoCertExp atomic.Int64
+	server      bool
 }
 
 func NewCert(lg *zap.Logger, cfg config.TLSConfig, server bool) (*CertInfo, *tls.Config, error) {
@@ -169,13 +176,17 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	var certPEM, keyPEM []byte
 	var err error
 	if autoCerts {
-		dur, err := time.ParseDuration(ci.cfg.AutoExpireDuration)
-		if err != nil {
-			dur = DefaultCertExpiration
-		}
-		certPEM, keyPEM, _, err = createTempTLS(ci.cfg.RSAKeySize, dur)
-		if err != nil {
-			return nil, err
+		now := time.Now()
+		if time.Unix(ci.autoCertExp.Load(), 0).Before(now) {
+			dur, err := time.ParseDuration(ci.cfg.AutoExpireDuration)
+			if err != nil {
+				dur = DefaultCertExpiration
+			}
+			ci.autoCertExp.Store(now.Add(DefaultCertExpiration - recreateAutoCertAdvance).Unix())
+			certPEM, keyPEM, _, err = createTempTLS(ci.cfg.RSAKeySize, dur)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		certPEM, err = os.ReadFile(ci.cfg.Cert)
@@ -188,11 +199,13 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		}
 	}
 
-	cert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return nil, errors.WithStack(err)
+	if certPEM != nil {
+		cert, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		ci.cert.Store(&cert)
 	}
-	ci.cert.Store(&cert)
 
 	if !ci.cfg.HasCA() {
 		lg.Info("no CA, server will not authenticate clients (connection is still secured)")

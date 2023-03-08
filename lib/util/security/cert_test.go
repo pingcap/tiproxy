@@ -235,18 +235,45 @@ func TestReload(t *testing.T) {
 	ci, tcfg, err := NewCert(lg, cfg, true)
 	require.NoError(t, err)
 	require.NotNil(t, tcfg)
-	cert := ci.cert.Load().(*tls.Certificate)
-	cp, err := x509.ParseCertificate(cert.Certificate[0])
-	require.NoError(t, err)
-	expire1 := cp.NotAfter
+	expire1 := getExpireTime(t, ci)
 
 	// Replace the cert and then reload. Check that the expiration is different.
 	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, 2*time.Hour)
 	require.NoError(t, err)
 	require.NoError(t, ci.Reload(lg))
-	cert = ci.cert.Load().(*tls.Certificate)
-	cp, err = x509.ParseCertificate(cert.Certificate[0])
-	require.NoError(t, err)
-	expire2 := cp.NotAfter
+	expire2 := getExpireTime(t, ci)
 	require.NotEqual(t, expire1, expire2)
+}
+
+func TestAutoCerts(t *testing.T) {
+	lg := logger.CreateLoggerForTest(t)
+	cfg := config.TLSConfig{
+		AutoCerts: true,
+	}
+
+	// Create an auto cert.
+	ci, tcfg, err := NewCert(lg, cfg, true)
+	require.NoError(t, err)
+	require.NotNil(t, tcfg)
+	expire1 := getExpireTime(t, ci)
+	require.True(t, ci.autoCertExp.Load() < expire1.Unix())
+
+	// The cert will not be recreated now.
+	ci.cfg.AutoExpireDuration = (DefaultCertExpiration - time.Hour).String()
+	require.NoError(t, ci.Reload(lg))
+	expire2 := getExpireTime(t, ci)
+	require.Equal(t, expire1, expire2)
+
+	// The cert will be recreated when it almost expires.
+	ci.autoCertExp.Store(time.Now().Add(-time.Minute).Unix())
+	require.NoError(t, ci.Reload(lg))
+	expire3 := getExpireTime(t, ci)
+	require.NotEqual(t, expire1, expire3)
+}
+
+func getExpireTime(t *testing.T, ci *CertInfo) time.Time {
+	cert := ci.cert.Load().(*tls.Certificate)
+	cp, err := x509.ParseCertificate(cert.Certificate[0])
+	require.NoError(t, err)
+	return cp.NotAfter
 }
