@@ -16,6 +16,7 @@ package security
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"path/filepath"
 	"testing"
 	"time"
@@ -215,4 +216,37 @@ func TestCertServer(t *testing.T) {
 			tc.checker(t, tcfg, ci)
 		}
 	}
+}
+
+func TestReload(t *testing.T) {
+	lg := logger.CreateLoggerForTest(t)
+	tmpdir := t.TempDir()
+	certPath := filepath.Join(tmpdir, "cert")
+	keyPath := filepath.Join(tmpdir, "key")
+	caPath := filepath.Join(tmpdir, "ca")
+	cfg := config.TLSConfig{
+		CA:   caPath,
+		Cert: certPath,
+		Key:  keyPath,
+	}
+
+	// Create a cert and record the expiration.
+	require.NoError(t, CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, time.Hour))
+	ci, tcfg, err := NewCert(lg, cfg, true)
+	require.NoError(t, err)
+	require.NotNil(t, tcfg)
+	cert := ci.cert.Load().(*tls.Certificate)
+	cp, err := x509.ParseCertificate(cert.Certificate[0])
+	require.NoError(t, err)
+	expire1 := cp.NotAfter
+
+	// Replace the cert and then reload. Check that the expiration is different.
+	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, 2*time.Hour)
+	require.NoError(t, err)
+	require.NoError(t, ci.Reload(lg))
+	cert = ci.cert.Load().(*tls.Certificate)
+	cp, err = x509.ParseCertificate(cert.Certificate[0])
+	require.NoError(t, err)
+	expire2 := cp.NotAfter
+	require.NotEqual(t, expire1, expire2)
 }

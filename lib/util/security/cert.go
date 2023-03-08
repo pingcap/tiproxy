@@ -33,7 +33,6 @@ type CertInfo struct {
 	cfg    config.TLSConfig
 	ca     atomic.Value
 	cert   atomic.Value
-	expire atomic.Int64
 	server bool
 }
 
@@ -46,10 +45,7 @@ func NewCert(lg *zap.Logger, cfg config.TLSConfig, server bool) (*CertInfo, *tls
 	return ci, tlscfg, err
 }
 
-func (ci *CertInfo) Reload(lg *zap.Logger, n time.Time) error {
-	if n.Unix() <= ci.expire.Load() {
-		return nil
-	}
+func (ci *CertInfo) Reload(lg *zap.Logger) error {
 	_, err := ci.reload(lg)
 	return err
 }
@@ -129,11 +125,6 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 	return err
 }
 
-func (ci *CertInfo) updateMinExpire(n int64) {
-	for o := ci.expire.Load(); o > n && !ci.expire.CAS(o, n); o = ci.expire.Load() {
-	}
-}
-
 func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	for len(pemCerts) > 0 {
@@ -151,9 +142,6 @@ func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 		if err != nil {
 			continue
 		}
-
-		ci.updateMinExpire(cert.NotAfter.Unix())
-
 		pool.AddCert(cert)
 	}
 	return pool, nil
@@ -203,13 +191,6 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return nil, errors.WithStack(err)
-	}
-	for _, c := range cert.Certificate {
-		cp, err := x509.ParseCertificate(c)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		ci.updateMinExpire(cp.NotAfter.Unix())
 	}
 	ci.cert.Store(&cert)
 
@@ -282,13 +263,6 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(ci.cfg.Cert, ci.cfg.Key)
 	if err != nil {
 		return nil, errors.WithStack(err)
-	}
-	for _, c := range cert.Certificate {
-		cp, err := x509.ParseCertificate(c)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		ci.updateMinExpire(cp.NotAfter.Unix())
 	}
 	ci.cert.Store(&cert)
 
