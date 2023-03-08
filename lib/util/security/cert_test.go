@@ -255,12 +255,15 @@ func TestAutoCerts(t *testing.T) {
 	ci, tcfg, err := NewCert(lg, cfg, true)
 	require.NoError(t, err)
 	require.NotNil(t, tcfg)
+	cert1 := ci.cert.Load().(*tls.Certificate)
 	expire1 := getExpireTime(t, ci)
 	require.True(t, ci.autoCertExp.Load() < expire1.Unix())
 
 	// The cert will not be recreated now.
 	ci.cfg.AutoExpireDuration = (DefaultCertExpiration - time.Hour).String()
 	require.NoError(t, ci.Reload(lg))
+	cert2 := ci.cert.Load().(*tls.Certificate)
+	require.Equal(t, cert1, cert2)
 	expire2 := getExpireTime(t, ci)
 	require.Equal(t, expire1, expire2)
 
