@@ -28,6 +28,7 @@ import (
 	mgrcrt "github.com/pingcap/TiProxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
+	"github.com/pingcap/TiProxy/pkg/proxy"
 	"go.uber.org/atomic"
 	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
@@ -57,10 +58,12 @@ type HTTPServer struct {
 	limit    ratelimit.Limiter
 	ready    *atomic.Bool
 	lg       *zap.Logger
+	proxy    *proxy.SQLServer
 	mgr      managers
 }
 
 func NewHTTPServer(cfg config.API, lg *zap.Logger,
+	proxy *proxy.SQLServer,
 	nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager,
 	crtmgr *mgrcrt.CertManager, handler HTTPHandler,
 	ready *atomic.Bool) (*HTTPServer, error) {
@@ -68,6 +71,7 @@ func NewHTTPServer(cfg config.API, lg *zap.Logger,
 		limit: ratelimit.New(DefAPILimit),
 		ready: ready,
 		lg:    lg,
+		proxy: proxy,
 		mgr:   managers{cfgmgr, nsmgr, crtmgr},
 	}
 

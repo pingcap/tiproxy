@@ -56,6 +56,10 @@ tidy:
 	go mod tidy
 	cd lib && go mod tidy
 
+cache:
+	go build ./...
+	cd lib && go build ./...
+
 test: gocovmerge
 	rm -f .cover.*
 	go test -coverprofile=.cover.pkg ./...
