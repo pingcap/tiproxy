@@ -25,6 +25,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,34 +310,64 @@ func TestRotate(t *testing.T) {
 			tc.reload(t)
 		}
 
-		timer := time.NewTimer(time.Second)
-	outer:
-		for {
-			select {
-			case <-timer.C:
-				t.Fatal("timeout on reloading")
-			case <-time.After(150 * time.Millisecond):
-				clientErr, serverErr := connectWithTLS(ctls, stls)
-				errmsg := fmt.Sprintf("client: %+v\nserver: %+v\n", clientErr, serverErr)
-				if tc.relErrCli != "" {
-					require.ErrorContains(t, clientErr, tc.relErrCli, errmsg)
-					require.Error(t, serverErr)
-					break outer
-				}
-				if tc.relErrSrv != "" {
-					require.ErrorContains(t, serverErr, tc.relErrSrv, errmsg)
-					require.Error(t, clientErr)
-					break outer
-				}
-				if tc.relErrCli == "" && tc.relErrSrv == "" {
-					if clientErr == nil && serverErr == nil {
-						break outer
-					}
+		time.Sleep(150 * time.Millisecond)
+		require.Eventually(t, func() bool {
+			clientErr, serverErr := connectWithTLS(ctls, stls)
+			if tc.relErrCli != "" {
+				if !strings.Contains(clientErr.Error(), tc.relErrCli) || serverErr == nil {
 					t.Logf("clientErr: %+v, serverErr: %+v\n", clientErr, serverErr)
+					return false
 				}
 			}
-		}
-
+			if tc.relErrSrv != "" {
+				if !strings.Contains(serverErr.Error(), tc.relErrSrv) || clientErr == nil {
+					t.Logf("clientErr: %+v, serverErr: %+v\n", clientErr, serverErr)
+					return false
+				}
+			}
+			if tc.relErrCli == "" && tc.relErrSrv == "" {
+				return clientErr == nil && serverErr == nil
+			}
+			return true
+		}, time.Second, 100*time.Millisecond)
 		certMgr.Close()
 	}
+}
+
+func TestBidirectional(t *testing.T) {
+	tmpdir := t.TempDir()
+	lg := logger.CreateLoggerForTest(t)
+	caPath1 := filepath.Join(tmpdir, "c1", "ca")
+	keyPath1 := filepath.Join(tmpdir, "c1", "key")
+	certPath1 := filepath.Join(tmpdir, "c1", "cert")
+	caPath2 := filepath.Join(tmpdir, "c2", "ca")
+	keyPath2 := filepath.Join(tmpdir, "c2", "key")
+	certPath2 := filepath.Join(tmpdir, "c2", "cert")
+
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration))
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 0, security.DefaultCertExpiration))
+
+	cfg := &config.Config{
+		Workdir: tmpdir,
+		Security: config.Security{
+			ServerTLS: config.TLSConfig{
+				Cert: certPath1,
+				Key:  keyPath1,
+				CA:   caPath2,
+			},
+			SQLTLS: config.TLSConfig{
+				CA:   caPath1,
+				Key:  keyPath2,
+				Cert: certPath2,
+			},
+		},
+	}
+
+	certMgr := NewCertManager()
+	require.NoError(t, certMgr.Init(cfg, lg))
+	stls := certMgr.ServerTLS()
+	ctls := certMgr.SQLTLS()
+	clientErr, serverErr := connectWithTLS(ctls, stls)
+	require.NoError(t, clientErr)
+	require.NoError(t, serverErr)
 }
