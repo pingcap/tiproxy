@@ -47,12 +47,12 @@ type Metrics struct {
 type KeepAlive struct {
 	Enabled bool `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty"`
 	// Idle, Cnt, and Intvl works only when the connection is idle. User packets will interrupt keep-alive.
-	// If the peer crashes and doesn't send FIN, the connection will be closed within Idle+Cnt*Intvl.
+	// If the peer crashes and doesn't send any packets, the connection will be closed within Idle+Cnt*Intvl.
 	Idle  time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty"`
 	Cnt   int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
 	Intvl time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty"`
 	// Timeout is the timeout of waiting ACK. It works for both user packets and keep-alive.
-	// For keep-alive, the timeout of waiting ACK is min(Timeout, Cnt*Intvl).
+	// It is suggested to be equal or close to Cnt*Intvl.
 	Timeout time.Duration `yaml:"timeout,omitempty" toml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
