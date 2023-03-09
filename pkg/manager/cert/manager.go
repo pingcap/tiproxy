@@ -105,8 +105,7 @@ func (cm *CertManager) SQLTLS() *tls.Config {
 
 // The proxy is supposed to be always online, so it should reload certs automatically,
 // rather than reloading it by restarting the proxy.
-// The proxy checks expiration time periodically and reloads certs in advance. If reloading
-// fails or the cert is not replaced, it will retry in the next round.
+// The proxy periodically reloads certs. If it fails, we will retry in the next round.
 func (cm *CertManager) reloadLoop(ctx context.Context) {
 	cm.wg.Run(func() {
 		for {
@@ -120,19 +119,19 @@ func (cm *CertManager) reloadLoop(ctx context.Context) {
 	})
 }
 
+// If any error happens, we still continue and use the old cert.
 func (cm *CertManager) reload() {
-	now := time.Now()
 	errs := make([]error, 0, 4)
-	if err := cm.serverTLS.Reload(cm.logger, now); err != nil {
+	if err := cm.serverTLS.Reload(cm.logger); err != nil {
 		errs = append(errs, err)
 	}
-	if err := cm.peerTLS.Reload(cm.logger, now); err != nil {
+	if err := cm.peerTLS.Reload(cm.logger); err != nil {
 		errs = append(errs, err)
 	}
-	if err := cm.clusterTLS.Reload(cm.logger, now); err != nil {
+	if err := cm.clusterTLS.Reload(cm.logger); err != nil {
 		errs = append(errs, err)
 	}
-	if err := cm.sqlTLS.Reload(cm.logger, now); err != nil {
+	if err := cm.sqlTLS.Reload(cm.logger); err != nil {
 		errs = append(errs, err)
 	}
 	err := errors.Collect(errors.New("loading certs"), errs...)

@@ -27,14 +27,20 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// Recreate the auto certs one hour before it expires.
+	// It should be longer than defaultRetryInterval.
+	recreateAutoCertAdvance = 24 * time.Hour
+)
+
 var emptyCert = new(tls.Certificate)
 
 type CertInfo struct {
-	cfg    config.TLSConfig
-	ca     atomic.Value
-	cert   atomic.Value
-	expire atomic.Int64
-	server bool
+	cfg         config.TLSConfig
+	ca          atomic.Value
+	cert        atomic.Value
+	autoCertExp atomic.Int64
+	server      bool
 }
 
 func NewCert(lg *zap.Logger, cfg config.TLSConfig, server bool) (*CertInfo, *tls.Config, error) {
@@ -46,10 +52,7 @@ func NewCert(lg *zap.Logger, cfg config.TLSConfig, server bool) (*CertInfo, *tls
 	return ci, tlscfg, err
 }
 
-func (ci *CertInfo) Reload(lg *zap.Logger, n time.Time) error {
-	if n.Unix() <= ci.expire.Load() {
-		return nil
-	}
+func (ci *CertInfo) Reload(lg *zap.Logger) error {
 	_, err := ci.reload(lg)
 	return err
 }
@@ -129,11 +132,6 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 	return err
 }
 
-func (ci *CertInfo) updateMinExpire(n int64) {
-	for o := ci.expire.Load(); o > n && !ci.expire.CAS(o, n); o = ci.expire.Load() {
-	}
-}
-
 func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	for len(pemCerts) > 0 {
@@ -151,9 +149,6 @@ func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 		if err != nil {
 			continue
 		}
-
-		ci.updateMinExpire(cert.NotAfter.Unix())
-
 		pool.AddCert(cert)
 	}
 	return pool, nil
@@ -181,13 +176,17 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	var certPEM, keyPEM []byte
 	var err error
 	if autoCerts {
-		dur, err := time.ParseDuration(ci.cfg.AutoExpireDuration)
-		if err != nil {
-			dur = DefaultCertExpiration
-		}
-		certPEM, keyPEM, _, err = createTempTLS(ci.cfg.RSAKeySize, dur)
-		if err != nil {
-			return nil, err
+		now := time.Now()
+		if time.Unix(ci.autoCertExp.Load(), 0).Before(now) {
+			dur, err := time.ParseDuration(ci.cfg.AutoExpireDuration)
+			if err != nil {
+				dur = DefaultCertExpiration
+			}
+			ci.autoCertExp.Store(now.Add(DefaultCertExpiration - recreateAutoCertAdvance).Unix())
+			certPEM, keyPEM, _, err = createTempTLS(ci.cfg.RSAKeySize, dur)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		certPEM, err = os.ReadFile(ci.cfg.Cert)
@@ -200,18 +199,13 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		}
 	}
 
-	cert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	for _, c := range cert.Certificate {
-		cp, err := x509.ParseCertificate(c)
+	if certPEM != nil {
+		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
-		ci.updateMinExpire(cp.NotAfter.Unix())
+		ci.cert.Store(&cert)
 	}
-	ci.cert.Store(&cert)
 
 	if !ci.cfg.HasCA() {
 		lg.Info("no CA, server will not authenticate clients (connection is still secured)")
@@ -282,13 +276,6 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	cert, err := tls.LoadX509KeyPair(ci.cfg.Cert, ci.cfg.Key)
 	if err != nil {
 		return nil, errors.WithStack(err)
-	}
-	for _, c := range cert.Certificate {
-		cp, err := x509.ParseCertificate(c)
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-		ci.updateMinExpire(cp.NotAfter.Unix())
 	}
 	ci.cert.Store(&cert)
 
