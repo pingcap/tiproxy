@@ -87,11 +87,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 
-	// setup http
-	if srv.HTTPServer, err = api.NewHTTPServer(cfg.API, lg.Named("api"), srv.NamespaceManager, srv.ConfigManager, srv.CertManager, handler, ready); err != nil {
-		return
-	}
-
 	// general cluster HTTP client
 	{
 		srv.Http = &http.Client{
@@ -152,6 +147,11 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		}
 
 		srv.Proxy.Run(ctx, srv.ConfigManager.WatchConfig())
+	}
+
+	// setup http
+	if srv.HTTPServer, err = api.NewHTTPServer(cfg.API, lg.Named("api"), srv.Proxy, srv.NamespaceManager, srv.ConfigManager, srv.CertManager, handler, ready); err != nil {
+		return
 	}
 
 	ready.Toggle()

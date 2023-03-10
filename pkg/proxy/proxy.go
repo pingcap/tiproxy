@@ -190,6 +190,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	clientConn.Run(ctx)
 }
 
+func (s *SQLServer) IsClosing() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.mu.inShutdown
+}
+
 // Graceful shutdown doesn't close the listener but rejects new connections.
 // Whether this affects NLB is to be tested.
 func (s *SQLServer) gracefulShutdown() {
@@ -213,9 +219,9 @@ func (s *SQLServer) gracefulShutdown() {
 		case <-timer.C:
 			return
 		case <-time.After(100 * time.Millisecond):
-			s.mu.Lock()
+			s.mu.RLock()
 			allClosed := len(s.mu.clients) == 0
-			s.mu.Unlock()
+			s.mu.RUnlock()
 			if allClosed {
 				return
 			}
@@ -236,13 +242,13 @@ func (s *SQLServer) Close() error {
 		errs = append(errs, s.listener.Close())
 	}
 
-	s.mu.Lock()
+	s.mu.RLock()
 	for _, conn := range s.mu.clients {
 		if err := conn.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
-	s.mu.Unlock()
+	s.mu.RUnlock()
 
 	s.wg.Wait()
 	return errors.Collect(ErrCloseServer, errs...)

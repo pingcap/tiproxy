@@ -23,7 +23,11 @@ import (
 )
 
 func (h *HTTPServer) DebugHealth(c *gin.Context) {
-	c.JSON(http.StatusOK, config.HealthInfo{
+	status := http.StatusOK
+	if h.proxy.IsClosing() {
+		status = http.StatusBadGateway
+	}
+	c.JSON(status, config.HealthInfo{
 		ConfigChecksum: h.mgr.cfg.GetConfigChecksum(),
 	})
 }
