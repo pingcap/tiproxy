@@ -45,17 +45,25 @@ type Metrics struct {
 }
 
 type KeepAlive struct {
-	Enabled bool          `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty"`
-	Idle    time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty"`
-	Cnt     int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
-	Intvl   time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty"`
+	Enabled bool `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty"`
+	// Idle, Cnt, and Intvl works only when the connection is idle. User packets will interrupt keep-alive.
+	// If the peer crashes and doesn't send any packets, the connection will be closed within Idle+Cnt*Intvl.
+	Idle  time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty"`
+	Cnt   int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
+	Intvl time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty"`
+	// Timeout is the timeout of waiting ACK. It works for both user packets and keep-alive.
+	// It is suggested to be equal or close to Cnt*Intvl.
 	Timeout time.Duration `yaml:"timeout,omitempty" toml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
 type ProxyServerOnline struct {
-	MaxConnections             uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
-	FrontendKeepalive          KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
-	BackendHealthyKeepalive    KeepAlive `yaml:"backend-healthy-keepalive" toml:"backend-healthy-keepalive" json:"backend-healthy-keepalive"`
+	MaxConnections    uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
+	FrontendKeepalive KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
+	// BackendHealthyKeepalive applies when the observer treats the backend as healthy.
+	// The config values should be conservative to save CPU and tolerate network fluctuation.
+	BackendHealthyKeepalive KeepAlive `yaml:"backend-healthy-keepalive" toml:"backend-healthy-keepalive" json:"backend-healthy-keepalive"`
+	// BackendUnhealthyKeepalive applies when the observer treats the backend as unhealthy.
+	// The config values can be aggressive because the backend may stop anytime.
 	BackendUnhealthyKeepalive  KeepAlive `yaml:"backend-unhealthy-keepalive" toml:"backend-unhealthy-keepalive" json:"backend-unhealthy-keepalive"`
 	ProxyProtocol              string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
 	GracefulWaitBeforeShutdown int       `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty"`
@@ -126,13 +134,13 @@ func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
 	backendHealthy.Enabled = true
 	backendHealthy.Idle = 60 * time.Second
 	backendHealthy.Cnt = 5
-	backendHealthy.Intvl = 5 * time.Second
-	backendHealthy.Timeout = 30 * time.Second
+	backendHealthy.Intvl = 3 * time.Second
+	backendHealthy.Timeout = 15 * time.Second
 	backendUnhealthy.Enabled = true
-	backendUnhealthy.Idle = 1 * time.Second
-	backendUnhealthy.Cnt = 2
+	backendUnhealthy.Idle = 10 * time.Second
+	backendUnhealthy.Cnt = 5
 	backendUnhealthy.Intvl = 1 * time.Second
-	backendUnhealthy.Timeout = 3 * time.Second
+	backendUnhealthy.Timeout = 5 * time.Second
 	return
 }
 
