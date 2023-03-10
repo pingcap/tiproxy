@@ -1,6 +1,6 @@
 <!--
 
-Thank you for contributing to Weir!
+Thank you for contributing to TiProxy!
 
 PR Title Format:
 1. pkg [, pkg2, pkg3]: what's changed
@@ -38,7 +38,7 @@ Tests <!-- At least one of them must be included. -->
 Notable changes
 
 - [ ] Has configuration change
-- [ ] Has HTTP API interfaces change (Don't forget to [add the declarative for API](https://github.com/tikv/pd/blob/master/docs/development.md#updating-api-documentation))
+- [ ] Has HTTP API interfaces change
 - [ ] Has tiproxyctl change
 - [ ] Other user behavior changes
 

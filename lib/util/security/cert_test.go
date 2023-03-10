@@ -16,6 +16,7 @@ package security
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"path/filepath"
 	"testing"
 	"time"
@@ -215,4 +216,67 @@ func TestCertServer(t *testing.T) {
 			tc.checker(t, tcfg, ci)
 		}
 	}
+}
+
+func TestReload(t *testing.T) {
+	lg := logger.CreateLoggerForTest(t)
+	tmpdir := t.TempDir()
+	certPath := filepath.Join(tmpdir, "cert")
+	keyPath := filepath.Join(tmpdir, "key")
+	caPath := filepath.Join(tmpdir, "ca")
+	cfg := config.TLSConfig{
+		CA:   caPath,
+		Cert: certPath,
+		Key:  keyPath,
+	}
+
+	// Create a cert and record the expiration.
+	require.NoError(t, CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, time.Hour))
+	ci, tcfg, err := NewCert(lg, cfg, true)
+	require.NoError(t, err)
+	require.NotNil(t, tcfg)
+	expire1 := getExpireTime(t, ci)
+
+	// Replace the cert and then reload. Check that the expiration is different.
+	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, 2*time.Hour)
+	require.NoError(t, err)
+	require.NoError(t, ci.Reload(lg))
+	expire2 := getExpireTime(t, ci)
+	require.NotEqual(t, expire1, expire2)
+}
+
+func TestAutoCerts(t *testing.T) {
+	lg := logger.CreateLoggerForTest(t)
+	cfg := config.TLSConfig{
+		AutoCerts: true,
+	}
+
+	// Create an auto cert.
+	ci, tcfg, err := NewCert(lg, cfg, true)
+	require.NoError(t, err)
+	require.NotNil(t, tcfg)
+	cert1 := ci.cert.Load().(*tls.Certificate)
+	expire1 := getExpireTime(t, ci)
+	require.True(t, ci.autoCertExp.Load() < expire1.Unix())
+
+	// The cert will not be recreated now.
+	ci.cfg.AutoExpireDuration = (DefaultCertExpiration - time.Hour).String()
+	require.NoError(t, ci.Reload(lg))
+	cert2 := ci.cert.Load().(*tls.Certificate)
+	require.Equal(t, cert1, cert2)
+	expire2 := getExpireTime(t, ci)
+	require.Equal(t, expire1, expire2)
+
+	// The cert will be recreated when it almost expires.
+	ci.autoCertExp.Store(time.Now().Add(-time.Minute).Unix())
+	require.NoError(t, ci.Reload(lg))
+	expire3 := getExpireTime(t, ci)
+	require.NotEqual(t, expire1, expire3)
+}
+
+func getExpireTime(t *testing.T, ci *CertInfo) time.Time {
+	cert := ci.cert.Load().(*tls.Certificate)
+	cp, err := x509.ParseCertificate(cert.Certificate[0])
+	require.NoError(t, err)
+	return cp.NotAfter
 }
