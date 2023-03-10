@@ -199,17 +199,17 @@ func (s *SQLServer) IsClosing() bool {
 // Graceful shutdown doesn't close the listener but rejects new connections.
 // Whether this affects NLB is to be tested.
 func (s *SQLServer) gracefulShutdown() {
-	s.mu.RLock()
+	s.mu.Lock()
 	gracefulWait := s.mu.gracefulWait
 	if gracefulWait == 0 {
-		s.mu.RUnlock()
+		s.mu.Unlock()
 		return
 	}
 	s.mu.inShutdown = true
 	for _, conn := range s.mu.clients {
 		conn.GracefulClose()
 	}
-	s.mu.RUnlock()
+	s.mu.Unlock()
 	s.logger.Info("SQL server is shutting down", zap.Int("graceful_wait", gracefulWait))
 
 	timer := time.NewTimer(time.Duration(gracefulWait) * time.Second)

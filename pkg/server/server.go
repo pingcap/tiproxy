@@ -154,7 +154,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 
-
 	ready.Toggle()
 	return
 }
