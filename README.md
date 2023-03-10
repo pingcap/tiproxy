@@ -42,6 +42,8 @@ $ make docker
 
 ## Usage
 
+### Run locally
+
 1. Generate a self-signed certificate, which is used for the token-based authentication between TiDB and TiProxy.
 
 For example, if you use openssl:
@@ -84,6 +86,69 @@ $ bin/tiproxy --config=conf/proxy.yaml
 4. Connect to TiProxy with your client. The default port is 6000:
 
 ```shell
+$ mysql -h127.0.0.1 -uroot -P6000
+```
+
+### Run in k8s
+
+1. Generate a self-signed certificate like above.
+
+2. Create secrets for session token signing certs.
+
+```shell
+$ kubectl create secret generic basic-sess -n $NAMESPACE --from-file=crt=cert.pem --from-file=key=key.pem
+```
+
+3. Create the TiDB cluster. An example of spec is as follows:
+
+```yaml
+---
+apiVersion: pingcap.com/v1alpha1
+kind: TidbCluster
+metadata:
+    name: tc
+spec:
+    version: nightly
+    pd:
+        replicas: 1
+        baseImage: pingcap/pd
+    tidb:
+        replicas: 2
+        baseImage: pingcap/tidb
+        tlsClient:
+            enabled: true
+        config: |
+            graceful-wait-before-shutdown=10
+            [security]
+              session-token-signing-cert = "/var/sess/cert.pem"
+              session-token-signing-key = "/var/sess/key.pem"
+        additionalVolumes:
+        - name: "sess"
+          secret:
+              secretName: basic-sess
+              items:
+              - key: crt
+                path: cert.pem
+              - key: key
+                path: key.pem
+        additionalVolumeMounts:
+        - name: "sess"
+          mountPath: /var/sess
+          readOnly: false
+    tikv:
+        replicas: 3
+        baseImage: pingcap/tikv
+    tiproxy:
+        replicas: 1
+        baseImage: {your-image}
+```
+
+Note that if you have enabled `tlsCluster`, you don't need to set the signing certs, `additionalVolumes` and `additionalVolumeMounts`.
+
+4. Connect to TiProxy with your client. The default port is 6000:
+
+```shell
+$ kubectl port-forward svc/tc-tiproxy 6000:6000 -n $NAMESPACE
 $ mysql -h127.0.0.1 -uroot -P6000
 ```
 
