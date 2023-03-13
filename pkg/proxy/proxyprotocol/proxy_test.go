@@ -1,4 +1,4 @@
-// Copyright 2022 PingCAP, Inc.
+// Copyright 2023 PingCAP, Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package net
+package proxyprotocol
 
 import (
+	"bytes"
 	"io"
 	"net"
 	"testing"
 
+	"github.com/pingcap/TiProxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,9 +28,9 @@ func TestProxyParse(t *testing.T) {
 	tcpaddr, err := net.ResolveTCPAddr("tcp", "192.168.1.1:34")
 	require.NoError(t, err)
 
-	testPipeConn(t,
-		func(t *testing.T, cli *PacketIO) {
-			require.NoError(t, cli.WriteProxyV2(&Proxy{
+	testkit.TestPipeConn(t,
+		func(t *testing.T, cli net.Conn) {
+			p := &Proxy{
 				Version:    ProxyVersion2,
 				Command:    ProxyCommandLocal,
 				SrcAddress: tcpaddr,
@@ -43,16 +45,20 @@ func TestProxyParse(t *testing.T) {
 						content: []byte("test"),
 					},
 				},
-			}))
+			}
+			b, err := p.ToBytes()
+			require.NoError(t, err)
+			_, err = io.Copy(cli, bytes.NewReader(b))
+			require.NoError(t, err)
 		},
-		func(t *testing.T, srv *PacketIO) {
-			// skip 4 bytes of magic
-			var hdr [4]byte
-			_, err := io.ReadFull(srv.conn, hdr[:])
+		func(t *testing.T, srv net.Conn) {
+			// skip magic
+			hdr := make([]byte, len(MagicV2))
+			_, err := io.ReadFull(srv, hdr)
 			require.NoError(t, err)
 
 			// try to parse V2
-			p, err := srv.parseProxyV2()
+			p, _, err := ParseProxyV2(srv)
 			require.NoError(t, err)
 			require.NotNil(t, p)
 			require.Equal(t, tcpaddr, p.SrcAddress)
@@ -68,6 +74,14 @@ func TestProxyParse(t *testing.T) {
 	)
 }
 
+type originAddr struct {
+	net.Addr
+}
+
+func (a *originAddr) Unwrap() net.Addr {
+	return a.Addr
+}
+
 func TestProxyToBytes(t *testing.T) {
 	hdr := &Proxy{
 		Version:    ProxyVersion2,
@@ -77,9 +91,9 @@ func TestProxyToBytes(t *testing.T) {
 	}
 	hdrBytes, err := hdr.ToBytes()
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(hdrBytes), len(proxyV2Magic)+4)
-	length := int(hdrBytes[len(proxyV2Magic)+2])<<8 | int(hdrBytes[len(proxyV2Magic)+3])
-	require.Equal(t, len(hdrBytes)-4-len(proxyV2Magic), length)
+	require.GreaterOrEqual(t, len(hdrBytes), len(MagicV2)+4)
+	length := int(hdrBytes[len(MagicV2)+2])<<8 | int(hdrBytes[len(MagicV2)+3])
+	require.Equal(t, len(hdrBytes)-4-len(MagicV2), length)
 
 	hdr.DstAddress = &net.UDPAddr{}
 	_, err = hdr.ToBytes()

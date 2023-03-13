@@ -47,6 +47,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/proxy/keepalive"
+	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/dbterror"
@@ -54,7 +55,6 @@ import (
 
 var (
 	errInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
-	proxyV2Magic       = []byte{0xD, 0xA, 0xD, 0xA, 0x0, 0xD, 0xA, 0x51, 0x55, 0x49, 0x54, 0xA}
 )
 
 const (
@@ -84,7 +84,7 @@ type PacketIO struct {
 	rawConn       net.Conn
 	buf           *bufio.ReadWriter
 	proxyInited   atomic.Bool
-	proxy         *Proxy
+	proxy         *proxyprotocol.Proxy
 	remoteAddr    net.Addr
 	wrap          error
 	sequence      uint8
@@ -117,7 +117,7 @@ func (p *PacketIO) wrapErr(err error) error {
 }
 
 // Proxy returned parsed proxy header from clients if any.
-func (p *PacketIO) Proxy() *Proxy {
+func (p *PacketIO) Proxy() *proxyprotocol.Proxy {
 	if p.proxyInited.Load() {
 		return p.proxy
 	}
@@ -155,7 +155,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	// probe proxy V2
 	refill := false
 	if !p.proxyInited.Load() {
-		if bytes.Equal(header[:], proxyV2Magic[:4]) {
+		if bytes.Equal(header[:], proxyprotocol.MagicV2[:4]) {
 			proxyHeader, err := p.parseProxyV2()
 			if err != nil {
 				return nil, false, errors.Wrap(ErrReadConn, err)
