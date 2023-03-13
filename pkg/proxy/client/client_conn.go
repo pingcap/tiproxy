@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/tidb/parser/mysql"
 	"go.uber.org/zap"
 )
 
@@ -85,9 +84,7 @@ func (cc *ClientConnection) processMsg(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		cmd := clientPkt[0]
-		switch cmd {
-		case mysql.ComQuit:
+		if pnet.Command(clientPkt[0]) == pnet.ComQuit {
 			return nil
 		}
 	}

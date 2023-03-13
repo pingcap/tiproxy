@@ -53,6 +53,7 @@ gocovmerge:
 tidy:
 	go mod tidy
 	cd lib && go mod tidy
+
 build:
 	go build ./...
 	cd lib && go build ./...

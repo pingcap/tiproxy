@@ -15,37 +15,14 @@
 package backend
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/pingcap/TiProxy/pkg/metrics"
-	"github.com/pingcap/tidb/parser/mysql"
-)
-
-// The labels are consistent with TiDB.
-var (
-	cmdToLabel = map[byte]string{
-		mysql.ComSleep:            "Sleep",
-		mysql.ComQuit:             "Quit",
-		mysql.ComInitDB:           "InitDB",
-		mysql.ComQuery:            "Query",
-		mysql.ComPing:             "Ping",
-		mysql.ComFieldList:        "FieldList",
-		mysql.ComStmtPrepare:      "StmtPrepare",
-		mysql.ComStmtExecute:      "StmtExecute",
-		mysql.ComStmtFetch:        "StmtFetch",
-		mysql.ComStmtClose:        "StmtClose",
-		mysql.ComStmtSendLongData: "StmtSendLongData",
-		mysql.ComStmtReset:        "StmtReset",
-		mysql.ComSetOption:        "SetOption",
-	}
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
 func addCmdMetrics(cmd byte, addr string, startTime time.Time) {
-	label, ok := cmdToLabel[cmd]
-	if !ok {
-		label = strconv.Itoa(int(cmd))
-	}
+	label := pnet.Command(cmd).String() 
 	metrics.QueryTotalCounter.WithLabelValues(addr, label).Inc()
 
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
@@ -55,10 +32,7 @@ func addCmdMetrics(cmd byte, addr string, startTime time.Time) {
 }
 
 func readCmdCounter(cmd byte, addr string) (int, error) {
-	label, ok := cmdToLabel[cmd]
-	if !ok {
-		label = strconv.Itoa(int(cmd))
-	}
+	label := pnet.Command(cmd).String() 
 	return metrics.ReadCounter(metrics.QueryTotalCounter.WithLabelValues(addr, label))
 }
 

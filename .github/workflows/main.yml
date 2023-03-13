@@ -62,5 +62,5 @@ jobs:
     with:
       ref: ${{ inputs.ref || github.ref }}
       debug: false
-      target: "cache"
+      target: "build"
       all_platform: true
