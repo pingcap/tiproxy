@@ -31,9 +31,7 @@ EXECUTABLE_TARGETS := $(patsubst cmd/%,cmd_%,$(wildcard cmd/*))
 
 default: cmd
 
-dev: cmd lint test
-
-cache: build lint test
+dev: build lint test
 
 cmd: $(EXECUTABLE_TARGETS)
 
@@ -55,8 +53,7 @@ gocovmerge:
 tidy:
 	go mod tidy
 	cd lib && go mod tidy
-
-cache:
+build:
 	go build ./...
 	cd lib && go build ./...
 

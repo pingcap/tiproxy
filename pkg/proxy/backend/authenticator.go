@@ -23,6 +23,7 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/hack"
 	"go.uber.org/zap"
@@ -65,14 +66,14 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 	if auth.proxyProtocol {
 		proxy := clientIO.Proxy()
 		if proxy == nil {
-			proxy = &pnet.Proxy{
+			proxy = &proxyprotocol.Proxy{
 				SrcAddress: clientIO.RemoteAddr(),
 				DstAddress: backendIO.RemoteAddr(),
-				Version:    pnet.ProxyVersion2,
+				Version:    proxyprotocol.ProxyVersion2,
 			}
 		}
 		// either from another proxy or directly from clients, we are acting as a proxy
-		proxy.Command = pnet.ProxyCommandProxy
+		proxy.Command = proxyprotocol.ProxyCommandProxy
 		if err := backendIO.WriteProxyV2(proxy); err != nil {
 			return err
 		}
