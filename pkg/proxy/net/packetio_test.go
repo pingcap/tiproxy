@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+func testPipeConn(t *testing.T, a, b func(*testing.T, *PacketIO), loop int) {
 	var wg waitgroup.WaitGroup
 	client, server := net.Pipe()
 	cli, srv := NewPacketIO(client), NewPacketIO(server)
@@ -218,7 +218,6 @@ func TestPeerActive(t *testing.T) {
 			ch <- struct{}{} // let srv write packet
 			// ReadPacket still reads the whole data after checking.
 			ch <- struct{}{}
-			require.True(t, cli.IsPeerActive())
 			data, err := cli.ReadPacket()
 			require.NoError(t, err)
 			require.Equal(t, "123", string(data))
@@ -229,7 +228,6 @@ func TestPeerActive(t *testing.T) {
 			require.True(t, cli.IsPeerActive())
 			// upgrade to TLS and try again
 			require.NoError(t, cli.ClientTLSHandshake(ctls))
-			require.True(t, cli.IsPeerActive())
 			data, err = cli.ReadPacket()
 			require.NoError(t, err)
 			require.Equal(t, "123", string(data))

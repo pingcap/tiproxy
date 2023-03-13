@@ -40,6 +40,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"io"
+	"math"
 	"net"
 	"sync/atomic"
 	"time"
@@ -77,17 +78,17 @@ func (f *rdbufConn) Read(b []byte) (int, error) {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
-	lastKeepAlive config.KeepAlive
-	inBytes       uint64
-	outBytes      uint64
-	conn          net.Conn
-	rawConn       net.Conn
-	buf           *bufio.ReadWriter
-	proxyInited   atomic.Bool
-	proxy         *Proxy
-	remoteAddr    net.Addr
-	wrap          error
-	sequence      uint8
+	lastKeepAlive             config.KeepAlive
+	lastInBytes, lastOutBytes uint64
+	inBytes, outBytes         uint64
+	conn                      net.Conn
+	rawConn                   net.Conn
+	buf                       *bufio.ReadWriter
+	proxyInited               atomic.Bool
+	proxy                     *Proxy
+	remoteAddr                net.Addr
+	wrap                      error
+	sequence                  uint8
 }
 
 func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
@@ -101,8 +102,10 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 			conn,
 			buf.Reader,
 		},
-		sequence: 0,
-		buf:      buf,
+		sequence:     0,
+		lastInBytes:  math.MaxUint64,
+		lastOutBytes: math.MaxUint64,
+		buf:          buf,
 	}
 	// TODO: disable it by default now
 	p.proxyInited.Store(true)
@@ -275,20 +278,10 @@ func (p *PacketIO) Flush() error {
 }
 
 // IsPeerActive checks if the peer connection is still active.
-// This function cannot be called concurrently with other functions of PacketIO.
-// This function normally costs 1ms, so don't call it too frequently.
-// This function may incorrectly return true if the system is extremely slow.
 func (p *PacketIO) IsPeerActive() bool {
-	if err := p.conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
-		return false
-	}
-	active := true
-	if _, err := p.buf.Peek(1); err != nil {
-		active = !errors.Is(err, io.EOF)
-	}
-	if err := p.conn.SetReadDeadline(time.Time{}); err != nil {
-		return false
-	}
+	// if there are bytes in/out, then it is active
+	active := p.lastInBytes != p.inBytes || p.lastOutBytes != p.outBytes
+	p.lastInBytes, p.lastOutBytes = p.inBytes, p.outBytes
 	return active
 }
 
