@@ -22,7 +22,7 @@ import (
 )
 
 func addCmdMetrics(cmd byte, addr string, startTime time.Time) {
-	label := pnet.Command(cmd).String() 
+	label := pnet.Command(cmd).String()
 	metrics.QueryTotalCounter.WithLabelValues(addr, label).Inc()
 
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
@@ -32,7 +32,7 @@ func addCmdMetrics(cmd byte, addr string, startTime time.Time) {
 }
 
 func readCmdCounter(cmd byte, addr string) (int, error) {
-	label := pnet.Command(cmd).String() 
+	label := pnet.Command(cmd).String()
 	return metrics.ReadCounter(metrics.QueryTotalCounter.WithLabelValues(addr, label))
 }
 
