@@ -53,9 +53,15 @@ gocovmerge:
 tidy:
 	go mod tidy
 	cd lib && go mod tidy
+
 build:
 	go build ./...
 	cd lib && go build ./...
+
+metrics:
+	go install github.com/google/go-jsonnet/cmd/jsonnet@latest
+	[ -e "grafonnet-lib" ] || git clone --depth=1 https://github.com/grafana/grafonnet-lib
+	JSONNET_PATH=grafonnet-lib jsonnet ./pkg/metrics/grafana/tiproxy_summary.jsonnet > ./pkg/metrics/grafana/tiproxy_summary.json
 
 test: gocovmerge
 	rm -f .cover.*
