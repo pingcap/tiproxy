@@ -251,7 +251,7 @@ local bMigCounterP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'sum(label_replace(label_replace(rate(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster=~".*$tidb_cluster", instance=~"$instance"}[2m]), "from", "$1", "from", "(.+-tidb-[0-9]+).*peer.*.svc.*"), "to", "$1", "to", "(.+-tidb-[0-9]+).*peer.*.svc.*")) by (from, to, migrate_res)',
+    'sum(label_replace(label_replace(rate(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster=~".*$tidb_cluster", instance=~"$instance"}[1m]), "from", "$1", "from", "(.+-tidb-[0-9]+).*peer.*.svc.*"), "to", "$1", "to", "(.+-tidb-[0-9]+).*peer.*.svc.*")) by (from, to, migrate_res)',
     legendFormat='{{migrate_res}}: {{from}} => {{to}}',
   )
 );
