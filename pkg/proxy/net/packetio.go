@@ -49,7 +49,6 @@ import (
 	"github.com/pingcap/TiProxy/pkg/proxy/keepalive"
 	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tidb/errno"
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/dbterror"
 )
 
@@ -188,7 +187,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 	p.inBytes += uint64(length)
-	return data, length == mysql.MaxPayloadLen, nil
+	return data, length == MaxPayloadLen, nil
 }
 
 // ReadPacket reads data and removes the header
@@ -208,10 +207,10 @@ func (p *PacketIO) ReadPacket() (data []byte, err error) {
 func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 	more := false
 	length := len(data)
-	if length >= mysql.MaxPayloadLen {
+	if length >= MaxPayloadLen {
 		// we need another packet, this is true even if
 		// the current packet is of len(MaxPayloadLen) exactly
-		length = mysql.MaxPayloadLen
+		length = MaxPayloadLen
 		more = true
 	}
 
