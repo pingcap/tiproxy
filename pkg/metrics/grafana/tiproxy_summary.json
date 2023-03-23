@@ -562,7 +562,7 @@
                "thresholds": [ ],
                "timeFrom": null,
                "timeShift": null,
-               "title": "CPS By Instance",
+               "title": "CPS by Instance",
                "tooltip": {
                   "shared": true,
                   "sort": 0,
@@ -638,7 +638,7 @@
                "steppedLine": false,
                "targets": [
                   {
-                     "expr": "sum(rate(tiproxy_session_query_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (backend)",
+                     "expr": "label_replace(sum(rate(tiproxy_session_query_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (backend), \"backend\", \"$1\", \"backend\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
                      "format": "time_series",
                      "intervalFactor": 2,
                      "legendFormat": "{{backend}}",
@@ -830,10 +830,10 @@
                "steppedLine": false,
                "targets": [
                   {
-                     "expr": "tiproxy_balance_b_conn{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}",
+                     "expr": "label_replace(tiproxy_balance_b_conn{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\".*$tidb_cluster\", instance=~\"$instance\"}, \"backend\", \"$1\", \"backend\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
                      "format": "time_series",
                      "intervalFactor": 2,
-                     "legendFormat": "{{backend}}",
+                     "legendFormat": "{{instance}} | {{backend}}",
                      "refId": "A"
                   }
                ],
@@ -916,10 +916,10 @@
                "steppedLine": false,
                "targets": [
                   {
-                     "expr": "sum(rate(tiproxy_balance_migrate_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (from, to, migrate_res)",
+                     "expr": "sum(label_replace(label_replace(rate(tiproxy_balance_migrate_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\".*$tidb_cluster\", instance=~\"$instance\"}[1m]), \"from\", \"$1\", \"from\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\"), \"to\", \"$1\", \"to\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")) by (from, to, migrate_res)",
                      "format": "time_series",
                      "intervalFactor": 2,
-                     "legendFormat": "{{from}}-{{to}}-{{migrate_res}}",
+                     "legendFormat": "{{migrate_res}}: {{from}} => {{to}}",
                      "refId": "A"
                   }
                ],

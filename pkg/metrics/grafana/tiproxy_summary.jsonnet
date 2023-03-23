@@ -185,7 +185,7 @@ local durationP = graphPanel.new(
 );
 
 local cpsByInstP = graphPanel.new(
-  title='CPS By Instance',
+  title='CPS by Instance',
   datasource=myDS,
   legend_rightSide=true,
   description='TiProxy query total statistics including both successful and failed ones.',
@@ -207,7 +207,7 @@ local cpsByBackP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'sum(rate(tiproxy_session_query_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (backend)',
+    'label_replace(sum(rate(tiproxy_session_query_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (backend), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
     legendFormat='{{backend}}',
   )
 );
@@ -237,8 +237,8 @@ local bConnP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'tiproxy_balance_b_conn{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}',
-    legendFormat='{{backend}}',
+    'label_replace(tiproxy_balance_b_conn{k8s_cluster="$k8s_cluster", tidb_cluster=".*$tidb_cluster", instance=~"$instance"}, "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{instance}} | {{backend}}',
   )
 );
 
@@ -251,8 +251,8 @@ local bMigCounterP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'sum(rate(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (from, to, migrate_res)',
-    legendFormat='{{from}}-{{to}}-{{migrate_res}}',
+    'sum(label_replace(label_replace(rate(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster=".*$tidb_cluster", instance=~"$instance"}[1m]), "from", "$1", "from", "(.+-tidb-[0-9]+).*peer.*.svc.*"), "to", "$1", "to", "(.+-tidb-[0-9]+).*peer.*.svc.*")) by (from, to, migrate_res)',
+    legendFormat='{{migrate_res}}: {{from}} => {{to}}',
   )
 );
 
