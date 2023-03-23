@@ -207,8 +207,8 @@ local cpsByBackP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'label_replace(sum(rate(tiproxy_session_query_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (backend, instance), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
-    legendFormat='{{instance}} | {{backend}}',
+    'label_replace(sum(rate(tiproxy_session_query_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (backend), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{backend}}',
   )
 );
 
