@@ -134,6 +134,12 @@ local cpuP = graphPanel.new(
     'rate(process_cpu_seconds_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}[1m])',
     legendFormat='{{instance}}',
   )
+)
+.addTarget(
+  prometheus.target(
+    'tiproxy_server_maxprocs{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}',
+    legendFormat='limit-{{instance}}',
+  )
 );
 
 local memP = graphPanel.new(
@@ -153,6 +159,20 @@ local memP = graphPanel.new(
   prometheus.target(
     'go_memory_classes_heap_objects_bytes{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"} + go_memory_classes_heap_unused_bytes{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}',
     legendFormat='HeapInuse-{{instance}}',
+  )
+);
+
+local uptimeP = graphPanel.new(
+  title='Uptime',
+  datasource=myDS,
+  legend_rightSide=true,
+  format='s',
+  description='TiProxy uptime since the last restart.',
+)
+.addTarget(
+  prometheus.target(
+    'time() - process_start_time_seconds{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}',
+    legendFormat='{{instance}}',
   )
 );
 
@@ -327,6 +347,7 @@ newDash
   .addPanel(memP, gridPos=rightPanelPos)
   .addPanel(connectionP, gridPos=leftPanelPos)
   .addPanel(goroutineP, gridPos=rightPanelPos)
+  .addPanel(uptimeP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )

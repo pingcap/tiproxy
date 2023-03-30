@@ -116,6 +116,7 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(ConnGauge)
 	prometheus.MustRegister(TimeJumpBackCounter)
 	prometheus.MustRegister(KeepAliveCounter)
+	prometheus.MustRegister(MaxProcsGauge)
 	prometheus.MustRegister(BackendStatusGauge)
 	prometheus.MustRegister(BackendConnGauge)
 	prometheus.MustRegister(QueryTotalCounter)
