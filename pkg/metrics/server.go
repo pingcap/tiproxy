@@ -28,6 +28,14 @@ var (
 			Help:      "Number of connections.",
 		})
 
+	MaxProcsGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelServer,
+			Name:      "maxprocs",
+			Help:      "The value of GOMAXPROCS.",
+		})
+
 	TimeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: ModuleProxy,

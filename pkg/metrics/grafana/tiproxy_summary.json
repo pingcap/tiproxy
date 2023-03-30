@@ -79,6 +79,13 @@
                      "intervalFactor": 2,
                      "legendFormat": "{{instance}}",
                      "refId": "A"
+                  },
+                  {
+                     "expr": "tiproxy_server_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "limit-{{instance}}",
+                     "refId": "B"
                   }
                ],
                "thresholds": [ ],
@@ -388,6 +395,92 @@
                      "show": true
                   }
                ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy uptime since the last restart.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 7,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "time() - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Uptime",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
             }
          ],
          "repeat": null,
@@ -407,7 +500,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 7,
+         "id": 8,
          "panels": [
             {
                "aliasColors": { },
@@ -424,7 +517,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 8,
+               "id": 9,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -524,7 +617,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 9,
+               "id": 10,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -610,7 +703,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 10,
+               "id": 11,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -696,7 +789,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 11,
+               "id": 12,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -785,7 +878,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 12,
+         "id": 13,
          "panels": [
             {
                "aliasColors": { },
@@ -802,7 +895,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 13,
+               "id": 14,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -888,7 +981,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 14,
+               "id": 15,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -974,7 +1067,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 15,
+               "id": 16,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1077,7 +1170,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 16,
+         "id": 17,
          "panels": [
             {
                "aliasColors": { },
@@ -1094,7 +1187,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 17,
+               "id": 18,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,

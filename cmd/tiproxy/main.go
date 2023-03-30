@@ -18,9 +18,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/pingcap/TiProxy/lib/util/cmd"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/sctx"
 	"github.com/pingcap/TiProxy/pkg/server"
 	"github.com/spf13/cobra"
@@ -45,6 +47,8 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&sctx.ConfigFile, "config", "", "proxy config file path")
 	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Log.Encoder, "log_encoder", "", "log in format of tidb, console, or json")
 	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Log.Level, "log_level", "", "log level")
+
+	metrics.MaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		srv, err := server.NewServer(cmd.Context(), sctx)
