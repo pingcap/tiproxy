@@ -695,7 +695,7 @@ func (mgr *BackendConnManager) setKeepAlive(cfg config.KeepAlive) {
 		return
 	}
 	if err := backendIO.SetKeepalive(cfg); err != nil {
-		mgr.logger.Warn("failed to set keepalive", zap.Error(err), zap.Stringer("backend_addr", backendIO.RemoteAddr()))
+		mgr.logger.Warn("failed to set keepalive", zap.Stringer("backend_addr", backendIO.RemoteAddr()), zap.Error(err))
 	}
 }
 
