@@ -69,7 +69,7 @@ clean:
 	switch src {
 	case backend.SrcClientQuit, backend.SrcClientErr, backend.SrcProxyQuit:
 	default:
-		cc.logger.Info(msg, zap.Error(err), zap.Stringer("quit source", src))
+		cc.logger.Info(msg, zap.String("backend_addr", cc.connMgr.ServerAddr()), zap.Error(err), zap.Stringer("quit source", src))
 	}
 }
 
