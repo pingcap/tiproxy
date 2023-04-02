@@ -289,7 +289,7 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 	for addr, status := range backends {
 		be := router.lookupBackend(addr, true)
 		if be == nil && status != StatusCannotConnect {
-			router.logger.Info("update backend", zap.String("addr", addr),
+			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev_status", "none"), zap.String("cur_status", status.String()))
 			router.backends.PushBack(&backendWrapper{
 				status:   status,
@@ -298,7 +298,7 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 			})
 		} else if be != nil {
 			backend := be.Value
-			router.logger.Info("update backend", zap.String("addr", addr),
+			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev_status", backend.status.String()), zap.String("cur_status", status.String()))
 			backend.status = status
 			if !router.removeBackendIfEmpty(be) {

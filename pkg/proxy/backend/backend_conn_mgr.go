@@ -229,12 +229,12 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			if err = selector.Succeed(mgr); err != nil {
 				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
 				if ignoredErr := cn.Close(); ignoredErr != nil {
-					mgr.logger.Error("close backend connection failed", zap.String("addr", addr), zap.Error(ignoredErr))
+					mgr.logger.Error("close backend connection failed", zap.String("backend_addr", addr), zap.Error(ignoredErr))
 				}
 				return nil, err
 			}
 
-			mgr.logger.Info("connected to backend", zap.String("addr", addr))
+			mgr.logger.Info("connected to backend", zap.String("backend_addr", addr))
 			// NOTE: should use DNS name as much as possible
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
@@ -443,7 +443,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
 			mgr.quitSource = SrcBackendQuit
 			if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
-				mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
+				mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
 			}
 		}
 		return
@@ -558,7 +558,7 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 	mgr.quitSource = SrcProxyQuit
 	// Closing clientIO will cause the whole connection to be closed.
 	if err := mgr.clientIO.GracefulClose(); err != nil {
-		mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+		mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
 	}
 	mgr.closeStatus.Store(statusClosing)
 }
@@ -573,11 +573,11 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	defer mgr.processLock.Unlock()
 	backendIO := mgr.backendIO.Load()
 	if !backendIO.IsPeerActive() {
-		mgr.logger.Info("backend connection is closed, close client connection", zap.Stringer("client", mgr.clientIO.RemoteAddr()),
-			zap.Stringer("backend", backendIO.RemoteAddr()))
+		mgr.logger.Info("backend connection is closed, close client connection",
+			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()))
 		mgr.quitSource = SrcBackendQuit
 		if err := mgr.clientIO.GracefulClose(); err != nil {
-			mgr.logger.Warn("graceful close client IO error", zap.Stringer("addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
 		}
 		mgr.closeStatus.Store(statusClosing)
 	}
@@ -669,7 +669,7 @@ func (mgr *BackendConnManager) Close() error {
 		// Just notify it with the current address.
 		if len(addr) > 0 {
 			if err := eventReceiver.OnConnClosed(addr, mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("addr", addr), zap.NamedError("notify_err", err))
+				mgr.logger.Error("close connection error", zap.String("client_addr", addr), zap.NamedError("notify_err", err))
 			}
 		}
 	}
@@ -695,7 +695,7 @@ func (mgr *BackendConnManager) setKeepAlive(cfg config.KeepAlive) {
 		return
 	}
 	if err := backendIO.SetKeepalive(cfg); err != nil {
-		mgr.logger.Warn("failed to set keepalive", zap.Error(err), zap.Stringer("backend", backendIO.RemoteAddr()))
+		mgr.logger.Warn("failed to set keepalive", zap.Error(err), zap.Stringer("backend_addr", backendIO.RemoteAddr()))
 	}
 }
 

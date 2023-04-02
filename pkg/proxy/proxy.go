@@ -145,18 +145,18 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	// 'maxConns == 0' => unlimited connections
 	if maxConns != 0 && conns >= maxConns {
 		s.mu.Unlock()
-		s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+		s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
 		return
 	}
 	if s.mu.inShutdown {
 		s.mu.Unlock()
-		s.logger.Warn("in shutdown", zap.String("addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+		s.logger.Warn("in shutdown", zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
 		return
 	}
 
 	connID := s.mu.connID
 	s.mu.connID++
-	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("remoteAddr", conn.RemoteAddr().String()))
+	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()))
 	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(),
 		s.hsHandler, connID, &backend.BCConfig{
 			ProxyProtocol:      s.mu.proxyProtocol,
