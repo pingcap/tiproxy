@@ -78,6 +78,7 @@ type RedirectableConn interface {
 	Redirect(addr string)
 	GetRedirectingAddr() string
 	NotifyBackendStatus(status BackendStatus)
+	ConnectionID() uint64
 }
 
 // backendWrapper contains the connections on the backend.

@@ -289,8 +289,8 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 	for addr, status := range backends {
 		be := router.lookupBackend(addr, true)
 		if be == nil && status != StatusCannotConnect {
-			router.logger.Info("find new backend", zap.String("addr", addr),
-				zap.String("status", status.String()))
+			router.logger.Info("update backend", zap.String("backend_addr", addr),
+				zap.String("prev_status", "none"), zap.String("cur_status", status.String()))
 			router.backends.PushBack(&backendWrapper{
 				status:   status,
 				addr:     addr,
@@ -298,7 +298,7 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 			})
 		} else if be != nil {
 			backend := be.Value
-			router.logger.Info("update backend", zap.String("addr", addr),
+			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev_status", backend.status.String()), zap.String("cur_status", status.String()))
 			backend.status = status
 			if !router.removeBackendIfEmpty(be) {
@@ -367,8 +367,11 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 		if ce == nil {
 			break
 		}
-		router.removeConn(busiestEle, ce)
 		conn := ce.Value
+		router.logger.Info("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
+			zap.String("from", busiestBackend.addr), zap.String("to", idlestBackend.addr),
+			zap.Int("from_score", busiestBackend.score()), zap.Int("to_score", idlestBackend.score()))
+		router.removeConn(busiestEle, ce)
 		conn.phase = phaseRedirectNotify
 		conn.lastRedirect = curTime
 		router.addConn(idlestEle, conn)

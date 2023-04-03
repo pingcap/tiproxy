@@ -200,7 +200,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		// but TiDB does not send all of its supported capabilities
 		// thus we must ignore server capabilities
 		// however, I will log something
-		logger.Info("backend does not support capabilities from proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
+		logger.Debug("backend does not support capabilities from proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
 	}
 
 	// forward client handshake resp
