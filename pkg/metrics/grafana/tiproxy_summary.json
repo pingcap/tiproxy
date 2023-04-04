@@ -256,7 +256,7 @@
                "repeat": null,
                "seriesOverrides": [ ],
                "spaceLength": 10,
-               "stack": true,
+               "stack": false,
                "steppedLine": false,
                "targets": [
                   {
@@ -349,7 +349,7 @@
                "repeat": null,
                "seriesOverrides": [ ],
                "spaceLength": 10,
-               "stack": true,
+               "stack": false,
                "steppedLine": false,
                "targets": [
                   {
@@ -358,6 +358,13 @@
                      "intervalFactor": 2,
                      "legendFormat": "{{instance}}",
                      "refId": "A"
+                  },
+                  {
+                     "expr": "sum(go_goroutines{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"tiproxy\"})",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "total",
+                     "refId": "B"
                   }
                ],
                "thresholds": [ ],
@@ -559,7 +566,7 @@
                      "refId": "B"
                   },
                   {
-                     "expr": "sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[30s])) / sum(rate(tiproxy_session_query_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s]))",
+                     "expr": "sum(rate(tiproxy_session_query_duration_seconds_sum{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[30s])) / sum(rate(tiproxy_session_query_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s]))",
                      "format": "time_series",
                      "intervalFactor": 2,
                      "legendFormat": "avg",

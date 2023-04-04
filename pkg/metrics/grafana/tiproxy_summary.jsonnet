@@ -92,7 +92,6 @@ local connectionP = graphPanel.new(
   legend_rightSide=true,
   description='TiProxy current connection counts.',
   format='short',
-  stack=true,
 )
 .addTarget(
   prometheus.target(
@@ -113,12 +112,17 @@ local goroutineP = graphPanel.new(
   legend_rightSide=true,
   description='TiProxy current goroutine counts.',
   format='short',
-  stack=true,
 )
 .addTarget(
   prometheus.target(
     'go_goroutines{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}',
     legendFormat='{{instance}}',
+  )
+)
+.addTarget(
+  prometheus.target(
+    'sum(go_goroutines{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", job="tiproxy"})',
+    legendFormat='total',
   )
 );
 
@@ -199,8 +203,22 @@ local durationP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_session_query_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
+    'sum(rate(tiproxy_session_query_duration_seconds_sum{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_session_query_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
     legendFormat='avg',
+  )
+);
+
+local durationByBackP = graphPanel.new(
+  title='Duration By Backend',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy P99 query durations by instances and backends.',
+  format='s',
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(histogram_quantile(0.99, sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster="$k8s_cluster", cluster_id=~".*$tidb_cluster", instance=~"$instance"}[2m])) by (le, instance, backend)), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{instance}} | {{backend}}',
   )
 );
 
