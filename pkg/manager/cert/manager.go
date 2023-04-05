@@ -17,7 +17,6 @@ package cert
 import (
 	"context"
 	"crypto/tls"
-	"github.com/pingcap/TiProxy/pkg/metrics"
 	"sync/atomic"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/metrics"
 	"go.uber.org/zap"
 )
 
@@ -138,9 +138,7 @@ func (cm *CertManager) reload() {
 	if len(errs) > 0 {
 		metrics.ServerErrCounter.WithLabelValues("load_cert").Add(float64(len(errs)))
 		err := errors.Collect(errors.New("loading certs"), errs...)
-		if err != nil {
-			cm.logger.Error("failed to reload some certs", zap.Error(err))
-		}
+		cm.logger.Error("failed to reload some certs", zap.Error(err))
 	}
 }
 

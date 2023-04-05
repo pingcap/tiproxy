@@ -17,6 +17,7 @@ package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
+// LblCmdType is the label constant.
 const (
 	LblCmdType = "cmd_type"
 )
