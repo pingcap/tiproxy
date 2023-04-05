@@ -253,7 +253,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	cancel()
 
 	duration := time.Since(startTime)
-	addGetBackendMetrics(duration)
+	addGetBackendMetrics(duration, err == nil)
 	if err != nil {
 		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.NamedError("last_err", origErr))
 	} else if duration >= 3*time.Second {

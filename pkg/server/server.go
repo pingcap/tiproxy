@@ -81,6 +81,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup metrics
 	srv.MetricsManager.Init(ctx, lg.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
+	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
 
 	// setup certs
 	if err = srv.CertManager.Init(cfg, lg.Named("cert")); err != nil {
@@ -159,6 +160,8 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 }
 
 func (s *Server) Close() error {
+	metrics.ServerEventCounter.WithLabelValues(metrics.EventClose).Inc()
+
 	errs := make([]error, 0, 4)
 	if s.Proxy != nil {
 		errs = append(errs, s.Proxy.Close())

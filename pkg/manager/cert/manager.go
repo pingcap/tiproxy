@@ -17,6 +17,7 @@ package cert
 import (
 	"context"
 	"crypto/tls"
+	"github.com/pingcap/TiProxy/pkg/metrics"
 	"sync/atomic"
 	"time"
 
@@ -134,9 +135,12 @@ func (cm *CertManager) reload() {
 	if err := cm.sqlTLS.Reload(cm.logger); err != nil {
 		errs = append(errs, err)
 	}
-	err := errors.Collect(errors.New("loading certs"), errs...)
-	if err != nil {
-		cm.logger.Error("failed to reload some certs", zap.Error(err))
+	if len(errs) > 0 {
+		metrics.ServerErrCounter.WithLabelValues("load_cert").Add(float64(len(errs)))
+		err := errors.Collect(errors.New("loading certs"), errs...)
+		if err != nil {
+			cm.logger.Error("failed to reload some certs", zap.Error(err))
+		}
 	}
 }
 

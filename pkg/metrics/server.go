@@ -19,6 +19,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const (
+	LblType = "type"
+
+	EventStart = "start"
+	EventClose = "close"
+)
+
 var (
 	ConnGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -35,6 +42,22 @@ var (
 			Name:      "maxprocs",
 			Help:      "The value of GOMAXPROCS.",
 		})
+
+	ServerEventCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelServer,
+			Name:      "event",
+			Help:      "Counter of TiProxy event.",
+		}, []string{LblType})
+
+	ServerErrCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelServer,
+			Name:      "err",
+			Help:      "Counter of server error.",
+		}, []string{LblType})
 
 	TimeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
