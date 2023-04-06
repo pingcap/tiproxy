@@ -303,19 +303,19 @@ local bMigDurP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'histogram_quantile(0.99, sum(rate(tiproxy_balance_migrate_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    'histogram_quantile(0.99, sum(rate(tiproxy_balance_migrate_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
     legendFormat='99',
   )
 )
 .addTarget(
   prometheus.target(
-    'histogram_quantile(0.95, sum(rate(tiproxy_balance_migrate_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    'histogram_quantile(0.95, sum(rate(tiproxy_balance_migrate_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
     legendFormat='95',
   )
 )
 .addTarget(
   prometheus.target(
-    'sum(rate(tiproxy_balance_migrate_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_balance_migrate_duration_millis_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
+    'sum(rate(tiproxy_balance_migrate_duration_seconds_sum{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_balance_migrate_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
     legendFormat='avg',
   )
 );
@@ -343,7 +343,7 @@ local bGetDurP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'sum(rate(tiproxy_backend_get_backend_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_backend_get_backend_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
+    'sum(rate(tiproxy_backend_get_backend_duration_seconds_sum{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_backend_get_backend_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
     legendFormat='avg',
   )
 );
@@ -371,7 +371,7 @@ local bPingBeP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'label_replace(tiproxy_backend_ping_backend_seconds{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}, "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    'label_replace(tiproxy_backend_ping_duration_seconds{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}, "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
     legendFormat='{{instance}} | {{backend}}',
   )
 );

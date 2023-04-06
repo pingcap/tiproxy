@@ -17,8 +17,8 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 const (
-	LblGetBeRes = "get_be_res"
-	LblStatus   = "status"
+	LblRes    = "res"
+	LblStatus = "status"
 )
 
 var (
@@ -45,13 +45,13 @@ var (
 			Subsystem: LabelBackend,
 			Name:      "get_backend",
 			Help:      "Counter of getting backend.",
-		}, []string{LblGetBeRes})
+		}, []string{LblRes})
 
 	PingBackendGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: ModuleProxy,
 			Subsystem: LabelBackend,
-			Name:      "ping_backend_duration_seconds",
+			Name:      "ping_duration_seconds",
 			Help:      "Time (s) of pinging the SQL port of each backend.",
-		}, []string{LblBackend})
+		}, []string{LblBackend, LblRes})
 )
