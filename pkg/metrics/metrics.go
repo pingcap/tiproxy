@@ -43,6 +43,7 @@ const (
 	LabelBalance = "balance"
 	LabelSession = "session"
 	LabelMonitor = "monitor"
+	LabelBackend = "backend"
 )
 
 // MetricsManager manages metrics.
@@ -114,14 +115,18 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
 
 	prometheus.MustRegister(ConnGauge)
+	prometheus.MustRegister(MaxProcsGauge)
+	prometheus.MustRegister(ServerEventCounter)
+	prometheus.MustRegister(ServerErrCounter)
 	prometheus.MustRegister(TimeJumpBackCounter)
 	prometheus.MustRegister(KeepAliveCounter)
-	prometheus.MustRegister(MaxProcsGauge)
-	prometheus.MustRegister(BackendStatusGauge)
-	prometheus.MustRegister(BackendConnGauge)
 	prometheus.MustRegister(QueryTotalCounter)
 	prometheus.MustRegister(QueryDurationHistogram)
+	prometheus.MustRegister(BackendStatusGauge)
 	prometheus.MustRegister(GetBackendHistogram)
+	prometheus.MustRegister(GetBackendCounter)
+	prometheus.MustRegister(PingBackendGauge)
+	prometheus.MustRegister(BackendConnGauge)
 	prometheus.MustRegister(MigrateCounter)
 	prometheus.MustRegister(MigrateDurationHistogram)
 }

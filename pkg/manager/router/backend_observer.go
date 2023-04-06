@@ -231,7 +231,9 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 
 		// Also dial the SQL port just in case that the SQL port hangs.
 		err := connectWithRetry(func() error {
+			startTime := time.Now()
 			conn, err := net.DialTimeout("tcp", addr, bo.healthCheckConfig.DialTimeout)
+			setPingBackendMetrics(addr, err == nil, startTime)
 			if err == nil {
 				if err := conn.Close(); err != nil && !pnet.IsDisconnectError(err) {
 					bo.logger.Error("close connection in health check failed", zap.Error(err))

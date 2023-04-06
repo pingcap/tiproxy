@@ -57,9 +57,15 @@ func addMigrateMetrics(from, to string, succeed bool, startTime time.Time) {
 	metrics.MigrateCounter.WithLabelValues(from, to, resLabel).Inc()
 
 	cost := time.Since(startTime)
-	metrics.MigrateDurationHistogram.WithLabelValues(from, to, resLabel).Observe(float64(cost.Milliseconds()))
+	metrics.MigrateDurationHistogram.WithLabelValues(from, to, resLabel).Observe(cost.Seconds())
 }
 
 func readMigrateCounter(from, to string, succeed bool) (int, error) {
 	return metrics.ReadCounter(metrics.MigrateCounter.WithLabelValues(from, to, succeedToLabel(succeed)))
+}
+
+func setPingBackendMetrics(addr string, succeed bool, startTime time.Time) {
+	cost := time.Since(startTime)
+	resLabel := succeedToLabel(succeed)
+	metrics.PingBackendGauge.WithLabelValues(addr, resLabel).Set(cost.Seconds())
 }

@@ -92,7 +92,6 @@ local connectionP = graphPanel.new(
   legend_rightSide=true,
   description='TiProxy current connection counts.',
   format='short',
-  stack=true,
 )
 .addTarget(
   prometheus.target(
@@ -113,12 +112,17 @@ local goroutineP = graphPanel.new(
   legend_rightSide=true,
   description='TiProxy current goroutine counts.',
   format='short',
-  stack=true,
 )
 .addTarget(
   prometheus.target(
     'go_goroutines{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}',
     legendFormat='{{instance}}',
+  )
+)
+.addTarget(
+  prometheus.target(
+    'sum(go_goroutines{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", job="tiproxy"})',
+    legendFormat='total',
   )
 );
 
@@ -199,8 +203,22 @@ local durationP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_session_query_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
+    'sum(rate(tiproxy_session_query_duration_seconds_sum{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_session_query_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
     legendFormat='avg',
+  )
+);
+
+local durationByBackP = graphPanel.new(
+  title='Duration By Backend',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy P99 query durations by instances and backends.',
+  format='s',
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(histogram_quantile(0.99, sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le, instance, backend)), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{instance}} | {{backend}}',
   )
 );
 
@@ -271,7 +289,7 @@ local bMigCounterP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'sum(label_replace(label_replace(rate(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m]), "from", "$1", "from", "(.+-tidb-[0-9]+).*peer.*.svc.*"), "to", "$1", "to", "(.+-tidb-[0-9]+).*peer.*.svc.*")) by (from, to, migrate_res)',
+    'label_replace(label_replace(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}, "from", "$1", "from", "(.+-tidb-[0-9]+).*peer.*.svc.*"), "to", "$1", "to", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
     legendFormat='{{migrate_res}}: {{from}} => {{to}}',
   )
 );
@@ -285,19 +303,19 @@ local bMigDurP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'histogram_quantile(0.99, sum(rate(tiproxy_balance_migrate_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    'histogram_quantile(0.99, sum(rate(tiproxy_balance_migrate_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
     legendFormat='99',
   )
 )
 .addTarget(
   prometheus.target(
-    'histogram_quantile(0.95, sum(rate(tiproxy_balance_migrate_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    'histogram_quantile(0.95, sum(rate(tiproxy_balance_migrate_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
     legendFormat='95',
   )
 )
 .addTarget(
   prometheus.target(
-    'sum(rate(tiproxy_balance_migrate_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_balance_migrate_duration_millis_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
+    'sum(rate(tiproxy_balance_migrate_duration_seconds_sum{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_balance_migrate_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
     legendFormat='avg',
   )
 );
@@ -313,20 +331,48 @@ local bGetDurP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'histogram_quantile(0.99, sum(rate(tiproxy_session_get_backend_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    'histogram_quantile(0.99, sum(rate(tiproxy_backend_get_backend_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
     legendFormat='99',
   )
 )
 .addTarget(
   prometheus.target(
-    'histogram_quantile(0.95, sum(rate(tiproxy_session_get_backend_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    'histogram_quantile(0.95, sum(rate(tiproxy_backend_get_backend_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
     legendFormat='95',
   )
 )
 .addTarget(
   prometheus.target(
-    'sum(rate(tiproxy_session_get_backend_duration_millis_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_session_get_backend_duration_millis_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
+    'sum(rate(tiproxy_backend_get_backend_duration_seconds_sum{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_backend_get_backend_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
     legendFormat='avg',
+  )
+);
+
+local bGetBeP = graphPanel.new(
+  title='Get Backend Count',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Number of getting an available backend.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'tiproxy_backend_get_backend{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}',
+    legendFormat='{{res}}',
+  )
+);
+
+local bPingBeP = graphPanel.new(
+  title='Ping Backend Duration',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Duration of Pinging backends.',
+  format='s',
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(tiproxy_backend_ping_duration_seconds{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}, "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{instance}} | {{backend}}',
   )
 );
 
@@ -370,7 +416,9 @@ newDash
 )
 .addPanel(
   backendRow
-  .addPanel(bGetDurP, gridPos=leftPanelPos)
+  .addPanel(bGetBeP, gridPos=leftPanelPos)
+  .addPanel(bGetDurP, gridPos=rightPanelPos)
+  .addPanel(bPingBeP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )
