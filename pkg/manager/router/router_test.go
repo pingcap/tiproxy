@@ -440,6 +440,37 @@ func TestSelectorReturnOrder(t *testing.T) {
 	require.True(t, len(addr) == 0)
 }
 
+// Test that the backends are balanced even when routing are concurrent.
+func TestRouteConcurrently(t *testing.T) {
+	tester := newRouterTester(t)
+	tester.addBackends(3)
+	addrs := make(map[string]int, 3)
+	selectors := make([]BackendSelector, 0, 30)
+	// All the clients are calling Next() but not yet Finish().
+	for i := 0; i < 30; i++ {
+		selector := tester.router.GetBackendSelector()
+		addr, err := selector.Next()
+		require.NoError(t, err)
+		addrs[addr]++
+		selectors = append(selectors, selector)
+	}
+	require.Equal(t, 3, len(addrs))
+	for _, num := range addrs {
+		require.Equal(t, 10, num)
+	}
+	for i := 0; i < 3; i++ {
+		backend := tester.getBackendByIndex(i)
+		require.Equal(t, 10, backend.connScore)
+	}
+	for _, selector := range selectors {
+		selector.Finish(nil, false)
+	}
+	for i := 0; i < 3; i++ {
+		backend := tester.getBackendByIndex(i)
+		require.Equal(t, 0, backend.connScore)
+	}
+}
+
 // Test that the backends are balanced during rolling restart.
 func TestRollingRestart(t *testing.T) {
 	tester := newRouterTester(t)
