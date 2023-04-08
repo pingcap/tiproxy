@@ -187,7 +187,7 @@ func (tester *routerTester) checkBackendOrder() {
 		backend := be.Value
 		// Empty unhealthy backends should be removed.
 		if backend.status == StatusCannotConnect {
-			require.NotEqual(tester.t, 0, backend.connList.Len())
+			require.True(tester.t, backend.connList.Len() > 0 || backend.connScore > 0)
 		}
 		curScore := backend.score()
 		require.GreaterOrEqual(tester.t, score, curScore)
@@ -200,8 +200,7 @@ func (tester *routerTester) simpleRoute(conn RedirectableConn) string {
 	addr, err := selector.Next()
 	require.NoError(tester.t, err)
 	if len(addr) > 0 {
-		err := selector.Succeed(conn)
-		require.NoError(tester.t, err)
+		selector.Finish(conn, true)
 	}
 	return addr
 }
@@ -519,9 +518,11 @@ func TestRebalanceCornerCase(t *testing.T) {
 			tester.addBackends(1)
 			tester.rebalance(10)
 			tester.checkRedirectingNum(10)
+			tester.checkBackendNum(2)
+			backend := tester.getBackendByIndex(1)
+			require.Equal(t, 10, backend.connScore)
+			tester.redirectFinish(10, true)
 			tester.checkBackendNum(1)
-			backend := tester.getBackendByIndex(0)
-			require.Equal(t, 10, backend.connList.Len())
 		},
 		func() {
 			// Connections won't be redirected again before redirection finishes.
@@ -531,11 +532,15 @@ func TestRebalanceCornerCase(t *testing.T) {
 			tester.addBackends(1)
 			tester.rebalance(10)
 			tester.checkRedirectingNum(10)
-			backend := tester.getBackendByIndex(0)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(10)
 			tester.checkRedirectingNum(10)
+			backend := tester.getBackendByIndex(0)
+			require.Equal(t, 10, backend.connScore)
+			require.Equal(t, 0, backend.connList.Len())
+			backend = tester.getBackendByIndex(1)
+			require.Equal(t, 0, backend.connScore)
 			require.Equal(t, 10, backend.connList.Len())
 		},
 		func() {
@@ -545,7 +550,7 @@ func TestRebalanceCornerCase(t *testing.T) {
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(10)
-			tester.checkBackendNum(1)
+			tester.checkBackendNum(2)
 			tester.redirectFinish(10, false)
 			tester.checkBackendNum(2)
 		},
@@ -661,8 +666,7 @@ func TestConcurrency(t *testing.T) {
 							conn = nil
 							continue
 						}
-						err = selector.Succeed(conn)
-						require.NoError(t, err)
+						selector.Finish(conn, true)
 						conn.from = addr
 					} else if len(conn.GetRedirectingAddr()) > 0 {
 						// redirecting, 70% success, 20% fail, 10% close

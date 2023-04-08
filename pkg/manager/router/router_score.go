@@ -22,7 +22,6 @@ import (
 
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"go.uber.org/zap"
 )
@@ -73,7 +72,7 @@ func (r *ScoreBasedRouter) Init(httpCli *http.Client, fetcher BackendFetcher, cf
 func (router *ScoreBasedRouter) GetBackendSelector() BackendSelector {
 	return BackendSelector{
 		routeOnce: router.routeOnce,
-		addConn:   router.addNewConn,
+		onCreate:  router.onCreateConn,
 	}
 }
 
@@ -106,6 +105,8 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 			}
 		}
 		if !found {
+			backend.connScore++
+			router.adjustBackendList(be)
 			return backend.addr, nil
 		}
 	}
@@ -117,41 +118,46 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 	return "", nil
 }
 
-func (router *ScoreBasedRouter) addNewConn(addr string, conn RedirectableConn) error {
-	connWrapper := &connWrapper{
-		RedirectableConn: conn,
-		phase:            phaseNotRedirected,
-	}
+func (router *ScoreBasedRouter) onCreateConn(addr string, conn RedirectableConn, succeed bool) {
 	router.Lock()
-	be := router.lookupBackend(addr, true)
-	if be == nil {
-		router.Unlock()
-		return errors.WithStack(errors.Errorf("backend %s is not found in the router", addr))
+	defer router.Unlock()
+	be := router.ensureBackend(addr, true)
+	backend := be.Value
+	if succeed {
+		connWrapper := &connWrapper{
+			RedirectableConn: conn,
+			phase:            phaseNotRedirected,
+		}
+		router.addConn(be, connWrapper)
+		conn.SetEventReceiver(router)
+	} else {
+		backend.connScore--
+		router.adjustBackendList(be)
 	}
-	router.addConn(be, connWrapper)
-	router.Unlock()
-	addBackendConnMetrics(addr)
-	conn.SetEventReceiver(router)
-	return nil
 }
 
 func (router *ScoreBasedRouter) removeConn(be *glist.Element[*backendWrapper], ce *glist.Element[*connWrapper]) {
 	backend := be.Value
 	backend.connList.Remove(ce)
-	if !router.removeBackendIfEmpty(be) {
-		router.adjustBackendList(be)
-	}
+	setBackendConnMetrics(backend.addr, backend.connList.Len())
+	router.adjustBackendList(be)
 }
 
 func (router *ScoreBasedRouter) addConn(be *glist.Element[*backendWrapper], conn *connWrapper) {
 	backend := be.Value
 	ce := backend.connList.PushBack(conn)
+	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	router.setConnWrapper(conn, ce)
+	conn.NotifyBackendStatus(backend.status)
 	router.adjustBackendList(be)
 }
 
 // adjustBackendList moves `be` after the score of `be` changes to keep the list ordered.
 func (router *ScoreBasedRouter) adjustBackendList(be *glist.Element[*backendWrapper]) {
+	if router.removeBackendIfEmpty(be) {
+		return
+	}
+
 	backend := be.Value
 	curScore := backend.score()
 	var mark *glist.Element[*backendWrapper]
@@ -217,67 +223,62 @@ func (router *ScoreBasedRouter) lookupBackend(addr string, forward bool) *glist.
 	return nil
 }
 
+func (router *ScoreBasedRouter) ensureBackend(addr string, forward bool) *glist.Element[*backendWrapper] {
+	be := router.lookupBackend(addr, forward)
+	if be == nil {
+		// The backend should always exist if it will be needed. Add a warning and add it back.
+		router.logger.Warn("backend is not found in the router", zap.String("backend_addr", addr), zap.Stack("stack"))
+		be = router.backends.PushFront(&backendWrapper{
+			status:   StatusCannotConnect,
+			addr:     addr,
+			connList: glist.New[*connWrapper](),
+		})
+		router.adjustBackendList(be)
+	}
+	return be
+}
+
 // OnRedirectSucceed implements ConnEventReceiver.OnRedirectSucceed interface.
 func (router *ScoreBasedRouter) OnRedirectSucceed(from, to string, conn RedirectableConn) error {
-	router.Lock()
-	defer router.Unlock()
-	be := router.lookupBackend(to, false)
-	if be == nil {
-		return errors.WithStack(errors.Errorf("backend %s is not found in the router", to))
-	}
-	toBackend := be.Value
-	conn.NotifyBackendStatus(toBackend.status)
-	connWrapper := router.getConnWrapper(conn).Value
-	connWrapper.phase = phaseRedirectEnd
-	addMigrateMetrics(from, to, true, connWrapper.lastRedirect)
-	subBackendConnMetrics(from)
-	addBackendConnMetrics(to)
+	router.onRedirectFinished(from, to, conn, true)
 	return nil
 }
 
 // OnRedirectFail implements ConnEventReceiver.OnRedirectFail interface.
 func (router *ScoreBasedRouter) OnRedirectFail(from, to string, conn RedirectableConn) error {
+	router.onRedirectFinished(from, to, conn, false)
+	return nil
+}
+
+func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn RedirectableConn, succeed bool) {
 	router.Lock()
 	defer router.Unlock()
-	be := router.lookupBackend(to, false)
-	if be == nil {
-		return errors.WithStack(errors.Errorf("backend %s is not found in the router", to))
-	}
-	router.removeConn(be, router.getConnWrapper(conn))
-
-	be = router.lookupBackend(from, true)
-	// The backend may have been removed because it's empty. Add it back.
-	if be == nil {
-		be = router.backends.PushBack(&backendWrapper{
-			status:   StatusCannotConnect,
-			addr:     from,
-			connList: glist.New[*connWrapper](),
-		})
-	}
-	conn.NotifyBackendStatus(be.Value.status)
+	fromBe := router.ensureBackend(from, true)
+	toBe := router.ensureBackend(to, false)
 	connWrapper := router.getConnWrapper(conn).Value
-	connWrapper.phase = phaseRedirectFail
-	addMigrateMetrics(from, to, false, connWrapper.lastRedirect)
-	router.addConn(be, connWrapper)
-	return nil
+	if succeed {
+		router.removeConn(fromBe, router.getConnWrapper(conn))
+		router.addConn(toBe, connWrapper)
+		connWrapper.phase = phaseRedirectEnd
+	} else {
+		fromBe.Value.connScore++
+		router.adjustBackendList(fromBe)
+		toBe.Value.connScore--
+		router.adjustBackendList(toBe)
+		connWrapper.phase = phaseRedirectFail
+	}
+	addMigrateMetrics(from, to, succeed, connWrapper.lastRedirect)
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
 func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn) error {
 	router.Lock()
 	defer router.Unlock()
-	// Get the redirecting address in the lock, rather than letting the connection pass it in.
-	// While the connection closes, the router may also send a new redirection signal concurrently
-	// and move it to another backendWrapper.
-	if toAddr := conn.GetRedirectingAddr(); len(toAddr) > 0 {
-		addr = toAddr
-	}
-	be := router.lookupBackend(addr, true)
-	if be == nil {
-		return errors.WithStack(errors.Errorf("backend %s is not found in the router", addr))
-	}
+	// OnConnClosed is always called after processing ongoing redirect events,
+	// so the addr passed in is the right backend.
+	be := router.ensureBackend(addr, true)
+	be.Value.connScore--
 	router.removeConn(be, router.getConnWrapper(conn))
-	subBackendConnMetrics(addr)
 	return nil
 }
 
@@ -291,25 +292,21 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStat
 		if be == nil && status != StatusCannotConnect {
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev_status", "none"), zap.String("cur_status", status.String()))
-			router.backends.PushBack(&backendWrapper{
+			be = router.backends.PushBack(&backendWrapper{
 				status:   status,
 				addr:     addr,
 				connList: glist.New[*connWrapper](),
 			})
+			router.adjustBackendList(be)
 		} else if be != nil {
 			backend := be.Value
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev_status", backend.status.String()), zap.String("cur_status", status.String()))
 			backend.status = status
-			if !router.removeBackendIfEmpty(be) {
-				router.adjustBackendList(be)
-				for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
-					conn := ele.Value
-					// If it's redirecting, the current backend of the connection if not self.
-					if conn.phase != phaseRedirectNotify {
-						conn.NotifyBackendStatus(status)
-					}
-				}
+			router.adjustBackendList(be)
+			for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
+				conn := ele.Value
+				conn.NotifyBackendStatus(status)
 			}
 		}
 	}
@@ -371,17 +368,21 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 		router.logger.Info("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
 			zap.String("from", busiestBackend.addr), zap.String("to", idlestBackend.addr),
 			zap.Int("from_score", busiestBackend.score()), zap.Int("to_score", idlestBackend.score()))
-		router.removeConn(busiestEle, ce)
+		busiestBackend.connScore--
+		router.adjustBackendList(busiestEle)
+		idlestBackend.connScore++
+		router.adjustBackendList(idlestEle)
 		conn.phase = phaseRedirectNotify
 		conn.lastRedirect = curTime
-		router.addConn(idlestEle, conn)
 		conn.Redirect(idlestBackend.addr)
 	}
 }
 
 func (router *ScoreBasedRouter) removeBackendIfEmpty(be *glist.Element[*backendWrapper]) bool {
 	backend := be.Value
-	if backend.status == StatusCannotConnect && backend.connList.Len() == 0 {
+	// If connList.Len() == 0, there won't be any outgoing connections.
+	// And if also connScore == 0, there won't be any incoming connections.
+	if backend.status == StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
 		router.backends.Remove(be)
 		return true
 	}

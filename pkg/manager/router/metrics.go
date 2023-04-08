@@ -33,12 +33,8 @@ func checkBackendStatusMetrics(addr string, status BackendStatus) bool {
 	return val == 1
 }
 
-func addBackendConnMetrics(addr string) {
-	metrics.BackendConnGauge.WithLabelValues(addr).Add(1)
-}
-
-func subBackendConnMetrics(addr string) {
-	metrics.BackendConnGauge.WithLabelValues(addr).Sub(1)
+func setBackendConnMetrics(addr string, conns int) {
+	metrics.BackendConnGauge.WithLabelValues(addr).Set(float64(conns))
 }
 
 func readBackendConnMetrics(addr string) (int, error) {

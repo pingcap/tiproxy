@@ -18,7 +18,7 @@ type BackendSelector struct {
 	excluded  []string
 	cur       string
 	routeOnce func(excluded []string) (string, error)
-	addConn   func(addr string, conn RedirectableConn) error
+	onCreate  func(addr string, conn RedirectableConn, succeed bool)
 }
 
 func (bs *BackendSelector) Reset() {
@@ -37,6 +37,6 @@ func (bs *BackendSelector) Next() (string, error) {
 	return bs.cur, nil
 }
 
-func (bs *BackendSelector) Succeed(conn RedirectableConn) error {
-	return bs.addConn(bs.cur, conn)
+func (bs *BackendSelector) Finish(conn RedirectableConn, succeed bool) {
+	bs.onCreate(bs.cur, conn, succeed)
 }
