@@ -187,7 +187,7 @@ func (tester *routerTester) checkBackendOrder() {
 		backend := be.Value
 		// Empty unhealthy backends should be removed.
 		if backend.status == StatusCannotConnect {
-			require.NotEqual(tester.t, 0, backend.connList.Len())
+			require.True(tester.t, backend.connList.Len() > 0 || backend.connScore > 0)
 		}
 		curScore := backend.score()
 		require.GreaterOrEqual(tester.t, score, curScore)
@@ -200,8 +200,7 @@ func (tester *routerTester) simpleRoute(conn RedirectableConn) string {
 	addr, err := selector.Next()
 	require.NoError(tester.t, err)
 	if len(addr) > 0 {
-		err := selector.Succeed(conn)
-		require.NoError(tester.t, err)
+		selector.Finish(conn, true)
 	}
 	return addr
 }
@@ -441,6 +440,37 @@ func TestSelectorReturnOrder(t *testing.T) {
 	require.True(t, len(addr) == 0)
 }
 
+// Test that the backends are balanced even when routing are concurrent.
+func TestRouteConcurrently(t *testing.T) {
+	tester := newRouterTester(t)
+	tester.addBackends(3)
+	addrs := make(map[string]int, 3)
+	selectors := make([]BackendSelector, 0, 30)
+	// All the clients are calling Next() but not yet Finish().
+	for i := 0; i < 30; i++ {
+		selector := tester.router.GetBackendSelector()
+		addr, err := selector.Next()
+		require.NoError(t, err)
+		addrs[addr]++
+		selectors = append(selectors, selector)
+	}
+	require.Equal(t, 3, len(addrs))
+	for _, num := range addrs {
+		require.Equal(t, 10, num)
+	}
+	for i := 0; i < 3; i++ {
+		backend := tester.getBackendByIndex(i)
+		require.Equal(t, 10, backend.connScore)
+	}
+	for _, selector := range selectors {
+		selector.Finish(nil, false)
+	}
+	for i := 0; i < 3; i++ {
+		backend := tester.getBackendByIndex(i)
+		require.Equal(t, 0, backend.connScore)
+	}
+}
+
 // Test that the backends are balanced during rolling restart.
 func TestRollingRestart(t *testing.T) {
 	tester := newRouterTester(t)
@@ -519,9 +549,11 @@ func TestRebalanceCornerCase(t *testing.T) {
 			tester.addBackends(1)
 			tester.rebalance(10)
 			tester.checkRedirectingNum(10)
+			tester.checkBackendNum(2)
+			backend := tester.getBackendByIndex(1)
+			require.Equal(t, 10, backend.connScore)
+			tester.redirectFinish(10, true)
 			tester.checkBackendNum(1)
-			backend := tester.getBackendByIndex(0)
-			require.Equal(t, 10, backend.connList.Len())
 		},
 		func() {
 			// Connections won't be redirected again before redirection finishes.
@@ -531,11 +563,15 @@ func TestRebalanceCornerCase(t *testing.T) {
 			tester.addBackends(1)
 			tester.rebalance(10)
 			tester.checkRedirectingNum(10)
-			backend := tester.getBackendByIndex(0)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(10)
 			tester.checkRedirectingNum(10)
+			backend := tester.getBackendByIndex(0)
+			require.Equal(t, 10, backend.connScore)
+			require.Equal(t, 0, backend.connList.Len())
+			backend = tester.getBackendByIndex(1)
+			require.Equal(t, 0, backend.connScore)
 			require.Equal(t, 10, backend.connList.Len())
 		},
 		func() {
@@ -545,7 +581,7 @@ func TestRebalanceCornerCase(t *testing.T) {
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(10)
-			tester.checkBackendNum(1)
+			tester.checkBackendNum(2)
 			tester.redirectFinish(10, false)
 			tester.checkBackendNum(2)
 		},
@@ -661,8 +697,7 @@ func TestConcurrency(t *testing.T) {
 							conn = nil
 							continue
 						}
-						err = selector.Succeed(conn)
-						require.NoError(t, err)
+						selector.Finish(conn, true)
 						conn.from = addr
 					} else if len(conn.GetRedirectingAddr()) > 0 {
 						// redirecting, 70% success, 20% fail, 10% close

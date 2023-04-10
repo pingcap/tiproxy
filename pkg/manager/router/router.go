@@ -76,7 +76,6 @@ type RedirectableConn interface {
 	SetValue(key, val any)
 	Value(key any) any
 	Redirect(addr string)
-	GetRedirectingAddr() string
 	NotifyBackendStatus(status BackendStatus)
 	ConnectionID() uint64
 }
@@ -85,14 +84,17 @@ type RedirectableConn interface {
 type backendWrapper struct {
 	status BackendStatus
 	addr   string
+	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
+	// connScore = connList.Len() + incoming connections - outgoing connections.
+	connScore int
 	// A list of *connWrapper and is ordered by the connecting or redirecting time.
-	// connList and connMap include moving out connections but not moving in connections.
+	// connList only includes the connections that are currently on this backend.
 	connList *glist.List[*connWrapper]
 }
 
 // score calculates the score of the backend. Larger score indicates higher load.
 func (b *backendWrapper) score() int {
-	return b.status.ToScore() + b.connList.Len()
+	return b.status.ToScore() + b.connScore
 }
 
 // connWrapper wraps RedirectableConn.

@@ -42,9 +42,10 @@ func (r *StaticRouter) GetBackendSelector() BackendSelector {
 			}
 			return "", nil
 		},
-		addConn: func(addr string, conn RedirectableConn) error {
-			r.cnt++
-			return nil
+		onCreate: func(addr string, conn RedirectableConn, succeed bool) {
+			if succeed {
+				r.cnt++
+			}
 		},
 	}
 }

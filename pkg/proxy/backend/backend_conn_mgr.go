@@ -222,16 +222,9 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 
 			var cn net.Conn
 			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
+			selector.Finish(mgr, err == nil)
 			if err != nil {
 				return nil, errors.Wrapf(err, "dial backend %s error", addr)
-			}
-
-			if err = selector.Succeed(mgr); err != nil {
-				// Bad luck: the backend has been recycled or shut down just after the selector returns it.
-				if ignoredErr := cn.Close(); ignoredErr != nil {
-					mgr.logger.Error("close backend connection failed", zap.String("backend_addr", addr), zap.Error(ignoredErr))
-				}
-				return nil, err
 			}
 
 			mgr.logger.Info("connected to backend", zap.String("backend_addr", addr))
@@ -511,16 +504,6 @@ func (mgr *BackendConnManager) Redirect(newAddr string) {
 	}
 	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
 	mgr.signalReceived <- signalTypeRedirect
-}
-
-// GetRedirectingAddr implements RedirectableConn.GetRedirectingAddr interface.
-// It returns the goal backend address to redirect to.
-func (mgr *BackendConnManager) GetRedirectingAddr() string {
-	signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
-	if signal == nil {
-		return ""
-	}
-	return signal.newAddr
 }
 
 func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *redirectResult) {
