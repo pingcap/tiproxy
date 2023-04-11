@@ -73,6 +73,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.Nil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -86,6 +87,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.Nil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -101,6 +103,7 @@ func TestCertServer(t *testing.T) {
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -117,6 +120,7 @@ func TestCertServer(t *testing.T) {
 				require.Equal(t, tls.RequestClientCert, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -131,6 +135,7 @@ func TestCertServer(t *testing.T) {
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -162,6 +167,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.Nil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -174,6 +180,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.Nil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -185,6 +192,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.NotNil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -198,6 +206,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
 			err: "",
 		},

@@ -195,14 +195,14 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	}
 
 	serverTLSConf = &tls.Config{
-		MinVersion:   tls.VersionTLS12,
+		MinVersion:   tls.VersionTLS11,
 		Certificates: []tls.Certificate{serverCert},
 	}
 
 	certpool := x509.NewCertPool()
 	certpool.AppendCertsFromPEM(caPEM)
 	clientTLSConf = &tls.Config{
-		MinVersion:         tls.VersionTLS12,
+		MinVersion:         tls.VersionTLS11,
 		InsecureSkipVerify: true,
 		RootCAs:            certpool,
 	}
@@ -218,7 +218,7 @@ func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	}
 
 	tcfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS11,
 	}
 	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
@@ -250,7 +250,7 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 			// still enable TLS without verify server certs
 			return &tls.Config{
 				InsecureSkipVerify: true,
-				MinVersion:         tls.VersionTLS12,
+				MinVersion:         tls.VersionTLS11,
 			}, nil
 		}
 		logger.Info("no CA to verify server connections, disable TLS")
@@ -258,7 +258,7 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	}
 
 	tcfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS11,
 	}
 	tcfg.RootCAs = x509.NewCertPool()
 	certBytes, err := os.ReadFile(cfg.CA)
