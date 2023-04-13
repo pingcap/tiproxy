@@ -61,7 +61,8 @@
 #   auto-certs = true # mostly used by tests. It will generate certs if no cert/key is specified.
 # 	rsa-key-size = 4096 # generated RSA keysize if auto-certs is enabled.
 # 	autocert-expire-duration = "72h" # default expire duration for auto certs.
-#   skip-ca = trure
+#   skip-ca = true
+#   min-tls-version = "1.1" # specify minimum TLS version
 # client object:
 #   1. requires: ca or skip-ca(skip verify server certs)
 #   2. optionally: cert/key will be used if server asks, i.e. server-side client verification
