@@ -83,15 +83,18 @@ type HandshakeHandler interface {
 	OnHandshake(ctx ConnContext, to string, err error)
 	OnConnClose(ctx ConnContext) error
 	GetCapability() pnet.Capability
+	GetServerVersion() string
 }
 
 type DefaultHandshakeHandler struct {
-	nsManager *namespace.NamespaceManager
+	nsManager     *namespace.NamespaceManager
+	serverVersion string
 }
 
-func NewDefaultHandshakeHandler(nsManager *namespace.NamespaceManager) *DefaultHandshakeHandler {
+func NewDefaultHandshakeHandler(nsManager *namespace.NamespaceManager, serverVersion string) *DefaultHandshakeHandler {
 	return &DefaultHandshakeHandler{
-		nsManager: nsManager,
+		nsManager:     nsManager,
+		serverVersion: serverVersion,
 	}
 }
 
@@ -122,12 +125,20 @@ func (handler *DefaultHandshakeHandler) GetCapability() pnet.Capability {
 	return SupportedServerCapabilities
 }
 
+func (handler *DefaultHandshakeHandler) GetServerVersion() string {
+	if len(handler.serverVersion) > 0 {
+		return handler.serverVersion
+	}
+	return pnet.ServerVersion
+}
+
 type CustomHandshakeHandler struct {
 	getRouter           func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error)
 	onHandshake         func(ConnContext, string, error)
 	onConnClose         func(ConnContext) error
 	handleHandshakeResp func(ctx ConnContext, resp *pnet.HandshakeResp) error
 	getCapability       func() pnet.Capability
+	getServerVersion    func() string
 }
 
 func (h *CustomHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
@@ -162,4 +173,11 @@ func (h *CustomHandshakeHandler) GetCapability() pnet.Capability {
 		return h.getCapability()
 	}
 	return SupportedServerCapabilities
+}
+
+func (h *CustomHandshakeHandler) GetServerVersion() string {
+	if h.getServerVersion != nil {
+		return h.getServerVersion()
+	}
+	return pnet.ServerVersion
 }

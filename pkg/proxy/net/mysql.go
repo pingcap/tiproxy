@@ -29,16 +29,17 @@ const (
 )
 
 var (
-	testServerVersion = mysql.ServerVersion
-	testCollation     = uint8(mysql.DefaultCollationID)
-	testConnID        = 100
-	testStatus        = mysql.ServerStatusAutocommit
+	ServerVersion = mysql.ServerVersion
+	Collation     = uint8(mysql.DefaultCollationID)
+	ConnID        = 100
+	Status        = mysql.ServerStatusAutocommit
 )
 
 // ParseInitialHandshake parses the initial handshake received from the server.
-func ParseInitialHandshake(data []byte) Capability {
-	// skip mysql version
-	pos := 1 + bytes.IndexByte(data[1:], 0x00) + 1
+func ParseInitialHandshake(data []byte) (Capability, string) {
+	// skip min version
+	serverVersion := string(data[1 : 1+bytes.IndexByte(data[1:], 0)])
+	pos := 1 + len(serverVersion) + 1
 	// skip connection id
 	// skip salt first part
 	// skip filter
@@ -59,7 +60,7 @@ func ParseInitialHandshake(data []byte) Capability {
 		// skip salt second part
 		// skip auth plugin
 	}
-	return Capability(capability)
+	return Capability(capability), serverVersion
 }
 
 // HandshakeResp indicates the response read from the client.
