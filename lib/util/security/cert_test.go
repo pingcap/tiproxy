@@ -73,7 +73,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.Nil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -87,7 +87,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.Nil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -97,6 +97,23 @@ func TestCertServer(t *testing.T) {
 				Cert: certPath,
 				Key:  keyPath,
 				CA:   caPath,
+			},
+			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
+				require.NotNil(t, c)
+				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
+				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
+			},
+			err: "",
+		},
+		{
+			server: true,
+			TLSConfig: config.TLSConfig{
+				Cert:          certPath,
+				Key:           keyPath,
+				CA:            caPath,
+				MinTLSVersion: "1.1",
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -120,7 +137,7 @@ func TestCertServer(t *testing.T) {
 				require.Equal(t, tls.RequestClientCert, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -129,6 +146,22 @@ func TestCertServer(t *testing.T) {
 			TLSConfig: config.TLSConfig{
 				AutoCerts: true,
 				CA:        caPath,
+			},
+			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
+				require.NotNil(t, c)
+				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
+				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
+			},
+			err: "",
+		},
+		{
+			server: true,
+			TLSConfig: config.TLSConfig{
+				AutoCerts:     true,
+				CA:            caPath,
+				MinTLSVersion: "1.1",
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -167,7 +200,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.Nil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -180,7 +213,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.Nil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -192,7 +225,7 @@ func TestCertServer(t *testing.T) {
 				require.NotNil(t, c)
 				require.NotNil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -201,6 +234,21 @@ func TestCertServer(t *testing.T) {
 				Cert: certPath,
 				Key:  keyPath,
 				CA:   caPath,
+			},
+			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
+				require.NotNil(t, c)
+				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, ci.cert.Load())
+				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
+			},
+			err: "",
+		},
+		{
+			TLSConfig: config.TLSConfig{
+				Cert:          certPath,
+				Key:           keyPath,
+				CA:            caPath,
+				MinTLSVersion: "1.1",
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)

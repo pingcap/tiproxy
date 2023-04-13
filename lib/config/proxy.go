@@ -17,8 +17,10 @@ package config
 
 import (
 	"bytes"
+	"crypto/tls"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -109,6 +111,7 @@ type TLSConfig struct {
 	Cert               string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
 	Key                string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
 	CA                 string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
+	MinTLSVersion      string `yaml:"min-tls-version,omitempty" toml:"min-tls-version,omitempty" json:"min-tls-version,omitempty"`
 	AutoCerts          bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty"`
 	RSAKeySize         int    `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
 	AutoExpireDuration string `yaml:"autocert-expire-duration,omitempty" toml:"autocert-expire-duration,omitempty" json:"autocert-expire-duration,omitempty"`
@@ -117,6 +120,21 @@ type TLSConfig struct {
 
 func (c TLSConfig) HasCert() bool {
 	return !(c.Cert == "" && c.Key == "")
+}
+
+func (c TLSConfig) MinTLSVer() uint16 {
+	switch {
+	case strings.HasSuffix(c.MinTLSVersion, "1.0"):
+		return tls.VersionTLS10
+	case strings.HasSuffix(c.MinTLSVersion, "1.1"):
+		return tls.VersionTLS11
+	case strings.HasSuffix(c.MinTLSVersion, "1.2"):
+		return tls.VersionTLS12
+	case strings.HasSuffix(c.MinTLSVersion, "1.3"):
+		return tls.VersionTLS13
+	default:
+		return tls.VersionTLS12
+	}
 }
 
 func (c TLSConfig) HasCA() bool {
@@ -162,6 +180,10 @@ func NewConfig() *Config {
 	cfg.Log.LogFile.MaxBackups = 3
 
 	cfg.Advance.IgnoreWrongNamespace = true
+	cfg.Security.SQLTLS.MinTLSVersion = "1.1"
+	cfg.Security.PeerTLS.MinTLSVersion = "1.1"
+	cfg.Security.ServerTLS.MinTLSVersion = "1.1"
+	cfg.Security.ClusterTLS.MinTLSVersion = "1.1"
 
 	return &cfg
 }
