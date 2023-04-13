@@ -27,7 +27,7 @@ var (
 
 // WriteInitialHandshake writes an initial handshake as a server.
 // It's used for tenant-aware routing and testing.
-func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, authPlugin string) error {
+func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, authPlugin string, serverVersion string) error {
 	saltLen := len(salt)
 	if saltLen < 8 {
 		return ErrSaltNotLongEnough
@@ -40,10 +40,10 @@ func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, aut
 	// min version 10
 	data = append(data, 10)
 	// server version[NUL]
-	data = append(data, testServerVersion...)
+	data = append(data, serverVersion...)
 	data = append(data, 0)
 	// connection id
-	data = append(data, byte(testConnID), byte(testConnID>>8), byte(testConnID>>16), byte(testConnID>>24))
+	data = append(data, byte(ConnID), byte(ConnID>>8), byte(ConnID>>16), byte(ConnID>>24))
 	// auth-plugin-data-part-1
 	data = append(data, salt[0:8]...)
 	// filler [00]
@@ -51,9 +51,9 @@ func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, aut
 	// capability flag lower 2 bytes, using default capability here
 	data = append(data, byte(capability), byte(capability>>8))
 	// charset
-	data = append(data, testCollation)
+	data = append(data, Collation)
 	// status
-	data = DumpUint16(data, testStatus)
+	data = DumpUint16(data, Status)
 	// capability flag upper 2 bytes, using default capability here
 	data = append(data, byte(capability>>16), byte(capability>>24))
 	// length of auth-plugin-data

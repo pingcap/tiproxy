@@ -61,8 +61,9 @@ type mockClient struct {
 	// Inputs that assigned by the test and will be sent to the server.
 	*clientConfig
 	// Outputs that received from the server and will be checked by the test.
-	authSucceed bool
-	mysqlErr    error
+	authSucceed   bool
+	mysqlErr      error
+	serverVersion string
 }
 
 func newMockClient(cfg *clientConfig) *mockClient {
@@ -79,8 +80,9 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 	if err != nil {
 		return err
 	}
-	serverCap := pnet.ParseInitialHandshake(pkt)
+	serverCap, serverVersion := pnet.ParseInitialHandshake(pkt)
 	mc.capability = mc.capability & serverCap
+	mc.serverVersion = serverVersion
 
 	resp := &pnet.HandshakeResp{
 		User:       mc.username,

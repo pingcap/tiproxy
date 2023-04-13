@@ -108,7 +108,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		proxyCapability ^= pnet.ClientSSL
 	}
 
-	if err := clientIO.WriteInitialHandshake(proxyCapability, auth.salt, mysql.AuthNativePassword); err != nil {
+	if err := clientIO.WriteInitialHandshake(proxyCapability, auth.salt, mysql.AuthNativePassword, handshakeHandler.GetServerVersion()); err != nil {
 		return err
 	}
 	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
@@ -277,7 +277,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 		err = pnet.ParseErrorPacket(serverPkt)
 		return
 	}
-	capability = pnet.ParseInitialHandshake(serverPkt)
+	capability, _ = pnet.ParseInitialHandshake(serverPkt)
 	return
 }
 
