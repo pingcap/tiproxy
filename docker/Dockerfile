@@ -11,8 +11,8 @@ RUN export VERSION=${VERSION} && export COMMIT=${COMMIT} && export GOPROXY=${GOP
 
 FROM alpine:latest
 
-COPY --from=builder /proxy/bin/* /bin
-COPY --from=builder /proxy/conf/* /etc/proxy
+COPY --from=builder /proxy/bin/* /bin/
+COPY --from=builder /proxy/conf/* /etc/proxy/
 
 EXPOSE 3080
 EXPOSE 3081
