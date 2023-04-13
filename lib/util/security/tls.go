@@ -30,7 +30,6 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.uber.org/zap"
 )
 
@@ -210,39 +209,6 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 	return
 }
 
-func BuildServerTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config, error) {
-	logger = logger.With(zap.String("tls", "server"))
-	if !cfg.HasCert() {
-		logger.Info("require certificates to secure clients connections, disable TLS")
-		return nil, nil
-	}
-
-	tcfg := &tls.Config{
-		MinVersion: tls.VersionTLS11,
-	}
-	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
-	if err != nil {
-		return nil, errors.Errorf("failed to load certs: %w", err)
-	}
-	tcfg.Certificates = append(tcfg.Certificates, cert)
-
-	if !cfg.HasCA() {
-		logger.Info("no CA, server will not authenticate clients (connection is still secured)")
-		return tcfg, nil
-	}
-
-	tcfg.ClientAuth = tls.RequireAndVerifyClientCert
-	tcfg.ClientCAs = x509.NewCertPool()
-	certBytes, err := os.ReadFile(cfg.CA)
-	if err != nil {
-		return nil, errors.Errorf("failed to read CA: %w", err)
-	}
-	if !tcfg.ClientCAs.AppendCertsFromPEM(certBytes) {
-		return nil, errors.Errorf("failed to append CA")
-	}
-	return tcfg, nil
-}
-
 func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config, error) {
 	logger = logger.With(zap.String("tls", "client"))
 	if !cfg.HasCA() {
@@ -280,38 +246,4 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	tcfg.Certificates = append(tcfg.Certificates, cert)
 
 	return tcfg, nil
-}
-
-func BuildEtcdTLSConfig(logger *zap.Logger, server, peer config.TLSConfig) (clientInfo, peerInfo transport.TLSInfo, err error) {
-	logger = logger.With(zap.String("tls", "etcd"))
-	clientInfo.Logger = logger
-	peerInfo.Logger = logger
-
-	if server.HasCert() {
-		clientInfo.CertFile = server.Cert
-		clientInfo.KeyFile = server.Key
-		if server.HasCA() {
-			clientInfo.TrustedCAFile = server.CA
-			clientInfo.ClientCertAuth = true
-		} else if !server.SkipCA {
-			logger.Info("no CA, proxy will not authenticate etcd clients (connection is still secured)")
-		}
-	}
-
-	if peer.HasCert() {
-		peerInfo.CertFile = peer.Cert
-		peerInfo.KeyFile = peer.Key
-		if peer.HasCA() {
-			peerInfo.TrustedCAFile = peer.CA
-			peerInfo.ClientCertAuth = true
-		} else if peer.SkipCA {
-			peerInfo.InsecureSkipVerify = true
-			peerInfo.ClientCertAuth = false
-		} else {
-			err = errors.New("need a full set of cert/key/ca or cert/key/skip-ca to secure etcd peer inter-communication")
-			return
-		}
-	}
-
-	return
 }
