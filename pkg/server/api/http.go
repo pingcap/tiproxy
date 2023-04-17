@@ -29,6 +29,7 @@ import (
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/proxy"
+	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
 	"go.uber.org/atomic"
 	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
@@ -79,6 +80,10 @@ func NewHTTPServer(cfg config.API, lg *zap.Logger,
 	h.listener, err = net.Listen("tcp", cfg.Addr)
 	if err != nil {
 		return nil, err
+	}
+	switch cfg.ProxyProtocol {
+	case "v2":
+		h.listener = proxyprotocol.NewListener(h.listener)
 	}
 
 	gin.SetMode(gin.ReleaseMode)

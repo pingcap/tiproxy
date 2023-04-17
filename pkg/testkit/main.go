@@ -43,8 +43,15 @@ func TestPipeConn(t *testing.T, a, b func(*testing.T, net.Conn), loop int) {
 }
 
 func TestTCPConn(t *testing.T, a, b func(*testing.T, net.Conn), loop int) {
-	listener, err := net.Listen("tcp", "127.0.0.0:0")
-	require.NoError(t, err)
+	TestTCPConnWithListener(t, func(t *testing.T, network, addr string) net.Listener {
+		ln, err := net.Listen(network, addr)
+		require.NoError(t, err)
+		return ln
+	}, a, b, loop)
+}
+
+func TestTCPConnWithListener(t *testing.T, listen func(*testing.T, string, string) net.Listener, a, b func(*testing.T, net.Conn), loop int) {
+	listener := listen(t, "tcp", "localhost:0")
 	defer func() {
 		require.NoError(t, listener.Close())
 	}()

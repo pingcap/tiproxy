@@ -81,6 +81,7 @@ type API struct {
 	User            string `yaml:"user,omitempty" toml:"user,omitempty" json:"user,omitempty"`
 	Password        string `yaml:"password,omitempty" toml:"password,omitempty" json:"password,omitempty"`
 	EnableBasicAuth bool   `yaml:"enable-basic-auth,omitempty" toml:"enable-basic-auth,omitempty" json:"enable-basic-auth,omitempty"`
+	ProxyProtocol   string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
 }
 
 type Advance struct {
