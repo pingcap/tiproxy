@@ -51,12 +51,12 @@ gocovmerge:
 	GOBIN=$(GOBIN) go install github.com/wadey/gocovmerge@master
 
 tidy:
-	go mod tidy
 	cd lib && go mod tidy
+	go mod tidy
 
 build:
-	go build ./...
 	cd lib && go build ./...
+	go build ./...
 
 metrics:
 	go install github.com/google/go-jsonnet/cmd/jsonnet@latest

@@ -131,9 +131,9 @@ func TestPacketIO(t *testing.T) {
 			}
 
 			// send handshake
-			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], mysql.AuthNativePassword))
+			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], mysql.AuthNativePassword, ServerVersion))
 			// salt should not be long enough
-			require.ErrorIs(t, srv.WriteInitialHandshake(0, make([]byte, 4), mysql.AuthNativePassword), ErrSaltNotLongEnough)
+			require.ErrorIs(t, srv.WriteInitialHandshake(0, make([]byte, 4), mysql.AuthNativePassword, ServerVersion), ErrSaltNotLongEnough)
 
 			// expect correct and wrong capability flags
 			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp()

@@ -571,11 +571,20 @@ func TestCustomHandshake(t *testing.T) {
 		handler.getCapability = func() pnet.Capability {
 			return SupportedServerCapabilities & ^pnet.ClientDeprecateEOF
 		}
+		handler.getServerVersion = func() string {
+			return "test_server_version"
+		}
 	})
 	runners := []runner{
 		// 1st handshake
 		{
-			client:  ts.mc.authenticate,
+			client: func(packetIO *pnet.PacketIO) error {
+				if err := ts.mc.authenticate(packetIO); err != nil {
+					return err
+				}
+				require.Equal(t, "test_server_version", ts.mc.serverVersion)
+				return nil
+			},
 			proxy:   ts.firstHandshake4Proxy,
 			backend: ts.handshake4Backend,
 		},

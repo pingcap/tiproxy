@@ -75,7 +75,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	}
 	var err error
 	// write initial handshake
-	if err = packetIO.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin); err != nil {
+	if err = packetIO.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin, pnet.ServerVersion); err != nil {
 		return err
 	}
 	// read the response

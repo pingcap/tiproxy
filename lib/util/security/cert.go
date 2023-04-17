@@ -167,7 +167,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:            tls.VersionTLS11,
+		MinVersion:            ci.cfg.MinTLSVer(),
 		GetCertificate:        ci.getCert,
 		GetClientCertificate:  ci.getClientCert,
 		VerifyPeerCertificate: ci.verifyPeerCertificate,
@@ -243,7 +243,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 			// still enable TLS without verify server certs
 			return &tls.Config{
 				InsecureSkipVerify: true,
-				MinVersion:         tls.VersionTLS11,
+				MinVersion:         ci.cfg.MinTLSVer(),
 			}, nil
 		}
 		lg.Info("no CA to verify server connections, disable TLS")
@@ -251,7 +251,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:            tls.VersionTLS11,
+		MinVersion:            ci.cfg.MinTLSVer(),
 		GetCertificate:        ci.getCert,
 		GetClientCertificate:  ci.getClientCert,
 		InsecureSkipVerify:    true,

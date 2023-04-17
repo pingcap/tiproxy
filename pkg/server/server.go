@@ -139,7 +139,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		if handler != nil {
 			hsHandler = handler
 		} else {
-			hsHandler = backend.NewDefaultHandshakeHandler(srv.NamespaceManager)
+			hsHandler = backend.NewDefaultHandshakeHandler(srv.NamespaceManager, cfg.Proxy.ServerVersion)
 		}
 		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, srv.CertManager, hsHandler)
 		if err != nil {
