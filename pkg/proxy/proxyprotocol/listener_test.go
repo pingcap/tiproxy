@@ -63,7 +63,22 @@ func TestProxyListener(t *testing.T) {
 			all, err := io.ReadAll(c)
 			require.NoError(t, err)
 			require.Equal(t, []byte("test"), all)
-			require.Equal(t, []byte("test"), all)
 			require.Equal(t, tcpaddr.String(), c.RemoteAddr().String())
+		}, 1)
+
+	testkit.TestTCPConnWithListener(t,
+		func(t *testing.T, network, addr string) net.Listener {
+			ln, err := net.Listen(network, addr)
+			require.NoError(t, err)
+			return NewListener(ln)
+		},
+		func(t *testing.T, c net.Conn) {
+			_, err = io.Copy(c, strings.NewReader("test"))
+			require.NoError(t, err)
+		},
+		func(t *testing.T, c net.Conn) {
+			all, err := io.ReadAll(c)
+			require.NoError(t, err)
+			require.Equal(t, []byte("test"), all)
 		}, 1)
 }
