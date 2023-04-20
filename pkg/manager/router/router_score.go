@@ -198,7 +198,8 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 			connWrapper := ce.Value
 			if connWrapper.phase != phaseRedirectNotify {
 				connWrapper.phase = phaseRedirectNotify
-				connWrapper.Redirect(backend.addr)
+				// we dont care the results
+				_ = connWrapper.Redirect(backend.addr)
 			}
 		}
 	}
@@ -372,16 +373,18 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 			break
 		}
 		conn := ce.Value
-		router.logger.Info("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
-			zap.String("from", busiestBackend.addr), zap.String("to", idlestBackend.addr),
-			zap.Int("from_score", busiestBackend.score()), zap.Int("to_score", idlestBackend.score()))
-		busiestBackend.connScore--
-		router.adjustBackendList(busiestEle)
-		idlestBackend.connScore++
-		router.adjustBackendList(idlestEle)
-		conn.phase = phaseRedirectNotify
-		conn.lastRedirect = curTime
-		conn.Redirect(idlestBackend.addr)
+		if conn.IsRedirectable() {
+			router.logger.Info("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
+				zap.String("from", busiestBackend.addr), zap.String("to", idlestBackend.addr),
+				zap.Int("from_score", busiestBackend.score()), zap.Int("to_score", idlestBackend.score()))
+			busiestBackend.connScore--
+			router.adjustBackendList(busiestEle)
+			idlestBackend.connScore++
+			router.adjustBackendList(idlestEle)
+			conn.phase = phaseRedirectNotify
+			conn.lastRedirect = curTime
+			conn.Redirect(idlestBackend.addr)
+		}
 	}
 }
 
