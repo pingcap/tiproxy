@@ -16,6 +16,7 @@ package proxyprotocol
 
 import (
 	"bytes"
+	"io"
 	"net"
 )
 
@@ -44,7 +45,7 @@ type proxyConn struct {
 
 func (c *proxyConn) Read(b []byte) (n int, err error) {
 	if !c.inited {
-		_, err = c.buf.ReadFrom(c.Conn)
+		_, err = c.buf.ReadFrom(io.LimitReader(c.Conn, int64(len(MagicV2)-c.buf.Len())))
 		if err != nil {
 			return
 		}
@@ -55,7 +56,7 @@ func (c *proxyConn) Read(b []byte) (n int, err error) {
 				return 0, nil
 			}
 			// it is proxy protocol
-			c.buf = nil
+			c.buf.Reset()
 			c.proxy, _, err = ParseProxyV2(c.Conn)
 			if err != nil {
 				return 0, err
