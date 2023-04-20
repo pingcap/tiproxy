@@ -16,7 +16,6 @@ package proxyprotocol
 
 import (
 	"bytes"
-	"io"
 	"net"
 )
 
@@ -33,37 +32,41 @@ func NewListener(o net.Listener) *Listener {
 
 func (n *Listener) Accept() (net.Conn, error) {
 	conn, err := n.Listener.Accept()
-	return &proxyConn{Conn: conn}, err
+	return &proxyConn{Conn: conn, buf: new(bytes.Buffer)}, err
 }
 
 type proxyConn struct {
 	net.Conn
-	proxyHdr []byte
-	proxy    *Proxy
-	inited   bool
+	buf    *bytes.Buffer
+	proxy  *Proxy
+	inited bool
 }
 
 func (c *proxyConn) Read(b []byte) (n int, err error) {
 	if !c.inited {
-		if len(c.proxyHdr) == 0 {
-			c.proxyHdr = make([]byte, len(MagicV2))
-		}
-		n, err = io.ReadFull(c.Conn, c.proxyHdr)
+		_, err = c.buf.ReadFrom(c.Conn)
 		if err != nil {
 			return
 		}
-		if bytes.Equal(c.proxyHdr, MagicV2) {
-			c.proxyHdr = nil
+		if bytes.HasPrefix(MagicV2, c.buf.Bytes()) {
+			if !bytes.Equal(MagicV2, c.buf.Bytes()) {
+				// prefix matches, maybe proxy header
+				// read again later
+				return 0, nil
+			}
+			// it is proxy protocol
+			c.buf = nil
 			c.proxy, _, err = ParseProxyV2(c.Conn)
 			if err != nil {
 				return 0, err
 			}
 		}
+		// prefixes mismatched
 		c.inited = true
 	}
-	if len(c.proxyHdr) > 0 {
-		n = copy(b, c.proxyHdr)
-		c.proxyHdr = c.proxyHdr[n:]
+	if c.buf.Len() > 0 {
+		n = copy(b, c.buf.Bytes())
+		_ = c.buf.Next(n)
 		return n, nil
 	}
 	return c.Conn.Read(b)
