@@ -34,6 +34,9 @@
 # user = ""
 # password = ""
 
+# same as [proxy.proxy-protocol], but for HTTP port
+# proxy-protocol = ""
+
 [log]
 
 # level = "info"
