@@ -62,7 +62,7 @@ func (c *proxyConn) Read(b []byte) (n int, err error) {
 				return 0, err
 			}
 		}
-		// prefixes mismatched
+		// prefixes mismatched, or we have parsed PP header
 		c.inited = true
 	}
 	if c.buf.Len() > 0 {
