@@ -40,10 +40,14 @@ func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T
 func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			a(t, NewPacketIO(c))
+			cli := NewPacketIO(c)
+			a(t, cli)
+			require.NoError(t, cli.Close())
 		},
 		func(t *testing.T, c net.Conn) {
-			b(t, NewPacketIO(c))
+			srv := NewPacketIO(c)
+			b(t, srv)
+			require.NoError(t, srv.Close())
 		}, loop)
 }
 
