@@ -44,8 +44,8 @@ golangci-lint:
 	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 lint: golangci-lint tidy
-	$(GOBIN)/golangci-lint run
 	cd lib && $(GOBIN)/golangci-lint run
+	$(GOBIN)/golangci-lint run
 
 gocovmerge:
 	GOBIN=$(GOBIN) go install github.com/wadey/gocovmerge@master

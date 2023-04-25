@@ -26,6 +26,12 @@ func WithProxy(pi *PacketIO) {
 	pi.proxyInited.Store(true)
 }
 
+func WithOnTraffic(f func(pi *PacketIO)) func(*PacketIO) {
+	return func(pi *PacketIO) {
+		pi.onTraffic = f
+	}
+}
+
 func WithWrapError(err error) func(pi *PacketIO) {
 	return func(pi *PacketIO) {
 		pi.wrap = err

@@ -171,6 +171,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.backendTLS = backendTLSConfig
 
 	mgr.clientIO = clientIO
+	mgr.clientIO.ApplyOpts(pnet.WithOnTraffic(func(*pnet.PacketIO) {
+		mgr.handshakeHandler.OnTraffic(mgr)
+	}))
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	if err != nil {
 		mgr.setQuitSourceByErr(err)

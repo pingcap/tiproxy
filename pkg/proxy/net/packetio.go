@@ -84,6 +84,7 @@ type PacketIO struct {
 	buf           *bufio.ReadWriter
 	proxyInited   atomic.Bool
 	proxy         *proxyprotocol.Proxy
+	onTraffic     func(*PacketIO)
 	remoteAddr    net.Addr
 	wrap          error
 	sequence      uint8
@@ -105,10 +106,14 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 	}
 	// TODO: disable it by default now
 	p.proxyInited.Store(true)
+	p.ApplyOpts(opts...)
+	return p
+}
+
+func (p *PacketIO) ApplyOpts(opts ...PacketIOption) {
 	for _, opt := range opts {
 		opt(p)
 	}
-	return p
 }
 
 func (p *PacketIO) wrapErr(err error) error {
@@ -201,6 +206,9 @@ func (p *PacketIO) ReadPacket() (data []byte, err error) {
 		}
 		data = append(data, buf...)
 	}
+	if p.onTraffic != nil {
+		p.onTraffic(p)
+	}
 	return data, nil
 }
 
@@ -244,6 +252,9 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 			return
 		}
 		data = data[n:]
+	}
+	if p.onTraffic != nil {
+		p.onTraffic(p)
 	}
 	if flush {
 		return p.Flush()

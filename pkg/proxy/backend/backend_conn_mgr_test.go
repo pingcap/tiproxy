@@ -784,6 +784,70 @@ func TestHandlerReturnError(t *testing.T) {
 	}
 }
 
+func TestOnTraffic(t *testing.T) {
+	i := 0
+	inbytes, outbytes := []int{
+		0x0,
+		0x24,
+		0x78,
+		0x78,
+		0x82,
+		0x82,
+		0x8c,
+		0x8c,
+		0x99,
+		0x99,
+		0x99,
+		0x99,
+		0x99,
+	}, []int{
+		0x58,
+		0x58,
+		0x58,
+		0x88,
+		0x88,
+		0x8e,
+		0x8e,
+		0x99,
+		0x99,
+		0x9e,
+		0xbb,
+		0xc3,
+		0xce,
+	}
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.checkBackendInterval = 10 * time.Millisecond
+		config.proxyConfig.handler.onTraffic = func(cc ConnContext) {
+			require.Equal(t, uint64(inbytes[i]), cc.ClientInBytes())
+			require.Equal(t, uint64(outbytes[i]), cc.ClientOutBytes())
+			i++
+		}
+	})
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// query
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.sql = "select 1"
+				return ts.mc.request(packetIO)
+			},
+			proxy: ts.forwardCmd4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				ts.mb.respondType = responseTypeResultSet
+				ts.mb.columns = 1
+				ts.mb.rows = 1
+				return ts.mb.respond(packetIO)
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
 func TestGetBackendIO(t *testing.T) {
 	addrs := make([]string, 0, 3)
 	listeners := make([]net.Listener, 0, cap(addrs))
