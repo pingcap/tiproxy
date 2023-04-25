@@ -266,6 +266,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
 	defer func() {
 		mgr.setQuitSourceByErr(err)
+		mgr.handshakeHandler.OnTraffic(mgr)
 	}()
 	if len(request) < 1 {
 		err = mysql.ErrMalformPacket
