@@ -22,62 +22,29 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/security"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/testkit"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
 
 func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
-	var wg waitgroup.WaitGroup
-	client, server := net.Pipe()
-	cli, srv := NewPacketIO(client), NewPacketIO(server)
-	if ddl, ok := t.Deadline(); ok {
-		require.NoError(t, client.SetDeadline(ddl))
-		require.NoError(t, server.SetDeadline(ddl))
-	}
-	for i := 0; i < loop; i++ {
-		wg.Run(func() {
-			a(t, cli)
-			require.NoError(t, cli.Close())
-		})
-		wg.Run(func() {
-			b(t, srv)
-			require.NoError(t, srv.Close())
-		})
-		wg.Wait()
-	}
+	testkit.TestPipeConn(t,
+		func(t *testing.T, c net.Conn) {
+			a(t, NewPacketIO(c))
+		},
+		func(t *testing.T, c net.Conn) {
+			b(t, NewPacketIO(c))
+		}, loop)
 }
 
 func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
-	listener, err := net.Listen("tcp", "0.0.0.0:0")
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, listener.Close())
-	}()
-	var wg waitgroup.WaitGroup
-	for i := 0; i < loop; i++ {
-		wg.Run(func() {
-			cli, err := net.Dial("tcp", listener.Addr().String())
-			require.NoError(t, err)
-			if ddl, ok := t.Deadline(); ok {
-				require.NoError(t, cli.SetDeadline(ddl))
-			}
-			cliIO := NewPacketIO(cli)
-			a(t, cliIO)
-			require.NoError(t, cliIO.Close())
-		})
-		wg.Run(func() {
-			srv, err := listener.Accept()
-			require.NoError(t, err)
-			if ddl, ok := t.Deadline(); ok {
-				require.NoError(t, srv.SetDeadline(ddl))
-			}
-			srvIO := NewPacketIO(srv)
-			b(t, srvIO)
-			require.NoError(t, srvIO.Close())
-		})
-		wg.Wait()
-	}
+	testkit.TestTCPConn(t,
+		func(t *testing.T, c net.Conn) {
+			a(t, NewPacketIO(c))
+		},
+		func(t *testing.T, c net.Conn) {
+			b(t, NewPacketIO(c))
+		}, loop)
 }
 
 func TestPacketIO(t *testing.T) {

@@ -92,10 +92,10 @@ func (p *Proxy) ToBytes() ([]byte, error) {
 	buf[magicLen+1] = byte(addressFamily<<4) | byte(network&0xF)
 
 	for _, tlv := range p.TLV {
-		buf = append(buf, byte(tlv.typ))
-		tlen := len(tlv.content)
+		buf = append(buf, byte(tlv.Typ))
+		tlen := len(tlv.Content)
 		buf = append(buf, byte(tlen>>8), byte(tlen))
-		buf = append(buf, tlv.content...)
+		buf = append(buf, tlv.Content...)
 	}
 
 	length := len(buf) - 4 - magicLen
@@ -205,8 +205,8 @@ func ParseProxyV2(rd io.Reader) (m *Proxy, n int, err error) {
 			length = len(buf) - 3
 		}
 		m.TLV = append(m.TLV, ProxyTlv{
-			typ:     typ,
-			content: buf[3 : 3+length],
+			Typ:     typ,
+			Content: buf[3 : 3+length],
 		})
 		buf = buf[3+length:]
 	}
