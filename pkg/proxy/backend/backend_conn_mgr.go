@@ -171,9 +171,6 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.backendTLS = backendTLSConfig
 
 	mgr.clientIO = clientIO
-	mgr.clientIO.ApplyOpts(pnet.WithOnTraffic(func(*pnet.PacketIO) {
-		mgr.handshakeHandler.OnTraffic(mgr)
-	}))
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	if err != nil {
 		mgr.setQuitSourceByErr(err)
@@ -269,6 +266,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
 	defer func() {
 		mgr.setQuitSourceByErr(err)
+		mgr.handshakeHandler.OnTraffic(mgr)
 	}()
 	if len(request) < 1 {
 		err = mysql.ErrMalformPacket
