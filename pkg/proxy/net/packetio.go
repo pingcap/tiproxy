@@ -103,12 +103,15 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 		sequence: 0,
 		buf:      buf,
 	}
-	// TODO: disable it by default now
 	p.proxyInited.Store(true)
+	p.ApplyOpts(opts...)
+	return p
+}
+
+func (p *PacketIO) ApplyOpts(opts ...PacketIOption) {
 	for _, opt := range opts {
 		opt(p)
 	}
-	return p
 }
 
 func (p *PacketIO) wrapErr(err error) error {
@@ -117,10 +120,7 @@ func (p *PacketIO) wrapErr(err error) error {
 
 // Proxy returned parsed proxy header from clients if any.
 func (p *PacketIO) Proxy() *proxyprotocol.Proxy {
-	if p.proxyInited.Load() {
-		return p.proxy
-	}
-	return nil
+	return p.proxy
 }
 
 func (p *PacketIO) LocalAddr() net.Addr {

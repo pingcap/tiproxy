@@ -63,8 +63,8 @@ const (
 )
 
 type ProxyTlv struct {
-	content []byte
-	typ     ProxyTlvType
+	Content []byte
+	Typ     ProxyTlvType
 }
 
 type Proxy struct {

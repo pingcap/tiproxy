@@ -43,12 +43,12 @@ func TestProxyListener(t *testing.T) {
 				DstAddress: tcpaddr,
 				TLV: []ProxyTlv{
 					{
-						typ:     ProxyTlvALPN,
-						content: nil,
+						Typ:     ProxyTlvALPN,
+						Content: nil,
 					},
 					{
-						typ:     ProxyTlvUniqueID,
-						content: []byte("test"),
+						Typ:     ProxyTlvUniqueID,
+						Content: []byte("test"),
 					},
 				},
 			}

@@ -37,12 +37,12 @@ func TestProxyParse(t *testing.T) {
 				DstAddress: tcpaddr,
 				TLV: []ProxyTlv{
 					{
-						typ:     ProxyTlvALPN,
-						content: nil,
+						Typ:     ProxyTlvALPN,
+						Content: nil,
 					},
 					{
-						typ:     ProxyTlvUniqueID,
-						content: []byte("test"),
+						Typ:     ProxyTlvUniqueID,
+						Content: []byte("test"),
 					},
 				},
 			}
@@ -66,9 +66,9 @@ func TestProxyParse(t *testing.T) {
 			require.Equal(t, ProxyVersion2, p.Version)
 			require.Equal(t, ProxyCommandLocal, p.Command)
 			require.Len(t, p.TLV, 2)
-			require.Equal(t, ProxyTlvALPN, p.TLV[0].typ)
-			require.Equal(t, ProxyTlvUniqueID, p.TLV[1].typ)
-			require.Equal(t, []byte("test"), p.TLV[1].content)
+			require.Equal(t, ProxyTlvALPN, p.TLV[0].Typ)
+			require.Equal(t, ProxyTlvUniqueID, p.TLV[1].Typ)
+			require.Equal(t, []byte("test"), p.TLV[1].Content)
 		},
 		1,
 	)

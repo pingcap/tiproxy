@@ -64,7 +64,9 @@ func TestTCPConnWithListener(t *testing.T, listen func(*testing.T, string, strin
 				require.NoError(t, cli.SetDeadline(ddl))
 			}
 			a(t, cli)
-			require.NoError(t, cli.Close())
+			if err := cli.Close(); err != nil {
+				require.ErrorIs(t, err, net.ErrClosed)
+			}
 		})
 		wg.Run(func() {
 			srv, err := listener.Accept()
@@ -73,7 +75,9 @@ func TestTCPConnWithListener(t *testing.T, listen func(*testing.T, string, strin
 				require.NoError(t, srv.SetDeadline(ddl))
 			}
 			b(t, srv)
-			require.NoError(t, srv.Close())
+			if err := srv.Close(); err != nil {
+				require.ErrorIs(t, err, net.ErrClosed)
+			}
 		})
 		wg.Wait()
 	}

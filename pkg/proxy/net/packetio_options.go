@@ -23,7 +23,7 @@ import (
 type PacketIOption = func(*PacketIO)
 
 func WithProxy(pi *PacketIO) {
-	pi.proxyInited.Store(true)
+	pi.proxyInited.Store(false)
 }
 
 func WithWrapError(err error) func(pi *PacketIO) {
