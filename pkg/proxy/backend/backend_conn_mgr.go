@@ -635,13 +635,12 @@ func (mgr *BackendConnManager) Close() error {
 
 	var connErr error
 	var addr string
+	handErr := mgr.handshakeHandler.OnConnClose(mgr)
 	mgr.processLock.Lock()
-	if backendIO := mgr.backendIO.Load(); backendIO != nil {
+	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
 		addr = backendIO.RemoteAddr().String()
 		connErr = backendIO.Close()
 	}
-	handErr := mgr.handshakeHandler.OnConnClose(mgr)
-	mgr.backendIO.Store(nil)
 	mgr.processLock.Unlock()
 
 	eventReceiver := mgr.getEventReceiver()
