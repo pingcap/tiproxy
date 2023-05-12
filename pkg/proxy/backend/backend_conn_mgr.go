@@ -633,6 +633,8 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.wg.Wait()
 
+	handErr := mgr.handshakeHandler.OnConnClose(mgr)
+
 	var connErr error
 	var addr string
 	mgr.processLock.Lock()
@@ -641,8 +643,6 @@ func (mgr *BackendConnManager) Close() error {
 		connErr = backendIO.Close()
 	}
 	mgr.processLock.Unlock()
-
-	handErr := mgr.handshakeHandler.OnConnClose(mgr)
 
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
