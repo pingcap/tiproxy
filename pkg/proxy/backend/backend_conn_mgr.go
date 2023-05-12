@@ -636,13 +636,13 @@ func (mgr *BackendConnManager) Close() error {
 	var connErr error
 	var addr string
 	mgr.processLock.Lock()
-	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
+	if backendIO := mgr.backendIO.Load(); backendIO != nil {
 		addr = backendIO.RemoteAddr().String()
 		connErr = backendIO.Close()
 	}
-	mgr.processLock.Unlock()
-
 	handErr := mgr.handshakeHandler.OnConnClose(mgr)
+	mgr.backendIO.Store(nil)
+	mgr.processLock.Unlock()
 
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
