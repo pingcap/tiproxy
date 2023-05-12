@@ -633,9 +633,10 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.wg.Wait()
 
+	handErr := mgr.handshakeHandler.OnConnClose(mgr)
+
 	var connErr error
 	var addr string
-	handErr := mgr.handshakeHandler.OnConnClose(mgr)
 	mgr.processLock.Lock()
 	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
 		addr = backendIO.RemoteAddr().String()
