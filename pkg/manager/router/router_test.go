@@ -652,13 +652,13 @@ func TestConcurrency(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	// Create 3 backends.
 	backends := map[string]*backendHealth{
-		"0": &backendHealth{
+		"0": {
 			status: StatusHealthy,
 		},
-		"1": &backendHealth{
+		"1": {
 			status: StatusHealthy,
 		},
-		"2": &backendHealth{
+		"2": {
 			status: StatusHealthy,
 		},
 	}
