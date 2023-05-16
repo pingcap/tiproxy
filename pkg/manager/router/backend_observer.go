@@ -239,7 +239,7 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 			})
 			if err != nil {
 				bh.status = StatusCannotConnect
-				bh.pingErr = err
+				bh.pingErr = errors.Wrapf(err, "connect status port failed")
 				continue
 			}
 		}
@@ -265,7 +265,7 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 		})
 		if err != nil {
 			bh.status = StatusCannotConnect
-			bh.pingErr = err
+			bh.pingErr = errors.Wrapf(err, "connect sql port failed")
 		}
 	}
 	return curBackendHealth
