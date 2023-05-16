@@ -17,8 +17,11 @@ package net
 import (
 	"bytes"
 	"encoding/binary"
+	"net"
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/packet"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/siddontang/go/hack"
 )
@@ -287,6 +290,34 @@ func ParseChangeUser(data []byte) (username, db string) {
 	db = string(dbName)
 	// TODO: attrs
 	return
+}
+
+// ReadServerVersion only reads server version.
+func ReadServerVersion(conn net.Conn) (string, error) {
+	c := packet.NewConn(conn)
+	data, err := c.ReadPacket()
+	if err != nil {
+		return "", err
+	}
+	if data[0] == gomysql.ERR_HEADER {
+		return "", errors.New("read initial handshake error")
+	}
+	pos := 1
+	version := data[pos : bytes.IndexByte(data[pos:], 0x00)+1]
+	return string(version), nil
+}
+
+// WriteServerVersion only writes server version. It's only used for testing.
+func WriteServerVersion(conn net.Conn, serverVersion string) error {
+	data := make([]byte, 0, 128)
+	data = append(data, []byte{0, 0, 0, 0}...)
+	// min version 10
+	data = append(data, 10)
+	// server version[NUL]
+	data = append(data, serverVersion...)
+	data = append(data, 0)
+	c := packet.NewConn(conn)
+	return c.WritePacket(data)
 }
 
 // ParseOKPacket transforms an OK packet into a Result object.

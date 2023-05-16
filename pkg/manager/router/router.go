@@ -34,12 +34,14 @@ type ConnEventReceiver interface {
 
 // Router routes client connections to backends.
 type Router interface {
-	// Router will handle connection events to balance connections if possible.
+	// ConnEventReceiver handles connection events to balance connections if possible.
 	ConnEventReceiver
 
 	GetBackendSelector() BackendSelector
 	RedirectConnections() error
 	ConnCount() int
+	// ServerVersion returns the TiDB version.
+	ServerVersion() string
 	Close()
 }
 
@@ -82,8 +84,8 @@ type RedirectableConn interface {
 
 // backendWrapper contains the connections on the backend.
 type backendWrapper struct {
-	status BackendStatus
-	addr   string
+	*backendHealth
+	addr string
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
 	// connScore = connList.Len() + incoming connections - outgoing connections.
 	connScore int
