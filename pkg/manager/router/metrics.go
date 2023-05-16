@@ -62,6 +62,5 @@ func readMigrateCounter(from, to string, succeed bool) (int, error) {
 
 func setPingBackendMetrics(addr string, succeed bool, startTime time.Time) {
 	cost := time.Since(startTime)
-	resLabel := succeedToLabel(succeed)
-	metrics.PingBackendGauge.WithLabelValues(addr, resLabel).Set(cost.Seconds())
+	metrics.PingBackendGauge.WithLabelValues(addr).Set(cost.Seconds())
 }

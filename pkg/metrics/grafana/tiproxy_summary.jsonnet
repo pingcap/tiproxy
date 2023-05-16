@@ -358,7 +358,7 @@ local bGetBeP = graphPanel.new(
 .addTarget(
   prometheus.target(
     'tiproxy_backend_get_backend{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}',
-    legendFormat='{{res}}',
+    legendFormat='{{instance}} : {{res}}',
   )
 );
 

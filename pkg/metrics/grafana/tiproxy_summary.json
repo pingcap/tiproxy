@@ -1225,7 +1225,7 @@
                      "expr": "tiproxy_backend_get_backend{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
                      "format": "time_series",
                      "intervalFactor": 2,
-                     "legendFormat": "{{res}}",
+                     "legendFormat": "{{instance}} : {{res}}",
                      "refId": "A"
                   }
                ],
