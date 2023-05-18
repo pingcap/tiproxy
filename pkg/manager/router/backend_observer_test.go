@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -34,11 +35,11 @@ import (
 )
 
 type mockEventReceiver struct {
-	backendChan chan map[string]BackendStatus
+	backendChan chan map[string]*backendHealth
 	errChan     chan error
 }
 
-func (mer *mockEventReceiver) OnBackendChanged(backends map[string]BackendStatus, err error) {
+func (mer *mockEventReceiver) OnBackendChanged(backends map[string]*backendHealth, err error) {
 	if err != nil {
 		mer.errChan <- err
 	} else if len(backends) > 0 {
@@ -46,7 +47,7 @@ func (mer *mockEventReceiver) OnBackendChanged(backends map[string]BackendStatus
 	}
 }
 
-func newMockEventReceiver(backendChan chan map[string]BackendStatus, errChan chan error) *mockEventReceiver {
+func newMockEventReceiver(backendChan chan map[string]*backendHealth, errChan chan error) *mockEventReceiver {
 	return &mockEventReceiver{
 		backendChan: backendChan,
 		errChan:     errChan,
@@ -66,7 +67,7 @@ func newHealthCheckConfigForTest() *config.HealthCheck {
 
 // Test that the notified backend status is correct when the backend starts or shuts down.
 func TestObserveBackends(t *testing.T) {
-	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
+	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth) {
 		bo.Start()
 
 		backend1 := addBackend(t, kv)
@@ -102,7 +103,7 @@ func TestObserveBackends(t *testing.T) {
 
 // Test that the observer can exit during health check.
 func TestCancelObserver(t *testing.T) {
-	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
+	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth) {
 		backends := make([]*backendServer, 0, 3)
 		for i := 0; i < 3; i++ {
 			backends = append(backends, addBackend(t, kv))
@@ -133,7 +134,7 @@ func TestCancelObserver(t *testing.T) {
 
 // Test that it won't hang or panic when the Etcd server fails.
 func TestEtcdUnavailable(t *testing.T) {
-	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus) {
+	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth) {
 		bo.Start()
 		etcd.Server.Stop()
 		<-etcd.Server.StopNotify()
@@ -173,7 +174,7 @@ func TestExternalFetcher(t *testing.T) {
 		mutex.Unlock()
 	}
 
-	backendChan := make(chan map[string]BackendStatus, 1)
+	backendChan := make(chan map[string]*backendHealth, 1)
 	errChan := make(chan error, 1)
 	mer := newMockEventReceiver(backendChan, errChan)
 	fetcher := NewExternalFetcher(backendGetter)
@@ -204,11 +205,30 @@ func TestExternalFetcher(t *testing.T) {
 	require.Error(t, err)
 }
 
-func runETCDTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]BackendStatus)) {
+func TestReadServerVersion(t *testing.T) {
+	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth) {
+		bo.Start()
+
+		backend1 := addBackend(t, kv)
+		backend1.serverVersion.Store("1.0")
+		addFakeTopology(t, kv, backend1.sqlAddr)
+		backends := getBackendsFromCh(t, backendChan)
+		require.Equal(t, "1.0", backends[backend1.sqlAddr].serverVersion)
+		backend1.stopSQLServer()
+		checkStatus(t, backendChan, backend1, StatusCannotConnect)
+		backend1.serverVersion.Store("2.0")
+		backend1.startSQLServer()
+		backends = getBackendsFromCh(t, backendChan)
+		require.Equal(t, "2.0", backends[backend1.sqlAddr].serverVersion)
+		backend1.close()
+	})
+}
+
+func runETCDTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth)) {
 	etcd := createEtcdServer(t, "127.0.0.1:0")
 	client := createEtcdClient(t, etcd)
 	kv := clientv3.NewKV(client)
-	backendChan := make(chan map[string]BackendStatus, 1)
+	backendChan := make(chan map[string]*backendHealth, 1)
 	mer := newMockEventReceiver(backendChan, make(chan error, 1))
 	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), newHealthCheckConfigForTest())
 	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, newHealthCheckConfigForTest(), fetcher)
@@ -217,26 +237,32 @@ func runETCDTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *Back
 	bo.Close()
 }
 
-func checkStatus(t *testing.T, backendChan chan map[string]BackendStatus, backend *backendServer, expectedStatus BackendStatus) {
-	var backends map[string]BackendStatus
+func checkStatus(t *testing.T, backendChan chan map[string]*backendHealth, backend *backendServer, expectedStatus BackendStatus) {
+	backends := getBackendsFromCh(t, backendChan)
+	require.Equal(t, 1, len(backends))
+	health, ok := backends[backend.sqlAddr]
+	require.True(t, ok)
+	require.Equal(t, expectedStatus, health.status)
+	require.True(t, checkBackendStatusMetrics(backend.sqlAddr, health.status))
+}
+
+func getBackendsFromCh(t *testing.T, backendChan chan map[string]*backendHealth) map[string]*backendHealth {
+	var backends map[string]*backendHealth
 	select {
 	case backends = <-backendChan:
 	case <-time.After(3 * time.Second):
 		t.Fatal("timeout")
 	}
-	require.Equal(t, 1, len(backends))
-	status, ok := backends[backend.sqlAddr]
-	require.True(t, ok)
-	require.Equal(t, expectedStatus, status)
-	require.True(t, checkBackendStatusMetrics(backend.sqlAddr, status))
+	return backends
 }
 
 type backendServer struct {
-	t            *testing.T
-	sqlListener  net.Listener
-	sqlAddr      string
-	statusServer *http.Server
-	statusAddr   string
+	t             *testing.T
+	sqlListener   net.Listener
+	sqlAddr       string
+	statusServer  *http.Server
+	statusAddr    string
+	serverVersion atomic.String
 	*mockHttpHandler
 	wg waitgroup.WaitGroup
 }
@@ -303,6 +329,9 @@ func (srv *backendServer) startSQLServer() {
 			conn, err := srv.sqlListener.Accept()
 			if err != nil {
 				// listener is closed
+				break
+			}
+			if err = pnet.WriteServerVersion(conn, srv.serverVersion.Load()); err != nil {
 				break
 			}
 			_ = conn.Close()

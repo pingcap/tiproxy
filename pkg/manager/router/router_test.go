@@ -136,11 +136,13 @@ func (tester *routerTester) createConn() *mockRedirectableConn {
 }
 
 func (tester *routerTester) addBackends(num int) {
-	backends := make(map[string]BackendStatus)
+	backends := make(map[string]*backendHealth)
 	for i := 0; i < num; i++ {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
-		backends[addr] = StatusHealthy
+		backends[addr] = &backendHealth{
+			status: StatusHealthy,
+		}
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
 	tester.router.OnBackendChanged(backends, nil)
@@ -148,7 +150,7 @@ func (tester *routerTester) addBackends(num int) {
 }
 
 func (tester *routerTester) killBackends(num int) {
-	backends := make(map[string]BackendStatus)
+	backends := make(map[string]*backendHealth)
 	indexes := rand.Perm(tester.router.backends.Len())
 	for _, index := range indexes {
 		if len(backends) >= num {
@@ -159,15 +161,19 @@ func (tester *routerTester) killBackends(num int) {
 		if backend.status == StatusCannotConnect {
 			continue
 		}
-		backends[backend.addr] = StatusCannotConnect
+		backends[backend.addr] = &backendHealth{
+			status: StatusCannotConnect,
+		}
 	}
 	tester.router.OnBackendChanged(backends, nil)
 	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) updateBackendStatusByAddr(addr string, status BackendStatus) {
-	backends := map[string]BackendStatus{
-		addr: status,
+	backends := map[string]*backendHealth{
+		addr: {
+			status: status,
+		},
 	}
 	tester.router.OnBackendChanged(backends, nil)
 	tester.checkBackendOrder()
@@ -645,13 +651,19 @@ func TestConcurrency(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	// Create 3 backends.
-	backends := map[string]BackendStatus{
-		"0": StatusHealthy,
-		"1": StatusHealthy,
-		"2": StatusHealthy,
+	backends := map[string]*backendHealth{
+		"0": {
+			status: StatusHealthy,
+		},
+		"1": {
+			status: StatusHealthy,
+		},
+		"2": {
+			status: StatusHealthy,
+		},
 	}
 	router.OnBackendChanged(backends, nil)
-	for addr, status := range backends {
+	for addr, health := range backends {
 		func(addr string, status BackendStatus) {
 			wg.Run(func() {
 				for {
@@ -666,12 +678,14 @@ func TestConcurrency(t *testing.T) {
 					} else {
 						status = StatusHealthy
 					}
-					router.OnBackendChanged(map[string]BackendStatus{
-						addr: status,
+					router.OnBackendChanged(map[string]*backendHealth{
+						addr: {
+							status: status,
+						},
 					}, nil)
 				}
 			})
-		}(addr, status)
+		}(addr, health.status)
 	}
 
 	// Create 20 connections.
@@ -875,4 +889,22 @@ func TestSetBackendStatus(t *testing.T) {
 	for _, conn := range tester.conns {
 		require.Equal(t, StatusHealthy, conn.status)
 	}
+}
+
+func TestGetServerVersion(t *testing.T) {
+	rt := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
+	t.Cleanup(rt.Close)
+	backends := map[string]*backendHealth{
+		"0": {
+			status:        StatusHealthy,
+			serverVersion: "1.0",
+		},
+		"1": {
+			status:        StatusHealthy,
+			serverVersion: "2.0",
+		},
+	}
+	rt.OnBackendChanged(backends, nil)
+	version := rt.ServerVersion()
+	require.True(t, version == "1.0" || version == "2.0")
 }

@@ -43,6 +43,8 @@ type ScoreBasedRouter struct {
 	// A list of *backendWrapper. The backends are in descending order of scores.
 	backends     *glist.List[*backendWrapper]
 	observeError error
+	// Only store the version of a random backend, so the client may see a wrong version when backends are upgrading.
+	serverVersion string
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
@@ -229,7 +231,9 @@ func (router *ScoreBasedRouter) ensureBackend(addr string, forward bool) *glist.
 		// The backend should always exist if it will be needed. Add a warning and add it back.
 		router.logger.Warn("backend is not found in the router", zap.String("backend_addr", addr), zap.Stack("stack"))
 		be = router.backends.PushFront(&backendWrapper{
-			status:   StatusCannotConnect,
+			backendHealth: &backendHealth{
+				status: StatusCannotConnect,
+			},
 			addr:     addr,
 			connList: glist.New[*connWrapper](),
 		})
@@ -283,32 +287,35 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 }
 
 // OnBackendChanged implements BackendEventReceiver.OnBackendChanged interface.
-func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]BackendStatus, err error) {
+func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*backendHealth, err error) {
 	router.Lock()
 	defer router.Unlock()
 	router.observeError = err
-	for addr, status := range backends {
+	for addr, health := range backends {
 		be := router.lookupBackend(addr, true)
-		if be == nil && status != StatusCannotConnect {
+		if be == nil && health.status != StatusCannotConnect {
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev_status", "none"), zap.String("cur_status", status.String()))
+				zap.String("prev", "none"), zap.String("cur", health.String()))
 			be = router.backends.PushBack(&backendWrapper{
-				status:   status,
-				addr:     addr,
-				connList: glist.New[*connWrapper](),
+				backendHealth: health,
+				addr:          addr,
+				connList:      glist.New[*connWrapper](),
 			})
 			router.adjustBackendList(be)
 		} else if be != nil {
 			backend := be.Value
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev_status", backend.status.String()), zap.String("cur_status", status.String()))
-			backend.status = status
+				zap.String("prev", backend.String()), zap.String("cur", health.String()))
+			backend.backendHealth = health
 			router.adjustBackendList(be)
 			for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
 				conn := ele.Value
-				conn.NotifyBackendStatus(status)
+				conn.NotifyBackendStatus(health.status)
 			}
 		}
+	}
+	if len(backends) > 0 {
+		router.updateServerVersion()
 	}
 }
 
@@ -398,6 +405,24 @@ func (router *ScoreBasedRouter) ConnCount() int {
 		j += backend.connList.Len()
 	}
 	return j
+}
+
+// It's called within a lock.
+func (router *ScoreBasedRouter) updateServerVersion() {
+	for be := router.backends.Front(); be != nil; be = be.Next() {
+		backend := be.Value
+		if backend.backendHealth.status != StatusCannotConnect && len(backend.serverVersion) > 0 {
+			router.serverVersion = backend.serverVersion
+			return
+		}
+	}
+}
+
+func (router *ScoreBasedRouter) ServerVersion() string {
+	router.Lock()
+	version := router.serverVersion
+	router.Unlock()
+	return version
 }
 
 // Close implements Router.Close interface.
