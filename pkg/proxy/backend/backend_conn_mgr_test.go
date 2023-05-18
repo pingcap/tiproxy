@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -179,8 +178,8 @@ func (ts *backendMgrTester) startTxn4Backend(packetIO *pnet.PacketIO) error {
 }
 
 func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	signal := (*signalRedirect)(atomic.LoadPointer(&ts.mp.signal))
-	require.Nil(ts.t, signal)
+	redirInfo := ts.mp.redirectInfo.Load()
+	require.Nil(ts.t, redirInfo)
 	backend1 := ts.mp.backendIO.Load()
 	// There is no other way to verify it's not redirected.
 	// The buffer size of channel signalReceived is 0, so after the second redirect signal is sent,

@@ -198,7 +198,8 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 			connWrapper := ce.Value
 			if connWrapper.phase != phaseRedirectNotify {
 				connWrapper.phase = phaseRedirectNotify
-				connWrapper.Redirect(backend.addr)
+				// we dont care the results
+				_ = connWrapper.Redirect(backend.addr)
 			}
 		}
 	}

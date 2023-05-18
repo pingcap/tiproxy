@@ -116,9 +116,8 @@ type BackendConnManager struct {
 	eventReceiver  unsafe.Pointer
 	config         *BCConfig
 	logger         *zap.Logger
-	// type *signalRedirect, it saves the last signal if there are multiple signals.
 	// It will be set to nil after migration.
-	signal unsafe.Pointer
+	redirectInfo atomic.Pointer[signalRedirect]
 	// redirectResCh is used to notify the event receiver asynchronously.
 	redirectResCh      chan *redirectResult
 	closeStatus        atomic.Int32
@@ -282,7 +281,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		return
 	}
 	defer mgr.resetCheckBackendTicker()
-	waitingRedirect := atomic.LoadPointer(&mgr.signal) != nil
+	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), waitingRedirect)
 	if !holdRequest {
@@ -409,7 +408,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	case statusNotifyClose, statusClosing, statusClosed:
 		return
 	}
-	signal := (*signalRedirect)(atomic.LoadPointer(&mgr.signal))
+	signal := mgr.redirectInfo.Load()
 	if signal == nil {
 		return
 	}
@@ -423,7 +422,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 	defer func() {
 		// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
-		atomic.CompareAndSwapPointer(&mgr.signal, unsafe.Pointer(signal), nil)
+		mgr.redirectInfo.Store(nil)
 		// Notifying may block. Notify the receiver asynchronously to:
 		// - Reduce the latency of session migration
 		// - Avoid the risk of deadlock
@@ -493,18 +492,16 @@ func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []b
 
 // Redirect implements RedirectableConn.Redirect interface. It redirects the current session to the newAddr.
 // Note that the caller requires the function to be non-blocking.
-func (mgr *BackendConnManager) Redirect(newAddr string) {
+func (mgr *BackendConnManager) Redirect(newAddr string) bool {
 	// NOTE: BackendConnManager may be closing concurrently because of no lock.
-	// The eventReceiver may read the new address even after BackendConnManager is closed.
-	atomic.StorePointer(&mgr.signal, unsafe.Pointer(&signalRedirect{
-		newAddr: newAddr,
-	}))
 	switch mgr.closeStatus.Load() {
 	case statusNotifyClose, statusClosing, statusClosed:
-		return
+		return false
 	}
+	mgr.redirectInfo.Store(&signalRedirect{newAddr: newAddr})
 	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
 	mgr.signalReceived <- signalTypeRedirect
+	return true
 }
 
 func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *redirectResult) {

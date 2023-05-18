@@ -68,11 +68,12 @@ func (conn *mockRedirectableConn) Value(k any) any {
 	return v
 }
 
-func (conn *mockRedirectableConn) Redirect(addr string) {
+func (conn *mockRedirectableConn) Redirect(addr string) bool {
 	conn.Lock()
 	require.Len(conn.t, conn.to, 0)
 	conn.to = addr
 	conn.Unlock()
+	return true
 }
 
 func (conn *mockRedirectableConn) GetRedirectingAddr() string {
