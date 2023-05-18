@@ -490,19 +490,12 @@ func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []b
 	return nil
 }
 
-func (mgr *BackendConnManager) isRedirectable() bool {
-	// NOTE: BackendConnManager may be closing concurrently because of no lock.
-	switch mgr.closeStatus.Load() {
-	case statusNotifyClose, statusClosing, statusClosed:
-		return false
-	}
-	return mgr.redirectInfo.Load() == nil
-}
-
 // Redirect implements RedirectableConn.Redirect interface. It redirects the current session to the newAddr.
 // Note that the caller requires the function to be non-blocking.
 func (mgr *BackendConnManager) Redirect(newAddr string) bool {
-	if !mgr.isRedirectable() {
+	// NOTE: BackendConnManager may be closing concurrently because of no lock.
+	switch mgr.closeStatus.Load() {
+	case statusNotifyClose, statusClosing, statusClosed:
 		return false
 	}
 	mgr.redirectInfo.Store(&signalRedirect{newAddr: newAddr})
