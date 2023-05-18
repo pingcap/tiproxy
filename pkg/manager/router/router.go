@@ -77,7 +77,6 @@ type RedirectableConn interface {
 	SetEventReceiver(receiver ConnEventReceiver)
 	SetValue(key, val any)
 	Value(key any) any
-	IsRedirectable() bool
 	// Redirect returns false if the current conn is not redirectable.
 	Redirect(addr string) bool
 	NotifyBackendStatus(status BackendStatus)

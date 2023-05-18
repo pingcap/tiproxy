@@ -373,18 +373,16 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 			break
 		}
 		conn := ce.Value
-		if conn.IsRedirectable() {
-			router.logger.Info("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
-				zap.String("from", busiestBackend.addr), zap.String("to", idlestBackend.addr),
-				zap.Int("from_score", busiestBackend.score()), zap.Int("to_score", idlestBackend.score()))
-			busiestBackend.connScore--
-			router.adjustBackendList(busiestEle)
-			idlestBackend.connScore++
-			router.adjustBackendList(idlestEle)
-			conn.phase = phaseRedirectNotify
-			conn.lastRedirect = curTime
-			conn.Redirect(idlestBackend.addr)
-		}
+		router.logger.Info("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
+			zap.String("from", busiestBackend.addr), zap.String("to", idlestBackend.addr),
+			zap.Int("from_score", busiestBackend.score()), zap.Int("to_score", idlestBackend.score()))
+		busiestBackend.connScore--
+		router.adjustBackendList(busiestEle)
+		idlestBackend.connScore++
+		router.adjustBackendList(idlestEle)
+		conn.phase = phaseRedirectNotify
+		conn.lastRedirect = curTime
+		conn.Redirect(idlestBackend.addr)
 	}
 }
 
