@@ -32,6 +32,7 @@ func TestHandshakeResp(t *testing.T) {
 		Collation:  0,
 	}
 	b := MakeHandshakeResponse(resp1)
-	resp2 := ParseHandshakeResponse(b)
+	resp2, err := ParseHandshakeResponse(b)
 	require.Equal(t, resp1, resp2)
+	require.NoError(t, err)
 }

@@ -42,3 +42,10 @@ func TestUnwrap(t *testing.T) {
 	require.ErrorIs(t, e2, e1, "stacktrace does not affect Is")
 	require.ErrorAs(t, e2, &e1, "stacktrace does not affect As")
 }
+
+func TestWarning(t *testing.T) {
+	warning := &serr.Warning{Err: serr.Wrapf(serr.New("internal err"), "msg")}
+	var w *serr.Warning
+	require.True(t, serr.As(warning, &w))
+	require.Equal(t, "internal err: msg", warning.Error())
+}

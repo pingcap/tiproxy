@@ -91,3 +91,20 @@ func (e *Error) As(target interface{}) bool {
 func (e *Error) Unwrap() error {
 	return errors.Unwrap(e.err)
 }
+
+type Warning struct {
+	Err error
+}
+
+func (e *Warning) Error() string {
+	return e.Err.Error()
+}
+
+func (e *Warning) Unwrap() error {
+	return e.Err
+}
+
+func (e *Warning) Is(target error) bool {
+	_, ok := target.(*Warning)
+	return ok
+}

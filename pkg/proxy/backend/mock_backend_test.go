@@ -95,7 +95,10 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 			return err
 		}
 	}
-	resp := pnet.ParseHandshakeResponse(clientPkt)
+	resp, err := pnet.ParseHandshakeResponse(clientPkt)
+	if err != nil {
+		return err
+	}
 	mb.username = resp.User
 	mb.db = resp.DB
 	mb.authData = resp.AuthData
