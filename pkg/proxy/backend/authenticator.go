@@ -158,7 +158,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	var warning *errors.Warning
 	if errors.As(err, &warning) {
 		logger.Warn("parse handshake response encounters error", zap.Error(err))
-	} else {
+	} else if err != nil {
 		return WrapUserError(err, parsePktErrMsg)
 	}
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
