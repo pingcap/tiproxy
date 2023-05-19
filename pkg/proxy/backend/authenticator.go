@@ -154,7 +154,13 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	if isSSL {
 		cctx.SetValue(ConnContextKeyTLSState, clientIO.TLSConnectionState())
 	}
-	clientResp := pnet.ParseHandshakeResponse(pkt)
+	clientResp, err := pnet.ParseHandshakeResponse(pkt)
+	var warning *errors.Warning
+	if errors.As(err, &warning) {
+		logger.Warn("parse handshake response encounters error", zap.Error(err))
+	} else if err != nil {
+		return WrapUserError(err, parsePktErrMsg)
+	}
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
 		return WrapUserError(err, err.Error())
 	}

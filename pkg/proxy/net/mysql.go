@@ -77,7 +77,7 @@ type HandshakeResp struct {
 	Collation  uint8
 }
 
-func ParseHandshakeResponse(data []byte) *HandshakeResp {
+func ParseHandshakeResponse(data []byte) (*HandshakeResp, error) {
 	resp := new(HandshakeResp)
 	pos := 0
 	// capability
@@ -138,18 +138,18 @@ func ParseHandshakeResponse(data []byte) *HandshakeResp {
 	}
 
 	// attrs
+	var err error
 	if resp.Capability&mysql.ClientConnectAtts > 0 {
 		if num, null, off := ParseLengthEncodedInt(data[pos:]); !null {
 			pos += off
 			row := data[pos : pos+int(num)]
-			attrs, err := parseAttrs(row)
+			resp.Attrs, err = parseAttrs(row)
 			if err != nil {
-				return nil
+				err = &errors.Warning{Err: errors.Wrapf(err, "parse attrs failed")}
 			}
-			resp.Attrs = attrs
 		}
 	}
-	return resp
+	return resp, err
 }
 
 func parseAttrs(data []byte) (map[string]string, error) {
