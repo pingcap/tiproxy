@@ -186,6 +186,11 @@ func (router *ScoreBasedRouter) adjustBackendList(be *glist.Element[*backendWrap
 	}
 }
 
+// RefreshBackend implements Router.GetBackendSelector interface.
+func (router *ScoreBasedRouter) RefreshBackend() {
+	router.observer.Refresh()
+}
+
 // RedirectConnections implements Router.RedirectConnections interface.
 // It redirects all connections compulsively. It's only used for testing.
 func (router *ScoreBasedRouter) RedirectConnections() error {
