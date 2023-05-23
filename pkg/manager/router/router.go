@@ -38,6 +38,7 @@ type Router interface {
 	ConnEventReceiver
 
 	GetBackendSelector() BackendSelector
+	RefreshBackend()
 	RedirectConnections() error
 	ConnCount() int
 	// ServerVersion returns the TiDB version.
