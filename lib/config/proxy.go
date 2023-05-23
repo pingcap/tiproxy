@@ -61,7 +61,7 @@ type ProxyServerOnline struct {
 }
 
 type ProxyServer struct {
-	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
+	Addr string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
 	// PDAddrs is deprecated. Please use `namespaces.xxx` to specify a pd backend.
 	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
 	ServerVersion     string `yaml:"server-version,omitempty" toml:"server-version,omitempty" json:"server-version,omitempty"`
