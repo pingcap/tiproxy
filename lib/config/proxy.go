@@ -20,13 +20,14 @@ var (
 )
 
 type Config struct {
-	Proxy    ProxyServer `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
-	API      API         `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
-	Advance  Advance     `yaml:"advance,omitempty" toml:"advance,omitempty" json:"advance,omitempty"`
-	Workdir  string      `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
-	Security Security    `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
-	Metrics  Metrics     `yaml:"metrics,omitempty" toml:"metrics,omitempty" json:"metrics,omitempty"`
-	Log      Log         `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
+	Proxy      ProxyServer          `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
+	API        API                  `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
+	Advance    Advance              `yaml:"advance,omitempty" toml:"advance,omitempty" json:"advance,omitempty"`
+	Workdir    string               `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
+	Security   Security             `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
+	Metrics    Metrics              `yaml:"metrics,omitempty" toml:"metrics,omitempty" json:"metrics,omitempty"`
+	Log        Log                  `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
+	Namespaces map[string]Namespace `yaml:"namespaces,omitempty" toml:"namespaces,omitempty" json:"namespaces,omitempty"`
 }
 
 type Metrics struct {
@@ -61,6 +62,7 @@ type ProxyServerOnline struct {
 
 type ProxyServer struct {
 	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
+	// PDAddrs is deprecated. Please use `namespaces.xxx` to specify a pd backend.
 	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
 	ServerVersion     string `yaml:"server-version,omitempty" toml:"server-version,omitempty" json:"server-version,omitempty"`
 	RequireBackendTLS bool   `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`

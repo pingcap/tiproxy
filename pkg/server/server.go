@@ -5,7 +5,7 @@ package server
 
 import (
 	"context"
-	"net/http"
+	"strings"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/sctx"
 	"github.com/pingcap/TiProxy/pkg/server/api"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
@@ -33,10 +32,6 @@ type Server struct {
 	MetricsManager   *metrics.MetricsManager
 	LoggerManager    *logger.LoggerManager
 	CertManager      *cert.CertManager
-	InfoSyncer       *infosync.InfoSyncer
-	ObserverClient   *clientv3.Client
-	// HTTP client
-	Http *http.Client
 	// HTTP server
 	HTTPServer *api.HTTPServer
 	// L7 proxy
@@ -78,28 +73,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 
-	// general cluster HTTP client
-	{
-		srv.Http = &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: srv.CertManager.ClusterTLS(),
-			},
-		}
-	}
-
-	// setup info syncer
-	{
-		srv.ObserverClient, err = infosync.InitEtcdClient(lg.Named("pd"), cfg, srv.CertManager)
-		if err != nil {
-			err = errors.WithStack(err)
-			return
-		}
-		srv.InfoSyncer = infosync.NewInfoSyncer(srv.ObserverClient, lg.Named("infosync"))
-		if err = srv.InfoSyncer.Init(ctx, cfg); err != nil {
-			return
-		}
-	}
-
 	// setup namespace manager
 	{
 		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
@@ -110,20 +83,24 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 		if len(nscs) == 0 {
 			// no existed namespace
-			nsc := &config.Namespace{
-				Namespace: "default",
+			pdAddrs := []string{"localhost:2379"}
+			if cfg.Proxy.PDAddrs != "" {
+				pdAddrs = strings.Split(cfg.Proxy.PDAddrs, ",")
+			}
+			nsc := config.Namespace{
+				Name: "default",
 				Backend: config.BackendNamespace{
-					Instances:    []string{},
-					SelectorType: "random",
+					Instances:    pdAddrs,
+					SelectorType: "pd",
 				},
 			}
-			if err = srv.ConfigManager.SetNamespace(ctx, nsc.Namespace, nsc); err != nil {
+			if err = srv.ConfigManager.SetNamespace(ctx, nsc); err != nil {
 				return
 			}
 			nscs = append(nscs, nsc)
 		}
 
-		err = srv.NamespaceManager.Init(lg.Named("nsmgr"), nscs, srv.ObserverClient, srv.Http)
+		err = srv.NamespaceManager.Init(lg.Named("nsmgr"), nscs, srv.CertManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -169,14 +146,8 @@ func (s *Server) Close() error {
 	if s.NamespaceManager != nil {
 		errs = append(errs, s.NamespaceManager.Close())
 	}
-	if s.InfoSyncer != nil {
-		s.InfoSyncer.Close()
-	}
 	if s.ConfigManager != nil {
 		errs = append(errs, s.ConfigManager.Close())
-	}
-	if s.ObserverClient != nil {
-		errs = append(errs, s.ObserverClient.Close())
 	}
 	if s.MetricsManager != nil {
 		s.MetricsManager.Close()

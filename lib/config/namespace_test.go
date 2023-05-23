@@ -10,7 +10,7 @@ import (
 )
 
 var testNamespaceConfig = Namespace{
-	Namespace: "test_ns",
+	Name: "test_ns",
 	Frontend: FrontendNamespace{
 		User: "xx",
 		Security: TLSConfig{

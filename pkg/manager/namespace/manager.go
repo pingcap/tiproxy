@@ -13,16 +13,16 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/TiProxy/pkg/manager/cert"
+	"github.com/pingcap/TiProxy/pkg/manager/infosync"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
 type NamespaceManager struct {
 	sync.RWMutex
-	client  *clientv3.Client
-	httpCli *http.Client
 	logger  *zap.Logger
+	certmgr *cert.CertManager
 	nsm     map[string]*Namespace
 }
 
@@ -30,27 +30,41 @@ func NewNamespaceManager() *NamespaceManager {
 	return &NamespaceManager{}
 }
 
-func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
-	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
+func (mgr *NamespaceManager) buildNamespace(cfg config.Namespace) (*Namespace, error) {
+	logger := mgr.logger.With(zap.String("namespace", cfg.Name))
 
 	var fetcher router.BackendFetcher
-	if mgr.client != nil {
-		fetcher = router.NewPDFetcher(mgr.client, logger.Named("be_fetcher"), config.NewDefaultHealthCheckConfig())
-	} else {
+	var is *infosync.InfoSyncer
+	switch cfg.Backend.SelectorType {
+	case "pd":
+		client, err := router.InitEtcdClient(logger.Named("pd"), cfg.Backend.Instances, mgr.certmgr)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		fetcher = router.NewPDFetcher(client, logger.Named("be_fetcher"), config.NewDefaultHealthCheckConfig())
+		is = infosync.NewInfoSyncer(client, logger.Named("infosync"))
+		if err = srv.InfoSyncer.Init(ctx, cfg); err != nil {
+			return
+		}
+	case "random":
 		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
 	}
 	rt := router.NewScoreBasedRouter(logger.Named("router"))
-	if err := rt.Init(mgr.httpCli, fetcher, config.NewDefaultHealthCheckConfig()); err != nil {
+	if err := rt.Init(&http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: mgr.certmgr.ClusterTLS(),
+		},
+	}, fetcher, config.NewDefaultHealthCheckConfig()); err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
 	return &Namespace{
-		name:   cfg.Namespace,
+		name:   cfg.Name,
 		user:   cfg.Frontend.User,
 		router: rt,
 	}, nil
 }
 
-func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delete []bool) error {
+func (mgr *NamespaceManager) CommitNamespaces(nss []config.Namespace, nss_delete []bool) error {
 	nsm := make(map[string]*Namespace)
 	mgr.RLock()
 	for k, v := range mgr.nsm {
@@ -60,13 +74,13 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 
 	for i, nsc := range nss {
 		if nss_delete != nil && nss_delete[i] {
-			delete(nsm, nsc.Namespace)
+			delete(nsm, nsc.Name)
 			continue
 		}
 
 		ns, err := mgr.buildNamespace(nsc)
 		if err != nil {
-			return fmt.Errorf("%w: create namespace error, namespace: %s", err, nsc.Namespace)
+			return fmt.Errorf("%w: create namespace error, namespace: %s", err, nsc.Name)
 		}
 		nsm[ns.Name()] = ns
 	}
@@ -77,10 +91,9 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, client *clientv3.Client, httpCli *http.Client) error {
+func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []config.Namespace, certmgr *cert.CertManager) error {
 	mgr.Lock()
-	mgr.client = client
-	mgr.httpCli = httpCli
+	mgr.certmgr = certmgr
 	mgr.logger = logger
 	mgr.Unlock()
 

@@ -16,11 +16,6 @@
 # graceful-wait-before-shutdown = 0
 
 # possible values:
-#		"" => enable static routing.
-#		"pd-addr:pd-port" => automatically tidb discovery.
-# pd-addrs = "127.0.0.1:2379"
-
-# possible values:
 #		0 => no limitation.
 #		100 => accept as many as 100 connections.
 # max-connections = 0
@@ -104,5 +99,16 @@
 # metrics-interval = 0
 
 [advance]
-
 # ignore-wrong-namespace = true
+
+#[namespaces.static]
+#	[namespaces.static.frontend]
+#	[namespaces.static.backend]
+#	instances = [ "127.0.0.1:4000" ]
+#	selector-type = "random"
+
+#[namespaces.pd]
+#	[namespaces.pd.frontend]
+#	[namespaces.pd.backend]
+#	instances = [ "localhost:2379" ]
+#	selector-type = "pd"

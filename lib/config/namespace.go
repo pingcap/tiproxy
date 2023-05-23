@@ -11,9 +11,9 @@ import (
 )
 
 type Namespace struct {
-	Namespace string            `yaml:"namespace" json:"namespace" toml:"namespace"`
-	Frontend  FrontendNamespace `yaml:"frontend" json:"frontend" toml:"frontend"`
-	Backend   BackendNamespace  `yaml:"backend" json:"backend" toml:"backend"`
+	Name     string            `yaml:"name" json:"name" toml:"name"`
+	Frontend FrontendNamespace `yaml:"frontend" json:"frontend" toml:"frontend"`
+	Backend  BackendNamespace  `yaml:"backend" json:"backend" toml:"backend"`
 }
 
 type FrontendNamespace struct {

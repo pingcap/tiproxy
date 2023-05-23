@@ -22,6 +22,7 @@ var _ BackendFetcher = (*StaticFetcher)(nil)
 // BackendFetcher is an interface to fetch the backend list.
 type BackendFetcher interface {
 	GetBackendList(context.Context) (map[string]*BackendInfo, error)
+	Close()
 }
 
 type pdBackendInfo struct {
@@ -155,6 +156,10 @@ func (pf *PDFetcher) filterTombstoneBackends() map[string]*BackendInfo {
 	return aliveBackends
 }
 
+func (pf *PDFetcher) Close() {
+	pf.logger.Info("close pd client", zap.Error(pf.client.Close()))
+}
+
 // StaticFetcher uses configured static addrs. This is only used for testing.
 type StaticFetcher struct {
 	backends map[string]*BackendInfo
@@ -168,6 +173,9 @@ func NewStaticFetcher(staticAddrs []string) *StaticFetcher {
 
 func (sf *StaticFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
 	return sf.backends, nil
+}
+
+func (sf *StaticFetcher) Close() {
 }
 
 func backendListToMap(addrs []string) map[string]*BackendInfo {

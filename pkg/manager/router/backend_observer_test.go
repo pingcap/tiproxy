@@ -363,3 +363,6 @@ func (ef *ExternalFetcher) GetBackendList(context.Context) (map[string]*BackendI
 	addrs, err := ef.backendGetter()
 	return backendListToMap(addrs), err
 }
+
+func (ef *ExternalFetcher) Close() {
+}

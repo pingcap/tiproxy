@@ -71,7 +71,7 @@ func NewHTTPServer(cfg config.API, lg *zap.Logger,
 		return nil, err
 	}
 	switch cfg.ProxyProtocol {
-	case "v2":
+	case  "v2":
 		h.listener = proxyprotocol.NewListener(h.listener)
 	}
 
@@ -167,7 +167,6 @@ func (h *HTTPServer) register(group *gin.RouterGroup, cfg config.API, nsmgr *mgr
 		if cfg.EnableBasicAuth {
 			adminGroup.Use(gin.BasicAuth(gin.Accounts{cfg.User: cfg.Password}))
 		}
-		h.registerNamespace(adminGroup.Group("namespace"))
 		h.registerConfig(adminGroup.Group("config"))
 	}
 

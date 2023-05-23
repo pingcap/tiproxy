@@ -61,7 +61,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				}
 				nscsmap := make(map[string]config.Namespace, len(nscs))
 				for _, nsc := range nscs {
-					nscsmap[nsc.Namespace] = nsc
+					nscsmap[nsc.Name] = nsc
 				}
 				return toml.NewEncoder(cmd.OutOrStdout()).Encode(nscsmap)
 			},
@@ -143,7 +143,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 				return err
 			}
 
-			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, nsc.Namespace), bytes.NewReader(nscbytes))
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, nsc.Name), bytes.NewReader(nscbytes))
 			if err != nil {
 				return err
 			}
@@ -183,12 +183,12 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 					return err
 				}
 
-				resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, nsc.Namespace), bytes.NewBuffer(nscbytes))
+				resp, err := doRequest(cmd.Context(), ctx, http.MethodPut, fmt.Sprintf("%s/%s", namespacePrefix, nsc.Name), bytes.NewBuffer(nscbytes))
 				if err != nil {
 					return err
 				}
 
-				cmd.Printf("- file: %s\n%s\n", nsc.Namespace, resp)
+				cmd.Printf("- file: %s\n%s\n", nsc.Name, resp)
 			}
 
 			return nil

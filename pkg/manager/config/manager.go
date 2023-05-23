@@ -13,13 +13,7 @@ import (
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
-	"github.com/tidwall/btree"
 	"go.uber.org/zap"
-)
-
-const (
-	pathPrefixNamespace = "ns"
-	pathPrefixConfig    = "config"
 )
 
 var (
@@ -36,8 +30,6 @@ type ConfigManager struct {
 	wg     waitgroup.WaitGroup
 	cancel context.CancelFunc
 	logger *zap.Logger
-
-	kv *btree.BTreeG[KVValue]
 
 	wch     *fsnotify.Watcher
 	overlay []byte
@@ -59,11 +51,6 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 	nctx, e.cancel = context.WithCancel(ctx)
 
 	e.logger = logger
-
-	// for namespace persistence
-	e.kv = btree.NewBTreeG(func(a, b KVValue) bool {
-		return a.Key < b.Key
-	})
 
 	// for config watch
 	if overlay != nil {

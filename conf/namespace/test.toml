@@ -1,4 +1,4 @@
-namespace = "ns2"
+name = "ns2"
 
 [frontend]
 user = "xhe"

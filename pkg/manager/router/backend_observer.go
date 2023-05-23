@@ -303,6 +303,7 @@ func (bo *BackendObserver) Close() {
 	if bo.cancelFunc != nil {
 		bo.cancelFunc()
 	}
+	bo.fetcher.Close()
 	bo.wg.Wait()
 }
 

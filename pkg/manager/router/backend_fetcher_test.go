@@ -110,19 +110,12 @@ func createEtcdServer(t *testing.T, addr string) *embed.Etcd {
 }
 
 func createEtcdClient(t *testing.T, etcd *embed.Etcd) *clientv3.Client {
-	cfg := &config.Config{
-		Proxy: config.ProxyServer{
-			PDAddrs: etcd.Clients[0].Addr().String(),
-		},
-	}
+	cfg := &config.Config{}
 	certMgr := cert.NewCertManager()
 	err := certMgr.Init(cfg, logger.CreateLoggerForTest(t), nil)
 	require.NoError(t, err)
 	client, err := infosync2.InitEtcdClient(logger.CreateLoggerForTest(t), cfg, certMgr)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		require.NoError(t, client.Close())
-	})
 	return client
 }
 

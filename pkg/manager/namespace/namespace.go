@@ -7,6 +7,7 @@
 package namespace
 
 import (
+	"github.com/pingcap/TiProxy/pkg/manager/infosync"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
 )
 
@@ -14,6 +15,7 @@ type Namespace struct {
 	name   string
 	user   string
 	router router.Router
+	is     infosync.InfoSyncer
 }
 
 func (n *Namespace) Name() string {
@@ -30,4 +32,5 @@ func (n *Namespace) GetRouter() router.Router {
 
 func (n *Namespace) Close() {
 	n.router.Close()
+	n.is.Close()
 }
