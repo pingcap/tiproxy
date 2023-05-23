@@ -1,0 +1,33 @@
+builds:
+  -
+    id: "tiproxy"
+    main: ./cmd/tiproxy
+    binary: tiproxy
+    ldflags:
+      - -s -w -X main.Version={{.Version}} -X main.commit={{.FullCommit}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    goarm:
+      - 7
+    goamd64:
+      - v2
+      - v3
+  -
+    id: "tiproxyctl"
+    main: ./cmd/tiproxyctl
+    binary: tiproxyctl
+    ldflags:
+      - -s -w -X main.Version={{.Version}} -X main.commit={{.FullCommit}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    goarm:
+      - 7
+    goamd64:
+      - v2
+      - v3
