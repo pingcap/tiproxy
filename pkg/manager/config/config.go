@@ -44,7 +44,7 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 			time.Sleep(50 * time.Millisecond)
 		}
 		// try to reload it
-		e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(f)), zap.Any("cfg", e.GetConfig()))
+		e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(f)))
 	}
 }
 
@@ -55,7 +55,10 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 // that are specified by users.
 func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 	e.sts.Lock()
-	defer e.sts.Unlock()
+	defer func() {
+		e.logger.Info("current config", zap.Any("cfg", e.GetConfig()))
+		e.sts.Unlock()
+	}()
 
 	base := e.sts.current
 	if base == nil {
