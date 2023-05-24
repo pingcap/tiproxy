@@ -56,7 +56,7 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 	e.sts.Lock()
 	defer func() {
-		e.logger.Info("current config", zap.Any("cfg", e.GetConfig()))
+		e.logger.Info("current config", zap.Any("cfg", e.sts.current))
 		e.sts.Unlock()
 	}()
 
@@ -79,24 +79,17 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 		return err
 	}
 
-	if err := e.setCurrentConfig(base); err != nil {
+	e.sts.current = base
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(base); err != nil {
 		return err
 	}
+	e.sts.checksum = crc32.ChecksumIEEE(buf.Bytes())
 
 	for _, list := range e.sts.listeners {
 		list <- base.Clone()
 	}
 
-	return nil
-}
-
-func (e *ConfigManager) setCurrentConfig(cfg *config.Config) error {
-	e.sts.current = cfg
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
-		return err
-	}
-	e.sts.checksum = crc32.ChecksumIEEE(buf.Bytes())
 	return nil
 }
 
