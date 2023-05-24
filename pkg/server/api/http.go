@@ -71,7 +71,7 @@ func NewHTTPServer(cfg config.API, lg *zap.Logger,
 		return nil, err
 	}
 	switch cfg.ProxyProtocol {
-	case  "v2":
+	case "v2":
 		h.listener = proxyprotocol.NewListener(h.listener)
 	}
 

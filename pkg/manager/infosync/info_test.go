@@ -174,16 +174,12 @@ func createEtcdServer(t *testing.T, lg *zap.Logger, addr string) *embed.Etcd {
 }
 
 func createEtcdClient(t *testing.T, lg *zap.Logger, etcd *embed.Etcd) *clientv3.Client {
-	cfg := &config.Config{
-		Proxy: config.ProxyServer{
-			PDAddrs: etcd.Clients[0].Addr().String(),
-		},
-	}
+	cfg := &config.Config{}
 	certMgr := cert.NewCertManager()
 	err := certMgr.Init(cfg, lg, nil)
 	require.NoError(t, err)
 	lg = lg.WithOptions(zap.IncreaseLevel(zap.FatalLevel))
-	client, err := InitEtcdClient(lg, cfg, certMgr)
+	client, err := InitEtcdClient(lg, []string{etcd.Clients[0].Addr().String()}, certMgr)
 	require.NoError(t, err)
 	return client
 }

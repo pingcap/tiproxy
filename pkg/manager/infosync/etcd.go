@@ -4,10 +4,8 @@
 package infosync
 
 import (
-	"strings"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -18,16 +16,14 @@ import (
 )
 
 // InitEtcdClient initializes an etcd client that fetches TiDB instance topology from PD.
-func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager) (*clientv3.Client, error) {
-	pdAddr := cfg.Proxy.PDAddrs
-	if len(pdAddr) == 0 {
+func InitEtcdClient(logger *zap.Logger, pdAddrs []string, certMgr *cert.CertManager) (*clientv3.Client, error) {
+	if len(pdAddrs) == 0 {
 		// use tidb server addresses directly
 		return nil, nil
 	}
-	pdEndpoints := strings.Split(pdAddr, ",")
-	logger.Info("connect ETCD servers", zap.Strings("addrs", pdEndpoints))
+	logger.Info("connect ETCD servers", zap.Strings("addrs", pdAddrs))
 	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:        pdEndpoints,
+		Endpoints:        pdAddrs,
 		TLS:              certMgr.ClusterTLS(),
 		Logger:           logger.Named("etcdcli"),
 		AutoSyncInterval: 30 * time.Second,

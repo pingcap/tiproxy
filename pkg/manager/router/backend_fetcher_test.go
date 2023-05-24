@@ -114,7 +114,7 @@ func createEtcdClient(t *testing.T, etcd *embed.Etcd) *clientv3.Client {
 	certMgr := cert.NewCertManager()
 	err := certMgr.Init(cfg, logger.CreateLoggerForTest(t), nil)
 	require.NoError(t, err)
-	client, err := infosync2.InitEtcdClient(logger.CreateLoggerForTest(t), cfg, certMgr)
+	client, err := infosync2.InitEtcdClient(logger.CreateLoggerForTest(t), strings.Split(cfg.Proxy.PDAddrs, ","), certMgr)
 	require.NoError(t, err)
 	return client
 }

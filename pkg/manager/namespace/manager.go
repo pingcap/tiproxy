@@ -7,6 +7,7 @@
 package namespace
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -23,7 +24,10 @@ type NamespaceManager struct {
 	sync.RWMutex
 	logger  *zap.Logger
 	certmgr *cert.CertManager
-	nsm     map[string]*Namespace
+	cfg     *config.Config
+	ctx     context.Context
+	// protected by mutext
+	nsm map[string]*Namespace
 }
 
 func NewNamespaceManager() *NamespaceManager {
@@ -37,14 +41,14 @@ func (mgr *NamespaceManager) buildNamespace(cfg config.Namespace) (*Namespace, e
 	var is *infosync.InfoSyncer
 	switch cfg.Backend.SelectorType {
 	case "pd":
-		client, err := router.InitEtcdClient(logger.Named("pd"), cfg.Backend.Instances, mgr.certmgr)
+		client, err := infosync.InitEtcdClient(logger.Named("pd"), cfg.Backend.Instances, mgr.certmgr)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
 		fetcher = router.NewPDFetcher(client, logger.Named("be_fetcher"), config.NewDefaultHealthCheckConfig())
 		is = infosync.NewInfoSyncer(client, logger.Named("infosync"))
-		if err = srv.InfoSyncer.Init(ctx, cfg); err != nil {
-			return
+		if err = is.Init(mgr.ctx, mgr.cfg); err != nil {
+			return nil, errors.WithStack(err)
 		}
 	case "random":
 		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
@@ -91,11 +95,11 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []config.Namespace, nss_delete
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []config.Namespace, certmgr *cert.CertManager) error {
-	mgr.Lock()
-	mgr.certmgr = certmgr
+func (mgr *NamespaceManager) Init(ctx context.Context, logger *zap.Logger, nscs []config.Namespace, certmgr *cert.CertManager, cfg *config.Config) error {
 	mgr.logger = logger
-	mgr.Unlock()
+	mgr.certmgr = certmgr
+	mgr.cfg = cfg
+	mgr.ctx = ctx
 
 	return mgr.CommitNamespaces(nscs, nil)
 }

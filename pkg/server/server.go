@@ -12,7 +12,6 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
-	"github.com/pingcap/TiProxy/pkg/manager/infosync"
 	"github.com/pingcap/TiProxy/pkg/manager/logger"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
 	"github.com/pingcap/TiProxy/pkg/metrics"
@@ -100,7 +99,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			nscs = append(nscs, nsc)
 		}
 
-		err = srv.NamespaceManager.Init(lg.Named("nsmgr"), nscs, srv.CertManager)
+		err = srv.NamespaceManager.Init(ctx, lg.Named("nsmgr"), nscs, srv.CertManager, cfg)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
