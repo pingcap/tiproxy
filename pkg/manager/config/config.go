@@ -53,10 +53,12 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 // `c.max-conns == 0` means no user-input, or it specified `0`.
 // So we always update the current config with a TOML string, which only overwrite fields
 // that are specified by users.
-func (e *ConfigManager) SetTOMLConfig(data []byte) error {
+func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	e.sts.Lock()
 	defer func() {
-		e.logger.Info("current config", zap.Any("cfg", e.sts.current))
+		if err == nil {
+			e.logger.Info("current config", zap.Any("cfg", e.sts.current))
+		}
 		e.sts.Unlock()
 	}()
 
@@ -67,22 +69,22 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 		base = base.Clone()
 	}
 
-	if err := toml.Unmarshal(data, base); err != nil {
-		return err
+	if err = toml.Unmarshal(data, base); err != nil {
+		return
 	}
 
-	if err := toml.Unmarshal(e.overlay, base); err != nil {
-		return err
+	if err = toml.Unmarshal(e.overlay, base); err != nil {
+		return
 	}
 
-	if err := base.Check(); err != nil {
-		return err
+	if err = base.Check(); err != nil {
+		return
 	}
 
 	e.sts.current = base
 	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(base); err != nil {
-		return err
+	if err = toml.NewEncoder(&buf).Encode(base); err != nil {
+		return
 	}
 	e.sts.checksum = crc32.ChecksumIEEE(buf.Bytes())
 
@@ -90,7 +92,7 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 		list <- base.Clone()
 	}
 
-	return nil
+	return
 }
 
 func (e *ConfigManager) GetConfig() *config.Config {
