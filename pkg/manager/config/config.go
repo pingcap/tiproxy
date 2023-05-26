@@ -44,7 +44,7 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 			time.Sleep(50 * time.Millisecond)
 		}
 		// try to reload it
-		e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(f)), zap.Any("cfg", e.GetConfig()))
+		e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(f)))
 	}
 }
 
@@ -53,9 +53,14 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 // `c.max-conns == 0` means no user-input, or it specified `0`.
 // So we always update the current config with a TOML string, which only overwrite fields
 // that are specified by users.
-func (e *ConfigManager) SetTOMLConfig(data []byte) error {
+func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	e.sts.Lock()
-	defer e.sts.Unlock()
+	defer func() {
+		if err == nil {
+			e.logger.Info("current config", zap.Any("cfg", e.sts.current))
+		}
+		e.sts.Unlock()
+	}()
 
 	base := e.sts.current
 	if base == nil {
@@ -64,37 +69,30 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) error {
 		base = base.Clone()
 	}
 
-	if err := toml.Unmarshal(data, base); err != nil {
-		return err
+	if err = toml.Unmarshal(data, base); err != nil {
+		return
 	}
 
-	if err := toml.Unmarshal(e.overlay, base); err != nil {
-		return err
+	if err = toml.Unmarshal(e.overlay, base); err != nil {
+		return
 	}
 
-	if err := base.Check(); err != nil {
-		return err
+	if err = base.Check(); err != nil {
+		return
 	}
 
-	if err := e.setCurrentConfig(base); err != nil {
-		return err
+	e.sts.current = base
+	var buf bytes.Buffer
+	if err = toml.NewEncoder(&buf).Encode(base); err != nil {
+		return
 	}
+	e.sts.checksum = crc32.ChecksumIEEE(buf.Bytes())
 
 	for _, list := range e.sts.listeners {
 		list <- base.Clone()
 	}
 
-	return nil
-}
-
-func (e *ConfigManager) setCurrentConfig(cfg *config.Config) error {
-	e.sts.current = cfg
-	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
-		return err
-	}
-	e.sts.checksum = crc32.ChecksumIEEE(buf.Bytes())
-	return nil
+	return
 }
 
 func (e *ConfigManager) GetConfig() *config.Config {
