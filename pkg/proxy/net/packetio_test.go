@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/pkg/testkit"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -54,6 +55,7 @@ func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T,
 func TestPacketIO(t *testing.T) {
 	expectMsg := []byte("test")
 	pktLengths := []int{0, mysql.MaxPayloadLen + 212, mysql.MaxPayloadLen, mysql.MaxPayloadLen * 2}
+	lg := logger.CreateLoggerForTest(t).Named("TestPacketIO")
 	testPipeConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			var err error
@@ -107,10 +109,10 @@ func TestPacketIO(t *testing.T) {
 			require.ErrorIs(t, srv.WriteInitialHandshake(0, make([]byte, 4), mysql.AuthNativePassword, ServerVersion), ErrSaltNotLongEnough)
 
 			// expect correct and wrong capability flags
-			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp()
+			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp(lg)
 			require.NoError(t, err)
 			require.True(t, isSSL)
-			_, isSSL, err = srv.ReadSSLRequestOrHandshakeResp()
+			_, isSSL, err = srv.ReadSSLRequestOrHandshakeResp(lg)
 			require.NoError(t, err)
 			require.False(t, isSSL)
 		},

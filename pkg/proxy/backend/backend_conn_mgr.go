@@ -174,7 +174,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	if err != nil {
 		mgr.setQuitSourceByErr(err)
 		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
-		WriteUserError(clientIO, err, mgr.logger)
+		clientIO.WriteUserError(err, mgr.logger)
 		return err
 	}
 	mgr.resetQuitSource()
@@ -193,7 +193,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
-		return nil, WrapUserError(err, err.Error())
+		return nil, pnet.WrapUserError(err, err.Error())
 	}
 	// Reasons to wait:
 	// - The TiDB instances may not be initialized yet
@@ -213,7 +213,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 				addr, err = selector.Next()
 			}
 			if err != nil {
-				return nil, backoff.Permanent(WrapUserError(err, err.Error()))
+				return nil, backoff.Permanent(pnet.WrapUserError(err, err.Error()))
 			}
 			if addr == "" {
 				return nil, router.ErrNoInstanceToSelect

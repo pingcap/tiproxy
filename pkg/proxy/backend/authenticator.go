@@ -111,21 +111,18 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	if err := clientIO.WriteInitialHandshake(proxyCapability, auth.salt, mysql.AuthNativePassword, handshakeHandler.GetServerVersion()); err != nil {
 		return err
 	}
-	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
+	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp(logger)
 	if err != nil {
 		return err
 	}
 	frontendCapability := pnet.Capability(binary.LittleEndian.Uint32(pkt))
 	if isSSL {
 		if _, err = clientIO.ServerTLSHandshake(frontendTLSConfig); err != nil {
-			return err
+			return pnet.WrapUserError(err, err.Error())
 		}
-		pkt, _, err = clientIO.ReadSSLRequestOrHandshakeResp()
+		pkt, _, err = clientIO.ReadSSLRequestOrHandshakeResp(logger)
 		if err != nil {
 			return err
-		}
-		if len(pkt) <= 32 {
-			return errors.WithStack(errors.New("expect handshake resp"))
 		}
 		frontendCapabilityResponse := pnet.Capability(binary.LittleEndian.Uint32(pkt))
 		if frontendCapability != frontendCapabilityResponse {
@@ -137,7 +134,11 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 	if commonCaps := frontendCapability & requiredFrontendCaps; commonCaps != requiredFrontendCaps {
 		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredFrontendCaps))
-		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from frontend", requiredFrontendCaps&^commonCaps)
+		mysqlErr := mysql.NewErr(mysql.ErrNotSupportedAuthMode)
+		if writeErr := clientIO.WriteErrPacket(mysqlErr); writeErr != nil {
+			return writeErr
+		}
+		return mysqlErr
 	}
 	commonCaps := frontendCapability & proxyCapability
 	if frontendCapability^commonCaps != 0 {
@@ -159,10 +160,10 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	if errors.As(err, &warning) {
 		logger.Warn("parse handshake response encounters error", zap.Error(err))
 	} else if err != nil {
-		return WrapUserError(err, parsePktErrMsg)
+		return pnet.WrapUserError(err, parsePktErrMsg)
 	}
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
-		return WrapUserError(err, err.Error())
+		return pnet.WrapUserError(err, err.Error())
 	}
 	auth.user = clientResp.User
 	auth.dbname = clientResp.DB
@@ -172,13 +173,13 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	backendIO, err := getBackendIO(cctx, auth, clientResp, 15*time.Second)
 	if err != nil {
-		return WrapUserError(err, connectErrMsg)
+		return pnet.WrapUserError(err, connectErrMsg)
 	}
 	backendIO.ResetSequence()
 
 	// write proxy header
 	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
-		return WrapUserError(err, handshakeErrMsg)
+		return pnet.WrapUserError(err, handshakeErrMsg)
 	}
 
 	// read backend initial handshake
@@ -190,11 +191,11 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 			}
 			return err
 		}
-		return WrapUserError(err, handshakeErrMsg)
+		return pnet.WrapUserError(err, handshakeErrMsg)
 	}
 
 	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
-		return WrapUserError(err, capabilityErrMsg)
+		return pnet.WrapUserError(err, capabilityErrMsg)
 	}
 
 	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
@@ -215,7 +216,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		// send an unknown auth plugin so that the backend will request the auth data again.
 		unknownAuthPlugin, nil, 0,
 	); err != nil {
-		return WrapUserError(err, handshakeErrMsg)
+		return pnet.WrapUserError(err, handshakeErrMsg)
 	}
 
 	// forward other packets
