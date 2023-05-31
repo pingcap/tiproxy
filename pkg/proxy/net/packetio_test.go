@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/pkg/testkit"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -28,24 +29,26 @@ import (
 )
 
 func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+	lg := logger.CreateLoggerForTest(t)
 	testkit.TestPipeConn(t,
 		func(t *testing.T, c net.Conn) {
-			a(t, NewPacketIO(c))
+			a(t, NewPacketIO(c, lg))
 		},
 		func(t *testing.T, c net.Conn) {
-			b(t, NewPacketIO(c))
+			b(t, NewPacketIO(c, lg))
 		}, loop)
 }
 
 func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+	lg := logger.CreateLoggerForTest(t)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			cli := NewPacketIO(c)
+			cli := NewPacketIO(c, lg)
 			a(t, cli)
 			require.NoError(t, cli.Close())
 		},
 		func(t *testing.T, c net.Conn) {
-			srv := NewPacketIO(c)
+			srv := NewPacketIO(c, lg)
 			b(t, srv)
 			require.NoError(t, srv.Close())
 		}, loop)
