@@ -19,6 +19,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
@@ -56,28 +57,29 @@ func newTCPConnSuite(t *testing.T) *tcpConnSuite {
 }
 
 func (tc *tcpConnSuite) newConn(t *testing.T, enableRoute bool) func() {
+	lg := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	if !enableRoute {
 		wg.Run(func() {
 			conn, err := tc.backendListener.Accept()
 			require.NoError(t, err)
-			tc.backendIO = pnet.NewPacketIO(conn)
+			tc.backendIO = pnet.NewPacketIO(conn, lg)
 		})
 	}
 	wg.Run(func() {
 		if !enableRoute {
 			backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
 			require.NoError(t, err)
-			tc.proxyBIO = pnet.NewPacketIO(backendConn)
+			tc.proxyBIO = pnet.NewPacketIO(backendConn, lg)
 		}
 		clientConn, err := tc.proxyListener.Accept()
 		require.NoError(t, err)
-		tc.proxyCIO = pnet.NewPacketIO(clientConn)
+		tc.proxyCIO = pnet.NewPacketIO(clientConn, lg)
 	})
 	wg.Run(func() {
 		conn, err := net.Dial("tcp", tc.proxyListener.Addr().String())
 		require.NoError(t, err)
-		tc.clientIO = pnet.NewPacketIO(conn)
+		tc.clientIO = pnet.NewPacketIO(conn, lg)
 	})
 	wg.Wait()
 	return func() {

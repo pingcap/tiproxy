@@ -29,24 +29,26 @@ import (
 )
 
 func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+	lg := logger.CreateLoggerForTest(t)
 	testkit.TestPipeConn(t,
 		func(t *testing.T, c net.Conn) {
-			a(t, NewPacketIO(c))
+			a(t, NewPacketIO(c, lg))
 		},
 		func(t *testing.T, c net.Conn) {
-			b(t, NewPacketIO(c))
+			b(t, NewPacketIO(c, lg))
 		}, loop)
 }
 
 func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+	lg := logger.CreateLoggerForTest(t)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			cli := NewPacketIO(c)
+			cli := NewPacketIO(c, lg)
 			a(t, cli)
 			require.NoError(t, cli.Close())
 		},
 		func(t *testing.T, c net.Conn) {
-			srv := NewPacketIO(c)
+			srv := NewPacketIO(c, lg)
 			b(t, srv)
 			require.NoError(t, srv.Close())
 		}, loop)
@@ -55,7 +57,6 @@ func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T,
 func TestPacketIO(t *testing.T) {
 	expectMsg := []byte("test")
 	pktLengths := []int{0, mysql.MaxPayloadLen + 212, mysql.MaxPayloadLen, mysql.MaxPayloadLen * 2}
-	lg := logger.CreateLoggerForTest(t).Named("TestPacketIO")
 	testPipeConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			var err error
@@ -109,10 +110,10 @@ func TestPacketIO(t *testing.T) {
 			require.ErrorIs(t, srv.WriteInitialHandshake(0, make([]byte, 4), mysql.AuthNativePassword, ServerVersion), ErrSaltNotLongEnough)
 
 			// expect correct and wrong capability flags
-			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp(lg)
+			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp()
 			require.NoError(t, err)
 			require.True(t, isSSL)
-			_, isSSL, err = srv.ReadSSLRequestOrHandshakeResp(lg)
+			_, isSSL, err = srv.ReadSSLRequestOrHandshakeResp()
 			require.NoError(t, err)
 			require.False(t, isSSL)
 		},

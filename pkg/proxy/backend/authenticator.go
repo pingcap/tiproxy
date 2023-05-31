@@ -111,7 +111,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	if err := clientIO.WriteInitialHandshake(proxyCapability, auth.salt, mysql.AuthNativePassword, handshakeHandler.GetServerVersion()); err != nil {
 		return err
 	}
-	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp(logger)
+	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		if _, err = clientIO.ServerTLSHandshake(frontendTLSConfig); err != nil {
 			return pnet.WrapUserError(err, err.Error())
 		}
-		pkt, _, err = clientIO.ReadSSLRequestOrHandshakeResp(logger)
+		pkt, _, err = clientIO.ReadSSLRequestOrHandshakeResp()
 		if err != nil {
 			return err
 		}

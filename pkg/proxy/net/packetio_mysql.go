@@ -87,14 +87,14 @@ func (p *PacketIO) WriteShaCommand() error {
 	return p.WritePacket([]byte{ShaCommand, FastAuthFail}, true)
 }
 
-func (p *PacketIO) ReadSSLRequestOrHandshakeResp(lg *zap.Logger) (pkt []byte, isSSL bool, err error) {
+func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err error) {
 	pkt, err = p.ReadPacket()
 	if err != nil {
 		return
 	}
 
 	if len(pkt) < 32 {
-		lg.Error("got malformed handshake response", zap.ByteString("packetData", pkt))
+		p.logger.Error("got malformed handshake response", zap.ByteString("packetData", pkt))
 		err = WrapUserError(mysql.ErrMalformPacket, mysql.ErrMalformPacket.Error())
 		return
 	}
@@ -138,7 +138,7 @@ func (p *PacketIO) WriteEOFPacket(status uint16) error {
 }
 
 // WriteUserError writes an unknown error to the client.
-func (p *PacketIO) WriteUserError(err error, lg *zap.Logger) {
+func (p *PacketIO) WriteUserError(err error) {
 	if err == nil {
 		return
 	}
@@ -148,6 +148,6 @@ func (p *PacketIO) WriteUserError(err error, lg *zap.Logger) {
 	}
 	myErr := mysql.NewErrf(mysql.ErrUnknown, "%s", nil, ue.UserMsg())
 	if writeErr := p.WriteErrPacket(myErr); writeErr != nil {
-		lg.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
+		p.logger.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
 	}
 }
