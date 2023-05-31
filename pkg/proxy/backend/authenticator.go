@@ -134,11 +134,10 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 	if commonCaps := frontendCapability & requiredFrontendCaps; commonCaps != requiredFrontendCaps {
 		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredFrontendCaps))
-		mysqlErr := mysql.NewErr(mysql.ErrNotSupportedAuthMode)
-		if writeErr := clientIO.WriteErrPacket(mysqlErr); writeErr != nil {
+		if writeErr := clientIO.WriteErrPacket(mysql.NewErr(mysql.ErrNotSupportedAuthMode)); writeErr != nil {
 			return writeErr
 		}
-		return mysqlErr
+		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from frontend", requiredFrontendCaps&^commonCaps)
 	}
 	commonCaps := frontendCapability & proxyCapability
 	if frontendCapability^commonCaps != 0 {
