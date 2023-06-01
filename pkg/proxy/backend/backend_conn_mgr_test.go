@@ -17,6 +17,7 @@ import (
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 const (
@@ -81,6 +82,7 @@ type runner struct {
 type backendMgrTester struct {
 	*testSuite
 	t      *testing.T
+	lg     *zap.Logger
 	closed bool
 }
 
@@ -93,6 +95,7 @@ func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 	tester := &backendMgrTester{
 		testSuite: ts,
 		t:         t,
+		lg:        logger.CreateLoggerForTest(t),
 	}
 	t.Cleanup(func() {
 		clean()
@@ -121,7 +124,7 @@ func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO *pnet.Packe
 func (ts *backendMgrTester) handshake4Backend(packetIO *pnet.PacketIO) error {
 	conn, err := ts.tc.backendListener.Accept()
 	require.NoError(ts.t, err)
-	ts.tc.backendIO = pnet.NewPacketIO(conn)
+	ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg)
 	return ts.mb.authenticate(ts.tc.backendIO)
 }
 
@@ -371,7 +374,7 @@ func TestConnectFail(t *testing.T) {
 			backend: func(_ *pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(ts.t, err)
-				ts.tc.backendIO = pnet.NewPacketIO(conn)
+				ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg)
 				ts.mb.authSucceed = false
 				return ts.mb.authenticate(ts.tc.backendIO)
 			},
@@ -415,7 +418,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(t, err)
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(t, err)
-				tmpBackendIO := pnet.NewPacketIO(conn)
+				tmpBackendIO := pnet.NewPacketIO(conn, ts.lg)
 				// auth fails
 				ts.mb.authSucceed = false
 				err = ts.mb.authenticate(tmpBackendIO)
@@ -436,7 +439,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(ts.t, err)
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(ts.t, err)
-				tmpBackendIO := pnet.NewPacketIO(conn)
+				tmpBackendIO := pnet.NewPacketIO(conn, ts.lg)
 				ts.mb.authSucceed = true
 				err = ts.mb.authenticate(tmpBackendIO)
 				require.NoError(t, err)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
+	"go.uber.org/zap"
 )
 
 var (
@@ -82,7 +83,8 @@ func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err 
 	}
 
 	if len(pkt) < 32 {
-		err = errors.WithStack(errors.Errorf("%w: but got less than 32 bytes", ErrExpectSSLRequest))
+		p.logger.Error("got malformed handshake response", zap.ByteString("packetData", pkt))
+		err = WrapUserError(mysql.ErrMalformPacket, mysql.ErrMalformPacket.Error())
 		return
 	}
 
@@ -122,4 +124,19 @@ func (p *PacketIO) WriteEOFPacket(status uint16) error {
 	// ClientProtocol41 must be enabled.
 	data = DumpUint16(data, status)
 	return p.WritePacket(data, true)
+}
+
+// WriteUserError writes an unknown error to the client.
+func (p *PacketIO) WriteUserError(err error) {
+	if err == nil {
+		return
+	}
+	var ue *UserError
+	if !errors.As(err, &ue) {
+		return
+	}
+	myErr := mysql.NewErrf(mysql.ErrUnknown, "%s", nil, ue.UserMsg())
+	if writeErr := p.WriteErrPacket(myErr); writeErr != nil {
+		p.logger.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
+	}
 }

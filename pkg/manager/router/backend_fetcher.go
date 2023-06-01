@@ -110,6 +110,10 @@ func (pf *PDFetcher) fetchBackendList(ctx context.Context) {
 		if response, err = pf.client.Get(ctx, infosync.TopologyInformationPath, clientv3.WithPrefix()); err == nil {
 			break
 		}
+		// Ignore errors when TiProxy shuts down.
+		if ctx.Err() != nil {
+			return
+		}
 		pf.logger.Error("fetch backend list failed, will retry later", zap.Error(err))
 		time.Sleep(pf.config.RetryInterval)
 	}

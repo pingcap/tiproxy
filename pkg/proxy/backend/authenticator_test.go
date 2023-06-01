@@ -16,50 +16,50 @@ func TestUnsupportedCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientSSL
+				cfg.clientConfig.capability &= ^pnet.ClientSSL
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientSSL
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability & ^pnet.ClientSSL
-			},
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability | pnet.ClientSSL
+				cfg.clientConfig.capability |= pnet.ClientSSL
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability & ^pnet.ClientDeprecateEOF
+				cfg.backendConfig.capability &= ^pnet.ClientSSL
 			},
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability | pnet.ClientDeprecateEOF
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientProtocol41
-			},
-			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientProtocol41
+				cfg.backendConfig.capability |= pnet.ClientSSL
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestClientCapability & ^pnet.ClientPSMultiResults
+				cfg.backendConfig.capability &= ^pnet.ClientDeprecateEOF
 			},
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestClientCapability | pnet.ClientPSMultiResults
+				cfg.backendConfig.capability |= pnet.ClientDeprecateEOF
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientPSMultiResults
+				cfg.clientConfig.capability &= ^pnet.ClientProtocol41
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientPSMultiResults
+				cfg.clientConfig.capability |= pnet.ClientProtocol41
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability &= ^pnet.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability |= pnet.ClientPSMultiResults
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability &= ^pnet.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability |= pnet.ClientPSMultiResults
 			},
 		},
 	}
@@ -140,27 +140,27 @@ func TestCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientConnectWithDB
+				cfg.clientConfig.capability &= ^pnet.ClientConnectWithDB
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientConnectWithDB
+				cfg.clientConfig.capability |= pnet.ClientConnectWithDB
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientConnectAttrs
+				cfg.clientConfig.capability &= ^pnet.ClientConnectAttrs
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientConnectAttrs
+				cfg.clientConfig.capability |= pnet.ClientConnectAttrs
 				cfg.clientConfig.attrs = map[string]string{"key": "value"}
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientSecureConnection
+				cfg.clientConfig.capability &= ^pnet.ClientSecureConnection
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientSecureConnection
+				cfg.clientConfig.capability |= pnet.ClientSecureConnection
 			},
 		},
 	}

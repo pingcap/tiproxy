@@ -66,7 +66,10 @@ func getCfgCombinations(cfgs [][]cfgOverrider) [][]cfgOverrider {
 		// Append the cfg to each of the existing overrider list.
 		for _, cfg := range cfgList {
 			for _, o := range cfgOverriders {
-				newOverriders = append(newOverriders, append(o, cfg))
+				newOverrider := make([]cfgOverrider, 0, len(o)+1)
+				newOverrider = append(newOverrider, o...)
+				newOverrider = append(newOverrider, cfg)
+				newOverriders = append(newOverriders, newOverrider)
 			}
 		}
 		cfgOverriders = newOverriders
@@ -176,9 +179,13 @@ func (ts *testSuite) authenticateFirstTime(t *testing.T, c checker) {
 		// Check the data received by client equals to the data sent from the server and vice versa.
 		require.Equal(t, ts.mb.authSucceed, ts.mc.authSucceed)
 		require.Equal(t, ts.mc.username, ts.mb.username)
-		require.Equal(t, ts.mc.dbName, ts.mb.db)
+		if ts.mc.capability&pnet.ClientConnectWithDB > 0 {
+			require.Equal(t, ts.mc.dbName, ts.mb.db)
+		}
 		require.Equal(t, ts.mc.authData, ts.mb.authData)
-		require.Equal(t, ts.mc.attrs, ts.mb.attrs)
+		if ts.mc.capability&pnet.ClientConnectAttrs > 0 {
+			require.Equal(t, ts.mc.attrs, ts.mb.attrs)
+		}
 	}
 }
 

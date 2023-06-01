@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/util/dbterror"
+	"go.uber.org/zap"
 )
 
 var (
@@ -73,12 +74,13 @@ type PacketIO struct {
 	buf           *bufio.ReadWriter
 	proxyInited   atomic.Bool
 	proxy         *proxyprotocol.Proxy
+	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
 	sequence      uint8
 }
 
-func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
+func NewPacketIO(conn net.Conn, lg *zap.Logger, opts ...PacketIOption) *PacketIO {
 	buf := bufio.NewReadWriter(
 		bufio.NewReaderSize(conn, defaultReaderSize),
 		bufio.NewWriterSize(conn, defaultWriterSize),
@@ -89,6 +91,7 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 			conn,
 			buf.Reader,
 		},
+		logger:   lg,
 		sequence: 0,
 		buf:      buf,
 	}
