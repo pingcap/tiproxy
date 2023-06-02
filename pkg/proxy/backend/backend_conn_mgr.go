@@ -291,11 +291,11 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 			val := binary.LittleEndian.Uint16(request[1:])
 			switch val {
 			case 0:
-				mgr.authenticator.capability |= mysql.ClientMultiStatements
-				mgr.cmdProcessor.capability |= mysql.ClientMultiStatements
+				mgr.authenticator.capability |= pnet.ClientMultiStatements
+				mgr.cmdProcessor.capability |= pnet.ClientMultiStatements
 			case 1:
-				mgr.authenticator.capability &^= mysql.ClientMultiStatements
-				mgr.cmdProcessor.capability &^= mysql.ClientMultiStatements
+				mgr.authenticator.capability &^= pnet.ClientMultiStatements
+				mgr.cmdProcessor.capability &^= pnet.ClientMultiStatements
 			default:
 				err = errors.Errorf("unrecognized set_option value:%d", val)
 				return

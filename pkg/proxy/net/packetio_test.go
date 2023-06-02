@@ -13,7 +13,6 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/pkg/testkit"
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,7 +44,7 @@ func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T,
 
 func TestPacketIO(t *testing.T) {
 	expectMsg := []byte("test")
-	pktLengths := []int{0, mysql.MaxPayloadLen + 212, mysql.MaxPayloadLen, mysql.MaxPayloadLen * 2}
+	pktLengths := []int{0, MaxPayloadLen + 212, MaxPayloadLen, MaxPayloadLen * 2}
 	testPipeConn(t,
 		func(t *testing.T, cli *PacketIO) {
 			var err error
@@ -56,7 +55,7 @@ func TestPacketIO(t *testing.T) {
 			outBytes := len(expectMsg) + 4
 			for _, l := range pktLengths {
 				require.NoError(t, cli.WritePacket(make([]byte, l), true))
-				outBytes += l + (l/(mysql.MaxPayloadLen)+1)*4
+				outBytes += l + (l/(MaxPayloadLen)+1)*4
 				require.Equal(t, uint64(outBytes), cli.OutBytes())
 			}
 
@@ -66,7 +65,7 @@ func TestPacketIO(t *testing.T) {
 
 			// send correct and wrong capability flags
 			var hdr [32]byte
-			binary.LittleEndian.PutUint32(hdr[:], mysql.ClientSSL)
+			binary.LittleEndian.PutUint32(hdr[:], ClientSSL.Uint32())
 			err = cli.WritePacket(hdr[:], true)
 			require.NoError(t, err)
 
@@ -89,14 +88,14 @@ func TestPacketIO(t *testing.T) {
 				msg, err = srv.ReadPacket()
 				require.NoError(t, err)
 				require.Equal(t, l, len(msg))
-				inBytes += l + (l/(mysql.MaxPayloadLen)+1)*4
+				inBytes += l + (l/(MaxPayloadLen)+1)*4
 				require.Equal(t, uint64(inBytes), srv.InBytes())
 			}
 
 			// send handshake
-			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], mysql.AuthNativePassword, ServerVersion))
+			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], AuthNativePassword, ServerVersion))
 			// salt should not be long enough
-			require.ErrorIs(t, srv.WriteInitialHandshake(0, make([]byte, 4), mysql.AuthNativePassword, ServerVersion), ErrSaltNotLongEnough)
+			require.ErrorIs(t, srv.WriteInitialHandshake(0, make([]byte, 4), AuthNativePassword, ServerVersion), ErrSaltNotLongEnough)
 
 			// expect correct and wrong capability flags
 			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp()

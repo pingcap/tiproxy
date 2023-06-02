@@ -6,8 +6,8 @@ package net
 import (
 	"encoding/binary"
 
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/tidb/parser/mysql"
 	"go.uber.org/zap"
 )
 
@@ -64,8 +64,9 @@ func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, aut
 func (p *PacketIO) WriteSwitchRequest(authPlugin string, salt []byte) error {
 	length := 1 + len(authPlugin) + 1 + len(salt) + 1
 	data := make([]byte, 0, length)
-	data = append(data, mysql.AuthSwitchRequest)
-	data = append(data, []byte(authPlugin)...)
+	// check https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_auth_switch_request.html
+	data = append(data, byte(AuthSwitchHeader))
+	data = append(data, authPlugin...)
 	data = append(data, 0x00)
 	data = append(data, salt...)
 	data = append(data, 0x00)
@@ -94,21 +95,26 @@ func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err 
 }
 
 // WriteErrPacket writes an Error packet.
-func (p *PacketIO) WriteErrPacket(merr *mysql.SQLError) error {
-	data := make([]byte, 0, 4+len(merr.Message)+len(merr.State))
-	data = append(data, mysql.ErrHeader)
-	data = append(data, byte(merr.Code), byte(merr.Code>>8))
-	// ClientProtocol41 must be enabled.
+func (p *PacketIO) WriteErrPacket(code uint16, message string) error {
+	data := make([]byte, 0, 9+len(message))
+	data = append(data, ErrHeader.Byte())
+	data = append(data, byte(code), byte(code>>8))
+
+	// TODO: ClientProtocol41 must be enabled for state
 	data = append(data, '#')
-	data = append(data, merr.State...)
-	data = append(data, merr.Message...)
+	s, ok := mysql.MySQLState[code]
+	if !ok {
+		s = mysql.DEFAULT_MYSQL_STATE
+	}
+	data = append(data, s...)
+	data = append(data, message...)
 	return p.WritePacket(data, true)
 }
 
 // WriteOKPacket writes an OK packet. It's only for testing.
-func (p *PacketIO) WriteOKPacket(status uint16, header byte) error {
+func (p *PacketIO) WriteOKPacket(status uint16, header Header) error {
 	data := make([]byte, 0, 7)
-	data = append(data, header)
+	data = append(data, header.Byte())
 	data = append(data, 0, 0)
 	// ClientProtocol41 must be enabled.
 	data = DumpUint16(data, status)
@@ -119,7 +125,7 @@ func (p *PacketIO) WriteOKPacket(status uint16, header byte) error {
 // WriteEOFPacket writes an EOF packet. It's only for testing.
 func (p *PacketIO) WriteEOFPacket(status uint16) error {
 	data := make([]byte, 0, 5)
-	data = append(data, mysql.EOFHeader)
+	data = append(data, EOFHeader.Byte())
 	data = append(data, 0, 0)
 	// ClientProtocol41 must be enabled.
 	data = DumpUint16(data, status)
@@ -135,8 +141,7 @@ func (p *PacketIO) WriteUserError(err error) {
 	if !errors.As(err, &ue) {
 		return
 	}
-	myErr := mysql.NewErrf(mysql.ErrUnknown, "%s", nil, ue.UserMsg())
-	if writeErr := p.WriteErrPacket(myErr); writeErr != nil {
+	if writeErr := p.WriteErrPacket(mysql.ER_UNKNOWN_ERROR, ue.UserMsg()); writeErr != nil {
 		p.logger.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
 	}
 }

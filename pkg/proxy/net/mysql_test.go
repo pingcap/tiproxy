@@ -6,7 +6,6 @@ package net
 import (
 	"testing"
 
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +16,7 @@ func TestHandshakeResp(t *testing.T) {
 		DB:         "db",
 		AuthPlugin: "plugin",
 		AuthData:   []byte("1234567890"),
-		Capability: ^mysql.ClientPluginAuthLenencClientData,
+		Capability: ^ClientPluginAuthLenencClientData,
 		Collation:  0,
 	}
 	b := MakeHandshakeResponse(resp1)
