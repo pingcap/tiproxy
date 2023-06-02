@@ -673,7 +673,9 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 			proxy: func(_, _ *pnet.PacketIO) error {
 				ts.mp.GracefulClose()
 				time.Sleep(300 * time.Millisecond)
-				require.Equal(t, statusNotifyClose, ts.mp.closeStatus.Load())
+				require.Eventually(t, func() bool {
+					return statusNotifyClose == ts.mp.closeStatus.Load()
+				}, time.Second, 100*time.Millisecond)
 				return nil
 			},
 		},
