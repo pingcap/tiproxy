@@ -263,7 +263,7 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 func MakeChangeUser(username, db, authPlugin string, authData []byte) []byte {
 	length := 1 + len(username) + 1 + len(authData) + 1 + len(db) + 1
 	data := make([]byte, 0, length)
-	data = append(data, mysql.ComChangeUser)
+	data = append(data, ComChangeUser.Byte())
 	data = append(data, []byte(username)...)
 	data = append(data, 0x00)
 	data = append(data, byte(len(authData)))

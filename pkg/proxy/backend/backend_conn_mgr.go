@@ -271,7 +271,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		err = mysql.ErrMalformPacket
 		return
 	}
-	cmd := request[0]
+	cmd := pnet.Command(request[0])
 	startTime := time.Now()
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
@@ -296,9 +296,9 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	}
 	if err == nil {
 		switch cmd {
-		case mysql.ComQuit:
+		case pnet.ComQuit:
 			return
-		case mysql.ComSetOption:
+		case pnet.ComSetOption:
 			val := binary.LittleEndian.Uint16(request[1:])
 			switch val {
 			case 0:
@@ -311,7 +311,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 				err = errors.Errorf("unrecognized set_option value:%d", val)
 				return
 			}
-		case mysql.ComChangeUser:
+		case pnet.ComChangeUser:
 			username, db := pnet.ParseChangeUser(request)
 			mgr.authenticator.changeUser(username, db)
 			return

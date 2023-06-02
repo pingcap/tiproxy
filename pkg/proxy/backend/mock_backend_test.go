@@ -163,7 +163,7 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeErr:
 		return packetIO.WriteErrPacket(mysql.NewErr(mysql.ErrUnknown))
 	case responseTypeResultSet:
-		if pkt[0] == mysql.ComQuery && string(pkt[1:]) == sqlQueryState {
+		if pnet.Command(pkt[0]) == pnet.ComQuery && string(pkt[1:]) == sqlQueryState {
 			return mb.respondSessionStates(packetIO)
 		}
 		return mb.respondResultSet(packetIO)
