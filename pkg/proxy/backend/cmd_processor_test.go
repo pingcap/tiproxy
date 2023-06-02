@@ -40,14 +40,14 @@ const (
 
 // cmdResponseTypes lists all commands and their responses.
 var cmdResponseTypes = map[pnet.Command][]respondType{
-	pnet.ComSleep:            {responseTypeErr},
-	pnet.ComQuit:             {responseTypeNone},
-	pnet.ComInitDB:           {responseTypeOK, responseTypeErr},
-	pnet.ComQuery:            {responseTypeOK, responseTypeErr, responseTypeResultSet, responseTypeLoadFile},
-	pnet.ComFieldList:        {responseTypeErr, responseTypeColumn},
-	pnet.ComCreateDB:         {responseTypeOK, responseTypeErr},
-	pnet.ComDropDB:           {responseTypeOK, responseTypeErr},
-	pnet.ComRefresh:          {responseTypeOK, responseTypeErr},
+	pnet.ComSleep:     {responseTypeErr},
+	pnet.ComQuit:      {responseTypeNone},
+	pnet.ComInitDB:    {responseTypeOK, responseTypeErr},
+	pnet.ComQuery:     {responseTypeOK, responseTypeErr, responseTypeResultSet, responseTypeLoadFile},
+	pnet.ComFieldList: {responseTypeErr, responseTypeColumn},
+	pnet.ComCreateDB:  {responseTypeOK, responseTypeErr},
+	pnet.ComDropDB:    {responseTypeOK, responseTypeErr},
+	pnet.ComRefresh:   {responseTypeOK, responseTypeErr},
 	// It is comShutdown
 	pnet.ComDeprecated1:      {responseTypeOK, responseTypeErr},
 	pnet.ComStatistics:       {responseTypeString},
