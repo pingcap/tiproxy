@@ -21,7 +21,7 @@ func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *gomy
 	packetIO.ResetSequence()
 	data := hack.Slice(sql)
 	request := make([]byte, 0, 1+len(data))
-	request = append(request, mysql.ComQuery)
+	request = append(request, pnet.ComQuery.Byte())
 	request = append(request, data...)
 	if err = packetIO.WritePacket(request, true); err != nil {
 		return

@@ -10,8 +10,8 @@ import (
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 )
 
-func addCmdMetrics(cmd byte, addr string, startTime time.Time) {
-	label := pnet.Command(cmd).String()
+func addCmdMetrics(cmd pnet.Command, addr string, startTime time.Time) {
+	label := cmd.String()
 	metrics.QueryTotalCounter.WithLabelValues(addr, label).Inc()
 
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
@@ -20,8 +20,8 @@ func addCmdMetrics(cmd byte, addr string, startTime time.Time) {
 	metrics.QueryDurationHistogram.WithLabelValues(addr, label).Observe(cost.Seconds())
 }
 
-func readCmdCounter(cmd byte, addr string) (int, error) {
-	label := pnet.Command(cmd).String()
+func readCmdCounter(cmd pnet.Command, addr string) (int, error) {
+	label := cmd.String()
 	return metrics.ReadCounter(metrics.QueryTotalCounter.WithLabelValues(addr, label))
 }
 

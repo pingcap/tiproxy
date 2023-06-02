@@ -37,8 +37,8 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 }
 
 func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) error {
-	cmd := request[0]
-	if cmd != mysql.ComChangeUser {
+	cmd := pnet.Command(request[0])
+	if cmd != pnet.ComChangeUser {
 		if err := backendIO.WritePacket(request, true); err != nil {
 			return err
 		}
@@ -49,23 +49,23 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 		}
 	}
 	switch cmd {
-	case mysql.ComStmtPrepare:
+	case pnet.ComStmtPrepare:
 		return cp.forwardPrepareCmd(clientIO, backendIO)
-	case mysql.ComStmtFetch:
+	case pnet.ComStmtFetch:
 		return cp.forwardFetchCmd(clientIO, backendIO, request)
-	case mysql.ComQuery, mysql.ComStmtExecute, mysql.ComProcessInfo:
+	case pnet.ComQuery, pnet.ComStmtExecute, pnet.ComProcessInfo:
 		return cp.forwardQueryCmd(clientIO, backendIO, request)
-	case mysql.ComStmtClose:
+	case pnet.ComStmtClose:
 		return cp.forwardCloseCmd(request)
-	case mysql.ComStmtSendLongData:
+	case pnet.ComStmtSendLongData:
 		return cp.forwardSendLongDataCmd(request)
-	case mysql.ComChangeUser:
+	case pnet.ComChangeUser:
 		return cp.forwardChangeUserCmd(clientIO, backendIO, request)
-	case mysql.ComStatistics:
+	case pnet.ComStatistics:
 		return cp.forwardStatisticsCmd(clientIO, backendIO)
-	case mysql.ComFieldList:
+	case pnet.ComFieldList:
 		return cp.forwardFieldListCmd(clientIO, backendIO, request)
-	case mysql.ComQuit:
+	case pnet.ComQuit:
 		return cp.forwardQuitCmd()
 	}
 
@@ -158,7 +158,7 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 		return cp.handleErrorPacket(response)
 	}
 	// impossible here
-	return errors.Errorf("unexpected response, cmd:%d resp:%d", mysql.ComStmtPrepare, response[0])
+	return errors.Errorf("unexpected response, cmd:%d resp:%d", pnet.ComStmtPrepare, response[0])
 }
 
 func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
@@ -231,7 +231,7 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 		return serverStatus, cp.handleErrorPacket(response)
 	}
 	// impossible here
-	return serverStatus, errors.Errorf("unexpected response, cmd:%d resp:%d", mysql.ComQuery, response[0])
+	return serverStatus, errors.Errorf("unexpected response, cmd:%d resp:%d", pnet.ComQuery, response[0])
 }
 
 func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
@@ -310,9 +310,9 @@ func (cp *CmdProcessor) forwardQuitCmd() error {
 // The application may always omit `COMMIT` and thus the session can never be redirected.
 // We can send a `COMMIT` statement to the current backend and then forward the `BEGIN` statement to the new backend.
 func (cp *CmdProcessor) needHoldRequest(request []byte) bool {
-	cmd, data := request[0], request[1:]
+	cmd, data := pnet.Command(request[0]), request[1:]
 	// BEGIN/START TRANSACTION statements cannot be prepared.
-	if cmd != mysql.ComQuery {
+	if cmd != pnet.ComQuery {
 		return false
 	}
 	// Hold request only when it's waiting for the end of the transaction.

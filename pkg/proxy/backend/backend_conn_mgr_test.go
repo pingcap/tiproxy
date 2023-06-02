@@ -148,10 +148,10 @@ func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO *pnet.PacketIO)
 	clientIO.ResetSequence()
 	request, err := clientIO.ReadPacket()
 	require.NoError(ts.t, err)
-	prevCounter, err := readCmdCounter(request[0], ts.tc.backendListener.Addr().String())
+	prevCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	rsErr := ts.mp.ExecuteCmd(context.Background(), request)
-	curCounter, err := readCmdCounter(request[0], ts.tc.backendListener.Addr().String())
+	curCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	require.Equal(ts.t, prevCounter+1, curCounter)
 	return rsErr
@@ -470,7 +470,7 @@ func TestSpecialCmds(t *testing.T) {
 		// change user
 		{
 			client: func(packetIO *pnet.PacketIO) error {
-				ts.mc.cmd = mysql.ComChangeUser
+				ts.mc.cmd = pnet.ComChangeUser
 				ts.mc.username = "another_user"
 				ts.mc.dbName = "another_db"
 				return ts.mc.request(packetIO)
@@ -481,7 +481,7 @@ func TestSpecialCmds(t *testing.T) {
 		// disable multi-stmts
 		{
 			client: func(packetIO *pnet.PacketIO) error {
-				ts.mc.cmd = mysql.ComSetOption
+				ts.mc.cmd = pnet.ComSetOption
 				ts.mc.dataBytes = []byte{1, 0}
 				return ts.mc.request(packetIO)
 			},
