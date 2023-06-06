@@ -300,7 +300,8 @@ func (auth *Authenticator) writeAuthHandshake(
 	}
 
 	var pkt []byte
-	if backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil {
+	// When client TLS is disabled, also disables proxy TLS.
+	if pnet.Capability(auth.capability)&pnet.ClientSSL != 0 && backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil {
 		resp.Capability |= mysql.ClientSSL
 		pkt = pnet.MakeHandshakeResponse(resp)
 		// write SSL Packet
