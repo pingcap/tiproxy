@@ -73,7 +73,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
 
 	// setup certs
-	if err = srv.CertManager.Init(cfg, lg.Named("cert")); err != nil {
+	if err = srv.CertManager.Init(cfg, lg.Named("cert"), srv.ConfigManager.WatchConfig()); err != nil {
 		return
 	}
 
