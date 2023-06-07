@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package backend
 
@@ -77,7 +66,10 @@ func getCfgCombinations(cfgs [][]cfgOverrider) [][]cfgOverrider {
 		// Append the cfg to each of the existing overrider list.
 		for _, cfg := range cfgList {
 			for _, o := range cfgOverriders {
-				newOverriders = append(newOverriders, append(o, cfg))
+				newOverrider := make([]cfgOverrider, 0, len(o)+1)
+				newOverrider = append(newOverrider, o...)
+				newOverrider = append(newOverrider, cfg)
+				newOverriders = append(newOverriders, newOverrider)
 			}
 		}
 		cfgOverriders = newOverriders
@@ -187,9 +179,13 @@ func (ts *testSuite) authenticateFirstTime(t *testing.T, c checker) {
 		// Check the data received by client equals to the data sent from the server and vice versa.
 		require.Equal(t, ts.mb.authSucceed, ts.mc.authSucceed)
 		require.Equal(t, ts.mc.username, ts.mb.username)
-		require.Equal(t, ts.mc.dbName, ts.mb.db)
+		if ts.mc.capability&pnet.ClientConnectWithDB > 0 {
+			require.Equal(t, ts.mc.dbName, ts.mb.db)
+		}
 		require.Equal(t, ts.mc.authData, ts.mb.authData)
-		require.Equal(t, ts.mc.attrs, ts.mb.attrs)
+		if ts.mc.capability&pnet.ClientConnectAttrs > 0 {
+			require.Equal(t, ts.mc.attrs, ts.mb.attrs)
+		}
 	}
 }
 

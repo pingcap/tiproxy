@@ -43,9 +43,15 @@ cmd_%:
 golangci-lint:
 	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
-lint: golangci-lint tidy
-	cd lib && $(GOBIN)/golangci-lint run
-	$(GOBIN)/golangci-lint run
+go-header:
+	GOBIN=$(GOBIN) go install github.com/denis-tingaikin/go-header/cmd/go-header@latest
+
+header: go-header
+	$(GOBIN)/go-header $(shell find . -name "*.go" -not -path "./pkg/proxy/keepalive*")
+
+lint: golangci-lint tidy header
+	cd lib && $(GOBIN)/golangci-lint run -c ../.golangci.yaml
+	$(GOBIN)/golangci-lint run -c .golangci.yaml
 
 gocovmerge:
 	GOBIN=$(GOBIN) go install github.com/wadey/gocovmerge@master

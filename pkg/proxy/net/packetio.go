@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 // The MIT License (MIT)
 //
@@ -50,6 +39,7 @@ import (
 	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tidb/errno"
 	"github.com/pingcap/tidb/util/dbterror"
+	"go.uber.org/zap"
 )
 
 var (
@@ -84,12 +74,13 @@ type PacketIO struct {
 	buf           *bufio.ReadWriter
 	proxyInited   atomic.Bool
 	proxy         *proxyprotocol.Proxy
+	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
 	sequence      uint8
 }
 
-func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
+func NewPacketIO(conn net.Conn, lg *zap.Logger, opts ...PacketIOption) *PacketIO {
 	buf := bufio.NewReadWriter(
 		bufio.NewReaderSize(conn, defaultReaderSize),
 		bufio.NewWriterSize(conn, defaultWriterSize),
@@ -100,6 +91,7 @@ func NewPacketIO(conn net.Conn, opts ...PacketIOption) *PacketIO {
 			conn,
 			buf.Reader,
 		},
+		logger:   lg,
 		sequence: 0,
 		buf:      buf,
 	}

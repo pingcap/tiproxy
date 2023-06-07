@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package net
 
@@ -21,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/security"
 	"github.com/pingcap/TiProxy/pkg/testkit"
 	"github.com/pingcap/tidb/parser/mysql"
@@ -28,24 +18,26 @@ import (
 )
 
 func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+	lg := logger.CreateLoggerForTest(t)
 	testkit.TestPipeConn(t,
 		func(t *testing.T, c net.Conn) {
-			a(t, NewPacketIO(c))
+			a(t, NewPacketIO(c, lg))
 		},
 		func(t *testing.T, c net.Conn) {
-			b(t, NewPacketIO(c))
+			b(t, NewPacketIO(c, lg))
 		}, loop)
 }
 
 func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+	lg := logger.CreateLoggerForTest(t)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			cli := NewPacketIO(c)
+			cli := NewPacketIO(c, lg)
 			a(t, cli)
 			require.NoError(t, cli.Close())
 		},
 		func(t *testing.T, c net.Conn) {
-			srv := NewPacketIO(c)
+			srv := NewPacketIO(c, lg)
 			b(t, srv)
 			require.NoError(t, srv.Close())
 		}, loop)

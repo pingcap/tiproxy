@@ -1,0 +1,6 @@
+values:
+  const:
+    COMPANY: PingCAP, Inc.
+template: |-
+  Copyright {{YEAR}} {{COMPANY}}
+  SPDX-License-Identifier: Apache-2.0

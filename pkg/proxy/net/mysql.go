@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package net
 
@@ -263,7 +252,7 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 func MakeChangeUser(username, db, authPlugin string, authData []byte) []byte {
 	length := 1 + len(username) + 1 + len(authData) + 1 + len(db) + 1
 	data := make([]byte, 0, length)
-	data = append(data, mysql.ComChangeUser)
+	data = append(data, ComChangeUser.Byte())
 	data = append(data, []byte(username)...)
 	data = append(data, 0x00)
 	data = append(data, byte(len(authData)))

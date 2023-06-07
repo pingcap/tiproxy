@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package backend
 
@@ -79,24 +68,24 @@ func (cp *CmdProcessor) updatePrepStmtStatus(request []byte, serverStatus uint16
 		stmtID         int
 		prepStmtStatus uint32
 	)
-	cmd := request[0]
+	cmd := pnet.Command(request[0])
 	switch cmd {
-	case mysql.ComStmtSendLongData, mysql.ComStmtExecute, mysql.ComStmtFetch, mysql.ComStmtReset, mysql.ComStmtClose:
+	case pnet.ComStmtSendLongData, pnet.ComStmtExecute, pnet.ComStmtFetch, pnet.ComStmtReset, pnet.ComStmtClose:
 		stmtID = int(binary.LittleEndian.Uint32(request[1:5]))
-	case mysql.ComResetConnection, mysql.ComChangeUser:
+	case pnet.ComResetConnection, pnet.ComChangeUser:
 		cp.preparedStmtStatus = make(map[int]uint32)
 		return
 	default:
 		return
 	}
 	switch cmd {
-	case mysql.ComStmtSendLongData:
+	case pnet.ComStmtSendLongData:
 		prepStmtStatus = StatusPrepareWaitExecute
-	case mysql.ComStmtExecute:
+	case pnet.ComStmtExecute:
 		if serverStatus&mysql.ServerStatusCursorExists > 0 {
 			prepStmtStatus = StatusPrepareWaitFetch
 		}
-	case mysql.ComStmtFetch:
+	case pnet.ComStmtFetch:
 		if serverStatus&mysql.ServerStatusLastRowSend == 0 {
 			prepStmtStatus = StatusPrepareWaitFetch
 		}

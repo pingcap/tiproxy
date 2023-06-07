@@ -1,20 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package cert
 
@@ -138,7 +123,7 @@ func TestInit(t *testing.T) {
 
 		certMgr := NewCertManager()
 		certMgr.SetRetryInterval(100 * time.Millisecond)
-		err := certMgr.Init(&tc.cfg, lg)
+		err := certMgr.Init(&tc.cfg, lg, nil)
 		if tc.err != "" {
 			require.ErrorContains(t, err, tc.err, fmt.Sprintf("%+v", tc))
 		} else {
@@ -283,7 +268,7 @@ func TestRotate(t *testing.T) {
 		if tc.pre != nil {
 			tc.pre(t)
 		}
-		require.NoError(t, certMgr.Init(cfg, lg))
+		require.NoError(t, certMgr.Init(cfg, lg, nil))
 
 		stls := certMgr.ServerTLS()
 		ctls := certMgr.SQLTLS()
@@ -364,10 +349,73 @@ func TestBidirectional(t *testing.T) {
 	}
 
 	certMgr := NewCertManager()
-	require.NoError(t, certMgr.Init(cfg, lg))
+	require.NoError(t, certMgr.Init(cfg, lg, nil))
 	stls := certMgr.ServerTLS()
 	ctls := certMgr.SQLTLS()
 	clientErr, serverErr := connectWithTLS(ctls, stls)
 	require.NoError(t, clientErr)
 	require.NoError(t, serverErr)
+}
+
+func TestWatchConfig(t *testing.T) {
+	tmpdir := t.TempDir()
+	lg := logger.CreateLoggerForTest(t)
+	caPath1 := filepath.Join(tmpdir, "c1", "ca")
+	keyPath1 := filepath.Join(tmpdir, "c1", "key")
+	certPath1 := filepath.Join(tmpdir, "c1", "cert")
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration))
+
+	tests := []struct {
+		cfg     config.TLSConfig
+		checker func(*tls.Config) bool
+	}{
+		{
+			cfg: config.TLSConfig{
+				SkipCA: true,
+			},
+			checker: func(tlsConfig *tls.Config) bool {
+				if tlsConfig == nil {
+					return false
+				}
+				return tlsConfig.InsecureSkipVerify
+			},
+		},
+		{
+			cfg: config.TLSConfig{
+				SkipCA: false,
+				CA:     caPath1,
+			},
+			checker: func(tlsConfig *tls.Config) bool {
+				return tlsConfig.GetCertificate != nil
+			},
+		},
+		{
+			cfg: config.TLSConfig{
+				SkipCA:        false,
+				CA:            caPath1,
+				MinTLSVersion: "1.3",
+			},
+			checker: func(tlsConfig *tls.Config) bool {
+				return tlsConfig.MinVersion == tls.VersionTLS13
+			},
+		},
+	}
+
+	cfgCh := make(chan *config.Config)
+	certMgr := NewCertManager()
+	cfg := config.Config{
+		Security: config.Security{
+			SQLTLS: config.TLSConfig{
+				SkipCA: false,
+			},
+		},
+	}
+	require.NoError(t, certMgr.Init(&cfg, lg, cfgCh))
+	for _, test := range tests {
+		cfg.Security.SQLTLS = test.cfg
+		cfgCh <- &cfg
+		require.Eventually(t, func() bool {
+			return test.checker(certMgr.SQLTLS())
+		}, time.Second, 10*time.Millisecond)
+	}
 }

@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package backend
 
@@ -28,6 +17,7 @@ import (
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 const (
@@ -92,6 +82,7 @@ type runner struct {
 type backendMgrTester struct {
 	*testSuite
 	t      *testing.T
+	lg     *zap.Logger
 	closed bool
 }
 
@@ -104,6 +95,7 @@ func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 	tester := &backendMgrTester{
 		testSuite: ts,
 		t:         t,
+		lg:        logger.CreateLoggerForTest(t),
 	}
 	t.Cleanup(func() {
 		clean()
@@ -132,7 +124,7 @@ func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO *pnet.Packe
 func (ts *backendMgrTester) handshake4Backend(packetIO *pnet.PacketIO) error {
 	conn, err := ts.tc.backendListener.Accept()
 	require.NoError(ts.t, err)
-	ts.tc.backendIO = pnet.NewPacketIO(conn)
+	ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg)
 	return ts.mb.authenticate(ts.tc.backendIO)
 }
 
@@ -156,10 +148,10 @@ func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO *pnet.PacketIO)
 	clientIO.ResetSequence()
 	request, err := clientIO.ReadPacket()
 	require.NoError(ts.t, err)
-	prevCounter, err := readCmdCounter(request[0], ts.tc.backendListener.Addr().String())
+	prevCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	rsErr := ts.mp.ExecuteCmd(context.Background(), request)
-	curCounter, err := readCmdCounter(request[0], ts.tc.backendListener.Addr().String())
+	curCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	require.Equal(ts.t, prevCounter+1, curCounter)
 	return rsErr
@@ -382,7 +374,7 @@ func TestConnectFail(t *testing.T) {
 			backend: func(_ *pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(ts.t, err)
-				ts.tc.backendIO = pnet.NewPacketIO(conn)
+				ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg)
 				ts.mb.authSucceed = false
 				return ts.mb.authenticate(ts.tc.backendIO)
 			},
@@ -426,7 +418,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(t, err)
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(t, err)
-				tmpBackendIO := pnet.NewPacketIO(conn)
+				tmpBackendIO := pnet.NewPacketIO(conn, ts.lg)
 				// auth fails
 				ts.mb.authSucceed = false
 				err = ts.mb.authenticate(tmpBackendIO)
@@ -447,7 +439,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(ts.t, err)
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(ts.t, err)
-				tmpBackendIO := pnet.NewPacketIO(conn)
+				tmpBackendIO := pnet.NewPacketIO(conn, ts.lg)
 				ts.mb.authSucceed = true
 				err = ts.mb.authenticate(tmpBackendIO)
 				require.NoError(t, err)
@@ -478,7 +470,7 @@ func TestSpecialCmds(t *testing.T) {
 		// change user
 		{
 			client: func(packetIO *pnet.PacketIO) error {
-				ts.mc.cmd = mysql.ComChangeUser
+				ts.mc.cmd = pnet.ComChangeUser
 				ts.mc.username = "another_user"
 				ts.mc.dbName = "another_db"
 				return ts.mc.request(packetIO)
@@ -489,7 +481,7 @@ func TestSpecialCmds(t *testing.T) {
 		// disable multi-stmts
 		{
 			client: func(packetIO *pnet.PacketIO) error {
-				ts.mc.cmd = mysql.ComSetOption
+				ts.mc.cmd = pnet.ComSetOption
 				ts.mc.dataBytes = []byte{1, 0}
 				return ts.mc.request(packetIO)
 			},

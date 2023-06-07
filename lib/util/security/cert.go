@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package security
 
@@ -19,11 +8,11 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -36,30 +25,20 @@ const (
 var emptyCert = new(tls.Certificate)
 
 type CertInfo struct {
-	cfg         config.TLSConfig
-	ca          atomic.Value
-	cert        atomic.Value
+	cfg         atomic.Pointer[config.TLSConfig]
+	ca          atomic.Pointer[x509.CertPool]
+	cert        atomic.Pointer[tls.Certificate]
 	autoCertExp atomic.Int64
 	server      bool
 }
 
-func NewCert(lg *zap.Logger, cfg config.TLSConfig, server bool) (*CertInfo, *tls.Config, error) {
-	ci := &CertInfo{
-		cfg:    cfg,
+func NewCert(server bool) *CertInfo {
+	return &CertInfo{
 		server: server,
 	}
-	tlscfg, err := ci.reload(lg)
-	return ci, tlscfg, err
 }
 
-func (ci *CertInfo) Reload(lg *zap.Logger) error {
-	_, err := ci.reload(lg)
-	return err
-}
-
-func (ci *CertInfo) reload(lg *zap.Logger) (*tls.Config, error) {
-	var tlsConfig *tls.Config
-	var err error
+func (ci *CertInfo) Reload(lg *zap.Logger) (tlsConfig *tls.Config, err error) {
 	// Some methods to rotate server config:
 	// - For certs: customize GetCertificate / GetConfigForClient.
 	// - For CA: customize ClientAuth + VerifyPeerCertificate / GetConfigForClient
@@ -74,24 +53,21 @@ func (ci *CertInfo) reload(lg *zap.Logger) (*tls.Config, error) {
 	return tlsConfig, err
 }
 
+func (ci *CertInfo) SetConfig(cfg config.TLSConfig) {
+	ci.cfg.Store(&cfg)
+}
+
 func (ci *CertInfo) getCert(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-	cert := ci.cert.Load()
-	if val, ok := cert.(*tls.Certificate); ok {
-		return val, nil
-	}
-	return nil, nil
+	return ci.cert.Load(), nil
 }
 
 func (ci *CertInfo) getClientCert(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 	cert := ci.cert.Load()
-	if val, ok := cert.(*tls.Certificate); ok {
-		return val, nil
-	}
 	if cert == nil {
 		// GetClientCertificate must return a non-nil Certificate.
 		return emptyCert, nil
 	}
-	return nil, nil
+	return cert, nil
 }
 
 func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certificate) error {
@@ -108,8 +84,8 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 		certs[i] = cert
 	}
 
-	cas, ok := ci.ca.Load().(*x509.CertPool)
-	if !ok {
+	cas := ci.ca.Load()
+	if cas == nil {
 		cas = x509.NewCertPool()
 	}
 	opts := x509.VerifyOptions{
@@ -155,10 +131,11 @@ func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 }
 
 func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
-	lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg))
+	lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg.Load()))
 	autoCerts := false
-	if !ci.cfg.HasCert() {
-		if ci.cfg.AutoCerts {
+	cfg := ci.cfg.Load()
+	if !cfg.HasCert() {
+		if cfg.AutoCerts {
 			autoCerts = true
 		} else {
 			lg.Info("require certificates to secure clients connections, disable TLS")
@@ -167,7 +144,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:            ci.cfg.MinTLSVer(),
+		MinVersion:            cfg.MinTLSVer(),
 		GetCertificate:        ci.getCert,
 		GetClientCertificate:  ci.getClientCert,
 		VerifyPeerCertificate: ci.verifyPeerCertificate,
@@ -178,22 +155,22 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	if autoCerts {
 		now := time.Now()
 		if time.Unix(ci.autoCertExp.Load(), 0).Before(now) {
-			dur, err := time.ParseDuration(ci.cfg.AutoExpireDuration)
+			dur, err := time.ParseDuration(cfg.AutoExpireDuration)
 			if err != nil {
 				dur = DefaultCertExpiration
 			}
 			ci.autoCertExp.Store(now.Add(DefaultCertExpiration - recreateAutoCertAdvance).Unix())
-			certPEM, keyPEM, _, err = createTempTLS(ci.cfg.RSAKeySize, dur)
+			certPEM, keyPEM, _, err = createTempTLS(cfg.RSAKeySize, dur)
 			if err != nil {
 				return nil, err
 			}
 		}
 	} else {
-		certPEM, err = os.ReadFile(ci.cfg.Cert)
+		certPEM, err = os.ReadFile(cfg.Cert)
 		if err != nil {
 			return nil, err
 		}
-		keyPEM, err = os.ReadFile(ci.cfg.Key)
+		keyPEM, err = os.ReadFile(cfg.Key)
 		if err != nil {
 			return nil, err
 		}
@@ -207,12 +184,12 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		ci.cert.Store(&cert)
 	}
 
-	if !ci.cfg.HasCA() {
+	if !cfg.HasCA() {
 		lg.Info("no CA, server will not authenticate clients (connection is still secured)")
 		return tcfg, nil
 	}
 
-	caPEM, err := os.ReadFile(ci.cfg.CA)
+	caPEM, err := os.ReadFile(cfg.CA)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +200,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 	ci.ca.Store(cas)
 
-	if ci.cfg.SkipCA {
+	if cfg.SkipCA {
 		tcfg.ClientAuth = tls.RequestClientCert
 	} else {
 		tcfg.ClientAuth = tls.RequireAnyClientCert
@@ -233,17 +210,18 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 }
 
 func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
-	lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg))
-	if ci.cfg.AutoCerts {
+	lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg.Load()))
+	cfg := ci.cfg.Load()
+	if cfg.AutoCerts {
 		lg.Info("specified auto-certs in a client tls config, ignored")
 	}
 
-	if !ci.cfg.HasCA() {
-		if ci.cfg.SkipCA {
+	if !cfg.HasCA() {
+		if cfg.SkipCA {
 			// still enable TLS without verify server certs
 			return &tls.Config{
 				InsecureSkipVerify: true,
-				MinVersion:         ci.cfg.MinTLSVer(),
+				MinVersion:         cfg.MinTLSVer(),
 			}, nil
 		}
 		lg.Info("no CA to verify server connections, disable TLS")
@@ -251,14 +229,14 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:            ci.cfg.MinTLSVer(),
+		MinVersion:            cfg.MinTLSVer(),
 		GetCertificate:        ci.getCert,
 		GetClientCertificate:  ci.getClientCert,
 		InsecureSkipVerify:    true,
 		VerifyPeerCertificate: ci.verifyPeerCertificate,
 	}
 
-	certBytes, err := os.ReadFile(ci.cfg.CA)
+	certBytes, err := os.ReadFile(cfg.CA)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -268,12 +246,12 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 	ci.ca.Store(cas)
 
-	if !ci.cfg.HasCert() {
+	if !cfg.HasCert() {
 		lg.Info("no certificates, server may reject the connection")
 		return tcfg, nil
 	}
 
-	cert, err := tls.LoadX509KeyPair(ci.cfg.Cert, ci.cfg.Key)
+	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

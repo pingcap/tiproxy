@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package backend
 
@@ -27,50 +16,50 @@ func TestUnsupportedCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientSSL
+				cfg.clientConfig.capability &= ^pnet.ClientSSL
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientSSL
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability & ^pnet.ClientSSL
-			},
-			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability | pnet.ClientSSL
+				cfg.clientConfig.capability |= pnet.ClientSSL
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability & ^pnet.ClientDeprecateEOF
+				cfg.backendConfig.capability &= ^pnet.ClientSSL
 			},
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestBackendCapability | pnet.ClientDeprecateEOF
-			},
-		},
-		{
-			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientProtocol41
-			},
-			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientProtocol41
+				cfg.backendConfig.capability |= pnet.ClientSSL
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestClientCapability & ^pnet.ClientPSMultiResults
+				cfg.backendConfig.capability &= ^pnet.ClientDeprecateEOF
 			},
 			func(cfg *testConfig) {
-				cfg.backendConfig.capability = defaultTestClientCapability | pnet.ClientPSMultiResults
+				cfg.backendConfig.capability |= pnet.ClientDeprecateEOF
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientPSMultiResults
+				cfg.clientConfig.capability &= ^pnet.ClientProtocol41
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientPSMultiResults
+				cfg.clientConfig.capability |= pnet.ClientProtocol41
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability &= ^pnet.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability |= pnet.ClientPSMultiResults
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability &= ^pnet.ClientPSMultiResults
+			},
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability |= pnet.ClientPSMultiResults
 			},
 		},
 	}
@@ -151,27 +140,27 @@ func TestCapability(t *testing.T) {
 	cfgs := [][]cfgOverrider{
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientConnectWithDB
+				cfg.clientConfig.capability &= ^pnet.ClientConnectWithDB
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientConnectWithDB
+				cfg.clientConfig.capability |= pnet.ClientConnectWithDB
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientConnectAttrs
+				cfg.clientConfig.capability &= ^pnet.ClientConnectAttrs
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientConnectAttrs
+				cfg.clientConfig.capability |= pnet.ClientConnectAttrs
 				cfg.clientConfig.attrs = map[string]string{"key": "value"}
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability & ^pnet.ClientSecureConnection
+				cfg.clientConfig.capability &= ^pnet.ClientSecureConnection
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.capability = defaultTestClientCapability | pnet.ClientSecureConnection
+				cfg.clientConfig.capability |= pnet.ClientSecureConnection
 			},
 		},
 	}
@@ -238,4 +227,43 @@ func TestCustomAuth(t *testing.T) {
 	ts.authenticateSecondTime(t, func(t *testing.T, ts *testSuite) {})
 	checker()
 	clean()
+}
+
+func TestEnableTLS(t *testing.T) {
+	tests := []struct {
+		cfg     cfgOverrider
+		enabled bool
+	}{
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.clientConfig.capability &= ^pnet.ClientSSL
+				cfg.backendConfig.capability |= pnet.ClientSSL
+			},
+			enabled: false,
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.clientConfig.capability |= pnet.ClientSSL
+				cfg.backendConfig.capability |= pnet.ClientSSL
+			},
+			enabled: true,
+		},
+		{
+			// client enables TLS but backendTLSConfig is nil
+			cfg: func(cfg *testConfig) {
+				cfg.clientConfig.capability |= pnet.ClientSSL
+				cfg.proxyConfig.backendTLSConfig = nil
+				cfg.backendConfig.capability |= pnet.ClientSSL
+			},
+			enabled: false,
+		},
+	}
+	tc := newTCPConnSuite(t)
+	for _, test := range tests {
+		ts, clean := newTestSuite(t, tc, test.cfg)
+		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
+			require.Equal(t, test.enabled, ts.mb.capability&pnet.ClientSSL > 0)
+		})
+		clean()
+	}
 }

@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package net
 
@@ -19,6 +8,7 @@ import (
 
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
+	"go.uber.org/zap"
 )
 
 var (
@@ -93,7 +83,8 @@ func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err 
 	}
 
 	if len(pkt) < 32 {
-		err = errors.WithStack(errors.Errorf("%w: but got less than 32 bytes", ErrExpectSSLRequest))
+		p.logger.Error("got malformed handshake response", zap.ByteString("packetData", pkt))
+		err = WrapUserError(mysql.ErrMalformPacket, mysql.ErrMalformPacket.Error())
 		return
 	}
 
@@ -133,4 +124,19 @@ func (p *PacketIO) WriteEOFPacket(status uint16) error {
 	// ClientProtocol41 must be enabled.
 	data = DumpUint16(data, status)
 	return p.WritePacket(data, true)
+}
+
+// WriteUserError writes an unknown error to the client.
+func (p *PacketIO) WriteUserError(err error) {
+	if err == nil {
+		return
+	}
+	var ue *UserError
+	if !errors.As(err, &ue) {
+		return
+	}
+	myErr := mysql.NewErrf(mysql.ErrUnknown, "%s", nil, ue.UserMsg())
+	if writeErr := p.WriteErrPacket(myErr); writeErr != nil {
+		p.logger.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
+	}
 }

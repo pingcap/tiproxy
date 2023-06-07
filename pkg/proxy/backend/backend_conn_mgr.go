@@ -1,16 +1,5 @@
-// Copyright 2022 PingCAP, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
 
 package backend
 
@@ -174,7 +163,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	if err != nil {
 		mgr.setQuitSourceByErr(err)
 		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
-		WriteUserError(clientIO, err, mgr.logger)
+		clientIO.WriteUserError(err)
 		return err
 	}
 	mgr.resetQuitSource()
@@ -193,7 +182,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
-		return nil, WrapUserError(err, err.Error())
+		return nil, pnet.WrapUserError(err, err.Error())
 	}
 	// Reasons to wait:
 	// - The TiDB instances may not be initialized yet
@@ -213,7 +202,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 				addr, err = selector.Next()
 			}
 			if err != nil {
-				return nil, backoff.Permanent(WrapUserError(err, err.Error()))
+				return nil, backoff.Permanent(pnet.WrapUserError(err, err.Error()))
 			}
 			if addr == "" {
 				return nil, router.ErrNoInstanceToSelect
@@ -230,7 +219,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 			// NOTE: should use DNS name as much as possible
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
-			backendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(addr, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn))
+			backendIO := pnet.NewPacketIO(cn, mgr.logger, pnet.WithRemoteAddr(addr, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn))
 			mgr.backendIO.Store(backendIO)
 			mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
 			return backendIO, nil
@@ -271,7 +260,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		err = mysql.ErrMalformPacket
 		return
 	}
-	cmd := request[0]
+	cmd := pnet.Command(request[0])
 	startTime := time.Now()
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
@@ -296,9 +285,9 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	}
 	if err == nil {
 		switch cmd {
-		case mysql.ComQuit:
+		case pnet.ComQuit:
 			return
-		case mysql.ComSetOption:
+		case pnet.ComSetOption:
 			val := binary.LittleEndian.Uint16(request[1:])
 			switch val {
 			case 0:
@@ -311,7 +300,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 				err = errors.Errorf("unrecognized set_option value:%d", val)
 				return
 			}
-		case mysql.ComChangeUser:
+		case pnet.ComChangeUser:
 			username, db := pnet.ParseChangeUser(request)
 			mgr.authenticator.changeUser(username, db)
 			return
@@ -453,7 +442,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err)
 		return
 	}
-	newBackendIO := pnet.NewPacketIO(cn, pnet.WithRemoteAddr(rs.to, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn))
+	newBackendIO := pnet.NewPacketIO(cn, mgr.logger, pnet.WithRemoteAddr(rs.to, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn))
 
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)
