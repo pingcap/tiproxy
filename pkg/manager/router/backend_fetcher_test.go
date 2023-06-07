@@ -115,7 +115,7 @@ func createEtcdClient(t *testing.T, etcd *embed.Etcd) *clientv3.Client {
 		},
 	}
 	certMgr := cert.NewCertManager()
-	err := certMgr.Init(cfg, logger.CreateLoggerForTest(t))
+	err := certMgr.Init(cfg, logger.CreateLoggerForTest(t), nil)
 	require.NoError(t, err)
 	client, err := InitEtcdClient(logger.CreateLoggerForTest(t), cfg, certMgr)
 	require.NoError(t, err)

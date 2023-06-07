@@ -131,7 +131,7 @@ func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 }
 
 func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
-	lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg))
+	lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg.Load()))
 	autoCerts := false
 	cfg := ci.cfg.Load()
 	if !cfg.HasCert() {
@@ -210,7 +210,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 }
 
 func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
-	lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg))
+	lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg.Load()))
 	cfg := ci.cfg.Load()
 	if cfg.AutoCerts {
 		lg.Info("specified auto-certs in a client tls config, ignored")

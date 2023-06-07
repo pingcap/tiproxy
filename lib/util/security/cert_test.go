@@ -325,6 +325,7 @@ func TestAutoCerts(t *testing.T) {
 	ci.autoCertExp.Store(time.Now().Add(-time.Minute).Unix())
 	require.NoError(t, err)
 	_, err = ci.Reload(lg)
+	require.NoError(t, err)
 	expire3 := getExpireTime(t, ci)
 	require.NotEqual(t, expire1, expire3)
 }
