@@ -20,6 +20,7 @@ import (
 
 var (
 	ErrCapabilityNegotiation = errors.New("capability negotiation failed")
+	ErrTLSConfigRequired     = errors.New("require TLS config on TiProxy when require-backend-tls=true")
 )
 
 const unknownAuthPlugin = "auth_unknown_plugin"
@@ -300,7 +301,17 @@ func (auth *Authenticator) writeAuthHandshake(
 	}
 
 	var pkt []byte
-	if backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil {
+	var enableTLS bool
+	if auth.requireBackendTLS {
+		if backendTLSConfig == nil {
+			return ErrTLSConfigRequired
+		}
+		enableTLS = true
+	} else {
+		// When client TLS is disabled, also disables proxy TLS.
+		enableTLS = pnet.Capability(auth.capability)&pnet.ClientSSL != 0 && backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil
+	}
+	if enableTLS {
 		resp.Capability |= mysql.ClientSSL
 		pkt = pnet.MakeHandshakeResponse(resp)
 		// write SSL Packet
