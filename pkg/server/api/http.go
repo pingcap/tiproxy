@@ -145,7 +145,9 @@ func (h *HTTPServer) attachLogger(c *gin.Context) {
 		fields = append(fields, zap.Errors("errs", errs))
 	}
 
-	if strings.HasPrefix(path, "/api/debug/health") || strings.HasPrefix(path, "/api/metrics") {
+	if len(c.Errors) > 0 {
+		h.lg.Warn(path, fields...)
+	} else if strings.HasPrefix(path, "/api/debug") || strings.HasPrefix(path, "/api/metrics") {
 		h.lg.Debug(path, fields...)
 	} else {
 		h.lg.Info(path, fields...)
