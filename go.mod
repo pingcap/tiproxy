@@ -5,12 +5,13 @@ go 1.19
 require (
 	github.com/BurntSushi/toml v1.2.1
 	github.com/bahlo/generic-list-go v0.2.0
-	github.com/cenkalti/backoff/v4 v4.2.0
+	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.8.1
 	github.com/go-mysql-org/go-mysql v1.6.0
 	github.com/pingcap/TiProxy/lib v0.0.0-00010101000000-000000000000
+	github.com/pingcap/errors v0.11.5-0.20221009092201-b66cddb77c32
 	github.com/pingcap/tidb v1.1.0-beta.0.20230103132820-3ccff46aa3bc
 	github.com/pingcap/tidb/parser v0.0.0-20230103132820-3ccff46aa3bc
 	github.com/prometheus/client_golang v1.14.0
@@ -83,7 +84,6 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.5 // indirect
 	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0 // indirect
-	github.com/pingcap/errors v0.11.5-0.20221009092201-b66cddb77c32 // indirect
 	github.com/pingcap/failpoint v0.0.0-20220423142525-ae43b7f4e5c3 // indirect
 	github.com/pingcap/kvproto v0.0.0-20221213093948-9ccc6beaf0aa // indirect
 	github.com/pingcap/log v1.1.1-0.20221116035753-734d527bc87c // indirect

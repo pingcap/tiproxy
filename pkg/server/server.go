@@ -12,9 +12,9 @@ import (
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/TiProxy/pkg/manager/config"
+	"github.com/pingcap/TiProxy/pkg/manager/infosync"
 	"github.com/pingcap/TiProxy/pkg/manager/logger"
 	mgrns "github.com/pingcap/TiProxy/pkg/manager/namespace"
-	"github.com/pingcap/TiProxy/pkg/manager/router"
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/proxy"
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
@@ -33,6 +33,7 @@ type Server struct {
 	MetricsManager   *metrics.MetricsManager
 	LoggerManager    *logger.LoggerManager
 	CertManager      *cert.CertManager
+	InfoSyncer       *infosync.InfoSyncer
 	ObserverClient   *clientv3.Client
 	// HTTP client
 	Http *http.Client
@@ -86,14 +87,21 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		}
 	}
 
-	// setup namespace manager
+	// setup info syncer
 	{
-		srv.ObserverClient, err = router.InitEtcdClient(lg.Named("pd"), cfg, srv.CertManager)
+		srv.ObserverClient, err = infosync.InitEtcdClient(lg.Named("pd"), cfg, srv.CertManager)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
 		}
+		srv.InfoSyncer = infosync.NewInfoSyncer(srv.ObserverClient, lg.Named("infosync"))
+		if err = srv.InfoSyncer.Init(ctx, cfg); err != nil {
+			return
+		}
+	}
 
+	// setup namespace manager
+	{
 		nscs, nerr := srv.ConfigManager.ListAllNamespace(ctx)
 		if nerr != nil {
 			err = errors.WithStack(nerr)
@@ -156,10 +164,13 @@ func (s *Server) Close() error {
 		errs = append(errs, s.Proxy.Close())
 	}
 	if s.HTTPServer != nil {
-		s.HTTPServer.Close()
+		errs = append(errs, s.HTTPServer.Close())
 	}
 	if s.NamespaceManager != nil {
 		errs = append(errs, s.NamespaceManager.Close())
+	}
+	if s.InfoSyncer != nil {
+		s.InfoSyncer.Close()
 	}
 	if s.ConfigManager != nil {
 		errs = append(errs, s.ConfigManager.Close())
@@ -171,9 +182,7 @@ func (s *Server) Close() error {
 		s.MetricsManager.Close()
 	}
 	if s.LoggerManager != nil {
-		if err := s.LoggerManager.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, s.LoggerManager.Close())
 	}
 	s.wg.Wait()
 	return errors.Collect(ErrCloseServer, errs...)

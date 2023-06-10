@@ -13,19 +13,15 @@ import (
 	"github.com/pingcap/TiProxy/pkg/metrics"
 	"github.com/pingcap/TiProxy/pkg/sctx"
 	"github.com/pingcap/TiProxy/pkg/server"
+	"github.com/pingcap/TiProxy/pkg/util/versioninfo"
 	"github.com/spf13/cobra"
-)
-
-var (
-	Version = "test"
-	Commit  = "test commit"
 )
 
 func main() {
 	rootCmd := &cobra.Command{
 		Use:     os.Args[0],
 		Short:   "start the proxy server",
-		Version: fmt.Sprintf("%s, commit %s", Version, Commit),
+		Version: fmt.Sprintf("%s, commit %s", versioninfo.TiProxyVersion, versioninfo.TiProxyGitHash),
 	}
 	rootCmd.SetOutput(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
