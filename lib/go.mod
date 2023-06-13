@@ -3,6 +3,7 @@ module github.com/pingcap/TiProxy/lib
 go 1.18
 
 require (
+	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.8.1
 	go.uber.org/atomic v1.9.0
