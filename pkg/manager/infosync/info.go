@@ -103,8 +103,7 @@ func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyIn
 	if err := is.initTopologySession(ctx); err != nil {
 		return
 	}
-	_ = is.storeTopologyInfo(ctx, topologyInfo)
-	_ = is.updateTopologyAliveness(ctx, topologyInfo)
+	is.syncTopology(ctx, topologyInfo)
 	ticker := time.NewTicker(is.syncConfig.refreshIntvl)
 	defer ticker.Stop()
 	for {
@@ -112,10 +111,7 @@ func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyIn
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Even if the topology is unchanged, the server may restart.
-			// We don't assume the server still persists data after restart, so we always store it again.
-			_ = is.storeTopologyInfo(ctx, topologyInfo)
-			_ = is.updateTopologyAliveness(ctx, topologyInfo)
+			is.syncTopology(ctx, topologyInfo)
 		case <-is.topologySession.Done():
 			is.lg.Warn("restart topology session")
 			if err := is.initTopologySession(ctx); err != nil {
@@ -166,6 +162,17 @@ func (is *InfoSyncer) getTopologyInfo(cfg *config.Config) (*TopologyInfo, error)
 	}, nil
 }
 
+func (is *InfoSyncer) syncTopology(ctx context.Context, topologyInfo *TopologyInfo) {
+	// Even if the topology is unchanged, the server may restart.
+	// We don't assume the server still persists data after restart, so we always store it again.
+	if err := is.storeTopologyInfo(ctx, topologyInfo); err != nil {
+		is.lg.Error("failed to store topology info", zap.Error(err))
+	}
+	if err := is.updateTopologyAliveness(ctx, topologyInfo); err != nil {
+		is.lg.Error("failed to update topology ttl", zap.Error(err))
+	}
+}
+
 func (is *InfoSyncer) storeTopologyInfo(ctx context.Context, topologyInfo *TopologyInfo) error {
 	infoBuf, err := json.Marshal(topologyInfo)
 	if err != nil {
@@ -173,32 +180,24 @@ func (is *InfoSyncer) storeTopologyInfo(ctx context.Context, topologyInfo *Topol
 	}
 	value := hack.String(infoBuf)
 	key := fmt.Sprintf("%s/%s/%s", tiproxyTopologyPath, net.JoinHostPort(topologyInfo.IP, topologyInfo.Port), InfoSuffix)
-	err = retry.Retry(func() error {
+	return retry.Retry(func() error {
 		childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.putTimeout)
 		_, err := is.etcdCli.Put(childCtx, key, value)
 		cancel()
 		return err
 	}, ctx, is.syncConfig.putRetryIntvl, is.syncConfig.putRetryCnt)
-	if err != nil {
-		is.lg.Error("failed to store topology info", zap.Error(err))
-	}
-	return err
 }
 
 func (is *InfoSyncer) updateTopologyAliveness(ctx context.Context, topologyInfo *TopologyInfo) error {
 	key := fmt.Sprintf("%s/%s/%s", tiproxyTopologyPath, net.JoinHostPort(topologyInfo.IP, topologyInfo.Port), TTLSuffix)
 	// The lease may be not found and the session won't be recreated, so do not retry infinitely.
-	err := retry.Retry(func() error {
+	return retry.Retry(func() error {
 		value := fmt.Sprintf("%v", time.Now().UnixNano())
 		childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.putTimeout)
 		_, err := is.etcdCli.Put(childCtx, key, value, clientv3.WithLease(is.topologySession.Lease()))
 		cancel()
 		return err
 	}, ctx, is.syncConfig.putRetryIntvl, is.syncConfig.putRetryCnt)
-	if err != nil {
-		is.lg.Error("failed to update topology ttl", zap.Error(err))
-	}
-	return err
 }
 
 func (is *InfoSyncer) Close() {
