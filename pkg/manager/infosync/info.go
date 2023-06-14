@@ -10,14 +10,17 @@ import (
 	"net"
 	"os"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/retry"
 	"github.com/pingcap/TiProxy/lib/util/sys"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	"github.com/pingcap/TiProxy/pkg/util/versioninfo"
 	"github.com/pingcap/errors"
+	tidbinfo "github.com/pingcap/tidb/domain/infosync"
 	"github.com/siddontang/go/hack"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
@@ -34,12 +37,12 @@ const (
 	topologyPutRetryCnt   = 3
 	logInterval           = 10
 
-	TTLSuffix  = "ttl"
-	InfoSuffix = "info"
+	ttlSuffix  = "ttl"
+	infoSuffix = "info"
 )
 
-// InfoSyncer syncs TiProxy topology to ETCD.
-// It writes 2 items: `/topology/tiproxy/.../info` and `/topology/tiproxy/.../ttl`.
+// InfoSyncer syncs TiProxy topology to ETCD and queries TiDB topology from ETCD.
+// It writes 2 items to ETCD: `/topology/tiproxy/.../info` and `/topology/tiproxy/.../ttl`.
 // `info` is written once and `ttl` will be erased automatically after TiProxy is down.
 // The code is modified from github.com/pingcap/tidb/domain/infosync/info.go.
 type InfoSyncer struct {
@@ -59,6 +62,7 @@ type syncConfig struct {
 	putRetryCnt   uint64
 }
 
+// TopologyInfo is the info of TiProxy.
 type TopologyInfo struct {
 	Version        string `json:"version"`
 	GitHash        string `json:"git_hash"`
@@ -69,10 +73,17 @@ type TopologyInfo struct {
 	StartTimestamp int64  `json:"start_timestamp"`
 }
 
-func NewInfoSyncer(etcdCli *clientv3.Client, lg *zap.Logger) *InfoSyncer {
+// TiDBInfo is the info of TiDB.
+type TiDBInfo struct {
+	// TopologyInfo is parsed from the /info path.
+	*tidbinfo.TopologyInfo
+	// TTL is parsed from the /ttl path.
+	TTL string
+}
+
+func NewInfoSyncer(lg *zap.Logger) *InfoSyncer {
 	return &InfoSyncer{
-		etcdCli: etcdCli,
-		lg:      lg,
+		lg: lg,
 		syncConfig: syncConfig{
 			sessionTTL:    topologySessionTTL,
 			refreshIntvl:  topologyRefreshIntvl,
@@ -83,7 +94,13 @@ func NewInfoSyncer(etcdCli *clientv3.Client, lg *zap.Logger) *InfoSyncer {
 	}
 }
 
-func (is *InfoSyncer) Init(ctx context.Context, cfg *config.Config) error {
+func (is *InfoSyncer) Init(ctx context.Context, cfg *config.Config, certMgr *cert.CertManager) error {
+	etcdCli, err := InitEtcdClient(is.lg, cfg, certMgr)
+	if err != nil {
+		return err
+	}
+	is.etcdCli = etcdCli
+
 	topologyInfo, err := is.getTopologyInfo(cfg)
 	if err != nil {
 		is.lg.Error("get topology failed", zap.Error(err))
@@ -124,6 +141,7 @@ func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyIn
 func (is *InfoSyncer) initTopologySession(ctx context.Context) error {
 	// Infinitely retry until cancelled.
 	return retry.RetryNotify(func() error {
+		// Do not use context.WithTimeout, otherwise the session will be cancelled after timeout, even if the session is created successfully.
 		topologySession, err := concurrency.NewSession(is.etcdCli, concurrency.WithTTL(is.syncConfig.sessionTTL), concurrency.WithContext(ctx))
 		if err == nil {
 			is.topologySession = topologySession
@@ -179,7 +197,7 @@ func (is *InfoSyncer) storeTopologyInfo(ctx context.Context, topologyInfo *Topol
 		return errors.Trace(err)
 	}
 	value := hack.String(infoBuf)
-	key := fmt.Sprintf("%s/%s/%s", tiproxyTopologyPath, net.JoinHostPort(topologyInfo.IP, topologyInfo.Port), InfoSuffix)
+	key := fmt.Sprintf("%s/%s/%s", tiproxyTopologyPath, net.JoinHostPort(topologyInfo.IP, topologyInfo.Port), infoSuffix)
 	return retry.Retry(func() error {
 		childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.putTimeout)
 		_, err := is.etcdCli.Put(childCtx, key, value)
@@ -189,7 +207,7 @@ func (is *InfoSyncer) storeTopologyInfo(ctx context.Context, topologyInfo *Topol
 }
 
 func (is *InfoSyncer) updateTopologyAliveness(ctx context.Context, topologyInfo *TopologyInfo) error {
-	key := fmt.Sprintf("%s/%s/%s", tiproxyTopologyPath, net.JoinHostPort(topologyInfo.IP, topologyInfo.Port), TTLSuffix)
+	key := fmt.Sprintf("%s/%s/%s", tiproxyTopologyPath, net.JoinHostPort(topologyInfo.IP, topologyInfo.Port), ttlSuffix)
 	// The lease may be not found and the session won't be recreated, so do not retry infinitely.
 	return retry.Retry(func() error {
 		value := fmt.Sprintf("%v", time.Now().UnixNano())
@@ -200,9 +218,55 @@ func (is *InfoSyncer) updateTopologyAliveness(ctx context.Context, topologyInfo 
 	}, ctx, is.syncConfig.putRetryIntvl, is.syncConfig.putRetryCnt)
 }
 
-func (is *InfoSyncer) Close() {
+func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBInfo, error) {
+	// etcdCli.Get will retry infinitely internally.
+	res, err := is.etcdCli.Get(ctx, tidbinfo.TopologyInformationPath, clientv3.WithPrefix())
+	if err != nil {
+		return nil, err
+	}
+
+	infos := make(map[string]*TiDBInfo, len(res.Kvs)/2)
+	for _, kv := range res.Kvs {
+		var ttl, addr string
+		var topology *tidbinfo.TopologyInfo
+		key := hack.String(kv.Key)
+		switch {
+		case strings.HasSuffix(key, ttlSuffix):
+			addr = key[len(tidbinfo.TopologyInformationPath)+1 : len(key)-len(ttlSuffix)-1]
+			ttl = hack.String(kv.Value)
+		case strings.HasSuffix(key, infoSuffix):
+			addr = key[len(tidbinfo.TopologyInformationPath)+1 : len(key)-len(infoSuffix)-1]
+			if err = json.Unmarshal(kv.Value, &topology); err != nil {
+				is.lg.Error("unmarshal topology info failed", zap.String("key", key),
+					zap.String("value", hack.String(kv.Value)), zap.Error(err))
+				continue
+			}
+		default:
+			continue
+		}
+
+		info, ok := infos[addr]
+		if !ok {
+			info = &TiDBInfo{}
+			infos[addr] = info
+		}
+
+		if len(ttl) > 0 {
+			info.TTL = hack.String(kv.Value)
+		} else {
+			info.TopologyInfo = topology
+		}
+	}
+	return infos, nil
+}
+
+func (is *InfoSyncer) Close() error {
 	if is.cancelFunc != nil {
 		is.cancelFunc()
 	}
 	is.wg.Wait()
+	if is.etcdCli != nil {
+		return is.etcdCli.Close()
+	}
+	return nil
 }

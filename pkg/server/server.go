@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/TiProxy/pkg/proxy/backend"
 	"github.com/pingcap/TiProxy/pkg/sctx"
 	"github.com/pingcap/TiProxy/pkg/server/api"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
@@ -34,7 +33,6 @@ type Server struct {
 	LoggerManager    *logger.LoggerManager
 	CertManager      *cert.CertManager
 	InfoSyncer       *infosync.InfoSyncer
-	ObserverClient   *clientv3.Client
 	// HTTP client
 	Http *http.Client
 	// HTTP server
@@ -89,13 +87,8 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup info syncer
 	{
-		srv.ObserverClient, err = infosync.InitEtcdClient(lg.Named("pd"), cfg, srv.CertManager)
-		if err != nil {
-			err = errors.WithStack(err)
-			return
-		}
-		srv.InfoSyncer = infosync.NewInfoSyncer(srv.ObserverClient, lg.Named("infosync"))
-		if err = srv.InfoSyncer.Init(ctx, cfg); err != nil {
+		srv.InfoSyncer = infosync.NewInfoSyncer(lg.Named("infosync"))
+		if err = srv.InfoSyncer.Init(ctx, cfg, srv.CertManager); err != nil {
 			return
 		}
 	}
@@ -123,7 +116,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			nscs = append(nscs, nsc)
 		}
 
-		err = srv.NamespaceManager.Init(lg.Named("nsmgr"), nscs, srv.ObserverClient, srv.Http)
+		err = srv.NamespaceManager.Init(lg.Named("nsmgr"), nscs, srv.InfoSyncer, srv.Http)
 		if err != nil {
 			err = errors.WithStack(err)
 			return
@@ -170,13 +163,10 @@ func (s *Server) Close() error {
 		errs = append(errs, s.NamespaceManager.Close())
 	}
 	if s.InfoSyncer != nil {
-		s.InfoSyncer.Close()
+		errs = append(errs, s.InfoSyncer.Close())
 	}
 	if s.ConfigManager != nil {
 		errs = append(errs, s.ConfigManager.Close())
-	}
-	if s.ObserverClient != nil {
-		errs = append(errs, s.ObserverClient.Close())
 	}
 	if s.MetricsManager != nil {
 		s.MetricsManager.Close()
