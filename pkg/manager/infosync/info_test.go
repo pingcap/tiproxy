@@ -214,6 +214,7 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 	ts.is = is
 
 	ts.client, err = InitEtcdClient(ts.lg, cfg, certMgr)
+	require.NoError(t, err)
 	ts.kv = clientv3.NewKV(ts.client)
 	return ts
 }
