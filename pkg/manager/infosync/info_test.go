@@ -304,7 +304,9 @@ func (ts *etcdTestSuite) createEtcdServer(addr string) {
 	require.Eventually(ts.t, func() bool {
 		var err error
 		etcd, err = embed.StartEtcd(cfg)
-		ts.t.Logf("start etcd failed, error: %s", err.Error())
+		if err != nil {
+			ts.t.Logf("start etcd failed, error: %s", err.Error())
+		}
 		return err == nil
 	}, 5*time.Second, 10*time.Millisecond)
 	<-etcd.Server.ReadyNotify()
