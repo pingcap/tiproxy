@@ -5,6 +5,7 @@ package net
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/TiProxy/lib/util/errors"
@@ -95,7 +96,7 @@ func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err 
 }
 
 // WriteErrPacket writes an Error packet.
-func (p *PacketIO) WriteErrPacket(code uint16, message string) error {
+func (p *PacketIO) WriteErrPacket(code uint16, message ...any) error {
 	data := make([]byte, 0, 9+len(message))
 	data = append(data, ErrHeader.Byte())
 	data = append(data, byte(code), byte(code>>8))
@@ -107,7 +108,14 @@ func (p *PacketIO) WriteErrPacket(code uint16, message string) error {
 		s = mysql.DEFAULT_MYSQL_STATE
 	}
 	data = append(data, s...)
-	data = append(data, message...)
+
+	var msg string
+	if format, ok := mysql.MySQLErrName[code]; ok {
+		msg = fmt.Sprintf(format, message...)
+	} else {
+		msg = fmt.Sprint(message...)
+	}
+	data = append(data, msg...)
 	return p.WritePacket(data, true)
 }
 
