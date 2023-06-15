@@ -65,6 +65,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg config.Namespace) (*Namespace, e
 		name:   cfg.Name,
 		user:   cfg.Frontend.User,
 		router: rt,
+		is:     is,
 	}, nil
 }
 

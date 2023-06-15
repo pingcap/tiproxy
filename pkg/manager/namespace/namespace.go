@@ -15,7 +15,7 @@ type Namespace struct {
 	name   string
 	user   string
 	router router.Router
-	is     infosync.InfoSyncer
+	is     *infosync.InfoSyncer
 }
 
 func (n *Namespace) Name() string {
@@ -31,6 +31,10 @@ func (n *Namespace) GetRouter() router.Router {
 }
 
 func (n *Namespace) Close() {
-	n.router.Close()
-	n.is.Close()
+	if n.router != nil {
+		n.router.Close()
+	}
+	if n.is != nil {
+		n.is.Close()
+	}
 }
