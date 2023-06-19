@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-// InitEtcdClient initializes an etcd client that fetches TiDB instance topology from PD.
+// InitEtcdClient initializes an etcd client that connects to PD ETCD server.
 func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager) (*clientv3.Client, error) {
 	pdAddr := cfg.Proxy.PDAddrs
 	if len(pdAddr) == 0 {

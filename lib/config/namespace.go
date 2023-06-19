@@ -33,30 +33,27 @@ const (
 	healthCheckMaxRetries    = 3
 	healthCheckRetryInterval = 1 * time.Second
 	healthCheckTimeout       = 2 * time.Second
-	tombstoneThreshold       = 5 * time.Minute
 )
 
 // HealthCheck contains some configurations for health check.
 // Some general configurations of them may be exposed to users in the future.
 // We can use shorter durations to speed up unit tests.
 type HealthCheck struct {
-	Enable             bool          `yaml:"enable" json:"enable" toml:"enable"`
-	Interval           time.Duration `yaml:"interval" json:"interval" toml:"interval"`
-	MaxRetries         int           `yaml:"max-retries" json:"max-retries" toml:"max-retries"`
-	RetryInterval      time.Duration `yaml:"retry-interval" json:"retry-interval" toml:"retry-interval"`
-	DialTimeout        time.Duration `yaml:"dial-timeout" json:"dial-timeout" toml:"dial-timeout"`
-	TombstoneThreshold time.Duration `yaml:"tombstone-threshold" json:"tombstone-threshold" toml:"tombstone-threshold"`
+	Enable        bool          `yaml:"enable" json:"enable" toml:"enable"`
+	Interval      time.Duration `yaml:"interval" json:"interval" toml:"interval"`
+	MaxRetries    int           `yaml:"max-retries" json:"max-retries" toml:"max-retries"`
+	RetryInterval time.Duration `yaml:"retry-interval" json:"retry-interval" toml:"retry-interval"`
+	DialTimeout   time.Duration `yaml:"dial-timeout" json:"dial-timeout" toml:"dial-timeout"`
 }
 
 // NewDefaultHealthCheckConfig creates a default HealthCheck.
 func NewDefaultHealthCheckConfig() *HealthCheck {
 	return &HealthCheck{
-		Enable:             true,
-		Interval:           healthCheckInterval,
-		MaxRetries:         healthCheckMaxRetries,
-		RetryInterval:      healthCheckRetryInterval,
-		DialTimeout:        healthCheckTimeout,
-		TombstoneThreshold: tombstoneThreshold,
+		Enable:        true,
+		Interval:      healthCheckInterval,
+		MaxRetries:    healthCheckMaxRetries,
+		RetryInterval: healthCheckRetryInterval,
+		DialTimeout:   healthCheckTimeout,
 	}
 }
 
@@ -72,9 +69,6 @@ func (hc *HealthCheck) Check() {
 	}
 	if hc.DialTimeout == 0 {
 		hc.DialTimeout = healthCheckTimeout
-	}
-	if hc.TombstoneThreshold == 0 {
-		hc.TombstoneThreshold = tombstoneThreshold
 	}
 }
 

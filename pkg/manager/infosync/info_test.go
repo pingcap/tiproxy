@@ -5,15 +5,19 @@ package infosync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
+	"path"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/logger"
+	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/cert"
+	tidbinfo "github.com/pingcap/tidb/domain/infosync"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -39,13 +43,15 @@ func TestTTLRefresh(t *testing.T) {
 }
 
 // InfoSyncer continues refreshing even after etcd server is down.
-func TestEtcdServerDown(t *testing.T) {
+func TestEtcdServerDown4Sync(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
 	var ttl string
 	for i := 0; i < 5; i++ {
 		// Make the server down for some time.
-		ts.restartServer(time.Second)
+		addr := ts.shutdownServer()
+		time.Sleep(time.Second)
+		ts.startServer(addr)
 		require.Eventually(t, func() bool {
 			newTTL, info := ts.getTTLAndInfo(tiproxyTopologyPath)
 			satisfied := newTTL != ttl && len(info) > 0
@@ -58,7 +64,7 @@ func TestEtcdServerDown(t *testing.T) {
 }
 
 // TTL is erased after the client is down.
-func TestClientDown(t *testing.T) {
+func TestClientDown4Sync(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
 	require.Eventually(t, func() bool {
@@ -72,6 +78,106 @@ func TestClientDown(t *testing.T) {
 	}, 3*time.Second, 100*time.Millisecond)
 }
 
+// Test that the result of GetTiDBTopology is right.
+func TestFetchTiDBTopology(t *testing.T) {
+	ts := newEtcdTestSuite(t)
+	t.Cleanup(ts.close)
+
+	tests := []struct {
+		update func()
+		check  func(info map[string]*TiDBInfo)
+	}{
+		{
+			// No backends.
+			check: func(info map[string]*TiDBInfo) {
+				require.Empty(t, info)
+			},
+		},
+		{
+			// Only update TTL.
+			update: func() {
+				ts.updateTTL("1.1.1.1:4000", []byte("123456789"))
+			},
+			check: func(info map[string]*TiDBInfo) {
+				require.Len(ts.t, info, 1)
+				require.Equal(ts.t, "123456789", info["1.1.1.1:4000"].TTL)
+				require.Nil(ts.t, info["1.1.1.1:4000"].TopologyInfo)
+			},
+		},
+		{
+			// Then update info.
+			update: func() {
+				ts.updateInfo("1.1.1.1:4000", &tidbinfo.TopologyInfo{
+					IP:         "1.1.1.1",
+					StatusPort: 10080,
+				})
+			},
+			check: func(info map[string]*TiDBInfo) {
+				require.Len(ts.t, info, 1)
+				require.Equal(ts.t, "123456789", info["1.1.1.1:4000"].TTL)
+				require.NotNil(ts.t, info["1.1.1.1:4000"].TopologyInfo)
+				require.Equal(ts.t, "1.1.1.1", info["1.1.1.1:4000"].IP)
+				require.Equal(ts.t, uint(10080), info["1.1.1.1:4000"].StatusPort)
+			},
+		},
+		{
+			// Add another backend.
+			update: func() {
+				ts.updateTTL("2.2.2.2:4000", []byte("123456789"))
+				ts.updateInfo("2.2.2.2:4000", &tidbinfo.TopologyInfo{
+					IP:         "2.2.2.2",
+					StatusPort: 10080,
+				})
+			},
+			check: func(info map[string]*TiDBInfo) {
+				require.Len(ts.t, info, 2)
+				require.Equal(ts.t, "123456789", info["2.2.2.2:4000"].TTL)
+				require.NotNil(ts.t, info["2.2.2.2:4000"].TopologyInfo)
+				require.Equal(ts.t, "2.2.2.2", info["2.2.2.2:4000"].IP)
+				require.Equal(ts.t, uint(10080), info["2.2.2.2:4000"].StatusPort)
+			},
+		},
+		{
+			// Remove the backend TTL.
+			update: func() {
+				ts.deleteTTL("2.2.2.2:4000")
+			},
+			check: func(info map[string]*TiDBInfo) {
+				require.Len(ts.t, info, 2)
+				require.Empty(ts.t, info["2.2.2.2:4000"].TTL)
+				require.NotNil(ts.t, info["2.2.2.2:4000"].TopologyInfo)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		if test.update != nil {
+			test.update()
+		}
+		info, err := ts.is.GetTiDBTopology(context.Background())
+		require.NoError(t, err)
+		test.check(info)
+	}
+}
+
+// Test that fetching retries when etcd server is down until the server is up again.
+func TestEtcdServerDown4Fetch(t *testing.T) {
+	ts := newEtcdTestSuite(t)
+	t.Cleanup(ts.close)
+	addr := ts.shutdownServer()
+
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		info, err := ts.is.GetTiDBTopology(context.Background())
+		require.NoError(t, err)
+		require.Len(ts.t, info, 0)
+	})
+
+	time.Sleep(time.Second)
+	ts.startServer(addr)
+	wg.Wait()
+}
+
 type etcdTestSuite struct {
 	t      *testing.T
 	lg     *zap.Logger
@@ -83,10 +189,19 @@ type etcdTestSuite struct {
 
 func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 	lg := logger.CreateLoggerForTest(t)
-	etcd := createEtcdServer(t, lg, "0.0.0.0:0")
-	client := createEtcdClient(t, lg, etcd)
-	kv := clientv3.NewKV(client)
-	is := NewInfoSyncer(client, lg)
+	ts := &etcdTestSuite{
+		t:  t,
+		lg: lg,
+	}
+
+	ts.startServer("0.0.0.0:0")
+	endpoint := ts.server.Clients[0].Addr().String()
+	cfg := newConfig(endpoint)
+
+	certMgr := cert.NewCertManager()
+	err := certMgr.Init(cfg, lg, nil)
+	require.NoError(t, err)
+	is := NewInfoSyncer(lg)
 	is.syncConfig = syncConfig{
 		sessionTTL:    1,
 		refreshIntvl:  50 * time.Millisecond,
@@ -94,44 +209,47 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 		putRetryIntvl: 10 * time.Millisecond,
 		putRetryCnt:   3,
 	}
-	err := is.Init(context.Background(), newConfig())
+	err = is.Init(context.Background(), cfg, certMgr)
 	require.NoError(t, err)
-	return &etcdTestSuite{
-		t:      t,
-		lg:     lg,
-		server: etcd,
-		client: client,
-		kv:     kv,
-		is:     is,
-	}
+	ts.is = is
+
+	ts.client, err = InitEtcdClient(ts.lg, cfg, certMgr)
+	require.NoError(t, err)
+	ts.kv = clientv3.NewKV(ts.client)
+	return ts
 }
 
 func (ts *etcdTestSuite) close() {
 	if ts.is != nil {
-		ts.is.Close()
+		require.NoError(ts.t, ts.is.Close())
 		ts.is = nil
-	}
-	if ts.server != nil {
-		ts.server.Close()
-		ts.server = nil
 	}
 	if ts.client != nil {
 		require.NoError(ts.t, ts.client.Close())
 		ts.client = nil
 	}
+	if ts.server != nil {
+		ts.server.Close()
+		ts.server = nil
+	}
 }
 
-func (ts *etcdTestSuite) restartServer(waitTime time.Duration) {
+func (ts *etcdTestSuite) startServer(addr string) {
+	ts.createEtcdServer(addr)
+}
+
+func (ts *etcdTestSuite) shutdownServer() string {
 	require.NotNil(ts.t, ts.server)
 	addr := ts.server.Clients[0].Addr().String()
 	ts.server.Close()
-	time.Sleep(waitTime)
-	ts.server = createEtcdServer(ts.t, ts.lg, addr)
+	ts.server = nil
+	return addr
 }
 
 func (ts *etcdTestSuite) closeInfoSyncer() {
 	require.NotNil(ts.t, ts.is)
-	ts.is.Close()
+	require.NoError(ts.t, ts.is.Close())
+	ts.is = nil
 }
 
 func (ts *etcdTestSuite) getTTLAndInfo(prefix string) (string, string) {
@@ -140,23 +258,42 @@ func (ts *etcdTestSuite) getTTLAndInfo(prefix string) (string, string) {
 	require.NoError(ts.t, err)
 	for _, kv := range rs.Kvs {
 		key := string(kv.Key)
-		if strings.HasSuffix(key, TTLSuffix) {
+		if strings.HasSuffix(key, ttlSuffix) {
 			ttl = string(kv.Value)
-		} else if strings.HasSuffix(key, InfoSuffix) {
+		} else if strings.HasSuffix(key, infoSuffix) {
 			info = string(kv.Value)
 		}
 	}
 	return ttl, info
 }
 
-func createEtcdServer(t *testing.T, lg *zap.Logger, addr string) *embed.Etcd {
+// Update the TTL for a backend.
+func (ts *etcdTestSuite) updateTTL(addr string, ttl []byte) {
+	_, err := ts.kv.Put(context.Background(), path.Join(tidbinfo.TopologyInformationPath, addr, ttlSuffix), string(ttl))
+	require.NoError(ts.t, err)
+}
+
+func (ts *etcdTestSuite) deleteTTL(addr string) {
+	_, err := ts.kv.Delete(context.Background(), path.Join(tidbinfo.TopologyInformationPath, addr, ttlSuffix))
+	require.NoError(ts.t, err)
+}
+
+// Update the TopologyInfo for a backend.
+func (ts *etcdTestSuite) updateInfo(sqlAddr string, info *tidbinfo.TopologyInfo) {
+	data, err := json.Marshal(info)
+	require.NoError(ts.t, err)
+	_, err = ts.kv.Put(context.Background(), path.Join(tidbinfo.TopologyInformationPath, sqlAddr, infoSuffix), string(data))
+	require.NoError(ts.t, err)
+}
+
+func (ts *etcdTestSuite) createEtcdServer(addr string) {
 	serverURL, err := url.Parse(fmt.Sprintf("http://%s", addr))
-	require.NoError(t, err)
+	require.NoError(ts.t, err)
 	cfg := embed.NewConfig()
-	cfg.Dir = t.TempDir()
+	cfg.Dir = ts.t.TempDir()
 	cfg.LCUrls = []url.URL{*serverURL}
 	cfg.LPUrls = []url.URL{*serverURL}
-	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(lg)
+	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(ts.lg)
 	cfg.LogLevel = "fatal"
 	// Reuse port so that it can reboot with the same port immediately.
 	cfg.SocketOpts = transport.SocketOpts{
@@ -164,34 +301,23 @@ func createEtcdServer(t *testing.T, lg *zap.Logger, addr string) *embed.Etcd {
 		ReusePort:    true,
 	}
 	var etcd *embed.Etcd
-	require.Eventually(t, func() bool {
+	require.Eventually(ts.t, func() bool {
 		var err error
 		etcd, err = embed.StartEtcd(cfg)
+		if err != nil {
+			ts.t.Logf("start etcd failed, error: %s", err.Error())
+		}
 		return err == nil
-	}, 3*time.Second, time.Second)
+	}, 5*time.Second, 10*time.Millisecond)
 	<-etcd.Server.ReadyNotify()
-	return etcd
+	ts.server = etcd
 }
 
-func createEtcdClient(t *testing.T, lg *zap.Logger, etcd *embed.Etcd) *clientv3.Client {
-	cfg := &config.Config{
-		Proxy: config.ProxyServer{
-			PDAddrs: etcd.Clients[0].Addr().String(),
-		},
-	}
-	certMgr := cert.NewCertManager()
-	err := certMgr.Init(cfg, lg, nil)
-	require.NoError(t, err)
-	lg = lg.WithOptions(zap.IncreaseLevel(zap.FatalLevel))
-	client, err := InitEtcdClient(lg, cfg, certMgr)
-	require.NoError(t, err)
-	return client
-}
-
-func newConfig() *config.Config {
+func newConfig(endpoint string) *config.Config {
 	return &config.Config{
 		Proxy: config.ProxyServer{
-			Addr: "0.0.0.0:6000",
+			Addr:    "0.0.0.0:6000",
+			PDAddrs: endpoint,
 		},
 		API: config.API{
 			Addr: "0.0.0.0:3080",
