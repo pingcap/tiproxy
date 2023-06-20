@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/retry"
 	"github.com/pingcap/TiProxy/lib/util/sys"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	"github.com/pingcap/TiProxy/pkg/manager/cert"
 	"github.com/pingcap/TiProxy/pkg/util/versioninfo"
-	"github.com/pingcap/errors"
 	tidbinfo "github.com/pingcap/tidb/domain/infosync"
 	"github.com/siddontang/go/hack"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -43,7 +43,7 @@ const (
 
 // InfoSyncer syncs TiProxy topology to ETCD and queries TiDB topology from ETCD.
 // It writes 2 items to ETCD: `/topology/tiproxy/.../info` and `/topology/tiproxy/.../ttl`.
-// `info` is written once and `ttl` will be erased automatically after TiProxy is down.
+// They are erased after TiProxy is down.
 // The code is modified from github.com/pingcap/tidb/domain/infosync/info.go.
 type InfoSyncer struct {
 	syncConfig      syncConfig
@@ -194,13 +194,13 @@ func (is *InfoSyncer) syncTopology(ctx context.Context, topologyInfo *TopologyIn
 func (is *InfoSyncer) storeTopologyInfo(ctx context.Context, topologyInfo *TopologyInfo) error {
 	infoBuf, err := json.Marshal(topologyInfo)
 	if err != nil {
-		return errors.Trace(err)
+		return errors.WithStack(err)
 	}
 	value := hack.String(infoBuf)
 	key := fmt.Sprintf("%s/%s/%s", tiproxyTopologyPath, net.JoinHostPort(topologyInfo.IP, topologyInfo.Port), infoSuffix)
 	return retry.Retry(func() error {
 		childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.putTimeout)
-		_, err := is.etcdCli.Put(childCtx, key, value)
+		_, err := is.etcdCli.Put(childCtx, key, value, clientv3.WithLease(is.topologySession.Lease()))
 		cancel()
 		return err
 	}, ctx, is.syncConfig.putRetryIntvl, is.syncConfig.putRetryCnt)
@@ -216,6 +216,15 @@ func (is *InfoSyncer) updateTopologyAliveness(ctx context.Context, topologyInfo 
 		cancel()
 		return err
 	}, ctx, is.syncConfig.putRetryIntvl, is.syncConfig.putRetryCnt)
+}
+
+func (is *InfoSyncer) removeTopology(ctx context.Context) error {
+	// removeTopology is called when closing TiProxy. We shouldn't make it too long, so we don't retry here.
+	// It will be removed automatically after TTL expires.
+	childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.putTimeout)
+	_, err := is.etcdCli.Delete(childCtx, tiproxyTopologyPath, clientv3.WithPrefix())
+	cancel()
+	return err
 }
 
 func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBInfo, error) {
@@ -265,8 +274,14 @@ func (is *InfoSyncer) Close() error {
 		is.cancelFunc()
 	}
 	is.wg.Wait()
-	if is.etcdCli != nil {
-		return is.etcdCli.Close()
+	errs := make([]error, 0)
+	if err := is.removeTopology(context.Background()); err != nil {
+		errs = append(errs, err)
 	}
-	return nil
+	if is.etcdCli != nil {
+		if err := is.etcdCli.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Collect(errors.New("closing InfoSyncer"), errs...)
 }

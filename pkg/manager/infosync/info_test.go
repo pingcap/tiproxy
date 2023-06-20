@@ -25,17 +25,22 @@ import (
 	"go.uber.org/zap"
 )
 
-// TTL is refreshed periodically.
+// TTL is refreshed periodically and info stays the same.
 func TestTTLRefresh(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
-	var ttl string
+	var ttl, info string
 	for i := 0; i < 10; i++ {
 		require.Eventually(t, func() bool {
-			newTTL, info := ts.getTTLAndInfo(tiproxyTopologyPath)
-			satisfied := newTTL != ttl && len(info) > 0
+			newTTL, newInfo := ts.getTTLAndInfo(tiproxyTopologyPath)
+			satisfied := newTTL != ttl && len(newInfo) > 0
 			if satisfied {
 				ttl = newTTL
+				if len(info) > 0 {
+					require.Equal(ts.t, info, newInfo)
+				} else {
+					info = newInfo
+				}
 			}
 			return satisfied
 		}, 3*time.Second, 100*time.Millisecond)
@@ -63,7 +68,7 @@ func TestEtcdServerDown4Sync(t *testing.T) {
 	}
 }
 
-// TTL is erased after the client is down.
+// TTL and info are erased after the client is down.
 func TestClientDown4Sync(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
@@ -72,10 +77,8 @@ func TestClientDown4Sync(t *testing.T) {
 		return len(ttl) > 0 && len(info) > 0
 	}, 3*time.Second, 100*time.Millisecond)
 	ts.closeInfoSyncer()
-	require.Eventually(t, func() bool {
-		ttl, _ := ts.getTTLAndInfo(tiproxyTopologyPath)
-		return len(ttl) == 0
-	}, 3*time.Second, 100*time.Millisecond)
+	ttl, info := ts.getTTLAndInfo(tiproxyTopologyPath)
+	require.True(t, len(ttl) == 0 && len(info) == 0)
 }
 
 // Test that the result of GetTiDBTopology is right.
@@ -205,7 +208,7 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 	is.syncConfig = syncConfig{
 		sessionTTL:    1,
 		refreshIntvl:  50 * time.Millisecond,
-		putTimeout:    30 * time.Millisecond,
+		putTimeout:    100 * time.Millisecond,
 		putRetryIntvl: 10 * time.Millisecond,
 		putRetryCnt:   3,
 	}
