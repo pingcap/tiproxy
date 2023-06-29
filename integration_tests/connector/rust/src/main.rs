@@ -1,3 +1,6 @@
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 use mysql::*;
 use mysql::prelude::*;
 use std::env;

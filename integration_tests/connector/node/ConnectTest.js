@@ -1,6 +1,7 @@
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 var mysql = require('mysql2');
-
-
 
 var connection = mysql.createConnection({
   host:  process.argv[2],

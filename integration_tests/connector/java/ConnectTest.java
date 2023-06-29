@@ -1,3 +1,6 @@
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 import java.sql.*;
 
 public class ConnectTest {

@@ -1,3 +1,6 @@
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 const Sequelize = require('sequelize');
 
 const sequelize = new Sequelize("test", process.argv[3], process.argv[4], {

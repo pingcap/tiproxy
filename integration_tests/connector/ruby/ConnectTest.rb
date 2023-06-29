@@ -1,3 +1,6 @@
+# Copyright 2023 PingCAP, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 # Requires mysql2 package ('gem install mysql2'). Please check https://github.com/brianmario/mysql2#readme for install guide.
 
 #!/usr/bin/ruby
