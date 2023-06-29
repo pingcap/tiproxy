@@ -25,17 +25,22 @@ import (
 	"go.uber.org/zap"
 )
 
-// TTL is refreshed periodically.
+// TTL is refreshed periodically and info stays the same.
 func TestTTLRefresh(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
-	var ttl string
+	var ttl, info string
 	for i := 0; i < 10; i++ {
 		require.Eventually(t, func() bool {
-			newTTL, info := ts.getTTLAndInfo(tiproxyTopologyPath)
-			satisfied := newTTL != ttl && len(info) > 0
+			newTTL, newInfo := ts.getTTLAndInfo(tiproxyTopologyPath)
+			satisfied := newTTL != ttl && len(newInfo) > 0
 			if satisfied {
 				ttl = newTTL
+				if len(info) > 0 {
+					require.Equal(ts.t, info, newInfo)
+				} else {
+					info = newInfo
+				}
 			}
 			return satisfied
 		}, 3*time.Second, 100*time.Millisecond)
@@ -63,8 +68,8 @@ func TestEtcdServerDown4Sync(t *testing.T) {
 	}
 }
 
-// TTL is erased after the client is down.
-func TestClientDown4Sync(t *testing.T) {
+// TTL and info are erased after the client shuts down normally.
+func TestClientShutDown4Sync(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
 	require.Eventually(t, func() bool {
@@ -72,9 +77,22 @@ func TestClientDown4Sync(t *testing.T) {
 		return len(ttl) > 0 && len(info) > 0
 	}, 3*time.Second, 100*time.Millisecond)
 	ts.closeInfoSyncer()
+	ttl, info := ts.getTTLAndInfo(tiproxyTopologyPath)
+	require.True(t, len(ttl) == 0 && len(info) == 0)
+}
+
+// TTL and info are erased after the client is down accidentally.
+func TestClientDown4Sync(t *testing.T) {
+	ts := newEtcdTestSuite(t)
+	t.Cleanup(ts.close)
 	require.Eventually(t, func() bool {
-		ttl, _ := ts.getTTLAndInfo(tiproxyTopologyPath)
-		return len(ttl) == 0
+		ttl, info := ts.getTTLAndInfo(tiproxyTopologyPath)
+		return len(ttl) > 0 && len(info) > 0
+	}, 3*time.Second, 100*time.Millisecond)
+	ts.stopInfoSyncer()
+	require.Eventually(t, func() bool {
+		ttl, info := ts.getTTLAndInfo(tiproxyTopologyPath)
+		return len(ttl) == 0 && len(info) == 0
 	}, 3*time.Second, 100*time.Millisecond)
 }
 
@@ -185,6 +203,7 @@ type etcdTestSuite struct {
 	client *clientv3.Client
 	kv     clientv3.KV
 	is     *InfoSyncer
+	cancel context.CancelFunc
 }
 
 func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
@@ -205,13 +224,15 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 	is.syncConfig = syncConfig{
 		sessionTTL:    1,
 		refreshIntvl:  50 * time.Millisecond,
-		putTimeout:    30 * time.Millisecond,
+		putTimeout:    100 * time.Millisecond,
 		putRetryIntvl: 10 * time.Millisecond,
 		putRetryCnt:   3,
 	}
-	err = is.Init(context.Background(), cfg, certMgr)
+	ctx, cancel := context.WithCancel(context.Background())
+	err = is.Init(ctx, cfg, certMgr)
 	require.NoError(t, err)
 	ts.is = is
+	ts.cancel = cancel
 
 	ts.client, err = InitEtcdClient(ts.lg, cfg, certMgr)
 	require.NoError(t, err)
@@ -223,6 +244,7 @@ func (ts *etcdTestSuite) close() {
 	if ts.is != nil {
 		require.NoError(ts.t, ts.is.Close())
 		ts.is = nil
+		ts.cancel()
 	}
 	if ts.client != nil {
 		require.NoError(ts.t, ts.client.Close())
@@ -250,6 +272,10 @@ func (ts *etcdTestSuite) closeInfoSyncer() {
 	require.NotNil(ts.t, ts.is)
 	require.NoError(ts.t, ts.is.Close())
 	ts.is = nil
+}
+
+func (ts *etcdTestSuite) stopInfoSyncer() {
+	ts.cancel()
 }
 
 func (ts *etcdTestSuite) getTTLAndInfo(prefix string) (string, string) {
