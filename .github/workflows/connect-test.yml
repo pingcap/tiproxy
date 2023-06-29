@@ -1,0 +1,473 @@
+name: Serverless Connect Test
+
+on:
+  schedule:
+    - cron: "0/30 * * * *"  # every 30 minutes
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Start TiDB
+        run: |
+          curl -OL https://download.pingcap.org/tidb-nightly-linux-amd64.tar.gz
+          tar -zxvf tidb-nightly-linux-amd64.tar.gz
+          ./tidb-nightly-linux-amd64/bin/tidb-server
+
+      - name: Compile TiProxy
+        uses: ./.github/workflows/common.yml
+        with:
+          debug: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
+          ref: ${{ inputs.ref || github.ref }}
+          target: "cmd"
+          all_platform: false
+
+      - name: Start TiProxy
+        run: |
+          ./bin/tiproxy
+
+    outputs:
+        USER: "root"
+        PASSWORD: ""
+        HOST: "0.0.0.0"
+        PORT: "6000"
+
+  mysql:
+    needs: setup
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        include:
+          - os: ubuntu-latest
+            cert: /etc/ssl/certs/ca-certificates.crt
+          - os: macos-latest
+            cert: /etc/ssl/cert.pem
+          - os: windows-latest
+            cert: ./integration_tests/connector/x1.pem
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Get mysql
+        uses: shogo82148/actions-setup-mysql@v1
+
+      - name: Run test on ${{ matrix.os }}
+        run: mysql -u ${{needs.setup.outputs.USER}} -h ${{needs.setup.outputs.HOST}} -P ${{needs.setup.outputs.PORT}} -D test --ssl-mode=VERIFY_IDENTITY --ssl-ca=${{ matrix.cert }} -p${{ needs.setup.outputs.PASSWORD }}
+
+  no_tls:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Get mysql
+        uses: shogo82148/actions-setup-mysql@v1
+
+      - name: Run test
+        run: "! mysql -u ${{needs.setup.outputs.USER}} -h ${{needs.setup.outputs.HOST}} -P ${{needs.setup.outputs.PORT}} -D test --ssl-mode=DISABLED -p${{ needs.setup.outputs.PASSWORD }}"
+#
+#  invalid_tls_version:
+#    needs: setup
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 10
+#    strategy:
+#      matrix:
+#        tls: [ TLSv1, TLSv1.1 ]
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-python@v4
+#        with:
+#          python-version: '3.10'
+#
+#      - name: Run test on ${{ matrix.tls }}
+#        run: |
+#          # Starting from 8.0.26, TLSv1 & TLSv1.1 are deprecated. From 8.0.28, they are completely removed.
+#          pip3 install mysql-connector-python==8.0.25
+#          cd example_code/python
+#          ! python3 tls_version.py ${{needs.setup.outputs.USER}} ${{needs.setup.outputs.TIDB_CLOUD_USER}} ${{secrets.TIDB_CLOUD_PASSWORD}} /etc/ssl/certs/ca-certificates.crt ${{ matrix.tls }}
+#
+#  valid_tls_version:
+#    needs: setup
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 10
+#    strategy:
+#      matrix:
+#        tls: [ TLSv1.2, TLSv1.3 ]
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-python@v4
+#        with:
+#          python-version: '3.10'
+#
+#      - name: Run test on ${{ matrix.tls }}
+#        run: |
+#          pip3 install mysql-connector-python
+#          cd example_code/python
+#          python3 tls_version.py ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{secrets.TIDB_CLOUD_PASSWORD}} /etc/ssl/certs/ca-certificates.crt ${{ matrix.tls }}
+#
+#  mycli:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#        include:
+#          - os: ubuntu-latest
+#            cert: /etc/ssl/certs/ca-certificates.crt
+#          - os: macos-latest
+#            cert: /etc/ssl/cert.pem
+#          - os: windows-latest
+#            cert: ./example_code/x1.pem
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - name: Checkout
+#        uses: actions/checkout@v3
+#
+#      - name: Install python
+#        uses: actions/setup-python@v3
+#
+#      - name: Install mycli
+#        run: pip3 install mycli
+#
+#      - name: Run test on ${{ matrix.os }}
+#        run:
+#          mycli -u ${{needs.setup.outputs.USER}} -h ${{needs.setup.outputs.TIDB_CLOUD_HOST}} -P 4000 -D test --ssl-ca=${{ matrix.cert }} --ssl-verify-server-cert -p${{ secrets.TIDB_CLOUD_PASSWORD}}
+#
+#  java_jdbc:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-java@v3
+#        with:
+#          distribution: 'adopt'
+#          java-version: '8'
+#      - name: Run test on ubuntu or macos
+#        if: ${{ matrix.os != 'windows-latest' }}
+#        run: |
+#          cd example_code/java
+#          javac ConnectTest.java
+#          java -cp mysql-connector-j-8.0.31.jar: ConnectTest ${{needs.setup.outputs.USER}} ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#      - name: Run test on windows
+#        if: ${{ matrix.os == 'windows-latest' }}
+#        # Need to use Chinese semicolon and an extra space before ConnectTest （don't know why）
+#        run: |
+#          cd example_code/java
+#          javac ConnectTest.java
+#          java -cp mysql-connector-j-8.0.31.jar； ConnectTest ${{needs.setup.outputs.USER}} ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#  # https://jira.mariadb.org/browse/CONJ-1023
+#  java_jdbc_mariadb_CONJ-1023:
+#    needs: setup
+#    runs-on: ubuntu-latest
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-java@v3
+#        with:
+#          distribution: 'adopt'
+#          java-version: '8'
+#      - name: Run test
+#        run: |
+#          cd example_code/java
+#          javac ConnectTestMariaDB.java
+#          java -cp mariadb-java-client-3.0.9.jar: ConnectTestMariaDB ${{needs.setup.outputs.USER}} ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#  python_mysqlclient:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#        include:
+#          - os: ubuntu-latest
+#            cert: /etc/ssl/certs/ca-certificates.crt
+#          - os: macos-latest
+#            cert: /etc/ssl/cert.pem
+#          - os: windows-latest
+#            cert: ../x1.pem
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-python@v4
+#        with:
+#          python-version: '3.10'
+#      - name: Install mysql in macos
+#        if: ${{ matrix.os == 'macos-latest' }}
+#        run: |
+#          # https://github.com/Homebrew/homebrew-core/issues/130258
+#          ln -sv $(brew --prefix zlib)/lib/libz.dylib $(brew --prefix)/lib/libzlib.dylib
+#          brew install mysql
+#          export PATH=$PATH:/usr/local/mysql/bin
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          pip3 install mysqlclient
+#          cd example_code/python
+#          python3 ConnectTest_mysqlclient.py ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }} ${{ matrix.cert }}
+#
+#  python_mysql_connector:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#        include:
+#          - os: ubuntu-latest
+#            cert: /etc/ssl/certs/ca-certificates.crt
+#          - os: macos-latest
+#            cert: /etc/ssl/cert.pem
+#          - os: windows-latest
+#            cert: ../x1.pem
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-python@v4
+#        with:
+#          python-version: '3.10'
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          pip3 install mysql-connector-python
+#          cd example_code/python
+#          python3 ConnectTest_mysql-connector-python.py ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }} ${{ matrix.cert }}
+#
+#  python_pymysql:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#        include:
+#          - os: ubuntu-latest
+#            cert: /etc/ssl/certs/ca-certificates.crt
+#          - os: macos-latest
+#            cert: /etc/ssl/cert.pem
+#          - os: windows-latest
+#            cert: ../x1.pem
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-python@v4
+#        with:
+#          python-version: '3.10'
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          pip3 install pymysql
+#          cd example_code/python
+#          python3 ConnectTest_pymysql.py ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }} ${{ matrix.cert }}
+#
+#  python_sqlalchemy:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#        include:
+#          - os: ubuntu-latest
+#            cert: /etc/ssl/certs/ca-certificates.crt
+#          - os: macos-latest
+#            cert: /etc/ssl/cert.pem
+#          - os: windows-latest
+#            cert: ../x1.pem
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-python@v4
+#        with:
+#          python-version: '3.10'
+#      - name: Install mysql in macos
+#        if: ${{ matrix.os == 'macos-latest' }}
+#        run: |
+#          # https://github.com/Homebrew/homebrew-core/issues/130258
+#          ln -sv $(brew --prefix zlib)/lib/libz.dylib $(brew --prefix)/lib/libzlib.dylib
+#          brew install mysql
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          pip3 install mysqlclient
+#          pip3 install sqlalchemy
+#          cd example_code/sqlalchemy
+#          python3 ConnectTest.py ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }} ${{ matrix.cert }}
+#
+#  go_godriver:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-go@v4
+#        with:
+#          go-version: '1.20.0'
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          cd example_code/go
+#          go mod tidy
+#          go run ConnectTest.go ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#  go_gorm:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-go@v4
+#        with:
+#          go-version: '1.20.0'
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          cd example_code/gorm
+#          go mod tidy
+#          go run ConnectTest.go ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#  node_mysql2:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-node@v3
+#        with:
+#          node-version: 16
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          cd example_code/node
+#          npm install --save mysql2
+#          node ConnectTest.js ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#  node_sequelize:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-node@v3
+#        with:
+#          node-version: 16
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          cd example_code/sequelize
+#          npm install --save mysql2
+#          npm install --save sequelize
+#          node ConnectTest.js ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#  rust_mysql:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ windows-latest, macos-latest ] # skip ubuntu-latest as it get stuck for unknown reasons
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 15
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: moonrepo/setup-rust@v0
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          cd example_code/rust
+#          cargo run ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#  ruby_mysql2:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, macos-latest ] # install mysql2 in windows is a little difficult, dismiss it for now
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: ruby/setup-ruby@v1
+#        with:
+#          ruby-version: '3.0' # Not needed with a .ruby-version file
+#          bundler-cache: true # runs 'bundle install' and caches installed gems automatically
+#      - name: Install mysql on macos
+#        if: ${{ matrix.os == 'macos-latest' }}
+#        run: |
+#          brew install mysql
+#          cd example_code/ruby
+#          # https://github.com/Homebrew/homebrew-core/issues/130258
+#          gem install mysql2 -- --with-mysql-dir=$(brew --prefix mysql)
+#          ruby ConnectTest.rb ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#      - name: Run test on ubuntu
+#        if: ${{ matrix.os == 'ubuntu-latest' }}
+#        run: |
+#          cd example_code/ruby
+#          gem install mysql2
+#          ruby ConnectTest.rb ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }}
+#
+#  php_mysqli:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, windows-latest, macos-latest ]
+#        include:
+#          - os: ubuntu-latest
+#            cert: /etc/ssl/certs/ca-certificates.crt
+#          - os: macos-latest
+#            cert: /etc/ssl/cert.pem
+#          - os: windows-latest
+#            cert: ../x1.pem
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: shivammathur/setup-php@v2
+#        with:
+#          php-version: '8.1'
+#          ini-values: extension=php_mysqli.dll
+#      - name: Run test on ${{ matrix.os }}
+#        run: |
+#          cd example_code/php
+#          php ConnectTest.php ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }} ${{matrix.cert}}
+#
+#  cpp_libmysqlclient:
+#    needs: setup
+#    strategy:
+#      matrix:
+#        os: [ ubuntu-latest, macos-latest ]
+#        include:
+#          - os: ubuntu-latest
+#            cert: /etc/ssl/certs/ca-certificates.crt
+#          - os: macos-latest
+#            cert: /etc/ssl/cert.pem
+#    runs-on: ${{ matrix.os }}
+#    timeout-minutes: 10
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: rlalik/setup-cpp-compiler@v1.2
+#      - name: Run test on macos
+#        if: ${{ matrix.os == 'macos-latest' }}
+#        run: |
+#          brew install mysql
+#          cd example_code/cpp
+#          g++ ConnectTest.cpp -o test -I/usr/local/include/mysql -lmysqlclient
+#          ./test ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }} ${{matrix.cert}}
+#      - name: Run test on ubuntu
+#        if: ${{ matrix.os == 'ubuntu-latest' }}
+#        run: |
+#          sudo apt install -y libmysqlclient-dev
+#          cd example_code/cpp
+#          g++ ConnectTest.cpp -o test -I/usr/include/mysql -lmysqlclient
+#          ./test ${{needs.setup.outputs.TIDB_CLOUD_HOST}} ${{needs.setup.outputs.USER}} ${{ secrets.TIDB_CLOUD_PASSWORD }} ${{matrix.cert}}
