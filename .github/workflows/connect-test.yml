@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+      - release-*
+  pull_request:
+    branches:
+      - main
+      - release-*
 
 jobs:
   setup:
@@ -32,10 +37,10 @@ jobs:
           ./bin/tiproxy
 
     outputs:
-        USER: "root"
-        PASSWORD: ""
-        HOST: "0.0.0.0"
-        PORT: "6000"
+      USER: "root"
+      PASSWORD: ""
+      HOST: "0.0.0.0"
+      PORT: "6000"
 
   mysql:
     needs: setup
