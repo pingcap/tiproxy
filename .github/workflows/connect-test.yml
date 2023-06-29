@@ -1,9 +1,9 @@
-name: Serverless Connect Test
+name: Connector Test
 
 on:
-  schedule:
-    - cron: "0/30 * * * *"  # every 30 minutes
-  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   setup:
