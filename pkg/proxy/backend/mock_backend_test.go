@@ -121,7 +121,7 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.Handsh
 			return err
 		}
 	} else {
-		if err := packetIO.WriteErrPacket(mysql.ErrAccessDenied, ""); err != nil {
+		if err := packetIO.WriteErrPacket(mysql.ErrAccessDenied); err != nil {
 			return err
 		}
 	}
@@ -150,7 +150,7 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeOK:
 		return mb.respondOK(packetIO)
 	case responseTypeErr:
-		return packetIO.WriteErrPacket(mysql.ErrUnknown, "")
+		return packetIO.WriteErrPacket(mysql.ErrUnknown)
 	case responseTypeResultSet:
 		if pnet.Command(pkt[0]) == pnet.ComQuery && string(pkt[1:]) == sqlQueryState {
 			return mb.respondSessionStates(packetIO)
@@ -179,7 +179,7 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeNone:
 		return nil
 	}
-	return packetIO.WriteErrPacket(mysql.ErrUnknown, "")
+	return packetIO.WriteErrPacket(mysql.ErrUnknown)
 }
 
 func (mb *mockBackend) respondOK(packetIO *pnet.PacketIO) error {
