@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"hash/crc32"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -27,13 +28,16 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 	switch {
 	case ev.Has(fsnotify.Create), ev.Has(fsnotify.Write), ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
+		if !strings.EqualFold(ev.Name, f) {
+			break
+		}
 		if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
 			// in case of remove/rename the file, files are not present at filesystem for a while
 			// it may be too fast to read the config file now, sleep for a while
 			time.Sleep(50 * time.Millisecond)
 		}
 		// try to reload it
-		e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(f)))
+		e.logger.Info("config file reloaded", zap.Stringer("event", ev), zap.Error(e.reloadConfigFile(f)))
 	}
 }
 

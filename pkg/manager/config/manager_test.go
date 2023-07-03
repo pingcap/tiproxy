@@ -5,6 +5,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/pingcap/TiProxy/lib/config"
@@ -12,8 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testConfigManager(t *testing.T, configFile string, overlays ...*config.Config) (*ConfigManager, context.Context) {
-	logger := logger.CreateLoggerForTest(t)
+func testConfigManager(t *testing.T, configFile string, overlays ...*config.Config) (*ConfigManager, fmt.Stringer, context.Context) {
+	logger, text := logger.CreateLoggerAndStringerForTest(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if ddl, ok := t.Deadline(); ok {
@@ -29,5 +30,5 @@ func testConfigManager(t *testing.T, configFile string, overlays ...*config.Conf
 
 	t.Cleanup(cancel)
 
-	return cfgmgr, ctx
+	return cfgmgr, text, ctx
 }

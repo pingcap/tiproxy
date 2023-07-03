@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,9 +23,9 @@ func TestConfigReload(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	cfgmgr1, _ := testConfigManager(t, tmpcfg)
+	cfgmgr1, _, _ := testConfigManager(t, tmpcfg)
 
-	cfgmgr2, _ := testConfigManager(t, "")
+	cfgmgr2, _, _ := testConfigManager(t, "")
 
 	cases := []struct {
 		name      string
@@ -135,7 +136,7 @@ func TestConfigRemove(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	cfgmgr, _ := testConfigManager(t, tmpcfg)
+	cfgmgr, _, _ := testConfigManager(t, tmpcfg)
 
 	// remove and recreate the file in a very short time
 	require.NoError(t, os.Remove(tmpcfg))
@@ -153,8 +154,84 @@ func TestConfigRemove(t *testing.T) {
 	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "vv" }, time.Second, 100*time.Millisecond)
 }
 
+func TestFilePath(t *testing.T) {
+	tmpdir := t.TempDir()
+	tmpcfg := filepath.Join(tmpdir, "cfg")
+
+	f, err := os.Create(tmpcfg)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	cfgmgr, text, _ := testConfigManager(t, tmpcfg)
+
+	count := 0
+	checkLog := func(increased int) {
+		if increased == 0 {
+			time.Sleep(100 * time.Millisecond)
+			require.Equal(t, count, strings.Count(text.String(), "config file reloaded"))
+		} else {
+			require.Eventually(t, func() bool { return strings.Count(text.String(), "config file reloaded") == count+increased }, time.Second, 100*time.Millisecond)
+			count += increased
+		}
+	}
+	checkLog(0)
+
+	require.NoError(t, os.WriteFile(tmpcfg, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
+	checkLog(1)
+
+	// Create, write and rename another file in the same directory won't make it reload.
+	tmplog := filepath.Join(tmpdir, "log")
+	f, err = os.Create(tmpcfg)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	require.NoError(t, os.WriteFile(tmplog, []byte("hello"), 0644))
+	err = os.Rename(filepath.Join(tmpdir, "log"), filepath.Join(tmpdir, "log1"))
+	require.NoError(t, err)
+	checkLog(0)
+	require.NoError(t, os.Remove(tmpcfg))
+	checkLog(1)
+
+	// Make sure it's case-insensitive.
+	tmpcfg = filepath.Join(tmpdir, "CFG")
+	f, err = os.Create(tmpcfg)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	checkLog(1)
+	require.NoError(t, os.Remove(tmpcfg))
+	checkLog(1)
+	require.NoError(t, cfgmgr.Close())
+
+	// Test relative path.
+	count = 0
+	tmpcfg = "cfg"
+	f, err = os.Create(tmpcfg)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	_, text, _ = testConfigManager(t, tmpcfg)
+	checkLog(0)
+	require.NoError(t, os.WriteFile(tmpcfg, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
+	checkLog(1)
+	require.NoError(t, os.Remove(tmpcfg))
+	checkLog(1)
+	require.NoError(t, cfgmgr.Close())
+
+	// Test not formatted path.
+	count = 0
+	tmpcfg = fmt.Sprintf("%s%c%ccfg1", tmpdir, filepath.Separator, filepath.Separator)
+	f, err = os.Create(tmpcfg)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	_, text, _ = testConfigManager(t, tmpcfg)
+	checkLog(0)
+	require.NoError(t, os.WriteFile(tmpcfg, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
+	checkLog(1)
+	require.NoError(t, os.Remove(tmpcfg))
+	checkLog(1)
+	require.NoError(t, cfgmgr.Close())
+}
+
 func TestChecksum(t *testing.T) {
-	cfgmgr, _ := testConfigManager(t, "")
+	cfgmgr, _, _ := testConfigManager(t, "")
 	c1 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
 	c2 := cfgmgr.GetConfigChecksum()

@@ -78,6 +78,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 		if err != nil {
 			return errors.WithStack(err)
 		}
+		configFile = filepath.Clean(configFile)
 
 		// Watch the parent dir, because vim/k8s or other apps may not edit files in-place:
 		// e.g. k8s configmap is a symlink of a symlink to a file, which will only trigger
@@ -122,14 +123,19 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 
 func (e *ConfigManager) Close() error {
 	var wcherr error
-	e.cancel()
+	if e.cancel != nil {
+		e.cancel()
+		e.cancel = nil
+	}
 	if e.wch != nil {
 		wcherr = e.wch.Close()
+		e.wch = nil
 	}
 	e.sts.Lock()
 	for _, ch := range e.sts.listeners {
 		close(ch)
 	}
+	e.sts.listeners = nil
 	e.sts.Unlock()
 	e.wg.Wait()
 	return wcherr
