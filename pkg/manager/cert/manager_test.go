@@ -58,7 +58,7 @@ func connectWithTLS(ctls, stls *tls.Config) (clientErr, serverErr error) {
 
 // Test various configurations.
 func TestInit(t *testing.T) {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	tmpdir := t.TempDir()
 
 	type testcase struct {
@@ -139,7 +139,7 @@ func TestInit(t *testing.T) {
 // Test rotation works.
 func TestRotate(t *testing.T) {
 	tmpdir := t.TempDir()
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	caPath := filepath.Join(tmpdir, "ca")
 	keyPath := filepath.Join(tmpdir, "key")
 	certPath := filepath.Join(tmpdir, "cert")
@@ -321,7 +321,7 @@ func TestRotate(t *testing.T) {
 
 func TestBidirectional(t *testing.T) {
 	tmpdir := t.TempDir()
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	caPath1 := filepath.Join(tmpdir, "c1", "ca")
 	keyPath1 := filepath.Join(tmpdir, "c1", "key")
 	certPath1 := filepath.Join(tmpdir, "c1", "cert")
@@ -359,7 +359,7 @@ func TestBidirectional(t *testing.T) {
 
 func TestWatchConfig(t *testing.T) {
 	tmpdir := t.TempDir()
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	caPath1 := filepath.Join(tmpdir, "c1", "ca")
 	keyPath1 := filepath.Join(tmpdir, "c1", "key")
 	certPath1 := filepath.Join(tmpdir, "c1", "cert")

@@ -26,17 +26,8 @@ func (t *testingLog) String() string {
 	return t.buf.String()
 }
 
-// CreateLoggerForTest creates a logger for unit tests.
-func CreateLoggerForTest(t *testing.T) *zap.Logger {
-	return zap.New(zapcore.NewCore(
-		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
-		zapcore.AddSync(&testingLog{T: t}),
-		zap.InfoLevel,
-	)).Named(t.Name())
-}
-
-// CreateLoggerAndStringerForTest returns both the logger and its content.
-func CreateLoggerAndStringerForTest(t *testing.T) (*zap.Logger, fmt.Stringer) {
+// CreateLoggerForTest returns both the logger and its content.
+func CreateLoggerForTest(t *testing.T) (*zap.Logger, fmt.Stringer) {
 	log := &testingLog{T: t}
 	return zap.New(zapcore.NewCore(
 		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),

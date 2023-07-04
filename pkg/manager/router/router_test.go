@@ -111,7 +111,8 @@ type routerTester struct {
 }
 
 func newRouterTester(t *testing.T) *routerTester {
-	router := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
 	t.Cleanup(router.Close)
 	return &routerTester{
 		t:      t,
@@ -634,7 +635,8 @@ func TestConcurrency(t *testing.T) {
 		Interval: 10 * time.Millisecond,
 	}
 	fetcher := &mockBackendFetcher{}
-	router := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
 	err := router.Init(nil, fetcher, healthCheckConfig)
 	require.NoError(t, err)
 
@@ -735,7 +737,7 @@ func TestRefresh(t *testing.T) {
 		return backends, nil
 	})
 	// Create a router with a very long health check interval.
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
@@ -774,7 +776,7 @@ func TestObserveError(t *testing.T) {
 		return backends, observeError
 	})
 	// Create a router with a very short health check interval.
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	observer, err := StartBackendObserver(lg, rt, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
@@ -829,7 +831,7 @@ func TestDisableHealthCheck(t *testing.T) {
 		return backends, nil
 	})
 	// Create a router with a very short health check interval.
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	err := rt.Init(nil, fetcher, &config.HealthCheck{Enable: false})
 	require.NoError(t, err)
@@ -868,7 +870,8 @@ func TestSetBackendStatus(t *testing.T) {
 }
 
 func TestGetServerVersion(t *testing.T) {
-	rt := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
+	lg, _ := logger.CreateLoggerForTest(t)
+	rt := NewScoreBasedRouter(lg)
 	t.Cleanup(rt.Close)
 	backends := map[string]*backendHealth{
 		"0": {
