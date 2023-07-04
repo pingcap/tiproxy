@@ -155,79 +155,123 @@ func TestConfigRemove(t *testing.T) {
 }
 
 func TestFilePath(t *testing.T) {
+	var (
+		cfgmgr *ConfigManager
+		text   fmt.Stringer
+		count  int
+	)
+
 	tmpdir := t.TempDir()
-	tmpcfg := filepath.Join(tmpdir, "cfg")
-
-	f, err := os.Create(tmpcfg)
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-
-	cfgmgr, text, _ := testConfigManager(t, tmpcfg)
-
-	count := 0
 	checkLog := func(increased int) {
 		if increased == 0 {
 			time.Sleep(100 * time.Millisecond)
 			require.Equal(t, count, strings.Count(text.String(), "config file reloaded"))
 		} else {
-			require.Eventually(t, func() bool { return strings.Count(text.String(), "config file reloaded") == count+increased }, time.Second, 100*time.Millisecond)
 			count += increased
+			require.Eventually(t, func() bool {
+				return strings.Count(text.String(), "config file reloaded") == count
+			}, time.Second, 20*time.Millisecond)
 		}
 	}
-	checkLog(0)
 
-	require.NoError(t, os.WriteFile(tmpcfg, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
-	checkLog(1)
+	tests := []struct {
+		filename   string
+		createFile func()
+		cleanFile  func()
+		checker    func(filename string)
+	}{
+		{
+			// Test updating another file in the same directory won't make it reload.
+			filename: filepath.Join(tmpdir, "cfg"),
+			checker: func(filename string) {
+				tmplog := filepath.Join(tmpdir, "log")
+				f, err := os.Create(tmplog)
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
+				require.NoError(t, os.WriteFile(tmplog, []byte("hello"), 0644))
+				newlog := filepath.Join(tmpdir, "log1")
+				require.NoError(t, os.Rename(tmplog, newlog))
+				require.NoError(t, os.Remove(newlog))
+				checkLog(0)
+			},
+		},
+		{
+			// Test case-insensitive.
+			filename: filepath.Join(tmpdir, "cfg"),
+			createFile: func() {
+				f, err := os.Create(filepath.Join(tmpdir, "CFG"))
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
+			},
+		},
+		{
+			// Test relative path.
+			filename: "cfg",
+		},
+		{
+			// Test uncleaned path.
+			filename: fmt.Sprintf("%s%c%ccfg", tmpdir, filepath.Separator, filepath.Separator),
+		},
+		{
+			// Test removing and creating the directory.
+			filename: "_tmp/cfg",
+			createFile: func() {
+				err := os.Mkdir("_tmp", 0755)
+				if err != nil {
+					require.ErrorIs(t, err, os.ErrExist)
+				}
+				f, err := os.Create("_tmp/cfg")
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
+			},
+			cleanFile: func() {
+				require.NoError(t, os.RemoveAll("_tmp"))
+				checkLog(1)
+			},
+			checker: func(filename string) {
+				require.NoError(t, os.RemoveAll("_tmp"))
+				checkLog(1)
 
-	// Create, write and rename another file in the same directory won't make it reload.
-	tmplog := filepath.Join(tmpdir, "log")
-	f, err = os.Create(tmpcfg)
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-	require.NoError(t, os.WriteFile(tmplog, []byte("hello"), 0644))
-	err = os.Rename(filepath.Join(tmpdir, "log"), filepath.Join(tmpdir, "log1"))
-	require.NoError(t, err)
-	checkLog(0)
-	require.NoError(t, os.Remove(tmpcfg))
-	checkLog(1)
+				require.NoError(t, os.Mkdir("_tmp", 0755))
+				f, err := os.Create("_tmp/cfg")
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
+				checkLog(1)
+			},
+		},
+	}
 
-	// Make sure it's case-insensitive.
-	tmpcfg = filepath.Join(tmpdir, "CFG")
-	f, err = os.Create(tmpcfg)
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-	checkLog(1)
-	require.NoError(t, os.Remove(tmpcfg))
-	checkLog(1)
-	require.NoError(t, cfgmgr.Close())
+	for _, test := range tests {
+		if test.createFile != nil {
+			test.createFile()
+		} else {
+			f, err := os.Create(test.filename)
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
+		}
 
-	// Test relative path.
-	count = 0
-	tmpcfg = "cfg"
-	f, err = os.Create(tmpcfg)
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-	_, text, _ = testConfigManager(t, tmpcfg)
-	checkLog(0)
-	require.NoError(t, os.WriteFile(tmpcfg, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
-	checkLog(1)
-	require.NoError(t, os.Remove(tmpcfg))
-	checkLog(1)
-	require.NoError(t, cfgmgr.Close())
+		count = 0
+		cfgmgr, text, _ = testConfigManager(t, test.filename)
+		checkLog(0)
 
-	// Test not formatted path.
-	count = 0
-	tmpcfg = fmt.Sprintf("%s%c%ccfg1", tmpdir, filepath.Separator, filepath.Separator)
-	f, err = os.Create(tmpcfg)
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-	_, text, _ = testConfigManager(t, tmpcfg)
-	checkLog(0)
-	require.NoError(t, os.WriteFile(tmpcfg, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
-	checkLog(1)
-	require.NoError(t, os.Remove(tmpcfg))
-	checkLog(1)
-	require.NoError(t, cfgmgr.Close())
+		// Test write.
+		require.NoError(t, os.WriteFile(test.filename, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
+		checkLog(1)
+
+		// Test other.
+		if test.checker != nil {
+			test.checker(test.filename)
+		}
+
+		// Test remove.
+		if test.cleanFile != nil {
+			test.cleanFile()
+		} else {
+			require.NoError(t, os.Remove(test.filename))
+			checkLog(1)
+		}
+		require.NoError(t, cfgmgr.Close())
+	}
 }
 
 func TestChecksum(t *testing.T) {
