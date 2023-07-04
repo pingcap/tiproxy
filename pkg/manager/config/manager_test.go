@@ -14,7 +14,7 @@ import (
 )
 
 func testConfigManager(t *testing.T, configFile string, overlays ...*config.Config) (*ConfigManager, fmt.Stringer, context.Context) {
-	logger, text := logger.CreateLoggerAndStringerForTest(t)
+	logger, text := logger.CreateLoggerForTest(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if ddl, ok := t.Deadline(); ok {
