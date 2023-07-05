@@ -33,6 +33,10 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+      - name: setup ccache
+        uses: alexjurkiewicz/setup-ccache@master
+        with:
+          max-size: 200M
       - name: "set vars"
         id: cache
         run: |
@@ -44,6 +48,7 @@ jobs:
           path: |
             ${{ steps.cache.outputs.go_cache }}
             ${{ steps.cache.outputs.go_mod_cache }}
+            ~/.ccache
           key: ${{ runner.os }}-go-${{ inputs.target == 'cache' && github.run_id || hashFiles('**/go.sum')}}
           restore-keys: |
             ${{ runner.os }}-go-
