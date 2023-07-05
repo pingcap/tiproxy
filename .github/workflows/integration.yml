@@ -61,8 +61,8 @@ jobs:
           ./bin/tiproxy --config conf/proxy.toml &
           sudo systemctl start mysql.service
           sleep 1
-          ./bin/tiproxyctl namespace import conf/namespace/
-          ./bin/tiproxyctl namespace commit default
+          ./bin/tiproxyctl -k namespace import conf/namespace/
+          ./bin/tiproxyctl -k namespace commit default
           ./build/bin/mysql_client_test -P 6000 -u root -h 127.0.0.1
       - name: "set up tmate session if necessary"
         if: ${{ failure() && inputs.debug }}
