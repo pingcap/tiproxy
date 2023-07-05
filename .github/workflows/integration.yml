@@ -57,6 +57,10 @@ jobs:
             ${{ runner.os }}-go-
       - name: build tiproxy
         run: make cmd
+      - name: build mysql client test
+        run: |
+          cmake -Bbuild -DWITHOUT_SERVER=on -DWITH_UNIT_TESTS=off mysql-server
+          cmake --build build -t mysql_client_test
       - name: setup & test
         run: |
           sed -i 's/# pd-addrs = "127.0.0.1:2379"/pd-addrs = ""/' conf/proxy.toml
@@ -66,13 +70,7 @@ jobs:
           sleep 1
           ./bin/tiproxyctl -k namespace import conf/namespace/
           ./bin/tiproxyctl -k namespace commit default
-          mysql -h 127.0.0.1 --port 3306 -u root -e 'CREATE DATABASE IF NOT EXISTS test;'
-          mysql -h 127.0.0.1 --port 6000 -u root -e 'CREATE DATABASE IF NOT EXISTS test;'
-          ./build/bin/mysql_client_test -P 6000 -u root -p=root -h 127.0.0.1
-      - name: build mysql client test
-        run: |
-          cmake -Bbuild -DWITHOUT_SERVER=on -DWITH_UNIT_TESTS=off mysql-server
-          cmake --build build -t mysql_client_test
+          ./build/bin/mysql_client_test -P 6000 -u root -h 127.0.0.1
       - name: "set up tmate session if necessary"
         if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3
