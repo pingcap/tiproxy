@@ -61,7 +61,7 @@ jobs:
             ${{ runner.os }}-go-
       - name : "tidy mod if needed"
         id: tidy
-        if: ${{ inputs.target == 'cmd' }}
+        if: ${{ inputs.target == 'cmd' && runner.os != 'Windows' }}
         uses: evantorrie/mott-the-tidier@v1-beta
         with:
           gomods: |
