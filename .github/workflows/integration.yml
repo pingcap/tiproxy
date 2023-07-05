@@ -1,0 +1,58 @@
+name: integration
+on:
+  workflow_call:
+    inputs:
+      debug:
+        type: boolean
+        description: "set tmate on failure"
+        required: true
+      ref:
+        type: string
+        description: "checkout specific ref"
+        required: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  integration:
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
+      - name: "checkout mysql"
+        uses: actions/checkout@v3
+        with:
+          repository: "xhebox/mysql-server"
+          path: "mysql-server"
+      - name: "setup golang"
+        uses: actions/setup-go@v3
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: "set vars"
+        id: cache
+        run: |
+          echo "::set-output name=go_cache::$(go env GOCACHE)"
+          echo "::set-output name=go_mod_cache::$(go env GOMODCACHE)"
+      - name: "try to use build cache"
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ steps.cache.outputs.go_cache }}
+            ${{ steps.cache.outputs.go_mod_cache }}
+          key: ${{ runner.os }}-go-${{ inputs.target == 'cache' && github.run_id || hashFiles('**/go.sum')}}
+          restore-keys: |
+            ${{ runner.os }}-go-
+      - name: build tiproxy
+        run: make cmd
+      - name: build mysql-server
+        run: |
+          cmake -Bbuild -DWITHOUT_SERVER=on -DWITH_UNIT_TESTS=off mysql-server
+          cmake --build build -t mysql_client_test
+      - name: "set up tmate session if necessary"
+        if: ${{ failure() && inputs.debug }}
+        uses: mxschmitt/action-tmate@v3
