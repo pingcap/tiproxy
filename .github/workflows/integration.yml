@@ -63,7 +63,7 @@ jobs:
           sleep 1
           ./bin/tiproxyctl -k namespace import conf/namespace/
           ./bin/tiproxyctl -k namespace commit default
-          ./build/bin/mysql_client_test -P 6000 -u root -h 127.0.0.1
+          ./build/bin/mysql_client_test -P 6000 -u root -p=root -h 127.0.0.1
       - name: "set up tmate session if necessary"
         if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3
