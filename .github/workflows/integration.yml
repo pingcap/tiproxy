@@ -49,10 +49,20 @@ jobs:
             ${{ runner.os }}-go-
       - name: build tiproxy
         run: make cmd
-      - name: build mysql-server
+      - name: build mysql client test
         run: |
           cmake -Bbuild -DWITHOUT_SERVER=on -DWITH_UNIT_TESTS=off mysql-server
           cmake --build build -t mysql_client_test
+      - name: setup & test
+        run: |
+          sed -i 's/# pd-addrs = "127.0.0.1:2379"/pd-addrs = ""/' conf/proxy.toml
+          sed -i 's/# auto-certs = true/auto-certs = true/' conf/proxy.toml
+          sed -i 's/4000/3306/' conf/namespace/example.toml
+          ./bin/tiproxy --config conf/proxy.toml &
+          ./bin/tiproxyctl namespace import conf/namespace/
+          ./bin/tiproxyctl namespace commit default
+          sudo systemctl start mysql.service
+          ./build/bin/mysql_client_test -P 6000 -u root -h 127.0.0.1
       - name: "set up tmate session if necessary"
         if: ${{ failure() && inputs.debug }}
         uses: mxschmitt/action-tmate@v3
