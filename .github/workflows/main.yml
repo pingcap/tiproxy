@@ -60,7 +60,8 @@ jobs:
     if: ${{ github.event_name != 'push' }}
     uses: ./.github/workflows/integration.yml
     with:
-      debug: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
+      #${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
+      debug: true
       ref: ${{ inputs.ref || github.ref }}
 
   cache:
