@@ -57,6 +57,7 @@ jobs:
         run: |
           sed -i 's/# pd-addrs = "127.0.0.1:2379"/pd-addrs = ""/' conf/proxy.toml
           sed -i 's/# auto-certs = true/auto-certs = true/' conf/proxy.toml
+          sed -i 's/4000/3306/' conf/namespace/example.toml
           ./bin/tiproxy --config conf/proxy.toml &
           sudo systemctl start mysql
           sleep 1
