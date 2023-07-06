@@ -211,6 +211,10 @@ func TestFilePath(t *testing.T) {
 			filename: "cfg",
 		},
 		{
+			// Test relative path.
+			filename: "./cfg",
+		},
+		{
 			// Test uncleaned path.
 			filename: fmt.Sprintf("%s%c%ccfg", tmpdir, filepath.Separator, filepath.Separator),
 		},
@@ -227,11 +231,11 @@ func TestFilePath(t *testing.T) {
 			},
 			cleanFile: func() {
 				require.NoError(t, os.RemoveAll("_tmp"))
-				checkLog(true)
 			},
 			checker: func(filename string) {
 				require.NoError(t, os.RemoveAll("_tmp"))
-				checkLog(true)
+				// To update `count`.
+				checkLog(false)
 
 				require.NoError(t, os.Mkdir("_tmp", 0755))
 				f, err := os.Create("_tmp/cfg")
@@ -268,8 +272,8 @@ func TestFilePath(t *testing.T) {
 		if test.cleanFile != nil {
 			test.cleanFile()
 		} else {
+			// It doesn't matter whether it triggers reload or not.
 			require.NoError(t, os.Remove(test.filename))
-			checkLog(true)
 		}
 		require.NoError(t, cfgmgr.Close())
 	}

@@ -78,7 +78,6 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		configFile = filepath.Clean(configFile)
 
 		// Watch the parent dir, because vim/k8s or other apps may not edit files in-place:
 		// e.g. k8s configmap is a symlink of a symlink to a file, which will only trigger
