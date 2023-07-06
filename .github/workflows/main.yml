@@ -58,10 +58,10 @@ jobs:
 
   it:
     if: ${{ github.event_name != 'push' }}
+    needs: cmd
     uses: ./.github/workflows/integration.yml
     with:
-      #${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
-      debug: true
+      debug: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
       ref: ${{ inputs.ref || github.ref }}
 
   cache:
