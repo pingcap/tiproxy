@@ -162,16 +162,13 @@ func TestFilePath(t *testing.T) {
 	)
 
 	tmpdir := t.TempDir()
-	checkLog := func(increased int) {
-		if increased == 0 {
-			time.Sleep(100 * time.Millisecond)
-			require.Equal(t, count, strings.Count(text.String(), "config file reloaded"))
-		} else {
-			count += increased
-			require.Eventually(t, func() bool {
-				return strings.Count(text.String(), "config file reloaded") == count
-			}, time.Second, 20*time.Millisecond)
-		}
+	checkLog := func(increased bool) {
+		// On linux, writing once will trigger 2 WRITE events. But on macOS, it only triggers once.
+		// So we always sleep 100ms to avoid missing any logs on the way.
+		time.Sleep(100 * time.Millisecond)
+		newCount := strings.Count(text.String(), "config file reloaded")
+		require.Equal(t, increased, newCount > count, fmt.Sprintf("now: %d, was: %d", newCount, count))
+		count = newCount
 	}
 
 	tests := []struct {
@@ -192,7 +189,7 @@ func TestFilePath(t *testing.T) {
 				newlog := filepath.Join(tmpdir, "log1")
 				require.NoError(t, os.Rename(tmplog, newlog))
 				require.NoError(t, os.Remove(newlog))
-				checkLog(0)
+				checkLog(false)
 			},
 		},
 		{
@@ -216,8 +213,7 @@ func TestFilePath(t *testing.T) {
 			// Test removing and creating the directory.
 			filename: "_tmp/cfg",
 			createFile: func() {
-				err := os.Mkdir("_tmp", 0755)
-				if err != nil {
+				if err := os.Mkdir("_tmp", 0755); err != nil {
 					require.ErrorIs(t, err, os.ErrExist)
 				}
 				f, err := os.Create("_tmp/cfg")
@@ -226,17 +222,17 @@ func TestFilePath(t *testing.T) {
 			},
 			cleanFile: func() {
 				require.NoError(t, os.RemoveAll("_tmp"))
-				checkLog(1)
+				checkLog(true)
 			},
 			checker: func(filename string) {
 				require.NoError(t, os.RemoveAll("_tmp"))
-				checkLog(1)
+				checkLog(true)
 
 				require.NoError(t, os.Mkdir("_tmp", 0755))
 				f, err := os.Create("_tmp/cfg")
 				require.NoError(t, err)
 				require.NoError(t, f.Close())
-				checkLog(1)
+				checkLog(true)
 			},
 		},
 	}
@@ -252,11 +248,11 @@ func TestFilePath(t *testing.T) {
 
 		count = 0
 		cfgmgr, text, _ = testConfigManager(t, test.filename)
-		checkLog(0)
+		checkLog(false)
 
 		// Test write.
 		require.NoError(t, os.WriteFile(test.filename, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
-		checkLog(1)
+		checkLog(true)
 
 		// Test other.
 		if test.checker != nil {
@@ -268,7 +264,7 @@ func TestFilePath(t *testing.T) {
 			test.cleanFile()
 		} else {
 			require.NoError(t, os.Remove(test.filename))
-			checkLog(1)
+			checkLog(true)
 		}
 		require.NoError(t, cfgmgr.Close())
 	}
