@@ -221,14 +221,12 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 			return nil
 		case mysql.ErrHeader:
 			return pnet.ParseErrorPacket(serverPkt)
-		case 1:
-			// skip caching_sha2_password fast path
-			if pluginName == "caching_sha2_password" && len(serverPkt) == 2 && serverPkt[1] == 3 {
-				continue
-			}
 		default: // mysql.AuthSwitchRequest, ShaCommand
 			if serverPkt[0] == mysql.AuthSwitchRequest {
 				pluginName = string(serverPkt[1:bytes.IndexByte(serverPkt[1:], 0)])
+			} else if serverPkt[0] == 1 && pluginName == "caching_sha2_password" && len(serverPkt) == 2 && serverPkt[1] == 3 {
+				// skip caching_sha2_password fast path
+				continue
 			}
 			if _, err = forwardMsg(clientIO, backendIO); err != nil {
 				return err
