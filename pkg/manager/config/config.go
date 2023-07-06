@@ -28,7 +28,9 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 	switch {
 	case ev.Has(fsnotify.Create), ev.Has(fsnotify.Write), ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
-		// The file may be the log file, triggering reload will cause more logs and thus cause reload again.
+		// The file may be the log file, triggering reload will cause more logs and thus cause reload again,
+		// so we need to filter the wrong files.
+		// Linux is case-sensitive but macOS is case-insensitive.
 		if !strings.EqualFold(ev.Name, f) {
 			break
 		}

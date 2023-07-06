@@ -199,6 +199,11 @@ func TestFilePath(t *testing.T) {
 				f, err := os.Create(filepath.Join(tmpdir, "CFG"))
 				require.NoError(t, err)
 				require.NoError(t, f.Close())
+				// Linux is case-sensitive but macOS is case-insensitive.
+				// For linux, it creates another file. For macOS, it doesn't touch the file.
+				f, err = os.Create(filepath.Join(tmpdir, "cfg"))
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
 			},
 		},
 		{
