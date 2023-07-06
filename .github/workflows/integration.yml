@@ -59,7 +59,7 @@ jobs:
           sed -i 's/# auto-certs = true/auto-certs = true/' conf/proxy.toml
           sed -i 's/4000/3306/' conf/namespace/example.toml
           ./bin/tiproxy --config conf/proxy.toml &
-          sudo systemctl start mysqld
+          sudo systemctl start mysql
           sleep 1
           ./bin/tiproxyctl -k namespace import conf/namespace/
           ./bin/tiproxyctl -k namespace commit default
