@@ -223,8 +223,9 @@ loop:
 		case mysql.ErrHeader:
 			return pnet.ParseErrorPacket(serverPkt)
 		default: // mysql.AuthSwitchRequest, ShaCommand
+			fmt.Printf("%d, %s, %+v\n", serverPkt[0], pluginName, serverPkt)
 			if serverPkt[0] == mysql.AuthSwitchRequest {
-				pluginName = string(serverPkt[1:bytes.IndexByte(serverPkt[1:], 0)])
+				pluginName = string(serverPkt[1 : bytes.IndexByte(serverPkt[1:], 0)+1])
 			} else if serverPkt[0] == 1 && pluginName == "caching_sha2_password" && len(serverPkt) == 2 && serverPkt[1] == 3 {
 				// skip caching_sha2_password fast path
 				continue loop
