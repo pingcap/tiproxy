@@ -211,6 +211,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 
 	// forward other packets
 	pluginName := ""
+loop:
 	for {
 		serverPkt, err := forwardMsg(backendIO, clientIO)
 		if err != nil {
@@ -226,7 +227,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 				pluginName = string(serverPkt[1:bytes.IndexByte(serverPkt[1:], 0)])
 			} else if serverPkt[0] == 1 && pluginName == "caching_sha2_password" && len(serverPkt) == 2 && serverPkt[1] == 3 {
 				// skip caching_sha2_password fast path
-				continue
+				continue loop
 			}
 			if _, err = forwardMsg(clientIO, backendIO); err != nil {
 				return err
