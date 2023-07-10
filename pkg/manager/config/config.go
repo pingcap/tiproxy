@@ -29,6 +29,7 @@ func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
 	case ev.Has(fsnotify.Create), ev.Has(fsnotify.Write), ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
 		// The file may be the log file, triggering reload will cause more logs and thus cause reload again,
 		// so we need to filter the wrong files.
+		// The filesystem differs from OS to OS, so don't use string comparison.
 		f1, err := os.Stat(ev.Name)
 		if err != nil {
 			break

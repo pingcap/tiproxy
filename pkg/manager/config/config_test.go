@@ -208,6 +208,7 @@ func TestFilePath(t *testing.T) {
 		},
 		{
 			// Test relative path.
+			// `event.Name` is `cfg` on MacOS, but it's `./cfg` on Linux.
 			filename: "cfg",
 		},
 		{
@@ -219,7 +220,7 @@ func TestFilePath(t *testing.T) {
 			filename: fmt.Sprintf("%s%c%ccfg", tmpdir, filepath.Separator, filepath.Separator),
 		},
 		{
-			// Test removing and creating the directory.
+			// Test removing and recreating the directory.
 			filename: "_tmp/cfg",
 			createFile: func() {
 				if err := os.Mkdir("_tmp", 0755); err != nil {
@@ -239,6 +240,19 @@ func TestFilePath(t *testing.T) {
 
 				require.NoError(t, os.Mkdir("_tmp", 0755))
 				f, err := os.Create("_tmp/cfg")
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
+				checkLog(true)
+			},
+		},
+		{
+			// Test removing and recreating the file.
+			filename: "cfg",
+			checker: func(filename string) {
+				require.NoError(t, os.Remove(filename))
+				checkLog(false)
+
+				f, err := os.Create(filename)
 				require.NoError(t, err)
 				require.NoError(t, f.Close())
 				checkLog(true)
