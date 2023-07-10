@@ -46,7 +46,7 @@ func newTCPConnSuite(t *testing.T) *tcpConnSuite {
 }
 
 func (tc *tcpConnSuite) newConn(t *testing.T, enableRoute bool) func() {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	if !enableRoute {
 		wg.Run(func() {

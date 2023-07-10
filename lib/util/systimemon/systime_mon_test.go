@@ -17,7 +17,7 @@ import (
 func TestSystimeMonitor(t *testing.T) {
 	errTriggered := atomic.NewBool(false)
 	nowTriggered := atomic.NewBool(false)
-	log := logger.CreateLoggerForTest(t)
+	log, _ := logger.CreateLoggerForTest(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg waitgroup.WaitGroup
 	wg.Run(func() {

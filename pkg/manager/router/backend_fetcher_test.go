@@ -104,7 +104,8 @@ func TestPDFetcher(t *testing.T) {
 	}
 
 	tpFetcher := newMockTpFetcher(t)
-	pf := NewPDFetcher(tpFetcher, logger.CreateLoggerForTest(t), newHealthCheckConfigForTest())
+	lg, _ := logger.CreateLoggerForTest(t)
+	pf := NewPDFetcher(tpFetcher, lg, newHealthCheckConfigForTest())
 	for _, test := range tests {
 		tpFetcher.infos = test.infos
 		if test.ctx == nil {

@@ -4,6 +4,8 @@
 package logger
 
 import (
+	"bytes"
+	"fmt"
 	"testing"
 
 	"go.uber.org/zap"
@@ -12,18 +14,24 @@ import (
 
 type testingLog struct {
 	*testing.T
+	buf bytes.Buffer
 }
 
 func (t *testingLog) Write(b []byte) (int, error) {
 	t.Logf("%s", b)
-	return len(b), nil
+	return t.buf.Write(b)
 }
 
-// CreateLoggerForTest creates a logger for unit tests.
-func CreateLoggerForTest(t *testing.T) *zap.Logger {
+func (t *testingLog) String() string {
+	return t.buf.String()
+}
+
+// CreateLoggerForTest returns both the logger and its content.
+func CreateLoggerForTest(t *testing.T) (*zap.Logger, fmt.Stringer) {
+	log := &testingLog{T: t}
 	return zap.New(zapcore.NewCore(
 		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
-		zapcore.AddSync(&testingLog{t}),
+		zapcore.AddSync(log),
 		zap.InfoLevel,
-	)).Named(t.Name())
+	)).Named(t.Name()), log
 }

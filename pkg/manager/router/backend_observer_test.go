@@ -147,7 +147,8 @@ func newObserverTestSuite(t *testing.T) *observerTestSuite {
 	fetcher := &mockBackendFetcher{
 		backends: make(map[string]*BackendInfo),
 	}
-	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, newHealthCheckConfigForTest(), fetcher)
+	lg, _ := logger.CreateLoggerForTest(t)
+	bo, err := NewBackendObserver(lg, mer, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
 	return &observerTestSuite{
 		t:           t,
