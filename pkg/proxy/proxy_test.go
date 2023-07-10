@@ -17,7 +17,7 @@ import (
 
 func TestGracefulShutdown(t *testing.T) {
 	// Graceful shutdown finishes immediately if there's no connection.
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil, "")
 	server, err := NewSQLServer(lg, config.ProxyServer{
 		ProxyServerOnline: config.ProxyServerOnline{

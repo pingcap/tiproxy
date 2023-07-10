@@ -16,7 +16,7 @@ import (
 )
 
 func TestCertServer(t *testing.T) {
-	logger := logger.CreateLoggerForTest(t)
+	logger, _ := logger.CreateLoggerForTest(t)
 	tmpdir := t.TempDir()
 	certPath := filepath.Join(tmpdir, "cert")
 	keyPath := filepath.Join(tmpdir, "key")
@@ -267,7 +267,7 @@ func TestCertServer(t *testing.T) {
 }
 
 func TestReload(t *testing.T) {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	tmpdir := t.TempDir()
 	certPath := filepath.Join(tmpdir, "cert")
 	keyPath := filepath.Join(tmpdir, "key")
@@ -297,7 +297,7 @@ func TestReload(t *testing.T) {
 }
 
 func TestAutoCerts(t *testing.T) {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := config.TLSConfig{
 		AutoCerts: true,
 	}
@@ -338,7 +338,7 @@ func getExpireTime(t *testing.T, ci *CertInfo) time.Time {
 }
 
 func TestSetConfig(t *testing.T) {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	ci := NewCert(false)
 	cfg := config.TLSConfig{
 		SkipCA: true,
