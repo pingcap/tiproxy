@@ -9,6 +9,7 @@ package namespace
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"sync"
 
 	"github.com/pingcap/TiProxy/lib/config"
@@ -33,7 +34,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
 	var fetcher router.BackendFetcher
-	if mgr.tpFetcher != nil {
+	if !reflect.ValueOf(mgr.tpFetcher).IsNil() {
 		fetcher = router.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), config.NewDefaultHealthCheckConfig())
 	} else {
 		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
