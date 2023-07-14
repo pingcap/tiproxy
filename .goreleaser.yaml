@@ -7,11 +7,13 @@ builds:
       - -s -w -X main.Version={{.Version}} -X main.commit={{.FullCommit}}
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
     goarm:
       - 7
+      - 8
     goamd64:
       - v2
       - v3
@@ -23,11 +25,13 @@ builds:
       - -s -w -X main.Version={{.Version}} -X main.commit={{.FullCommit}}
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
     goarm:
       - 7
+      - 8
     goamd64:
       - v2
       - v3
