@@ -4,6 +4,7 @@
 package backend
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 
 var (
 	ErrCapabilityNegotiation = errors.New("capability negotiation failed")
+	ErrTLSConfigRequired     = errors.New("require TLS config on TiProxy when require-backend-tls=true")
 )
 
 const unknownAuthPlugin = "auth_unknown_plugin"
@@ -208,6 +210,8 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 
 	// forward other packets
+	pluginName := ""
+loop:
 	for {
 		serverPkt, err := forwardMsg(backendIO, clientIO)
 		if err != nil {
@@ -219,6 +223,12 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		case mysql.ErrHeader:
 			return pnet.ParseErrorPacket(serverPkt)
 		default: // mysql.AuthSwitchRequest, ShaCommand
+			if serverPkt[0] == mysql.AuthSwitchRequest {
+				pluginName = string(serverPkt[1 : bytes.IndexByte(serverPkt[1:], 0)+1])
+			} else if serverPkt[0] == 1 && pluginName == mysql.AuthCachingSha2Password && len(serverPkt) == 2 && serverPkt[1] == 3 {
+				// caching_sha2_password fast path
+				continue loop
+			}
 			if _, err = forwardMsg(clientIO, backendIO); err != nil {
 				return err
 			}
@@ -300,7 +310,17 @@ func (auth *Authenticator) writeAuthHandshake(
 	}
 
 	var pkt []byte
-	if backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil {
+	var enableTLS bool
+	if auth.requireBackendTLS {
+		if backendTLSConfig == nil {
+			return ErrTLSConfigRequired
+		}
+		enableTLS = true
+	} else {
+		// When client TLS is disabled, also disables proxy TLS.
+		enableTLS = pnet.Capability(auth.capability)&pnet.ClientSSL != 0 && backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil
+	}
+	if enableTLS {
 		resp.Capability |= mysql.ClientSSL
 		pkt = pnet.MakeHandshakeResponse(resp)
 		// write SSL Packet

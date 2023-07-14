@@ -111,7 +111,8 @@ type routerTester struct {
 }
 
 func newRouterTester(t *testing.T) *routerTester {
-	router := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
 	t.Cleanup(router.Close)
 	return &routerTester{
 		t:      t,
@@ -628,55 +629,42 @@ func TestRebalanceCornerCase(t *testing.T) {
 
 // Test all kinds of events occur concurrently.
 func TestConcurrency(t *testing.T) {
-	// Router.observer doesn't work because the etcd is always empty.
-	// We create other goroutines to change backends easily.
-	etcd := createEtcdServer(t, "127.0.0.1:0")
-	client := createEtcdClient(t, etcd)
-	healthCheckConfig := newHealthCheckConfigForTest()
-	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), healthCheckConfig)
-	router := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
+	// Disable health check so that it just reads BackendFetcher.
+	healthCheckConfig := &config.HealthCheck{
+		Enable:   false,
+		Interval: 10 * time.Millisecond,
+	}
+	fetcher := &mockBackendFetcher{}
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
 	err := router.Init(nil, fetcher, healthCheckConfig)
 	require.NoError(t, err)
 
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	// Create 3 backends.
-	backends := map[string]*backendHealth{
-		"0": {
-			status: StatusHealthy,
-		},
-		"1": {
-			status: StatusHealthy,
-		},
-		"2": {
-			status: StatusHealthy,
-		},
+	// Create 3 backends and change their status randomly.
+	fetcher.backends = map[string]*BackendInfo{
+		"0": {},
+		"1": {},
+		"2": {},
 	}
-	router.OnBackendChanged(backends, nil)
-	for addr, health := range backends {
-		func(addr string, status BackendStatus) {
-			wg.Run(func() {
-				for {
-					waitTime := rand.Intn(50) + 30
-					select {
-					case <-time.After(time.Duration(waitTime) * time.Millisecond):
-					case <-ctx.Done():
-						return
-					}
-					if status == StatusHealthy {
-						status = StatusCannotConnect
-					} else {
-						status = StatusHealthy
-					}
-					router.OnBackendChanged(map[string]*backendHealth{
-						addr: {
-							status: status,
-						},
-					}, nil)
-				}
-			})
-		}(addr, health.status)
-	}
+	wg.Run(func() {
+		for {
+			waitTime := rand.Intn(20) + 10
+			select {
+			case <-time.After(time.Duration(waitTime) * time.Millisecond):
+			case <-ctx.Done():
+				return
+			}
+			idx := rand.Intn(3)
+			addr := strconv.Itoa(idx)
+			if _, ok := fetcher.backends[addr]; ok {
+				delete(fetcher.backends, addr)
+			} else {
+				fetcher.backends[addr] = &BackendInfo{}
+			}
+		}
+	})
 
 	// Create 20 connections.
 	for i := 0; i < 20; i++ {
@@ -749,7 +737,7 @@ func TestRefresh(t *testing.T) {
 		return backends, nil
 	})
 	// Create a router with a very long health check interval.
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
@@ -788,7 +776,7 @@ func TestObserveError(t *testing.T) {
 		return backends, observeError
 	})
 	// Create a router with a very short health check interval.
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	observer, err := StartBackendObserver(lg, rt, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
@@ -843,7 +831,7 @@ func TestDisableHealthCheck(t *testing.T) {
 		return backends, nil
 	})
 	// Create a router with a very short health check interval.
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	err := rt.Init(nil, fetcher, &config.HealthCheck{Enable: false})
 	require.NoError(t, err)
@@ -882,7 +870,8 @@ func TestSetBackendStatus(t *testing.T) {
 }
 
 func TestGetServerVersion(t *testing.T) {
-	rt := NewScoreBasedRouter(logger.CreateLoggerForTest(t))
+	lg, _ := logger.CreateLoggerForTest(t)
+	rt := NewScoreBasedRouter(lg)
 	t.Cleanup(rt.Close)
 	backends := map[string]*backendHealth{
 		"0": {

@@ -7,20 +7,16 @@ import (
 	"context"
 	"net"
 	"net/http"
-	"sync"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/lib/util/logger"
 	"github.com/pingcap/TiProxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/atomic"
-	"golang.org/x/exp/slices"
 )
 
 type mockEventReceiver struct {
@@ -45,204 +41,160 @@ func newMockEventReceiver(backendChan chan map[string]*backendHealth, errChan ch
 
 func newHealthCheckConfigForTest() *config.HealthCheck {
 	return &config.HealthCheck{
-		Enable:             true,
-		Interval:           500 * time.Millisecond,
-		MaxRetries:         3,
-		RetryInterval:      100 * time.Millisecond,
-		DialTimeout:        100 * time.Millisecond,
-		TombstoneThreshold: 5 * time.Minute,
+		Enable:        true,
+		Interval:      300 * time.Millisecond,
+		MaxRetries:    3,
+		RetryInterval: 30 * time.Millisecond,
+		DialTimeout:   100 * time.Millisecond,
 	}
 }
 
 // Test that the notified backend status is correct when the backend starts or shuts down.
 func TestObserveBackends(t *testing.T) {
-	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth) {
-		bo.Start()
+	ts := newObserverTestSuite(t)
+	t.Cleanup(ts.close)
+	ts.bo.Start()
 
-		backend1 := addBackend(t, kv)
-		checkStatus(t, backendChan, backend1, StatusHealthy)
-		addFakeTopology(t, kv, backend1.sqlAddr)
-		backend1.stopSQLServer()
-		checkStatus(t, backendChan, backend1, StatusCannotConnect)
-		backend1.startSQLServer()
-		checkStatus(t, backendChan, backend1, StatusHealthy)
-		backend1.setHTTPResp(false)
-		checkStatus(t, backendChan, backend1, StatusCannotConnect)
-		backend1.setHTTPResp(true)
-		checkStatus(t, backendChan, backend1, StatusHealthy)
-		backend1.setHTTPWait(bo.healthCheckConfig.DialTimeout + time.Second)
-		checkStatus(t, backendChan, backend1, StatusCannotConnect)
-		backend1.setHTTPWait(time.Duration(0))
-		checkStatus(t, backendChan, backend1, StatusHealthy)
-		backend1.stopHTTPServer()
-		checkStatus(t, backendChan, backend1, StatusCannotConnect)
-		backend1.startHTTPServer()
-		checkStatus(t, backendChan, backend1, StatusHealthy)
+	backend1 := ts.addBackend()
+	ts.checkStatus(backend1, StatusHealthy)
+	backend1.stopSQLServer()
+	ts.checkStatus(backend1, StatusCannotConnect)
+	backend1.startSQLServer()
+	ts.checkStatus(backend1, StatusHealthy)
+	backend1.setHTTPResp(false)
+	ts.checkStatus(backend1, StatusCannotConnect)
+	backend1.setHTTPResp(true)
+	ts.checkStatus(backend1, StatusHealthy)
+	backend1.setHTTPWait(ts.bo.healthCheckConfig.DialTimeout + time.Second)
+	ts.checkStatus(backend1, StatusCannotConnect)
+	backend1.setHTTPWait(time.Duration(0))
+	ts.checkStatus(backend1, StatusHealthy)
+	backend1.stopHTTPServer()
+	ts.checkStatus(backend1, StatusCannotConnect)
+	backend1.startHTTPServer()
+	ts.checkStatus(backend1, StatusHealthy)
 
-		backend2 := addBackend(t, kv)
-		checkStatus(t, backendChan, backend2, StatusHealthy)
-		removeBackend(t, kv, backend2)
-		checkStatus(t, backendChan, backend2, StatusCannotConnect)
+	backend2 := ts.addBackend()
+	ts.checkStatus(backend2, StatusHealthy)
+	ts.removeBackend(backend2)
+	ts.checkStatus(backend2, StatusCannotConnect)
 
-		backend1.close()
-		checkStatus(t, backendChan, backend1, StatusCannotConnect)
-		backend2.close()
-	})
-}
-
-// Test that the observer can exit during health check.
-func TestCancelObserver(t *testing.T) {
-	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth) {
-		backends := make([]*backendServer, 0, 3)
-		for i := 0; i < 3; i++ {
-			backends = append(backends, addBackend(t, kv))
-		}
-		backendInfo, err := bo.fetcher.GetBackendList(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, 3, len(backendInfo))
-
-		// Try 10 times.
-		for i := 0; i < 10; i++ {
-			childCtx, cancelFunc := context.WithCancel(context.Background())
-			var wg waitgroup.WaitGroup
-			wg.Run(func() {
-				for childCtx.Err() != nil {
-					bo.checkHealth(childCtx, backendInfo)
-				}
-			})
-			time.Sleep(10 * time.Millisecond)
-			cancelFunc()
-			wg.Wait()
-		}
-
-		for _, backend := range backends {
-			backend.close()
-		}
-	})
-}
-
-// Test that it won't hang or panic when the Etcd server fails.
-func TestEtcdUnavailable(t *testing.T) {
-	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth) {
-		bo.Start()
-		etcd.Server.Stop()
-		<-etcd.Server.StopNotify()
-		// The observer will retry indefinitely. We verify it won't panic or hang here.
-		// There's no other way than modifying the code or just sleeping.
-		time.Sleep(bo.healthCheckConfig.Interval + bo.healthCheckConfig.DialTimeout + bo.healthCheckConfig.RetryInterval)
-		require.Equal(t, 0, len(backendChan))
-	})
-}
-
-// Test that the notified backend status is correct for external fetcher.
-func TestExternalFetcher(t *testing.T) {
-	backendAddrs := make([]string, 0)
-	var observeError error
-	var mutex sync.Mutex
-	backendGetter := func() ([]string, error) {
-		mutex.Lock()
-		defer mutex.Unlock()
-		return backendAddrs, observeError
-	}
-	addBackend := func() *backendServer {
-		backend := newBackendServer(t)
-		mutex.Lock()
-		backendAddrs = append(backendAddrs, backend.sqlAddr)
-		mutex.Unlock()
-		return backend
-	}
-	removeBackend := func(backend *backendServer) {
-		mutex.Lock()
-		idx := slices.Index(backendAddrs, backend.sqlAddr)
-		backendAddrs = append(backendAddrs[:idx], backendAddrs[idx+1:]...)
-		mutex.Unlock()
-	}
-	mockError := func() {
-		mutex.Lock()
-		observeError = errors.New("mock observe error")
-		mutex.Unlock()
-	}
-
-	backendChan := make(chan map[string]*backendHealth, 1)
-	errChan := make(chan error, 1)
-	mer := newMockEventReceiver(backendChan, errChan)
-	fetcher := NewExternalFetcher(backendGetter)
-	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, newHealthCheckConfigForTest(), fetcher)
-	require.NoError(t, err)
-	bo.Start()
-	defer bo.Close()
-
-	backend1 := addBackend()
-	checkStatus(t, backendChan, backend1, StatusHealthy)
-	backend2 := addBackend()
-	checkStatus(t, backendChan, backend2, StatusHealthy)
-
-	// remove from the list but it's still alive
-	removeBackend(backend1)
-	checkStatus(t, backendChan, backend1, StatusCannotConnect)
 	backend1.close()
-
-	// kill it but it's still in the list
+	ts.checkStatus(backend1, StatusCannotConnect)
 	backend2.close()
-	checkStatus(t, backendChan, backend2, StatusCannotConnect)
-	removeBackend(backend2)
+}
 
-	// returns observe error
-	require.Len(t, errChan, 0)
-	mockError()
-	err = <-errChan
-	require.Error(t, err)
+// Test that the health check can exit when the context is cancelled.
+func TestCancelObserver(t *testing.T) {
+	ts := newObserverTestSuite(t)
+	t.Cleanup(ts.close)
+
+	backends := make([]*backendServer, 0, 3)
+	for i := 0; i < 3; i++ {
+		backends = append(backends, ts.addBackend())
+	}
+	info, err := ts.fetcher.GetBackendList(context.Background())
+	require.NoError(t, err)
+	require.Len(t, info, 3)
+
+	// Try 10 times.
+	for i := 0; i < 10; i++ {
+		childCtx, cancelFunc := context.WithCancel(context.Background())
+		var wg waitgroup.WaitGroup
+		wg.Run(func() {
+			for childCtx.Err() != nil {
+				ts.bo.checkHealth(childCtx, info)
+			}
+		})
+		time.Sleep(10 * time.Millisecond)
+		cancelFunc()
+		wg.Wait()
+	}
+
+	for _, backend := range backends {
+		backend.close()
+	}
 }
 
 func TestReadServerVersion(t *testing.T) {
-	runETCDTest(t, func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth) {
-		bo.Start()
+	ts := newObserverTestSuite(t)
+	t.Cleanup(ts.close)
 
-		backend1 := addBackend(t, kv)
-		backend1.serverVersion.Store("1.0")
-		addFakeTopology(t, kv, backend1.sqlAddr)
-		backends := getBackendsFromCh(t, backendChan)
-		require.Equal(t, "1.0", backends[backend1.sqlAddr].serverVersion)
-		backend1.stopSQLServer()
-		checkStatus(t, backendChan, backend1, StatusCannotConnect)
-		backend1.serverVersion.Store("2.0")
-		backend1.startSQLServer()
-		backends = getBackendsFromCh(t, backendChan)
-		require.Equal(t, "2.0", backends[backend1.sqlAddr].serverVersion)
-		backend1.close()
-	})
+	backend1 := ts.addBackend()
+	backend1.serverVersion.Store("1.0")
+	ts.bo.Start()
+	backends := ts.getBackendsFromCh()
+	require.Equal(t, "1.0", backends[backend1.sqlAddr].serverVersion)
+	backend1.stopSQLServer()
+	ts.checkStatus(backend1, StatusCannotConnect)
+	backend1.serverVersion.Store("2.0")
+	backend1.startSQLServer()
+	backends = ts.getBackendsFromCh()
+	require.Equal(t, "2.0", backends[backend1.sqlAddr].serverVersion)
+	backend1.close()
 }
 
-func runETCDTest(t *testing.T, f func(etcd *embed.Etcd, kv clientv3.KV, bo *BackendObserver, backendChan chan map[string]*backendHealth)) {
-	etcd := createEtcdServer(t, "127.0.0.1:0")
-	client := createEtcdClient(t, etcd)
-	kv := clientv3.NewKV(client)
+type observerTestSuite struct {
+	t           *testing.T
+	bo          *BackendObserver
+	fetcher     *mockBackendFetcher
+	backendChan chan map[string]*backendHealth
+}
+
+func newObserverTestSuite(t *testing.T) *observerTestSuite {
 	backendChan := make(chan map[string]*backendHealth, 1)
 	mer := newMockEventReceiver(backendChan, make(chan error, 1))
-	fetcher := NewPDFetcher(client, logger.CreateLoggerForTest(t), newHealthCheckConfigForTest())
-	bo, err := NewBackendObserver(logger.CreateLoggerForTest(t), mer, nil, newHealthCheckConfigForTest(), fetcher)
+	fetcher := &mockBackendFetcher{
+		backends: make(map[string]*BackendInfo),
+	}
+	lg, _ := logger.CreateLoggerForTest(t)
+	bo, err := NewBackendObserver(lg, mer, nil, newHealthCheckConfigForTest(), fetcher)
 	require.NoError(t, err)
-	f(etcd, kv, bo, backendChan)
-	bo.Close()
+	return &observerTestSuite{
+		t:           t,
+		bo:          bo,
+		fetcher:     fetcher,
+		backendChan: backendChan,
+	}
 }
 
-func checkStatus(t *testing.T, backendChan chan map[string]*backendHealth, backend *backendServer, expectedStatus BackendStatus) {
-	backends := getBackendsFromCh(t, backendChan)
-	require.Equal(t, 1, len(backends))
+func (ts *observerTestSuite) close() {
+	if ts.bo != nil {
+		ts.bo.Close()
+		ts.bo = nil
+	}
+}
+
+func (ts *observerTestSuite) checkStatus(backend *backendServer, expectedStatus BackendStatus) {
+	backends := ts.getBackendsFromCh()
+	require.Equal(ts.t, 1, len(backends))
 	health, ok := backends[backend.sqlAddr]
-	require.True(t, ok)
-	require.Equal(t, expectedStatus, health.status)
-	require.True(t, checkBackendStatusMetrics(backend.sqlAddr, health.status))
+	require.True(ts.t, ok)
+	require.Equal(ts.t, expectedStatus, health.status)
+	require.True(ts.t, checkBackendStatusMetrics(backend.sqlAddr, health.status))
 }
 
-func getBackendsFromCh(t *testing.T, backendChan chan map[string]*backendHealth) map[string]*backendHealth {
+func (ts *observerTestSuite) getBackendsFromCh() map[string]*backendHealth {
 	var backends map[string]*backendHealth
 	select {
-	case backends = <-backendChan:
+	case backends = <-ts.backendChan:
 	case <-time.After(3 * time.Second):
-		t.Fatal("timeout")
+		ts.t.Fatal("timeout")
 	}
 	return backends
+}
+
+func (ts *observerTestSuite) addBackend() *backendServer {
+	backend := newBackendServer(ts.t)
+	ts.fetcher.backends[backend.sqlAddr] = &BackendInfo{
+		IP:         backend.ip,
+		StatusPort: backend.statusPort,
+	}
+	return backend
+}
+
+func (ts *observerTestSuite) removeBackend(backend *backendServer) {
+	delete(ts.fetcher.backends, backend.sqlAddr)
 }
 
 type backendServer struct {
@@ -253,7 +205,9 @@ type backendServer struct {
 	statusAddr    string
 	serverVersion atomic.String
 	*mockHttpHandler
-	wg waitgroup.WaitGroup
+	wg         waitgroup.WaitGroup
+	ip         string
+	statusPort uint
 }
 
 func newBackendServer(t *testing.T) *backendServer {
@@ -300,6 +254,7 @@ func (srv *backendServer) startHTTPServer() {
 	}
 	var statusListener net.Listener
 	statusListener, srv.statusAddr = startListener(srv.t, srv.statusAddr)
+	srv.ip, srv.statusPort = parseHostPort(srv.t, srv.statusAddr)
 	srv.statusServer = &http.Server{Addr: srv.statusAddr, Handler: srv.mockHttpHandler}
 	srv.wg.Run(func() {
 		_ = srv.statusServer.Serve(statusListener)
@@ -346,6 +301,22 @@ func startListener(t *testing.T, addr string) (net.Listener, string) {
 	listener, err := net.Listen("tcp", addr)
 	require.NoError(t, err)
 	return listener, listener.Addr().String()
+}
+
+func parseHostPort(t *testing.T, addr string) (string, uint) {
+	host, port, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	p, err := strconv.ParseUint(port, 10, 32)
+	require.NoError(t, err)
+	return host, uint(p)
+}
+
+type mockBackendFetcher struct {
+	backends map[string]*BackendInfo
+}
+
+func (mbf *mockBackendFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
+	return mbf.backends, nil
 }
 
 // ExternalFetcher fetches backend list from a given callback.

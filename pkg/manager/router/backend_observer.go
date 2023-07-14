@@ -72,8 +72,6 @@ func (bh *backendHealth) String() string {
 }
 
 const (
-	ttlPathSuffix    = "/ttl"
-	infoPathSuffix   = "/info"
 	statusPathSuffix = "/status"
 )
 

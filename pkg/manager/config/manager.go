@@ -101,12 +101,22 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 				case <-nctx.Done():
 					return
 				case err := <-e.wch.Errors:
-					e.logger.Info("failed to watch config file", zap.Error(err))
+					e.logger.Warn("failed to watch config file", zap.Error(err))
 				case ev := <-e.wch.Events:
 					e.handleFSEvent(ev, configFile)
 				case <-ticker.C:
+					// There may be concurrent issues:
+					// 1. Remove the directory and the watcher removes the directory automatically
+					// 2. Create the directory and the file again within a tick
+					// 3. Add it to the watcher again, but the CREATE event is not sent
+					//
+					// Checking the watch list still have a concurrent issue because the watcher may remove the
+					// directory between WatchList and Add. We'll fix it later because it's complex to fix it entirely.
+					exists := len(e.wch.WatchList()) > 0
 					if err := e.wch.Add(parentDir); err != nil {
-						e.logger.Info("failed to rewatch config file", zap.Error(err))
+						e.logger.Warn("failed to rewatch config file", zap.Error(err))
+					} else if !exists {
+						e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(configFile)))
 					}
 				}
 			}
@@ -122,14 +132,19 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 
 func (e *ConfigManager) Close() error {
 	var wcherr error
-	e.cancel()
+	if e.cancel != nil {
+		e.cancel()
+		e.cancel = nil
+	}
 	if e.wch != nil {
 		wcherr = e.wch.Close()
+		e.wch = nil
 	}
 	e.sts.Lock()
 	for _, ch := range e.sts.listeners {
 		close(ch)
 	}
+	e.sts.listeners = nil
 	e.sts.Unlock()
 	e.wg.Wait()
 	return wcherr

@@ -228,3 +228,42 @@ func TestCustomAuth(t *testing.T) {
 	checker()
 	clean()
 }
+
+func TestEnableTLS(t *testing.T) {
+	tests := []struct {
+		cfg     cfgOverrider
+		enabled bool
+	}{
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.clientConfig.capability &= ^pnet.ClientSSL
+				cfg.backendConfig.capability |= pnet.ClientSSL
+			},
+			enabled: false,
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.clientConfig.capability |= pnet.ClientSSL
+				cfg.backendConfig.capability |= pnet.ClientSSL
+			},
+			enabled: true,
+		},
+		{
+			// client enables TLS but backendTLSConfig is nil
+			cfg: func(cfg *testConfig) {
+				cfg.clientConfig.capability |= pnet.ClientSSL
+				cfg.proxyConfig.backendTLSConfig = nil
+				cfg.backendConfig.capability |= pnet.ClientSSL
+			},
+			enabled: false,
+		},
+	}
+	tc := newTCPConnSuite(t)
+	for _, test := range tests {
+		ts, clean := newTestSuite(t, tc, test.cfg)
+		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
+			require.Equal(t, test.enabled, ts.mb.capability&pnet.ClientSSL > 0)
+		})
+		clean()
+	}
+}

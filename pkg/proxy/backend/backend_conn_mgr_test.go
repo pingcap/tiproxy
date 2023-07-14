@@ -92,10 +92,11 @@ func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 		cfg.testSuiteConfig.enableRouteLogic = true
 	})
 	ts, clean := newTestSuite(t, tc, cfg...)
+	lg, _ := logger.CreateLoggerForTest(t)
 	tester := &backendMgrTester{
 		testSuite: ts,
 		t:         t,
-		lg:        logger.CreateLoggerForTest(t),
+		lg:        lg,
 	}
 	t.Cleanup(func() {
 		clean()
@@ -841,7 +842,8 @@ func TestGetBackendIO(t *testing.T) {
 			}
 		},
 	}
-	mgr := NewBackendConnManager(logger.CreateLoggerForTest(t), handler, 0, &BCConfig{})
+	lg, _ := logger.CreateLoggerForTest(t)
+	mgr := NewBackendConnManager(lg, handler, 0, &BCConfig{})
 	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
 		wg.Run(func() {

@@ -58,7 +58,7 @@ func connectWithTLS(ctls, stls *tls.Config) (clientErr, serverErr error) {
 
 // Test various configurations.
 func TestInit(t *testing.T) {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	tmpdir := t.TempDir()
 
 	type testcase struct {
@@ -123,7 +123,7 @@ func TestInit(t *testing.T) {
 
 		certMgr := NewCertManager()
 		certMgr.SetRetryInterval(100 * time.Millisecond)
-		err := certMgr.Init(&tc.cfg, lg)
+		err := certMgr.Init(&tc.cfg, lg, nil)
 		if tc.err != "" {
 			require.ErrorContains(t, err, tc.err, fmt.Sprintf("%+v", tc))
 		} else {
@@ -139,7 +139,7 @@ func TestInit(t *testing.T) {
 // Test rotation works.
 func TestRotate(t *testing.T) {
 	tmpdir := t.TempDir()
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	caPath := filepath.Join(tmpdir, "ca")
 	keyPath := filepath.Join(tmpdir, "key")
 	certPath := filepath.Join(tmpdir, "cert")
@@ -268,7 +268,7 @@ func TestRotate(t *testing.T) {
 		if tc.pre != nil {
 			tc.pre(t)
 		}
-		require.NoError(t, certMgr.Init(cfg, lg))
+		require.NoError(t, certMgr.Init(cfg, lg, nil))
 
 		stls := certMgr.ServerTLS()
 		ctls := certMgr.SQLTLS()
@@ -321,7 +321,7 @@ func TestRotate(t *testing.T) {
 
 func TestBidirectional(t *testing.T) {
 	tmpdir := t.TempDir()
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	caPath1 := filepath.Join(tmpdir, "c1", "ca")
 	keyPath1 := filepath.Join(tmpdir, "c1", "key")
 	certPath1 := filepath.Join(tmpdir, "c1", "cert")
@@ -349,10 +349,73 @@ func TestBidirectional(t *testing.T) {
 	}
 
 	certMgr := NewCertManager()
-	require.NoError(t, certMgr.Init(cfg, lg))
+	require.NoError(t, certMgr.Init(cfg, lg, nil))
 	stls := certMgr.ServerTLS()
 	ctls := certMgr.SQLTLS()
 	clientErr, serverErr := connectWithTLS(ctls, stls)
 	require.NoError(t, clientErr)
 	require.NoError(t, serverErr)
+}
+
+func TestWatchConfig(t *testing.T) {
+	tmpdir := t.TempDir()
+	lg, _ := logger.CreateLoggerForTest(t)
+	caPath1 := filepath.Join(tmpdir, "c1", "ca")
+	keyPath1 := filepath.Join(tmpdir, "c1", "key")
+	certPath1 := filepath.Join(tmpdir, "c1", "cert")
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration))
+
+	tests := []struct {
+		cfg     config.TLSConfig
+		checker func(*tls.Config) bool
+	}{
+		{
+			cfg: config.TLSConfig{
+				SkipCA: true,
+			},
+			checker: func(tlsConfig *tls.Config) bool {
+				if tlsConfig == nil {
+					return false
+				}
+				return tlsConfig.InsecureSkipVerify
+			},
+		},
+		{
+			cfg: config.TLSConfig{
+				SkipCA: false,
+				CA:     caPath1,
+			},
+			checker: func(tlsConfig *tls.Config) bool {
+				return tlsConfig.GetCertificate != nil
+			},
+		},
+		{
+			cfg: config.TLSConfig{
+				SkipCA:        false,
+				CA:            caPath1,
+				MinTLSVersion: "1.3",
+			},
+			checker: func(tlsConfig *tls.Config) bool {
+				return tlsConfig.MinVersion == tls.VersionTLS13
+			},
+		},
+	}
+
+	cfgCh := make(chan *config.Config)
+	certMgr := NewCertManager()
+	cfg := config.Config{
+		Security: config.Security{
+			SQLTLS: config.TLSConfig{
+				SkipCA: false,
+			},
+		},
+	}
+	require.NoError(t, certMgr.Init(&cfg, lg, cfgCh))
+	for _, test := range tests {
+		cfg.Security.SQLTLS = test.cfg
+		cfgCh <- &cfg
+		require.Eventually(t, func() bool {
+			return test.checker(certMgr.SQLTLS())
+		}, time.Second, 10*time.Millisecond)
+	}
 }

@@ -9,21 +9,21 @@ package namespace
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"sync"
 
 	"github.com/pingcap/TiProxy/lib/config"
 	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/TiProxy/pkg/manager/router"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
 type NamespaceManager struct {
 	sync.RWMutex
-	client  *clientv3.Client
-	httpCli *http.Client
-	logger  *zap.Logger
-	nsm     map[string]*Namespace
+	tpFetcher router.TopologyFetcher
+	httpCli   *http.Client
+	logger    *zap.Logger
+	nsm       map[string]*Namespace
 }
 
 func NewNamespaceManager() *NamespaceManager {
@@ -34,8 +34,8 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
 	var fetcher router.BackendFetcher
-	if mgr.client != nil {
-		fetcher = router.NewPDFetcher(mgr.client, logger.Named("be_fetcher"), config.NewDefaultHealthCheckConfig())
+	if !reflect.ValueOf(mgr.tpFetcher).IsNil() {
+		fetcher = router.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), config.NewDefaultHealthCheckConfig())
 	} else {
 		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
 	}
@@ -77,9 +77,9 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, client *clientv3.Client, httpCli *http.Client) error {
+func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher router.TopologyFetcher, httpCli *http.Client) error {
 	mgr.Lock()
-	mgr.client = client
+	mgr.tpFetcher = tpFetcher
 	mgr.httpCli = httpCli
 	mgr.logger = logger
 	mgr.Unlock()

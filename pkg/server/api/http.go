@@ -115,9 +115,6 @@ func (h *HTTPServer) rateLimit(c *gin.Context) {
 
 func (h *HTTPServer) attachLogger(c *gin.Context) {
 	path := c.Request.URL.Path
-	if strings.HasPrefix(path, "/api/debug/health") {
-		return
-	}
 
 	fields := make([]zapcore.Field, 0, 9)
 
@@ -148,7 +145,13 @@ func (h *HTTPServer) attachLogger(c *gin.Context) {
 		fields = append(fields, zap.Errors("errs", errs))
 	}
 
-	h.lg.Info(path, fields...)
+	if len(c.Errors) > 0 {
+		h.lg.Warn(path, fields...)
+	} else if strings.HasPrefix(path, "/api/debug") || strings.HasPrefix(path, "/api/metrics") {
+		h.lg.Debug(path, fields...)
+	} else {
+		h.lg.Info(path, fields...)
+	}
 }
 
 func (h *HTTPServer) readyState(c *gin.Context) {

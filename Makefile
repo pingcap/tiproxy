@@ -20,7 +20,7 @@ DEBUG ?=
 DOCKERPREFIX ?=
 BUILD_TAGS ?=
 LDFLAGS ?=
-BUILDFLAGS ?= -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS) -X main.Version=$(VERSION) -X main.Commit=$(COMMIT)' -tags '$(BUILD_TAGS)'
+BUILDFLAGS ?= -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS) -X github.com/pingcap/TiProxy/pkg/util/versioninfo.TiProxyVersion=$(VERSION) -X github.com/pingcap/TiProxy/pkg/util/versioninfo.TiProxyGitHash=$(COMMIT)' -tags '$(BUILD_TAGS)'
 ifneq ("$(DEBUG)", "")
 	BUILDFLAGS += -race
 endif
