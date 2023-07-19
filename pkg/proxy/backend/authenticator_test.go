@@ -267,3 +267,26 @@ func TestEnableTLS(t *testing.T) {
 		clean()
 	}
 }
+
+// Even if auth fails, the auth data should be passed so that `using password` in the error message is correct.
+func TestAuthFail(t *testing.T) {
+	cfgs := []cfgOverrider{
+		func(cfg *testConfig) {
+			cfg.clientConfig.authData = nil
+			cfg.backendConfig.authSucceed = false
+		},
+		func(cfg *testConfig) {
+			cfg.clientConfig.authData = []byte("dummy")
+			cfg.backendConfig.authSucceed = false
+		},
+	}
+
+	tc := newTCPConnSuite(t)
+	for _, cfg := range cfgs {
+		ts, clean := newTestSuite(t, tc, cfg)
+		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
+			require.Equal(t, len(ts.mc.authData), len(ts.mb.authData))
+		})
+		clean()
+	}
+}
