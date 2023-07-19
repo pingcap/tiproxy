@@ -36,7 +36,7 @@ func TestPushMetrics(t *testing.T) {
 		}),
 	)
 	defer pgwOK.Close()
-	log := logger.CreateLoggerForTest(t)
+	log, _ := logger.CreateLoggerForTest(t)
 
 	tests := []struct {
 		metricsAddr     string

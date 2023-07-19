@@ -17,7 +17,7 @@ import (
 )
 
 func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestPipeConn(t,
 		func(t *testing.T, c net.Conn) {
 			a(t, NewPacketIO(c, lg))
@@ -28,7 +28,7 @@ func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T
 }
 
 func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
 			cli := NewPacketIO(c, lg)

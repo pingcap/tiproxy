@@ -46,10 +46,11 @@ type mockProxy struct {
 }
 
 func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
+	lg, _ := logger.CreateLoggerForTest(t)
 	mp := &mockProxy{
 		proxyConfig: cfg,
-		logger:      logger.CreateLoggerForTest(t).Named("mockProxy"),
-		BackendConnManager: NewBackendConnManager(logger.CreateLoggerForTest(t), cfg.handler, 0, &BCConfig{
+		logger:      lg.Named("mockProxy"),
+		BackendConnManager: NewBackendConnManager(lg, cfg.handler, 0, &BCConfig{
 			CheckBackendInterval: cfg.checkBackendInterval,
 		}),
 	}

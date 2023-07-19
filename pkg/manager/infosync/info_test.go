@@ -207,7 +207,7 @@ type etcdTestSuite struct {
 }
 
 func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
-	lg := logger.CreateLoggerForTest(t)
+	lg, _ := logger.CreateLoggerForTest(t)
 	ts := &etcdTestSuite{
 		t:  t,
 		lg: lg,

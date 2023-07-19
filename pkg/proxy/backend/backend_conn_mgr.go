@@ -280,7 +280,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		if !IsMySQLError(err) {
 			return
 		} else {
-			mgr.logger.Debug("got a mysql error", zap.Error(err))
+			mgr.logger.Debug("got a mysql error", zap.Error(err), zap.Stringer("cmd", cmd))
 		}
 	}
 	if err == nil {

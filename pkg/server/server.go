@@ -86,7 +86,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	}
 
 	// setup info syncer
-	{
+	if cfg.Proxy.PDAddrs != "" {
 		srv.InfoSyncer = infosync.NewInfoSyncer(lg.Named("infosync"))
 		if err = srv.InfoSyncer.Init(ctx, cfg, srv.CertManager); err != nil {
 			return
