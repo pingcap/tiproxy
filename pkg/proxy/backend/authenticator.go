@@ -203,8 +203,9 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	// forward client handshake resp
 	if err := auth.writeAuthHandshake(
 		backendIO, backendTLSConfig, backendCapability,
-		// send an unknown auth plugin so that the backend will request the auth data again.
-		unknownAuthPlugin, nil, 0,
+		// Send an unknown auth plugin so that the backend will request the auth data again.
+		// Copy the auth data so that the backend can set correct `using password` in the error message.
+		unknownAuthPlugin, clientResp.AuthData, 0,
 	); err != nil {
 		return pnet.WrapUserError(err, handshakeErrMsg)
 	}
