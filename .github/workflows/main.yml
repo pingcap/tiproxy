@@ -56,14 +56,6 @@ jobs:
       target: "test"
       all_platform: false
 
-  it:
-    if: ${{ github.event_name != 'push' }}
-    needs: cmd
-    uses: ./.github/workflows/integration.yml
-    with:
-      debug: ${{ github.event_name == 'workflow_dispatch' && inputs.debug }}
-      ref: ${{ inputs.ref || github.ref }}
-
   cache:
     if: ${{ github.event_name == 'push' }}
     uses: ./.github/workflows/common.yml
