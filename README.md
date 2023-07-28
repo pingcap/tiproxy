@@ -68,7 +68,7 @@ Where the `session-token-signing-cert` and `session-token-signing-key` are the p
 
 And then start the TiDB cluster with the config.toml.
 
-3. Update the [`proxy.yaml`](/conf/proxy.yaml) of TiProxy:
+3. Update the [`proxy.yaml`](/conf/proxy.toml) of TiProxy:
 
 ```yaml
 proxy:
