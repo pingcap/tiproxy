@@ -22,7 +22,7 @@ const (
 type CmdProcessor struct {
 	// Each prepared statement has an independent status.
 	preparedStmtStatus map[int]uint32
-	capability         uint32
+	capability         pnet.Capability
 	// Only includes in_trans or quit status.
 	serverStatus uint32
 }

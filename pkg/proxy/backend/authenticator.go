@@ -42,7 +42,7 @@ type Authenticator struct {
 	user              string
 	attrs             map[string]string
 	salt              []byte
-	capability        uint32 // client capability
+	capability        pnet.Capability
 	collation         uint8
 	proxyProtocol     bool
 	requireBackendTLS bool
@@ -125,7 +125,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 	if commonCaps := frontendCapability & requiredFrontendCaps; commonCaps != requiredFrontendCaps {
 		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredFrontendCaps))
-		if writeErr := clientIO.WriteErrPacket(mysql.NewErr(mysql.ErrNotSupportedAuthMode)); writeErr != nil {
+		if writeErr := clientIO.WriteErrPacket(mysql.ErrNotSupportedAuthMode); writeErr != nil {
 			return writeErr
 		}
 		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from frontend", requiredFrontendCaps&^commonCaps)
@@ -134,12 +134,12 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	if frontendCapability^commonCaps != 0 {
 		logger.Debug("frontend send capabilities unsupported by proxy", zap.Stringer("common", commonCaps), zap.Stringer("frontend", frontendCapability^commonCaps), zap.Stringer("proxy", proxyCapability^commonCaps))
 	}
-	auth.capability = commonCaps.Uint32()
-	if auth.capability&mysql.ClientPluginAuth == 0 {
+	auth.capability = commonCaps
+	if auth.capability&pnet.ClientPluginAuth == 0 {
 		logger.Warn("frontend may not support plugin auth", zap.Stringer("capability", commonCaps))
 		// Some clients (e.g. node/mysql) support ClientAuthPlugin but don't have the capability set correctly.
 		// Always set it to ensure capability.
-		auth.capability |= mysql.ClientPluginAuth
+		auth.capability |= pnet.ClientPluginAuth
 	}
 
 	if isSSL {
@@ -267,7 +267,7 @@ func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, bac
 
 	if err = auth.writeAuthHandshake(
 		backendIO, backendTLSConfig, backendCapability,
-		mysql.AuthTiDBSessionToken, hack.Slice(sessionToken), mysql.ClientPluginAuth,
+		pnet.AuthTiDBSessionToken, hack.Slice(sessionToken), pnet.ClientPluginAuth,
 	); err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ func (auth *Authenticator) writeAuthHandshake(
 	backendCapability pnet.Capability,
 	authPlugin string,
 	authData []byte,
-	authCap uint32,
+	authCap pnet.Capability,
 ) error {
 	// Always handshake with SSL enabled and enable auth_plugin.
 	resp := &pnet.HandshakeResp{
@@ -307,7 +307,7 @@ func (auth *Authenticator) writeAuthHandshake(
 	}
 
 	if len(resp.Attrs) > 0 {
-		resp.Capability |= mysql.ClientConnectAtts
+		resp.Capability |= pnet.ClientConnectAttrs
 	}
 
 	var pkt []byte
@@ -322,7 +322,7 @@ func (auth *Authenticator) writeAuthHandshake(
 		enableTLS = pnet.Capability(auth.capability)&pnet.ClientSSL != 0 && backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil
 	}
 	if enableTLS {
-		resp.Capability |= mysql.ClientSSL
+		resp.Capability |= pnet.ClientSSL
 		pkt = pnet.MakeHandshakeResponse(resp)
 		// write SSL Packet
 		if err := backendIO.WritePacket(pkt[:32], true); err != nil {
@@ -339,7 +339,7 @@ func (auth *Authenticator) writeAuthHandshake(
 			return err
 		}
 	} else {
-		resp.Capability &= ^mysql.ClientSSL
+		resp.Capability &= ^pnet.ClientSSL
 		pkt = pnet.MakeHandshakeResponse(resp)
 	}
 

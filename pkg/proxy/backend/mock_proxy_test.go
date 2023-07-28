@@ -54,7 +54,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 			CheckBackendInterval: cfg.checkBackendInterval,
 		}),
 	}
-	mp.cmdProcessor.capability = cfg.capability.Uint32()
+	mp.cmdProcessor.capability = cfg.capability
 	return mp
 }
 

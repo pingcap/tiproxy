@@ -62,7 +62,7 @@ type HandshakeResp struct {
 	DB         string
 	AuthPlugin string
 	AuthData   []byte
-	Capability uint32
+	Capability Capability
 	Collation  uint8
 }
 
@@ -70,7 +70,7 @@ func ParseHandshakeResponse(data []byte) (*HandshakeResp, error) {
 	resp := new(HandshakeResp)
 	pos := 0
 	// capability
-	resp.Capability = binary.LittleEndian.Uint32(data[:4])
+	resp.Capability = Capability(binary.LittleEndian.Uint32(data[:4]))
 	pos += 4
 	// skip max packet size
 	pos += 4
@@ -85,7 +85,7 @@ func ParseHandshakeResponse(data []byte) (*HandshakeResp, error) {
 	pos += len(resp.User) + 1
 
 	// password
-	if resp.Capability&mysql.ClientPluginAuthLenencClientData > 0 {
+	if resp.Capability&ClientPluginAuthLenencClientData > 0 {
 		if data[pos] == 0x1 { // No auth data
 			pos += 2
 		} else {
@@ -96,7 +96,7 @@ func ParseHandshakeResponse(data []byte) (*HandshakeResp, error) {
 				pos += int(num)
 			}
 		}
-	} else if resp.Capability&mysql.ClientSecureConnection > 0 {
+	} else if resp.Capability&ClientSecureConnection > 0 {
 		authLen := int(data[pos])
 		pos++
 		resp.AuthData = data[pos : pos+authLen]
@@ -107,7 +107,7 @@ func ParseHandshakeResponse(data []byte) (*HandshakeResp, error) {
 	}
 
 	// dbname
-	if resp.Capability&mysql.ClientConnectWithDB > 0 {
+	if resp.Capability&ClientConnectWithDB > 0 {
 		if len(data[pos:]) > 0 {
 			idx := bytes.IndexByte(data[pos:], 0)
 			resp.DB = string(data[pos : pos+idx])
@@ -116,7 +116,7 @@ func ParseHandshakeResponse(data []byte) (*HandshakeResp, error) {
 	}
 
 	// auth plugin
-	if resp.Capability&mysql.ClientPluginAuth > 0 {
+	if resp.Capability&ClientPluginAuth > 0 {
 		idx := bytes.IndexByte(data[pos:], 0)
 		s := pos
 		f := pos + idx
@@ -128,7 +128,7 @@ func ParseHandshakeResponse(data []byte) (*HandshakeResp, error) {
 
 	// attrs
 	var err error
-	if resp.Capability&mysql.ClientConnectAtts > 0 {
+	if resp.Capability&ClientConnectAttrs > 0 {
 		if num, null, off := ParseLengthEncodedInt(data[pos:]); !null {
 			pos += off
 			row := data[pos : pos+int(num)]
@@ -184,11 +184,11 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 	authResp = DumpLengthEncodedInt(authRespBuf[:0], uint64(len(resp.AuthData)))
 	capability := resp.Capability
 	if len(authResp) > 1 {
-		capability |= mysql.ClientPluginAuthLenencClientData
+		capability |= ClientPluginAuthLenencClientData
 	} else {
-		capability &= ^mysql.ClientPluginAuthLenencClientData
+		capability &= ^ClientPluginAuthLenencClientData
 	}
-	if capability&mysql.ClientConnectAtts > 0 {
+	if capability&ClientConnectAttrs > 0 {
 		attrs = dumpAttrs(resp.Attrs)
 		attrBuf = DumpLengthEncodedInt(attrLenBuf[:0], uint64(len(attrs)))
 	}
@@ -197,7 +197,7 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 	data := make([]byte, length)
 	pos := 0
 	// capability [32 bit]
-	DumpUint32(data[:0], capability)
+	DumpUint32(data[:0], capability.Uint32())
 	pos += 4
 	// MaxPacketSize [32 bit]
 	pos += 4
@@ -213,10 +213,10 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 	pos++
 
 	// auth data
-	if capability&mysql.ClientPluginAuthLenencClientData > 0 {
+	if capability&ClientPluginAuthLenencClientData > 0 {
 		pos += copy(data[pos:], authResp)
 		pos += copy(data[pos:], resp.AuthData)
-	} else if capability&mysql.ClientSecureConnection > 0 {
+	} else if capability&ClientSecureConnection > 0 {
 		data[pos] = byte(len(resp.AuthData))
 		pos++
 		pos += copy(data[pos:], resp.AuthData)
@@ -227,21 +227,21 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 	}
 
 	// db [null terminated string]
-	if capability&mysql.ClientConnectWithDB > 0 {
+	if capability&ClientConnectWithDB > 0 {
 		pos += copy(data[pos:], resp.DB)
 		data[pos] = 0x00
 		pos++
 	}
 
 	// auth_plugin [null terminated string]
-	if capability&mysql.ClientPluginAuth > 0 {
+	if capability&ClientPluginAuth > 0 {
 		pos += copy(data[pos:], resp.AuthPlugin)
 		data[pos] = 0x00
 		pos++
 	}
 
 	// attrs
-	if capability&mysql.ClientConnectAtts > 0 {
+	if capability&ClientConnectAttrs > 0 {
 		pos += copy(data[pos:], attrBuf)
 		pos += copy(data[pos:], attrs)
 	}
@@ -337,12 +337,12 @@ func ParseErrorPacket(data []byte) error {
 
 // IsOKPacket returns true if it's an OK packet (but not ResultSet OK).
 func IsOKPacket(data []byte) bool {
-	return data[0] == mysql.OKHeader
+	return data[0] == OKHeader.Byte()
 }
 
 // IsEOFPacket returns true if it's an EOF packet.
 func IsEOFPacket(data []byte) bool {
-	return data[0] == mysql.EOFHeader && len(data) <= 5
+	return data[0] == EOFHeader.Byte() && len(data) <= 5
 }
 
 // IsResultSetOKPacket returns true if it's an OK packet after the result set when CLIENT_DEPRECATE_EOF is enabled.
@@ -350,10 +350,10 @@ func IsEOFPacket(data []byte) bool {
 // See https://mariadb.com/kb/en/result-set-packets/
 func IsResultSetOKPacket(data []byte) bool {
 	// With CLIENT_PROTOCOL_41 enabled, the least length is 7.
-	return data[0] == mysql.EOFHeader && len(data) >= 7 && len(data) < 0xFFFFFF
+	return data[0] == EOFHeader.Byte() && len(data) >= 7 && len(data) < 0xFFFFFF
 }
 
 // IsErrorPacket returns true if it's an error packet.
 func IsErrorPacket(data []byte) bool {
-	return data[0] == mysql.ErrHeader
+	return data[0] == ErrHeader.Byte()
 }

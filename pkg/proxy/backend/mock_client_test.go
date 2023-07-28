@@ -78,7 +78,7 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 		AuthPlugin: mc.authPlugin,
 		Attrs:      mc.attrs,
 		AuthData:   mc.authData,
-		Capability: mc.capability.Uint32(),
+		Capability: mc.capability,
 		Collation:  mc.collation,
 	}
 	pkt = pnet.MakeHandshakeResponse(resp)
