@@ -72,7 +72,7 @@ And then start the TiDB cluster with the config.toml.
 
 ```toml
 proxy:
-    pd-addrs: "127.0.0.1:2379"
+    pd-addrs = "127.0.0.1:2379"
 ```
 
 Where the `pd-addrs` contains the addresses of all PD instances.
