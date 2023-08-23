@@ -71,7 +71,7 @@ And then start the TiDB cluster with the config.toml.
 3. Update the [`proxy.toml`](/conf/proxy.toml) of TiProxy:
 
 ```toml
-proxy:
+[proxy]
     pd-addrs = "127.0.0.1:2379"
 ```
 
