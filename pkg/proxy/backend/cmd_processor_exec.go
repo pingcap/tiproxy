@@ -81,7 +81,7 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 	case mysql.ErrHeader:
 		return cp.handleErrorPacket(response)
 	case mysql.EOFHeader:
-		if cp.capability&mysql.ClientDeprecateEOF == 0 {
+		if cp.capability&pnet.ClientDeprecateEOF == 0 {
 			cp.handleEOFPacket(request, response)
 		} else {
 			cp.handleOKPacket(request, response)
@@ -111,7 +111,7 @@ func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO
 			}
 			return 0, cp.handleErrorPacket(response)
 		}
-		if cp.capability&mysql.ClientDeprecateEOF == 0 {
+		if cp.capability&pnet.ClientDeprecateEOF == 0 {
 			if pnet.IsEOFPacket(response) {
 				return cp.handleEOFPacket(request, response), clientIO.Flush()
 			}
@@ -136,7 +136,7 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 		numColumns := binary.LittleEndian.Uint16(response[5:])
 		numParams := binary.LittleEndian.Uint16(response[7:])
 		expectedPackets := int(numColumns) + int(numParams)
-		if cp.capability&mysql.ClientDeprecateEOF == 0 {
+		if cp.capability&pnet.ClientDeprecateEOF == 0 {
 			if numColumns > 0 {
 				expectedPackets++
 			}
@@ -235,7 +235,7 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 }
 
 func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
-	if cp.capability&mysql.ClientDeprecateEOF == 0 {
+	if cp.capability&pnet.ClientDeprecateEOF == 0 {
 		var response []byte
 		// read columns
 		for {
