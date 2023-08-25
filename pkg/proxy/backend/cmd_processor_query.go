@@ -69,7 +69,7 @@ func (cp *CmdProcessor) readResultColumns(packetIO *pnet.PacketIO, result *gomys
 
 	for {
 		if fieldIndex == len(result.Fields) {
-			if cp.capability&mysql.ClientDeprecateEOF == 0 {
+			if cp.capability&pnet.ClientDeprecateEOF == 0 {
 				if data, err = packetIO.ReadPacket(); err != nil {
 					return err
 				}
@@ -102,7 +102,7 @@ func (cp *CmdProcessor) readResultRows(packetIO *pnet.PacketIO, result *gomysql.
 		if data, err = packetIO.ReadPacket(); err != nil {
 			return err
 		}
-		if cp.capability&mysql.ClientDeprecateEOF == 0 {
+		if cp.capability&pnet.ClientDeprecateEOF == 0 {
 			if pnet.IsEOFPacket(data) {
 				result.Status = binary.LittleEndian.Uint16(data[3:])
 				break

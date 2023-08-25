@@ -48,7 +48,7 @@ $ make docker
 
 For example, if you use openssl:
 
-```
+```shell
 openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
   -keyout key.pem -out cert.pem -subj "/CN=example.com"
 ```
@@ -68,11 +68,11 @@ Where the `session-token-signing-cert` and `session-token-signing-key` are the p
 
 And then start the TiDB cluster with the config.toml.
 
-3. Update the [`proxy.yaml`](/conf/proxy.yaml) of TiProxy:
+3. Update the [`proxy.toml`](/conf/proxy.toml) of TiProxy:
 
-```yaml
-proxy:
-    pd-addrs: "127.0.0.1:2379"
+```toml
+[proxy]
+    pd-addrs = "127.0.0.1:2379"
 ```
 
 Where the `pd-addrs` contains the addresses of all PD instances.
@@ -80,13 +80,13 @@ Where the `pd-addrs` contains the addresses of all PD instances.
 And then start TiProxy:
 
 ```shell
-$ bin/tiproxy --config=conf/proxy.yaml
+bin/tiproxy --config=conf/proxy.toml
 ```
 
 4. Connect to TiProxy with your client. The default port is 6000:
 
 ```shell
-$ mysql -h127.0.0.1 -uroot -P6000
+mysql -h127.0.0.1 -uroot -P6000
 ```
 
 ### Run in k8s

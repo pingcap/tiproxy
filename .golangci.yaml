@@ -22,6 +22,10 @@ issues:
       linters:
         - gosec
       text: "G402:"
+    - path: pkg/proxy/net/auth.go
+      linters:
+        - gosec
+      text: "G101:"
 
 linters:
   enable:

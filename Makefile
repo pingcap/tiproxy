@@ -27,7 +27,7 @@ endif
 IMAGE_TAG ?= latest
 EXECUTABLE_TARGETS := $(patsubst cmd/%,cmd_%,$(wildcard cmd/*))
 
-.PHONY: cmd_% test lint docker docker-release golangci-lint gocovmerge
+.PHONY: cmd_% test lint docker docker-release golangci-lint gocovmerge clean
 
 default: cmd
 
@@ -41,7 +41,7 @@ cmd_%:
 	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
 golangci-lint:
-	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.54.1
 
 go-header:
 	GOBIN=$(GOBIN) go install github.com/denis-tingaikin/go-header/cmd/go-header@latest
@@ -78,6 +78,9 @@ test: gocovmerge
 	tail -1 .cover.func
 	rm -f .cover.*
 	go tool cover -html=.cover -o .cover.html
+
+clean:
+	rm -rf bin dist grafonnet-lib
 
 docker:
 	docker build -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell go env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" -f docker/Dockerfile .
