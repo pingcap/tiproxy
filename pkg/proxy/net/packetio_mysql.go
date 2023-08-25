@@ -18,7 +18,7 @@ var (
 
 // WriteInitialHandshake writes an initial handshake as a server.
 // It's used for tenant-aware routing and testing.
-func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, authPlugin string, serverVersion string) error {
+func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, authPlugin string, serverVersion string, connID uint64) error {
 	saltLen := len(salt)
 	if saltLen < 8 {
 		return ErrSaltNotLongEnough
@@ -34,7 +34,7 @@ func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, aut
 	data = append(data, serverVersion...)
 	data = append(data, 0)
 	// connection id
-	data = append(data, byte(ConnID), byte(ConnID>>8), byte(ConnID>>16), byte(ConnID>>24))
+	data = append(data, byte(connID), byte(connID>>8), byte(connID>>16), byte(connID>>24))
 	// auth-plugin-data-part-1
 	data = append(data, salt[0:8]...)
 	// filler [00]

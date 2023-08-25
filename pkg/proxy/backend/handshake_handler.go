@@ -16,6 +16,7 @@ type ConnContextKey string
 
 const (
 	ConnContextKeyTLSState ConnContextKey = "tls-state"
+	ConnContextKeyConnID   ConnContextKey = "conn-id"
 )
 
 type ErrorSource int

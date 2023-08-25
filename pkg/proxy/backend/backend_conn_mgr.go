@@ -142,6 +142,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		redirectResCh:  make(chan *redirectResult, 1),
 		quitSource:     SrcClientQuit,
 	}
+	mgr.SetValue(ConnContextKeyConnID, connectionID)
 	return mgr
 }
 

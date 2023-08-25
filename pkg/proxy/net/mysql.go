@@ -23,7 +23,6 @@ const (
 var (
 	ServerVersion = mysql.ServerVersion
 	Collation     = uint8(mysql.DefaultCollationID)
-	ConnID        = 100
 	Status        = mysql.ServerStatusAutocommit
 )
 
