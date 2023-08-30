@@ -5,10 +5,8 @@ package config
 
 import (
 	"bytes"
-	"crypto/tls"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -109,21 +107,6 @@ type TLSConfig struct {
 
 func (c TLSConfig) HasCert() bool {
 	return !(c.Cert == "" && c.Key == "")
-}
-
-func (c TLSConfig) MinTLSVer() uint16 {
-	switch {
-	case strings.HasSuffix(c.MinTLSVersion, "1.0"):
-		return tls.VersionTLS10
-	case strings.HasSuffix(c.MinTLSVersion, "1.1"):
-		return tls.VersionTLS11
-	case strings.HasSuffix(c.MinTLSVersion, "1.2"):
-		return tls.VersionTLS12
-	case strings.HasSuffix(c.MinTLSVersion, "1.3"):
-		return tls.VersionTLS13
-	default:
-		return tls.VersionTLS12
-	}
 }
 
 func (c TLSConfig) HasCA() bool {
