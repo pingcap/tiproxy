@@ -22,6 +22,7 @@ type proxyConfig struct {
 	sessionToken         string
 	capability           pnet.Capability
 	waitRedirect         bool
+	connectionID         uint64
 }
 
 func newProxyConfig() *proxyConfig {
@@ -50,7 +51,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	mp := &mockProxy{
 		proxyConfig: cfg,
 		logger:      lg.Named("mockProxy"),
-		BackendConnManager: NewBackendConnManager(lg, cfg.handler, 0, &BCConfig{
+		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.connectionID, &BCConfig{
 			CheckBackendInterval: cfg.checkBackendInterval,
 		}),
 	}

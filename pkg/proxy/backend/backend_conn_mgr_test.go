@@ -983,3 +983,22 @@ func TestKeepAlive(t *testing.T) {
 	}
 	ts.runTests(runners)
 }
+
+func TestConnID(t *testing.T) {
+	ids := []uint64{0, 4, 9}
+	for _, id := range ids {
+		ts := newBackendMgrTester(t, func(config *testConfig) {
+			config.proxyConfig.connectionID = id
+		})
+		runners := []runner{{
+			client: func(packetIO *pnet.PacketIO) error {
+				err := ts.mc.authenticate(packetIO)
+				require.Equal(t, ts.mc.connid, id)
+				return err
+			},
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		}}
+		ts.runTests(runners)
+	}
+}
