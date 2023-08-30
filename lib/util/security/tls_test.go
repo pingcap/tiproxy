@@ -49,7 +49,6 @@ func TestGetMinTLSVer(t *testing.T) {
 		},
 		{
 			verInt: tls.VersionTLS12,
-			warn:   "Invalid TLS version",
 		},
 	}
 

@@ -250,9 +250,9 @@ func GetMinTLSVer(tlsVerStr string, logger *zap.Logger) uint16 {
 		minTLSVersion = tls.VersionTLS12
 	case strings.HasSuffix(tlsVerStr, "1.3"):
 		minTLSVersion = tls.VersionTLS13
+	case len(tlsVerStr) == 0:
 	default:
 		logger.Warn("Invalid TLS version, using default instead", zap.String("tls-version", tlsVerStr))
-		minTLSVersion = tls.VersionTLS12
 	}
 	if minTLSVersion < tls.VersionTLS12 {
 		logger.Warn("Minimum TLS version allows pre-TLSv1.2 protocols, this is not recommended")
