@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pingcap/TiProxy/lib/config"
@@ -235,4 +236,26 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	tcfg.Certificates = append(tcfg.Certificates, cert)
 
 	return tcfg, nil
+}
+
+// GetMinTLSVer parses the min tls version from config and reports warning if necessary.
+func GetMinTLSVer(tlsVerStr string, logger *zap.Logger) uint16 {
+	var minTLSVersion uint16 = tls.VersionTLS12
+	switch {
+	case strings.HasSuffix(tlsVerStr, "1.0"):
+		minTLSVersion = tls.VersionTLS10
+	case strings.HasSuffix(tlsVerStr, "1.1"):
+		minTLSVersion = tls.VersionTLS11
+	case strings.HasSuffix(tlsVerStr, "1.2"):
+		minTLSVersion = tls.VersionTLS12
+	case strings.HasSuffix(tlsVerStr, "1.3"):
+		minTLSVersion = tls.VersionTLS13
+	case len(tlsVerStr) == 0:
+	default:
+		logger.Warn("Invalid TLS version, using default instead", zap.String("tls-version", tlsVerStr))
+	}
+	if minTLSVersion < tls.VersionTLS12 {
+		logger.Warn("Minimum TLS version allows pre-TLSv1.2 protocols, this is not recommended")
+	}
+	return minTLSVersion
 }
