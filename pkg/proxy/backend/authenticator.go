@@ -284,7 +284,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 		err = pnet.ParseErrorPacket(serverPkt)
 		return
 	}
-	capability, _ = pnet.ParseInitialHandshake(serverPkt)
+	capability, _, _ = pnet.ParseInitialHandshake(serverPkt)
 	return
 }
 

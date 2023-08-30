@@ -45,7 +45,8 @@ func newClientConfig() *clientConfig {
 }
 
 type mockClient struct {
-	err error
+	connid uint64
+	err    error
 	// Inputs that assigned by the test and will be sent to the server.
 	*clientConfig
 	// Outputs that received from the server and will be checked by the test.
@@ -68,9 +69,10 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 	if err != nil {
 		return err
 	}
-	serverCap, serverVersion := pnet.ParseInitialHandshake(pkt)
+	serverCap, connid, serverVersion := pnet.ParseInitialHandshake(pkt)
 	mc.capability = mc.capability & serverCap
 	mc.serverVersion = serverVersion
+	mc.connid = connid
 
 	resp := &pnet.HandshakeResp{
 		User:       mc.username,

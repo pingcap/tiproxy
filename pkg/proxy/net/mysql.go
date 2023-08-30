@@ -27,11 +27,11 @@ var (
 )
 
 // ParseInitialHandshake parses the initial handshake received from the server.
-func ParseInitialHandshake(data []byte) (Capability, string) {
+func ParseInitialHandshake(data []byte) (Capability, uint64, string) {
 	// skip min version
 	serverVersion := string(data[1 : 1+bytes.IndexByte(data[1:], 0)])
 	pos := 1 + len(serverVersion) + 1
-	// skip connection id
+	connid := uint32(binary.LittleEndian.Uint32(data[pos : pos+4]))
 	// skip salt first part
 	// skip filter
 	pos += 4 + 8 + 1
@@ -51,7 +51,7 @@ func ParseInitialHandshake(data []byte) (Capability, string) {
 		// skip salt second part
 		// skip auth plugin
 	}
-	return Capability(capability), serverVersion
+	return Capability(capability), uint64(connid), serverVersion
 }
 
 // HandshakeResp indicates the response read from the client.
