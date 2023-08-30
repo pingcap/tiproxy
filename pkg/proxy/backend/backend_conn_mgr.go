@@ -104,6 +104,7 @@ type BackendConnManager struct {
 	cmdProcessor   *CmdProcessor
 	eventReceiver  unsafe.Pointer
 	config         *BCConfig
+	ologger        *zap.Logger
 	logger         *zap.Logger
 	// It will be set to nil after migration.
 	redirectInfo atomic.Pointer[signalRedirect]
@@ -118,6 +119,7 @@ type BackendConnManager struct {
 	backendIO        atomic.Pointer[pnet.PacketIO]
 	backendTLS       *tls.Config
 	handshakeHandler HandshakeHandler
+	loggerFields     []zap.Field
 	ctxmap           sync.Map
 	connectionID     uint64
 	quitSource       ErrorSource
@@ -127,6 +129,7 @@ type BackendConnManager struct {
 func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler, connectionID uint64, config *BCConfig) *BackendConnManager {
 	config.check()
 	mgr := &BackendConnManager{
+		ologger:          logger,
 		logger:           logger,
 		config:           config,
 		connectionID:     connectionID,
@@ -160,13 +163,14 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.backendTLS = backendTLSConfig
 
 	mgr.clientIO = clientIO
-	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
+	beconnid, err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	if err != nil {
 		mgr.setQuitSourceByErr(err)
 		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
 		clientIO.WriteUserError(err)
 		return err
 	}
+	mgr.UpdateLogger(zap.Uint64("beconnid", beconnid))
 	mgr.resetQuitSource()
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
 
@@ -445,7 +449,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 	newBackendIO := pnet.NewPacketIO(cn, mgr.logger, pnet.WithRemoteAddr(rs.to, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn))
 
-	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
+	var beconnid uint64
+	if beconnid, rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)
 	} else {
 		mgr.setQuitSourceByErr(rs.err)
@@ -460,6 +465,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	if ignoredErr := backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
+	mgr.UpdateLogger(zap.Uint64("beconnid", beconnid))
 	mgr.backendIO.Store(newBackendIO)
 	mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
@@ -693,5 +699,18 @@ func (mgr *BackendConnManager) resetQuitSource() {
 }
 
 func (mgr *BackendConnManager) UpdateLogger(fields ...zap.Field) {
-	mgr.logger = mgr.logger.With(fields...)
+	for _, f := range fields {
+		found := false
+		for i, v := range mgr.loggerFields {
+			if v.Key == f.Key {
+				mgr.loggerFields[i] = f
+				found = true
+				break
+			}
+		}
+		if !found {
+			mgr.loggerFields = append(mgr.loggerFields, f)
+		}
+	}
+	mgr.logger = mgr.ologger.With(mgr.loggerFields...)
 }

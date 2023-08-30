@@ -60,7 +60,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	if err := mp.authenticator.handshakeFirstTime(mp.logger, mp, clientIO, mp.handshakeHandler, func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
+	if _, err := mp.authenticator.handshakeFirstTime(mp.logger, mp, clientIO, mp.handshakeHandler, func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
 		return backendIO, nil
 	}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
 		return err
@@ -70,7 +70,8 @@ func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) e
 }
 
 func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO *pnet.PacketIO) error {
-	return mp.authenticator.handshakeSecondTime(mp.logger, clientIO, backendIO, mp.backendTLSConfig, mp.sessionToken)
+	_, err := mp.authenticator.handshakeSecondTime(mp.logger, clientIO, backendIO, mp.backendTLSConfig, mp.sessionToken)
+	return err
 }
 
 func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {
