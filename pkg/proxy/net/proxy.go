@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 )
 
 func (p *PacketIO) parseProxyV2() (*proxyprotocol.Proxy, error) {

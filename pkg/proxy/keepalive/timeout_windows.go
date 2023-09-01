@@ -1,4 +1,5 @@
 //go:build windows
+
 // Copyright 2023 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -7,7 +8,7 @@ package keepalive
 import (
 	"syscall"
 
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 )
 
 const _TCP_MAXRT = 5

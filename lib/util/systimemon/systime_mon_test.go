@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/util/logger"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/TiProxy/lib/util/logger"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/lib/util/logger"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
 

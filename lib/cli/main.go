@@ -10,9 +10,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/cmd"
-	"github.com/pingcap/TiProxy/lib/util/security"
+	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/cmd"
+	"github.com/pingcap/tiproxy/lib/util/security"
 	"github.com/spf13/cobra"
 )
 

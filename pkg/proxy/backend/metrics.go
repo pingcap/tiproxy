@@ -6,8 +6,8 @@ package backend
 import (
 	"time"
 
-	"github.com/pingcap/TiProxy/pkg/metrics"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/metrics"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
 func addCmdMetrics(cmd pnet.Command, addr string, startTime time.Time) {

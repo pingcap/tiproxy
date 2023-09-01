@@ -7,8 +7,8 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
 type clientConfig struct {

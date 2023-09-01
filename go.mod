@@ -1,4 +1,4 @@
-module github.com/pingcap/TiProxy
+module github.com/pingcap/tiproxy
 
 go 1.19
 
@@ -10,9 +10,9 @@ require (
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.8.1
 	github.com/go-mysql-org/go-mysql v1.6.0
-	github.com/pingcap/TiProxy/lib v0.0.0-00010101000000-000000000000
 	github.com/pingcap/tidb v1.1.0-beta.0.20230103132820-3ccff46aa3bc
 	github.com/pingcap/tidb/parser v0.0.0-20230103132820-3ccff46aa3bc
+	github.com/pingcap/tiproxy/lib v0.0.0-00010101000000-000000000000
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
 	github.com/siddontang/go v0.0.0-20180604090527-bdc77568d726
@@ -141,4 +141,4 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/pingcap/TiProxy/lib => ./lib
+replace github.com/pingcap/tiproxy/lib => ./lib

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/stretchr/testify/require"
 )
 

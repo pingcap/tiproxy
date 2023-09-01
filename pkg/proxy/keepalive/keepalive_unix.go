@@ -8,7 +8,7 @@ package keepalive
 import (
 	"syscall"
 
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 )
 
 func setKeepalive(fd uintptr, cfg config.KeepAlive) error {

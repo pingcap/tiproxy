@@ -10,7 +10,7 @@ import (
 	"math/rand"
 	"net/http"
 
-	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
 )
 

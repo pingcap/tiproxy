@@ -7,10 +7,10 @@ import (
 	"encoding/binary"
 	"strings"
 
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
 )
 

@@ -4,7 +4,7 @@ builds:
     main: ./cmd/tiproxy
     binary: tiproxy
     ldflags:
-      - -s -w -X github.com/pingcap/TiProxy/pkg/util/versioninfo.TiProxyVersion={{.Version}} -X github.com/pingcap/TiProxy/pkg/util/versioninfo.TiProxyGitHash={{.FullCommit}}
+      - -s -w -X github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyVersion={{.Version}} -X github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyGitHash={{.FullCommit}}
     goos:
       - linux
       - darwin
@@ -22,7 +22,7 @@ builds:
     main: ./cmd/tiproxyctl
     binary: tiproxyctl
     ldflags:
-      - -s -w -X github.com/pingcap/TiProxy/pkg/util/versioninfo.TiProxyVersion={{.Version}} -X github.com/pingcap/TiProxy/pkg/util/versioninfo.TiProxyGitHash={{.FullCommit}}
+      - -s -w -X github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyVersion={{.Version}} -X github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyGitHash={{.FullCommit}}
     goos:
       - linux
       - darwin

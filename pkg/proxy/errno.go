@@ -3,7 +3,7 @@
 
 package proxy
 
-import "github.com/pingcap/TiProxy/lib/util/errors"
+import "github.com/pingcap/tiproxy/lib/util/errors"
 
 var (
 	ErrCloseServer = errors.New("failed to close sqlserver")

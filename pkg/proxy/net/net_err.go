@@ -7,7 +7,7 @@ import (
 	"io"
 	"syscall"
 
-	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
 // IsDisconnectError returns whether the error is caused by peer disconnection.
