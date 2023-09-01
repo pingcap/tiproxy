@@ -8,9 +8,9 @@ import (
 	"crypto/tls"
 	"net"
 
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/pkg/proxy/backend"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/proxy/backend"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
 

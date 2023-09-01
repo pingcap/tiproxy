@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/util/systimemon"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/lib/util/systimemon"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/push"

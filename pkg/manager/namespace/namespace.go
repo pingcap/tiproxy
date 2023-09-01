@@ -7,7 +7,7 @@
 package namespace
 
 import (
-	"github.com/pingcap/TiProxy/pkg/manager/router"
+	"github.com/pingcap/tiproxy/pkg/manager/router"
 )
 
 type Namespace struct {

@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/lib/util/security"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
-	"github.com/pingcap/TiProxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/security"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"go.uber.org/zap"
 )
 

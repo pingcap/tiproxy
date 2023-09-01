@@ -4,7 +4,7 @@
 package backend
 
 import (
-	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 	"path"
 	"testing"
 
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )

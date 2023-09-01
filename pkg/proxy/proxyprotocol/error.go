@@ -3,7 +3,7 @@
 
 package proxyprotocol
 
-import "github.com/pingcap/TiProxy/lib/util/errors"
+import "github.com/pingcap/tiproxy/lib/util/errors"
 
 var (
 	ErrAddressFamilyMismatch = errors.New("address family between source and target mismatched")

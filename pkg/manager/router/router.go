@@ -7,7 +7,7 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
-	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
 var (

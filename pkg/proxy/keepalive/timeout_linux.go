@@ -8,7 +8,7 @@ package keepalive
 import (
 	"syscall"
 
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 )
 
 const _TCP_USER_TIMEOUT = 0x12

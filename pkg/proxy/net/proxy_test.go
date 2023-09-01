@@ -9,7 +9,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
+	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	"github.com/stretchr/testify/require"
 )
 

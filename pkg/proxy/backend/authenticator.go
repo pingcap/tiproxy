@@ -11,11 +11,11 @@ import (
 	"net"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
-	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tidb/util/hack"
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	"go.uber.org/zap"
 )
 

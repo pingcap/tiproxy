@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
 )
 

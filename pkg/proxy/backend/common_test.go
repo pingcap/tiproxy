@@ -8,10 +8,10 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pingcap/TiProxy/lib/util/logger"
-	"github.com/pingcap/TiProxy/lib/util/security"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/lib/util/security"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 )
 

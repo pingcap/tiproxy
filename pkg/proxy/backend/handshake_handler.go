@@ -4,10 +4,10 @@
 package backend
 
 import (
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/pkg/manager/namespace"
-	"github.com/pingcap/TiProxy/pkg/manager/router"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/manager/namespace"
+	"github.com/pingcap/tiproxy/pkg/manager/router"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
 

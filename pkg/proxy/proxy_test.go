@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/logger"
-	"github.com/pingcap/TiProxy/pkg/proxy/backend"
-	"github.com/pingcap/TiProxy/pkg/proxy/client"
+	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/proxy/backend"
+	"github.com/pingcap/tiproxy/pkg/proxy/client"
 	"github.com/stretchr/testify/require"
 )
 

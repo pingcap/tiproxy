@@ -8,7 +8,7 @@ import (
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 )
 
 func (h *HTTPServer) DebugHealth(c *gin.Context) {

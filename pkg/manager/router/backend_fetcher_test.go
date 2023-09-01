@@ -7,9 +7,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pingcap/TiProxy/lib/util/logger"
-	"github.com/pingcap/TiProxy/pkg/manager/infosync"
 	tidbinfo "github.com/pingcap/tidb/domain/infosync"
+	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/stretchr/testify/require"
 )
 

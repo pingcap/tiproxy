@@ -6,7 +6,7 @@
 package keepalive
 
 import (
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 )
 
 func setTimeout(fd uintptr, cfg config.KeepAlive) error {

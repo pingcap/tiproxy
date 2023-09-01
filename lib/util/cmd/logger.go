@@ -6,7 +6,7 @@ package cmd
 import (
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

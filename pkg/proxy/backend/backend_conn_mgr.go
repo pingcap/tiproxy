@@ -19,12 +19,12 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
-	"github.com/pingcap/TiProxy/pkg/manager/router"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/manager/router"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )

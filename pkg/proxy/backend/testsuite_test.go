@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pingcap/TiProxy/pkg/manager/router"
-	pnet "github.com/pingcap/TiProxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/manager/router"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 )
 

@@ -7,7 +7,7 @@ import (
 	"crypto/tls"
 	"testing"
 
-	"github.com/pingcap/TiProxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 )
 

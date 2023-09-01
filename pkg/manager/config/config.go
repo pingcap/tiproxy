@@ -11,7 +11,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/fsnotify/fsnotify"
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 	"go.uber.org/zap"
 )
 

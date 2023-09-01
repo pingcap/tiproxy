@@ -7,9 +7,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/retry"
-	"github.com/pingcap/TiProxy/pkg/manager/infosync"
+	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/retry"
+	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"go.uber.org/zap"
 )
 

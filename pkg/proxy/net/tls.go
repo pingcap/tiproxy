@@ -7,7 +7,7 @@ import (
 	"bufio"
 	"crypto/tls"
 
-	"github.com/pingcap/TiProxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
 func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error) {

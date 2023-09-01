@@ -7,9 +7,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/cmd"
-	"github.com/pingcap/TiProxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/cmd"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

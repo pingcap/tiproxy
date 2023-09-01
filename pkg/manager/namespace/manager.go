@@ -12,9 +12,9 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/pingcap/TiProxy/lib/config"
-	"github.com/pingcap/TiProxy/lib/util/errors"
-	"github.com/pingcap/TiProxy/pkg/manager/router"
+	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/manager/router"
 	"go.uber.org/zap"
 )
 

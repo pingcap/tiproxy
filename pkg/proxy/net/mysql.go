@@ -10,8 +10,8 @@ import (
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/go-mysql-org/go-mysql/packet"
-	"github.com/pingcap/TiProxy/lib/util/errors"
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/siddontang/go/hack"
 )
 

@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/pingcap/TiProxy/lib/cli"
-	"github.com/pingcap/TiProxy/lib/util/cmd"
-	"github.com/pingcap/TiProxy/pkg/util/versioninfo"
+	"github.com/pingcap/tiproxy/lib/cli"
+	"github.com/pingcap/tiproxy/lib/util/cmd"
+	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 )
 
 func main() {

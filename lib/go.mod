@@ -1,4 +1,4 @@
-module github.com/pingcap/TiProxy/lib
+module github.com/pingcap/tiproxy/lib
 
 go 1.18
 

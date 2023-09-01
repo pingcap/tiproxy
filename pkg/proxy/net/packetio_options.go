@@ -6,7 +6,7 @@ package net
 import (
 	"net"
 
-	"github.com/pingcap/TiProxy/pkg/proxy/proxyprotocol"
+	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 )
 
 type PacketIOption = func(*PacketIO)

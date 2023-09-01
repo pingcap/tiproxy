@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/pingcap/TiProxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/spf13/cobra"
 )
 

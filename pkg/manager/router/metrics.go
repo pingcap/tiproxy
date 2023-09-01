@@ -6,7 +6,7 @@ package router
 import (
 	"time"
 
-	"github.com/pingcap/TiProxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 )
 
 func updateBackendStatusMetrics(addr string, prevStatus, curStatus BackendStatus) {
