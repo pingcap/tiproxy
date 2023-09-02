@@ -5,6 +5,8 @@ package versioninfo
 
 // These variables will be overwritten by Makefile.
 var (
-	TiProxyGitHash = "None"
-	TiProxyVersion = "None"
+	TiProxyVersion   = "None"
+	TiProxyGitBranch = "None"
+	TiProxyGitHash   = "None"
+	TiProxyBuildTS   = "None"
 )
