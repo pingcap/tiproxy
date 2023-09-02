@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"runtime"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -20,6 +21,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sctx"
 	"github.com/pingcap/tiproxy/pkg/server/api"
+	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
@@ -59,6 +61,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 	srv.LoggerManager.Init(srv.ConfigManager.WatchConfig())
+	printInfo(lg)
 
 	// setup config manager
 	if err = srv.ConfigManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, &sctx.Overlay); err != nil {
@@ -147,6 +150,19 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	ready.Toggle()
 	return
+}
+
+func printInfo(lg *zap.Logger) {
+	fields := []zap.Field{
+		zap.String("Release Version", versioninfo.TiProxyVersion),
+		zap.String("Git Commit Hash", versioninfo.TiProxyGitHash),
+		zap.String("Git Branch", versioninfo.TiProxyGitBranch),
+		zap.String("UTC Build Time", versioninfo.TiProxyBuildTS),
+		zap.String("GoVersion", versioninfo.BuildVersion),
+		zap.String("OS", runtime.GOOS),
+		zap.String("Arch", runtime.GOARCH),
+	}
+	lg.Info("Welcome to TiProxy.", fields...)
 }
 
 func (s *Server) Close() error {

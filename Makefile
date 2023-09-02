@@ -14,13 +14,19 @@
 # limitations under the License.
 
 GOBIN := $(shell pwd)/bin
-VERSION ?= $(shell git rev-parse --abbrev-ref HEAD)
+VERSION ?= $(shell git describe --tags --dirty --always)
+BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 COMMIT ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)
 DEBUG ?=
 DOCKERPREFIX ?=
 BUILD_TAGS ?=
 LDFLAGS ?=
-BUILDFLAGS ?= -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS) -X github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyVersion=$(VERSION) -X github.com/pingcap/TiProxy/pkg/util/versioninfo.TiProxyGitHash=$(COMMIT)' -tags '$(BUILD_TAGS)'
+LDFLAGS += -X "github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyVersion=$(VERSION)"
+LDFLAGS += -X "github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyGitBranch=$(BRANCH)"
+LDFLAGS += -X "github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyGitHash=$(COMMIT)"
+LDFLAGS += -X "github.com/pingcap/tiproxy/pkg/util/versioninfo.TiProxyBuildTS=$(shell date -u '+%Y-%m-%d %H:%M:%S')"
+
+BUILDFLAGS ?= -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags '$(BUILD_TAGS)'
 ifneq ("$(DEBUG)", "")
 	BUILDFLAGS += -race
 endif
