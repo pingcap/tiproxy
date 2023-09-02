@@ -158,7 +158,7 @@ func printInfo(lg *zap.Logger) {
 		zap.String("Git Commit Hash", versioninfo.TiProxyGitHash),
 		zap.String("Git Branch", versioninfo.TiProxyGitBranch),
 		zap.String("UTC Build Time", versioninfo.TiProxyBuildTS),
-		zap.String("GoVersion", versioninfo.BuildVersion),
+		zap.String("GoVersion", runtime.Version()),
 		zap.String("OS", runtime.GOOS),
 		zap.String("Arch", runtime.GOARCH),
 	}
