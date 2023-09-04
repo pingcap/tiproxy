@@ -7,8 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
@@ -74,7 +73,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	}
 	// upgrade to TLS
 	capability := binary.LittleEndian.Uint16(clientPkt[:2])
-	sslEnabled := uint32(capability)&mysql.ClientSSL > 0 && mb.capability&pnet.ClientSSL > 0
+	sslEnabled := pnet.Capability(capability)&pnet.ClientSSL > 0 && mb.capability&pnet.ClientSSL > 0
 	if sslEnabled {
 		if _, err = packetIO.ServerTLSHandshake(mb.tlsConfig); err != nil {
 			return err
@@ -98,7 +97,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 }
 
 func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.HandshakeResp) error {
-	if resp.AuthPlugin != mysql.AuthTiDBSessionToken {
+	if resp.AuthPlugin != pnet.AuthTiDBSessionToken {
 		var err error
 		if err = packetIO.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
 			return err
@@ -107,7 +106,7 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.Handsh
 			return err
 		}
 		switch mb.authPlugin {
-		case mysql.AuthCachingSha2Password:
+		case pnet.AuthCachingSha2Password:
 			if err = packetIO.WriteShaCommand(); err != nil {
 				return err
 			}
@@ -121,7 +120,7 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.Handsh
 			return err
 		}
 	} else {
-		if err := packetIO.WriteErrPacket(mysql.ErrAccessDenied); err != nil {
+		if err := packetIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_ACCESS_DENIED_ERROR)); err != nil {
 			return err
 		}
 	}
@@ -150,7 +149,7 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeOK:
 		return mb.respondOK(packetIO)
 	case responseTypeErr:
-		return packetIO.WriteErrPacket(mysql.ErrUnknown)
+		return packetIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR))
 	case responseTypeResultSet:
 		if pnet.Command(pkt[0]) == pnet.ComQuery && string(pkt[1:]) == sqlQueryState {
 			return mb.respondSessionStates(packetIO)
@@ -179,16 +178,16 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeNone:
 		return nil
 	}
-	return packetIO.WriteErrPacket(mysql.ErrUnknown)
+	return packetIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR))
 }
 
 func (mb *mockBackend) respondOK(packetIO *pnet.PacketIO) error {
 	for i := 0; i < mb.stmtNum; i++ {
 		status := mb.status
 		if i < mb.stmtNum-1 {
-			status |= mysql.ServerMoreResultsExists
+			status |= mysql.SERVER_MORE_RESULTS_EXISTS
 		} else {
-			status &= ^mysql.ServerMoreResultsExists
+			status &= ^mysql.SERVER_MORE_RESULTS_EXISTS
 		}
 		if err := packetIO.WriteOKPacket(status, pnet.OKHeader); err != nil {
 			return err
@@ -242,16 +241,16 @@ func (mb *mockBackend) respondResultSet(packetIO *pnet.PacketIO) error {
 }
 
 func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, values [][]any) error {
-	rs, err := gomysql.BuildSimpleTextResultset(names, values)
+	rs, err := mysql.BuildSimpleTextResultset(names, values)
 	if err != nil {
 		return err
 	}
 	for i := 0; i < mb.stmtNum; i++ {
 		status := mb.status
 		if i < mb.stmtNum-1 {
-			status |= mysql.ServerMoreResultsExists
+			status |= mysql.SERVER_MORE_RESULTS_EXISTS
 		} else {
-			status &= ^mysql.ServerMoreResultsExists
+			status &= ^mysql.SERVER_MORE_RESULTS_EXISTS
 		}
 		data := pnet.DumpLengthEncodedInt(nil, uint64(len(names)))
 		if err := packetIO.WritePacket(data, false); err != nil {
@@ -263,7 +262,7 @@ func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, v
 			}
 		}
 
-		if status&mysql.ServerStatusCursorExists == 0 {
+		if status&mysql.SERVER_STATUS_CURSOR_EXISTS == 0 {
 			if mb.capability&pnet.ClientDeprecateEOF == 0 {
 				if err := packetIO.WriteEOFPacket(status); err != nil {
 					return err
@@ -291,12 +290,12 @@ func (mb *mockBackend) respondLoadFile(packetIO *pnet.PacketIO) error {
 	for i := 0; i < mb.stmtNum; i++ {
 		status := mb.status
 		if i < mb.stmtNum-1 {
-			status |= mysql.ServerMoreResultsExists
+			status |= mysql.SERVER_MORE_RESULTS_EXISTS
 		} else {
-			status &= ^mysql.ServerMoreResultsExists
+			status &= ^mysql.SERVER_MORE_RESULTS_EXISTS
 		}
 		data := make([]byte, 0, 1+len(mockCmdStr))
-		data = append(data, mysql.LocalInFileHeader)
+		data = append(data, pnet.LocalInFileHeader.Byte())
 		data = append(data, []byte(mockCmdStr)...)
 		if err := packetIO.WritePacket(data, true); err != nil {
 			return err
@@ -321,7 +320,7 @@ func (mb *mockBackend) respondLoadFile(packetIO *pnet.PacketIO) error {
 
 // respond to Prepare
 func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
-	data := []byte{mysql.OKHeader}
+	data := []byte{pnet.OKHeader.Byte()}
 	data = pnet.DumpUint32(data, uint32(mockCmdInt))
 	data = pnet.DumpUint16(data, uint16(mb.columns))
 	data = pnet.DumpUint16(data, uint16(mb.params))

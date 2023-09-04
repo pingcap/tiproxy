@@ -11,7 +11,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/util/hack"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -73,7 +73,7 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 }
 
 func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapability pnet.Capability) error {
-	requiredBackendCaps := defRequiredBackendCaps & pnet.Capability(auth.capability)
+	requiredBackendCaps := defRequiredBackendCaps & auth.capability
 	if auth.requireBackendTLS {
 		requiredBackendCaps |= pnet.ClientSSL
 	}
@@ -100,7 +100,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 
 	cid, _ := cctx.Value(ConnContextKeyConnID).(uint64)
-	if err := clientIO.WriteInitialHandshake(proxyCapability, auth.salt, mysql.AuthNativePassword, handshakeHandler.GetServerVersion(), cid); err != nil {
+	if err := clientIO.WriteInitialHandshake(proxyCapability, auth.salt, pnet.AuthNativePassword, handshakeHandler.GetServerVersion(), cid); err != nil {
 		return err
 	}
 	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
@@ -126,7 +126,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	}
 	if commonCaps := frontendCapability & requiredFrontendCaps; commonCaps != requiredFrontendCaps {
 		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredFrontendCaps))
-		if writeErr := clientIO.WriteErrPacket(mysql.ErrNotSupportedAuthMode); writeErr != nil {
+		if writeErr := clientIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_NOT_SUPPORTED_AUTH_MODE)); writeErr != nil {
 			return writeErr
 		}
 		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from frontend", requiredFrontendCaps&^commonCaps)
@@ -220,14 +220,14 @@ loop:
 			return err
 		}
 		switch serverPkt[0] {
-		case mysql.OKHeader:
+		case pnet.OKHeader.Byte():
 			return nil
-		case mysql.ErrHeader:
+		case pnet.ErrHeader.Byte():
 			return pnet.ParseErrorPacket(serverPkt)
 		default: // mysql.AuthSwitchRequest, ShaCommand
-			if serverPkt[0] == mysql.AuthSwitchRequest {
+			if serverPkt[0] == pnet.AuthSwitchHeader.Byte() {
 				pluginName = string(serverPkt[1 : bytes.IndexByte(serverPkt[1:], 0)+1])
-			} else if serverPkt[0] == 1 && pluginName == mysql.AuthCachingSha2Password && len(serverPkt) == 2 && serverPkt[1] == 3 {
+			} else if serverPkt[0] == 1 && pluginName == pnet.AuthCachingSha2Password && len(serverPkt) == 2 && serverPkt[1] == 3 {
 				// caching_sha2_password fast path
 				continue loop
 			}
@@ -262,7 +262,7 @@ func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, bac
 		return err
 	}
 
-	if err := auth.verifyBackendCaps(logger, pnet.Capability(backendCapability)); err != nil {
+	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
 		return err
 	}
 
@@ -320,7 +320,7 @@ func (auth *Authenticator) writeAuthHandshake(
 		enableTLS = true
 	} else {
 		// When client TLS is disabled, also disables proxy TLS.
-		enableTLS = pnet.Capability(auth.capability)&pnet.ClientSSL != 0 && backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil
+		enableTLS = auth.capability&pnet.ClientSSL != 0 && backendCapability&pnet.ClientSSL != 0 && backendTLSConfig != nil
 	}
 	if enableTLS {
 		resp.Capability |= pnet.ClientSSL
@@ -355,9 +355,9 @@ func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) erro
 	}
 
 	switch data[0] {
-	case mysql.OKHeader:
+	case pnet.OKHeader.Byte():
 		return nil
-	case mysql.ErrHeader:
+	case pnet.ErrHeader.Byte():
 		return pnet.ParseErrorPacket(data)
 	default: // mysql.AuthSwitchRequest, ShaCommand:
 		return errors.Errorf("read unexpected command: %#x", data[0])

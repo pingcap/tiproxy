@@ -5,7 +5,6 @@ package net
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -96,26 +95,14 @@ func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err 
 }
 
 // WriteErrPacket writes an Error packet.
-func (p *PacketIO) WriteErrPacket(code uint16, message ...any) error {
-	data := make([]byte, 0, 9+len(message))
+func (p *PacketIO) WriteErrPacket(merr *mysql.MyError) error {
+	data := make([]byte, 0, 9+len(merr.Message))
 	data = append(data, ErrHeader.Byte())
-	data = append(data, byte(code), byte(code>>8))
-
-	// TODO: ClientProtocol41 must be enabled for state
+	data = append(data, byte(merr.Code), byte(merr.Code>>8))
+	// ClientProtocol41 is always enabled.
 	data = append(data, '#')
-	s, ok := mysql.MySQLState[code]
-	if !ok {
-		s = mysql.DEFAULT_MYSQL_STATE
-	}
-	data = append(data, s...)
-
-	var msg string
-	if format, ok := mysql.MySQLErrName[code]; ok {
-		msg = fmt.Sprintf(format, message...)
-	} else {
-		msg = fmt.Sprint(message...)
-	}
-	data = append(data, msg...)
+	data = append(data, merr.State...)
+	data = append(data, merr.Message...)
 	return p.WritePacket(data, true)
 }
 
@@ -124,7 +111,7 @@ func (p *PacketIO) WriteOKPacket(status uint16, header Header) error {
 	data := make([]byte, 0, 7)
 	data = append(data, header.Byte())
 	data = append(data, 0, 0)
-	// ClientProtocol41 must be enabled.
+	// ClientProtocol41 is always enabled.
 	data = DumpUint16(data, status)
 	data = append(data, 0, 0)
 	return p.WritePacket(data, true)
@@ -135,7 +122,7 @@ func (p *PacketIO) WriteEOFPacket(status uint16) error {
 	data := make([]byte, 0, 5)
 	data = append(data, EOFHeader.Byte())
 	data = append(data, 0, 0)
-	// ClientProtocol41 must be enabled.
+	// ClientProtocol41 is always enabled.
 	data = DumpUint16(data, status)
 	return p.WritePacket(data, true)
 }
@@ -149,7 +136,8 @@ func (p *PacketIO) WriteUserError(err error) {
 	if !errors.As(err, &ue) {
 		return
 	}
-	if writeErr := p.WriteErrPacket(mysql.ER_UNKNOWN_ERROR, ue.UserMsg()); writeErr != nil {
+	myErr := mysql.NewError(mysql.ER_UNKNOWN_ERROR, ue.UserMsg())
+	if writeErr := p.WriteErrPacket(myErr); writeErr != nil {
 		p.logger.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
 	}
 }
