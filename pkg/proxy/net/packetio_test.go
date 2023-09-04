@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/security"
@@ -253,6 +254,35 @@ func TestKeepAlive(t *testing.T) {
 			time.Sleep(3*time.Second + 100*time.Millisecond)
 			_, err := srv.ReadPacket()
 			require.NoError(t, err)
+		},
+		1,
+	)
+}
+
+func TestPredefinedPacket(t *testing.T) {
+	testTCPConn(t,
+		func(t *testing.T, cli *PacketIO) {
+			data, err := cli.ReadPacket()
+			require.NoError(t, err)
+			merr := ParseErrorPacket(data).(*mysql.MyError)
+			require.Equal(t, uint16(mysql.ER_UNKNOWN_ERROR), merr.Code)
+			require.Equal(t, "Unknown error", merr.Message)
+
+			data, err = cli.ReadPacket()
+			require.NoError(t, err)
+			merr = ParseErrorPacket(data).(*mysql.MyError)
+			require.Equal(t, uint16(mysql.ER_UNKNOWN_ERROR), merr.Code)
+			require.Equal(t, "test error", merr.Message)
+
+			data, err = cli.ReadPacket()
+			require.NoError(t, err)
+			res := ParseOKPacket(data)
+			require.Equal(t, uint16(100), res.Status)
+		},
+		func(t *testing.T, srv *PacketIO) {
+			require.NoError(t, srv.WriteErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR)))
+			require.NoError(t, srv.WriteErrPacket(mysql.NewError(mysql.ER_UNKNOWN_ERROR, "test error")))
+			require.NoError(t, srv.WriteOKPacket(100, OKHeader))
 		},
 		1,
 	)
