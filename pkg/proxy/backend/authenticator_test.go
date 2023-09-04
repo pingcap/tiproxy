@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/tidb/parser/mysql"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 )
@@ -220,7 +221,7 @@ func TestCustomAuth(t *testing.T) {
 		require.Equal(t, ts.mc.username, inUser)
 		require.Equal(t, reUser, ts.mb.username)
 		require.Equal(t, reAttrs, ts.mb.attrs)
-		require.Equal(t, reCap&pnet.ClientDeprecateEOF, pnet.Capability(ts.mb.capability)&pnet.ClientDeprecateEOF)
+		require.Equal(t, reCap&pnet.ClientDeprecateEOF, ts.mb.capability&pnet.ClientDeprecateEOF)
 	}
 	ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {})
 	checker()
@@ -286,6 +287,53 @@ func TestAuthFail(t *testing.T) {
 		ts, clean := newTestSuite(t, tc, cfg)
 		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
 			require.Equal(t, len(ts.mc.authData), len(ts.mb.authData))
+		})
+		clean()
+	}
+}
+
+func TestRequireBackendTLS(t *testing.T) {
+	tests := []struct {
+		cfg    cfgOverrider
+		errMsg string
+	}{
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.proxyConfig.bcConfig.RequireBackendTLS = true
+				cfg.proxyConfig.backendTLSConfig = nil
+				cfg.backendConfig.capability |= pnet.ClientSSL
+			},
+			errMsg: requireProxyTLSErrMsg,
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.proxyConfig.bcConfig.RequireBackendTLS = true
+				cfg.backendConfig.tlsConfig = nil
+				cfg.backendConfig.capability &= ^pnet.ClientSSL
+			},
+			errMsg: requireTiDBTLSErrMsg,
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.proxyConfig.bcConfig.RequireBackendTLS = false
+				cfg.proxyConfig.backendTLSConfig = nil
+				cfg.backendConfig.tlsConfig = nil
+				cfg.backendConfig.capability &= ^pnet.ClientSSL
+			},
+		},
+	}
+
+	tc := newTCPConnSuite(t)
+	for _, tt := range tests {
+		ts, clean := newTestSuite(t, tc, tt.cfg)
+		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
+			if len(tt.errMsg) > 0 {
+				var userError *pnet.UserError
+				require.True(t, errors.As(ts.mp.err, &userError))
+				require.Equal(t, tt.errMsg, userError.UserMsg())
+			} else {
+				require.NoError(t, ts.mp.err)
+			}
 		})
 		clean()
 	}

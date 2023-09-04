@@ -21,7 +21,6 @@ import (
 
 var (
 	ErrCapabilityNegotiation = errors.New("capability negotiation failed")
-	ErrTLSConfigRequired     = errors.New("require TLS config on TiProxy when require-backend-tls=true")
 )
 
 const unknownAuthPlugin = "auth_unknown_plugin"
@@ -74,17 +73,15 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 
 func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapability pnet.Capability) error {
 	requiredBackendCaps := defRequiredBackendCaps & auth.capability
-	if auth.requireBackendTLS {
-		requiredBackendCaps |= pnet.ClientSSL
-	}
-
 	if commonCaps := backendCapability & requiredBackendCaps; commonCaps != requiredBackendCaps {
 		// The error cannot be sent to the client because the client only expects an initial handshake packet.
 		// The only way is to log it and disconnect.
 		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps^commonCaps))
 		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps^commonCaps)
 	}
-
+	if auth.requireBackendTLS && (backendCapability&pnet.ClientSSL == 0) {
+		return pnet.WrapUserError(errors.New("backend doesn't enable TLS"), requireTiDBTLSErrMsg)
+	}
 	return nil
 }
 
@@ -315,7 +312,7 @@ func (auth *Authenticator) writeAuthHandshake(
 	var enableTLS bool
 	if auth.requireBackendTLS {
 		if backendTLSConfig == nil {
-			return ErrTLSConfigRequired
+			return pnet.WrapUserError(errors.New("tiproxy doesn't enable TLS"), requireProxyTLSErrMsg)
 		}
 		enableTLS = true
 	} else {
