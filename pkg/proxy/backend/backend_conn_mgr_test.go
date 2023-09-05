@@ -784,7 +784,7 @@ func TestOnTraffic(t *testing.T) {
 		0xce,
 	}
 	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.checkBackendInterval = 10 * time.Millisecond
+		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
 		config.proxyConfig.handler.onTraffic = func(cc ConnContext) {
 			require.Equal(t, uint64(inbytes[i]), cc.ClientInBytes())
 			require.Equal(t, uint64(outbytes[i]), cc.ClientOutBytes())
@@ -873,7 +873,7 @@ func TestGetBackendIO(t *testing.T) {
 
 func TestBackendInactive(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.checkBackendInterval = 10 * time.Millisecond
+		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
 	})
 	runners := []runner{
 		// 1st handshake
@@ -957,7 +957,7 @@ func TestBackendInactive(t *testing.T) {
 
 func TestKeepAlive(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.checkBackendInterval = 10 * time.Millisecond
+		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
 	})
 	runners := []runner{
 		{

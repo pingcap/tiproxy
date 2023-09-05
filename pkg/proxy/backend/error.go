@@ -8,10 +8,12 @@ import (
 )
 
 const (
-	connectErrMsg    = "No available TiDB instances, please check TiDB cluster"
-	parsePktErrMsg   = "TiProxy fails to parse the packet, please contact PingCAP"
-	handshakeErrMsg  = "TiProxy fails to connect to TiDB, please check network"
-	capabilityErrMsg = "Verify TiDB capability failed, please upgrade TiDB"
+	connectErrMsg         = "No available TiDB instances, please check TiDB cluster"
+	parsePktErrMsg        = "TiProxy fails to parse the packet, please contact PingCAP"
+	handshakeErrMsg       = "TiProxy fails to connect to TiDB, please check network"
+	capabilityErrMsg      = "Verify TiDB capability failed, please upgrade TiDB"
+	requireProxyTLSErrMsg = "Require TLS config on TiProxy when require-backend-tls=true"
+	requireTiDBTLSErrMsg  = "Require TLS config on TiDB when require-backend-tls=true"
 )
 
 var (

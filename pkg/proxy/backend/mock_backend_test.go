@@ -91,7 +91,7 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	mb.db = resp.DB
 	mb.authData = resp.AuthData
 	mb.attrs = resp.Attrs
-	mb.capability = pnet.Capability(resp.Capability)
+	mb.capability = resp.Capability
 	// verify password
 	return mb.verifyPassword(packetIO, resp)
 }
