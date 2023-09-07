@@ -24,6 +24,7 @@ type backendConfig struct {
 	stmtNum       int
 	capability    pnet.Capability
 	status        uint16
+	proxyProtocol bool
 	authSucceed   bool
 	abnormalExit  bool
 }
@@ -61,6 +62,9 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	if mb.abnormalExit {
 		return packetIO.Close()
 	}
+	if mb.proxyProtocol {
+		packetIO.ApplyOpts(pnet.WithProxy)
+	}
 	var err error
 	// write initial handshake
 	if err = packetIO.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin, pnet.ServerVersion, 100); err != nil {
@@ -68,8 +72,9 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	}
 	// read the response
 	var clientPkt []byte
+	// Unlike TiProxy, TiDB always sends an error to the client even if EOF.
 	if clientPkt, err = packetIO.ReadPacket(); err != nil {
-		return err
+		return packetIO.WriteErrPacket(mysql.NewError(mysql.ER_UNKNOWN_ERROR, err.Error()))
 	}
 	// upgrade to TLS
 	capability := binary.LittleEndian.Uint16(clientPkt[:2])

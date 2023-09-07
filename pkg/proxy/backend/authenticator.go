@@ -210,12 +210,19 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 
 	// forward other packets
 	pluginName := ""
+	pktIdx := 0
 loop:
 	for {
 		serverPkt, err := forwardMsg(backendIO, clientIO)
 		if err != nil {
+			// tiproxy pp enabled, tidb pp disabled, tls disabled => invalid sequence
+			// tiproxy pp disabled, tidb pp enabled, tls disabled => invalid sequence
+			if pktIdx == 0 && errors.Is(err, pnet.ErrInvalidSequence) {
+				return pnet.WrapUserError(err, checkPPV2ErrMsg)
+			}
 			return err
 		}
+		pktIdx++
 		switch serverPkt[0] {
 		case pnet.OKHeader.Byte():
 			return nil
@@ -334,7 +341,9 @@ func (auth *Authenticator) writeAuthHandshake(
 			tcfg.ServerName = host
 		}
 		if err := backendIO.ClientTLSHandshake(tcfg); err != nil {
-			return err
+			// tiproxy pp enabled, tidb pp disabled, tls enabled => tls handshake encounters unrecognized packet
+			// tiproxy pp disabled, tidb pp enabled, tls enabled => tls handshake encounters unrecognized packet
+			return pnet.WrapUserError(err, checkPPV2ErrMsg)
 		}
 	} else {
 		resp.Capability &= ^pnet.ClientSSL
