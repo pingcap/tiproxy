@@ -338,3 +338,52 @@ func TestRequireBackendTLS(t *testing.T) {
 		clean()
 	}
 }
+
+func TestProxyProtocol(t *testing.T) {
+	cfgs := [][]cfgOverrider{
+		{
+			func(cfg *testConfig) {
+				cfg.proxyConfig.bcConfig.ProxyProtocol = true
+			},
+			func(cfg *testConfig) {
+				cfg.proxyConfig.bcConfig.ProxyProtocol = false
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.backendConfig.proxyProtocol = true
+			},
+			func(cfg *testConfig) {
+				cfg.backendConfig.proxyProtocol = false
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.proxyConfig.bcConfig.RequireBackendTLS = true
+				cfg.backendConfig.capability |= pnet.ClientSSL
+			},
+			func(cfg *testConfig) {
+				cfg.proxyConfig.bcConfig.RequireBackendTLS = false
+				cfg.backendConfig.capability &= ^pnet.ClientSSL
+			},
+		},
+	}
+
+	tc := newTCPConnSuite(t)
+	cfgOverriders := getCfgCombinations(cfgs)
+	for _, cfgs := range cfgOverriders {
+		ts, clean := newTestSuite(t, tc, cfgs...)
+		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
+			// TiDB proxy-protocol can be set unfallbackable, but TiProxy proxy-protocol is always fallbackable.
+			// So when backend enables proxy-protocol and proxy disables it, it still works well.
+			if ts.mp.bcConfig.ProxyProtocol && !ts.mb.proxyProtocol {
+				var userError *pnet.UserError
+				require.True(t, errors.As(ts.mp.err, &userError))
+				require.Equal(t, checkPPV2ErrMsg, userError.UserMsg())
+			} else {
+				require.NoError(t, ts.mp.err)
+			}
+		})
+		clean()
+	}
+}

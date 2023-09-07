@@ -32,7 +32,7 @@ func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *t
 	}
 	pkt := pnet.NewPacketIO(conn, logger, opts...)
 	return &ClientConnection{
-		logger:            logger.With(zap.Bool("proxy-protocol", bcConfig.ProxyProtocol)),
+		logger:            logger,
 		frontendTLSConfig: frontendTLSConfig,
 		backendTLSConfig:  backendTLSConfig,
 		pkt:               pkt,
@@ -58,7 +58,7 @@ clean:
 	switch src {
 	case backend.SrcClientQuit, backend.SrcClientErr, backend.SrcProxyQuit:
 	default:
-		cc.logger.Info(msg, zap.String("backend_addr", cc.connMgr.ServerAddr()), zap.Stringer("quit source", src), zap.Error(err))
+		cc.logger.Warn(msg, zap.String("backend_addr", cc.connMgr.ServerAddr()), zap.Stringer("quit source", src), zap.Error(err))
 	}
 }
 

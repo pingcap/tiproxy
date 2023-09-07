@@ -43,7 +43,7 @@ import (
 )
 
 var (
-	errInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
+	ErrInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
 )
 
 const (
@@ -169,7 +169,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 
 	sequence := header[3]
 	if sequence != p.sequence {
-		return nil, false, errInvalidSequence.GenWithStack("invalid sequence %d != %d", sequence, p.sequence)
+		return nil, false, ErrInvalidSequence.GenWithStack("invalid sequence %d != %d", sequence, p.sequence)
 	}
 	p.sequence++
 	length := int(uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16)
