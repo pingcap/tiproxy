@@ -14,7 +14,7 @@ const (
 	capabilityErrMsg      = "Verify TiDB capability failed, please upgrade TiDB"
 	requireProxyTLSErrMsg = "Require TLS enabled on TiProxy when require-backend-tls=true"
 	requireTiDBTLSErrMsg  = "Require TLS enabled on TiDB when require-backend-tls=true"
-	checkPPV2ErrMsg       = "TiProxy fails to connect to TiDB, please make sure TiDB proxy-protocol is set correctly"
+	checkPPV2ErrMsg       = "TiProxy fails to connect to TiDB, please make sure TiDB proxy-protocol is set correctly. If this error still exists, please contact PingCAP"
 )
 
 var (
