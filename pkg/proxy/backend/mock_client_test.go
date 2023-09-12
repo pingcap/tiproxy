@@ -166,7 +166,15 @@ func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
 }
 
 func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
-	data := pnet.MakeChangeUser(mc.username, mc.dbName, mysql.AuthNativePassword, mc.authData)
+	req := &pnet.ChangeUserReq{
+		User:       mc.username,
+		DB:         mc.dbName,
+		AuthPlugin: mysql.AuthNativePassword,
+		AuthData:   mc.authData,
+		Charset:    []byte{0x11, 0x22},
+		Attrs:      mc.attrs,
+	}
+	data := pnet.MakeChangeUser(req, mc.capability)
 	if err := packetIO.WritePacket(data, true); err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
@@ -132,6 +133,22 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.Handsh
 	return nil
 }
 
+func (mb *mockBackend) changeUser(pkt []byte) error {
+	req, err := pnet.ParseChangeUser(pkt, mb.capability)
+	if err != nil {
+		return err
+	}
+	mb.username = req.User
+	mb.db = req.DB
+	mb.attrs = req.Attrs
+	mb.authData = req.AuthData
+	mb.authPlugin = req.AuthPlugin
+	if mb.authPlugin != unknownAuthPlugin {
+		return errors.New("should use different auth plugin")
+	}
+	return nil
+}
+
 func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
 	if mb.abnormalExit {
 		return packetIO.Close()
@@ -149,6 +166,11 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	pkt, err := packetIO.ReadPacket()
 	if err != nil {
 		return err
+	}
+	if pnet.Command(pkt[0]) == pnet.ComChangeUser {
+		if err := mb.changeUser(pkt); err != nil {
+			return err
+		}
 	}
 	switch mb.respondType {
 	case responseTypeOK:

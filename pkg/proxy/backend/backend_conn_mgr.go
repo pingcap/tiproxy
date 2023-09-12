@@ -19,7 +19,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -130,7 +129,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		logger:           logger,
 		config:           config,
 		connectionID:     connectionID,
-		cmdProcessor:     NewCmdProcessor(),
+		cmdProcessor:     NewCmdProcessor(logger.Named("cp")),
 		handshakeHandler: handshakeHandler,
 		authenticator: &Authenticator{
 			proxyProtocol:     config.ProxyProtocol,
@@ -258,7 +257,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.handshakeHandler.OnTraffic(mgr)
 	}()
 	if len(request) < 1 {
-		err = mysql.ErrMalformPacket
+		err = gomysql.ErrMalformPacket
 		return
 	}
 	cmd := pnet.Command(request[0])
@@ -302,9 +301,9 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 				return
 			}
 		case pnet.ComChangeUser:
-			username, db := pnet.ParseChangeUser(request)
-			mgr.authenticator.changeUser(username, db)
-			return
+			// Critical errors should not happen because CmdProcessor has parsed it already.
+			req, _ := pnet.ParseChangeUser(request, mgr.authenticator.capability)
+			mgr.authenticator.changeUser(req)
 		}
 	}
 	// Even if it meets an MySQL error, it may have changed the status, such as when executing multi-statements.

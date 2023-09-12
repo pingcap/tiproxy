@@ -148,7 +148,11 @@ func (ts *testSuite) changeDB(db string) {
 func (ts *testSuite) changeUser(username, db string) {
 	ts.mc.username = username
 	ts.mc.dbName = db
-	ts.mp.authenticator.changeUser(username, db)
+	req := &pnet.ChangeUserReq{
+		User: username,
+		DB:   db,
+	}
+	ts.mp.authenticator.changeUser(req)
 }
 
 func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendRunner func(*pnet.PacketIO) error,

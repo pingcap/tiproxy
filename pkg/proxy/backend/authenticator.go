@@ -371,10 +371,10 @@ func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) erro
 }
 
 // changeUser is called once the client sends COM_CHANGE_USER.
-func (auth *Authenticator) changeUser(username, db string) {
-	auth.user = username
-	auth.dbname = db
-	// TODO: attrs
+func (auth *Authenticator) changeUser(req *pnet.ChangeUserReq) {
+	auth.user = req.User
+	auth.dbname = req.DB
+	auth.attrs = req.Attrs
 }
 
 // updateCurrentDB is called once the client sends COM_INIT_DB or `use db`.

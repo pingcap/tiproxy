@@ -247,37 +247,99 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 	return data[:pos]
 }
 
-// MakeChangeUser creates the data of COM_CHANGE_USER. It's only used for testing.
-func MakeChangeUser(username, db, authPlugin string, authData []byte) []byte {
-	length := 1 + len(username) + 1 + len(authData) + 1 + len(db) + 1
+type ChangeUserReq struct {
+	Attrs      map[string]string
+	User       string
+	DB         string
+	AuthPlugin string
+	AuthData   []byte
+	Charset    []byte
+}
+
+// MakeChangeUser creates the data of COM_CHANGE_USER.
+func MakeChangeUser(req *ChangeUserReq, capability Capability) []byte {
+	var attrLenBuf [9]byte
+	var attrs, attrBuf []byte
+	length := 1 + len(req.User) + 1 + len(req.AuthData) + 1 + len(req.DB) + 1 + 2 + len(req.AuthPlugin) + 1
+	if capability&ClientConnectAttrs > 0 {
+		attrs = dumpAttrs(req.Attrs)
+		attrBuf = DumpLengthEncodedInt(attrLenBuf[:0], uint64(len(attrs)))
+	}
 	data := make([]byte, 0, length)
 	data = append(data, ComChangeUser.Byte())
-	data = append(data, []byte(username)...)
+	// username
+	data = append(data, hack.Slice(req.User)...)
 	data = append(data, 0x00)
-	data = append(data, byte(len(authData)))
-	data = append(data, authData...)
-	data = append(data, []byte(db)...)
+	// auth data
+	if capability&ClientSecureConnection > 0 {
+		data = append(data, byte(len(req.AuthData)))
+		data = append(data, req.AuthData...)
+	} else {
+		data = append(data, req.AuthData...)
+		data = append(data, 0x00)
+	}
+	// db
+	data = append(data, hack.Slice(req.DB)...)
 	data = append(data, 0x00)
-
-	// character set
-	data = append(data, 0x00)
-	data = append(data, 0x00)
-
-	data = append(data, []byte(authPlugin)...)
-	data = append(data, 0x00)
+	// character set. CLIENT_PROTOCOL_41 is always enabled.
+	data = append(data, req.Charset...)
+	// auth plugin
+	if capability&ClientPluginAuth > 0 {
+		data = append(data, hack.Slice(req.AuthPlugin)...)
+		data = append(data, 0x00)
+	}
+	// attrs
+	if capability&ClientConnectAttrs > 0 {
+		data = append(data, attrBuf...)
+		data = append(data, attrs...)
+	}
 	return data
 }
 
 // ParseChangeUser parses the data of COM_CHANGE_USER.
-func ParseChangeUser(data []byte) (username, db string) {
-	user, data := ParseNullTermString(data[1:])
-	username = string(user)
-	passLen := int(data[0])
-	data = data[passLen+1:]
-	dbName, _ := ParseNullTermString(data)
-	db = string(dbName)
-	// TODO: attrs
-	return
+func ParseChangeUser(data []byte, capability Capability) (*ChangeUserReq, error) {
+	req := new(ChangeUserReq)
+	pos := 1
+	// username
+	req.User = hack.String(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
+	pos += len(req.User) + 1
+	// auth data
+	if capability&ClientSecureConnection > 0 {
+		authLen := int(data[pos])
+		pos++
+		req.AuthData = data[pos : pos+authLen]
+		pos += authLen
+	} else {
+		req.AuthData = data[pos : pos+bytes.IndexByte(data[pos:], 0)]
+		pos += len(req.AuthData) + 1
+	}
+	// db
+	req.DB = hack.String(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
+	pos += len(req.DB) + 1
+	if pos >= len(data) {
+		return req, nil
+	}
+	// character set. CLIENT_PROTOCOL_41 is always enabled.
+	req.Charset = data[pos : pos+2]
+	pos += 2
+	// auth plugin
+	if capability&ClientPluginAuth > 0 {
+		req.AuthPlugin = hack.String(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
+		pos += len(req.AuthPlugin) + 1
+	}
+	// attrs
+	var err error
+	if capability&ClientConnectAttrs > 0 {
+		if num, null, off := ParseLengthEncodedInt(data[pos:]); !null {
+			pos += off
+			row := data[pos : pos+int(num)]
+			req.Attrs, err = parseAttrs(row)
+			if err != nil {
+				err = &errors.Warning{Err: errors.Wrapf(err, "parse attrs failed")}
+			}
+		}
+	}
+	return req, err
 }
 
 // ReadServerVersion only reads server version.
@@ -291,7 +353,7 @@ func ReadServerVersion(conn net.Conn) (string, error) {
 		return "", errors.New("read initial handshake error")
 	}
 	pos := 1
-	version := data[pos : bytes.IndexByte(data[pos:], 0x00)+1]
+	version := data[pos : pos+bytes.IndexByte(data[pos:], 0x00)]
 	return string(version), nil
 }
 

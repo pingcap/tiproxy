@@ -145,6 +145,15 @@ func (ts *backendMgrTester) redirectSucceed4Backend(packetIO *pnet.PacketIO) err
 	return nil
 }
 
+func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ *pnet.PacketIO) error {
+	backend1 := ts.mp.backendIO.Load()
+	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
+	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
+	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
+	require.Equal(ts.t, SrcClientQuit, ts.mp.QuitSource())
+	return nil
+}
+
 func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO *pnet.PacketIO) error {
 	clientIO.ResetSequence()
 	request, err := clientIO.ReadPacket()
@@ -232,15 +241,8 @@ func TestNormalRedirect(t *testing.T) {
 		},
 		// 2nd handshake: redirect immediately after connection
 		{
-			client: nil,
-			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendIO.Load()
-				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
-				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendIO.Load())
-				require.Equal(t, SrcClientQuit, ts.mp.QuitSource())
-				return nil
-			},
+			client:  nil,
+			proxy:   ts.redirectSucceed4Proxy,
 			backend: ts.redirectSucceed4Backend,
 		},
 	}
@@ -309,6 +311,33 @@ func TestRedirectInTxn(t *testing.T) {
 		// start a transaction to make it unredirect-able
 		{
 			client:  ts.mc.request,
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.startTxn4Backend,
+		},
+		// try to redirect but it doesn't redirect
+		{
+			proxy: ts.checkNotRedirected4Proxy,
+		},
+		// CHANGE_USER clears the txn
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComChangeUser
+				return ts.mc.request(packetIO)
+			},
+			proxy: ts.redirectAfterCmd4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				// respond to the client request
+				err := ts.respondWithNoTxn4Backend(packetIO)
+				require.NoError(t, err)
+				return ts.redirectSucceed4Backend(packetIO)
+			},
+		},
+		// start a transaction to make it unredirect-able
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComQuery
+				return ts.mc.request(packetIO)
+			},
 			proxy:   ts.forwardCmd4Proxy,
 			backend: ts.startTxn4Backend,
 		},
@@ -492,14 +521,7 @@ func TestSpecialCmds(t *testing.T) {
 		// 2nd handshake
 		{
 			client: nil,
-			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendIO.Load()
-				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
-				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendIO.Load())
-				require.Equal(t, SrcClientQuit, ts.mp.QuitSource())
-				return nil
-			},
+			proxy:  ts.redirectSucceed4Proxy,
 			backend: func(packetIO *pnet.PacketIO) error {
 				ts.mb.sessionStates = "{\"current-db\":\"session_db\"}"
 				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
@@ -596,14 +618,8 @@ func TestCustomHandshake(t *testing.T) {
 		},
 		// 2nd handshake
 		{
-			client: nil,
-			proxy: func(_, _ *pnet.PacketIO) error {
-				backend1 := ts.mp.backendIO.Load()
-				ts.mp.Redirect(ts.tc.backendListener.Addr().String())
-				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
-				require.NotEqual(t, backend1, ts.mp.backendIO.Load())
-				return nil
-			},
+			client:  nil,
+			proxy:   ts.redirectSucceed4Proxy,
 			backend: ts.redirectSucceed4Backend,
 		},
 		{
@@ -1001,4 +1017,62 @@ func TestConnID(t *testing.T) {
 		}}
 		ts.runTests(runners)
 	}
+}
+
+func TestConnAttrs(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	attr1 := map[string]string{"k1": "v1"}
+	attr2 := map[string]string{"k2": "v2"}
+	runners := []runner{
+		// 1st handshake
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.attrs = attr1
+				return ts.mc.authenticate(packetIO)
+			},
+			proxy: ts.firstHandshake4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				err := ts.handshake4Backend(packetIO)
+				require.NoError(t, err)
+				require.Equal(t, attr1, ts.mb.attrs)
+				return nil
+			},
+		},
+		// 2nd handshake
+		{
+			proxy: ts.redirectSucceed4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				err := ts.redirectSucceed4Backend(packetIO)
+				require.NoError(t, err)
+				require.Equal(t, attr1, ts.mb.attrs)
+				return nil
+			},
+		},
+		// CHANGE_USER updates attrs
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComChangeUser
+				ts.mc.attrs = attr2
+				return ts.mc.request(packetIO)
+			},
+			proxy: ts.forwardCmd4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				err := ts.respondWithNoTxn4Backend(packetIO)
+				require.NoError(t, err)
+				require.Equal(t, attr2, ts.mb.attrs)
+				return nil
+			},
+		},
+		// 2nd handshake
+		{
+			proxy: ts.redirectSucceed4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				err := ts.redirectSucceed4Backend(packetIO)
+				require.NoError(t, err)
+				require.Equal(t, attr2, ts.mb.attrs)
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
 }
