@@ -43,6 +43,6 @@ func TestChangeUserReq(t *testing.T) {
 	capability = 0
 	req1.Attrs = nil
 	b = MakeChangeUser(req1, capability)
-	req2, err = ParseChangeUser(b, capability)
+	_, err = ParseChangeUser(b, capability)
 	require.NoError(t, err)
 }
