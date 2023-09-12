@@ -7,11 +7,13 @@ import (
 	"encoding/binary"
 	"strings"
 
+	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
+	"go.uber.org/zap"
 )
 
 // executeCmd forwards requests and responses between the client and the backend.
@@ -38,13 +40,9 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 
 func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) error {
 	cmd := pnet.Command(request[0])
+	// ComChangeUser is special: we need to modify the packet before forwarding.
 	if cmd != pnet.ComChangeUser {
 		if err := backendIO.WritePacket(request, true); err != nil {
-			return err
-		}
-	} else {
-		user, db := pnet.ParseChangeUser(request)
-		if err := backendIO.WritePacket(pnet.MakeChangeUser(user, db, unknownAuthPlugin, nil), true); err != nil {
 			return err
 		}
 	}
@@ -271,6 +269,23 @@ func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) error {
 }
 
 func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+	req, err := pnet.ParseChangeUser(request, cp.capability)
+	if err != nil {
+		cp.logger.Warn("parse COM_CHANGE_USER packet encounters error", zap.Error(err))
+		var warning *errors.Warning
+		if !errors.As(err, &warning) {
+			return gomysql.ErrMalformPacket
+		}
+	}
+	// The client may use the TiProxy salt to generate the auth data instead of using the TiDB salt,
+	// so we need another switch-auth request to pass the TiDB salt to the client.
+	// See https://github.com/pingcap/tiproxy/issues/127.
+	req.AuthPlugin = unknownAuthPlugin
+	req.AuthData = nil
+	if err := backendIO.WritePacket(pnet.MakeChangeUser(req, cp.capability), true); err != nil {
+		return err
+	}
+
 	for {
 		response, err := forwardOnePacket(clientIO, backendIO, true)
 		if err != nil {

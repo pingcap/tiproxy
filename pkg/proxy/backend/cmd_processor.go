@@ -9,6 +9,7 @@ import (
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/parser/mysql"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"go.uber.org/zap"
 )
 
 const (
@@ -25,12 +26,14 @@ type CmdProcessor struct {
 	capability         pnet.Capability
 	// Only includes in_trans or quit status.
 	serverStatus uint32
+	logger       *zap.Logger
 }
 
-func NewCmdProcessor() *CmdProcessor {
+func NewCmdProcessor(logger *zap.Logger) *CmdProcessor {
 	return &CmdProcessor{
 		serverStatus:       0,
 		preparedStmtStatus: make(map[int]uint32),
+		logger:             logger,
 	}
 }
 
