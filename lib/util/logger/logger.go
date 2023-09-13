@@ -6,6 +6,7 @@ package logger
 import (
 	"bytes"
 	"fmt"
+	"sync"
 	"testing"
 
 	"go.uber.org/zap"
@@ -14,15 +15,20 @@ import (
 
 type testingLog struct {
 	*testing.T
+	sync.Mutex
 	buf bytes.Buffer
 }
 
 func (t *testingLog) Write(b []byte) (int, error) {
+	t.Lock()
+	defer t.Unlock()
 	t.Logf("%s", b)
 	return t.buf.Write(b)
 }
 
 func (t *testingLog) String() string {
+	t.Lock()
+	defer t.Unlock()
 	return t.buf.String()
 }
 

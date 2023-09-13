@@ -4,14 +4,22 @@
 package proxy
 
 import (
+	"context"
+	"database/sql"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/manager/router"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 )
 
@@ -97,4 +105,50 @@ func TestGracefulShutdown(t *testing.T) {
 		t.Fatal("timeout")
 	case <-finish:
 	}
+}
+
+func TestRecoverPanic(t *testing.T) {
+	lg, text := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	err := certManager.Init(&config.Config{}, lg, nil)
+	require.NoError(t, err)
+	server, err := NewSQLServer(lg, config.ProxyServer{
+		Addr: "0.0.0.0:6000",
+	}, certManager, &panicHsHandler{})
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+
+	mdb, err := sql.Open("mysql", "root@tcp(localhost:6000)/test")
+	require.NoError(t, err)
+	// The first connection encounters panic.
+	require.ErrorContains(t, mdb.Ping(), "invalid connection")
+	require.Eventually(t, func() bool {
+		return strings.Contains(text.String(), "panic")
+	}, 3*time.Second, 10*time.Millisecond)
+	// The second connection gets a server error, which means the server is still running.
+	require.ErrorContains(t, mdb.Ping(), "no router")
+	require.NoError(t, mdb.Close())
+	require.NoError(t, server.Close())
+	certManager.Close()
+}
+
+type panicHsHandler struct {
+	backend.DefaultHandshakeHandler
+}
+
+// HandleHandshakeResp only panics for the first connections.
+func (handler *panicHsHandler) HandleHandshakeResp(ctx backend.ConnContext, _ *pnet.HandshakeResp) error {
+	if ctx.Value(backend.ConnContextKeyConnID).(uint64) == 0 {
+		panic("HandleHandshakeResp panic")
+	}
+	return nil
+}
+
+func (handler *panicHsHandler) GetServerVersion() string {
+	return "5.7"
+}
+
+// GetRouter returns an error for the second connection.
+func (handler *panicHsHandler) GetRouter(backend.ConnContext, *pnet.HandshakeResp) (router.Router, error) {
+	return nil, errors.New("no router")
 }
