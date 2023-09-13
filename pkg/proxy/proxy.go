@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util"
 	"go.uber.org/zap"
 )
 
@@ -118,7 +119,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 				}
 
 				s.wg.Run(func() {
-					s.onConn(ctx, conn)
+					util.WithRecovery(func() { s.onConn(ctx, conn) }, nil, s.logger)
 				})
 			}
 		}
