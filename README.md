@@ -10,6 +10,8 @@ TiProxy is forked from [Weir](https://github.com/tidb-incubator/weir).
 
 When a TiDB instance restarts or shuts down, TiProxy migrates backend connections on this instance to other instances. In this way, the clients won't be disconnected.
 
+For more details, please refer to the blog [Achieving Zero-Downtime Upgrades with TiDB](https://www.pingcap.com/blog/achieving-zero-downtime-upgrades-tidb/).
+
 ### Load Balance
 
 TiProxy routes new connections to backends based on their scores to keep load balanced. The score is basically calculated from the connections on each backend.
