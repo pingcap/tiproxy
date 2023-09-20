@@ -62,6 +62,7 @@ type HandshakeResp struct {
 	AuthPlugin string
 	AuthData   []byte
 	Capability Capability
+	ZstdLevel  int
 	Collation  uint8
 }
 
@@ -132,10 +133,18 @@ func ParseHandshakeResponse(data []byte) (*HandshakeResp, error) {
 			pos += off
 			row := data[pos : pos+int(num)]
 			resp.Attrs, err = parseAttrs(row)
+			// Some clients have known bugs, but we should be compatible with them.
+			// E.g. https://bugs.mysql.com/bug.php?id=79612.
 			if err != nil {
 				err = &errors.Warning{Err: errors.Wrapf(err, "parse attrs failed")}
 			}
+			pos += int(num)
 		}
+	}
+
+	// zstd compress level
+	if resp.Capability&ClientZstdCompressionAlgorithm > 0 {
+		resp.ZstdLevel = int(data[pos])
 	}
 	return resp, err
 }
@@ -192,7 +201,7 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 		attrBuf = DumpLengthEncodedInt(attrLenBuf[:0], uint64(len(attrs)))
 	}
 
-	length := 4 + 4 + 1 + 23 + len(resp.User) + 1 + len(authResp) + len(resp.AuthData) + len(resp.DB) + 1 + len(resp.AuthPlugin) + 1 + len(attrBuf) + len(attrs)
+	length := 4 + 4 + 1 + 23 + len(resp.User) + 1 + len(authResp) + len(resp.AuthData) + len(resp.DB) + 1 + len(resp.AuthPlugin) + 1 + len(attrBuf) + len(attrs) + 1
 	data := make([]byte, length)
 	pos := 0
 	// capability [32 bit]
@@ -243,6 +252,12 @@ func MakeHandshakeResponse(resp *HandshakeResp) []byte {
 	if capability&ClientConnectAttrs > 0 {
 		pos += copy(data[pos:], attrBuf)
 		pos += copy(data[pos:], attrs)
+	}
+
+	// compress level
+	if capability&ClientZstdCompressionAlgorithm > 0 {
+		data[pos] = byte(resp.ZstdLevel)
+		pos++
 	}
 	return data[:pos]
 }

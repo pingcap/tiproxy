@@ -37,7 +37,7 @@ func TestProxyParse(t *testing.T) {
 			}
 			b, err := p.ToBytes()
 			require.NoError(t, err)
-			_, err = io.Copy(cli.conn, bytes.NewReader(b))
+			_, err = io.Copy(cli.readWriter, bytes.NewReader(b))
 			require.NoError(t, err)
 			err = cli.WritePacket([]byte("hello"), true)
 			require.NoError(t, err)
