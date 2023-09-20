@@ -26,6 +26,22 @@ The TiProxy also checks health on TiDB instances to ensure they are alive, and m
 
 For more details, see [Design Doc](https://github.com/pingcap/tidb/blob/master/docs/design/2022-07-20-session-manager.md).
 
+## Future Plans
+
+TiProxy's role as a versatile database proxy is continuously evolving to meet the diverse needs of self-hosting users. Here are some of the key expectations that TiProxy is poised to fulfill:
+
+### Tenant Isolation
+
+In a multi-tenant database environment that supports database consolidation, TiProxy offers the ability to route connections based on usernames or client addresses. This ensures the effective isolation of TiDB resources, safeguarding data and performance for different tenants.
+
+### Traffic Management
+
+Sudden traffic spikes can catch any system off guard. TiProxy steps in with features like rate limiting and query refusal in extreme cases, enabling you to better manage and control incoming traffic to TiDB.
+
+### Post-Upgrade Validation
+
+Ensuring the smooth operation of TiDB after an upgrade is crucial. TiProxy can play a vital role in this process by replicating traffic and replaying it on a new TiDB cluster. This comprehensive testing helps verify that the upgraded system works as expected.
+
 ## Build
 
 Build the binary in local:
@@ -140,7 +156,7 @@ spec:
         baseImage: pingcap/tikv
     tiproxy:
         replicas: 1
-        baseImage: {your-image}
+        baseImage: pingcap/tiproxy
 ```
 
 Note that if you have enabled `tlsCluster`, you don't need to set the signing certs, `additionalVolumes` and `additionalVolumeMounts`.
