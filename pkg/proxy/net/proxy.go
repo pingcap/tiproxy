@@ -23,7 +23,7 @@ func (p *PacketIO) EnableProxyServer() {
 
 // Proxy returned parsed proxy header from clients if any.
 func (p *PacketIO) Proxy() *proxyprotocol.Proxy {
-	return p.readWriter.getProxy()
+	return p.readWriter.Proxy()
 }
 
 var _ packetReadWriter = (*proxyReadWriter)(nil)
@@ -128,6 +128,6 @@ func (prw *proxyReadWriter) RemoteAddr() net.Addr {
 	return prw.RemoteAddr()
 }
 
-func (prw *proxyReadWriter) getProxy() *proxyprotocol.Proxy {
+func (prw *proxyReadWriter) Proxy() *proxyprotocol.Proxy {
 	return prw.proxy
 }

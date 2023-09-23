@@ -6,29 +6,24 @@ package net
 import (
 	"bufio"
 	"crypto/tls"
-	"net"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 )
 
-// tlsHandshakeConn is only used for TLS handshake.
+// tlsHandshakeConn is only used as the underlying connection in tls.Conn.
 // TLS handshake must read from the buffered reader because the handshake data may be already buffered in the reader.
 // TLS handshake can not use the buffered writer directly because it assumes the data is always flushed immediately.
-type tlsHandshakeConn struct {
+type tlsInternalConn struct {
 	packetReadWriter
 }
 
-func (br *tlsHandshakeConn) Write(p []byte) (n int, err error) {
-	if n, err = br.packetReadWriter.Write(p); err != nil {
-		return
-	}
-	return n, br.packetReadWriter.Flush()
+func (br *tlsInternalConn) Write(p []byte) (n int, err error) {
+	return br.packetReadWriter.DirectWrite(p)
 }
 
 func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error) {
 	tlsConfig = tlsConfig.Clone()
-	conn := &tlsHandshakeConn{p.readWriter}
+	conn := &tlsInternalConn{p.readWriter}
 	tlsConn := tls.Server(conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(ErrHandshakeTLS, err))
@@ -39,7 +34,7 @@ func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionStat
 
 func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 	tlsConfig = tlsConfig.Clone()
-	conn := &tlsHandshakeConn{p.readWriter}
+	conn := &tlsInternalConn{p.readWriter}
 	tlsConn := tls.Client(conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
 		return errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
@@ -49,39 +44,53 @@ func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 }
 
 func (p *PacketIO) TLSConnectionState() tls.ConnectionState {
-	return p.readWriter.tlsConnectionState()
+	return p.readWriter.TLSConnectionState()
 }
 
 var _ packetReadWriter = (*tlsReadWriter)(nil)
 
 type tlsReadWriter struct {
-	rdbufConn
-	rw packetReadWriter
+	packetReadWriter
+	buf  *bufio.ReadWriter
+	conn *tls.Conn
 }
 
-func newTLSReadWriter(rw packetReadWriter, tlsConn net.Conn) *tlsReadWriter {
+func newTLSReadWriter(rw packetReadWriter, tlsConn *tls.Conn) *tlsReadWriter {
 	// Can not modify rw and reuse it because tlsConn is using rw internally.
-	// So we must create another buffer.
+	// We must create another buffer.
 	buf := bufio.NewReadWriter(bufio.NewReaderSize(tlsConn, defaultReaderSize), bufio.NewWriterSize(tlsConn, defaultWriterSize))
 	return &tlsReadWriter{
-		rdbufConn: rdbufConn{
-			Conn:       tlsConn,
-			ReadWriter: buf,
-			inBytes:    rw.getInBytes(),
-			outBytes:   rw.getOutBytes(),
-		},
-		rw: rw,
+		packetReadWriter: rw,
+		buf:              buf,
+		conn:             tlsConn,
 	}
 }
 
-func (trw *tlsReadWriter) afterRead() {
-	trw.rw.afterRead()
+func (trw *tlsReadWriter) Read(b []byte) (n int, err error) {
+	// inBytes and outBytes are updated internally in trw.packetReadWriter.
+	return trw.buf.Read(b)
 }
 
-func (trw *tlsReadWriter) reset() {
-	trw.rw.reset()
+func (trw *tlsReadWriter) Write(p []byte) (int, error) {
+	return trw.buf.Write(p)
 }
 
-func (trw *tlsReadWriter) getProxy() *proxyprotocol.Proxy {
-	return trw.rw.getProxy()
+func (trw *tlsReadWriter) DirectWrite(p []byte) (int, error) {
+	return trw.conn.Write(p)
+}
+
+func (trw *tlsReadWriter) Peek(n int) ([]byte, error) {
+	return trw.buf.Peek(n)
+}
+
+func (trw *tlsReadWriter) Discard(n int) (int, error) {
+	return trw.buf.Discard(n)
+}
+
+func (trw *tlsReadWriter) Flush() error {
+	return trw.buf.Flush()
+}
+
+func (trw *tlsReadWriter) TLSConnectionState() tls.ConnectionState {
+	return trw.conn.ConnectionState()
 }
