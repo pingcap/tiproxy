@@ -8,7 +8,7 @@ import (
 	"compress/zlib"
 	"io"
 
-	"github.com/klauspost/compress/zstd"
+	"github.com/DataDog/zstd"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
 )
@@ -38,7 +38,7 @@ const (
 	// Packets bigger than maxCompressedSize will be split into multiple compressed packets.
 	// MySQL is 16K for the first packet and the rest for the second, MySQL Connector/J is 16M.
 	// The length itself must fit in the 3 byte field in the header.
-	maxCompressedSize = 1 << 22
+	maxCompressedSize = 1<<24 - 1
 	// minCompressSize is the min uncompressed data size for compressed data.
 	// Packets smaller than minCompressSize won't be compressed.
 	// MySQL and MySQL Connector/J are both 50.
@@ -63,9 +63,9 @@ type compressedReadWriter struct {
 	readBuffer  []byte
 	writeBuffer bytes.Buffer
 	algorithm   CompressAlgorithm
-	zstdLevel   zstd.EncoderLevel
 	logger      *zap.Logger
 	rwStatus    rwStatus
+	zstdLevel   int
 	sequence    uint8
 }
 
@@ -73,7 +73,7 @@ func newCompressedReadWriter(rw packetReadWriter, algorithm CompressAlgorithm, z
 	return &compressedReadWriter{
 		packetReadWriter: rw,
 		algorithm:        algorithm,
-		zstdLevel:        zstd.EncoderLevelFromZstd(zstdLevel),
+		zstdLevel:        zstdLevel,
 		logger:           logger,
 		rwStatus:         rwNone,
 	}
@@ -261,12 +261,11 @@ func (crw *compressedReadWriter) compress(data []byte) ([]byte, error) {
 	var compressWriter io.WriteCloser
 	switch crw.algorithm {
 	case CompressionZlib:
-		compressWriter, err = zlib.NewWriterLevel(&compressedPacket, zlib.HuffmanOnly)
+		if compressWriter, err = zlib.NewWriterLevel(&compressedPacket, zlib.DefaultCompression); err != nil {
+			return nil, errors.WithStack(err)
+		}
 	case CompressionZstd:
-		compressWriter, err = zstd.NewWriter(&compressedPacket, zstd.WithEncoderLevel(crw.zstdLevel))
-	}
-	if err != nil {
-		return nil, errors.WithStack(err)
+		compressWriter = zstd.NewWriterLevel(&compressedPacket, crw.zstdLevel)
 	}
 	if _, err = compressWriter.Write(data); err != nil {
 		return nil, errors.WithStack(err)
@@ -282,17 +281,12 @@ func (crw *compressedReadWriter) uncompress(data []byte, uncompressedLength int)
 	var compressedReader io.ReadCloser
 	switch crw.algorithm {
 	case CompressionZlib:
-		compressedReader, err = zlib.NewReader(bytes.NewReader(data))
-	case CompressionZstd:
-		var zstdReader *zstd.Decoder
-		if zstdReader, err = zstd.NewReader(bytes.NewReader(data), zstd.WithDecoderConcurrency(1)); err == nil {
-			compressedReader = zstdReader.IOReadCloser()
+		if compressedReader, err = zlib.NewReader(bytes.NewReader(data)); err != nil {
+			return nil, errors.WithStack(err)
 		}
+	case CompressionZstd:
+		compressedReader = zstd.NewReader(bytes.NewReader(data))
 	}
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-
 	uncompressed := make([]byte, uncompressedLength)
 	if _, err = io.ReadFull(compressedReader, uncompressed); err != nil {
 		return nil, errors.WithStack(err)

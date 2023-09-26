@@ -319,6 +319,7 @@ func (auth *Authenticator) writeAuthHandshake(
 		AuthData:   authData,
 		Capability: auth.capability | authCap,
 		AuthPlugin: authPlugin,
+		ZstdLevel:  auth.zstdLevel,
 	}
 
 	if len(resp.Attrs) > 0 {
