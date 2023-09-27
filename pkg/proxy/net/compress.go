@@ -141,7 +141,7 @@ func (crw *compressedReadWriter) readFromConn() error {
 		}
 	} else {
 		// If the data is compressed, the compressed length is the length of data after the compressed header and
-		// the uncompressed length is the length of data after uncompression.
+		// the uncompressed length is the length of data after decompression.
 		data := make([]byte, compressedLength)
 		if _, err = io.ReadFull(crw.packetReadWriter, data); err != nil {
 			return err
@@ -179,6 +179,9 @@ func (crw *compressedReadWriter) Write(data []byte) (n int, err error) {
 func (crw *compressedReadWriter) Flush() error {
 	var err error
 	data := crw.writeBuffer.Bytes()
+	if len(data) == 0 {
+		return nil
+	}
 	crw.writeBuffer.Reset()
 
 	// If the data is uncompressed, the uncompressed length is 0 and compressed length is the data length
@@ -187,7 +190,7 @@ func (crw *compressedReadWriter) Flush() error {
 	compressedLength := len(data)
 	if len(data) >= minCompressSize {
 		// If the data is compressed, the compressed length is the length of data after the compressed header and
-		// the uncompressed length is the length of data after uncompression.
+		// the uncompressed length is the length of data after decompression.
 		uncompressedLength = len(data)
 		if data, err = crw.compress(data); err != nil {
 			return err
@@ -211,6 +214,14 @@ func (crw *compressedReadWriter) Flush() error {
 		return errors.WithStack(err)
 	}
 	return crw.packetReadWriter.Flush()
+}
+
+// DirectWrite won't be used.
+func (crw *compressedReadWriter) DirectWrite(data []byte) (n int, err error) {
+	if n, err = crw.Write(data); err != nil {
+		return
+	}
+	return n, crw.Flush()
 }
 
 // Peek won't be used.

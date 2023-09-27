@@ -26,6 +26,7 @@ type clientConfig struct {
 	capability pnet.Capability
 	collation  uint8
 	cmd        pnet.Command
+	zstdLevel  int
 	// for both auth and cmd
 	abnormalExit bool
 }
@@ -82,6 +83,7 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 		AuthData:   mc.authData,
 		Capability: mc.capability,
 		Collation:  mc.collation,
+		ZstdLevel:  mc.zstdLevel,
 	}
 	pkt = pnet.MakeHandshakeResponse(resp)
 	if mc.capability&pnet.ClientSSL > 0 {

@@ -50,17 +50,13 @@ const (
 	defaultReaderSize = 16 * 1024
 )
 
-// The functions in bufferedIO are implemented by bufio.ReadWriter.
-type bufferedIO interface {
-	Peek(n int) ([]byte, error)
-	Discard(n int) (int, error)
-	Flush() error
-}
-
 // packetReadWriter acts like a net.Conn with read and write buffer.
 type packetReadWriter interface {
 	net.Conn
-	bufferedIO
+	// Peek / Discard / Flush are implemented by bufio.ReadWriter.
+	Peek(n int) ([]byte, error)
+	Discard(n int) (int, error)
+	Flush() error
 	DirectWrite(p []byte) (int, error)
 	Proxy() *proxyprotocol.Proxy
 	TLSConnectionState() tls.ConnectionState
@@ -82,7 +78,7 @@ type basicReadWriter struct {
 	sequence uint8
 }
 
-func newBasicBufConn(conn net.Conn) *basicReadWriter {
+func newBasicReadWriter(conn net.Conn) *basicReadWriter {
 	return &basicReadWriter{
 		Conn:       conn,
 		ReadWriter: bufio.NewReadWriter(bufio.NewReaderSize(conn, defaultReaderSize), bufio.NewWriterSize(conn, defaultWriterSize)),
@@ -166,7 +162,7 @@ func NewPacketIO(conn net.Conn, lg *zap.Logger, opts ...PacketIOption) *PacketIO
 	p := &PacketIO{
 		rawConn:    conn,
 		logger:     lg,
-		readWriter: newBasicBufConn(conn),
+		readWriter: newBasicReadWriter(conn),
 	}
 	p.ApplyOpts(opts...)
 	return p

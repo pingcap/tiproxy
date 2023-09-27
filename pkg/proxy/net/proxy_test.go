@@ -10,31 +10,14 @@ import (
 	"testing"
 
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
+	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 )
 
 func TestProxyParse(t *testing.T) {
-	tcpaddr, err := net.ResolveTCPAddr("tcp", "192.168.1.1:34")
-	require.NoError(t, err)
-
+	tcpaddr, p := mockProxy(t)
 	testPipeConn(t,
 		func(t *testing.T, cli *PacketIO) {
-			p := &proxyprotocol.Proxy{
-				Version:    proxyprotocol.ProxyVersion2,
-				Command:    proxyprotocol.ProxyCommandLocal,
-				SrcAddress: tcpaddr,
-				DstAddress: tcpaddr,
-				TLV: []proxyprotocol.ProxyTlv{
-					{
-						Typ:     proxyprotocol.ProxyTlvALPN,
-						Content: nil,
-					},
-					{
-						Typ:     proxyprotocol.ProxyTlvUniqueID,
-						Content: []byte("test"),
-					},
-				},
-			}
 			b, err := p.ToBytes()
 			require.NoError(t, err)
 			_, err = io.Copy(cli.readWriter, bytes.NewReader(b))
@@ -51,4 +34,48 @@ func TestProxyParse(t *testing.T) {
 		},
 		1,
 	)
+}
+
+func TestProxyReadWrite(t *testing.T) {
+	addr, p := mockProxy(t)
+	message := []byte("hello world")
+	testkit.TestTCPConn(t,
+		func(t *testing.T, c net.Conn) {
+			prw := newProxyClient(newBasicReadWriter(c), p)
+			n, err := prw.Write(message)
+			require.NoError(t, err)
+			require.Equal(t, len(message), n)
+			require.NoError(t, prw.Flush())
+		},
+		func(t *testing.T, c net.Conn) {
+			prw := newProxyServer(newBasicReadWriter(c))
+			data := make([]byte, len(message))
+			n, err := prw.Read(data)
+			require.NoError(t, err)
+			require.Equal(t, len(message), n)
+			require.Equal(t, p.SrcAddress, prw.Proxy().SrcAddress)
+			require.Equal(t, addr.String(), prw.RemoteAddr().String())
+		}, 1)
+}
+
+func mockProxy(t *testing.T) (*net.TCPAddr, *proxyprotocol.Proxy) {
+	tcpaddr, err := net.ResolveTCPAddr("tcp", "192.168.1.1:34")
+	require.NoError(t, err)
+	p := &proxyprotocol.Proxy{
+		Version:    proxyprotocol.ProxyVersion2,
+		Command:    proxyprotocol.ProxyCommandLocal,
+		SrcAddress: tcpaddr,
+		DstAddress: tcpaddr,
+		TLV: []proxyprotocol.ProxyTlv{
+			{
+				Typ:     proxyprotocol.ProxyTlvALPN,
+				Content: nil,
+			},
+			{
+				Typ:     proxyprotocol.ProxyTlvUniqueID,
+				Content: []byte("test"),
+			},
+		},
+	}
+	return tcpaddr, p
 }

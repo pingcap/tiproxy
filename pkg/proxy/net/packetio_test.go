@@ -287,3 +287,78 @@ func TestPredefinedPacket(t *testing.T) {
 		1,
 	)
 }
+
+// Test the combination of proxy, tls and compress.
+func TestProxyTLSCompress(t *testing.T) {
+	stls, ctls, err := security.CreateTLSConfigForTest()
+	require.NoError(t, err)
+	addr, p := mockProxy(t)
+	ch := make(chan []byte)
+	write := func(p *PacketIO, data []byte) {
+		outBytes := p.OutBytes()
+		require.NoError(t, p.WritePacket(data, true))
+		ch <- data
+		require.Greater(t, p.OutBytes(), outBytes)
+		require.True(t, p.IsPeerActive())
+		require.NotEmpty(t, p.RemoteAddr().String())
+	}
+	read := func(p *PacketIO) {
+		inBytes := p.InBytes()
+		data := <-ch
+		pkt, err := p.ReadPacket()
+		require.NoError(t, err)
+		require.Equal(t, data, pkt)
+		require.Greater(t, p.InBytes(), inBytes)
+		require.True(t, p.IsPeerActive())
+		require.NotEmpty(t, p.RemoteAddr().String())
+	}
+	for _, enableCompress := range []bool{true, false} {
+		for _, enableTLS := range []bool{true, false} {
+			for _, enableProxy := range []bool{true, false} {
+				testTCPConn(t, func(t *testing.T, cli *PacketIO) {
+					if enableProxy {
+						cli.EnableProxyClient(p)
+					}
+					write(cli, []byte("test1"))
+					if enableTLS {
+						require.NoError(t, cli.ClientTLSHandshake(ctls))
+						require.True(t, cli.TLSConnectionState().HandshakeComplete)
+					}
+					read(cli)
+					if enableCompress {
+						cli.ResetSequence()
+						require.NoError(t, cli.SetCompressionAlgorithm(CompressionZlib, 0))
+					}
+					write(cli, []byte("test3"))
+					read(cli)
+					// make sure the peer won't quit in advance
+					ch <- nil
+				}, func(t *testing.T, srv *PacketIO) {
+					if enableProxy {
+						srv.EnableProxyServer()
+					}
+					read(srv)
+					if enableProxy {
+						require.Equal(t, addr.String(), srv.RemoteAddr().String())
+						require.Equal(t, addr.String(), srv.Proxy().SrcAddress.String())
+					}
+					if enableTLS {
+						state, err := srv.ServerTLSHandshake(stls)
+						require.NoError(t, err)
+						require.True(t, state.HandshakeComplete)
+						require.True(t, srv.TLSConnectionState().HandshakeComplete)
+					}
+					write(srv, []byte("test2"))
+					if enableCompress {
+						srv.ResetSequence()
+						require.NoError(t, srv.SetCompressionAlgorithm(CompressionZlib, 0))
+					}
+					read(srv)
+					write(srv, []byte("test4"))
+					// make sure the peer won't quit in advance
+					<-ch
+				}, 1)
+			}
+		}
+	}
+}

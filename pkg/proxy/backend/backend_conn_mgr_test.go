@@ -527,8 +527,8 @@ func TestSpecialCmds(t *testing.T) {
 				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
 				require.Equal(t, "another_user", ts.mb.username)
 				require.Equal(t, "session_db", ts.mb.db)
-				expectCap := pnet.Capability(ts.mp.handshakeHandler.GetCapability() &^ (pnet.ClientMultiStatements | pnet.ClientPluginAuthLenencClientData))
-				gotCap := pnet.Capability(ts.mb.capability &^ pnet.ClientPluginAuthLenencClientData)
+				expectCap := ts.mp.handshakeHandler.GetCapability() & defaultTestClientCapability &^ (pnet.ClientMultiStatements | pnet.ClientPluginAuthLenencClientData)
+				gotCap := ts.mb.capability &^ pnet.ClientPluginAuthLenencClientData
 				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
 				return nil
 			},
@@ -793,18 +793,16 @@ func TestHandlerReturnError(t *testing.T) {
 }
 
 func TestOnTraffic(t *testing.T) {
-	i := 0
-	inbytes, outbytes := []int{
-		0x99,
-	}, []int{
-		0xce,
-	}
+	var inBytes, outBytes uint64
 	ts := newBackendMgrTester(t, func(config *testConfig) {
 		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
 		config.proxyConfig.handler.onTraffic = func(cc ConnContext) {
-			require.Equal(t, uint64(inbytes[i]), cc.ClientInBytes())
-			require.Equal(t, uint64(outbytes[i]), cc.ClientOutBytes())
-			i++
+			require.Greater(t, cc.ClientInBytes(), uint64(0))
+			require.GreaterOrEqual(t, cc.ClientInBytes(), inBytes)
+			inBytes = cc.ClientInBytes()
+			require.Greater(t, cc.ClientOutBytes(), uint64(0))
+			require.GreaterOrEqual(t, cc.ClientOutBytes(), outBytes)
+			outBytes = cc.ClientOutBytes()
 		}
 	})
 	runners := []runner{

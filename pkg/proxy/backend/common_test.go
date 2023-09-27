@@ -84,6 +84,24 @@ func (tc *tcpConnSuite) newConn(t *testing.T, enableRoute bool) func() {
 	}
 }
 
+func (tc *tcpConnSuite) reconnectBackend(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		_ = tc.backendIO.Close()
+		conn, err := tc.backendListener.Accept()
+		require.NoError(t, err)
+		tc.backendIO = pnet.NewPacketIO(conn, lg)
+	})
+	wg.Run(func() {
+		_ = tc.proxyBIO.Close()
+		backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
+		require.NoError(t, err)
+		tc.proxyBIO = pnet.NewPacketIO(backendConn, lg)
+	})
+	wg.Wait()
+}
+
 func (tc *tcpConnSuite) run(clientRunner, backendRunner func(*pnet.PacketIO) error, proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) (cerr, berr, perr error) {
 	var wg waitgroup.WaitGroup
 	if clientRunner != nil {

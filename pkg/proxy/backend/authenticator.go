@@ -226,10 +226,10 @@ loop:
 		pktIdx++
 		switch serverPkt[0] {
 		case pnet.OKHeader.Byte():
-			if err := auth.setCompress(clientIO, auth.capability); err != nil {
+			if err := setCompress(clientIO, auth.capability, auth.zstdLevel); err != nil {
 				return err
 			}
-			if err := auth.setCompress(backendIO, auth.capability&backendCapability); err != nil {
+			if err := setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel); err != nil {
 				return err
 			}
 			return nil
@@ -285,7 +285,7 @@ func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, bac
 	}
 
 	if err = auth.handleSecondAuthResult(backendIO); err == nil {
-		return auth.setCompress(backendIO, auth.capability&backendCapability)
+		return setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel)
 	}
 	return err
 }
@@ -317,7 +317,7 @@ func (auth *Authenticator) writeAuthHandshake(
 		Attrs:      auth.attrs,
 		Collation:  auth.collation,
 		AuthData:   authData,
-		Capability: auth.capability | authCap,
+		Capability: auth.capability&backendCapability | authCap,
 		AuthPlugin: authPlugin,
 		ZstdLevel:  auth.zstdLevel,
 	}
@@ -381,16 +381,6 @@ func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) erro
 	}
 }
 
-func (auth *Authenticator) setCompress(clientIO *pnet.PacketIO, capability pnet.Capability) error {
-	algorithm := pnet.CompressionNone
-	if capability&pnet.ClientCompress > 0 {
-		algorithm = pnet.CompressionZlib
-	} else if capability&pnet.ClientZstdCompressionAlgorithm > 0 {
-		algorithm = pnet.CompressionZstd
-	}
-	return clientIO.SetCompressionAlgorithm(algorithm, auth.zstdLevel)
-}
-
 // changeUser is called once the client sends COM_CHANGE_USER.
 func (auth *Authenticator) changeUser(req *pnet.ChangeUserReq) {
 	auth.user = req.User
@@ -402,4 +392,14 @@ func (auth *Authenticator) changeUser(req *pnet.ChangeUserReq) {
 // The proxy cannot send the original dbname to TiDB in the second handshake because the original db may be dropped.
 func (auth *Authenticator) updateCurrentDB(db string) {
 	auth.dbname = db
+}
+
+func setCompress(packetIO *pnet.PacketIO, capability pnet.Capability, zstdLevel int) error {
+	algorithm := pnet.CompressionNone
+	if capability&pnet.ClientCompress > 0 {
+		algorithm = pnet.CompressionZlib
+	} else if capability&pnet.ClientZstdCompressionAlgorithm > 0 {
+		algorithm = pnet.CompressionZstd
+	}
+	return packetIO.SetCompressionAlgorithm(algorithm, zstdLevel)
 }

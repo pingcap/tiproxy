@@ -95,7 +95,7 @@ func (prw *proxyReadWriter) Write(p []byte) (n int, err error) {
 		}
 		prw.proxyInited.Store(true)
 	}
-	return prw.Write(p)
+	return prw.packetReadWriter.Write(p)
 }
 
 func (prw *proxyReadWriter) parseProxyV2() (*proxyprotocol.Proxy, error) {
@@ -125,7 +125,7 @@ func (prw *proxyReadWriter) RemoteAddr() net.Addr {
 	if prw.addr != nil {
 		return prw.addr
 	}
-	return prw.RemoteAddr()
+	return prw.packetReadWriter.RemoteAddr()
 }
 
 func (prw *proxyReadWriter) Proxy() *proxyprotocol.Proxy {
