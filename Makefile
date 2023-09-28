@@ -44,7 +44,7 @@ cmd: $(EXECUTABLE_TARGETS)
 cmd_%: OUTPUT=$(patsubst cmd_%,./bin/%,$@)
 cmd_%: SOURCE=$(patsubst cmd_%,./cmd/%,$@)
 cmd_%:
-	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
+	CGO_ENABLED=1 go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
 golangci-lint:
 	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.54.1
@@ -68,7 +68,7 @@ tidy:
 
 build:
 	cd lib && go build ./...
-	go build ./...
+	CGO_ENABLED=1 go build ./...
 
 metrics:
 	go install github.com/google/go-jsonnet/cmd/jsonnet@latest
