@@ -43,7 +43,7 @@ func TestCompressZlib(t *testing.T) {
 // Test read/write with zstd compression.
 func TestCompressZstd(t *testing.T) {
 	sizes := []int{minCompressSize - 1, 1024, maxCompressedSize, maxCompressedSize + 1, maxCompressedSize * 2}
-	levels := []int{1, 3, 9, 20}
+	levels := []int{1, 3, 9, 22}
 	lg, _ := logger.CreateLoggerForTest(t)
 	for _, level := range levels {
 		testkit.TestTCPConn(t,

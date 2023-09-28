@@ -65,7 +65,7 @@ type compressedReadWriter struct {
 	algorithm   CompressAlgorithm
 	logger      *zap.Logger
 	rwStatus    rwStatus
-	zstdLevel   int
+	zstdLevel   zstd.EncoderLevel
 	sequence    uint8
 }
 
@@ -73,7 +73,7 @@ func newCompressedReadWriter(rw packetReadWriter, algorithm CompressAlgorithm, z
 	return &compressedReadWriter{
 		packetReadWriter: rw,
 		algorithm:        algorithm,
-		zstdLevel:        zstdLevel,
+		zstdLevel:        zstd.EncoderLevelFromZstd(zstdLevel),
 		logger:           logger,
 		rwStatus:         rwNone,
 	}
@@ -276,7 +276,7 @@ func (crw *compressedReadWriter) compress(data []byte) ([]byte, error) {
 	case CompressionZlib:
 		compressWriter, err = zlib.NewWriterLevel(&compressedPacket, zlib.DefaultCompression)
 	case CompressionZstd:
-		compressWriter, err = zstd.NewWriter(&compressedPacket, zstd.WithEncoderLevel(zstd.EncoderLevel(crw.zstdLevel)))
+		compressWriter, err = zstd.NewWriter(&compressedPacket, zstd.WithEncoderLevel(crw.zstdLevel))
 	}
 	if err != nil {
 		return nil, errors.WithStack(err)
