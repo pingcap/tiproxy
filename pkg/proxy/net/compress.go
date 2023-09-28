@@ -8,7 +8,7 @@ import (
 	"compress/zlib"
 	"io"
 
-	"github.com/DataDog/zstd"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
 )
@@ -266,17 +266,20 @@ func (crw *compressedReadWriter) Discard(n int) (d int, err error) {
 	return
 }
 
+// DataDog/zstd is much faster but it's not good at cross-platform.
+// https://github.com/go-mysql-org/go-mysql/issues/799
 func (crw *compressedReadWriter) compress(data []byte) ([]byte, error) {
 	var err error
 	var compressedPacket bytes.Buffer
 	var compressWriter io.WriteCloser
 	switch crw.algorithm {
 	case CompressionZlib:
-		if compressWriter, err = zlib.NewWriterLevel(&compressedPacket, zlib.DefaultCompression); err != nil {
-			return nil, errors.WithStack(err)
-		}
+		compressWriter, err = zlib.NewWriterLevel(&compressedPacket, zlib.DefaultCompression)
 	case CompressionZstd:
-		compressWriter = zstd.NewWriterLevel(&compressedPacket, crw.zstdLevel)
+		compressWriter, err = zstd.NewWriter(&compressedPacket, zstd.WithEncoderLevel(zstd.EncoderLevel(crw.zstdLevel)))
+	}
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 	if _, err = compressWriter.Write(data); err != nil {
 		return nil, errors.WithStack(err)
@@ -296,7 +299,11 @@ func (crw *compressedReadWriter) uncompress(data []byte, uncompressedLength int)
 			return nil, errors.WithStack(err)
 		}
 	case CompressionZstd:
-		compressedReader = zstd.NewReader(bytes.NewReader(data))
+		var decoder *zstd.Decoder
+		if decoder, err = zstd.NewReader(bytes.NewReader(data)); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		compressedReader = decoder.IOReadCloser()
 	}
 	uncompressed := make([]byte, uncompressedLength)
 	if _, err = io.ReadFull(compressedReader, uncompressed); err != nil {
