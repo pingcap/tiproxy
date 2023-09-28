@@ -446,8 +446,6 @@ func TestCompressProtocol(t *testing.T) {
 		},
 	}
 
-	tc := newTCPConnSuite(t)
-	cfgOverriders := getCfgCombinations(cfgs)
 	checker := func(t *testing.T, ts *testSuite, referCfg *testConfig) {
 		// If the client enables compression, client <-> proxy enables compression.
 		if referCfg.clientConfig.capability&pnet.ClientCompress > 0 {
@@ -481,6 +479,9 @@ func TestCompressProtocol(t *testing.T) {
 			require.Equal(t, pnet.Capability(0), ts.mb.capability&pnet.ClientZstdCompressionAlgorithm)
 		}
 	}
+
+	tc := newTCPConnSuite(t)
+	cfgOverriders := getCfgCombinations(cfgs)
 	for _, cfgs := range cfgOverriders {
 		referCfg := newTestConfig(cfgs...)
 		ts, clean := newTestSuite(t, tc, cfgs...)
@@ -496,21 +497,52 @@ func TestCompressProtocol(t *testing.T) {
 
 // After upgrading the backend, the backend capability may change.
 func TestUpgradeBackendCap(t *testing.T) {
+	cfgs := [][]cfgOverrider{
+		{
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability &= ^pnet.ClientCompress
+				cfg.clientConfig.capability &= ^pnet.ClientZstdCompressionAlgorithm
+			},
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability |= pnet.ClientCompress
+				cfg.clientConfig.capability |= pnet.ClientZstdCompressionAlgorithm
+				cfg.clientConfig.zstdLevel = 3
+			},
+			func(cfg *testConfig) {
+				cfg.clientConfig.capability |= pnet.ClientCompress
+				cfg.clientConfig.capability &= ^pnet.ClientZstdCompressionAlgorithm
+			},
+		},
+		{
+			func(cfg *testConfig) {
+				cfg.backendConfig.capability &= ^pnet.ClientCompress
+				cfg.backendConfig.capability &= ^pnet.ClientZstdCompressionAlgorithm
+			},
+		},
+	}
+
 	tc := newTCPConnSuite(t)
-	// Before upgrade, the client supports compression but the backend doesn't support.
-	ts, clean := newTestSuite(t, tc, func(cfg *testConfig) {
-		cfg.clientConfig.capability |= pnet.ClientCompress
-		cfg.backendConfig.capability &= ^pnet.ClientCompress
-	})
-	ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
-		require.Greater(t, ts.mp.authenticator.capability&pnet.ClientCompress, pnet.Capability(0))
-		require.Greater(t, ts.mc.capability&pnet.ClientCompress, pnet.Capability(0))
-		require.Equal(t, pnet.Capability(0), ts.mb.capability&pnet.ClientCompress)
-	})
-	// After upgrade, the backend also supports compression.
-	ts.mb.backendConfig.capability |= pnet.ClientCompress
-	ts.authenticateSecondTime(t, func(t *testing.T, ts *testSuite) {
-		require.Greater(t, ts.mb.capability&pnet.ClientCompress, pnet.Capability(0))
-	})
-	clean()
+	cfgOverriders := getCfgCombinations(cfgs)
+	for _, cfgs := range cfgOverriders {
+		referCfg := newTestConfig(cfgs...)
+		ts, clean := newTestSuite(t, tc, cfgs...)
+		// Before upgrade, the backend doesn't support compression.
+		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
+			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientCompress, ts.mp.authenticator.capability&pnet.ClientCompress)
+			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientCompress, ts.mc.capability&pnet.ClientCompress)
+			require.Equal(t, pnet.Capability(0), ts.mb.capability&pnet.ClientCompress)
+		})
+		// After upgrade, the backend also supports compression.
+		ts.mb.backendConfig.capability |= pnet.ClientCompress
+		ts.mb.backendConfig.capability |= pnet.ClientZstdCompressionAlgorithm
+		ts.authenticateSecondTime(t, func(t *testing.T, ts *testSuite) {
+			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientCompress, ts.mc.capability&pnet.ClientCompress)
+			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientCompress, ts.mp.authenticator.capability&pnet.ClientCompress)
+			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientCompress, ts.mb.capability&pnet.ClientCompress)
+			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientZstdCompressionAlgorithm, ts.mc.capability&pnet.ClientZstdCompressionAlgorithm)
+			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientZstdCompressionAlgorithm, ts.mp.authenticator.capability&pnet.ClientZstdCompressionAlgorithm)
+			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientZstdCompressionAlgorithm, ts.mb.capability&pnet.ClientZstdCompressionAlgorithm)
+		})
+		clean()
+	}
 }
