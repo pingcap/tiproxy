@@ -211,6 +211,29 @@ func TestCompressHeader(t *testing.T) {
 		}, 1)
 }
 
+// Test that Read and Write returns correct errors.
+func TestReadWriteError(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	testkit.TestTCPConn(t,
+		func(t *testing.T, c net.Conn) {
+		},
+		func(t *testing.T, c net.Conn) {
+			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			_, err := crw.Read(make([]byte, 1))
+			require.True(t, IsDisconnectError(err))
+		}, 1)
+	testkit.TestTCPConn(t,
+		func(t *testing.T, c net.Conn) {
+		},
+		func(t *testing.T, c net.Conn) {
+			require.NoError(t, c.Close())
+			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			_, err := crw.Write(make([]byte, 1))
+			require.NoError(t, err)
+			require.ErrorIs(t, crw.Flush(), net.ErrClosed)
+		}, 1)
+}
+
 func fillAndWrite(t *testing.T, crw *compressedReadWriter, b byte, length int) {
 	data := fillData(b, length)
 	_, err := crw.Write(data)

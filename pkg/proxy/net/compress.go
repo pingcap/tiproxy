@@ -37,7 +37,9 @@ const (
 	// maxCompressedSize is the max uncompressed data size for a compressed packet.
 	// Packets bigger than maxCompressedSize will be split into multiple compressed packets.
 	// MySQL is 16K for the first packet and the rest for the second, MySQL Connector/J is 16M.
-	// The length itself must fit in the 3 byte field in the header.
+	// Two restrictions for the length:
+	// - it should be smaller than 16M so that the length can fit in the 3 byte field in the header.
+	// - it should be larger than 4M so that the compressed sequence can fit in the 3 byte field when max_allowed_packet is 1G.
 	maxCompressedSize = 1<<24 - 1
 	// minCompressSize is the min uncompressed data size for compressed data.
 	// Packets smaller than minCompressSize won't be compressed.
@@ -60,7 +62,7 @@ var _ packetReadWriter = (*compressedReadWriter)(nil)
 
 type compressedReadWriter struct {
 	packetReadWriter
-	readBuffer  []byte
+	readBuffer  bytes.Buffer
 	writeBuffer bytes.Buffer
 	algorithm   CompressAlgorithm
 	logger      *zap.Logger
@@ -100,17 +102,15 @@ func (crw *compressedReadWriter) beginRW(status rwStatus) {
 func (crw *compressedReadWriter) Read(p []byte) (n int, err error) {
 	crw.beginRW(rwRead)
 	// Read from the connection to fill the buffer if the buffer is empty.
-	if len(crw.readBuffer) == 0 {
+	if crw.readBuffer.Len() == 0 {
 		if err = crw.readFromConn(); err != nil {
 			return
 		}
 	}
-	n = copy(p, crw.readBuffer)
-	if n == len(crw.readBuffer) {
-		// Free the buffer. Too many idle connections may hold too much unnecessary memory.
-		crw.readBuffer = nil
-	} else {
-		crw.readBuffer = crw.readBuffer[n:]
+	n, err = crw.readBuffer.Read(p)
+	// Trade off between memory and efficiency.
+	if n == len(p) && crw.readBuffer.Len() == 0 && crw.readBuffer.Cap() > defaultReaderSize {
+		crw.readBuffer = bytes.Buffer{}
 	}
 	return
 }
@@ -135,9 +135,9 @@ func (crw *compressedReadWriter) readFromConn() error {
 	if uncompressedLength == 0 {
 		// If the data is uncompressed, the uncompressed length is 0 and compressed length is the data length
 		// after the compressed header.
-		crw.readBuffer = make([]byte, compressedLength)
-		if _, err = io.ReadFull(crw.packetReadWriter, crw.readBuffer); err != nil {
-			return err
+		crw.readBuffer.Grow(compressedLength)
+		if _, err = io.CopyN(&crw.readBuffer, crw.packetReadWriter, int64(compressedLength)); err != nil {
+			return errors.WithStack(err)
 		}
 	} else {
 		// If the data is compressed, the compressed length is the length of data after the compressed header and
@@ -146,7 +146,7 @@ func (crw *compressedReadWriter) readFromConn() error {
 		if _, err = io.ReadFull(crw.packetReadWriter, data); err != nil {
 			return err
 		}
-		if crw.readBuffer, err = crw.uncompress(data, uncompressedLength); err != nil {
+		if err = crw.uncompress(data, uncompressedLength); err != nil {
 			return err
 		}
 	}
@@ -182,7 +182,12 @@ func (crw *compressedReadWriter) Flush() error {
 	if len(data) == 0 {
 		return nil
 	}
-	crw.writeBuffer.Reset()
+	// Trade off between memory and efficiency.
+	if crw.writeBuffer.Cap() > defaultWriterSize {
+		crw.writeBuffer = bytes.Buffer{}
+	} else {
+		crw.writeBuffer.Reset()
+	}
 
 	// If the data is uncompressed, the uncompressed length is 0 and compressed length is the data length
 	// after the compressed header.
@@ -228,42 +233,26 @@ func (crw *compressedReadWriter) DirectWrite(data []byte) (n int, err error) {
 // Notice: the peeked data may be discarded if an error is returned.
 func (crw *compressedReadWriter) Peek(n int) (data []byte, err error) {
 	crw.beginRW(rwRead)
-	var readBuffer []byte
-	for len(readBuffer) < n {
-		if len(crw.readBuffer) == 0 {
-			if err = crw.readFromConn(); err != nil {
-				return
-			}
+	for crw.readBuffer.Len() < n {
+		if err = crw.readFromConn(); err != nil {
+			return
 		}
-		readBuffer = append(readBuffer, crw.readBuffer...)
-		crw.readBuffer = nil
 	}
 	data = make([]byte, 0, n)
-	copy(data, readBuffer)
-	crw.readBuffer = readBuffer
+	copy(data, crw.readBuffer.Bytes())
 	return
 }
 
 // Discard won't be used.
 func (crw *compressedReadWriter) Discard(n int) (d int, err error) {
 	crw.beginRW(rwRead)
-	for left := n; left > 0; {
-		if len(crw.readBuffer) == 0 {
-			if err = crw.readFromConn(); err != nil {
-				return
-			}
-		}
-		if left >= len(crw.readBuffer) {
-			left -= len(crw.readBuffer)
-			crw.readBuffer = nil
-			d += len(crw.readBuffer)
-		} else {
-			left = 0
-			crw.readBuffer = crw.readBuffer[left:]
-			d += left
+	for crw.readBuffer.Len() < n {
+		if err = crw.readFromConn(); err != nil {
+			return
 		}
 	}
-	return
+	crw.readBuffer.Next(n)
+	return n, err
 }
 
 // DataDog/zstd is much faster but it's not good at cross-platform.
@@ -290,27 +279,27 @@ func (crw *compressedReadWriter) compress(data []byte) ([]byte, error) {
 	return compressedPacket.Bytes(), nil
 }
 
-func (crw *compressedReadWriter) uncompress(data []byte, uncompressedLength int) ([]byte, error) {
+func (crw *compressedReadWriter) uncompress(data []byte, uncompressedLength int) error {
 	var err error
 	var compressedReader io.ReadCloser
 	switch crw.algorithm {
 	case CompressionZlib:
 		if compressedReader, err = zlib.NewReader(bytes.NewReader(data)); err != nil {
-			return nil, errors.WithStack(err)
+			return errors.WithStack(err)
 		}
 	case CompressionZstd:
 		var decoder *zstd.Decoder
 		if decoder, err = zstd.NewReader(bytes.NewReader(data)); err != nil {
-			return nil, errors.WithStack(err)
+			return errors.WithStack(err)
 		}
 		compressedReader = decoder.IOReadCloser()
 	}
-	uncompressed := make([]byte, uncompressedLength)
-	if _, err = io.ReadFull(compressedReader, uncompressed); err != nil {
-		return nil, errors.WithStack(err)
+	crw.readBuffer.Grow(uncompressedLength)
+	if _, err = io.CopyN(&crw.readBuffer, compressedReader, int64(uncompressedLength)); err != nil {
+		return errors.WithStack(err)
 	}
 	if err = compressedReader.Close(); err != nil {
-		return nil, errors.WithStack(err)
+		return errors.WithStack(err)
 	}
-	return uncompressed, nil
+	return nil
 }
