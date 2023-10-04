@@ -45,6 +45,8 @@ const (
 	// Packets smaller than minCompressSize won't be compressed.
 	// MySQL and MySQL Connector/J are both 50.
 	minCompressSize = 50
+	// defaultZlibLevel is the compression level for zlib. MySQL is 6.
+	zlibCompressionLevel = 6
 )
 
 func (p *PacketIO) SetCompressionAlgorithm(algorithm CompressAlgorithm, zstdLevel int) error {
@@ -263,7 +265,7 @@ func (crw *compressedReadWriter) compress(data []byte) ([]byte, error) {
 	var compressWriter io.WriteCloser
 	switch crw.algorithm {
 	case CompressionZlib:
-		compressWriter, err = zlib.NewWriterLevel(&compressedPacket, zlib.DefaultCompression)
+		compressWriter, err = zlib.NewWriterLevel(&compressedPacket, zlibCompressionLevel)
 	case CompressionZstd:
 		compressWriter, err = zstd.NewWriter(&compressedPacket, zstd.WithEncoderLevel(crw.zstdLevel))
 	}
