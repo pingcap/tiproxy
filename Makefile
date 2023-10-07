@@ -89,7 +89,7 @@ clean:
 	rm -rf bin dist grafonnet-lib
 
 docker:
-	docker build -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell go env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" -f docker/Dockerfile .
+	docker build -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell go env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" --build-arg "BRANCH=$(BRANCH)" -f docker/Dockerfile .
 
 docker-release:
-	docker buildx build --platform linux/amd64,linux/arm64 --push -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell go env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" -f docker/Dockerfile .
+	docker buildx build --platform linux/amd64,linux/arm64 --push -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell go env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" --build-arg "BRANCH=$(BRANCH)" -f docker/Dockerfile .
