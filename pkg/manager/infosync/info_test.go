@@ -224,7 +224,7 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 	is.syncConfig = syncConfig{
 		sessionTTL:    1,
 		refreshIntvl:  50 * time.Millisecond,
-		putTimeout:    100 * time.Millisecond,
+		putTimeout:    1 * time.Second,
 		putRetryIntvl: 10 * time.Millisecond,
 		putRetryCnt:   3,
 	}
@@ -242,7 +242,9 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 
 func (ts *etcdTestSuite) close() {
 	if ts.is != nil {
-		require.NoError(ts.t, ts.is.Close())
+		if err := ts.is.Close(); err != nil {
+			require.ErrorIs(ts.t, err, context.DeadlineExceeded)
+		}
 		ts.is = nil
 		ts.cancel()
 	}

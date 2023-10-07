@@ -163,11 +163,11 @@ func (is *InfoSyncer) getTopologyInfo(cfg *config.Config) (*TopologyInfo, error)
 	ip := sys.GetLocalIP()
 	_, port, err := net.SplitHostPort(cfg.Proxy.Addr)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	_, statusPort, err := net.SplitHostPort(cfg.API.Addr)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	return &TopologyInfo{
 		Version:        versioninfo.TiProxyVersion,
@@ -202,7 +202,7 @@ func (is *InfoSyncer) storeTopologyInfo(ctx context.Context, topologyInfo *Topol
 		childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.putTimeout)
 		_, err := is.etcdCli.Put(childCtx, key, value, clientv3.WithLease(is.topologySession.Lease()))
 		cancel()
-		return err
+		return errors.WithStack(err)
 	}, ctx, is.syncConfig.putRetryIntvl, is.syncConfig.putRetryCnt)
 }
 
@@ -214,7 +214,7 @@ func (is *InfoSyncer) updateTopologyAliveness(ctx context.Context, topologyInfo 
 		childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.putTimeout)
 		_, err := is.etcdCli.Put(childCtx, key, value, clientv3.WithLease(is.topologySession.Lease()))
 		cancel()
-		return err
+		return errors.WithStack(err)
 	}, ctx, is.syncConfig.putRetryIntvl, is.syncConfig.putRetryCnt)
 }
 
@@ -224,14 +224,14 @@ func (is *InfoSyncer) removeTopology(ctx context.Context) error {
 	childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.putTimeout)
 	_, err := is.etcdCli.Delete(childCtx, tiproxyTopologyPath, clientv3.WithPrefix())
 	cancel()
-	return err
+	return errors.WithStack(err)
 }
 
 func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBInfo, error) {
 	// etcdCli.Get will retry infinitely internally.
 	res, err := is.etcdCli.Get(ctx, tidbinfo.TopologyInformationPath, clientv3.WithPrefix())
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	infos := make(map[string]*TiDBInfo, len(res.Kvs)/2)
@@ -280,7 +280,7 @@ func (is *InfoSyncer) Close() error {
 	}
 	if is.etcdCli != nil {
 		if err := is.etcdCli.Close(); err != nil {
-			errs = append(errs, err)
+			errs = append(errs, errors.WithStack(err))
 		}
 	}
 	return errors.Collect(errors.New("closing InfoSyncer"), errs...)
