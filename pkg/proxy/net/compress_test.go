@@ -28,7 +28,7 @@ func TestCompressZlib(t *testing.T) {
 				require.NoError(t, crw.Flush())
 				// Check compressed bytes.
 				outBytes := crw.OutBytes()
-				checkByteNum(t, outBytes-written, size)
+				checkWrittenByteSize(t, outBytes-written, size)
 				written = outBytes
 			}
 		},
@@ -55,7 +55,7 @@ func TestCompressZstd(t *testing.T) {
 					require.NoError(t, crw.Flush())
 					// Check compressed bytes.
 					outBytes := crw.OutBytes()
-					checkByteNum(t, outBytes-written, size)
+					checkWrittenByteSize(t, outBytes-written, size)
 					written = outBytes
 				}
 			},
@@ -265,7 +265,7 @@ func checkData(t *testing.T, data []byte, b byte) {
 	}
 }
 
-func checkByteNum(t *testing.T, diff uint64, size int) {
+func checkWrittenByteSize(t *testing.T, diff uint64, size int) {
 	if size < minCompressSize {
 		require.Equal(t, uint64(size+7), diff)
 	} else {

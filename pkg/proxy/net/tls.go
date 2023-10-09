@@ -12,7 +12,8 @@ import (
 
 // tlsHandshakeConn is only used as the underlying connection in tls.Conn.
 // TLS handshake must read from the buffered reader because the handshake data may be already buffered in the reader.
-// TLS handshake can not use the buffered writer directly because it assumes the data is always flushed immediately.
+// TLS handshake can not use the buffered writer directly because it assumes the data will be flushed automatically,
+// however buffered writer may not flush without calling `Flush`.
 type tlsInternalConn struct {
 	packetReadWriter
 }

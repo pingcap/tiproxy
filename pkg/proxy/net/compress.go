@@ -36,7 +36,7 @@ const (
 const (
 	// maxCompressedSize is the max uncompressed data size for a compressed packet.
 	// Packets bigger than maxCompressedSize will be split into multiple compressed packets.
-	// MySQL is 16K for the first packet and the rest for the second, MySQL Connector/J is 16M.
+	// MySQL has 16K for the first packet. The rest packets and MySQL Connector/J are 16M.
 	// Two restrictions for the length:
 	// - it should be smaller than 16M so that the length can fit in the 3 byte field in the header.
 	// - it should be larger than 4M so that the compressed sequence can fit in the 3 byte field when max_allowed_packet is 1G.
