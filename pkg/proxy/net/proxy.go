@@ -63,9 +63,6 @@ func (prw *proxyReadWriter) Read(b []byte) (int, error) {
 			return 0, errors.Wrap(ErrReadConn, err)
 		}
 		if bytes.Equal(header[:], proxyprotocol.MagicV2[:4]) {
-			if _, err = prw.Discard(4); err != nil {
-				return 0, err
-			}
 			proxyHeader, err := prw.parseProxyV2()
 			if err != nil {
 				return 0, errors.Wrap(ErrReadConn, err)
@@ -99,16 +96,16 @@ func (prw *proxyReadWriter) Write(p []byte) (n int, err error) {
 }
 
 func (prw *proxyReadWriter) parseProxyV2() (*proxyprotocol.Proxy, error) {
-	rem, err := prw.packetReadWriter.Peek(8)
+	rem, err := prw.packetReadWriter.Peek(len(proxyprotocol.MagicV2))
 	if err != nil {
 		return nil, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
-	if !bytes.Equal(rem, proxyprotocol.MagicV2[4:]) {
+	if !bytes.Equal(rem, proxyprotocol.MagicV2) {
 		return nil, nil
 	}
 
 	// yes, it is proxyV2
-	_, err = prw.packetReadWriter.Discard(8)
+	_, err = prw.packetReadWriter.Discard(len(proxyprotocol.MagicV2))
 	if err != nil {
 		return nil, errors.WithStack(errors.Wrap(ErrReadConn, err))
 	}
