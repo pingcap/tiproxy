@@ -30,7 +30,6 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tidb/errno"
@@ -51,51 +50,120 @@ const (
 	defaultReaderSize = 16 * 1024
 )
 
-// rdbufConn will buffer read for non-TLS connections.
-// While TLS connections have internal buffering, we still need to pass *rdbufConn to `tls.XXX()`.
-// Because TLS handshake data may already be buffered in `*rdbufConn`.
-// TODO: only enable writer buffering for TLS connections, otherwise enable read/write buffering.
-type rdbufConn struct {
+// packetReadWriter acts like a net.Conn with read and write buffer.
+type packetReadWriter interface {
 	net.Conn
-	*bufio.Reader
+	// Peek / Discard / Flush are implemented by bufio.ReadWriter.
+	Peek(n int) ([]byte, error)
+	Discard(n int) (int, error)
+	Flush() error
+	DirectWrite(p []byte) (int, error)
+	Proxy() *proxyprotocol.Proxy
+	TLSConnectionState() tls.ConnectionState
+	InBytes() uint64
+	OutBytes() uint64
+	IsPeerActive() bool
+	SetSequence(uint8)
+	Sequence() uint8
 }
 
-func (f *rdbufConn) Read(b []byte) (int, error) {
-	return f.Reader.Read(b)
+var _ packetReadWriter = (*basicReadWriter)(nil)
+
+// basicReadWriter is used for raw connections.
+type basicReadWriter struct {
+	net.Conn
+	*bufio.ReadWriter
+	inBytes  uint64
+	outBytes uint64
+	sequence uint8
+}
+
+func newBasicReadWriter(conn net.Conn) *basicReadWriter {
+	return &basicReadWriter{
+		Conn:       conn,
+		ReadWriter: bufio.NewReadWriter(bufio.NewReaderSize(conn, defaultReaderSize), bufio.NewWriterSize(conn, defaultWriterSize)),
+	}
+}
+
+func (brw *basicReadWriter) Read(b []byte) (n int, err error) {
+	n, err = brw.ReadWriter.Read(b)
+	brw.inBytes += uint64(n)
+	return n, errors.WithStack(err)
+}
+
+func (brw *basicReadWriter) Write(p []byte) (int, error) {
+	n, err := brw.ReadWriter.Write(p)
+	brw.outBytes += uint64(n)
+	return n, errors.WithStack(err)
+}
+
+func (brw *basicReadWriter) DirectWrite(p []byte) (int, error) {
+	n, err := brw.Conn.Write(p)
+	brw.outBytes += uint64(n)
+	return n, errors.WithStack(err)
+}
+
+func (brw *basicReadWriter) SetSequence(sequence uint8) {
+	brw.sequence = sequence
+}
+
+func (brw *basicReadWriter) Sequence() uint8 {
+	return brw.sequence
+}
+
+func (brw *basicReadWriter) Proxy() *proxyprotocol.Proxy {
+	return nil
+}
+
+func (brw *basicReadWriter) InBytes() uint64 {
+	return brw.inBytes
+}
+
+func (brw *basicReadWriter) OutBytes() uint64 {
+	return brw.outBytes
+}
+
+func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
+	return tls.ConnectionState{}
+}
+
+// IsPeerActive checks if the peer connection is still active.
+// If the backend disconnects, the client should also be disconnected (required by serverless).
+// We have no other way than reading from the connection.
+//
+// This function cannot be called concurrently with other functions of packetReadWriter.
+// This function normally costs 1ms, so don't call it too frequently.
+// This function may incorrectly return true if the system is extremely slow.
+func (brw *basicReadWriter) IsPeerActive() bool {
+	if err := brw.Conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+		return false
+	}
+	active := true
+	if _, err := brw.ReadWriter.Peek(1); err != nil {
+		active = !errors.Is(err, io.EOF)
+	}
+	if err := brw.Conn.SetReadDeadline(time.Time{}); err != nil {
+		return false
+	}
+	return active
 }
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
 	lastKeepAlive config.KeepAlive
-	inBytes       uint64
-	outBytes      uint64
-	conn          net.Conn
 	rawConn       net.Conn
-	buf           *bufio.ReadWriter
-	proxyInited   atomic.Bool
-	proxy         *proxyprotocol.Proxy
+	readWriter    packetReadWriter
 	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
-	sequence      uint8
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, opts ...PacketIOption) *PacketIO {
-	buf := bufio.NewReadWriter(
-		bufio.NewReaderSize(conn, defaultReaderSize),
-		bufio.NewWriterSize(conn, defaultWriterSize),
-	)
 	p := &PacketIO{
-		rawConn: conn,
-		conn: &rdbufConn{
-			conn,
-			buf.Reader,
-		},
-		logger:   lg,
-		sequence: 0,
-		buf:      buf,
+		rawConn:    conn,
+		logger:     lg,
+		readWriter: newBasicReadWriter(conn),
 	}
-	p.proxyInited.Store(true)
 	p.ApplyOpts(opts...)
 	return p
 }
@@ -110,75 +178,42 @@ func (p *PacketIO) wrapErr(err error) error {
 	return errors.WithStack(errors.Wrap(p.wrap, err))
 }
 
-// Proxy returned parsed proxy header from clients if any.
-func (p *PacketIO) Proxy() *proxyprotocol.Proxy {
-	return p.proxy
-}
-
 func (p *PacketIO) LocalAddr() net.Addr {
-	return p.conn.LocalAddr()
+	return p.readWriter.LocalAddr()
 }
 
 func (p *PacketIO) RemoteAddr() net.Addr {
 	if p.remoteAddr != nil {
 		return p.remoteAddr
 	}
-	return p.conn.RemoteAddr()
+	return p.readWriter.RemoteAddr()
 }
 
 func (p *PacketIO) ResetSequence() {
-	p.sequence = 0
+	p.readWriter.SetSequence(0)
 }
 
 // GetSequence is used in tests to assert that the sequences on the client and server are equal.
 func (p *PacketIO) GetSequence() uint8 {
-	return p.sequence
+	return p.readWriter.Sequence()
 }
 
 func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	var header [4]byte
-
-	if _, err := io.ReadFull(p.buf, header[:]); err != nil {
+	if _, err := io.ReadFull(p.readWriter, header[:]); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
-	p.inBytes += 4
-
-	// probe proxy V2
-	refill := false
-	if !p.proxyInited.Load() {
-		if bytes.Equal(header[:], proxyprotocol.MagicV2[:4]) {
-			proxyHeader, err := p.parseProxyV2()
-			if err != nil {
-				return nil, false, errors.Wrap(ErrReadConn, err)
-			}
-			if proxyHeader != nil {
-				p.proxy = proxyHeader
-				refill = true
-			}
-		}
-		p.proxyInited.Store(true)
+	sequence, pktSequence := header[3], p.readWriter.Sequence()
+	if sequence != pktSequence {
+		return nil, false, ErrInvalidSequence.GenWithStack("invalid sequence, expected %d, actual %d", pktSequence, sequence)
 	}
+	p.readWriter.SetSequence(sequence + 1)
 
-	// refill mysql headers
-	if refill {
-		if _, err := io.ReadFull(p.buf, header[:]); err != nil {
-			return nil, false, errors.Wrap(ErrReadConn, err)
-		}
-		p.inBytes += 4
-	}
-
-	sequence := header[3]
-	if sequence != p.sequence {
-		return nil, false, ErrInvalidSequence.GenWithStack("invalid sequence %d != %d", sequence, p.sequence)
-	}
-	p.sequence++
 	length := int(uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16)
-
 	data := make([]byte, length)
-	if _, err := io.ReadFull(p.buf, data); err != nil {
+	if _, err := io.ReadFull(p.readWriter, data); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
-	p.inBytes += uint64(length)
 	return data, length == MaxPayloadLen, nil
 }
 
@@ -207,21 +242,20 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 	}
 
 	var header [4]byte
+	sequence := p.readWriter.Sequence()
 	header[0] = byte(length)
 	header[1] = byte(length >> 8)
 	header[2] = byte(length >> 16)
-	header[3] = p.sequence
-	p.sequence++
+	header[3] = sequence
+	p.readWriter.SetSequence(sequence + 1)
 
-	if _, err := io.Copy(p.buf, bytes.NewReader(header[:])); err != nil {
+	if _, err := io.Copy(p.readWriter, bytes.NewReader(header[:])); err != nil {
 		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
-	p.outBytes += 4
 
-	if _, err := io.Copy(p.buf, bytes.NewReader(data[:length])); err != nil {
+	if _, err := io.Copy(p.readWriter, bytes.NewReader(data[:length])); err != nil {
 		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
-	p.outBytes += uint64(length)
 
 	return length, more, nil
 }
@@ -244,43 +278,22 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 }
 
 func (p *PacketIO) InBytes() uint64 {
-	return p.inBytes
+	return p.readWriter.InBytes()
 }
 
 func (p *PacketIO) OutBytes() uint64 {
-	return p.outBytes
-}
-
-func (p *PacketIO) TLSConnectionState() tls.ConnectionState {
-	if tlsConn, ok := p.conn.(*tls.Conn); ok {
-		return tlsConn.ConnectionState()
-	}
-	return tls.ConnectionState{}
+	return p.readWriter.OutBytes()
 }
 
 func (p *PacketIO) Flush() error {
-	if err := p.buf.Flush(); err != nil {
+	if err := p.readWriter.Flush(); err != nil {
 		return p.wrapErr(errors.Wrap(ErrFlushConn, err))
 	}
 	return nil
 }
 
-// IsPeerActive checks if the peer connection is still active.
-// This function cannot be called concurrently with other functions of PacketIO.
-// This function normally costs 1ms, so don't call it too frequently.
-// This function may incorrectly return true if the system is extremely slow.
 func (p *PacketIO) IsPeerActive() bool {
-	if err := p.conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
-		return false
-	}
-	active := true
-	if _, err := p.buf.Peek(1); err != nil {
-		active = !errors.Is(err, io.EOF)
-	}
-	if err := p.conn.SetReadDeadline(time.Time{}); err != nil {
-		return false
-	}
-	return active
+	return p.readWriter.IsPeerActive()
 }
 
 func (p *PacketIO) SetKeepalive(cfg config.KeepAlive) error {
@@ -297,7 +310,7 @@ func (p *PacketIO) LastKeepAlive() config.KeepAlive {
 }
 
 func (p *PacketIO) GracefulClose() error {
-	if err := p.conn.SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
+	if err := p.readWriter.SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
 	return nil
@@ -311,7 +324,7 @@ func (p *PacketIO) Close() error {
 			errs = append(errs, err)
 		}
 	*/
-	if err := p.conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+	if err := p.readWriter.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		errs = append(errs, err)
 	}
 	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))

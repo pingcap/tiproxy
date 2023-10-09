@@ -29,11 +29,12 @@ const defRequiredBackendCaps = pnet.ClientDeprecateEOF
 
 // SupportedServerCapabilities is the default supported capabilities. Other server capabilities are not supported.
 // TiDB supports ClientDeprecateEOF since v6.3.0.
+// TiDB supports ClientCompress and ClientZstdCompressionAlgorithm since v7.2.0.
 const SupportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientConnectWithDB |
 	pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientInteractive | pnet.ClientLongFlag | pnet.ClientSSL |
 	pnet.ClientTransactions | pnet.ClientReserved | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
 	pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientPluginAuthLenencClientData |
-	requiredFrontendCaps | defRequiredBackendCaps
+	pnet.ClientCompress | pnet.ClientZstdCompressionAlgorithm | requiredFrontendCaps | defRequiredBackendCaps
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
@@ -42,6 +43,7 @@ type Authenticator struct {
 	attrs             map[string]string
 	salt              []byte
 	capability        pnet.Capability
+	zstdLevel         int
 	collation         uint8
 	proxyProtocol     bool
 	requireBackendTLS bool
@@ -64,9 +66,7 @@ func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO
 		}
 		// either from another proxy or directly from clients, we are acting as a proxy
 		proxy.Command = proxyprotocol.ProxyCommandProxy
-		if err := backendIO.WriteProxyV2(proxy); err != nil {
-			return err
-		}
+		backendIO.EnableProxyClient(proxy)
 	}
 	return nil
 }
@@ -157,6 +157,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	auth.dbname = clientResp.DB
 	auth.collation = clientResp.Collation
 	auth.attrs = clientResp.Attrs
+	auth.zstdLevel = clientResp.ZstdLevel
 
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	backendIO, err := getBackendIO(cctx, auth, clientResp, 15*time.Second)
@@ -225,6 +226,12 @@ loop:
 		pktIdx++
 		switch serverPkt[0] {
 		case pnet.OKHeader.Byte():
+			if err := setCompress(clientIO, auth.capability, auth.zstdLevel); err != nil {
+				return err
+			}
+			if err := setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel); err != nil {
+				return err
+			}
 			return nil
 		case pnet.ErrHeader.Byte():
 			return pnet.ParseErrorPacket(serverPkt)
@@ -277,7 +284,10 @@ func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, bac
 		return err
 	}
 
-	return auth.handleSecondAuthResult(backendIO)
+	if err = auth.handleSecondAuthResult(backendIO); err == nil {
+		return setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel)
+	}
+	return err
 }
 
 func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serverPkt []byte, capability pnet.Capability, err error) {
@@ -307,8 +317,9 @@ func (auth *Authenticator) writeAuthHandshake(
 		Attrs:      auth.attrs,
 		Collation:  auth.collation,
 		AuthData:   authData,
-		Capability: auth.capability | authCap,
+		Capability: auth.capability&backendCapability | authCap,
 		AuthPlugin: authPlugin,
+		ZstdLevel:  auth.zstdLevel,
 	}
 
 	if len(resp.Attrs) > 0 {
@@ -381,4 +392,14 @@ func (auth *Authenticator) changeUser(req *pnet.ChangeUserReq) {
 // The proxy cannot send the original dbname to TiDB in the second handshake because the original db may be dropped.
 func (auth *Authenticator) updateCurrentDB(db string) {
 	auth.dbname = db
+}
+
+func setCompress(packetIO *pnet.PacketIO, capability pnet.Capability, zstdLevel int) error {
+	algorithm := pnet.CompressionNone
+	if capability&pnet.ClientCompress > 0 {
+		algorithm = pnet.CompressionZlib
+	} else if capability&pnet.ClientZstdCompressionAlgorithm > 0 {
+		algorithm = pnet.CompressionZstd
+	}
+	return packetIO.SetCompressionAlgorithm(algorithm, zstdLevel)
 }

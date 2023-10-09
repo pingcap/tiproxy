@@ -22,13 +22,13 @@ import (
 // sent from the server and vice versa.
 
 const (
-	defaultTestBackendCapability = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientLongFlag |
+	defaultTestClientCapability = pnet.ClientLongPassword | pnet.ClientFoundRows | pnet.ClientLongFlag |
 		pnet.ClientConnectWithDB | pnet.ClientNoSchema | pnet.ClientODBC | pnet.ClientLocalFiles | pnet.ClientIgnoreSpace |
 		pnet.ClientProtocol41 | pnet.ClientInteractive | pnet.ClientSSL | pnet.ClientIgnoreSigpipe |
 		pnet.ClientTransactions | pnet.ClientReserved | pnet.ClientSecureConnection | pnet.ClientMultiStatements |
 		pnet.ClientMultiResults | pnet.ClientPluginAuth | pnet.ClientConnectAttrs | pnet.ClientPluginAuthLenencClientData |
 		pnet.ClientDeprecateEOF
-	defaultTestClientCapability = defaultTestBackendCapability
+	defaultTestBackendCapability = defaultTestClientCapability | pnet.ClientCompress | pnet.ClientZstdCompressionAlgorithm
 )
 
 var (
@@ -197,6 +197,7 @@ func (ts *testSuite) authenticateFirstTime(t *testing.T, c checker) {
 // This must be called after authenticateFirstTime.
 func (ts *testSuite) authenticateSecondTime(t *testing.T, c checker) {
 	ts.mb.backendConfig.authSucceed = true
+	ts.tc.reconnectBackend(t)
 	ts.runAndCheck(t, c, nil, ts.mb.authenticate, ts.mp.authenticateSecondTime)
 	if c == nil {
 		require.Equal(t, ts.mc.username, ts.mb.username)
