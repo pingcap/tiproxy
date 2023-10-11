@@ -362,3 +362,47 @@ func TestProxyTLSCompress(t *testing.T) {
 		}
 	}
 }
+
+// Test the sequence is correct with the compression protocol.
+func TestPacketSequence(t *testing.T) {
+	write := func(p *PacketIO, flush bool) {
+		require.NoError(t, p.WritePacket([]byte{0}, flush))
+	}
+	read := func(p *PacketIO) {
+		_, err := p.ReadPacket()
+		require.NoError(t, err)
+	}
+	loops := 1024
+	testTCPConn(t,
+		func(t *testing.T, cli *PacketIO) {
+			require.NoError(t, cli.SetCompressionAlgorithm(CompressionZlib, 0))
+			read(cli)
+			// uncompressed sequence = compressed sequence
+			write(cli, false)
+			write(cli, true)
+			// sequence wraps around
+			for i := 0; i < loops; i++ {
+				read(cli)
+			}
+			// reset sequence
+			cli.ResetSequence()
+			write(cli, true)
+		},
+		func(t *testing.T, srv *PacketIO) {
+			require.NoError(t, srv.SetCompressionAlgorithm(CompressionZlib, 0))
+			write(srv, true)
+			// uncompressed sequence = compressed sequence
+			read(srv)
+			read(srv)
+			// sequence wraps around
+			for i := 0; i < loops; i++ {
+				write(srv, false)
+			}
+			require.NoError(t, srv.Flush())
+			// reset sequence
+			srv.ResetSequence()
+			read(srv)
+		},
+		1,
+	)
+}
