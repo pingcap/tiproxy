@@ -380,9 +380,14 @@ func TestPacketSequence(t *testing.T) {
 			// uncompressed sequence = compressed sequence
 			write(cli, false)
 			write(cli, true)
-			// sequence wraps around
+			// uncompressed sequence wraps around (1000 writes + 1 flush)
 			for i := 0; i < loops; i++ {
-				read(cli)
+				write(cli, false)
+			}
+			require.NoError(t, cli.Flush())
+			// compressed sequence wraps around (1000 writes + 1000 flushes)
+			for i := 0; i < loops; i++ {
+				write(cli, true)
 			}
 			// reset sequence
 			cli.ResetSequence()
@@ -394,11 +399,14 @@ func TestPacketSequence(t *testing.T) {
 			// uncompressed sequence = compressed sequence
 			read(srv)
 			read(srv)
-			// sequence wraps around
+			// uncompressed sequence wraps around
 			for i := 0; i < loops; i++ {
-				write(srv, false)
+				read(srv)
 			}
-			require.NoError(t, srv.Flush())
+			// compressed sequence wraps around
+			for i := 0; i < loops; i++ {
+				read(srv)
+			}
 			// reset sequence
 			srv.ResetSequence()
 			read(srv)
