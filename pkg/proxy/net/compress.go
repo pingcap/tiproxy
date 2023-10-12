@@ -25,21 +25,11 @@ const (
 	CompressionZstd
 )
 
-type rwStatus int
-
-const (
-	rwNone rwStatus = iota
-	rwRead
-	rwWrite
-)
-
 const (
 	// maxCompressedSize is the max uncompressed data size for a compressed packet.
 	// Packets bigger than maxCompressedSize will be split into multiple compressed packets.
 	// MySQL has 16K for the first packet. The rest packets and MySQL Connector/J are 16M.
-	// Two restrictions for the length:
-	// - it should be smaller than 16M so that the length can fit in the 3 byte field in the header.
-	// - it should be larger than 4M so that the compressed sequence can fit in the 3 byte field when max_allowed_packet is 1G.
+	// It should be smaller than 16M so that the length can fit in the 3 byte field in the header.
 	maxCompressedSize = 1<<24 - 1
 	// minCompressSize is the min uncompressed data size for compressed data.
 	// Packets smaller than minCompressSize won't be compressed.
@@ -83,18 +73,18 @@ func newCompressedReadWriter(rw packetReadWriter, algorithm CompressAlgorithm, z
 	}
 }
 
-func (crw *compressedReadWriter) SetSequence(sequence uint8) {
-	crw.packetReadWriter.SetSequence(sequence)
+func (crw *compressedReadWriter) ResetSequence() {
+	crw.packetReadWriter.ResetSequence()
 	// Reset the compressed sequence before the next command.
-	if sequence == 0 {
-		crw.sequence = 0
-		crw.rwStatus = rwNone
-	}
+	// Sequence wraps around once it hits 0xFF, so we need ResetSequence() to know that it's reset instead of overflow.
+	crw.sequence = 0
+	crw.rwStatus = rwNone
 }
 
+// BeginRW implements packetReadWriter.BeginRW.
 // Uncompressed sequence of MySQL doesn't follow the spec: it's set to the compressed sequence when
 // the client/server begins reading or writing.
-func (crw *compressedReadWriter) beginRW(status rwStatus) {
+func (crw *compressedReadWriter) BeginRW(status rwStatus) {
 	if crw.rwStatus != status {
 		crw.packetReadWriter.SetSequence(crw.sequence)
 		crw.rwStatus = status
@@ -102,7 +92,6 @@ func (crw *compressedReadWriter) beginRW(status rwStatus) {
 }
 
 func (crw *compressedReadWriter) Read(p []byte) (n int, err error) {
-	crw.beginRW(rwRead)
 	// Read from the connection to fill the buffer if the buffer is empty.
 	if crw.readBuffer.Len() == 0 {
 		if err = crw.readFromConn(); err != nil {
@@ -156,7 +145,6 @@ func (crw *compressedReadWriter) readFromConn() error {
 }
 
 func (crw *compressedReadWriter) Write(data []byte) (n int, err error) {
-	crw.beginRW(rwWrite)
 	for {
 		remainingLen := maxCompressedSize - crw.writeBuffer.Len()
 		if len(data) <= remainingLen {
@@ -234,7 +222,6 @@ func (crw *compressedReadWriter) DirectWrite(data []byte) (n int, err error) {
 // Peek won't be used.
 // Notice: the peeked data may be discarded if an error is returned.
 func (crw *compressedReadWriter) Peek(n int) (data []byte, err error) {
-	crw.beginRW(rwRead)
 	for crw.readBuffer.Len() < n {
 		if err = crw.readFromConn(); err != nil {
 			return
@@ -247,7 +234,6 @@ func (crw *compressedReadWriter) Peek(n int) (data []byte, err error) {
 
 // Discard won't be used.
 func (crw *compressedReadWriter) Discard(n int) (d int, err error) {
-	crw.beginRW(rwRead)
 	for crw.readBuffer.Len() < n {
 		if err = crw.readFromConn(); err != nil {
 			return

@@ -50,6 +50,14 @@ const (
 	defaultReaderSize = 16 * 1024
 )
 
+type rwStatus int
+
+const (
+	rwNone rwStatus = iota
+	rwRead
+	rwWrite
+)
+
 // packetReadWriter acts like a net.Conn with read and write buffer.
 type packetReadWriter interface {
 	net.Conn
@@ -65,6 +73,10 @@ type packetReadWriter interface {
 	IsPeerActive() bool
 	SetSequence(uint8)
 	Sequence() uint8
+	// ResetSequence is called before executing a command.
+	ResetSequence()
+	// BeginRW is called before reading or writing packets.
+	BeginRW(status rwStatus)
 }
 
 var _ packetReadWriter = (*basicReadWriter)(nil)
@@ -121,6 +133,13 @@ func (brw *basicReadWriter) InBytes() uint64 {
 
 func (brw *basicReadWriter) OutBytes() uint64 {
 	return brw.outBytes
+}
+
+func (brw *basicReadWriter) BeginRW(rwStatus) {
+}
+
+func (brw *basicReadWriter) ResetSequence() {
+	brw.sequence = 0
 }
 
 func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
@@ -190,7 +209,7 @@ func (p *PacketIO) RemoteAddr() net.Addr {
 }
 
 func (p *PacketIO) ResetSequence() {
-	p.readWriter.SetSequence(0)
+	p.readWriter.ResetSequence()
 }
 
 // GetSequence is used in tests to assert that the sequences on the client and server are equal.
@@ -219,6 +238,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 
 // ReadPacket reads data and removes the header
 func (p *PacketIO) ReadPacket() (data []byte, err error) {
+	p.readWriter.BeginRW(rwRead)
 	for more := true; more; {
 		var buf []byte
 		buf, more, err = p.readOnePacket()
@@ -262,6 +282,7 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 
 // WritePacket writes data without a header
 func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
+	p.readWriter.BeginRW(rwWrite)
 	for more := true; more; {
 		var n int
 		n, more, err = p.writeOnePacket(data)

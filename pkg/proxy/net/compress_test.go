@@ -235,6 +235,7 @@ func TestReadWriteError(t *testing.T) {
 }
 
 func fillAndWrite(t *testing.T, crw *compressedReadWriter, b byte, length int) {
+	crw.BeginRW(rwWrite)
 	data := fillData(b, length)
 	_, err := crw.Write(data)
 	require.NoError(t, err)
@@ -250,6 +251,7 @@ func fillData(b byte, length int) []byte {
 }
 
 func readAndCheck(t *testing.T, crw *compressedReadWriter, b byte, length int) {
+	crw.BeginRW(rwRead)
 	data := make([]byte, length)
 	_, err := io.ReadFull(crw, data)
 	require.NoError(t, err)
