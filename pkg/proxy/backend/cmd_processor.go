@@ -17,6 +17,11 @@ const (
 	StatusQuit
 	StatusPrepareWaitExecute
 	StatusPrepareWaitFetch
+
+	// errUserPrefixMismatch is a special error that indicates the request is
+	// directed to unexpected tidb-server and has been rejected by tidb.
+	// Therefore, it should be treated as a proxy error instead of a MySQL error.
+	errUserPrefixMismatch = uint16(20003)
 )
 
 // CmdProcessor maintains the transaction and prepared statement status and decides whether the session can be redirected.
@@ -122,6 +127,6 @@ func IsMySQLError(err error) bool {
 	if err == nil {
 		return false
 	}
-	_, ok := err.(*gomysql.MyError)
-	return ok
+	myError, ok := err.(*gomysql.MyError)
+	return ok && myError.Code != errUserPrefixMismatch
 }
