@@ -5,7 +5,6 @@ package net
 
 import (
 	"bytes"
-	"io"
 	"net"
 	"sync/atomic"
 
@@ -77,22 +76,37 @@ func (prw *proxyReadWriter) Read(b []byte) (int, error) {
 }
 
 func (prw *proxyReadWriter) Write(p []byte) (n int, err error) {
-	// The proxy header should be written at the beginning of connection, before any write operations.
-	if prw.client && !prw.proxyInited.Load() {
-		buf, err := prw.proxy.ToBytes()
-		if err != nil {
-			return 0, errors.Wrap(ErrWriteConn, err)
-		}
-		if _, err := io.Copy(prw.packetReadWriter, bytes.NewReader(buf)); err != nil {
-			return 0, errors.Wrap(ErrWriteConn, err)
-		}
-		// according to the spec, we better flush to avoid server hanging
-		if err := prw.packetReadWriter.Flush(); err != nil {
-			return 0, err
-		}
-		prw.proxyInited.Store(true)
+	if err := prw.writeProxy(); err != nil {
+		return 0, err
 	}
 	return prw.packetReadWriter.Write(p)
+}
+
+func (prw *proxyReadWriter) writeProxy() error {
+	// The proxy header should be written at the beginning of connection, before any write operations.
+	if !prw.client || prw.proxyInited.Load() {
+		return nil
+	}
+	buf, err := prw.proxy.ToBytes()
+	if err != nil {
+		return errors.Wrap(ErrWriteConn, err)
+	}
+	if _, err := prw.packetReadWriter.Write(buf); err != nil {
+		return errors.Wrap(ErrWriteConn, err)
+	}
+	// according to the spec, we better flush to avoid server hanging
+	if err := prw.packetReadWriter.Flush(); err != nil {
+		return err
+	}
+	prw.proxyInited.Store(true)
+	return nil
+}
+
+func (prw *proxyReadWriter) DirectWrite(p []byte) (n int, err error) {
+	if err := prw.writeProxy(); err != nil {
+		return 0, err
+	}
+	return prw.packetReadWriter.DirectWrite(p)
 }
 
 func (prw *proxyReadWriter) parseProxyV2() (*proxyprotocol.Proxy, error) {

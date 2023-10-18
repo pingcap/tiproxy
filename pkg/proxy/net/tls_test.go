@@ -21,7 +21,7 @@ func TestTLSReadWrite(t *testing.T) {
 	ch := make(chan []byte)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			brw := newBasicReadWriter(c)
+			brw := newBasicReadWriter(c, DefaultConnBufferSize)
 			conn := &tlsInternalConn{brw}
 			tlsConn := tls.Client(conn, ctls)
 			require.NoError(t, tlsConn.Handshake())
@@ -45,7 +45,7 @@ func TestTLSReadWrite(t *testing.T) {
 			}
 		},
 		func(t *testing.T, c net.Conn) {
-			brw := newBasicReadWriter(c)
+			brw := newBasicReadWriter(c, DefaultConnBufferSize)
 			conn := &tlsInternalConn{brw}
 			tlsConn := tls.Server(conn, stls)
 			require.NoError(t, tlsConn.Handshake())

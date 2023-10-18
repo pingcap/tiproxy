@@ -125,7 +125,7 @@ func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO *pnet.Packe
 func (ts *backendMgrTester) handshake4Backend(packetIO *pnet.PacketIO) error {
 	conn, err := ts.tc.backendListener.Accept()
 	require.NoError(ts.t, err)
-	ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg)
+	ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg, pnet.DefaultConnBufferSize)
 	return ts.mb.authenticate(ts.tc.backendIO)
 }
 
@@ -404,7 +404,7 @@ func TestConnectFail(t *testing.T) {
 			backend: func(_ *pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(ts.t, err)
-				ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg)
+				ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg, pnet.DefaultConnBufferSize)
 				ts.mb.authSucceed = false
 				return ts.mb.authenticate(ts.tc.backendIO)
 			},
@@ -448,7 +448,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(t, err)
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(t, err)
-				tmpBackendIO := pnet.NewPacketIO(conn, ts.lg)
+				tmpBackendIO := pnet.NewPacketIO(conn, ts.lg, pnet.DefaultConnBufferSize)
 				// auth fails
 				ts.mb.authSucceed = false
 				err = ts.mb.authenticate(tmpBackendIO)
@@ -469,7 +469,7 @@ func TestRedirectFail(t *testing.T) {
 				require.NoError(ts.t, err)
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(ts.t, err)
-				tmpBackendIO := pnet.NewPacketIO(conn, ts.lg)
+				tmpBackendIO := pnet.NewPacketIO(conn, ts.lg, pnet.DefaultConnBufferSize)
 				ts.mb.authSucceed = true
 				err = ts.mb.authenticate(tmpBackendIO)
 				require.NoError(t, err)

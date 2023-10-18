@@ -59,7 +59,7 @@ type tlsReadWriter struct {
 func newTLSReadWriter(rw packetReadWriter, tlsConn *tls.Conn) *tlsReadWriter {
 	// Can not modify rw and reuse it because tlsConn is using rw internally.
 	// We must create another buffer.
-	buf := bufio.NewReadWriter(bufio.NewReaderSize(tlsConn, defaultReaderSize), bufio.NewWriterSize(tlsConn, defaultWriterSize))
+	buf := bufio.NewReadWriter(bufio.NewReaderSize(tlsConn, DefaultConnBufferSize), bufio.NewWriterSize(tlsConn, DefaultConnBufferSize))
 	return &tlsReadWriter{
 		packetReadWriter: rw,
 		buf:              buf,

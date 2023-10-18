@@ -13,6 +13,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/security"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 )
@@ -21,10 +22,10 @@ func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T
 	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestPipeConn(t,
 		func(t *testing.T, c net.Conn) {
-			a(t, NewPacketIO(c, lg))
+			a(t, NewPacketIO(c, lg, DefaultConnBufferSize))
 		},
 		func(t *testing.T, c net.Conn) {
-			b(t, NewPacketIO(c, lg))
+			b(t, NewPacketIO(c, lg, DefaultConnBufferSize))
 		}, loop)
 }
 
@@ -32,12 +33,12 @@ func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T,
 	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			cli := NewPacketIO(c, lg)
+			cli := NewPacketIO(c, lg, DefaultConnBufferSize)
 			a(t, cli)
 			require.NoError(t, cli.Close())
 		},
 		func(t *testing.T, c net.Conn) {
-			srv := NewPacketIO(c, lg)
+			srv := NewPacketIO(c, lg, DefaultConnBufferSize)
 			b(t, srv)
 			require.NoError(t, srv.Close())
 		}, loop)
@@ -413,4 +414,52 @@ func TestPacketSequence(t *testing.T) {
 		},
 		1,
 	)
+}
+
+func BenchmarkWritePacket(b *testing.B) {
+	b.ReportAllocs()
+	cli, srv := net.Pipe()
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		packetIO := NewPacketIO(srv, nil, DefaultConnBufferSize)
+		for {
+			if _, err := packetIO.ReadPacket(); err != nil {
+				break
+			}
+		}
+		_ = srv.Close()
+	})
+	packetIO := NewPacketIO(cli, nil, DefaultConnBufferSize)
+	data := make([]byte, 100)
+	for i := 0; i < b.N; i++ {
+		if err := packetIO.WritePacket(data, false); err != nil {
+			b.Fatal(err)
+		}
+	}
+	_ = packetIO.Close()
+	wg.Wait()
+}
+
+func BenchmarkReadPacket(b *testing.B) {
+	b.ReportAllocs()
+	cli, srv := net.Pipe()
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		b := make([]byte, 1024*1024)
+		packetIO := NewPacketIO(srv, nil, 1024*1024)
+		for {
+			if err := packetIO.WritePacket(b, true); err != nil {
+				break
+			}
+		}
+		_ = srv.Close()
+	})
+	packetIO := NewPacketIO(cli, nil, DefaultConnBufferSize)
+	for i := 0; i < b.N; i++ {
+		if _, err := packetIO.ReadPacket(); err != nil {
+			b.Fatal(err)
+		}
+	}
+	_ = packetIO.Close()
+	wg.Wait()
 }

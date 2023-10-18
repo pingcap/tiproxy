@@ -4,6 +4,8 @@
 package net
 
 import (
+	"bytes"
+	"compress/zlib"
 	"fmt"
 	"io"
 	"math/rand"
@@ -21,7 +23,7 @@ func TestCompressZlib(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			written := crw.OutBytes()
 			for _, size := range sizes {
 				fillAndWrite(t, crw, 'a', size)
@@ -33,7 +35,7 @@ func TestCompressZlib(t *testing.T) {
 			}
 		},
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			for _, size := range sizes {
 				readAndCheck(t, crw, 'a', size)
 			}
@@ -48,7 +50,7 @@ func TestCompressZstd(t *testing.T) {
 	for _, level := range levels {
 		testkit.TestTCPConn(t,
 			func(t *testing.T, c net.Conn) {
-				crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZstd, level, lg)
+				crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZstd, level, lg)
 				written := crw.OutBytes()
 				for _, size := range sizes {
 					fillAndWrite(t, crw, 'a', size)
@@ -60,7 +62,7 @@ func TestCompressZstd(t *testing.T) {
 				}
 			},
 			func(t *testing.T, c net.Conn) {
-				crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZstd, level, lg)
+				crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZstd, level, lg)
 				for _, size := range sizes {
 					readAndCheck(t, crw, 'a', size)
 				}
@@ -77,7 +79,7 @@ func TestCompressMergePkt(t *testing.T) {
 	}
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			written := 0
 			for i, size := range sizes {
 				fillAndWrite(t, crw, 'a'+byte(i), size)
@@ -88,7 +90,7 @@ func TestCompressMergePkt(t *testing.T) {
 			require.NoError(t, crw.Flush())
 		},
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			for i, size := range sizes {
 				readAndCheck(t, crw, 'a'+byte(i), size)
 			}
@@ -101,7 +103,7 @@ func TestCompressPeekDiscard(t *testing.T) {
 	size := 1000
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			data := fillData('a', size)
 			_, err := crw.DirectWrite(data)
 			require.NoError(t, err)
@@ -111,7 +113,7 @@ func TestCompressPeekDiscard(t *testing.T) {
 			require.NoError(t, err)
 		},
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			peek, err := crw.Peek(10)
 			require.NoError(t, err)
 			checkData(t, peek, 'a')
@@ -128,7 +130,7 @@ func TestCompressSequence(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			fillAndWrite(t, crw, 'a', 100)
 			fillAndWrite(t, crw, 'a', 100)
 			require.NoError(t, crw.Flush())
@@ -152,7 +154,7 @@ func TestCompressSequence(t *testing.T) {
 			require.NoError(t, crw.Flush())
 		},
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			readAndCheck(t, crw, 'a', 100)
 			readAndCheck(t, crw, 'a', 100)
 			require.Equal(t, uint8(2), crw.Sequence())
@@ -180,14 +182,14 @@ func TestCompressHeader(t *testing.T) {
 	sizes := []int{minCompressSize - 1, maxCompressedSize, maxCompressedSize + 1}
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			for i, size := range sizes {
 				fillAndWrite(t, crw, 'a'+byte(i), size)
 				require.NoError(t, crw.Flush())
 			}
 		},
 		func(t *testing.T, c net.Conn) {
-			brw := newBasicReadWriter(c)
+			brw := newBasicReadWriter(c, DefaultConnBufferSize)
 			crw := newCompressedReadWriter(brw, CompressionZlib, 0, lg)
 			for i, size := range sizes {
 				header, err := brw.Peek(7)
@@ -218,7 +220,7 @@ func TestReadWriteError(t *testing.T) {
 		func(t *testing.T, c net.Conn) {
 		},
 		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			_, err := crw.Read(make([]byte, 1))
 			require.True(t, IsDisconnectError(err))
 		}, 1)
@@ -227,7 +229,7 @@ func TestReadWriteError(t *testing.T) {
 		},
 		func(t *testing.T, c net.Conn) {
 			require.NoError(t, c.Close())
-			crw := newCompressedReadWriter(newBasicReadWriter(c), CompressionZlib, 0, lg)
+			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
 			_, err := crw.Write(make([]byte, 1))
 			require.NoError(t, err)
 			require.ErrorIs(t, crw.Flush(), net.ErrClosed)
@@ -273,5 +275,53 @@ func checkWrittenByteSize(t *testing.T, diff uint64, size int) {
 	} else {
 		require.Greater(t, diff, uint64(0))
 		require.Less(t, diff, uint64(size+7))
+	}
+}
+
+func BenchmarkCompress(b *testing.B) {
+	b.ReportAllocs()
+	data := make([]byte, 1024*1024)
+	for i := 0; i < b.N; i++ {
+		compress(b, data)
+	}
+}
+
+func compress(b *testing.B, data []byte) []byte {
+	var compressedPacket bytes.Buffer
+	compressWriter, err := zlib.NewWriterLevel(&compressedPacket, zlibCompressionLevel)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, err = compressWriter.Write(data); err != nil {
+		b.Fatal(err)
+	}
+	if err = compressWriter.Close(); err != nil {
+		b.Fatal(err)
+	}
+	return compressedPacket.Bytes()
+}
+
+func uncompress(b *testing.B, data []byte) []byte {
+	compressedReader, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		b.Fatal(err)
+	}
+	var readBuffer bytes.Buffer
+	readBuffer.Grow(1024 * 1024)
+	if _, err = io.CopyN(&readBuffer, compressedReader, int64(1024*1024)); err != nil {
+		b.Fatal(err)
+	}
+	if err = compressedReader.Close(); err != nil {
+		b.Fatal(err)
+	}
+	return readBuffer.Bytes()
+}
+
+func BenchmarkUncompress(b *testing.B) {
+	b.ReportAllocs()
+	data := make([]byte, 1024*1024)
+	res := compress(b, data)
+	for i := 0; i < b.N; i++ {
+		uncompress(b, res)
 	}
 }
