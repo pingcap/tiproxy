@@ -60,6 +60,7 @@ type compressedReadWriter struct {
 	logger      *zap.Logger
 	rwStatus    rwStatus
 	zstdLevel   zstd.EncoderLevel
+	header      []byte
 	sequence    uint8
 }
 
@@ -70,6 +71,7 @@ func newCompressedReadWriter(rw packetReadWriter, algorithm CompressAlgorithm, z
 		zstdLevel:        zstd.EncoderLevelFromZstd(zstdLevel),
 		logger:           logger,
 		rwStatus:         rwNone,
+		header:           make([]byte, 7),
 	}
 }
 
@@ -100,7 +102,7 @@ func (crw *compressedReadWriter) Read(p []byte) (n int, err error) {
 	}
 	n, err = crw.readBuffer.Read(p)
 	// Trade off between memory and efficiency.
-	if n == len(p) && crw.readBuffer.Len() == 0 && crw.readBuffer.Cap() > defaultReaderSize {
+	if n == len(p) && crw.readBuffer.Len() == 0 && crw.readBuffer.Cap() > DefaultConnBufferSize {
 		crw.readBuffer = bytes.Buffer{}
 	}
 	return
@@ -110,18 +112,17 @@ func (crw *compressedReadWriter) Read(p []byte) (n int, err error) {
 // The format of the protocol: https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_compression_packet.html
 func (crw *compressedReadWriter) readFromConn() error {
 	var err error
-	var header [7]byte
-	if _, err = io.ReadFull(crw.packetReadWriter, header[:]); err != nil {
+	if err = ReadFull(crw.packetReadWriter, crw.header); err != nil {
 		return err
 	}
-	compressedSequence := header[3]
+	compressedSequence := crw.header[3]
 	if compressedSequence != crw.sequence {
 		return ErrInvalidSequence.GenWithStack(
 			"invalid compressed sequence, expected %d, actual %d", crw.sequence, compressedSequence)
 	}
 	crw.sequence++
-	compressedLength := int(uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16)
-	uncompressedLength := int(uint32(header[4]) | uint32(header[5])<<8 | uint32(header[6])<<16)
+	compressedLength := int(uint32(crw.header[0]) | uint32(crw.header[1])<<8 | uint32(crw.header[2])<<16)
+	uncompressedLength := int(uint32(crw.header[4]) | uint32(crw.header[5])<<8 | uint32(crw.header[6])<<16)
 
 	if uncompressedLength == 0 {
 		// If the data is uncompressed, the uncompressed length is 0 and compressed length is the data length
@@ -134,7 +135,7 @@ func (crw *compressedReadWriter) readFromConn() error {
 		// If the data is compressed, the compressed length is the length of data after the compressed header and
 		// the uncompressed length is the length of data after decompression.
 		data := make([]byte, compressedLength)
-		if _, err = io.ReadFull(crw.packetReadWriter, data); err != nil {
+		if err = ReadFull(crw.packetReadWriter, data); err != nil {
 			return err
 		}
 		if err = crw.uncompress(data, uncompressedLength); err != nil {
@@ -173,7 +174,7 @@ func (crw *compressedReadWriter) Flush() error {
 		return nil
 	}
 	// Trade off between memory and efficiency.
-	if crw.writeBuffer.Cap() > defaultWriterSize {
+	if crw.writeBuffer.Cap() > DefaultConnBufferSize {
 		crw.writeBuffer = bytes.Buffer{}
 	} else {
 		crw.writeBuffer.Reset()
@@ -193,16 +194,15 @@ func (crw *compressedReadWriter) Flush() error {
 		compressedLength = len(data)
 	}
 
-	var compressedHeader [7]byte
-	compressedHeader[0] = byte(compressedLength)
-	compressedHeader[1] = byte(compressedLength >> 8)
-	compressedHeader[2] = byte(compressedLength >> 16)
-	compressedHeader[3] = crw.sequence
-	compressedHeader[4] = byte(uncompressedLength)
-	compressedHeader[5] = byte(uncompressedLength >> 8)
-	compressedHeader[6] = byte(uncompressedLength >> 16)
+	crw.header[0] = byte(compressedLength)
+	crw.header[1] = byte(compressedLength >> 8)
+	crw.header[2] = byte(compressedLength >> 16)
+	crw.header[3] = crw.sequence
+	crw.header[4] = byte(uncompressedLength)
+	crw.header[5] = byte(uncompressedLength >> 8)
+	crw.header[6] = byte(uncompressedLength >> 16)
 	crw.sequence++
-	if _, err = crw.packetReadWriter.Write(compressedHeader[:]); err != nil {
+	if _, err = crw.packetReadWriter.Write(crw.header[:]); err != nil {
 		return errors.WithStack(err)
 	}
 	if _, err = crw.packetReadWriter.Write(data); err != nil {

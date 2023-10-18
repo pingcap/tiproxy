@@ -29,6 +29,7 @@ type serverState struct {
 	clients            map[uint64]*client.ClientConnection
 	connID             uint64
 	maxConnections     uint64
+	connBufferSize     int
 	tcpKeepAlive       bool
 	proxyProtocol      bool
 	gracefulWait       int
@@ -80,6 +81,7 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
 	s.mu.healthyKeepAlive = cfg.BackendHealthyKeepalive
 	s.mu.unhealthyKeepAlive = cfg.BackendUnhealthyKeepalive
+	s.mu.connBufferSize = cfg.ConnBufferSize
 	s.mu.Unlock()
 }
 
@@ -154,6 +156,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 			RequireBackendTLS:  s.requireBackendTLS,
 			HealthyKeepAlive:   s.mu.healthyKeepAlive,
 			UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
+			ConnBufferSize:     s.mu.connBufferSize,
 		})
 	s.mu.clients[connID] = clientConn
 	s.mu.Unlock()

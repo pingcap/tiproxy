@@ -25,6 +25,12 @@
 #		100 => accept as many as 100 connections.
 # max-connections = 0
 
+# It's a tradeoff between memory and performance.
+# possible values:
+#       0 => default value
+#		1K to 16M
+# conn-buffer-size = 0
+
 [api]
 # addr = "0.0.0.0:3080"
 

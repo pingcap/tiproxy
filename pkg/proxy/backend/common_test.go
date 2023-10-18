@@ -52,23 +52,23 @@ func (tc *tcpConnSuite) newConn(t *testing.T, enableRoute bool) func() {
 		wg.Run(func() {
 			conn, err := tc.backendListener.Accept()
 			require.NoError(t, err)
-			tc.backendIO = pnet.NewPacketIO(conn, lg)
+			tc.backendIO = pnet.NewPacketIO(conn, lg, pnet.DefaultConnBufferSize)
 		})
 	}
 	wg.Run(func() {
 		if !enableRoute {
 			backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
 			require.NoError(t, err)
-			tc.proxyBIO = pnet.NewPacketIO(backendConn, lg)
+			tc.proxyBIO = pnet.NewPacketIO(backendConn, lg, pnet.DefaultConnBufferSize)
 		}
 		clientConn, err := tc.proxyListener.Accept()
 		require.NoError(t, err)
-		tc.proxyCIO = pnet.NewPacketIO(clientConn, lg)
+		tc.proxyCIO = pnet.NewPacketIO(clientConn, lg, pnet.DefaultConnBufferSize)
 	})
 	wg.Run(func() {
 		conn, err := net.Dial("tcp", tc.proxyListener.Addr().String())
 		require.NoError(t, err)
-		tc.clientIO = pnet.NewPacketIO(conn, lg)
+		tc.clientIO = pnet.NewPacketIO(conn, lg, pnet.DefaultConnBufferSize)
 	})
 	wg.Wait()
 	return func() {
@@ -91,13 +91,13 @@ func (tc *tcpConnSuite) reconnectBackend(t *testing.T) {
 		_ = tc.backendIO.Close()
 		conn, err := tc.backendListener.Accept()
 		require.NoError(t, err)
-		tc.backendIO = pnet.NewPacketIO(conn, lg)
+		tc.backendIO = pnet.NewPacketIO(conn, lg, pnet.DefaultConnBufferSize)
 	})
 	wg.Run(func() {
 		_ = tc.proxyBIO.Close()
 		backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
 		require.NoError(t, err)
-		tc.proxyBIO = pnet.NewPacketIO(backendConn, lg)
+		tc.proxyBIO = pnet.NewPacketIO(backendConn, lg, pnet.DefaultConnBufferSize)
 	})
 	wg.Wait()
 }

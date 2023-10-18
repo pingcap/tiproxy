@@ -30,7 +30,7 @@ func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *t
 	if bcConfig.ProxyProtocol {
 		opts = append(opts, pnet.WithProxy)
 	}
-	pkt := pnet.NewPacketIO(conn, logger, opts...)
+	pkt := pnet.NewPacketIO(conn, logger, bcConfig.ConnBufferSize, opts...)
 	return &ClientConnection{
 		logger:            logger,
 		frontendTLSConfig: frontendTLSConfig,

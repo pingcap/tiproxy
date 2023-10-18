@@ -15,6 +15,7 @@ import (
 
 var (
 	ErrUnsupportedProxyProtocolVersion = errors.New("unsupported proxy protocol version")
+	ErrInvalidConfigValue              = errors.New("invalid config value")
 )
 
 type Config struct {
@@ -46,6 +47,7 @@ type KeepAlive struct {
 
 type ProxyServerOnline struct {
 	MaxConnections    uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
+	ConnBufferSize    int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty"`
 	FrontendKeepalive KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
 	// BackendHealthyKeepalive applies when the observer treats the backend as healthy.
 	// The config values should be conservative to save CPU and tolerate network fluctuation.
@@ -182,6 +184,9 @@ func (cfg *Config) Check() error {
 		return errors.Wrapf(ErrUnsupportedProxyProtocolVersion, "%s", cfg.Proxy.ProxyProtocol)
 	}
 
+	if cfg.Proxy.ConnBufferSize > 0 && (cfg.Proxy.ConnBufferSize > 16*1024*1024 || cfg.Proxy.ConnBufferSize < 1024) {
+		return errors.Wrapf(ErrInvalidConfigValue, "conn-buffer-size must be between 1K and 16M")
+	}
 	return nil
 }
 

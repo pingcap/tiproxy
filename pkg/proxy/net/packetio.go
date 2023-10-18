@@ -26,7 +26,6 @@ package net
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/tls"
 	"io"
 	"net"
@@ -46,8 +45,7 @@ var (
 )
 
 const (
-	defaultWriterSize = 16 * 1024
-	defaultReaderSize = 16 * 1024
+	DefaultConnBufferSize = 32 * 1024
 )
 
 type rwStatus int
@@ -90,10 +88,13 @@ type basicReadWriter struct {
 	sequence uint8
 }
 
-func newBasicReadWriter(conn net.Conn) *basicReadWriter {
+func newBasicReadWriter(conn net.Conn, bufferSize int) *basicReadWriter {
+	if bufferSize == 0 {
+		bufferSize = DefaultConnBufferSize
+	}
 	return &basicReadWriter{
 		Conn:       conn,
-		ReadWriter: bufio.NewReadWriter(bufio.NewReaderSize(conn, defaultReaderSize), bufio.NewWriterSize(conn, defaultWriterSize)),
+		ReadWriter: bufio.NewReadWriter(bufio.NewReaderSize(conn, bufferSize), bufio.NewWriterSize(conn, bufferSize)),
 	}
 }
 
@@ -172,16 +173,18 @@ type PacketIO struct {
 	lastKeepAlive config.KeepAlive
 	rawConn       net.Conn
 	readWriter    packetReadWriter
+	header        []byte
 	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
 }
 
-func NewPacketIO(conn net.Conn, lg *zap.Logger, opts ...PacketIOption) *PacketIO {
+func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *PacketIO {
 	p := &PacketIO{
+		header:     make([]byte, 4),
 		rawConn:    conn,
 		logger:     lg,
-		readWriter: newBasicReadWriter(conn),
+		readWriter: newBasicReadWriter(conn, bufferSize),
 	}
 	p.ApplyOpts(opts...)
 	return p
@@ -218,19 +221,18 @@ func (p *PacketIO) GetSequence() uint8 {
 }
 
 func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
-	var header [4]byte
-	if _, err := io.ReadFull(p.readWriter, header[:]); err != nil {
+	if err := ReadFull(p.readWriter, p.header); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
-	sequence, pktSequence := header[3], p.readWriter.Sequence()
+	sequence, pktSequence := p.header[3], p.readWriter.Sequence()
 	if sequence != pktSequence {
 		return nil, false, ErrInvalidSequence.GenWithStack("invalid sequence, expected %d, actual %d", pktSequence, sequence)
 	}
 	p.readWriter.SetSequence(sequence + 1)
 
-	length := int(uint32(header[0]) | uint32(header[1])<<8 | uint32(header[2])<<16)
+	length := int(p.header[0]) | int(p.header[1])<<8 | int(p.header[2])<<16
 	data := make([]byte, length)
-	if _, err := io.ReadFull(p.readWriter, data); err != nil {
+	if err := ReadFull(p.readWriter, data); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 	return data, length == MaxPayloadLen, nil
@@ -246,7 +248,11 @@ func (p *PacketIO) ReadPacket() (data []byte, err error) {
 			err = p.wrapErr(err)
 			return
 		}
-		data = append(data, buf...)
+		if data == nil {
+			data = buf
+		} else {
+			data = append(data, buf...)
+		}
 	}
 	return data, nil
 }
@@ -261,19 +267,18 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 		more = true
 	}
 
-	var header [4]byte
 	sequence := p.readWriter.Sequence()
-	header[0] = byte(length)
-	header[1] = byte(length >> 8)
-	header[2] = byte(length >> 16)
-	header[3] = sequence
+	p.header[0] = byte(length)
+	p.header[1] = byte(length >> 8)
+	p.header[2] = byte(length >> 16)
+	p.header[3] = sequence
 	p.readWriter.SetSequence(sequence + 1)
 
-	if _, err := io.Copy(p.readWriter, bytes.NewReader(header[:])); err != nil {
+	if _, err := p.readWriter.Write(p.header); err != nil {
 		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
 
-	if _, err := io.Copy(p.readWriter, bytes.NewReader(data[:length])); err != nil {
+	if _, err := p.readWriter.Write(data[:length]); err != nil {
 		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
 
@@ -349,4 +354,18 @@ func (p *PacketIO) Close() error {
 		errs = append(errs, err)
 	}
 	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))
+}
+
+// ReadFull is used to replace io.ReadFull to erase boundary check, function calls and interface conversion.
+// It is a hot path when many rows are returned.
+func ReadFull(prw packetReadWriter, b []byte) error {
+	m := len(b)
+	for n := 0; n < m; {
+		nn, err := prw.Read(b[n:])
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		n += nn
+	}
+	return nil
 }

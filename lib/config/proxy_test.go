@@ -26,6 +26,7 @@ var testProxyConfig = Config{
 			FrontendKeepalive:          KeepAlive{Enabled: true},
 			ProxyProtocol:              "v2",
 			GracefulWaitBeforeShutdown: 10,
+			ConnBufferSize:             32 * 1024,
 		},
 	},
 	API: API{
@@ -112,6 +113,12 @@ func TestProxyCheck(t *testing.T) {
 				c.Proxy.ProxyProtocol = "v1"
 			},
 			err: ErrUnsupportedProxyProtocolVersion,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.ConnBufferSize = 100 * 1024 * 1024
+			},
+			err: ErrInvalidConfigValue,
 		},
 	}
 	for _, tc := range testcases {

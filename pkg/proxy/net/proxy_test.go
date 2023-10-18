@@ -41,14 +41,14 @@ func TestProxyReadWrite(t *testing.T) {
 	message := []byte("hello world")
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
-			prw := newProxyClient(newBasicReadWriter(c), p)
+			prw := newProxyClient(newBasicReadWriter(c, DefaultConnBufferSize), p)
 			n, err := prw.Write(message)
 			require.NoError(t, err)
 			require.Equal(t, len(message), n)
 			require.NoError(t, prw.Flush())
 		},
 		func(t *testing.T, c net.Conn) {
-			prw := newProxyServer(newBasicReadWriter(c))
+			prw := newProxyServer(newBasicReadWriter(c, DefaultConnBufferSize))
 			data := make([]byte, len(message))
 			n, err := prw.Read(data)
 			require.NoError(t, err)
