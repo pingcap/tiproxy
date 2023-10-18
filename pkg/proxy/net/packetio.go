@@ -168,6 +168,20 @@ func (brw *basicReadWriter) IsPeerActive() bool {
 	return active
 }
 
+// ReadFull is used to replace io.ReadFull to erase boundary check, function calls and interface conversion.
+// It is a hot path when many rows are returned.
+func ReadFull(prw packetReadWriter, b []byte) error {
+	m := len(b)
+	for n := 0; n < m; {
+		nn, err := prw.Read(b[n:])
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		n += nn
+	}
+	return nil
+}
+
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
 	lastKeepAlive config.KeepAlive
@@ -354,18 +368,4 @@ func (p *PacketIO) Close() error {
 		errs = append(errs, err)
 	}
 	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))
-}
-
-// ReadFull is used to replace io.ReadFull to erase boundary check, function calls and interface conversion.
-// It is a hot path when many rows are returned.
-func ReadFull(prw packetReadWriter, b []byte) error {
-	m := len(b)
-	for n := 0; n < m; {
-		nn, err := prw.Read(b[n:])
-		if err != nil {
-			return errors.WithStack(err)
-		}
-		n += nn
-	}
-	return nil
 }
