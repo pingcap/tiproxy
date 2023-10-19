@@ -170,7 +170,7 @@ func (is *InfoSyncer) getTopologyInfo(cfg *config.Config) (*TopologyInfo, error)
 	}
 	// reporting a non unicast IP makes no sense, try to find one
 	// loopback/linklocal-unicast are not global unicast IP, but are valid local unicast IP
-	if pip := net.ParseIP(ip); pip.Equal(net.IPv4bcast) || pip.IsUnspecified() || pip.IsMulticast() {
+	if pip := net.ParseIP(ip); ip == "" || pip.Equal(net.IPv4bcast) || pip.IsUnspecified() || pip.IsMulticast() {
 		if v := sys.GetGlobalUnicastIP(); v != "" {
 			ip = v
 		}
