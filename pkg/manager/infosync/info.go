@@ -168,9 +168,9 @@ func (is *InfoSyncer) getTopologyInfo(cfg *config.Config) (*TopologyInfo, error)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	// reporting a non unicast IP makes no sense
-	// try to find one
-	if !net.ParseIP(ip).IsGlobalUnicast() {
+	// reporting a non unicast IP makes no sense, try to find one
+	// loopback/linklocal-unicast are not global unicast IP, but are valid local unicast IP
+	if pip := net.ParseIP(ip); !pip.IsGlobalUnicast() && !pip.IsLoopback() && !pip.IsLinkLocalUnicast() {
 		if v := sys.GetGlobalUnicastIP(); v != "" {
 			ip = v
 		}
