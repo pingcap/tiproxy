@@ -5,7 +5,7 @@ package sys
 
 import "net"
 
-func GetLocalIP() string {
+func GetGlobalUnicastIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
 		for _, address := range addrs {
