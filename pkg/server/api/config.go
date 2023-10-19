@@ -35,7 +35,12 @@ func (h *HTTPServer) ConfigSet(c *gin.Context) {
 }
 
 func (h *HTTPServer) ConfigGet(c *gin.Context) {
-	c.TOML(http.StatusOK, h.mgr.cfg.GetConfig())
+	switch c.Query("format") {
+	case "json":
+		c.JSON(http.StatusOK, h.mgr.cfg.GetConfig())
+	default:
+		c.TOML(http.StatusOK, h.mgr.cfg.GetConfig())
+	}
 }
 
 func (h *HTTPServer) registerConfig(group *gin.RouterGroup) {
