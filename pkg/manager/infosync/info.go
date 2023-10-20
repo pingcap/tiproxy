@@ -160,14 +160,20 @@ func (is *InfoSyncer) getTopologyInfo(cfg *config.Config) (*TopologyInfo, error)
 		s = ""
 	}
 	dir := path.Dir(s)
-	ip := sys.GetLocalIP()
-	_, port, err := net.SplitHostPort(cfg.Proxy.Addr)
+	ip, port, err := net.SplitHostPort(cfg.Proxy.Addr)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	_, statusPort, err := net.SplitHostPort(cfg.API.Addr)
 	if err != nil {
 		return nil, errors.WithStack(err)
+	}
+	// reporting a non unicast IP makes no sense, try to find one
+	// loopback/linklocal-unicast are not global unicast IP, but are valid local unicast IP
+	if pip := net.ParseIP(ip); ip == "" || pip.Equal(net.IPv4bcast) || pip.IsUnspecified() || pip.IsMulticast() {
+		if v := sys.GetGlobalUnicastIP(); v != "" {
+			ip = v
+		}
 	}
 	return &TopologyInfo{
 		Version:        versioninfo.TiProxyVersion,

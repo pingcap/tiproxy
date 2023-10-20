@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"path"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	tidbinfo "github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/lib/util/sys"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/stretchr/testify/require"
@@ -175,6 +177,43 @@ func TestFetchTiDBTopology(t *testing.T) {
 		info, err := ts.is.GetTiDBTopology(context.Background())
 		require.NoError(t, err)
 		test.check(info)
+	}
+}
+
+func TestGetTopology(t *testing.T) {
+	ts := newEtcdTestSuite(t)
+	t.Cleanup(ts.close)
+	for _, cas := range []struct {
+		ip          string
+		port        string
+		non_unicast bool
+	}{
+		{":34", "34", true},
+		{"0.0.0.0:34", "34", true},
+		{"255.255.255.255:34", "34", true},
+		{"239.255.255.255:34", "34", true},
+		{"[FF02::1:FF47]:34", "34", true},
+		{"127.0.0.1:34", "34", false},
+		{"[F02::1:FF47]:34", "34", false},
+		{"192.0.0.1:6049", "6049", false},
+	} {
+		is, err := ts.is.getTopologyInfo(&config.Config{
+			Proxy: config.ProxyServer{
+				Addr: cas.ip,
+			},
+			API: config.API{
+				Addr: cas.ip,
+			},
+		})
+		require.NoError(t, err)
+		ip, _, err := net.SplitHostPort(cas.ip)
+		require.NoError(t, err)
+		if cas.non_unicast {
+			ip = sys.GetGlobalUnicastIP()
+		}
+		require.Equal(t, ip, is.IP)
+		require.Equal(t, cas.port, is.Port)
+		require.Equal(t, cas.port, is.StatusPort)
 	}
 }
 
