@@ -11,7 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
-func (h *HTTPServer) NamespaceGet(c *gin.Context) {
+func (h *Server) NamespaceGet(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
 		c.JSON(http.StatusBadRequest, "bad namespace parameter")
@@ -31,7 +31,7 @@ func (h *HTTPServer) NamespaceGet(c *gin.Context) {
 	c.JSON(http.StatusOK, nsc)
 }
 
-func (h *HTTPServer) NamespaceUpsert(c *gin.Context) {
+func (h *Server) NamespaceUpsert(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
 		c.JSON(http.StatusBadRequest, "bad namespace parameter")
@@ -57,7 +57,7 @@ func (h *HTTPServer) NamespaceUpsert(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *HTTPServer) NamespaceRemove(c *gin.Context) {
+func (h *Server) NamespaceRemove(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
 		c.JSON(http.StatusBadRequest, "bad namespace parameter")
@@ -76,7 +76,7 @@ func (h *HTTPServer) NamespaceRemove(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *HTTPServer) NamespaceCommit(c *gin.Context) {
+func (h *Server) NamespaceCommit(c *gin.Context) {
 	ns_names := c.QueryArray("namespace")
 
 	var nss []*config.Namespace
@@ -122,7 +122,7 @@ func (h *HTTPServer) NamespaceCommit(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *HTTPServer) NamespaceList(c *gin.Context) {
+func (h *Server) NamespaceList(c *gin.Context) {
 	nscs, err := h.mgr.cfg.ListAllNamespace(c)
 	if err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
@@ -136,7 +136,7 @@ func (h *HTTPServer) NamespaceList(c *gin.Context) {
 	c.JSON(http.StatusOK, nscs)
 }
 
-func (h *HTTPServer) registerNamespace(group *gin.RouterGroup) {
+func (h *Server) registerNamespace(group *gin.RouterGroup) {
 	group.GET("/", h.NamespaceList)
 	group.POST("/commit", h.NamespaceCommit)
 	group.GET("/:namespace", h.NamespaceGet)

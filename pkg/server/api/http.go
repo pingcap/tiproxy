@@ -11,6 +11,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
+	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
+	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/sysutil"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -23,6 +28,8 @@ import (
 	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 )
 
 const (
@@ -42,27 +49,43 @@ type managers struct {
 	crt *mgrcrt.CertManager
 }
 
-type HTTPServer struct {
+type Server struct {
 	listener net.Listener
 	wg       waitgroup.WaitGroup
 	limit    ratelimit.Limiter
 	ready    *atomic.Bool
 	lg       *zap.Logger
 	proxy    *proxy.SQLServer
+	grpc     *grpc.Server
 	mgr      managers
 }
 
-func NewHTTPServer(cfg config.API, lg *zap.Logger,
+func NewServer(cfg config.API, lg *zap.Logger,
 	proxy *proxy.SQLServer,
 	nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager,
 	crtmgr *mgrcrt.CertManager, handler HTTPHandler,
-	ready *atomic.Bool) (*HTTPServer, error) {
-	h := &HTTPServer{
+	ready *atomic.Bool) (*Server, error) {
+	grpcOpts := []grpc_zap.Option{
+		grpc_zap.WithLevels(func(code codes.Code) zapcore.Level {
+			return zap.InfoLevel
+		}),
+	}
+	h := &Server{
 		limit: ratelimit.New(DefAPILimit),
 		ready: ready,
 		lg:    lg,
 		proxy: proxy,
-		mgr:   managers{cfgmgr, nsmgr, crtmgr},
+		grpc: grpc.NewServer(
+			grpc_middleware.WithUnaryServerChain(
+				grpc_ctxtags.UnaryServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),
+				grpc_zap.UnaryServerInterceptor(lg.Named("grpcu"), grpcOpts...),
+			),
+			grpc_middleware.WithStreamServerChain(
+				grpc_ctxtags.StreamServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),
+				grpc_zap.StreamServerInterceptor(lg.Named("grpcs"), grpcOpts...),
+			),
+		),
+		mgr: managers{cfgmgr, nsmgr, crtmgr},
 	}
 
 	var err error
@@ -77,14 +100,17 @@ func NewHTTPServer(cfg config.API, lg *zap.Logger,
 
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
+	engine.UseH2C = true
 	engine.Use(
 		gin.Recovery(),
 		h.rateLimit,
-		h.attachLogger,
 		h.readyState,
+		h.grpcServer,
+		h.attachLogger,
 	)
 
-	h.register(engine.Group("/api"), cfg, nsmgr, cfgmgr)
+	h.registerGrpc(engine, cfg, cfgmgr)
+	h.registerAPI(engine.Group("/api"), cfg, nsmgr, cfgmgr)
 
 	if handler != nil {
 		if err := handler.RegisterHTTP(engine); err != nil {
@@ -109,11 +135,11 @@ func NewHTTPServer(cfg config.API, lg *zap.Logger,
 	return h, nil
 }
 
-func (h *HTTPServer) rateLimit(c *gin.Context) {
+func (h *Server) rateLimit(c *gin.Context) {
 	_ = h.limit.Take()
 }
 
-func (h *HTTPServer) attachLogger(c *gin.Context) {
+func (h *Server) attachLogger(c *gin.Context) {
 	path := c.Request.URL.Path
 
 	fields := make([]zapcore.Field, 0, 9)
@@ -154,16 +180,30 @@ func (h *HTTPServer) attachLogger(c *gin.Context) {
 	}
 }
 
-func (h *HTTPServer) readyState(c *gin.Context) {
+func (h *Server) readyState(c *gin.Context) {
 	if !h.ready.Load() {
 		c.Abort()
 		c.JSON(http.StatusInternalServerError, "service not ready")
 	}
 }
 
-func (h *HTTPServer) register(group *gin.RouterGroup, cfg config.API, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
+func (h *Server) registerGrpc(g *gin.Engine, cfg config.API, cfgmgr *mgrcfg.ConfigManager) {
+	diagnosticspb.RegisterDiagnosticsServer(h.grpc, sysutil.NewDiagnosticsServer(cfgmgr.GetConfig().Log.LogFile.Filename))
+}
+
+func (h *Server) grpcServer(ctx *gin.Context) {
+	if ctx.Request.ProtoMajor == 2 && strings.HasPrefix(ctx.GetHeader("Content-Type"), "application/grpc") {
+		ctx.Status(http.StatusOK)
+		h.grpc.ServeHTTP(ctx.Writer, ctx.Request)
+		ctx.Abort()
+	} else {
+		ctx.Next()
+	}
+}
+
+func (h *Server) registerAPI(g *gin.RouterGroup, cfg config.API, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
 	{
-		adminGroup := group.Group("admin")
+		adminGroup := g.Group("admin")
 		if cfg.EnableBasicAuth {
 			adminGroup.Use(gin.BasicAuth(gin.Accounts{cfg.User: cfg.Password}))
 		}
@@ -171,12 +211,13 @@ func (h *HTTPServer) register(group *gin.RouterGroup, cfg config.API, nsmgr *mgr
 		h.registerConfig(adminGroup.Group("config"))
 	}
 
-	h.registerMetrics(group.Group("metrics"))
-	h.registerDebug(group.Group("debug"))
+	h.registerMetrics(g.Group("metrics"))
+	h.registerDebug(g.Group("debug"))
 }
 
-func (h *HTTPServer) Close() error {
+func (h *Server) Close() error {
 	err := h.listener.Close()
 	h.wg.Wait()
+	h.grpc.Stop()
 	return err
 }

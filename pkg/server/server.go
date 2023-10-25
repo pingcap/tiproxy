@@ -38,7 +38,7 @@ type Server struct {
 	// HTTP client
 	Http *http.Client
 	// HTTP server
-	HTTPServer *api.HTTPServer
+	APIServer *api.Server
 	// L7 proxy
 	Proxy *proxy.SQLServer
 }
@@ -143,8 +143,8 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		srv.Proxy.Run(ctx, srv.ConfigManager.WatchConfig())
 	}
 
-	// setup http
-	if srv.HTTPServer, err = api.NewHTTPServer(cfg.API, lg.Named("api"), srv.Proxy, srv.NamespaceManager, srv.ConfigManager, srv.CertManager, handler, ready); err != nil {
+	// setup http & grpc
+	if srv.APIServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.Proxy, srv.NamespaceManager, srv.ConfigManager, srv.CertManager, handler, ready); err != nil {
 		return
 	}
 
@@ -172,8 +172,8 @@ func (s *Server) Close() error {
 	if s.Proxy != nil {
 		errs = append(errs, s.Proxy.Close())
 	}
-	if s.HTTPServer != nil {
-		errs = append(errs, s.HTTPServer.Close())
+	if s.APIServer != nil {
+		errs = append(errs, s.APIServer.Close())
 	}
 	if s.NamespaceManager != nil {
 		errs = append(errs, s.NamespaceManager.Close())
