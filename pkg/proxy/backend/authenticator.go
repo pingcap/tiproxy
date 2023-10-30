@@ -226,18 +226,21 @@ loop:
 			}
 			return err
 		}
+		var packetErr error
 		if serverPkt[0] == pnet.ErrHeader.Byte() {
-			err = pnet.ParseErrorPacket(serverPkt)
-			if handshakeHandler.HandleHandshakeErr(cctx, err.(*gomysql.MyError)) {
+			packetErr = pnet.ParseErrorPacket(serverPkt)
+			if handshakeHandler.HandleHandshakeErr(cctx, packetErr.(*gomysql.MyError)) {
 				logger.Warn("handle handshake error, start reconnect", zap.Error(err))
 				backendIO.Close()
 				goto RECONNECT
 			}
-			return err
 		}
 		err = clientIO.WritePacket(serverPkt, true)
 		if err != nil {
 			return err
+		}
+		if packetErr != nil {
+			return packetErr
 		}
 
 		pktIdx++
