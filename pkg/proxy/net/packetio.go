@@ -110,6 +110,20 @@ func (brw *basicReadWriter) Write(p []byte) (int, error) {
 	return n, errors.WithStack(err)
 }
 
+// ReadFrom overrides bufio.ReadWriter.ReadFrom, which is called in io.Copy.
+func (brw *basicReadWriter) ReadFrom(r io.Reader) (int64, error) {
+	n, err := brw.ReadWriter.ReadFrom(r)
+	brw.outBytes += uint64(n)
+	return n, errors.WithStack(err)
+}
+
+// WriteTo overrides bufio.ReadWriter.WriteTo, which is called in io.Copy.
+func (brw *basicReadWriter) WriteTo(w io.Writer) (int64, error) {
+	n, err := brw.ReadWriter.WriteTo(w)
+	brw.inBytes += uint64(n)
+	return n, errors.WithStack(err)
+}
+
 func (brw *basicReadWriter) DirectWrite(p []byte) (int, error) {
 	n, err := brw.Conn.Write(p)
 	brw.outBytes += uint64(n)
@@ -315,6 +329,39 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 		return p.Flush()
 	}
 	return nil
+}
+
+func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, firstPktLen int) bool, process func(response []byte) error) error {
+	p.readWriter.BeginRW(rwRead)
+	dest.readWriter.BeginRW(rwWrite)
+	for {
+		header, err := p.readWriter.Peek(5)
+		if err != nil {
+			return errors.Wrap(ErrReadConn, err)
+		}
+		length := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
+		if isEnd(header[4], length) {
+			data, err := p.ReadPacket()
+			if err != nil {
+				return errors.Wrap(ErrReadConn, err)
+			}
+			if err := dest.WritePacket(data, false); err != nil {
+				return errors.Wrap(ErrWriteConn, err)
+			}
+			return process(data)
+		} else {
+			sequence, pktSequence := header[3], p.readWriter.Sequence()
+			if sequence != pktSequence {
+				return ErrInvalidSequence.GenWithStack("invalid sequence, expected %d, actual %d", pktSequence, sequence)
+			}
+			p.readWriter.SetSequence(sequence + 1)
+			// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
+			dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
+			if _, err := io.CopyN(dest.readWriter, p.readWriter, int64(length+4)); err != nil {
+				return errors.Wrap(ErrRelayConn, err)
+			}
+		}
+	}
 }
 
 func (p *PacketIO) InBytes() uint64 {

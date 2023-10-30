@@ -312,7 +312,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 	if serverPkt, err = backendIO.ReadPacket(); err != nil {
 		return
 	}
-	if pnet.IsErrorPacket(serverPkt) {
+	if pnet.IsErrorPacket(serverPkt[0]) {
 		err = pnet.ParseErrorPacket(serverPkt)
 		return
 	}

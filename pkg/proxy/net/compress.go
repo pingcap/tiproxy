@@ -227,9 +227,7 @@ func (crw *compressedReadWriter) Peek(n int) (data []byte, err error) {
 			return
 		}
 	}
-	data = make([]byte, 0, n)
-	copy(data, crw.readBuffer.Bytes())
-	return
+	return crw.readBuffer.Bytes()[:n], nil
 }
 
 // Discard won't be used.
