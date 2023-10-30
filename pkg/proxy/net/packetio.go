@@ -64,6 +64,7 @@ type packetReadWriter interface {
 	Discard(n int) (int, error)
 	Flush() error
 	DirectWrite(p []byte) (int, error)
+	ReadFrom(r io.Reader) (int64, error)
 	Proxy() *proxyprotocol.Proxy
 	TLSConnectionState() tls.ConnectionState
 	InBytes() uint64
@@ -194,6 +195,12 @@ func ReadFull(prw packetReadWriter, b []byte) error {
 		n += nn
 	}
 	return nil
+}
+
+// CopyN is used to replace io.CopyN to erase boundary check, function calls and interface conversion.
+// It is a hot path when many rows are returned.
+func CopyN(dest, src packetReadWriter, n int64) (int64, error) {
+	return dest.ReadFrom(io.LimitReader(src, n))
 }
 
 // PacketIO is a helper to read and write sql and proxy protocol.
@@ -357,7 +364,7 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 			p.readWriter.SetSequence(sequence + 1)
 			// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
 			dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
-			if _, err := io.CopyN(dest.readWriter, p.readWriter, int64(length+4)); err != nil {
+			if _, err := CopyN(dest.readWriter, p.readWriter, int64(length+4)); err != nil {
 				return errors.Wrap(ErrRelayConn, err)
 			}
 		}
