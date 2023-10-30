@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/util/hack"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -229,7 +228,7 @@ loop:
 		var packetErr error
 		if serverPkt[0] == pnet.ErrHeader.Byte() {
 			packetErr = pnet.ParseErrorPacket(serverPkt)
-			if handshakeHandler.HandleHandshakeErr(cctx, packetErr.(*gomysql.MyError)) {
+			if handshakeHandler.HandleHandshakeErr(cctx, packetErr.(*mysql.MyError)) {
 				logger.Warn("handle handshake error, start reconnect", zap.Error(err))
 				backendIO.Close()
 				goto RECONNECT
