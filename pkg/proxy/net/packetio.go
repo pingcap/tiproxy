@@ -111,17 +111,9 @@ func (brw *basicReadWriter) Write(p []byte) (int, error) {
 	return n, errors.WithStack(err)
 }
 
-// ReadFrom overrides bufio.ReadWriter.ReadFrom, which is called in io.Copy.
 func (brw *basicReadWriter) ReadFrom(r io.Reader) (int64, error) {
 	n, err := brw.ReadWriter.ReadFrom(r)
 	brw.outBytes += uint64(n)
-	return n, errors.WithStack(err)
-}
-
-// WriteTo overrides bufio.ReadWriter.WriteTo, which is called in io.Copy.
-func (brw *basicReadWriter) WriteTo(w io.Writer) (int64, error) {
-	n, err := brw.ReadWriter.WriteTo(w)
-	brw.inBytes += uint64(n)
 	return n, errors.WithStack(err)
 }
 
@@ -197,18 +189,13 @@ func ReadFull(prw packetReadWriter, b []byte) error {
 	return nil
 }
 
-// CopyN is used to replace io.CopyN to erase boundary check, function calls and interface conversion.
-// It is a hot path when many rows are returned.
-func CopyN(dest, src packetReadWriter, n int64) (int64, error) {
-	return dest.ReadFrom(io.LimitReader(src, n))
-}
-
 // PacketIO is a helper to read and write sql and proxy protocol.
 type PacketIO struct {
 	lastKeepAlive config.KeepAlive
 	rawConn       net.Conn
 	readWriter    packetReadWriter
-	header        []byte
+	limitReader   io.LimitedReader // reuse memory to reduce allocation
+	header        []byte           // reuse memory to reduce allocation
 	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
@@ -364,7 +351,9 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 			p.readWriter.SetSequence(sequence + 1)
 			// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
 			dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
-			if _, err := CopyN(dest.readWriter, p.readWriter, int64(length+4)); err != nil {
+			p.limitReader.N = int64(length + 4)
+			p.limitReader.R = p.readWriter
+			if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
 				return errors.Wrap(ErrRelayConn, err)
 			}
 		}

@@ -108,6 +108,24 @@ func (crw *compressedReadWriter) Read(p []byte) (n int, err error) {
 	return
 }
 
+func (crw *compressedReadWriter) ReadFrom(r io.Reader) (n int64, err error) {
+	// TODO: copy compressed data directly.
+	buf := make([]byte, DefaultConnBufferSize)
+	nn := 0
+	for {
+		nn, err = r.Read(buf)
+		if (err == nil || err == io.EOF) && nn > 0 {
+			_, err = crw.Write(buf[:nn])
+			n += int64(nn)
+		}
+		if err == io.EOF {
+			return n, nil
+		} else if err != nil {
+			return n, err
+		}
+	}
+}
+
 // Read and uncompress the data into readBuffer.
 // The format of the protocol: https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_basic_compression_packet.html
 func (crw *compressedReadWriter) readFromConn() error {
