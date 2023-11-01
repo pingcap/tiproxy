@@ -100,30 +100,25 @@ func forwardOnePacket(destIO, srcIO *pnet.PacketIO, flush bool) (data []byte, er
 func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
 	var serverStatus uint16
 	err := backendIO.ForwardUntil(clientIO, func(firstByte byte, length int) bool {
-		if pnet.IsErrorPacket(firstByte) {
+		switch {
+		case pnet.IsErrorPacket(firstByte):
 			return true
+		case cp.capability&pnet.ClientDeprecateEOF == 0:
+			return pnet.IsEOFPacket(firstByte, length)
+		default:
+			return pnet.IsResultSetOKPacket(firstByte, length)
 		}
-		if cp.capability&pnet.ClientDeprecateEOF == 0 {
-			if pnet.IsEOFPacket(firstByte, length) {
-				return true
-			}
-		} else {
-			if pnet.IsResultSetOKPacket(firstByte, length) {
-				return true
-			}
-		}
-		return false
 	}, func(response []byte) error {
-		if pnet.IsErrorPacket(response[0]) {
+		switch {
+		case pnet.IsErrorPacket(response[0]):
 			if err := clientIO.Flush(); err != nil {
 				return err
 			}
 			return cp.handleErrorPacket(response)
-		}
-		if cp.capability&pnet.ClientDeprecateEOF == 0 {
+		case cp.capability&pnet.ClientDeprecateEOF == 0:
 			serverStatus = cp.handleEOFPacket(request, response)
 			return clientIO.Flush()
-		} else {
+		default:
 			serverStatus = cp.handleOKPacket(request, response).Status
 			return clientIO.Flush()
 		}

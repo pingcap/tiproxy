@@ -25,7 +25,6 @@
 package net
 
 import (
-	"bufio"
 	"crypto/tls"
 	"io"
 	"net"
@@ -37,6 +36,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
+	"github.com/pingcap/tiproxy/pkg/util/bufio"
 	"go.uber.org/zap"
 )
 

@@ -505,6 +505,52 @@ func TestForwardUntil(t *testing.T) {
 	}
 }
 
+func TestForwardUntilWithDataLen(t *testing.T) {
+	srvCh := make(chan *PacketIO)
+	exitCh := make(chan struct{})
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		testTCPConn(t,
+			func(t *testing.T, cli *PacketIO) {
+				for i := 0; i < 10000; i++ {
+					data := make([]byte, 100)
+					require.NoError(t, cli.WritePacket(data, true))
+				}
+			},
+			func(t *testing.T, srv1 *PacketIO) {
+				srv2 := <-srvCh
+				i := 0
+				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) bool {
+					i++
+					return i == 10000
+				}, func(response []byte) error {
+					return srv2.Flush()
+				})
+				require.NoError(t, err)
+				exitCh <- struct{}{}
+			},
+			1,
+		)
+	})
+	wg.Run(func() {
+		testTCPConn(t,
+			func(t *testing.T, cli *PacketIO) {
+				for i := 0; i < 10000; i++ {
+					data, err := cli.ReadPacket()
+					require.NoError(t, err)
+					require.Len(t, data, 100)
+				}
+			},
+			func(t *testing.T, srv2 *PacketIO) {
+				srvCh <- srv2
+				<-exitCh
+			},
+			1,
+		)
+	})
+	wg.Wait()
+}
+
 func BenchmarkWritePacket(b *testing.B) {
 	b.ReportAllocs()
 	cli, srv := net.Pipe()
