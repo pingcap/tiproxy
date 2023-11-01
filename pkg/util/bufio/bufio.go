@@ -1,10 +1,13 @@
+// Copyright 2023 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
 // Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package bufio implements buffered I/O. It wraps an io.Reader or io.Writer
-// object, creating another object (Reader or Writer) that also implements
-// the interface but provides buffering and some help for textual I/O.
+// Package bufio is a simplified Golang bufio.
+// It mainly avoids calling TCPConn.ReadFrom in Writer.ReadFrom because
+// TCPConn.ReadFrom calls sys calls.
 package bufio
 
 import (

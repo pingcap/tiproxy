@@ -329,9 +329,6 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 	p.readWriter.BeginRW(rwRead)
 	dest.readWriter.BeginRW(rwWrite)
 	p.limitReader.R = p.readWriter
-	defer func() {
-		p.limitReader.R = nil
-	}()
 	for {
 		header, err := p.readWriter.Peek(5)
 		if err != nil {

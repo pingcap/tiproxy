@@ -505,15 +505,16 @@ func TestForwardUntil(t *testing.T) {
 	}
 }
 
-func TestForwardUntilWithDataLen(t *testing.T) {
+func TestForwardUntilLongData(t *testing.T) {
 	srvCh := make(chan *PacketIO)
 	exitCh := make(chan struct{})
 	var wg waitgroup.WaitGroup
+	loops, dataSize := 100000, 100
 	wg.Run(func() {
 		testTCPConn(t,
 			func(t *testing.T, cli *PacketIO) {
-				for i := 0; i < 10000; i++ {
-					data := make([]byte, 100)
+				for i := 0; i < loops; i++ {
+					data := make([]byte, dataSize)
 					require.NoError(t, cli.WritePacket(data, true))
 				}
 			},
@@ -522,7 +523,7 @@ func TestForwardUntilWithDataLen(t *testing.T) {
 				i := 0
 				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) bool {
 					i++
-					return i == 10000
+					return i == loops
 				}, func(response []byte) error {
 					return srv2.Flush()
 				})
@@ -535,10 +536,10 @@ func TestForwardUntilWithDataLen(t *testing.T) {
 	wg.Run(func() {
 		testTCPConn(t,
 			func(t *testing.T, cli *PacketIO) {
-				for i := 0; i < 10000; i++ {
+				for i := 0; i < loops; i++ {
 					data, err := cli.ReadPacket()
 					require.NoError(t, err)
-					require.Len(t, data, 100)
+					require.Len(t, data, dataSize)
 				}
 			},
 			func(t *testing.T, srv2 *PacketIO) {
