@@ -32,13 +32,10 @@ func (h *Server) NamespaceGet(c *gin.Context) {
 }
 
 func (h *Server) NamespaceUpsert(c *gin.Context) {
-	ns := c.Param("namespace")
-	if ns == "" {
-		c.JSON(http.StatusBadRequest, "bad namespace parameter")
-		return
-	}
-
 	nsc := &config.Namespace{}
+	if nsc.Namespace == "" {
+		nsc.Namespace = c.Param("namespace")
+	}
 
 	if c.ShouldBindJSON(nsc) != nil {
 		c.JSON(http.StatusBadRequest, "bad namespace json")
@@ -48,7 +45,7 @@ func (h *Server) NamespaceUpsert(c *gin.Context) {
 	if err := h.mgr.cfg.SetNamespace(c, nsc.Namespace, nsc); err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,
-			Err:  errors.Errorf("can not update namespace[%s]: %+v", ns, err),
+			Err:  errors.Errorf("can not update namespace[%s]: %+v", nsc.Namespace, err),
 		})
 		c.JSON(http.StatusInternalServerError, "can not update config")
 		return
@@ -132,8 +129,11 @@ func (h *Server) NamespaceList(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, "failed to list namespaces")
 		return
 	}
-
-	c.JSON(http.StatusOK, nscs)
+	if nscs != nil {
+		c.JSON(http.StatusOK, nscs)
+	} else {
+		c.JSON(http.StatusOK, "")
+	}
 }
 
 func (h *Server) registerNamespace(group *gin.RouterGroup) {
@@ -141,5 +141,6 @@ func (h *Server) registerNamespace(group *gin.RouterGroup) {
 	group.POST("/commit", h.NamespaceCommit)
 	group.GET("/:namespace", h.NamespaceGet)
 	group.PUT("/:namespace", h.NamespaceUpsert)
+	group.PUT("/", h.NamespaceUpsert)
 	group.DELETE("/:namespace", h.NamespaceRemove)
 }

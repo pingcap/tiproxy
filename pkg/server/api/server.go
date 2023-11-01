@@ -22,7 +22,6 @@ import (
 	mgrcrt "github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
-	"github.com/pingcap/tiproxy/pkg/proxy"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	"go.uber.org/atomic"
 	"go.uber.org/ratelimit"
@@ -50,18 +49,18 @@ type managers struct {
 }
 
 type Server struct {
-	listener net.Listener
-	wg       waitgroup.WaitGroup
-	limit    ratelimit.Limiter
-	ready    *atomic.Bool
-	lg       *zap.Logger
-	proxy    *proxy.SQLServer
-	grpc     *grpc.Server
-	mgr      managers
+	listener  net.Listener
+	wg        waitgroup.WaitGroup
+	limit     ratelimit.Limiter
+	ready     *atomic.Bool
+	lg        *zap.Logger
+	grpc      *grpc.Server
+	isClosing func() bool
+	mgr       managers
 }
 
 func NewServer(cfg config.API, lg *zap.Logger,
-	proxy *proxy.SQLServer,
+	isClosing func() bool,
 	nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager,
 	crtmgr *mgrcrt.CertManager, handler HTTPHandler,
 	ready *atomic.Bool) (*Server, error) {
@@ -71,10 +70,10 @@ func NewServer(cfg config.API, lg *zap.Logger,
 		}),
 	}
 	h := &Server{
-		limit: ratelimit.New(DefAPILimit),
-		ready: ready,
-		lg:    lg,
-		proxy: proxy,
+		limit:     ratelimit.New(DefAPILimit),
+		ready:     ready,
+		lg:        lg,
+		isClosing: isClosing,
 		grpc: grpc.NewServer(
 			grpc_middleware.WithUnaryServerChain(
 				grpc_ctxtags.UnaryServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),

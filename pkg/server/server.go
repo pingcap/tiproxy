@@ -144,7 +144,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	}
 
 	// setup http & grpc
-	if srv.APIServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.Proxy, srv.NamespaceManager, srv.ConfigManager, srv.CertManager, handler, ready); err != nil {
+	if srv.APIServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.Proxy.IsClosing, srv.NamespaceManager, srv.ConfigManager, srv.CertManager, handler, ready); err != nil {
 		return
 	}
 
