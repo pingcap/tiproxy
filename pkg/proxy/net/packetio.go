@@ -336,6 +336,7 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 		}
 		length := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
 		if isEnd(header[4], length) {
+			// TODO: allocate a buffer from pool and return the buffer after `process`.
 			data, err := p.ReadPacket()
 			if err != nil {
 				return errors.Wrap(ErrReadConn, err)
