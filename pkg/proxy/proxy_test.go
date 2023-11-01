@@ -107,6 +107,29 @@ func TestGracefulShutdown(t *testing.T) {
 	}
 }
 
+func TestMultiPorts(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	err := certManager.Init(&config.Config{}, lg, nil)
+	require.NoError(t, err)
+	server, err := NewSQLServer(lg, config.ProxyServer{
+		Addr:  "0.0.0.0:6000",
+		Ports: []string{"3043"},
+	}, certManager, &panicHsHandler{})
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+
+	require.Len(t, server.listeners, 2)
+	for _, listener := range server.listeners {
+		conn, err := net.Dial("tcp", listener.Addr().String())
+		require.NoError(t, err)
+		require.NoError(t, conn.Close())
+	}
+
+	require.NoError(t, server.Close())
+	certManager.Close()
+}
+
 func TestRecoverPanic(t *testing.T) {
 	lg, text := logger.CreateLoggerForTest(t)
 	certManager := cert.NewCertManager()

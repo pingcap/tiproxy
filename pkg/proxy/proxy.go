@@ -76,7 +76,7 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 		return nil, err
 	}
 	for i, port := range cfg.Ports {
-		s.listeners[i], err = net.Listen("tcp", net.JoinHostPort(host, port))
+		s.listeners[1+i], err = net.Listen("tcp", net.JoinHostPort(host, port))
 		if err != nil {
 			return nil, err
 		}
@@ -116,14 +116,14 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 		}
 	})
 
-	for _, listener := range s.listeners {
+	for i := range s.listeners {
 		s.wg.Run(func() {
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				default:
-					conn, err := listener.Accept()
+					conn, err := s.listeners[i].Accept()
 					if err != nil {
 						if errors.Is(err, net.ErrClosed) {
 							return
