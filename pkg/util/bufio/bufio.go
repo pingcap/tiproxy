@@ -25,12 +25,10 @@ var (
 
 // Reader implements buffering for an io.Reader object.
 type Reader struct {
-	buf          []byte
-	rd           io.Reader // reader provided by the client
-	r, w         int       // buf read and write positions
-	err          error
-	lastByte     int // last byte read for UnreadByte; -1 means invalid
-	lastRuneSize int // size of last rune read for UnreadRune; -1 means invalid
+	buf  []byte
+	rd   io.Reader // reader provided by the client
+	r, w int       // buf read and write positions
+	err  error
 }
 
 const minReadBufferSize = 16
@@ -81,10 +79,8 @@ func (b *Reader) Reset(r io.Reader) {
 
 func (b *Reader) reset(buf []byte, r io.Reader) {
 	*b = Reader{
-		buf:          buf,
-		rd:           r,
-		lastByte:     -1,
-		lastRuneSize: -1,
+		buf: buf,
+		rd:  r,
 	}
 }
 
@@ -139,9 +135,6 @@ func (b *Reader) Peek(n int) ([]byte, error) {
 		return nil, ErrNegativeCount
 	}
 
-	b.lastByte = -1
-	b.lastRuneSize = -1
-
 	for b.w-b.r < n && b.w-b.r < len(b.buf) && b.err == nil {
 		b.fill() // b.w-b.r < len(b.buf) => buffer is not full
 	}
@@ -175,9 +168,6 @@ func (b *Reader) Discard(n int) (discarded int, err error) {
 	if n == 0 {
 		return
 	}
-
-	b.lastByte = -1
-	b.lastRuneSize = -1
 
 	remain := n
 	for {
@@ -226,10 +216,6 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 			if n < 0 {
 				panic(errNegativeRead)
 			}
-			if n > 0 {
-				b.lastByte = int(p[n-1])
-				b.lastRuneSize = -1
-			}
 			return n, b.readErr()
 		}
 		// One read.
@@ -251,8 +237,6 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 	// the underlying reader returned a bad count. See issue 49795.
 	n = copy(p, b.buf[b.r:b.w])
 	b.r += n
-	b.lastByte = int(b.buf[b.r-1])
-	b.lastRuneSize = -1
 	return n, nil
 }
 
@@ -264,9 +248,6 @@ func (b *Reader) Buffered() int { return b.w - b.r }
 // If the underlying reader supports the WriteTo method,
 // this calls the underlying WriteTo without buffering.
 func (b *Reader) WriteTo(w io.Writer) (n int64, err error) {
-	b.lastByte = -1
-	b.lastRuneSize = -1
-
 	n, err = b.writeBuf(w)
 	if err != nil {
 		return
@@ -426,7 +407,9 @@ func (b *Writer) Write(p []byte) (nn int, err error) {
 		} else {
 			n = copy(b.buf[b.n:], p)
 			b.n += n
-			b.Flush()
+			if b.err = b.Flush(); b.err != nil {
+				break
+			}
 		}
 		nn += n
 		p = p[n:]

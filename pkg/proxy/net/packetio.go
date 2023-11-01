@@ -328,6 +328,10 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, firstPktLen int) bool, process func(response []byte) error) error {
 	p.readWriter.BeginRW(rwRead)
 	dest.readWriter.BeginRW(rwWrite)
+	p.limitReader.R = p.readWriter
+	defer func() {
+		p.limitReader.R = nil
+	}()
 	for {
 		header, err := p.readWriter.Peek(5)
 		if err != nil {
@@ -352,7 +356,6 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 			// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
 			dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
 			p.limitReader.N = int64(length + 4)
-			p.limitReader.R = p.readWriter
 			if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
 				return errors.Wrap(ErrRelayConn, err)
 			}
