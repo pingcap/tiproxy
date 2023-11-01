@@ -17,6 +17,8 @@ import (
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, method string, path string, rd io.Reader, f func(*testing.T, *http.Response))) {
@@ -52,4 +54,12 @@ func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, meth
 		f(t, resp)
 		require.NoError(t, resp.Body.Close())
 	}
+}
+
+func TestGrpc(t *testing.T) {
+	srv, _ := createServer(t, nil)
+	addr := srv.listener.Addr().String()
+	cc, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	require.NoError(t, cc.Close())
 }
