@@ -4,6 +4,7 @@
 package backend
 
 import (
+	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/pingcap/tiproxy/pkg/manager/router"
@@ -70,6 +71,7 @@ type ConnContext interface {
 
 type HandshakeHandler interface {
 	HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error
+	HandleHandshakeErr(ctx ConnContext, err *gomysql.MyError) bool // return true means retry connect
 	GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error)
 	OnHandshake(ctx ConnContext, to string, err error)
 	OnConnClose(ctx ConnContext) error
@@ -92,6 +94,10 @@ func NewDefaultHandshakeHandler(nsManager *namespace.NamespaceManager, serverVer
 
 func (handler *DefaultHandshakeHandler) HandleHandshakeResp(ConnContext, *pnet.HandshakeResp) error {
 	return nil
+}
+
+func (handler *DefaultHandshakeHandler) HandleHandshakeErr(ctx ConnContext, err *gomysql.MyError) bool {
+	return false
 }
 
 func (handler *DefaultHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
@@ -142,6 +148,7 @@ type CustomHandshakeHandler struct {
 	onTraffic           func(ConnContext)
 	onConnClose         func(ConnContext) error
 	handleHandshakeResp func(ctx ConnContext, resp *pnet.HandshakeResp) error
+	handleHandshakeErr  func(ctx ConnContext, err *gomysql.MyError) bool
 	getCapability       func() pnet.Capability
 	getServerVersion    func() string
 }
@@ -177,6 +184,13 @@ func (h *CustomHandshakeHandler) HandleHandshakeResp(ctx ConnContext, resp *pnet
 		return h.handleHandshakeResp(ctx, resp)
 	}
 	return nil
+}
+
+func (h *CustomHandshakeHandler) HandleHandshakeErr(ctx ConnContext, err *gomysql.MyError) bool {
+	if h.handleHandshakeErr != nil {
+		return h.handleHandshakeErr(ctx, err)
+	}
+	return false
 }
 
 func (h *CustomHandshakeHandler) GetCapability() pnet.Capability {

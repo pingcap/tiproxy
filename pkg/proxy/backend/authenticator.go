@@ -159,6 +159,8 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	auth.attrs = clientResp.Attrs
 	auth.zstdLevel = clientResp.ZstdLevel
 
+RECONNECT:
+
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
 	backendIO, err := getBackendIO(cctx, auth, clientResp, 15*time.Second)
 	if err != nil {
@@ -214,7 +216,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	pktIdx := 0
 loop:
 	for {
-		serverPkt, err := forwardMsg(backendIO, clientIO)
+		serverPkt, err := backendIO.ReadPacket()
 		if err != nil {
 			// tiproxy pp enabled, tidb pp disabled, tls disabled => invalid sequence
 			// tiproxy pp disabled, tidb pp enabled, tls disabled => invalid sequence
@@ -223,6 +225,23 @@ loop:
 			}
 			return err
 		}
+		var packetErr error
+		if serverPkt[0] == pnet.ErrHeader.Byte() {
+			packetErr = pnet.ParseErrorPacket(serverPkt)
+			if handshakeHandler.HandleHandshakeErr(cctx, packetErr.(*mysql.MyError)) {
+				logger.Warn("handle handshake error, start reconnect", zap.Error(err))
+				backendIO.Close()
+				goto RECONNECT
+			}
+		}
+		err = clientIO.WritePacket(serverPkt, true)
+		if err != nil {
+			return err
+		}
+		if packetErr != nil {
+			return packetErr
+		}
+
 		pktIdx++
 		switch serverPkt[0] {
 		case pnet.OKHeader.Byte():
@@ -233,8 +252,6 @@ loop:
 				return err
 			}
 			return nil
-		case pnet.ErrHeader.Byte():
-			return pnet.ParseErrorPacket(serverPkt)
 		default: // mysql.AuthSwitchRequest, ShaCommand
 			if serverPkt[0] == pnet.AuthSwitchHeader.Byte() {
 				pluginName = string(serverPkt[1 : bytes.IndexByte(serverPkt[1:], 0)+1])
