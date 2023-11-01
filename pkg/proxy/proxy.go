@@ -37,7 +37,7 @@ type serverState struct {
 }
 
 type SQLServer struct {
-	listener          net.Listener
+	listeners         []net.Listener
 	logger            *zap.Logger
 	certMgr           *cert.CertManager
 	hsHandler         backend.HandshakeHandler
@@ -65,9 +65,21 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 
 	s.reset(&cfg.ProxyServerOnline)
 
-	s.listener, err = net.Listen("tcp", cfg.Addr)
+	s.listeners = make([]net.Listener, len(cfg.Ports)+1)
+	s.listeners[0], err = net.Listen("tcp", cfg.Addr)
 	if err != nil {
 		return nil, err
+	}
+
+	host, _, err := net.SplitHostPort(cfg.Addr)
+	if err != nil {
+		return nil, err
+	}
+	for i, port := range cfg.Ports {
+		s.listeners[i], err = net.Listen("tcp", net.JoinHostPort(host, port))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return s, nil
@@ -104,28 +116,30 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 		}
 	})
 
-	s.wg.Run(func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				conn, err := s.listener.Accept()
-				if err != nil {
-					if errors.Is(err, net.ErrClosed) {
-						return
+	for _, listener := range s.listeners {
+		s.wg.Run(func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					conn, err := listener.Accept()
+					if err != nil {
+						if errors.Is(err, net.ErrClosed) {
+							return
+						}
+
+						s.logger.Error("accept failed", zap.Error(err))
+						continue
 					}
 
-					s.logger.Error("accept failed", zap.Error(err))
-					continue
+					s.wg.Run(func() {
+						util.WithRecovery(func() { s.onConn(ctx, conn) }, nil, s.logger)
+					})
 				}
-
-				s.wg.Run(func() {
-					util.WithRecovery(func() { s.onConn(ctx, conn) }, nil, s.logger)
-				})
 			}
-		}
-	})
+		})
+	}
 }
 
 func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
@@ -232,8 +246,8 @@ func (s *SQLServer) Close() error {
 		s.cancelFunc = nil
 	}
 	errs := make([]error, 0, 4)
-	if s.listener != nil {
-		errs = append(errs, s.listener.Close())
+	for _, listener := range s.listeners {
+		errs = append(errs, listener.Close())
 	}
 
 	s.mu.RLock()

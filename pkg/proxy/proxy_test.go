@@ -48,11 +48,11 @@ func TestGracefulShutdown(t *testing.T) {
 	createClientConn := func() *client.ClientConnection {
 		server.mu.Lock()
 		go func() {
-			conn, err := net.Dial("tcp", server.listener.Addr().String())
+			conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
 			require.NoError(t, err)
 			require.NoError(t, conn.Close())
 		}()
-		conn, err := server.listener.Accept()
+		conn, err := server.listeners[0].Accept()
 		require.NoError(t, err)
 		clientConn := client.NewClientConnection(lg, conn, nil, nil, hsHandler, 0, &backend.BCConfig{})
 		server.mu.clients[1] = clientConn

@@ -60,10 +60,12 @@ type ProxyServerOnline struct {
 }
 
 type ProxyServer struct {
-	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
-	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
-	ServerVersion     string `yaml:"server-version,omitempty" toml:"server-version,omitempty" json:"server-version,omitempty"`
-	RequireBackendTLS bool   `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
+	Addr              string   `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
+	// Ports will attach server to additional ports.
+	Ports             []string `yaml:"ports,omitempty" toml:"ports,omitempty" json:"ports,omitempty"`
+	PDAddrs           string   `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
+	ServerVersion     string   `yaml:"server-version,omitempty" toml:"server-version,omitempty" json:"server-version,omitempty"`
+	RequireBackendTLS bool     `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
 	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
@@ -168,7 +170,6 @@ func (cfg *Config) Clone() *Config {
 }
 
 func (cfg *Config) Check() error {
-
 	if cfg.Workdir == "" {
 		d, err := os.Getwd()
 		if err != nil {
