@@ -31,7 +31,7 @@ func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, meth
 	}
 	require.NoError(t, cfgmgr.Init(context.Background(), lg, "", nil))
 	crtmgr := mgrcrt.NewCertManager()
-	crtmgr.Init(cfgmgr.GetConfig(), lg, cfgmgr.WatchConfig())
+	require.NoError(t, crtmgr.Init(cfgmgr.GetConfig(), lg, cfgmgr.WatchConfig()))
 	srv, err := NewServer(config.API{
 		Addr: "0.0.0.0:0",
 	}, lg, func() bool {
