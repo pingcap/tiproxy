@@ -11,9 +11,9 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 )
 
-func (h *HTTPServer) DebugHealth(c *gin.Context) {
+func (h *Server) DebugHealth(c *gin.Context) {
 	status := http.StatusOK
-	if h.proxy.IsClosing() {
+	if h.isClosing() {
 		status = http.StatusBadGateway
 	}
 	c.JSON(status, config.HealthInfo{
@@ -21,7 +21,7 @@ func (h *HTTPServer) DebugHealth(c *gin.Context) {
 	})
 }
 
-func (h *HTTPServer) DebugRedirect(c *gin.Context) {
+func (h *Server) DebugRedirect(c *gin.Context) {
 	errs := h.mgr.ns.RedirectConnections()
 	if len(errs) != 0 {
 		for _, err := range errs {
@@ -36,7 +36,7 @@ func (h *HTTPServer) DebugRedirect(c *gin.Context) {
 	}
 }
 
-func (h *HTTPServer) registerDebug(group *gin.RouterGroup) {
+func (h *Server) registerDebug(group *gin.RouterGroup) {
 	group.POST("/redirect", h.DebugRedirect)
 	group.GET("/health", h.DebugHealth)
 	pprof.RouteRegister(group, "/pprof")

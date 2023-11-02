@@ -11,7 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
-func (h *HTTPServer) ConfigSet(c *gin.Context) {
+func (h *Server) ConfigSet(c *gin.Context) {
 	data, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
@@ -34,7 +34,7 @@ func (h *HTTPServer) ConfigSet(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *HTTPServer) ConfigGet(c *gin.Context) {
+func (h *Server) ConfigGet(c *gin.Context) {
 	switch c.Query("format") {
 	case "json":
 		c.JSON(http.StatusOK, h.mgr.cfg.GetConfig())
@@ -43,7 +43,7 @@ func (h *HTTPServer) ConfigGet(c *gin.Context) {
 	}
 }
 
-func (h *HTTPServer) registerConfig(group *gin.RouterGroup) {
+func (h *Server) registerConfig(group *gin.RouterGroup) {
 	group.PUT("/", h.ConfigSet)
 	group.GET("/", h.ConfigGet)
 }
