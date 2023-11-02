@@ -602,7 +602,7 @@ func BenchmarkReadPacket(b *testing.B) {
 }
 
 func BenchmarkForwardWithReadWrite(b *testing.B) {
-	loops := 1
+	loops := 100
 	runForwardBenchmark(b, func(packetIO1, packetIO2 *PacketIO) {
 		for j := 0; j < loops; j++ {
 			data, err := packetIO1.ReadPacket()
@@ -617,7 +617,7 @@ func BenchmarkForwardWithReadWrite(b *testing.B) {
 }
 
 func BenchmarkForwardUntil(b *testing.B) {
-	loops := 1
+	loops := 100
 	runForwardBenchmark(b, func(packetIO1, packetIO2 *PacketIO) {
 		j := 0
 		err := packetIO1.ForwardUntil(packetIO2, func(firstByte byte, firstPktLen int) (bool, bool) {
