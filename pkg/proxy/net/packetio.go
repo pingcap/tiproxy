@@ -25,7 +25,6 @@
 package net
 
 import (
-	"bufio"
 	"crypto/tls"
 	"io"
 	"net"
@@ -37,6 +36,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
+	"github.com/pingcap/tiproxy/pkg/util/bufio"
 	"go.uber.org/zap"
 )
 
@@ -64,6 +64,7 @@ type packetReadWriter interface {
 	Discard(n int) (int, error)
 	Flush() error
 	DirectWrite(p []byte) (int, error)
+	ReadFrom(r io.Reader) (int64, error)
 	Proxy() *proxyprotocol.Proxy
 	TLSConnectionState() tls.ConnectionState
 	InBytes() uint64
@@ -106,6 +107,12 @@ func (brw *basicReadWriter) Read(b []byte) (n int, err error) {
 
 func (brw *basicReadWriter) Write(p []byte) (int, error) {
 	n, err := brw.ReadWriter.Write(p)
+	brw.outBytes += uint64(n)
+	return n, errors.WithStack(err)
+}
+
+func (brw *basicReadWriter) ReadFrom(r io.Reader) (int64, error) {
+	n, err := brw.ReadWriter.ReadFrom(r)
 	brw.outBytes += uint64(n)
 	return n, errors.WithStack(err)
 }
@@ -187,7 +194,8 @@ type PacketIO struct {
 	lastKeepAlive config.KeepAlive
 	rawConn       net.Conn
 	readWriter    packetReadWriter
-	header        []byte
+	limitReader   io.LimitedReader // reuse memory to reduce allocation
+	header        []byte           // reuse memory to reduce allocation
 	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
@@ -315,6 +323,42 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 		return p.Flush()
 	}
 	return nil
+}
+
+func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, firstPktLen int) bool, process func(response []byte) error) error {
+	p.readWriter.BeginRW(rwRead)
+	dest.readWriter.BeginRW(rwWrite)
+	p.limitReader.R = p.readWriter
+	for {
+		header, err := p.readWriter.Peek(5)
+		if err != nil {
+			return errors.Wrap(ErrReadConn, err)
+		}
+		length := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
+		if isEnd(header[4], length) {
+			// TODO: allocate a buffer from pool and return the buffer after `process`.
+			data, err := p.ReadPacket()
+			if err != nil {
+				return errors.Wrap(ErrReadConn, err)
+			}
+			if err := dest.WritePacket(data, false); err != nil {
+				return errors.Wrap(ErrWriteConn, err)
+			}
+			return process(data)
+		} else {
+			sequence, pktSequence := header[3], p.readWriter.Sequence()
+			if sequence != pktSequence {
+				return ErrInvalidSequence.GenWithStack("invalid sequence, expected %d, actual %d", pktSequence, sequence)
+			}
+			p.readWriter.SetSequence(sequence + 1)
+			// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
+			dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
+			p.limitReader.N = int64(length + 4)
+			if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
+				return errors.Wrap(ErrRelayConn, err)
+			}
+		}
+	}
 }
 
 func (p *PacketIO) InBytes() uint64 {

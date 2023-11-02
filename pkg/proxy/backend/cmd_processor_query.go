@@ -73,7 +73,7 @@ func (cp *CmdProcessor) readResultColumns(packetIO *pnet.PacketIO, result *gomys
 				if data, err = packetIO.ReadPacket(); err != nil {
 					return err
 				}
-				if !pnet.IsEOFPacket(data) {
+				if !pnet.IsEOFPacket(data[0], len(data)) {
 					return errors.WithStack(mysql.ErrMalformPacket)
 				}
 				result.Status = binary.LittleEndian.Uint16(data[3:])
@@ -103,19 +103,19 @@ func (cp *CmdProcessor) readResultRows(packetIO *pnet.PacketIO, result *gomysql.
 			return err
 		}
 		if cp.capability&pnet.ClientDeprecateEOF == 0 {
-			if pnet.IsEOFPacket(data) {
+			if pnet.IsEOFPacket(data[0], len(data)) {
 				result.Status = binary.LittleEndian.Uint16(data[3:])
 				break
 			}
 		} else {
-			if pnet.IsResultSetOKPacket(data) {
+			if pnet.IsResultSetOKPacket(data[0], len(data)) {
 				rs := pnet.ParseOKPacket(data)
 				result.Status = rs.Status
 				break
 			}
 		}
 		// An error may occur when the backend writes rows.
-		if pnet.IsErrorPacket(data) {
+		if pnet.IsErrorPacket(data[0]) {
 			return cp.handleErrorPacket(data)
 		}
 		result.RowDatas = append(result.RowDatas, data)
