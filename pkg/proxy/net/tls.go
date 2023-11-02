@@ -4,10 +4,11 @@
 package net
 
 import (
-	"bufio"
 	"crypto/tls"
+	"io"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/util/bufio"
 )
 
 // tlsHandshakeConn is only used as the underlying connection in tls.Conn.
@@ -70,6 +71,10 @@ func newTLSReadWriter(rw packetReadWriter, tlsConn *tls.Conn) *tlsReadWriter {
 func (trw *tlsReadWriter) Read(b []byte) (n int, err error) {
 	// inBytes and outBytes are updated internally in trw.packetReadWriter.
 	return trw.buf.Read(b)
+}
+
+func (trw *tlsReadWriter) ReadFrom(r io.Reader) (int64, error) {
+	return trw.buf.ReadFrom(r)
 }
 
 func (trw *tlsReadWriter) Write(p []byte) (int, error) {

@@ -8,6 +8,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func (h *HTTPServer) registerMetrics(group *gin.RouterGroup) {
+func (h *Server) registerMetrics(group *gin.RouterGroup) {
 	group.GET("/", gin.WrapF(promhttp.Handler().ServeHTTP))
 }

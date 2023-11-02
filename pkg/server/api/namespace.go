@@ -11,7 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
-func (h *HTTPServer) NamespaceGet(c *gin.Context) {
+func (h *Server) NamespaceGet(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
 		c.JSON(http.StatusBadRequest, "bad namespace parameter")
@@ -31,14 +31,11 @@ func (h *HTTPServer) NamespaceGet(c *gin.Context) {
 	c.JSON(http.StatusOK, nsc)
 }
 
-func (h *HTTPServer) NamespaceUpsert(c *gin.Context) {
-	ns := c.Param("namespace")
-	if ns == "" {
-		c.JSON(http.StatusBadRequest, "bad namespace parameter")
-		return
-	}
-
+func (h *Server) NamespaceUpsert(c *gin.Context) {
 	nsc := &config.Namespace{}
+	if nsc.Namespace == "" {
+		nsc.Namespace = c.Param("namespace")
+	}
 
 	if c.ShouldBindJSON(nsc) != nil {
 		c.JSON(http.StatusBadRequest, "bad namespace json")
@@ -48,7 +45,7 @@ func (h *HTTPServer) NamespaceUpsert(c *gin.Context) {
 	if err := h.mgr.cfg.SetNamespace(c, nsc.Namespace, nsc); err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,
-			Err:  errors.Errorf("can not update namespace[%s]: %+v", ns, err),
+			Err:  errors.Errorf("can not update namespace[%s]: %+v", nsc.Namespace, err),
 		})
 		c.JSON(http.StatusInternalServerError, "can not update config")
 		return
@@ -57,7 +54,7 @@ func (h *HTTPServer) NamespaceUpsert(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *HTTPServer) NamespaceRemove(c *gin.Context) {
+func (h *Server) NamespaceRemove(c *gin.Context) {
 	ns := c.Param("namespace")
 	if ns == "" {
 		c.JSON(http.StatusBadRequest, "bad namespace parameter")
@@ -76,7 +73,7 @@ func (h *HTTPServer) NamespaceRemove(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *HTTPServer) NamespaceCommit(c *gin.Context) {
+func (h *Server) NamespaceCommit(c *gin.Context) {
 	ns_names := c.QueryArray("namespace")
 
 	var nss []*config.Namespace
@@ -122,7 +119,7 @@ func (h *HTTPServer) NamespaceCommit(c *gin.Context) {
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *HTTPServer) NamespaceList(c *gin.Context) {
+func (h *Server) NamespaceList(c *gin.Context) {
 	nscs, err := h.mgr.cfg.ListAllNamespace(c)
 	if err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
@@ -132,14 +129,18 @@ func (h *HTTPServer) NamespaceList(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, "failed to list namespaces")
 		return
 	}
-
-	c.JSON(http.StatusOK, nscs)
+	if nscs != nil {
+		c.JSON(http.StatusOK, nscs)
+	} else {
+		c.JSON(http.StatusOK, "")
+	}
 }
 
-func (h *HTTPServer) registerNamespace(group *gin.RouterGroup) {
+func (h *Server) registerNamespace(group *gin.RouterGroup) {
 	group.GET("/", h.NamespaceList)
 	group.POST("/commit", h.NamespaceCommit)
 	group.GET("/:namespace", h.NamespaceGet)
 	group.PUT("/:namespace", h.NamespaceUpsert)
+	group.PUT("/", h.NamespaceUpsert)
 	group.DELETE("/:namespace", h.NamespaceRemove)
 }

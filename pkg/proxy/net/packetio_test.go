@@ -416,6 +416,142 @@ func TestPacketSequence(t *testing.T) {
 	)
 }
 
+func TestForwardUntil(t *testing.T) {
+	stls, ctls, err := security.CreateTLSConfigForTest()
+	require.NoError(t, err)
+	_, p := mockProxy(t)
+	srvCh := make(chan *PacketIO)
+	exitCh := make(chan struct{})
+	prepareClient := func(enableProxy, enableTLS, enableCompress bool, cli *PacketIO) {
+		if enableProxy {
+			cli.EnableProxyClient(p)
+		}
+		if enableTLS {
+			require.NoError(t, cli.ClientTLSHandshake(ctls))
+			require.True(t, cli.TLSConnectionState().HandshakeComplete)
+		}
+		if enableCompress {
+			cli.ResetSequence()
+			require.NoError(t, cli.SetCompressionAlgorithm(CompressionZlib, 0))
+		}
+	}
+	prepareServer := func(enableProxy, enableTLS, enableCompress bool, srv *PacketIO) {
+		if enableProxy {
+			srv.EnableProxyServer()
+		}
+		if enableTLS {
+			state, err := srv.ServerTLSHandshake(stls)
+			require.NoError(t, err)
+			require.True(t, state.HandshakeComplete)
+			require.True(t, srv.TLSConnectionState().HandshakeComplete)
+		}
+		if enableCompress {
+			srv.ResetSequence()
+			require.NoError(t, srv.SetCompressionAlgorithm(CompressionZlib, 0))
+		}
+	}
+	for _, enableCompress := range []bool{true, false} {
+		for _, enableTLS := range []bool{true, false} {
+			for _, enableProxy := range []bool{true, false} {
+				var wg waitgroup.WaitGroup
+				loops := 100
+				// client1 writes to server1
+				// server1 forwards to server2
+				// server2 writes to client2
+				wg.Run(func() {
+					testTCPConn(t,
+						func(t *testing.T, cli *PacketIO) {
+							prepareClient(enableProxy, enableTLS, enableCompress, cli)
+							for i := 0; i <= loops; i++ {
+								require.NoError(t, cli.WritePacket([]byte{byte(i)}, true))
+							}
+						},
+						func(t *testing.T, srv1 *PacketIO) {
+							prepareServer(enableProxy, enableTLS, enableCompress, srv1)
+							srv2 := <-srvCh
+							err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) bool {
+								return firstByte == byte(loops) && firstPktLen == 1
+							}, func(response []byte) error {
+								require.Equal(t, []byte{byte(loops)}, response)
+								return srv2.Flush()
+							})
+							require.NoError(t, err)
+							exitCh <- struct{}{}
+						},
+						1,
+					)
+				})
+				wg.Run(func() {
+					testTCPConn(t,
+						func(t *testing.T, cli *PacketIO) {
+							prepareClient(enableProxy, enableTLS, enableCompress, cli)
+							for i := 0; i < loops; i++ {
+								data, err := cli.ReadPacket()
+								require.NoError(t, err)
+								require.Equal(t, []byte{byte(i)}, data)
+							}
+						},
+						func(t *testing.T, srv2 *PacketIO) {
+							prepareServer(enableProxy, enableTLS, enableCompress, srv2)
+							srvCh <- srv2
+							<-exitCh
+						},
+						1,
+					)
+				})
+				wg.Wait()
+			}
+		}
+	}
+}
+
+func TestForwardUntilLongData(t *testing.T) {
+	srvCh := make(chan *PacketIO)
+	exitCh := make(chan struct{})
+	var wg waitgroup.WaitGroup
+	loops, dataSize := 100000, 100
+	wg.Run(func() {
+		testTCPConn(t,
+			func(t *testing.T, cli *PacketIO) {
+				for i := 0; i < loops; i++ {
+					data := make([]byte, dataSize)
+					require.NoError(t, cli.WritePacket(data, true))
+				}
+			},
+			func(t *testing.T, srv1 *PacketIO) {
+				srv2 := <-srvCh
+				i := 0
+				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) bool {
+					i++
+					return i == loops
+				}, func(response []byte) error {
+					return srv2.Flush()
+				})
+				require.NoError(t, err)
+				exitCh <- struct{}{}
+			},
+			1,
+		)
+	})
+	wg.Run(func() {
+		testTCPConn(t,
+			func(t *testing.T, cli *PacketIO) {
+				for i := 0; i < loops; i++ {
+					data, err := cli.ReadPacket()
+					require.NoError(t, err)
+					require.Len(t, data, dataSize)
+				}
+			},
+			func(t *testing.T, srv2 *PacketIO) {
+				srvCh <- srv2
+				<-exitCh
+			},
+			1,
+		)
+	})
+	wg.Wait()
+}
+
 func BenchmarkWritePacket(b *testing.B) {
 	b.ReportAllocs()
 	cli, srv := net.Pipe()

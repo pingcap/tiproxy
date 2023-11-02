@@ -53,18 +53,25 @@ func newProxyServer(rw packetReadWriter) *proxyReadWriter {
 }
 
 func (prw *proxyReadWriter) Read(b []byte) (int, error) {
+	if err := prw.readProxy(); err != nil {
+		return 0, err
+	}
+	return prw.packetReadWriter.Read(b)
+}
+
+func (prw *proxyReadWriter) readProxy() error {
 	// probe proxy V2
 	if !prw.client && !prw.proxyInited.Load() {
 		// We don't know whether the client has enabled proxy protocol.
 		// If it doesn't, reading data of len(MagicV2) may block forever.
-		header, err := prw.Peek(4)
+		header, err := prw.packetReadWriter.Peek(4)
 		if err != nil {
-			return 0, errors.Wrap(ErrReadConn, err)
+			return errors.Wrap(ErrReadConn, err)
 		}
 		if bytes.Equal(header[:], proxyprotocol.MagicV2[:4]) {
 			proxyHeader, err := prw.parseProxyV2()
 			if err != nil {
-				return 0, errors.Wrap(ErrReadConn, err)
+				return errors.Wrap(ErrReadConn, err)
 			}
 			if proxyHeader != nil {
 				prw.proxy = proxyHeader
@@ -72,7 +79,14 @@ func (prw *proxyReadWriter) Read(b []byte) (int, error) {
 		}
 		prw.proxyInited.Store(true)
 	}
-	return prw.packetReadWriter.Read(b)
+	return nil
+}
+
+func (prw *proxyReadWriter) Peek(n int) ([]byte, error) {
+	if err := prw.readProxy(); err != nil {
+		return nil, err
+	}
+	return prw.packetReadWriter.Peek(n)
 }
 
 func (prw *proxyReadWriter) Write(p []byte) (n int, err error) {

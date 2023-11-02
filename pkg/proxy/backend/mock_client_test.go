@@ -279,11 +279,11 @@ func (mc *mockClient) readUntilResultEnd(packetIO *pnet.PacketIO) (pkt []byte, e
 			return
 		}
 		if mc.capability&pnet.ClientDeprecateEOF == 0 {
-			if pnet.IsEOFPacket(pkt) {
+			if pnet.IsEOFPacket(pkt[0], len(pkt)) {
 				break
 			}
 		} else {
-			if pnet.IsResultSetOKPacket(pkt) {
+			if pnet.IsResultSetOKPacket(pkt[0], len(pkt)) {
 				break
 			}
 		}
