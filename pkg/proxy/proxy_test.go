@@ -29,7 +29,6 @@ func TestGracefulShutdown(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil, "")
 	server, err := NewSQLServer(lg, config.ProxyServer{
-		Addr: "0.0.0.0:0",
 		ProxyServerOnline: config.ProxyServerOnline{
 			GracefulWaitBeforeShutdown: 10,
 		},
@@ -64,7 +63,6 @@ func TestGracefulShutdown(t *testing.T) {
 
 	// Graceful shutdown will be blocked if there are alive connections.
 	server, err = NewSQLServer(lg, config.ProxyServer{
-		Addr: "0.0.0.0:0",
 		ProxyServerOnline: config.ProxyServerOnline{
 			GracefulWaitBeforeShutdown: 10,
 		},
@@ -93,7 +91,6 @@ func TestGracefulShutdown(t *testing.T) {
 
 	// Graceful shutdown will shut down after GracefulWaitBeforeShutdown.
 	server, err = NewSQLServer(lg, config.ProxyServer{
-		Addr: "0.0.0.0:0",
 		ProxyServerOnline: config.ProxyServerOnline{
 			GracefulWaitBeforeShutdown: 1,
 		},
@@ -117,8 +114,7 @@ func TestMultiPorts(t *testing.T) {
 	err := certManager.Init(&config.Config{}, lg, nil)
 	require.NoError(t, err)
 	server, err := NewSQLServer(lg, config.ProxyServer{
-		Addr:  "0.0.0.0:0",
-		Ports: []string{"0"},
+		Addrs: []string{"0.0.0.0:0"},
 	}, certManager, &panicHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
@@ -139,9 +135,7 @@ func TestRecoverPanic(t *testing.T) {
 	certManager := cert.NewCertManager()
 	err := certManager.Init(&config.Config{}, lg, nil)
 	require.NoError(t, err)
-	server, err := NewSQLServer(lg, config.ProxyServer{
-		Addr: "0.0.0.0:0",
-	}, certManager, &panicHsHandler{})
+	server, err := NewSQLServer(lg, config.ProxyServer{}, certManager, &panicHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 

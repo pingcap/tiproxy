@@ -38,7 +38,7 @@ type serverState struct {
 
 type SQLServer struct {
 	listeners         []net.Listener
-	ports             []string
+	addrs             []string
 	logger            *zap.Logger
 	certMgr           *cert.CertManager
 	hsHandler         backend.HandshakeHandler
@@ -66,17 +66,13 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 
 	s.reset(&cfg.ProxyServerOnline)
 
-	s.ports = make([]string, 0, len(cfg.Ports)+1)
-	host, port, err := net.SplitHostPort(cfg.Addr)
-	if err != nil {
-		return nil, err
-	}
-	s.ports = append(s.ports, port)
-	s.ports = append(s.ports, cfg.Ports...)
+	s.addrs = make([]string, 0, len(cfg.Addrs)+1)
+	s.addrs = append(s.addrs, cfg.Addr)
+	s.addrs = append(s.addrs, cfg.Addrs...)
 
-	s.listeners = make([]net.Listener, len(s.ports))
-	for i, port := range s.ports {
-		s.listeners[i], err = net.Listen("tcp", net.JoinHostPort(host, port))
+	s.listeners = make([]net.Listener, len(s.addrs))
+	for i, addr := range s.addrs {
+		s.listeners[i], err = net.Listen("tcp", addr)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +130,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 					}
 
 					s.wg.Run(func() {
-						util.WithRecovery(func() { s.onConn(ctx, conn, s.ports[i]) }, nil, s.logger)
+						util.WithRecovery(func() { s.onConn(ctx, conn, s.addrs[i]) }, nil, s.logger)
 					})
 				}
 			}
@@ -142,7 +138,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 	}
 }
 
-func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, port string) {
+func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	s.mu.Lock()
 	conns := uint64(len(s.mu.clients))
 	maxConns := s.mu.maxConnections
@@ -163,9 +159,9 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, port string) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
-		zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.String("port", port))
+		zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.String("addr", addr))
 	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(),
-		s.hsHandler, connID, port, &backend.BCConfig{
+		s.hsHandler, connID, addr, &backend.BCConfig{
 			ProxyProtocol:      s.mu.proxyProtocol,
 			RequireBackendTLS:  s.requireBackendTLS,
 			HealthyKeepAlive:   s.mu.healthyKeepAlive,
