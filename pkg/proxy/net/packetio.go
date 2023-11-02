@@ -325,7 +325,8 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 	return nil
 }
 
-func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, firstPktLen int) bool, process func(response []byte) error) error {
+func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
+	process func(response []byte) error) error {
 	p.readWriter.BeginRW(rwRead)
 	dest.readWriter.BeginRW(rwWrite)
 	p.limitReader.R = p.readWriter
@@ -335,16 +336,18 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 			return errors.Wrap(ErrReadConn, err)
 		}
 		length := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
-		if isEnd(header[4], length) {
+		end, needData := isEnd(header[4], length)
+		var data []byte
+		// Just call ReadFrom if the caller doesn't need the data, even if it's the last packet.
+		if end && needData {
 			// TODO: allocate a buffer from pool and return the buffer after `process`.
-			data, err := p.ReadPacket()
+			data, err = p.ReadPacket()
 			if err != nil {
 				return errors.Wrap(ErrReadConn, err)
 			}
 			if err := dest.WritePacket(data, false); err != nil {
 				return errors.Wrap(ErrWriteConn, err)
 			}
-			return process(data)
 		} else {
 			sequence, pktSequence := header[3], p.readWriter.Sequence()
 			if sequence != pktSequence {
@@ -357,6 +360,14 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 			if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
 				return errors.Wrap(ErrRelayConn, err)
 			}
+		}
+
+		if end {
+			if process != nil {
+				// data == nil iff needData == false
+				return process(data)
+			}
+			return nil
 		}
 	}
 }

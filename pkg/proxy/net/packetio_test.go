@@ -277,8 +277,8 @@ func TestPredefinedPacket(t *testing.T) {
 
 			data, err = cli.ReadPacket()
 			require.NoError(t, err)
-			res := ParseOKPacket(data)
-			require.Equal(t, uint16(100), res.Status)
+			status := ParseOKPacket(data)
+			require.Equal(t, uint16(100), status)
 		},
 		func(t *testing.T, srv *PacketIO) {
 			require.NoError(t, srv.WriteErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR)))
@@ -469,8 +469,8 @@ func TestForwardUntil(t *testing.T) {
 						func(t *testing.T, srv1 *PacketIO) {
 							prepareServer(enableProxy, enableTLS, enableCompress, srv1)
 							srv2 := <-srvCh
-							err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) bool {
-								return firstByte == byte(loops) && firstPktLen == 1
+							err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
+								return firstByte == byte(loops) && firstPktLen == 1, true
 							}, func(response []byte) error {
 								require.Equal(t, []byte{byte(loops)}, response)
 								return srv2.Flush()
@@ -521,10 +521,11 @@ func TestForwardUntilLongData(t *testing.T) {
 			func(t *testing.T, srv1 *PacketIO) {
 				srv2 := <-srvCh
 				i := 0
-				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) bool {
+				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
 					i++
-					return i == loops
+					return i == loops, true
 				}, func(response []byte) error {
+					require.Len(t, response, dataSize)
 					return srv2.Flush()
 				})
 				require.NoError(t, err)
@@ -597,5 +598,76 @@ func BenchmarkReadPacket(b *testing.B) {
 		}
 	}
 	_ = packetIO.Close()
+	wg.Wait()
+}
+
+func BenchmarkForwardWithReadWrite(b *testing.B) {
+	loops := 1
+	runForwardBenchmark(b, func(packetIO1, packetIO2 *PacketIO) {
+		for j := 0; j < loops; j++ {
+			data, err := packetIO1.ReadPacket()
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err = packetIO2.WritePacket(data, j == loops-1); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkForwardUntil(b *testing.B) {
+	loops := 1
+	runForwardBenchmark(b, func(packetIO1, packetIO2 *PacketIO) {
+		j := 0
+		err := packetIO1.ForwardUntil(packetIO2, func(firstByte byte, firstPktLen int) (bool, bool) {
+			j++
+			if j == loops {
+				if err := packetIO2.Flush(); err != nil {
+					b.Fatal(err)
+				}
+				return true, false
+			}
+			return false, false
+		}, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	})
+}
+
+func runForwardBenchmark(b *testing.B, f func(packetIO1, packetIO2 *PacketIO)) {
+	b.ReportAllocs()
+	cli1, srv1 := net.Pipe()
+	cli2, srv2 := net.Pipe()
+	var wg waitgroup.WaitGroup
+	// cli1: writer
+	wg.Run(func() {
+		b := make([]byte, 128)
+		packetIO := NewPacketIO(cli1, nil, DefaultConnBufferSize)
+		for i := 0; ; i++ {
+			if err := packetIO.WritePacket(b, i%10 == 0); err != nil {
+				break
+			}
+		}
+		_ = cli1.Close()
+	})
+	// cli2: reader
+	wg.Run(func() {
+		packetIO := NewPacketIO(cli2, nil, DefaultConnBufferSize)
+		for {
+			if _, err := packetIO.ReadPacket(); err != nil {
+				break
+			}
+		}
+		_ = cli2.Close()
+	})
+	packetIO1 := NewPacketIO(srv1, nil, DefaultConnBufferSize)
+	packetIO2 := NewPacketIO(srv2, nil, DefaultConnBufferSize)
+	for i := 0; i < b.N; i++ {
+		f(packetIO1, packetIO2)
+	}
+	_ = packetIO1.Close()
+	_ = packetIO2.Close()
 	wg.Wait()
 }

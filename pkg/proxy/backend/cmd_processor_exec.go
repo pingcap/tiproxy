@@ -99,14 +99,14 @@ func forwardOnePacket(destIO, srcIO *pnet.PacketIO, flush bool) (data []byte, er
 
 func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
 	var serverStatus uint16
-	err := backendIO.ForwardUntil(clientIO, func(firstByte byte, length int) bool {
+	err := backendIO.ForwardUntil(clientIO, func(firstByte byte, length int) (end, needData bool) {
 		switch {
 		case pnet.IsErrorPacket(firstByte):
-			return true
+			return true, true
 		case cp.capability&pnet.ClientDeprecateEOF == 0:
-			return pnet.IsEOFPacket(firstByte, length)
+			return pnet.IsEOFPacket(firstByte, length), true
 		default:
-			return pnet.IsResultSetOKPacket(firstByte, length)
+			return pnet.IsResultSetOKPacket(firstByte, length), true
 		}
 	}, func(response []byte) error {
 		switch {
@@ -146,9 +146,14 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 				expectedPackets++
 			}
 		}
-		for i := 0; i < expectedPackets; i++ {
-			// Ignore this status because PREPARE doesn't affect status.
-			if _, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
+		// Ignore this status because PREPARE doesn't affect status.
+		if expectedPackets > 0 {
+			i := 0
+			err = backendIO.ForwardUntil(clientIO, func(firstByte byte, firstPktLen int) (end, needData bool) {
+				i++
+				return i >= expectedPackets, false
+			}, nil)
+			if err != nil {
 				return err
 			}
 		}
@@ -175,26 +180,35 @@ func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO *pnet.PacketIO, 
 
 func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
 	for {
-		response, err := forwardOnePacket(clientIO, backendIO, false)
-		if err != nil {
-			return err
-		}
 		var serverStatus uint16
-		switch response[0] {
-		case mysql.OKHeader:
-			status := cp.handleOKPacket(request, response)
-			serverStatus, err = status, clientIO.Flush()
-		case mysql.ErrHeader:
-			if err := clientIO.Flush(); err != nil {
-				return err
+		var first byte
+		err := backendIO.ForwardUntil(clientIO, func(firstByte byte, _ int) (end, needData bool) {
+			first = firstByte
+			switch firstByte {
+			case mysql.OKHeader, mysql.ErrHeader:
+				return true, true
+			default:
+				return true, false
 			}
-			// Subsequent statements won't be executed even if it's a multi-statement.
-			return cp.handleErrorPacket(response)
-		case mysql.LocalInFileHeader:
-			serverStatus, err = cp.forwardLoadInFile(clientIO, backendIO, request)
-		default:
-			serverStatus, err = cp.forwardResultSet(clientIO, backendIO, request)
-		}
+		}, func(response []byte) error {
+			var err error
+			switch first {
+			case mysql.OKHeader:
+				status := cp.handleOKPacket(request, response)
+				serverStatus, err = status, clientIO.Flush()
+			case mysql.ErrHeader:
+				if err = clientIO.Flush(); err != nil {
+					return err
+				}
+				// Subsequent statements won't be executed even if it's a multi-statement.
+				return cp.handleErrorPacket(response)
+			case mysql.LocalInFileHeader:
+				serverStatus, err = cp.forwardLoadInFile(clientIO, backendIO, request)
+			default:
+				serverStatus, err = cp.forwardResultSet(clientIO, backendIO, request)
+			}
+			return err
+		})
 		if err != nil {
 			return err
 		}
@@ -213,11 +227,14 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 	// The client sends file data until an empty packet.
 	for {
 		var data []byte
-		// The file may be large, so always flush it.
-		if data, err = forwardOnePacket(backendIO, clientIO, true); err != nil {
+		// Do not call PacketIO.ForwardUntil. It peeks 5 bytes but there may be only 4 bytes here.
+		if data, err = forwardOnePacket(backendIO, clientIO, false); err != nil {
 			return
 		}
 		if len(data) == 0 {
+			if err := backendIO.Flush(); err != nil {
+				return 0, err
+			}
 			break
 		}
 	}
@@ -237,22 +254,22 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 
 func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
 	if cp.capability&pnet.ClientDeprecateEOF == 0 {
-		var response []byte
+		var serverStatus uint16
 		// read columns
-		for {
-			var err error
-			if response, err = forwardOnePacket(clientIO, backendIO, false); err != nil {
-				return 0, err
+		err := backendIO.ForwardUntil(clientIO, func(firstByte byte, firstPktLen int) (end, needData bool) {
+			return pnet.IsEOFPacket(firstByte, firstPktLen), true
+		}, func(response []byte) error {
+			serverStatus = binary.LittleEndian.Uint16(response[3:])
+			// If a cursor exists, only columns are sent this time. The client will then send COM_STMT_FETCH to fetch rows.
+			// Otherwise, columns and rows are both sent once.
+			if serverStatus&mysql.ServerStatusCursorExists > 0 {
+				serverStatus = cp.handleEOFPacket(request, response)
+				return clientIO.Flush()
 			}
-			if pnet.IsEOFPacket(response[0], len(response)) {
-				break
-			}
-		}
-		serverStatus := binary.LittleEndian.Uint16(response[3:])
-		// If a cursor exists, only columns are sent this time. The client will then send COM_STMT_FETCH to fetch rows.
-		// Otherwise, columns and rows are both sent once.
-		if serverStatus&mysql.ServerStatusCursorExists > 0 {
-			return cp.handleEOFPacket(request, response), clientIO.Flush()
+			return nil
+		})
+		if err != nil {
+			return serverStatus, err
 		}
 	}
 	// Deprecate EOF or no cursor.
