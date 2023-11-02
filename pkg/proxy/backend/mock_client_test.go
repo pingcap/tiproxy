@@ -361,8 +361,7 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 			if mc.capability&pnet.ClientDeprecateEOF == 0 {
 				serverStatus = binary.LittleEndian.Uint16(pkt[3:])
 			} else {
-				rs := pnet.ParseOKPacket(pkt)
-				serverStatus = rs.Status
+				serverStatus = pnet.ParseOKPacket(pkt)
 			}
 		}
 		if serverStatus&mysql.ServerMoreResultsExists == 0 {

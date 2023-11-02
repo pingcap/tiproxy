@@ -119,7 +119,7 @@ func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO
 			serverStatus = cp.handleEOFPacket(request, response)
 			return clientIO.Flush()
 		default:
-			serverStatus = cp.handleOKPacket(request, response).Status
+			serverStatus = cp.handleOKPacket(request, response)
 			return clientIO.Flush()
 		}
 	})
@@ -182,8 +182,8 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 		var serverStatus uint16
 		switch response[0] {
 		case mysql.OKHeader:
-			rs := cp.handleOKPacket(request, response)
-			serverStatus, err = rs.Status, clientIO.Flush()
+			status := cp.handleOKPacket(request, response)
+			serverStatus, err = status, clientIO.Flush()
 		case mysql.ErrHeader:
 			if err := clientIO.Flush(); err != nil {
 				return err
@@ -227,8 +227,7 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 	}
 	switch response[0] {
 	case mysql.OKHeader:
-		rs := cp.handleOKPacket(request, response)
-		return rs.Status, nil
+		return cp.handleOKPacket(request, response), nil
 	case mysql.ErrHeader:
 		return serverStatus, cp.handleErrorPacket(response)
 	}

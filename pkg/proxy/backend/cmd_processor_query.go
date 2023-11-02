@@ -16,7 +16,7 @@ import (
 // query is called when the proxy sends requests to the backend by itself,
 // such as querying session states, committing the current transaction.
 // It only supports limited cases, excluding loading file, cursor fetch, multi-statements, etc.
-func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *gomysql.Result, response []byte, err error) {
+func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *gomysql.Resultset, response []byte, err error) {
 	// send request
 	packetIO.ResetSequence()
 	data := hack.Slice(sql)
@@ -33,13 +33,15 @@ func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *gomy
 	}
 	switch response[0] {
 	case mysql.OKHeader:
-		result = cp.handleOKPacket(request, response)
+		cp.handleOKPacket(request, response)
 	case mysql.ErrHeader:
 		err = cp.handleErrorPacket(response)
 	case mysql.LocalInFileHeader:
 		err = errors.WithStack(mysql.ErrMalformPacket)
 	default:
-		result, err = cp.readResultSet(packetIO, response)
+		var rs *gomysql.Result
+		rs, err = cp.readResultSet(packetIO, response)
+		result = rs.Resultset
 	}
 	return
 }
@@ -109,8 +111,7 @@ func (cp *CmdProcessor) readResultRows(packetIO *pnet.PacketIO, result *gomysql.
 			}
 		} else {
 			if pnet.IsResultSetOKPacket(data[0], len(data)) {
-				rs := pnet.ParseOKPacket(data)
-				result.Status = rs.Status
+				result.Status = pnet.ParseOKPacket(data)
 				break
 			}
 		}

@@ -385,17 +385,15 @@ func WriteServerVersion(conn net.Conn, serverVersion string) error {
 	return c.WritePacket(data)
 }
 
-// ParseOKPacket transforms an OK packet into a Result object.
-func ParseOKPacket(data []byte) *gomysql.Result {
-	var n int
+// ParseOKPacket parses an OK packet and only returns server status.
+func ParseOKPacket(data []byte) uint16 {
 	var pos = 1
-	r := new(gomysql.Result)
-	r.AffectedRows, _, n = ParseLengthEncodedInt(data[pos:])
-	pos += n
-	r.InsertId, _, n = ParseLengthEncodedInt(data[pos:])
-	pos += n
-	r.Status = binary.LittleEndian.Uint16(data[pos:])
-	return r
+	// skip affected rows
+	pos += SkipLengthEncodedInt(data[pos:])
+	// skip insert id
+	pos += SkipLengthEncodedInt(data[pos:])
+	// return status
+	return binary.LittleEndian.Uint16(data[pos:])
 }
 
 // ParseErrorPacket transforms an error packet into a MyError object.
