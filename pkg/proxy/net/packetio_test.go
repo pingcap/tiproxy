@@ -509,7 +509,7 @@ func TestForwardUntilLongData(t *testing.T) {
 	srvCh := make(chan *PacketIO)
 	exitCh := make(chan struct{})
 	var wg waitgroup.WaitGroup
-	sizes := []int{DefaultConnBufferSize - 1, DefaultConnBufferSize, DefaultConnBufferSize + 1, DefaultConnBufferSize*2 - 1, DefaultConnBufferSize * 2}
+	sizes := []int{DefaultConnBufferSize, DefaultConnBufferSize * 2, MaxPayloadLen - 1, MaxPayloadLen, MaxPayloadLen + 1, MaxPayloadLen*2 - 1, MaxPayloadLen * 2}
 	wg.Run(func() {
 		testTCPConn(t,
 			func(t *testing.T, cli *PacketIO) {
@@ -528,6 +528,12 @@ func TestForwardUntilLongData(t *testing.T) {
 					return srv2.Flush()
 				})
 				require.NoError(t, err)
+				sum := 0
+				for _, size := range sizes {
+					sum += size + 4
+				}
+				require.GreaterOrEqual(t, srv1.InBytes(), uint64(sum))
+				require.Equal(t, srv1.InBytes(), srv2.OutBytes())
 				exitCh <- struct{}{}
 			},
 			1,
