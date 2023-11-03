@@ -168,7 +168,6 @@ func (cfg *Config) Clone() *Config {
 }
 
 func (cfg *Config) Check() error {
-
 	if cfg.Workdir == "" {
 		d, err := os.Getwd()
 		if err != nil {

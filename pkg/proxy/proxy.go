@@ -6,6 +6,7 @@ package proxy
 import (
 	"context"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,7 +38,8 @@ type serverState struct {
 }
 
 type SQLServer struct {
-	listener          net.Listener
+	listeners         []net.Listener
+	addrs             []string
 	logger            *zap.Logger
 	certMgr           *cert.CertManager
 	hsHandler         backend.HandshakeHandler
@@ -65,9 +67,13 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 
 	s.reset(&cfg.ProxyServerOnline)
 
-	s.listener, err = net.Listen("tcp", cfg.Addr)
-	if err != nil {
-		return nil, err
+	s.addrs = strings.Split(cfg.Addr, ",")
+	s.listeners = make([]net.Listener, len(s.addrs))
+	for i, addr := range s.addrs {
+		s.listeners[i], err = net.Listen("tcp", addr)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return s, nil
@@ -104,31 +110,34 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 		}
 	})
 
-	s.wg.Run(func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				conn, err := s.listener.Accept()
-				if err != nil {
-					if errors.Is(err, net.ErrClosed) {
-						return
+	for i := range s.listeners {
+		j := i
+		s.wg.Run(func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					conn, err := s.listeners[j].Accept()
+					if err != nil {
+						if errors.Is(err, net.ErrClosed) {
+							return
+						}
+
+						s.logger.Error("accept failed", zap.Error(err))
+						continue
 					}
 
-					s.logger.Error("accept failed", zap.Error(err))
-					continue
+					s.wg.Run(func() {
+						util.WithRecovery(func() { s.onConn(ctx, conn, s.addrs[j]) }, nil, s.logger)
+					})
 				}
-
-				s.wg.Run(func() {
-					util.WithRecovery(func() { s.onConn(ctx, conn) }, nil, s.logger)
-				})
 			}
-		}
-	})
+		})
+	}
 }
 
-func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
+func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	s.mu.Lock()
 	conns := uint64(len(s.mu.clients))
 	maxConns := s.mu.maxConnections
@@ -149,9 +158,9 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
-		zap.Bool("proxy-protocol", s.mu.proxyProtocol))
+		zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.String("addr", addr))
 	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(),
-		s.hsHandler, connID, &backend.BCConfig{
+		s.hsHandler, connID, addr, &backend.BCConfig{
 			ProxyProtocol:      s.mu.proxyProtocol,
 			RequireBackendTLS:  s.requireBackendTLS,
 			HealthyKeepAlive:   s.mu.healthyKeepAlive,
@@ -232,8 +241,8 @@ func (s *SQLServer) Close() error {
 		s.cancelFunc = nil
 	}
 	errs := make([]error, 0, 4)
-	if s.listener != nil {
-		errs = append(errs, s.listener.Close())
+	for i := range s.listeners {
+		errs = append(errs, s.listeners[i].Close())
 	}
 
 	s.mu.RLock()
