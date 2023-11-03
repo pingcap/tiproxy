@@ -171,7 +171,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	s.mu.Unlock()
 
 	logger.Info("new connection")
-	metrics.ConnGauge.WithLabelValues(addr).Inc()
+	metrics.ConnGauge.Inc()
 
 	defer func() {
 		s.mu.Lock()
@@ -183,7 +183,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		} else {
 			logger.Info("connection closed")
 		}
-		metrics.ConnGauge.WithLabelValues(addr).Dec()
+		metrics.ConnGauge.Dec()
 	}()
 
 	if err := keepalive.SetKeepalive(conn, config.KeepAlive{Enabled: tcpKeepAlive}); err != nil {

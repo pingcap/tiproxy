@@ -12,20 +12,19 @@ import (
 
 const (
 	LblType = "type"
-	LblAddr = "addr"
 
 	EventStart = "start"
 	EventClose = "close"
 )
 
 var (
-	ConnGauge = prometheus.NewGaugeVec(
+	ConnGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: ModuleProxy,
 			Subsystem: LabelServer,
 			Name:      "connections",
 			Help:      "Number of connections.",
-		}, []string{LblAddr})
+		})
 
 	MaxProcsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
