@@ -160,7 +160,8 @@ func (is *InfoSyncer) getTopologyInfo(cfg *config.Config) (*TopologyInfo, error)
 		s = ""
 	}
 	dir := path.Dir(s)
-	ip, port, err := net.SplitHostPort(cfg.Proxy.Addr)
+	addrs := strings.Split(cfg.Proxy.Addr, ",")
+	ip, port, err := net.SplitHostPort(addrs[0])
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

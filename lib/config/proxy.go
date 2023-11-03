@@ -60,12 +60,10 @@ type ProxyServerOnline struct {
 }
 
 type ProxyServer struct {
-	Addr string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
-	// Addrs will attach server to additional addrs.
-	Addrs             []string `yaml:"addrs,omitempty" toml:"addrs,omitempty" json:"addrs,omitempty"`
-	PDAddrs           string   `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
-	ServerVersion     string   `yaml:"server-version,omitempty" toml:"server-version,omitempty" json:"server-version,omitempty"`
-	RequireBackendTLS bool     `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
+	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
+	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
+	ServerVersion     string `yaml:"server-version,omitempty" toml:"server-version,omitempty" json:"server-version,omitempty"`
+	RequireBackendTLS bool   `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
 	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 

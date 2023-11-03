@@ -108,13 +108,13 @@ func TestGracefulShutdown(t *testing.T) {
 	}
 }
 
-func TestMultiPorts(t *testing.T) {
+func TestMultiAddr(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	certManager := cert.NewCertManager()
 	err := certManager.Init(&config.Config{}, lg, nil)
 	require.NoError(t, err)
 	server, err := NewSQLServer(lg, config.ProxyServer{
-		Addrs: []string{"0.0.0.0:0"},
+		Addr: "0.0.0.0:0,0.0.0.0:0",
 	}, certManager, &panicHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)

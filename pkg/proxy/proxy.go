@@ -5,7 +5,9 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,10 +68,8 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 
 	s.reset(&cfg.ProxyServerOnline)
 
-	s.addrs = make([]string, 0, len(cfg.Addrs)+1)
-	s.addrs = append(s.addrs, cfg.Addr)
-	s.addrs = append(s.addrs, cfg.Addrs...)
-
+	s.addrs = strings.Split(cfg.Addr, ",")
+	fmt.Printf("xhe %s\n", s.addrs)
 	s.listeners = make([]net.Listener, len(s.addrs))
 	for i, addr := range s.addrs {
 		s.listeners[i], err = net.Listen("tcp", addr)
@@ -113,13 +113,14 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 	})
 
 	for i := range s.listeners {
+		j := i
 		s.wg.Run(func() {
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				default:
-					conn, err := s.listeners[i].Accept()
+					conn, err := s.listeners[j].Accept()
 					if err != nil {
 						if errors.Is(err, net.ErrClosed) {
 							return
@@ -130,7 +131,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 					}
 
 					s.wg.Run(func() {
-						util.WithRecovery(func() { s.onConn(ctx, conn, s.addrs[i]) }, nil, s.logger)
+						util.WithRecovery(func() { s.onConn(ctx, conn, s.addrs[j]) }, nil, s.logger)
 					})
 				}
 			}
@@ -172,7 +173,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	s.mu.Unlock()
 
 	logger.Info("new connection")
-	metrics.ConnGauge.Inc()
+	metrics.ConnGauge.WithLabelValues(addr).Inc()
 
 	defer func() {
 		s.mu.Lock()
@@ -184,7 +185,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		} else {
 			logger.Info("connection closed")
 		}
-		metrics.ConnGauge.Dec()
+		metrics.ConnGauge.WithLabelValues(addr).Dec()
 	}()
 
 	if err := keepalive.SetKeepalive(conn, config.KeepAlive{Enabled: tcpKeepAlive}); err != nil {
