@@ -349,16 +349,26 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 				return errors.Wrap(ErrWriteConn, err)
 			}
 		} else {
-			sequence, pktSequence := header[3], p.readWriter.Sequence()
-			if sequence != pktSequence {
-				return ErrInvalidSequence.GenWithStack("invalid sequence, expected %d, actual %d", pktSequence, sequence)
-			}
-			p.readWriter.SetSequence(sequence + 1)
-			// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
-			dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
-			p.limitReader.N = int64(length + 4)
-			if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
-				return errors.Wrap(ErrRelayConn, err)
+			for {
+				sequence, pktSequence := header[3], p.readWriter.Sequence()
+				if sequence != pktSequence {
+					return ErrInvalidSequence.GenWithStack("invalid sequence, expected %d, actual %d", pktSequence, sequence)
+				}
+				p.readWriter.SetSequence(sequence + 1)
+				// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
+				dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
+				p.limitReader.N = int64(length + 4)
+				if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
+					return errors.Wrap(ErrRelayConn, err)
+				}
+				// For large packets, continue.
+				if length < MaxPayloadLen {
+					break
+				}
+				if header, err = p.readWriter.Peek(4); err != nil {
+					return errors.Wrap(ErrReadConn, err)
+				}
+				length = int(header[0]) | int(header[1])<<8 | int(header[2])<<16
 			}
 		}
 

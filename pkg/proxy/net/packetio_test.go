@@ -509,23 +509,22 @@ func TestForwardUntilLongData(t *testing.T) {
 	srvCh := make(chan *PacketIO)
 	exitCh := make(chan struct{})
 	var wg waitgroup.WaitGroup
-	loops, dataSize := 100000, 100
+	sizes := []int{DefaultConnBufferSize - 1, DefaultConnBufferSize, DefaultConnBufferSize + 1, DefaultConnBufferSize*2 - 1, DefaultConnBufferSize * 2}
 	wg.Run(func() {
 		testTCPConn(t,
 			func(t *testing.T, cli *PacketIO) {
-				for i := 0; i < loops; i++ {
-					data := make([]byte, dataSize)
+				for i, size := range sizes {
+					data := make([]byte, size)
+					data[0] = byte(i)
 					require.NoError(t, cli.WritePacket(data, true))
 				}
 			},
 			func(t *testing.T, srv1 *PacketIO) {
 				srv2 := <-srvCh
-				i := 0
 				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
-					i++
-					return i == loops, true
+					return firstByte >= byte(len(sizes)-1), true
 				}, func(response []byte) error {
-					require.Len(t, response, dataSize)
+					require.Len(t, response, sizes[len(sizes)-1])
 					return srv2.Flush()
 				})
 				require.NoError(t, err)
@@ -537,10 +536,11 @@ func TestForwardUntilLongData(t *testing.T) {
 	wg.Run(func() {
 		testTCPConn(t,
 			func(t *testing.T, cli *PacketIO) {
-				for i := 0; i < loops; i++ {
+				for i, size := range sizes {
 					data, err := cli.ReadPacket()
 					require.NoError(t, err)
-					require.Len(t, data, dataSize)
+					require.Equal(t, byte(i), data[0])
+					require.Len(t, data, size)
 				}
 			},
 			func(t *testing.T, srv2 *PacketIO) {
