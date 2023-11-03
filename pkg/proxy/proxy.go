@@ -5,7 +5,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -69,7 +68,6 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 	s.reset(&cfg.ProxyServerOnline)
 
 	s.addrs = strings.Split(cfg.Addr, ",")
-	fmt.Printf("xhe %s\n", s.addrs)
 	s.listeners = make([]net.Listener, len(s.addrs))
 	for i, addr := range s.addrs {
 		s.listeners[i], err = net.Listen("tcp", addr)
