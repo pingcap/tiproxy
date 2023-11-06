@@ -6,6 +6,7 @@ package proxy
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -48,13 +49,13 @@ func TestGracefulShutdown(t *testing.T) {
 	createClientConn := func() *client.ClientConnection {
 		server.mu.Lock()
 		go func() {
-			conn, err := net.Dial("tcp", server.listener.Addr().String())
+			conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
 			require.NoError(t, err)
 			require.NoError(t, conn.Close())
 		}()
-		conn, err := server.listener.Accept()
+		conn, err := server.listeners[0].Accept()
 		require.NoError(t, err)
-		clientConn := client.NewClientConnection(lg, conn, nil, nil, hsHandler, 0, &backend.BCConfig{})
+		clientConn := client.NewClientConnection(lg, conn, nil, nil, hsHandler, 0, "", &backend.BCConfig{})
 		server.mu.clients[1] = clientConn
 		server.mu.Unlock()
 		return clientConn
@@ -107,18 +108,40 @@ func TestGracefulShutdown(t *testing.T) {
 	}
 }
 
+func TestMultiAddr(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	err := certManager.Init(&config.Config{}, lg, nil)
+	require.NoError(t, err)
+	server, err := NewSQLServer(lg, config.ProxyServer{
+		Addr: "0.0.0.0:0,0.0.0.0:0",
+	}, certManager, &panicHsHandler{})
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+
+	require.Len(t, server.listeners, 2)
+	for _, listener := range server.listeners {
+		conn, err := net.Dial("tcp", listener.Addr().String())
+		require.NoError(t, err)
+		require.NoError(t, conn.Close())
+	}
+
+	require.NoError(t, server.Close())
+	certManager.Close()
+}
+
 func TestRecoverPanic(t *testing.T) {
 	lg, text := logger.CreateLoggerForTest(t)
 	certManager := cert.NewCertManager()
 	err := certManager.Init(&config.Config{}, lg, nil)
 	require.NoError(t, err)
-	server, err := NewSQLServer(lg, config.ProxyServer{
-		Addr: "0.0.0.0:6000",
-	}, certManager, &panicHsHandler{})
+	server, err := NewSQLServer(lg, config.ProxyServer{}, certManager, &panicHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
-	mdb, err := sql.Open("mysql", "root@tcp(localhost:6000)/test")
+	_, port, err := net.SplitHostPort(server.listeners[0].Addr().String())
+	require.NoError(t, err)
+	mdb, err := sql.Open("mysql", fmt.Sprintf("root@tcp(localhost:%s)/test", port))
 	require.NoError(t, err)
 	// The first connection encounters panic.
 	require.ErrorContains(t, mdb.Ping(), "invalid connection")

@@ -136,10 +136,6 @@ func (e *ConfigManager) Close() error {
 		e.cancel()
 		e.cancel = nil
 	}
-	if e.wch != nil {
-		wcherr = e.wch.Close()
-		e.wch = nil
-	}
 	e.sts.Lock()
 	for _, ch := range e.sts.listeners {
 		close(ch)
@@ -147,5 +143,10 @@ func (e *ConfigManager) Close() error {
 	e.sts.listeners = nil
 	e.sts.Unlock()
 	e.wg.Wait()
+	// close after all goroutines are done
+	if e.wch != nil {
+		wcherr = e.wch.Close()
+		e.wch = nil
+	}
 	return wcherr
 }
