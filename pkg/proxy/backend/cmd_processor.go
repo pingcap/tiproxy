@@ -37,10 +37,10 @@ func NewCmdProcessor(logger *zap.Logger) *CmdProcessor {
 	}
 }
 
-func (cp *CmdProcessor) handleOKPacket(request, response []byte) *gomysql.Result {
-	r := pnet.ParseOKPacket(response)
-	cp.updateServerStatus(request, r.Status)
-	return r
+func (cp *CmdProcessor) handleOKPacket(request, response []byte) uint16 {
+	status := pnet.ParseOKPacket(response)
+	cp.updateServerStatus(request, status)
+	return status
 }
 
 func (cp *CmdProcessor) handleErrorPacket(data []byte) error {

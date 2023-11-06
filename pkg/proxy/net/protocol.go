@@ -67,6 +67,20 @@ func ParseLengthEncodedInt(b []byte) (num uint64, isNull bool, n int) {
 	return
 }
 
+// SkipLengthEncodedInt skips the int and only returns the length of the encoded int.
+func SkipLengthEncodedInt(b []byte) int {
+	switch b[0] {
+	case 0xfc:
+		return 3
+	case 0xfd:
+		return 4
+	case 0xfe:
+		return 9
+	default:
+		return 1
+	}
+}
+
 func ParseLengthEncodedBytes(b []byte) ([]byte, bool, int, error) {
 	// Get length
 	num, isNull, n := ParseLengthEncodedInt(b)

@@ -353,7 +353,7 @@ func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessi
 
 func (mgr *BackendConnManager) querySessionStates(backendIO *pnet.PacketIO) (sessionStates, sessionToken string, err error) {
 	// Do not lock here because the caller already locks.
-	var result *gomysql.Result
+	var result *gomysql.Resultset
 	if result, _, err = mgr.cmdProcessor.query(backendIO, sqlQueryState); err != nil {
 		return
 	}

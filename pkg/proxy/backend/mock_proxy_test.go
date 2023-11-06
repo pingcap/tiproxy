@@ -39,7 +39,7 @@ type mockProxy struct {
 
 	*proxyConfig
 	// outputs that received from the server.
-	rs *gomysql.Result
+	rs *gomysql.Resultset
 	// execution results
 	err         error
 	logger      *zap.Logger
