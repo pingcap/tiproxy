@@ -6,6 +6,7 @@ package net
 import (
 	"testing"
 
+	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,4 +46,18 @@ func TestChangeUserReq(t *testing.T) {
 	b = MakeChangeUser(req1, capability)
 	_, err = ParseChangeUser(b, capability)
 	require.NoError(t, err)
+}
+
+func TestLogAttrs(t *testing.T) {
+	attrs := map[string]string{
+		AttrNameClientVersion: "8.1.0",
+		AttrNameClientName1:   "libmysql",
+		AttrNameProgramName:   "mysql",
+	}
+	lg, text := logger.CreateLoggerForTest(t)
+	lg.Info("connection info", Attr2ZapFields(attrs)...)
+	str := text.String()
+	require.Contains(t, str, `"client_version": "8.1.0"`)
+	require.Contains(t, str, `"client_name": "libmysql"`)
+	require.Contains(t, str, `"program_name": "mysql"`)
 }

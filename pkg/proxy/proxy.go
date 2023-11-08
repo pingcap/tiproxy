@@ -158,7 +158,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	connID := s.mu.connID
 	s.mu.connID++
 	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
-		zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.String("addr", addr))
+		zap.String("addr", addr))
 	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(),
 		s.hsHandler, connID, addr, &backend.BCConfig{
 			ProxyProtocol:      s.mu.proxyProtocol,
@@ -168,9 +168,9 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 			ConnBufferSize:     s.mu.connBufferSize,
 		})
 	s.mu.clients[connID] = clientConn
+	logger.Info("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol))
 	s.mu.Unlock()
 
-	logger.Info("new connection")
 	metrics.ConnGauge.Inc()
 
 	defer func() {

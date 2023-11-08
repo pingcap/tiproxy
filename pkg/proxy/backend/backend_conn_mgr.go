@@ -216,7 +216,6 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 				return nil, errors.Wrapf(err, "dial backend %s error", addr)
 			}
 
-			mgr.logger.Info("connected to backend", zap.String("backend_addr", addr))
 			// NOTE: should use DNS name as much as possible
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
@@ -640,7 +639,7 @@ func (mgr *BackendConnManager) Close() error {
 		// Just notify it with the current address.
 		if len(addr) > 0 {
 			if err := eventReceiver.OnConnClosed(addr, mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("client_addr", addr), zap.NamedError("notify_err", err))
+				mgr.logger.Error("close connection error", zap.String("backend_addr", addr), zap.NamedError("notify_err", err))
 			}
 		}
 	}
@@ -694,4 +693,14 @@ func (mgr *BackendConnManager) resetQuitSource() {
 
 func (mgr *BackendConnManager) UpdateLogger(fields ...zap.Field) {
 	mgr.logger = mgr.logger.With(fields...)
+}
+
+// ConnInfo returns detailed info of the connection, which should not be logged too many times.
+func (mgr *BackendConnManager) ConnInfo() []zap.Field {
+	var fields []zap.Field
+	if mgr.authenticator != nil {
+		fields = mgr.authenticator.ConnInfo()
+	}
+	fields = append(fields, zap.String("backend_addr", mgr.ServerAddr()))
+	return fields
 }

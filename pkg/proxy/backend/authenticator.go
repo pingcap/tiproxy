@@ -411,6 +411,12 @@ func (auth *Authenticator) updateCurrentDB(db string) {
 	auth.dbname = db
 }
 
+func (auth *Authenticator) ConnInfo() []zap.Field {
+	fields := pnet.Attr2ZapFields(auth.attrs)
+	fields = append(fields, zap.Stringer("capability", auth.capability), zap.Bool("proxy-protocol", auth.proxyProtocol))
+	return fields
+}
+
 func setCompress(packetIO *pnet.PacketIO, capability pnet.Capability, zstdLevel int) error {
 	algorithm := pnet.CompressionNone
 	if capability&pnet.ClientCompress > 0 {
