@@ -13,6 +13,7 @@ import (
 	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/siddontang/go/hack"
+	"go.uber.org/zap"
 )
 
 const (
@@ -430,4 +431,33 @@ func IsResultSetOKPacket(firstByte byte, length int) bool {
 // IsErrorPacket returns true if it's an error packet.
 func IsErrorPacket(firstByte byte) bool {
 	return firstByte == ErrHeader.Byte()
+}
+
+// The connection attribute names that are logged.
+// https://dev.mysql.com/doc/mysql-perfschema-excerpt/8.2/en/performance-schema-connection-attribute-tables.html
+const (
+	AttrNameClientVersion = "_client_version" // libmysqlclient & Connector/C++ & Connector/J & Connector/Net & Connector/Python
+	AttrNameClientName1   = "_client_name"    // libmysqlclient & Connector/C++ & Connector/J & Connector/Python & mysqlnd
+	AttrNameClientName2   = "_program_name"   // Connector/Net
+	AttrNameProgramName   = "program_name"    // MySQL Client & MySQL Shell
+)
+
+// Attr2ZapFields converts connection attributes to log fields.
+// We only pick some of them because others may be too sensitive to be logged.
+func Attr2ZapFields(attrs map[string]string) []zap.Field {
+	fields := make([]zap.Field, 0, 3)
+	if attrs != nil {
+		if version, ok := attrs[AttrNameClientVersion]; ok {
+			fields = append(fields, zap.String("client_version", version))
+		}
+		if name, ok := attrs[AttrNameClientName1]; ok {
+			fields = append(fields, zap.String("client_name", name))
+		} else if name, ok := attrs[AttrNameClientName2]; ok {
+			fields = append(fields, zap.String("client_name", name))
+		}
+		if name, ok := attrs[AttrNameProgramName]; ok {
+			fields = append(fields, zap.String("program_name", name))
+		}
+	}
+	return fields
 }

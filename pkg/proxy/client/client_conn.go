@@ -49,6 +49,7 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 		msg = "new connection failed"
 		goto clean
 	}
+	cc.logger.Info("connected to backend", cc.connMgr.ConnInfo()...)
 	if err = cc.processMsg(ctx); err != nil {
 		msg = "fails to relay the connection"
 		goto clean
@@ -59,7 +60,9 @@ clean:
 	switch src {
 	case backend.SrcClientQuit, backend.SrcClientErr, backend.SrcProxyQuit:
 	default:
-		cc.logger.Warn(msg, zap.String("backend_addr", cc.connMgr.ServerAddr()), zap.Stringer("quit source", src), zap.Error(err))
+		fields := cc.connMgr.ConnInfo()
+		fields = append(fields, zap.Stringer("quit source", src), zap.Error(err))
+		cc.logger.Warn(msg, fields...)
 	}
 }
 
