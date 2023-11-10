@@ -203,9 +203,6 @@ func (h *Server) grpcServer(ctx *gin.Context) {
 func (h *Server) registerAPI(g *gin.RouterGroup, cfg config.API, nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager) {
 	{
 		adminGroup := g.Group("admin")
-		if cfg.EnableBasicAuth {
-			adminGroup.Use(gin.BasicAuth(gin.Accounts{cfg.User: cfg.Password}))
-		}
 		h.registerNamespace(adminGroup.Group("namespace"))
 		h.registerConfig(adminGroup.Group("config"))
 	}

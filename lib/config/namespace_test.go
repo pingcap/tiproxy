@@ -21,8 +21,7 @@ var testNamespaceConfig = Namespace{
 		},
 	},
 	Backend: BackendNamespace{
-		Instances:    []string{"127.0.0.1:4000", "127.0.0.1:4001"},
-		SelectorType: "random",
+		Instances: []string{"127.0.0.1:4000", "127.0.0.1:4001"},
 		Security: TLSConfig{
 			CA:     "t",
 			Cert:   "t",

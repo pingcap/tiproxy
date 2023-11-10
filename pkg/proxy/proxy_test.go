@@ -27,7 +27,7 @@ import (
 func TestGracefulShutdown(t *testing.T) {
 	// Graceful shutdown finishes immediately if there's no connection.
 	lg, _ := logger.CreateLoggerForTest(t)
-	hsHandler := backend.NewDefaultHandshakeHandler(nil, "")
+	hsHandler := backend.NewDefaultHandshakeHandler(nil)
 	server, err := NewSQLServer(lg, config.ProxyServer{
 		ProxyServerOnline: config.ProxyServerOnline{
 			GracefulWaitBeforeShutdown: 10,
@@ -128,6 +128,37 @@ func TestMultiAddr(t *testing.T) {
 
 	require.NoError(t, server.Close())
 	certManager.Close()
+}
+
+func TestWatchCfg(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	hsHandler := backend.NewDefaultHandshakeHandler(nil)
+	cfgch := make(chan *config.Config)
+	server, err := NewSQLServer(lg, config.ProxyServer{}, nil, hsHandler)
+	require.NoError(t, err)
+	server.Run(context.Background(), cfgch)
+	cfg := &config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				RequireBackendTLS:          true,
+				MaxConnections:             100,
+				ConnBufferSize:             1024 * 1024,
+				ProxyProtocol:              "v2",
+				GracefulWaitBeforeShutdown: 100,
+			},
+		},
+	}
+	cfgch <- cfg
+	require.Eventually(t, func() bool {
+		server.mu.RLock()
+		defer server.mu.RUnlock()
+		return server.mu.requireBackendTLS == cfg.Proxy.RequireBackendTLS &&
+			server.mu.maxConnections == cfg.Proxy.MaxConnections &&
+			server.mu.connBufferSize == cfg.Proxy.ConnBufferSize &&
+			server.mu.proxyProtocol == (cfg.Proxy.ProxyProtocol != "") &&
+			server.mu.gracefulWait == cfg.Proxy.GracefulWaitBeforeShutdown
+	}, 3*time.Second, 10*time.Millisecond)
+	require.NoError(t, server.Close())
 }
 
 func TestRecoverPanic(t *testing.T) {

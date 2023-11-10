@@ -31,6 +31,7 @@ type serverState struct {
 	connID             uint64
 	maxConnections     uint64
 	connBufferSize     int
+	requireBackendTLS  bool
 	tcpKeepAlive       bool
 	proxyProtocol      bool
 	gracefulWait       int
@@ -38,14 +39,13 @@ type serverState struct {
 }
 
 type SQLServer struct {
-	listeners         []net.Listener
-	addrs             []string
-	logger            *zap.Logger
-	certMgr           *cert.CertManager
-	hsHandler         backend.HandshakeHandler
-	requireBackendTLS bool
-	wg                waitgroup.WaitGroup
-	cancelFunc        context.CancelFunc
+	listeners  []net.Listener
+	addrs      []string
+	logger     *zap.Logger
+	certMgr    *cert.CertManager
+	hsHandler  backend.HandshakeHandler
+	wg         waitgroup.WaitGroup
+	cancelFunc context.CancelFunc
 
 	mu serverState
 }
@@ -53,12 +53,10 @@ type SQLServer struct {
 // NewSQLServer creates a new SQLServer.
 func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.CertManager, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
 	var err error
-
 	s := &SQLServer{
-		logger:            logger,
-		certMgr:           certMgr,
-		hsHandler:         hsHandler,
-		requireBackendTLS: cfg.RequireBackendTLS,
+		logger:    logger,
+		certMgr:   certMgr,
+		hsHandler: hsHandler,
 		mu: serverState{
 			connID:  0,
 			clients: make(map[uint64]*client.ClientConnection),
@@ -83,6 +81,7 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.Lock()
 	s.mu.tcpKeepAlive = cfg.FrontendKeepalive.Enabled
 	s.mu.maxConnections = cfg.MaxConnections
+	s.mu.requireBackendTLS = cfg.RequireBackendTLS
 	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
 	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
 	s.mu.healthyKeepAlive = cfg.BackendHealthyKeepalive
@@ -162,13 +161,13 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerTLS(), s.certMgr.SQLTLS(),
 		s.hsHandler, connID, addr, &backend.BCConfig{
 			ProxyProtocol:      s.mu.proxyProtocol,
-			RequireBackendTLS:  s.requireBackendTLS,
+			RequireBackendTLS:  s.mu.requireBackendTLS,
 			HealthyKeepAlive:   s.mu.healthyKeepAlive,
 			UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
 			ConnBufferSize:     s.mu.connBufferSize,
 		})
 	s.mu.clients[connID] = clientConn
-	logger.Info("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol))
+	logger.Info("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
 	s.mu.Unlock()
 
 	metrics.ConnGauge.Inc()

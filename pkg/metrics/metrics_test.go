@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 )
@@ -21,11 +22,71 @@ import (
 func TestPushMetrics(t *testing.T) {
 	proxyAddr := "0.0.0.0:6000"
 	labelName := fmt.Sprintf("%s_%s_maxprocs", ModuleProxy, LabelServer)
+	bodyCh1, bodyCh2 := make(chan string), make(chan string)
+	pgwOK1, pgwOK2 := setupServer(t, bodyCh1), setupServer(t, bodyCh2)
+	log, _ := logger.CreateLoggerForTest(t)
+
+	tests := []struct {
+		metricsAddr     string
+		metricsInterval uint
+		pushedCh        chan string
+	}{
+		{
+			metricsAddr:     pgwOK1.URL,
+			metricsInterval: 1,
+			pushedCh:        bodyCh1,
+		},
+		{
+			metricsAddr:     pgwOK1.URL,
+			metricsInterval: 0,
+			pushedCh:        nil,
+		},
+		{
+			metricsAddr:     pgwOK2.URL,
+			metricsInterval: 1,
+			pushedCh:        bodyCh2,
+		},
+		{
+			metricsAddr:     "",
+			metricsInterval: 1,
+			pushedCh:        nil,
+		},
+	}
+	mm := NewMetricsManager()
+	cfgCh := make(chan *config.Config, 1)
+	mm.Init(context.Background(), log, proxyAddr, config.Metrics{}, cfgCh)
+	for _, tt := range tests {
+		cfgCh <- &config.Config{
+			Metrics: config.Metrics{
+				MetricsAddr:     tt.metricsAddr,
+				MetricsInterval: tt.metricsInterval,
+			},
+		}
+		if tt.pushedCh != nil {
+			select {
+			case body := <-tt.pushedCh:
+				require.Contains(t, body, labelName)
+			case <-time.After(2 * time.Second):
+				t.Fatal("not pushed")
+			}
+		} else {
+			select {
+			case <-bodyCh1:
+				t.Fatal("pushed 1")
+			case <-bodyCh2:
+				t.Fatal("pushed 2")
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}
+	mm.Close()
+}
+
+func setupServer(t *testing.T, bodyCh chan string) *httptest.Server {
 	hostname, err := os.Hostname()
 	require.NoError(t, err)
 	expectedPath := fmt.Sprintf("/metrics/job/tiproxy/instance/%s_6000", hostname)
-	bodyCh := make(chan string)
-	pgwOK := httptest.NewServer(
+	server := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
@@ -35,50 +96,6 @@ func TestPushMetrics(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		}),
 	)
-	defer pgwOK.Close()
-	log, _ := logger.CreateLoggerForTest(t)
-
-	tests := []struct {
-		metricsAddr     string
-		metricsInterval uint
-		pushed          bool
-	}{
-		{
-			metricsAddr:     pgwOK.URL,
-			metricsInterval: 1,
-			pushed:          true,
-		},
-		{
-			metricsAddr:     "",
-			metricsInterval: 1,
-			pushed:          false,
-		},
-		{
-			metricsAddr:     pgwOK.URL,
-			metricsInterval: 0,
-			pushed:          false,
-		},
-	}
-	for _, tt := range tests {
-		for len(bodyCh) > 0 {
-			<-bodyCh
-		}
-		mm := NewMetricsManager()
-		mm.Init(context.Background(), log, tt.metricsAddr, tt.metricsInterval, proxyAddr)
-		if tt.pushed {
-			select {
-			case body := <-bodyCh:
-				require.Contains(t, body, labelName)
-			case <-time.After(2 * time.Second):
-				t.Fatal("not pushed")
-			}
-		} else {
-			select {
-			case <-bodyCh:
-				t.Fatal("pushed")
-			case <-time.After(2 * time.Second):
-			}
-		}
-		mm.Close()
-	}
+	t.Cleanup(server.Close)
+	return server
 }
