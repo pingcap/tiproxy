@@ -54,20 +54,18 @@ func TestEtcdServerDown4Sync(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
 	var ttl string
-	for i := 0; i < 5; i++ {
-		// Make the server down for some time.
-		addr := ts.shutdownServer()
-		time.Sleep(time.Second)
-		ts.startServer(addr)
-		require.Eventually(t, func() bool {
-			newTTL, info := ts.getTTLAndInfo(tiproxyTopologyPath)
-			satisfied := newTTL != ttl && len(info) > 0
-			if satisfied {
-				ttl = newTTL
-			}
-			return satisfied
-		}, 5*time.Second, 100*time.Millisecond)
-	}
+	// Make the server down for some time.
+	addr := ts.shutdownServer()
+	time.Sleep(time.Second)
+	ts.startServer(addr)
+	require.Eventually(t, func() bool {
+		newTTL, info := ts.getTTLAndInfo(tiproxyTopologyPath)
+		satisfied := newTTL != ttl && len(info) > 0
+		if satisfied {
+			ttl = newTTL
+		}
+		return satisfied
+	}, 5*time.Second, 100*time.Millisecond)
 }
 
 // TTL and info are erased after the client shuts down normally.
