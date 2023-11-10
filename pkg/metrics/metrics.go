@@ -170,25 +170,6 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(MigrateDurationHistogram)
 }
 
-// prometheusPushClient pushes metrics to Prometheus Pushgateway.
-func prometheusPushClient(ctx context.Context, logger *zap.Logger, addr string, interval time.Duration, proxyAddr string) {
-	job := "tiproxy"
-	pusher := push.New(addr, job)
-	pusher = pusher.Gatherer(prometheus.DefaultGatherer)
-	pusher = pusher.Grouping("instance", instanceName(proxyAddr))
-	for ctx.Err() == nil {
-		err := pusher.Push()
-		if err != nil {
-			logger.Error("could not push metrics to prometheus pushgateway", zap.String("err", err.Error()))
-		}
-		select {
-		case <-time.After(interval):
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
 func instanceName(proxyAddr string) string {
 	hostname, err := os.Hostname()
 	if err != nil {
