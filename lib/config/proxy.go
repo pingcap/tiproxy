@@ -46,6 +46,7 @@ type KeepAlive struct {
 }
 
 type ProxyServerOnline struct {
+	RequireBackendTLS bool      `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
 	MaxConnections    uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
 	ConnBufferSize    int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty"`
 	FrontendKeepalive KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
@@ -62,17 +63,12 @@ type ProxyServerOnline struct {
 type ProxyServer struct {
 	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
 	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
-	ServerVersion     string `yaml:"server-version,omitempty" toml:"server-version,omitempty" json:"server-version,omitempty"`
-	RequireBackendTLS bool   `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
 	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
 type API struct {
-	Addr            string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
-	User            string `yaml:"user,omitempty" toml:"user,omitempty" json:"user,omitempty"`
-	Password        string `yaml:"password,omitempty" toml:"password,omitempty" json:"password,omitempty"`
-	EnableBasicAuth bool   `yaml:"enable-basic-auth,omitempty" toml:"enable-basic-auth,omitempty" json:"enable-basic-auth,omitempty"`
-	ProxyProtocol   string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
+	Addr          string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
+	ProxyProtocol string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
 }
 
 type Advance struct {

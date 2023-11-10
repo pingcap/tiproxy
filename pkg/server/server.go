@@ -71,7 +71,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	cfg := srv.ConfigManager.GetConfig()
 
 	// setup metrics
-	srv.MetricsManager.Init(ctx, lg.Named("metrics"), cfg.Metrics.MetricsAddr, cfg.Metrics.MetricsInterval, cfg.Proxy.Addr)
+	srv.MetricsManager.Init(ctx, lg.Named("metrics"), cfg.Proxy.Addr, cfg.Metrics, srv.ConfigManager.WatchConfig())
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
 
 	// setup certs
@@ -109,8 +109,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			nsc := &config.Namespace{
 				Namespace: "default",
 				Backend: config.BackendNamespace{
-					Instances:    []string{},
-					SelectorType: "random",
+					Instances: []string{},
 				},
 			}
 			if err = srv.ConfigManager.SetNamespace(ctx, nsc.Namespace, nsc); err != nil {
@@ -132,7 +131,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		if handler != nil {
 			hsHandler = handler
 		} else {
-			hsHandler = backend.NewDefaultHandshakeHandler(srv.NamespaceManager, cfg.Proxy.ServerVersion)
+			hsHandler = backend.NewDefaultHandshakeHandler(srv.NamespaceManager)
 		}
 		srv.Proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg.Proxy, srv.CertManager, hsHandler)
 		if err != nil {
