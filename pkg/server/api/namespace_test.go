@@ -35,7 +35,7 @@ func TestNamespace(t *testing.T) {
 	doHTTP(t, http.MethodGet, "/api/admin/namespace/dge", nil, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		require.Equal(t, `{"namespace":"dge","frontend":{"user":"","security":{}},"backend":{"instances":null,"selector-type":"","security":{}}}`, string(all))
+		require.Equal(t, `{"namespace":"dge","frontend":{"user":"","security":{}},"backend":{"instances":null,"security":{}}}`, string(all))
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 
