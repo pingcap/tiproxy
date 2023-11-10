@@ -5,11 +5,12 @@ package backend
 
 import (
 	"crypto/tls"
+	"testing"
+
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
-	"testing"
 )
 
 type proxyConfig struct {

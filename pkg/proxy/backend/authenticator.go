@@ -8,13 +8,14 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"net"
+
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/util/hack"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	"go.uber.org/zap"
-	"net"
 )
 
 var (
