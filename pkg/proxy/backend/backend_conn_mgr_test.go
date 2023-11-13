@@ -761,8 +761,8 @@ func TestHandlerReturnError(t *testing.T) {
 			quitSource: SrcProxyErr,
 		},
 		{
-			// TODO: make it fail faster.
 			cfg: func(config *testConfig) {
+				config.proxyConfig.bcConfig.ConnectTimeout = time.Second
 				config.proxyConfig.handler.getRouter = func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
 					return router.NewStaticRouter(nil), nil
 				}
@@ -857,7 +857,7 @@ func TestGetBackendIO(t *testing.T) {
 		},
 	}
 	lg, _ := logger.CreateLoggerForTest(t)
-	mgr := NewBackendConnManager(lg, handler, 0, &BCConfig{})
+	mgr := NewBackendConnManager(lg, handler, 0, &BCConfig{ConnectTimeout: time.Second})
 	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
 		wg.Run(func() {
@@ -867,7 +867,7 @@ func TestGetBackendIO(t *testing.T) {
 				require.NoError(t, cn.Close())
 			}
 		})
-		io, err := mgr.getBackendIO(mgr, mgr.authenticator, nil, time.Second)
+		io, err := mgr.getBackendIO(mgr, mgr.authenticator, nil)
 		if err == nil {
 			require.NoError(t, io.Close())
 		}

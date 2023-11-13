@@ -33,7 +33,11 @@ var (
 )
 
 const (
-	DialTimeout          = 1 * time.Second
+	// DialTimeout is the timeout for each dial.
+	DialTimeout = 1 * time.Second
+	// ConnectTimeout is the timeout for choosing and connecting to an available backend.
+	ConnectTimeout = 15 * time.Second
+	// CheckBackendInterval is the interval for checking if the backend is still connected.
 	CheckBackendInterval = time.Minute
 )
 
@@ -74,6 +78,7 @@ type BCConfig struct {
 	HealthyKeepAlive     config.KeepAlive
 	UnhealthyKeepAlive   config.KeepAlive
 	CheckBackendInterval time.Duration
+	ConnectTimeout       time.Duration
 	ConnBufferSize       int
 	ProxyProtocol        bool
 	RequireBackendTLS    bool
@@ -82,6 +87,9 @@ type BCConfig struct {
 func (cfg *BCConfig) check() {
 	if cfg.CheckBackendInterval == time.Duration(0) {
 		cfg.CheckBackendInterval = CheckBackendInterval
+	}
+	if cfg.ConnectTimeout == time.Duration(0) {
+		cfg.ConnectTimeout = ConnectTimeout
 	}
 }
 
@@ -180,7 +188,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	return nil
 }
 
-func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error) {
+func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
 		return nil, pnet.WrapUserError(err, err.Error())
@@ -188,7 +196,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 	// Reasons to wait:
 	// - The TiDB instances may not be initialized yet
 	// - One TiDB may be just shut down and another is just started but not ready yet
-	bctx, cancel := context.WithTimeout(context.Background(), timeout)
+	bctx, cancel := context.WithTimeout(context.Background(), mgr.config.ConnectTimeout)
 	selector := r.GetBackendSelector()
 	startTime := time.Now()
 	var addr string

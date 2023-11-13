@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/util/hack"
@@ -85,7 +84,7 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 	return nil
 }
 
-type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp, timeout time.Duration) (*pnet.PacketIO, error)
+type backendIOGetter func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
 
 func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnContext, clientIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
 	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
@@ -162,7 +161,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 RECONNECT:
 
 	// In case of testing, backendIO is passed manually that we don't want to bother with the routing logic.
-	backendIO, err := getBackendIO(cctx, auth, clientResp, 15*time.Second)
+	backendIO, err := getBackendIO(cctx, auth, clientResp)
 	if err != nil {
 		return pnet.WrapUserError(err, connectErrMsg)
 	}
