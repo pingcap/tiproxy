@@ -72,6 +72,7 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 		mu: serverState{
 			connID:  0,
 			clients: make(map[uint64]*client.ClientConnection),
+			status:  statusNormal,
 		},
 	}
 

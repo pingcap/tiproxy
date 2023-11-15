@@ -178,11 +178,11 @@ func TestWatchCfg(t *testing.T) {
 	cfg := &config.Config{
 		Proxy: config.ProxyServer{
 			ProxyServerOnline: config.ProxyServerOnline{
-				RequireBackendTLS:          true,
-				MaxConnections:             100,
-				ConnBufferSize:             1024 * 1024,
-				ProxyProtocol:              "v2",
-				GracefulWaitBeforeShutdown: 100,
+				RequireBackendTLS:        true,
+				MaxConnections:           100,
+				ConnBufferSize:           1024 * 1024,
+				ProxyProtocol:            "v2",
+				GracefulCloseConnTimeout: 100,
 			},
 		},
 	}
