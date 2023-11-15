@@ -23,6 +23,17 @@ import (
 	"go.uber.org/zap"
 )
 
+type serverStatus int
+
+const (
+	// statusNormal: normal status
+	statusNormal serverStatus = iota
+	// statusWaitShutdown: during graceful-wait-before-shutdown
+	statusWaitShutdown
+	// statusDrainClient: during graceful-close-conn-timeout
+	statusDrainClient
+)
+
 type serverState struct {
 	sync.RWMutex
 	healthyKeepAlive   config.KeepAlive
@@ -34,8 +45,9 @@ type serverState struct {
 	requireBackendTLS  bool
 	tcpKeepAlive       bool
 	proxyProtocol      bool
-	gracefulWait       int
-	inShutdown         bool
+	gracefulWait       int // graceful-wait-before-shutdown
+	gracefulClose      int // graceful-close-conn-timeout
+	status             serverStatus
 }
 
 type SQLServer struct {
@@ -84,6 +96,7 @@ func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
 	s.mu.requireBackendTLS = cfg.RequireBackendTLS
 	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
 	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
+	s.mu.gracefulClose = cfg.GracefulCloseConnTimeout
 	s.mu.healthyKeepAlive = cfg.BackendHealthyKeepalive
 	s.mu.unhealthyKeepAlive = cfg.BackendUnhealthyKeepalive
 	s.mu.connBufferSize = cfg.ConnBufferSize
@@ -148,11 +161,6 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
 		return
 	}
-	if s.mu.inShutdown {
-		s.mu.Unlock()
-		s.logger.Warn("in shutdown", zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
-		return
-	}
 
 	connID := s.mu.connID
 	s.mu.connID++
@@ -192,29 +200,44 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	clientConn.Run(ctx)
 }
 
+// IsClosing tells the HTTP API whether it should return healthy status.
 func (s *SQLServer) IsClosing() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.mu.inShutdown
+	return s.mu.status >= statusWaitShutdown
 }
 
-// Graceful shutdown doesn't close the listener but rejects new connections.
-// Whether this affects NLB is to be tested.
 func (s *SQLServer) gracefulShutdown() {
+	// Step 1: HTTP status returns unhealthy so that NLB takes this instance offline and then new connections won't come.
 	s.mu.Lock()
 	gracefulWait := s.mu.gracefulWait
-	if gracefulWait == 0 {
+	s.mu.status = statusWaitShutdown
+	s.mu.Unlock()
+	s.logger.Info("SQL server prepares for shutdown", zap.Int("graceful_wait", gracefulWait))
+	if gracefulWait > 0 {
+		time.Sleep(time.Duration(gracefulWait) * time.Second)
+	}
+
+	// Step 2: reject new connections and drain clients.
+	for i := range s.listeners {
+		if err := s.listeners[i].Close(); err != nil {
+			s.logger.Warn("closing listener fails", zap.Error(err))
+		}
+	}
+	s.mu.Lock()
+	s.mu.status = statusDrainClient
+	gracefulClose := s.mu.gracefulClose
+	s.logger.Info("SQL server is shutting down", zap.Int("graceful_close", gracefulClose), zap.Int("conn_count", len(s.mu.clients)))
+	if gracefulClose <= 0 {
 		s.mu.Unlock()
 		return
 	}
-	s.mu.inShutdown = true
 	for _, conn := range s.mu.clients {
 		conn.GracefulClose()
 	}
 	s.mu.Unlock()
-	s.logger.Info("SQL server is shutting down", zap.Int("graceful_wait", gracefulWait))
 
-	timer := time.NewTimer(time.Duration(gracefulWait) * time.Second)
+	timer := time.NewTimer(time.Duration(gracefulClose) * time.Second)
 	defer timer.Stop()
 	for {
 		select {
@@ -239,19 +262,16 @@ func (s *SQLServer) Close() error {
 		s.cancelFunc()
 		s.cancelFunc = nil
 	}
-	errs := make([]error, 0, 4)
-	for i := range s.listeners {
-		errs = append(errs, s.listeners[i].Close())
-	}
 
 	s.mu.RLock()
+	s.logger.Info("force closing connections", zap.Int("conn_count", len(s.mu.clients)))
 	for _, conn := range s.mu.clients {
 		if err := conn.Close(); err != nil {
-			errs = append(errs, err)
+			s.logger.Warn("close connection error", zap.Error(err))
 		}
 	}
 	s.mu.RUnlock()
 
 	s.wg.Wait()
-	return errors.Collect(ErrCloseServer, errs...)
+	return nil
 }

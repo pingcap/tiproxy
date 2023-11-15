@@ -16,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/router"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
@@ -24,15 +25,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGracefulShutdown(t *testing.T) {
+func TestGracefulCloseConn(t *testing.T) {
 	// Graceful shutdown finishes immediately if there's no connection.
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil)
-	server, err := NewSQLServer(lg, config.ProxyServer{
+	cfg := config.ProxyServer{
 		ProxyServerOnline: config.ProxyServerOnline{
-			GracefulWaitBeforeShutdown: 10,
+			GracefulCloseConnTimeout: 10,
 		},
-	}, nil, hsHandler)
+	}
+	server, err := NewSQLServer(lg, cfg, nil, hsHandler)
 	require.NoError(t, err)
 	finish := make(chan struct{})
 	go func() {
@@ -62,11 +64,7 @@ func TestGracefulShutdown(t *testing.T) {
 	}
 
 	// Graceful shutdown will be blocked if there are alive connections.
-	server, err = NewSQLServer(lg, config.ProxyServer{
-		ProxyServerOnline: config.ProxyServerOnline{
-			GracefulWaitBeforeShutdown: 10,
-		},
-	}, nil, hsHandler)
+	server, err = NewSQLServer(lg, cfg, nil, hsHandler)
 	require.NoError(t, err)
 	clientConn := createClientConn()
 	go func() {
@@ -89,12 +87,9 @@ func TestGracefulShutdown(t *testing.T) {
 	case <-finish:
 	}
 
-	// Graceful shutdown will shut down after GracefulWaitBeforeShutdown.
-	server, err = NewSQLServer(lg, config.ProxyServer{
-		ProxyServerOnline: config.ProxyServerOnline{
-			GracefulWaitBeforeShutdown: 1,
-		},
-	}, nil, hsHandler)
+	// Graceful shutdown will shut down after GracefulCloseConnTimeout.
+	cfg.GracefulCloseConnTimeout = 1
+	server, err = NewSQLServer(lg, cfg, nil, hsHandler)
 	require.NoError(t, err)
 	createClientConn()
 	go func() {
@@ -106,6 +101,49 @@ func TestGracefulShutdown(t *testing.T) {
 		t.Fatal("timeout")
 	case <-finish:
 	}
+}
+
+func TestGracefulShutDown(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	hsHandler := backend.NewDefaultHandshakeHandler(nil)
+	cfg := config.ProxyServer{
+		ProxyServerOnline: config.ProxyServerOnline{
+			GracefulWaitBeforeShutdown: 2,
+			GracefulCloseConnTimeout:   10,
+		},
+	}
+	server, err := NewSQLServer(lg, cfg, nil, hsHandler)
+	require.NoError(t, err)
+
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		// Wait until the server begins to shut down.
+		for i := 0; ; i++ {
+			if server.IsClosing() {
+				break
+			}
+			if i >= 50 {
+				t.Fatal("timeout")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		// The listener should be open.
+		conn1, err := net.Dial("tcp", server.listeners[0].Addr().String())
+		require.NoError(t, err)
+		// The listener should be closed after GracefulWaitBeforeShutdown.
+		require.Eventually(t, func() bool {
+			conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
+			if err == nil {
+				require.NoError(t, conn.Close())
+			} else {
+				require.ErrorContains(t, err, "connection refused")
+			}
+			return err != nil
+		}, 3*time.Second, 100*time.Millisecond)
+		require.NoError(t, conn1.Close())
+	})
+	require.NoError(t, server.Close())
+	wg.Wait()
 }
 
 func TestMultiAddr(t *testing.T) {

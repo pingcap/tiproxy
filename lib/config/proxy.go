@@ -58,6 +58,7 @@ type ProxyServerOnline struct {
 	BackendUnhealthyKeepalive  KeepAlive `yaml:"backend-unhealthy-keepalive" toml:"backend-unhealthy-keepalive" json:"backend-unhealthy-keepalive"`
 	ProxyProtocol              string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
 	GracefulWaitBeforeShutdown int       `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty"`
+	GracefulCloseConnTimeout   int       `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty"`
 }
 
 type ProxyServer struct {
@@ -140,6 +141,7 @@ func NewConfig() *Config {
 	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnhealthyKeepalive = DefaultKeepAlive()
 	cfg.Proxy.RequireBackendTLS = true
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
+	cfg.Proxy.GracefulCloseConnTimeout = 15
 
 	cfg.API.Addr = "0.0.0.0:3080"
 

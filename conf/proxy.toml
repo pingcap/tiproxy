@@ -10,10 +10,18 @@
 #   "v2" => accept proxy protocol if any, require backends to support proxy protocol.
 # proxy-protocol = ""
 
+# graceful-wait-before-shutdown is recommanded to be set to 0 when there's no other proxy(e.g. NLB) between the client and TiProxy.
 # possible values:
-# 	0 => disable graceful shutdown.
-# 	30 => graceful shutdown waiting time in 30 seconds.
+# 	0 => begin to drain clients immediately.
+# 	30 => HTTP status returns unhealthy and the SQL port accepts new connections for the last 30 seconds. After that, refuse new connections and drain clients.
 # graceful-wait-before-shutdown = 0
+
+# graceful-close-conn-timeout is recommanded to be set longer than the lifecycle of a transaction.
+# possible values:
+#   0 => force closing connections immediately.
+#   15 => close connections when they have finished current transactions (AKA drain clients). After 15s, force closing all the connections.
+
+graceful-close-conn-timeout = 15
 
 # possible values:
 #		"" => enable static routing.
