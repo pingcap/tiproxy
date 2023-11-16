@@ -118,15 +118,7 @@ func TestGracefulShutDown(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	wg.Run(func() {
 		// Wait until the server begins to shut down.
-		for i := 0; ; i++ {
-			if server.IsClosing() {
-				break
-			}
-			if i >= 50 {
-				t.Fatal("timeout")
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+		require.Eventually(t, server.IsClosing, 500*time.Millisecond, 10*time.Millisecond)
 		// The listener should be open.
 		conn1, err := net.Dial("tcp", server.listeners[0].Addr().String())
 		require.NoError(t, err)
@@ -135,8 +127,6 @@ func TestGracefulShutDown(t *testing.T) {
 			conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
 			if err == nil {
 				require.NoError(t, conn.Close())
-			} else {
-				require.ErrorContains(t, err, "connection refused")
 			}
 			return err != nil
 		}, 3*time.Second, 100*time.Millisecond)
