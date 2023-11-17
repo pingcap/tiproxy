@@ -87,9 +87,6 @@ graceful-close-conn-timeout = 15
 # server object:
 #   1. requires: cert/key or auto-certs(generate a temporary cert, mostly for testing)
 #   2. optionally: ca will enable server-side client verification. If skip-ca is true with non-empty ca, server will only verify clients if it can provide any cert. Otherwise, clients must provide a cert.
-# peer object:
-#   1. requires: cert/key/ca or auto-certs
-#   2. useless/forbid: skip-ca
 
 	# client object
 	[security.cluster-tls]
@@ -98,12 +95,17 @@ graceful-close-conn-timeout = 15
 
 	# client object
 	[security.sql-tls]
-	# access to other components like TiDB or PD, will use this
+	# access to TiDB SQL(4000) port will use this
 	skip-ca = true
 
 	# server object
 	[security.server-tls]
-	# proxy SQL or HTTP port will use this
+	# proxy SQL port will use this
+	# auto-certs = true
+
+	# server object
+	[security.server-http-tls]
+	# proxy HTTP port will use this
 	# auto-certs = true
 
 [metrics]

@@ -49,13 +49,13 @@ var testProxyConfig = Config{
 		},
 	},
 	Security: Security{
-		ServerTLS: TLSConfig{
+		ServerSQLTLS: TLSConfig{
 			CA:        "a",
 			Cert:      "b",
 			Key:       "c",
 			AutoCerts: true,
 		},
-		PeerTLS: TLSConfig{
+		ServerHTTPTLS: TLSConfig{
 			CA:        "a",
 			Cert:      "b",
 			Key:       "c",

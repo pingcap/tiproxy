@@ -117,7 +117,7 @@ func NewServer(cfg config.API, lg *zap.Logger,
 		}
 	}
 
-	if tlscfg := crtmgr.ServerTLS(); tlscfg != nil {
+	if tlscfg := crtmgr.ServerHTTPTLS(); tlscfg != nil {
 		h.listener = tls.NewListener(h.listener, tlscfg)
 	}
 

@@ -113,10 +113,10 @@ func (c TLSConfig) HasCA() bool {
 }
 
 type Security struct {
-	ServerTLS  TLSConfig `yaml:"server-tls,omitempty" toml:"server-tls,omitempty" json:"server-tls,omitempty"`
-	PeerTLS    TLSConfig `yaml:"peer-tls,omitempty" toml:"peer-tls,omitempty" json:"peer-tls,omitempty"`
-	ClusterTLS TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
-	SQLTLS     TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
+	ServerSQLTLS  TLSConfig `yaml:"server-tls,omitempty" toml:"server-tls,omitempty" json:"server-tls,omitempty"`
+	ServerHTTPTLS TLSConfig `yaml:"server-http-tls,omitempty" toml:"server-http-tls,omitempty" json:"server-http-tls,omitempty"`
+	ClusterTLS    TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
+	SQLTLS        TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
@@ -153,8 +153,8 @@ func NewConfig() *Config {
 
 	cfg.Advance.IgnoreWrongNamespace = true
 	cfg.Security.SQLTLS.MinTLSVersion = "1.1"
-	cfg.Security.PeerTLS.MinTLSVersion = "1.1"
-	cfg.Security.ServerTLS.MinTLSVersion = "1.1"
+	cfg.Security.ServerSQLTLS.MinTLSVersion = "1.1"
+	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.1"
 	cfg.Security.ClusterTLS.MinTLSVersion = "1.1"
 
 	return &cfg
@@ -184,6 +184,7 @@ func (cfg *Config) Check() error {
 	if cfg.Proxy.ConnBufferSize > 0 && (cfg.Proxy.ConnBufferSize > 16*1024*1024 || cfg.Proxy.ConnBufferSize < 1024) {
 		return errors.Wrapf(ErrInvalidConfigValue, "conn-buffer-size must be between 1K and 16M")
 	}
+
 	return nil
 }
 
