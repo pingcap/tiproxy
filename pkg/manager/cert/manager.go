@@ -25,10 +25,8 @@ const (
 // Currently, all the namespaces share the same certs but there might be per-namespace
 // certs in the future.
 type CertManager struct {
-	serverSQLTLS       *security.CertInfo // client -> proxy
-	serverSQLTLSConfig atomic.Pointer[tls.Config]
-	//serverHTTPTLS       *security.CertInfo // proxyctl -> proxy
-	//serverHTTPTLSConfig atomic.Pointer[tls.Config]
+	serverSQLTLS        *security.CertInfo // client -> proxy
+	serverSQLTLSConfig  atomic.Pointer[tls.Config]
 	serverHTTPTLS       *security.CertInfo // proxyctl -> proxy
 	serverHTTPTLSConfig atomic.Pointer[tls.Config]
 	clusterTLS          *security.CertInfo // proxy -> pd / tidb status port
