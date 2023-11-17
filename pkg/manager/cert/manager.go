@@ -52,7 +52,7 @@ func NewCertManager() *CertManager {
 func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger, cfgch <-chan *config.Config) error {
 	cm.logger = logger
 	cm.serverSQLTLS = security.NewCert(true)
-	cm.serverHTTPTLS = security.NewCert(false)
+	cm.serverHTTPTLS = security.NewCert(true)
 	cm.clusterTLS = security.NewCert(false)
 	cm.sqlTLS = security.NewCert(false)
 	cm.setConfig(cfg)
