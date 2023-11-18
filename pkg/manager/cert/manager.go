@@ -25,14 +25,14 @@ const (
 // Currently, all the namespaces share the same certs but there might be per-namespace
 // certs in the future.
 type CertManager struct {
-	serverTLS        *security.CertInfo // client / proxyctl -> proxy
-	serverTLSConfig  atomic.Pointer[tls.Config]
-	peerTLS          *security.CertInfo // proxy -> proxy
-	peerTLSConfig    atomic.Pointer[tls.Config]
-	clusterTLS       *security.CertInfo // proxy -> pd / tidb status port
-	clusterTLSConfig atomic.Pointer[tls.Config]
-	sqlTLS           *security.CertInfo // proxy -> tidb sql port
-	sqlTLSConfig     atomic.Pointer[tls.Config]
+	serverSQLTLS        *security.CertInfo // client -> proxy
+	serverSQLTLSConfig  atomic.Pointer[tls.Config]
+	serverHTTPTLS       *security.CertInfo // proxyctl -> proxy
+	serverHTTPTLSConfig atomic.Pointer[tls.Config]
+	clusterTLS          *security.CertInfo // proxy -> pd / tidb status port
+	clusterTLSConfig    atomic.Pointer[tls.Config]
+	sqlTLS              *security.CertInfo // proxy -> tidb sql port
+	sqlTLSConfig        atomic.Pointer[tls.Config]
 
 	cancel        context.CancelFunc
 	wg            waitgroup.WaitGroup
@@ -51,8 +51,8 @@ func NewCertManager() *CertManager {
 // cfgch can be set to nil for the serverless tier because it has no config manager.
 func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger, cfgch <-chan *config.Config) error {
 	cm.logger = logger
-	cm.serverTLS = security.NewCert(true)
-	cm.peerTLS = security.NewCert(false)
+	cm.serverSQLTLS = security.NewCert(true)
+	cm.serverHTTPTLS = security.NewCert(true)
 	cm.clusterTLS = security.NewCert(false)
 	cm.sqlTLS = security.NewCert(false)
 	cm.setConfig(cfg)
@@ -67,8 +67,8 @@ func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger, cfgch <-chan
 }
 
 func (cm *CertManager) setConfig(cfg *config.Config) {
-	cm.serverTLS.SetConfig(cfg.Security.ServerTLS)
-	cm.peerTLS.SetConfig(cfg.Security.PeerTLS)
+	cm.serverSQLTLS.SetConfig(cfg.Security.ServerSQLTLS)
+	cm.serverHTTPTLS.SetConfig(cfg.Security.ServerHTTPTLS)
 	cm.clusterTLS.SetConfig(cfg.Security.ClusterTLS)
 	cm.sqlTLS.SetConfig(cfg.Security.SQLTLS)
 }
@@ -77,16 +77,16 @@ func (cm *CertManager) SetRetryInterval(interval time.Duration) {
 	cm.retryInterval.Store(int64(interval))
 }
 
-func (cm *CertManager) ServerTLS() *tls.Config {
-	return cm.serverTLSConfig.Load()
+func (cm *CertManager) ServerSQLTLS() *tls.Config {
+	return cm.serverSQLTLSConfig.Load()
+}
+
+func (cm *CertManager) ServerHTTPTLS() *tls.Config {
+	return cm.serverHTTPTLSConfig.Load()
 }
 
 func (cm *CertManager) ClusterTLS() *tls.Config {
 	return cm.clusterTLSConfig.Load()
-}
-
-func (cm *CertManager) PeerTLS() *tls.Config {
-	return cm.peerTLSConfig.Load()
 }
 
 func (cm *CertManager) SQLTLS() *tls.Config {
@@ -122,15 +122,15 @@ func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Conf
 // If any error happens, we still continue and use the old cert.
 func (cm *CertManager) reload() error {
 	errs := make([]error, 0, 4)
-	if tlsConfig, err := cm.serverTLS.Reload(cm.logger); err != nil {
+	if tlsConfig, err := cm.serverSQLTLS.Reload(cm.logger); err != nil {
 		errs = append(errs, err)
 	} else {
-		cm.serverTLSConfig.Store(tlsConfig)
+		cm.serverSQLTLSConfig.Store(tlsConfig)
 	}
-	if tlsConfig, err := cm.peerTLS.Reload(cm.logger); err != nil {
+	if tlsConfig, err := cm.serverHTTPTLS.Reload(cm.logger); err != nil {
 		errs = append(errs, err)
 	} else {
-		cm.peerTLSConfig.Store(tlsConfig)
+		cm.serverHTTPTLSConfig.Store(tlsConfig)
 	}
 	if tlsConfig, err := cm.clusterTLS.Reload(cm.logger); err != nil {
 		errs = append(errs, err)
