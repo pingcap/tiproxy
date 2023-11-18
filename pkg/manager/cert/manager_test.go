@@ -73,9 +73,9 @@ func TestInit(t *testing.T) {
 		{
 			name: "empty",
 			check: func(t *testing.T, cm *CertManager) {
-				require.Nil(t, cm.ServerTLS())
+				require.Nil(t, cm.ServerSQLTLS())
 				require.Nil(t, cm.ClusterTLS())
-				require.Nil(t, cm.PeerTLS())
+				require.Nil(t, cm.ServerHTTPTLS())
 				require.Nil(t, cm.SQLTLS())
 			},
 		},
@@ -83,28 +83,34 @@ func TestInit(t *testing.T) {
 			name: "server config",
 			cfg: config.Config{
 				Security: config.Security{
-					ServerTLS: config.TLSConfig{AutoCerts: true},
+					ServerSQLTLS:  config.TLSConfig{AutoCerts: true},
+					ServerHTTPTLS: config.TLSConfig{AutoCerts: true},
+					ClusterTLS:    config.TLSConfig{AutoCerts: true},
+					SQLTLS:        config.TLSConfig{AutoCerts: true},
 				},
 			},
 			check: func(t *testing.T, cm *CertManager) {
 				require.Nil(t, cm.ClusterTLS())
-				require.Nil(t, cm.PeerTLS())
 				require.Nil(t, cm.SQLTLS())
-				require.NotNil(t, cm.ServerTLS())
+				require.NotNil(t, cm.ServerHTTPTLS())
+				require.NotNil(t, cm.ServerSQLTLS())
 			},
 		},
 		{
 			name: "client config",
 			cfg: config.Config{
 				Security: config.Security{
-					SQLTLS: config.TLSConfig{SkipCA: true},
+					ServerSQLTLS:  config.TLSConfig{SkipCA: true},
+					ServerHTTPTLS: config.TLSConfig{SkipCA: true},
+					ClusterTLS:    config.TLSConfig{SkipCA: true},
+					SQLTLS:        config.TLSConfig{SkipCA: true},
 				},
 			},
 			check: func(t *testing.T, cm *CertManager) {
-				require.Nil(t, cm.ClusterTLS())
-				require.Nil(t, cm.PeerTLS())
-				require.Nil(t, cm.ServerTLS())
+				require.NotNil(t, cm.ClusterTLS())
 				require.NotNil(t, cm.SQLTLS())
+				require.Nil(t, cm.ServerHTTPTLS())
+				require.Nil(t, cm.ServerSQLTLS())
 			},
 		},
 		{
@@ -159,7 +165,7 @@ func TestRotate(t *testing.T) {
 	cfg := &config.Config{
 		Workdir: tmpdir,
 		Security: config.Security{
-			ServerTLS: config.TLSConfig{
+			ServerSQLTLS: config.TLSConfig{
 				Cert: certPath,
 				Key:  keyPath,
 			},
@@ -270,7 +276,7 @@ func TestRotate(t *testing.T) {
 		}
 		require.NoError(t, certMgr.Init(cfg, lg, nil))
 
-		stls := certMgr.ServerTLS()
+		stls := certMgr.ServerSQLTLS()
 		ctls := certMgr.SQLTLS()
 
 		// pre reloading test
@@ -335,7 +341,7 @@ func TestBidirectional(t *testing.T) {
 	cfg := &config.Config{
 		Workdir: tmpdir,
 		Security: config.Security{
-			ServerTLS: config.TLSConfig{
+			ServerSQLTLS: config.TLSConfig{
 				Cert: certPath1,
 				Key:  keyPath1,
 				CA:   caPath2,
@@ -350,7 +356,7 @@ func TestBidirectional(t *testing.T) {
 
 	certMgr := NewCertManager()
 	require.NoError(t, certMgr.Init(cfg, lg, nil))
-	stls := certMgr.ServerTLS()
+	stls := certMgr.ServerSQLTLS()
 	ctls := certMgr.SQLTLS()
 	clientErr, serverErr := connectWithTLS(ctls, stls)
 	require.NoError(t, clientErr)
