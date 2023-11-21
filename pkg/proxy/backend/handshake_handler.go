@@ -12,6 +12,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// Interfaces in this file are used for the serverless tier.
+
 // Context keys.
 type ConnContextKey string
 
@@ -21,41 +23,6 @@ const (
 	ConnContextKeyConnAddr ConnContextKey = "conn-addr"
 )
 
-type ErrorSource int
-
-const (
-	// SrcClientQuit includes: client quit; bad client conn
-	SrcClientQuit ErrorSource = iota
-	// SrcClientErr includes: wrong password; mal format packet
-	SrcClientErr
-	// SrcProxyQuit includes: proxy graceful shutdown
-	SrcProxyQuit
-	// SrcProxyErr includes: cannot get backend list; capability negotiation
-	SrcProxyErr
-	// SrcBackendQuit includes: backend quit
-	SrcBackendQuit
-	// SrcBackendErr is reserved
-	SrcBackendErr
-)
-
-func (es ErrorSource) String() string {
-	switch es {
-	case SrcClientQuit:
-		return "client quit"
-	case SrcClientErr:
-		return "client error"
-	case SrcProxyQuit:
-		return "proxy shutdown"
-	case SrcProxyErr:
-		return "proxy error"
-	case SrcBackendQuit:
-		return "backend quit"
-	case SrcBackendErr:
-		return "backend error"
-	}
-	return "unknown"
-}
-
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 var _ HandshakeHandler = (*CustomHandshakeHandler)(nil)
 
@@ -64,7 +31,6 @@ type ConnContext interface {
 	ServerAddr() string
 	ClientInBytes() uint64
 	ClientOutBytes() uint64
-	QuitSource() ErrorSource
 	UpdateLogger(fields ...zap.Field)
 	SetValue(key, val any)
 	Value(key any) any
@@ -74,8 +40,8 @@ type HandshakeHandler interface {
 	HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error
 	HandleHandshakeErr(ctx ConnContext, err *gomysql.MyError) bool // return true means retry connect
 	GetRouter(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error)
-	OnHandshake(ctx ConnContext, to string, err error)
-	OnConnClose(ctx ConnContext) error
+	OnHandshake(ctx ConnContext, to string, err error, src ErrorSource)
+	OnConnClose(ctx ConnContext, src ErrorSource) error
 	OnTraffic(ctx ConnContext)
 	GetCapability() pnet.Capability
 	GetServerVersion() string
@@ -111,13 +77,13 @@ func (handler *DefaultHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Ha
 	return ns.GetRouter(), nil
 }
 
-func (handler *DefaultHandshakeHandler) OnHandshake(ConnContext, string, error) {
+func (handler *DefaultHandshakeHandler) OnHandshake(ConnContext, string, error, ErrorSource) {
 }
 
 func (handler *DefaultHandshakeHandler) OnTraffic(ConnContext) {
 }
 
-func (handler *DefaultHandshakeHandler) OnConnClose(ConnContext) error {
+func (handler *DefaultHandshakeHandler) OnConnClose(ConnContext, ErrorSource) error {
 	return nil
 }
 
@@ -156,7 +122,7 @@ func (h *CustomHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Handshake
 	return nil, errors.New("no router")
 }
 
-func (h *CustomHandshakeHandler) OnHandshake(ctx ConnContext, addr string, err error) {
+func (h *CustomHandshakeHandler) OnHandshake(ctx ConnContext, addr string, err error, src ErrorSource) {
 	if h.onHandshake != nil {
 		h.onHandshake(ctx, addr, err)
 	}
@@ -168,7 +134,7 @@ func (h *CustomHandshakeHandler) OnTraffic(ctx ConnContext) {
 	}
 }
 
-func (h *CustomHandshakeHandler) OnConnClose(ctx ConnContext) error {
+func (h *CustomHandshakeHandler) OnConnClose(ctx ConnContext, src ErrorSource) error {
 	if h.onConnClose != nil {
 		return h.onConnClose(ctx)
 	}

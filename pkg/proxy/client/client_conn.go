@@ -57,11 +57,9 @@ func (cc *ClientConnection) Run(ctx context.Context) {
 
 clean:
 	src := cc.connMgr.QuitSource()
-	switch src {
-	case backend.SrcClientQuit, backend.SrcClientErr, backend.SrcProxyQuit:
-	default:
+	if !src.Normal() {
 		fields := cc.connMgr.ConnInfo()
-		fields = append(fields, zap.Stringer("quit source", src), zap.Error(err))
+		fields = append(fields, zap.Stringer("quit_source", src), zap.Error(err))
 		cc.logger.Warn(msg, fields...)
 	}
 }

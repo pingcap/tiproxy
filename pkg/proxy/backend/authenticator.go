@@ -76,10 +76,10 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 		// The error cannot be sent to the client because the client only expects an initial handshake packet.
 		// The only way is to log it and disconnect.
 		logger.Error("require backend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredBackendCaps^commonCaps))
-		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps^commonCaps)
+		return pnet.WrapUserError(errors.Wrap(ErrBackendHandshake, errors.Wrapf(ErrCapabilityNegotiation, "require %s from backend", requiredBackendCaps^commonCaps)), capabilityErrMsg)
 	}
 	if auth.requireBackendTLS && (backendCapability&pnet.ClientSSL == 0) {
-		return pnet.WrapUserError(errors.New("backend doesn't enable TLS"), requireTiDBTLSErrMsg)
+		return pnet.WrapUserError(errors.Wrap(ErrBackendHandshake, errors.New("backend doesn't enable TLS")), requireTiDBTLSErrMsg)
 	}
 	return nil
 }
@@ -125,7 +125,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 		if writeErr := clientIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_NOT_SUPPORTED_AUTH_MODE)); writeErr != nil {
 			return writeErr
 		}
-		return errors.Wrapf(ErrCapabilityNegotiation, "require %s from frontend", requiredFrontendCaps&^commonCaps)
+		return errors.Wrap(ErrClientHandshake, errors.Wrapf(ErrCapabilityNegotiation, "require %s from frontend", requiredFrontendCaps&^commonCaps))
 	}
 	commonCaps := frontendCapability & proxyCapability
 	if frontendCapability^commonCaps != 0 {
@@ -185,7 +185,7 @@ RECONNECT:
 	}
 
 	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
-		return pnet.WrapUserError(err, capabilityErrMsg)
+		return err
 	}
 
 	if common := proxyCapability & backendCapability; (proxyCapability^common)&^pnet.ClientSSL != 0 {
@@ -224,12 +224,14 @@ loop:
 			}
 			return err
 		}
-		var packetErr error
+		var packetErr *mysql.MyError
 		if serverPkt[0] == pnet.ErrHeader.Byte() {
 			packetErr = pnet.ParseErrorPacket(serverPkt)
-			if handshakeHandler.HandleHandshakeErr(cctx, packetErr.(*mysql.MyError)) {
-				logger.Warn("handle handshake error, start reconnect", zap.Error(err))
-				backendIO.Close()
+			if handshakeHandler.HandleHandshakeErr(cctx, packetErr) {
+				logger.Warn("handle handshake error, start reconnect", zap.Error(packetErr))
+				if closeErr := backendIO.Close(); closeErr != nil {
+					logger.Warn("close backend error", zap.Error(closeErr))
+				}
 				goto RECONNECT
 			}
 		}
