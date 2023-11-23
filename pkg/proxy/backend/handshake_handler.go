@@ -106,9 +106,9 @@ func (handler *DefaultHandshakeHandler) GetServerVersion() string {
 
 type CustomHandshakeHandler struct {
 	getRouter           func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error)
-	onHandshake         func(ConnContext, string, error)
+	onHandshake         func(ConnContext, string, error, ErrorSource)
 	onTraffic           func(ConnContext)
-	onConnClose         func(ConnContext) error
+	onConnClose         func(ConnContext, ErrorSource) error
 	handleHandshakeResp func(ctx ConnContext, resp *pnet.HandshakeResp) error
 	handleHandshakeErr  func(ctx ConnContext, err *gomysql.MyError) bool
 	getCapability       func() pnet.Capability
@@ -124,7 +124,7 @@ func (h *CustomHandshakeHandler) GetRouter(ctx ConnContext, resp *pnet.Handshake
 
 func (h *CustomHandshakeHandler) OnHandshake(ctx ConnContext, addr string, err error, src ErrorSource) {
 	if h.onHandshake != nil {
-		h.onHandshake(ctx, addr, err)
+		h.onHandshake(ctx, addr, err, src)
 	}
 }
 
@@ -136,7 +136,7 @@ func (h *CustomHandshakeHandler) OnTraffic(ctx ConnContext) {
 
 func (h *CustomHandshakeHandler) OnConnClose(ctx ConnContext, src ErrorSource) error {
 	if h.onConnClose != nil {
-		return h.onConnClose(ctx)
+		return h.onConnClose(ctx, src)
 	}
 	return nil
 }

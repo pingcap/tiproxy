@@ -433,6 +433,12 @@ func IsErrorPacket(firstByte byte) bool {
 	return firstByte == ErrHeader.Byte()
 }
 
+// IsMySQLError returns true if the error is a MySQL error.
+func IsMySQLError(err error) bool {
+	var myerr *gomysql.MyError
+	return errors.As(err, &myerr)
+}
+
 // The connection attribute names that are logged.
 // https://dev.mysql.com/doc/mysql-perfschema-excerpt/8.2/en/performance-schema-connection-attribute-tables.html
 const (

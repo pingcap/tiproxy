@@ -162,7 +162,7 @@ func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendR
 		require.NoError(t, ts.mc.err)
 		require.NoError(t, ts.mb.err)
 		if ts.mb.err != nil {
-			require.True(t, IsMySQLError(ts.mp.err))
+			require.True(t, pnet.IsMySQLError(ts.mp.err))
 		}
 		if clientRunner != nil && backendRunner != nil {
 			// Ensure all the packets are forwarded.

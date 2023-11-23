@@ -7,11 +7,6 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
-	"github.com/pingcap/tiproxy/lib/util/errors"
-)
-
-var (
-	ErrNoInstanceToSelect = errors.New("no instances to route")
 )
 
 // ConnEventReceiver receives connection events.

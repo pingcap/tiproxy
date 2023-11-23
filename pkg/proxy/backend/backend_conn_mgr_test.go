@@ -150,7 +150,7 @@ func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ *pnet.PacketIO) error {
 	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
 	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
-	require.Equal(ts.t, SrcClientQuit, ts.mp.QuitSource())
+	require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
 	return nil
 }
 
@@ -372,7 +372,7 @@ func TestRedirectInTxn(t *testing.T) {
 				require.NoError(t, err)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventFail)
 				require.Equal(t, backend1, ts.mp.backendIO.Load())
-				require.Equal(t, SrcClientQuit, ts.mp.QuitSource())
+				require.Equal(t, SrcNone, ts.mp.QuitSource())
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
@@ -411,7 +411,7 @@ func TestConnectFail(t *testing.T) {
 		},
 		{
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				require.Equal(t, SrcClientErr, ts.mp.QuitSource())
+				require.Equal(t, SrcClientAuthFail, ts.mp.QuitSource())
 				return nil
 			},
 		},
@@ -624,7 +624,7 @@ func TestCustomHandshake(t *testing.T) {
 		},
 		{
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				require.Equal(t, SrcClientQuit, ts.mp.QuitSource())
+				require.Equal(t, SrcNone, ts.mp.QuitSource())
 				return nil
 			},
 		},
@@ -767,8 +767,8 @@ func TestHandlerReturnError(t *testing.T) {
 					return router.NewStaticRouter(nil), nil
 				}
 			},
-			errMsg:     connectErrMsg,
-			quitSource: SrcProxyErr,
+			errMsg:     ErrProxyNoBackend.Error(),
+			quitSource: SrcProxyNoBackend,
 		},
 	}
 	for _, test := range tests {
@@ -847,12 +847,12 @@ func TestGetBackendIO(t *testing.T) {
 		getRouter: func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
 			return rt, nil
 		},
-		onHandshake: func(connContext ConnContext, s string, err error) {
+		onHandshake: func(connContext ConnContext, s string, err error, src ErrorSource) {
 			if err != nil && len(s) > 0 {
 				badAddrs[s] = struct{}{}
 			}
 			if err != nil {
-				require.Equal(t, SrcProxyErr, connContext.QuitSource())
+				require.Equal(t, SrcBackendHandshake, src)
 			}
 		},
 	}
@@ -961,7 +961,7 @@ func TestBackendInactive(t *testing.T) {
 		},
 		{
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				require.Equal(t, SrcBackendQuit, ts.mp.QuitSource())
+				require.Equal(t, SrcBackendNetwork, ts.mp.QuitSource())
 				return nil
 			},
 		},

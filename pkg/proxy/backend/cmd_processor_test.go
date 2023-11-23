@@ -1027,7 +1027,7 @@ func TestNetworkError(t *testing.T) {
 	clientErrChecker := func(t *testing.T, ts *testSuite) {
 		require.True(t, pnet.IsDisconnectError(ts.mp.err))
 		require.True(t, pnet.IsDisconnectError(ts.mc.err))
-		require.NotNil(t, ts.mp.err.(*pnet.UserError))
+		require.NotNil(t, ErrToClient(ts.mp.err))
 	}
 	backendErrChecker := func(t *testing.T, ts *testSuite) {
 		require.True(t, pnet.IsDisconnectError(ts.mp.err))

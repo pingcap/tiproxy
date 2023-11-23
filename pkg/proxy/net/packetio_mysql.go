@@ -85,7 +85,7 @@ func (p *PacketIO) ReadSSLRequestOrHandshakeResp() (pkt []byte, isSSL bool, err 
 
 	if len(pkt) < 32 {
 		p.logger.Error("got malformed handshake response", zap.ByteString("packetData", pkt))
-		err = WrapUserError(mysql.ErrMalformPacket, mysql.ErrMalformPacket.Error())
+		err = mysql.ErrMalformPacket
 		return
 	}
 
@@ -132,11 +132,7 @@ func (p *PacketIO) WriteUserError(err error) {
 	if err == nil {
 		return
 	}
-	var ue *UserError
-	if !errors.As(err, &ue) {
-		return
-	}
-	myErr := mysql.NewError(mysql.ER_UNKNOWN_ERROR, ue.UserMsg())
+	myErr := mysql.NewError(mysql.ER_UNKNOWN_ERROR, err.Error())
 	if writeErr := p.WriteErrPacket(myErr); writeErr != nil {
 		p.logger.Error("writing error to client failed", zap.NamedError("mysql_err", err), zap.NamedError("write_err", writeErr))
 	}

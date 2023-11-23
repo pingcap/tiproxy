@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/pingcap/tidb/parser/mysql"
-	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 )
@@ -70,10 +69,10 @@ func TestUnsupportedCapability(t *testing.T) {
 	for _, cfgs := range cfgOverriders {
 		ts, clean := newTestSuite(t, tc, cfgs...)
 		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
-			if ts.mb.backendConfig.capability&defRequiredBackendCaps != defRequiredBackendCaps {
-				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
-			} else if ts.mc.clientConfig.capability&requiredFrontendCaps != requiredFrontendCaps {
-				require.ErrorIs(t, ts.mp.err, ErrCapabilityNegotiation)
+			if ts.mc.clientConfig.capability&requiredFrontendCaps != requiredFrontendCaps {
+				require.ErrorIs(t, ts.mp.err, ErrClientCap)
+			} else if ts.mb.backendConfig.capability&defRequiredBackendCaps != defRequiredBackendCaps {
+				require.ErrorIs(t, ts.mp.err, ErrBackendCap)
 			} else {
 				require.NoError(t, ts.mc.err)
 				require.NoError(t, ts.mp.err)
@@ -318,8 +317,8 @@ func TestAuthFail(t *testing.T) {
 
 func TestRequireBackendTLS(t *testing.T) {
 	tests := []struct {
-		cfg    cfgOverrider
-		errMsg string
+		cfg cfgOverrider
+		err error
 	}{
 		{
 			cfg: func(cfg *testConfig) {
@@ -327,7 +326,7 @@ func TestRequireBackendTLS(t *testing.T) {
 				cfg.proxyConfig.backendTLSConfig = nil
 				cfg.backendConfig.capability |= pnet.ClientSSL
 			},
-			errMsg: requireProxyTLSErrMsg,
+			err: ErrProxyNoTLS,
 		},
 		{
 			cfg: func(cfg *testConfig) {
@@ -335,7 +334,7 @@ func TestRequireBackendTLS(t *testing.T) {
 				cfg.backendConfig.tlsConfig = nil
 				cfg.backendConfig.capability &= ^pnet.ClientSSL
 			},
-			errMsg: requireTiDBTLSErrMsg,
+			err: ErrBackendNoTLS,
 		},
 		{
 			cfg: func(cfg *testConfig) {
@@ -351,10 +350,8 @@ func TestRequireBackendTLS(t *testing.T) {
 	for _, tt := range tests {
 		ts, clean := newTestSuite(t, tc, tt.cfg)
 		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
-			if len(tt.errMsg) > 0 {
-				var userError *pnet.UserError
-				require.True(t, errors.As(ts.mp.err, &userError))
-				require.Equal(t, tt.errMsg, userError.UserMsg())
+			if tt.err != nil {
+				require.ErrorIs(t, ts.mp.err, tt.err)
 			} else {
 				require.NoError(t, ts.mp.err)
 			}
@@ -401,9 +398,8 @@ func TestProxyProtocol(t *testing.T) {
 			// TiDB proxy-protocol can be set unfallbackable, but TiProxy proxy-protocol is always fallbackable.
 			// So when backend enables proxy-protocol and proxy disables it, it still works well.
 			if ts.mp.bcConfig.ProxyProtocol && !ts.mb.proxyProtocol {
-				var userError *pnet.UserError
-				require.True(t, errors.As(ts.mp.err, &userError))
-				require.Equal(t, checkPPV2ErrMsg, userError.UserMsg())
+				err := ErrToClient(ts.mp.err)
+				require.Equal(t, ErrBackendPPV2, err)
 			} else {
 				require.NoError(t, ts.mp.err)
 			}

@@ -6,7 +6,6 @@ package backend
 import (
 	"encoding/binary"
 
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/parser/mysql"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
@@ -115,13 +114,4 @@ func (cp *CmdProcessor) hasPendingPreparedStmts() bool {
 		}
 	}
 	return false
-}
-
-// IsMySQLError returns true if the error is a MySQL error.
-func IsMySQLError(err error) bool {
-	if err == nil {
-		return false
-	}
-	_, ok := err.(*gomysql.MyError)
-	return ok
 }

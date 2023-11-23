@@ -170,8 +170,13 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.clientIO = clientIO
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	if err != nil {
-		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err, Error2Source(err))
-		clientIO.WriteUserError(err)
+		src := Error2Source(err)
+		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err, src)
+		// For some errors, convert them to MySQL errors and send them to the client.
+		if clientErr := ErrToClient(err); clientErr != nil {
+			clientIO.WriteUserError(clientErr)
+		}
+		mgr.quitSource = src
 		return err
 	}
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
@@ -189,7 +194,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
-		return nil, pnet.WrapUserError(err, err.Error())
+		return nil, errors.Wrap(ErrProxyErr, err)
 	}
 	// Reasons to wait:
 	// - The TiDB instances may not be initialized yet
@@ -209,17 +214,17 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 				addr, err = selector.Next()
 			}
 			if err != nil {
-				return nil, backoff.Permanent(pnet.WrapUserError(err, err.Error()))
+				return nil, backoff.Permanent(errors.Wrap(ErrProxyErr, err))
 			}
 			if addr == "" {
-				return nil, router.ErrNoInstanceToSelect
+				return nil, ErrProxyNoBackend
 			}
 
 			var cn net.Conn
 			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
 			selector.Finish(mgr, err == nil)
 			if err != nil {
-				return nil, errors.Wrapf(err, "dial backend %s error", addr)
+				return nil, errors.Wrap(ErrBackendHandshake, errors.Wrapf(err, "dial backend %s error", addr))
 			}
 
 			// NOTE: should use DNS name as much as possible
@@ -282,7 +287,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 	}
 	if err != nil {
-		if !IsMySQLError(err) {
+		if !pnet.IsMySQLError(err) {
 			return
 		} else {
 			mgr.logger.Debug("got a mysql error", zap.Error(err), zap.Stringer("cmd", cmd))
@@ -318,7 +323,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 			// Execute the held request no matter redirection succeeds or not.
 			_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), false)
 			addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
-			if err != nil && !IsMySQLError(err) {
+			if err != nil && !pnet.IsMySQLError(err) {
 				return
 			}
 		} else if mgr.closeStatus.Load() == statusNotifyClose {
