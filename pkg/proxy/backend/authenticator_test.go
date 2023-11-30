@@ -71,8 +71,12 @@ func TestUnsupportedCapability(t *testing.T) {
 		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
 			if ts.mc.clientConfig.capability&requiredFrontendCaps != requiredFrontendCaps {
 				require.ErrorIs(t, ts.mp.err, ErrClientCap)
+				require.Nil(t, ErrToClient(ts.mp.err))
+				require.Equal(t, SrcClientHandshake, Error2Source(ts.mp.err))
 			} else if ts.mb.backendConfig.capability&defRequiredBackendCaps != defRequiredBackendCaps {
 				require.ErrorIs(t, ts.mp.err, ErrBackendCap)
+				require.Equal(t, ErrBackendCap, ErrToClient(ts.mp.err))
+				require.Equal(t, SrcBackendHandshake, Error2Source(ts.mp.err))
 			} else {
 				require.NoError(t, ts.mc.err)
 				require.NoError(t, ts.mp.err)
@@ -310,6 +314,7 @@ func TestAuthFail(t *testing.T) {
 		ts, clean := newTestSuite(t, tc, cfg)
 		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
 			require.Equal(t, len(ts.mc.authData), len(ts.mb.authData))
+			require.Equal(t, SrcClientAuthFail, Error2Source(ts.mp.err))
 		})
 		clean()
 	}
@@ -319,6 +324,7 @@ func TestRequireBackendTLS(t *testing.T) {
 	tests := []struct {
 		cfg cfgOverrider
 		err error
+		src ErrorSource
 	}{
 		{
 			cfg: func(cfg *testConfig) {
@@ -327,6 +333,7 @@ func TestRequireBackendTLS(t *testing.T) {
 				cfg.backendConfig.capability |= pnet.ClientSSL
 			},
 			err: ErrProxyNoTLS,
+			src: SrcProxyErr,
 		},
 		{
 			cfg: func(cfg *testConfig) {
@@ -335,6 +342,7 @@ func TestRequireBackendTLS(t *testing.T) {
 				cfg.backendConfig.capability &= ^pnet.ClientSSL
 			},
 			err: ErrBackendNoTLS,
+			src: SrcBackendHandshake,
 		},
 		{
 			cfg: func(cfg *testConfig) {
@@ -352,6 +360,7 @@ func TestRequireBackendTLS(t *testing.T) {
 		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
 			if tt.err != nil {
 				require.ErrorIs(t, ts.mp.err, tt.err)
+				require.Equal(t, tt.src, Error2Source(ts.mp.err))
 			} else {
 				require.NoError(t, ts.mp.err)
 			}
@@ -400,6 +409,7 @@ func TestProxyProtocol(t *testing.T) {
 			if ts.mp.bcConfig.ProxyProtocol && !ts.mb.proxyProtocol {
 				err := ErrToClient(ts.mp.err)
 				require.Equal(t, ErrBackendPPV2, err)
+				require.Equal(t, SrcBackendHandshake, Error2Source(err))
 			} else {
 				require.NoError(t, ts.mp.err)
 			}

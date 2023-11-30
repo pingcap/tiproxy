@@ -20,7 +20,6 @@ var (
 	ErrClientCap        = errors.New("Verify client capability failed, please upgrade the client")
 	ErrClientHandshake  = errors.New("Fails to handshake with the client")
 	ErrClientAuthFail   = errors.New("Authentication fails")
-	ErrProxyMalformed   = errors.New("TiProxy fails to parse the packet, please contact PingCAP")
 	ErrProxyErr         = errors.New("Other serverless error")
 	ErrProxyNoBackend   = errors.New("No available TiDB instances, please make sure TiDB is available")
 	ErrProxyNoTLS       = errors.New("Require TLS enabled on TiProxy when require-backend-tls=true")
@@ -36,8 +35,6 @@ func ErrToClient(err error) error {
 	case pnet.IsMySQLError(err):
 		// If it's a MySQL error, it should be already sent to the client.
 		return nil
-	case errors.Is(err, ErrProxyMalformed):
-		return ErrProxyMalformed
 	case errors.Is(err, ErrProxyNoBackend):
 		return ErrProxyNoBackend
 	case errors.Is(err, ErrProxyNoTLS):
@@ -72,7 +69,7 @@ type ErrorSource int
 const (
 	// SrcNone includes: succeed for OnHandshake; client normally quit for OnConnClose
 	SrcNone ErrorSource = iota
-	// SrcClientNetwork includes: EOF; reset by peer; connection refused
+	// SrcClientNetwork includes: EOF; reset by peer; connection refused; io timeout
 	SrcClientNetwork
 	// SrcClientHandshake includes: client capability unsupported; TLS handshake fails
 	SrcClientHandshake
@@ -88,31 +85,36 @@ const (
 	SrcProxyNoBackend
 	// SrcProxyErr includes: HandshakeHandler returns error; proxy disables TLS; unexpected errors
 	SrcProxyErr
-	// SrcBackendNetwork includes: EOF; reset by peer; connection refused
+	// SrcBackendNetwork includes: EOF; reset by peer; connection refused; io timeout
 	SrcBackendNetwork
-	// SrcBackendHandshake includes: dial failure; backend capability unsupported; backend disables TLS; TLS handshake fails
+	// SrcBackendHandshake includes: dial failure; backend capability unsupported; backend disables TLS; TLS handshake fails; proxy protocol fails
 	SrcBackendHandshake
 )
 
 // Error2Source returns the ErrorSource by the error.
 func Error2Source(err error) ErrorSource {
-	switch {
-	case err == nil:
+	if err == nil {
 		return SrcNone
-	// Disconnection errors may come from other errors such as ErrProxyNoBackend.
+	}
+	// Disconnection errors may come from other errors such as ErrProxyNoBackend and ErrBackendHandshake.
 	// ErrClientConn and ErrBackendConn may include non-connection errors.
-	case pnet.IsDisconnectError(err) && errors.Is(err, ErrClientConn):
-		return SrcClientNetwork
-	case pnet.IsDisconnectError(err) && errors.Is(err, ErrBackendConn):
-		return SrcBackendNetwork
+	if pnet.IsDisconnectError(err) {
+		if errors.Is(err, ErrClientConn) {
+			return SrcClientNetwork
+		} else if errors.Is(err, ErrBackendConn) {
+			return SrcBackendNetwork
+		}
+	}
+	switch {
+	// ErrInvalidSequence and ErrMalformPacket may be wrapped with other errors such as ErrBackendHandshake.
 	case errors.Is(err, pnet.ErrInvalidSequence), errors.Is(err, gomysql.ErrMalformPacket):
 		// We assume the clients and TiDB are right and treat it as TiProxy bugs.
 		return SrcProxyMalformed
-	case errors.Is(err, ErrClientHandshake):
+	case errors.Is(err, ErrClientHandshake), errors.Is(err, ErrClientCap):
 		return SrcClientHandshake
 	case errors.Is(err, ErrClientAuthFail):
 		return SrcClientAuthFail
-	case errors.Is(err, ErrBackendHandshake):
+	case errors.Is(err, ErrBackendHandshake), errors.Is(err, ErrBackendCap), errors.Is(err, ErrBackendNoTLS), errors.Is(err, ErrBackendPPV2):
 		return SrcBackendHandshake
 	case errors.Is(err, ErrProxyNoBackend):
 		return SrcProxyNoBackend
@@ -171,7 +173,7 @@ func (es ErrorSource) GetSourceComp() SourceComp {
 // Normal returns whether this error source is expected.
 func (es ErrorSource) Normal() bool {
 	switch es {
-	case SrcNone, SrcProxyQuit, SrcClientSQLErr:
+	case SrcNone, SrcProxyQuit, SrcClientNetwork, SrcClientSQLErr:
 		return true
 	}
 	return false

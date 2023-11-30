@@ -190,6 +190,9 @@ func (ts *testSuite) authenticateFirstTime(t *testing.T, c checker) {
 		if ts.mc.capability&pnet.ClientConnectAttrs > 0 {
 			require.Equal(t, ts.mc.attrs, ts.mb.attrs)
 		}
+		if !ts.mb.authSucceed {
+			require.Equal(t, SrcClientAuthFail, Error2Source(ts.mp.err))
+		}
 	}
 }
 

@@ -307,7 +307,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 				mgr.authenticator.capability &^= pnet.ClientMultiStatements
 				mgr.cmdProcessor.capability &^= pnet.ClientMultiStatements
 			default:
-				err = errors.Errorf("unrecognized set_option value:%d", val)
+				err = errors.Wrapf(gomysql.ErrMalformPacket, "unrecognized set_option value:%d", val)
 				return
 			}
 		case pnet.ComChangeUser:

@@ -59,11 +59,11 @@ func (tc *tcpConnSuite) newConn(t *testing.T, enableRoute bool) func() {
 		if !enableRoute {
 			backendConn, err := net.Dial("tcp", tc.backendListener.Addr().String())
 			require.NoError(t, err)
-			tc.proxyBIO = pnet.NewPacketIO(backendConn, lg, pnet.DefaultConnBufferSize)
+			tc.proxyBIO = pnet.NewPacketIO(backendConn, lg, pnet.DefaultConnBufferSize, pnet.WithWrapError(ErrBackendConn))
 		}
 		clientConn, err := tc.proxyListener.Accept()
 		require.NoError(t, err)
-		tc.proxyCIO = pnet.NewPacketIO(clientConn, lg, pnet.DefaultConnBufferSize)
+		tc.proxyCIO = pnet.NewPacketIO(clientConn, lg, pnet.DefaultConnBufferSize, pnet.WithWrapError(ErrClientConn))
 	})
 	wg.Run(func() {
 		conn, err := net.Dial("tcp", tc.proxyListener.Addr().String())

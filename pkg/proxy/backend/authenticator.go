@@ -143,7 +143,7 @@ func (auth *Authenticator) handshakeFirstTime(logger *zap.Logger, cctx ConnConte
 	if errors.As(err, &warning) {
 		logger.Warn("parse handshake response encounters error", zap.Error(err))
 	} else if err != nil {
-		return errors.Wrap(ErrProxyMalformed, err)
+		return err
 	}
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
 		return errors.Wrap(ErrProxyErr, err)
@@ -165,7 +165,7 @@ RECONNECT:
 
 	// write proxy header
 	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
-		return errors.Wrap(ErrBackendHandshake, err)
+		return err
 	}
 
 	// read backend initial handshake
@@ -176,7 +176,7 @@ RECONNECT:
 				return writeErr
 			}
 		}
-		return errors.Wrap(ErrBackendHandshake, err)
+		return err
 	}
 
 	if err := auth.verifyBackendCaps(logger, backendCapability); err != nil {
@@ -215,7 +215,7 @@ loop:
 			// tiproxy pp enabled, tidb pp disabled, tls disabled => invalid sequence
 			// tiproxy pp disabled, tidb pp enabled, tls disabled => invalid sequence
 			if pktIdx == 0 && errors.Is(err, pnet.ErrInvalidSequence) {
-				return ErrBackendPPV2
+				return errors.Wrap(ErrBackendPPV2, err)
 			}
 			return err
 		}
@@ -242,10 +242,10 @@ loop:
 		switch serverPkt[0] {
 		case pnet.OKHeader.Byte():
 			if err := setCompress(clientIO, auth.capability, auth.zstdLevel); err != nil {
-				return err
+				return errors.Wrap(ErrClientHandshake, err)
 			}
 			if err := setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel); err != nil {
-				return err
+				return errors.Wrap(ErrBackendHandshake, err)
 			}
 			return nil
 		default: // mysql.AuthSwitchRequest, ShaCommand
@@ -273,12 +273,12 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 
 func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, backendTLSConfig *tls.Config, sessionToken string) error {
 	if len(sessionToken) == 0 {
-		return errors.Wrapf(ErrProxyErr, "session token is empty")
+		return errors.Wrapf(ErrBackendHandshake, "session token is empty")
 	}
 
 	// write proxy header
 	if err := auth.writeProxyProtocol(clientIO, backendIO); err != nil {
-		return errors.Wrap(ErrBackendHandshake, err)
+		return err
 	}
 
 	_, backendCapability, err := auth.readInitialHandshake(backendIO)
@@ -298,17 +298,20 @@ func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, bac
 	}
 
 	if err = auth.handleSecondAuthResult(backendIO); err == nil {
-		return setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel)
+		if err = setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel); err != nil {
+			return errors.Wrap(ErrBackendHandshake, err)
+		}
 	}
 	return errors.Wrap(ErrBackendHandshake, err)
 }
 
 func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serverPkt []byte, capability pnet.Capability, err error) {
 	if serverPkt, err = backendIO.ReadPacket(); err != nil {
+		err = errors.Wrap(ErrBackendHandshake, err)
 		return
 	}
 	if pnet.IsErrorPacket(serverPkt[0]) {
-		err = pnet.ParseErrorPacket(serverPkt)
+		err = errors.Wrap(ErrBackendHandshake, pnet.ParseErrorPacket(serverPkt))
 		return
 	}
 	capability, _, _ = pnet.ParseInitialHandshake(serverPkt)
@@ -355,7 +358,7 @@ func (auth *Authenticator) writeAuthHandshake(
 		pkt = pnet.MakeHandshakeResponse(resp)
 		// write SSL Packet
 		if err := backendIO.WritePacket(pkt[:32], true); err != nil {
-			return err
+			return errors.Wrap(ErrBackendHandshake, err)
 		}
 		// Send TLS / SSL request packet. The server must have supported TLS.
 		tcfg := backendTLSConfig.Clone()
@@ -375,7 +378,10 @@ func (auth *Authenticator) writeAuthHandshake(
 	}
 
 	// write handshake resp
-	return backendIO.WritePacket(pkt, true)
+	if err := backendIO.WritePacket(pkt, true); err != nil {
+		return errors.Wrap(ErrBackendHandshake, err)
+	}
+	return nil
 }
 
 func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) error {

@@ -165,6 +165,7 @@ func TestDirectQuery(t *testing.T) {
 			},
 			c: func(t *testing.T, ts *testSuite) {
 				require.Error(t, ts.mp.err)
+				require.Equal(t, SrcClientSQLErr, Error2Source(ts.mp.err))
 				require.NoError(t, ts.mb.err)
 			},
 		},
@@ -1027,7 +1028,6 @@ func TestNetworkError(t *testing.T) {
 	clientErrChecker := func(t *testing.T, ts *testSuite) {
 		require.True(t, pnet.IsDisconnectError(ts.mp.err))
 		require.True(t, pnet.IsDisconnectError(ts.mc.err))
-		require.NotNil(t, ErrToClient(ts.mp.err))
 	}
 	backendErrChecker := func(t *testing.T, ts *testSuite) {
 		require.True(t, pnet.IsDisconnectError(ts.mp.err))
@@ -1039,10 +1039,13 @@ func TestNetworkError(t *testing.T) {
 
 	ts, clean := newTestSuite(t, tc, clientExitCfg)
 	ts.authenticateFirstTime(t, backendErrChecker)
+	require.Equal(t, SrcClientNetwork, Error2Source(ts.mp.err))
 	clean()
 
 	ts, clean = newTestSuite(t, tc, backendExitCfg)
 	ts.authenticateFirstTime(t, clientErrChecker)
+	require.Equal(t, ErrBackendHandshake, ErrToClient(ts.mp.err))
+	require.Equal(t, SrcBackendNetwork, Error2Source(ts.mp.err))
 	clean()
 
 	ts, clean = newTestSuite(t, tc, backendExitCfg)
@@ -1051,10 +1054,12 @@ func TestNetworkError(t *testing.T) {
 
 	ts, clean = newTestSuite(t, tc, clientExitCfg)
 	ts.executeCmd(t, backendErrChecker)
+	require.Equal(t, SrcClientNetwork, Error2Source(ts.mp.err))
 	clean()
 
-	ts, clean = newTestSuite(t, tc, clientExitCfg)
-	ts.executeCmd(t, backendErrChecker)
+	ts, clean = newTestSuite(t, tc, backendExitCfg)
+	ts.executeCmd(t, clientErrChecker)
+	require.Equal(t, SrcBackendNetwork, Error2Source(ts.mp.err))
 	clean()
 
 	ts, clean = newTestSuite(t, tc, backendExitCfg)
