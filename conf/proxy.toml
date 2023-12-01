@@ -3,12 +3,12 @@
 [proxy]
 # addr = "0.0.0.0:6000"
 # tcp-keep-alive = true
-# require-backend-tls = true
+require-backend-tls = false
 
 # possible values:
 #   "" => disable proxy protocol.
 #   "v2" => accept proxy protocol if any, require backends to support proxy protocol.
-# proxy-protocol = ""
+proxy-protocol = ""
 
 # graceful-wait-before-shutdown is recommanded to be set to 0 when there's no other proxy(e.g. NLB) between the client and TiProxy.
 # possible values:
@@ -26,7 +26,7 @@ graceful-close-conn-timeout = 15
 # possible values:
 #		"" => enable static routing.
 #		"pd-addr:pd-port" => automatically tidb discovery.
-# pd-addrs = "127.0.0.1:2379"
+pd-addrs = ""
 
 # possible values:
 #		0 => no limitation.
