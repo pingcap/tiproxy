@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/util/hack"
@@ -212,11 +213,6 @@ loop:
 	for {
 		serverPkt, err := backendIO.ReadPacket()
 		if err != nil {
-			// tiproxy pp enabled, tidb pp disabled, tls disabled => invalid sequence
-			// tiproxy pp disabled, tidb pp enabled, tls disabled => invalid sequence
-			if pktIdx == 0 {
-				return errors.Wrap(ErrBackendPPV2, err)
-			}
 			return err
 		}
 		var packetErr *mysql.MyError
@@ -235,6 +231,18 @@ loop:
 			return err
 		}
 		if packetErr != nil {
+			// tiproxy pp enabled, tidb pp disabled, tls disabled => invalid sequence
+			// tiproxy pp disabled, tidb pp enabled, tls disabled => invalid sequence
+			for _, p := range []string{
+				"packets out of order",
+				"(nvali): d sequence",
+				"invalid sequence",
+				"PROXY Protocol",
+			} {
+				if strings.Contains(packetErr.Message, p) {
+					return errors.Wrap(ErrBackendPPV2, packetErr)
+				}
+			}
 			return errors.Wrap(ErrClientAuthFail, packetErr)
 		}
 
