@@ -403,6 +403,10 @@ func TestProxyProtocol(t *testing.T) {
 	cfgOverriders := getCfgCombinations(cfgs)
 	for _, cfgs := range cfgOverriders {
 		ts, clean := newTestSuite(t, tc, cfgs...)
+		// invalid sequence detection removed, backend will stuck if clients insists to send proxy header.
+		if !ts.mb.proxyProtocol && ts.mp.bcConfig.ProxyProtocol {
+			continue
+		}
 		ts.authenticateFirstTime(t, func(t *testing.T, ts *testSuite) {
 			// TiDB proxy-protocol can be set unfallbackable, but TiProxy proxy-protocol is always fallbackable.
 			// So when backend enables proxy-protocol and proxy disables it, it still works well.

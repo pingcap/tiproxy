@@ -214,7 +214,7 @@ loop:
 		if err != nil {
 			// tiproxy pp enabled, tidb pp disabled, tls disabled => invalid sequence
 			// tiproxy pp disabled, tidb pp enabled, tls disabled => invalid sequence
-			if pktIdx == 0 && errors.Is(err, pnet.ErrInvalidSequence) {
+			if pktIdx == 0 && auth.proxyProtocol {
 				return errors.Wrap(ErrBackendPPV2, err)
 			}
 			return err

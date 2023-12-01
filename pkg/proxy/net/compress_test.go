@@ -125,57 +125,6 @@ func TestCompressPeekDiscard(t *testing.T) {
 		}, 1)
 }
 
-// Test that the uncompressed sequence is correct.
-func TestCompressSequence(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
-	testkit.TestTCPConn(t,
-		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
-			fillAndWrite(t, crw, 'a', 100)
-			fillAndWrite(t, crw, 'a', 100)
-			require.NoError(t, crw.Flush())
-			require.Equal(t, uint8(2), crw.Sequence())
-			// uncompressed sequence = compressed sequence
-			readAndCheck(t, crw, 'a', 100)
-			require.Equal(t, uint8(2), crw.Sequence())
-			readAndCheck(t, crw, 'a', 100)
-			require.Equal(t, uint8(3), crw.Sequence())
-			// uncompressed sequence = compressed sequence
-			fillAndWrite(t, crw, 'a', maxCompressedSize+1)
-			require.NoError(t, crw.Flush())
-			require.Equal(t, uint8(3), crw.Sequence())
-			// uncompressed sequence = compressed sequence
-			readAndCheck(t, crw, 'a', maxCompressedSize+1)
-			require.Equal(t, uint8(5), crw.Sequence())
-			// flush empty buffer won't increase sequence
-			require.NoError(t, crw.Flush())
-			require.NoError(t, crw.Flush())
-			fillAndWrite(t, crw, 'a', 100)
-			require.NoError(t, crw.Flush())
-		},
-		func(t *testing.T, c net.Conn) {
-			crw := newCompressedReadWriter(newBasicReadWriter(c, DefaultConnBufferSize), CompressionZlib, 0, lg)
-			readAndCheck(t, crw, 'a', 100)
-			readAndCheck(t, crw, 'a', 100)
-			require.Equal(t, uint8(2), crw.Sequence())
-			// uncompressed sequence = compressed sequence
-			fillAndWrite(t, crw, 'a', 100)
-			require.Equal(t, uint8(2), crw.Sequence())
-			fillAndWrite(t, crw, 'a', 100)
-			require.Equal(t, uint8(3), crw.Sequence())
-			require.NoError(t, crw.Flush())
-			// uncompressed sequence = compressed sequence
-			readAndCheck(t, crw, 'a', maxCompressedSize+1)
-			require.Equal(t, uint8(3), crw.Sequence())
-			// uncompressed sequence = compressed sequence
-			fillAndWrite(t, crw, 'a', maxCompressedSize+1)
-			require.NoError(t, crw.Flush())
-			require.Equal(t, uint8(5), crw.Sequence())
-			// flush empty buffer won't increase sequence
-			readAndCheck(t, crw, 'a', 100)
-		}, 1)
-}
-
 // Test that the compressed header is correctly filled.
 func TestCompressHeader(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
@@ -237,7 +186,6 @@ func TestReadWriteError(t *testing.T) {
 }
 
 func fillAndWrite(t *testing.T, crw *compressedReadWriter, b byte, length int) {
-	crw.BeginRW(rwWrite)
 	data := fillData(b, length)
 	_, err := crw.Write(data)
 	require.NoError(t, err)
@@ -253,7 +201,6 @@ func fillData(b byte, length int) []byte {
 }
 
 func readAndCheck(t *testing.T, crw *compressedReadWriter, b byte, length int) {
-	crw.BeginRW(rwRead)
 	data := make([]byte, length)
 	_, err := io.ReadFull(crw, data)
 	require.NoError(t, err)

@@ -30,18 +30,12 @@ import (
 	"net"
 	"time"
 
-	"github.com/pingcap/tidb/errno"
-	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tiproxy/pkg/util/bufio"
 	"go.uber.org/zap"
-)
-
-var (
-	ErrInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
 )
 
 const (
@@ -74,8 +68,6 @@ type packetReadWriter interface {
 	Sequence() uint8
 	// ResetSequence is called before executing a command.
 	ResetSequence()
-	// BeginRW is called before reading or writing packets.
-	BeginRW(status rwStatus)
 }
 
 var _ packetReadWriter = (*basicReadWriter)(nil)
@@ -141,9 +133,6 @@ func (brw *basicReadWriter) InBytes() uint64 {
 
 func (brw *basicReadWriter) OutBytes() uint64 {
 	return brw.outBytes
-}
-
-func (brw *basicReadWriter) BeginRW(rwStatus) {
 }
 
 func (brw *basicReadWriter) ResetSequence() {
@@ -246,11 +235,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	if err := ReadFull(p.readWriter, p.header); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
-	sequence, pktSequence := p.header[3], p.readWriter.Sequence()
-	if sequence != pktSequence {
-		return nil, false, ErrInvalidSequence.GenWithStack("invalid sequence, expected %d, actual %d", pktSequence, sequence)
-	}
-	p.readWriter.SetSequence(sequence + 1)
+	p.readWriter.SetSequence(p.header[3] + 1)
 
 	length := int(p.header[0]) | int(p.header[1])<<8 | int(p.header[2])<<16
 	data := make([]byte, length)
@@ -262,7 +247,6 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 
 // ReadPacket reads data and removes the header
 func (p *PacketIO) ReadPacket() (data []byte, err error) {
-	p.readWriter.BeginRW(rwRead)
 	for more := true; more; {
 		var buf []byte
 		buf, more, err = p.readOnePacket()
@@ -309,7 +293,6 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 
 // WritePacket writes data without a header
 func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
-	p.readWriter.BeginRW(rwWrite)
 	for more := true; more; {
 		var n int
 		n, more, err = p.writeOnePacket(data)
@@ -327,8 +310,6 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 
 func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
 	process func(response []byte) error) error {
-	p.readWriter.BeginRW(rwRead)
-	dest.readWriter.BeginRW(rwWrite)
 	p.limitReader.R = p.readWriter
 	for {
 		header, err := p.readWriter.Peek(5)
@@ -350,11 +331,7 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 			}
 		} else {
 			for {
-				sequence, pktSequence := header[3], p.readWriter.Sequence()
-				if sequence != pktSequence {
-					return p.wrapErr(ErrInvalidSequence.GenWithStack("invalid sequence, expected %d, actual %d", pktSequence, sequence))
-				}
-				p.readWriter.SetSequence(sequence + 1)
+				p.readWriter.SetSequence(header[3] + 1)
 				// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
 				dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
 				p.limitReader.N = int64(length + 4)
