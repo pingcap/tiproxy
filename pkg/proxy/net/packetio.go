@@ -42,14 +42,6 @@ const (
 	DefaultConnBufferSize = 32 * 1024
 )
 
-type rwStatus int
-
-const (
-	rwNone rwStatus = iota
-	rwRead
-	rwWrite
-)
-
 // packetReadWriter acts like a net.Conn with read and write buffer.
 type packetReadWriter interface {
 	net.Conn
