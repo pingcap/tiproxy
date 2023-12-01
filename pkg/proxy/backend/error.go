@@ -106,8 +106,8 @@ func Error2Source(err error) ErrorSource {
 		}
 	}
 	switch {
-	// ErrMalformPacket may be wrapped with other errors such as ErrBackendHandshake.
-	case errors.Is(err, gomysql.ErrMalformPacket):
+	// ErrInvalidSequence and ErrMalformPacket may be wrapped with other errors such as ErrBackendHandshake.
+	case errors.Is(err, pnet.ErrInvalidSequence), errors.Is(err, gomysql.ErrMalformPacket):
 		// We assume the clients and TiDB are right and treat it as TiProxy bugs.
 		return SrcProxyMalformed
 	case errors.Is(err, ErrClientHandshake), errors.Is(err, ErrClientCap):

@@ -59,6 +59,7 @@ type compressedReadWriter struct {
 	writeBuffer bytes.Buffer
 	algorithm   CompressAlgorithm
 	logger      *zap.Logger
+	rwStatus    rwStatus
 	zstdLevel   zstd.EncoderLevel
 	header      []byte
 	sequence    uint8
@@ -70,6 +71,7 @@ func newCompressedReadWriter(rw packetReadWriter, algorithm CompressAlgorithm, z
 		algorithm:        algorithm,
 		zstdLevel:        zstd.EncoderLevelFromZstd(zstdLevel),
 		logger:           logger,
+		rwStatus:         rwNone,
 		header:           make([]byte, 7),
 	}
 }
@@ -79,6 +81,17 @@ func (crw *compressedReadWriter) ResetSequence() {
 	// Reset the compressed sequence before the next command.
 	// Sequence wraps around once it hits 0xFF, so we need ResetSequence() to know that it's reset instead of overflow.
 	crw.sequence = 0
+	crw.rwStatus = rwNone
+}
+
+// BeginRW implements packetReadWriter.BeginRW.
+// Uncompressed sequence of MySQL doesn't follow the spec: it's set to the compressed sequence when
+// the client/server begins reading or writing.
+func (crw *compressedReadWriter) BeginRW(status rwStatus) {
+	if crw.rwStatus != status {
+		crw.packetReadWriter.SetSequence(crw.sequence)
+		crw.rwStatus = status
+	}
 }
 
 func (crw *compressedReadWriter) Read(p []byte) (n int, err error) {
@@ -121,7 +134,12 @@ func (crw *compressedReadWriter) readFromConn() error {
 	if err = ReadFull(crw.packetReadWriter, crw.header); err != nil {
 		return err
 	}
-	crw.sequence = crw.header[3] + 1
+	compressedSequence := crw.header[3]
+	if compressedSequence != crw.sequence {
+		return ErrInvalidSequence.GenWithStack(
+			"invalid compressed sequence, expected %d, actual %d", crw.sequence, compressedSequence)
+	}
+	crw.sequence++
 	compressedLength := int(uint32(crw.header[0]) | uint32(crw.header[1])<<8 | uint32(crw.header[2])<<16)
 	uncompressedLength := int(uint32(crw.header[4]) | uint32(crw.header[5])<<8 | uint32(crw.header[6])<<16)
 

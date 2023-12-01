@@ -30,6 +30,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/pingcap/tidb/errno"
+	"github.com/pingcap/tidb/util/dbterror"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
@@ -38,8 +40,20 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
+)
+
 const (
 	DefaultConnBufferSize = 32 * 1024
+)
+
+type rwStatus int
+
+const (
+	rwNone rwStatus = iota
+	rwRead
+	rwWrite
 )
 
 // packetReadWriter acts like a net.Conn with read and write buffer.
@@ -60,6 +74,8 @@ type packetReadWriter interface {
 	Sequence() uint8
 	// ResetSequence is called before executing a command.
 	ResetSequence()
+	// BeginRW is called before reading or writing packets.
+	BeginRW(status rwStatus)
 }
 
 var _ packetReadWriter = (*basicReadWriter)(nil)
@@ -125,6 +141,9 @@ func (brw *basicReadWriter) InBytes() uint64 {
 
 func (brw *basicReadWriter) OutBytes() uint64 {
 	return brw.outBytes
+}
+
+func (brw *basicReadWriter) BeginRW(rwStatus) {
 }
 
 func (brw *basicReadWriter) ResetSequence() {
@@ -239,6 +258,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 
 // ReadPacket reads data and removes the header
 func (p *PacketIO) ReadPacket() (data []byte, err error) {
+	p.readWriter.BeginRW(rwRead)
 	for more := true; more; {
 		var buf []byte
 		buf, more, err = p.readOnePacket()
@@ -285,6 +305,7 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 
 // WritePacket writes data without a header
 func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
+	p.readWriter.BeginRW(rwWrite)
 	for more := true; more; {
 		var n int
 		n, more, err = p.writeOnePacket(data)
@@ -302,6 +323,8 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 
 func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
 	process func(response []byte) error) error {
+	p.readWriter.BeginRW(rwRead)
+	dest.readWriter.BeginRW(rwWrite)
 	p.limitReader.R = p.readWriter
 	for {
 		header, err := p.readWriter.Peek(5)
