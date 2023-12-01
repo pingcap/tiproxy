@@ -162,7 +162,7 @@ func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendR
 		require.NoError(t, ts.mc.err)
 		require.NoError(t, ts.mb.err)
 		if ts.mb.err != nil {
-			require.True(t, IsMySQLError(ts.mp.err))
+			require.True(t, pnet.IsMySQLError(ts.mp.err))
 		}
 		if clientRunner != nil && backendRunner != nil {
 			// Ensure all the packets are forwarded.
@@ -189,6 +189,9 @@ func (ts *testSuite) authenticateFirstTime(t *testing.T, c checker) {
 		require.Equal(t, ts.mc.authData, ts.mb.authData)
 		if ts.mc.capability&pnet.ClientConnectAttrs > 0 {
 			require.Equal(t, ts.mc.attrs, ts.mb.attrs)
+		}
+		if !ts.mb.authSucceed {
+			require.Equal(t, SrcClientAuthFail, Error2Source(ts.mp.err))
 		}
 	}
 }

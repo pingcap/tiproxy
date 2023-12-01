@@ -265,13 +265,13 @@ func TestPredefinedPacket(t *testing.T) {
 		func(t *testing.T, cli *PacketIO) {
 			data, err := cli.ReadPacket()
 			require.NoError(t, err)
-			merr := ParseErrorPacket(data).(*mysql.MyError)
+			merr := ParseErrorPacket(data)
 			require.Equal(t, uint16(mysql.ER_UNKNOWN_ERROR), merr.Code)
 			require.Equal(t, "Unknown error", merr.Message)
 
 			data, err = cli.ReadPacket()
 			require.NoError(t, err)
-			merr = ParseErrorPacket(data).(*mysql.MyError)
+			merr = ParseErrorPacket(data)
 			require.Equal(t, uint16(mysql.ER_UNKNOWN_ERROR), merr.Code)
 			require.Equal(t, "test error", merr.Message)
 

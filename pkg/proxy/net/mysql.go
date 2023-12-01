@@ -32,7 +32,7 @@ func ParseInitialHandshake(data []byte) (Capability, uint64, string) {
 	// skip min version
 	serverVersion := string(data[1 : 1+bytes.IndexByte(data[1:], 0)])
 	pos := 1 + len(serverVersion) + 1
-	connid := uint32(binary.LittleEndian.Uint32(data[pos : pos+4]))
+	connid := binary.LittleEndian.Uint32(data[pos : pos+4])
 	// skip salt first part
 	// skip filter
 	pos += 4 + 8 + 1
@@ -398,7 +398,7 @@ func ParseOKPacket(data []byte) uint16 {
 }
 
 // ParseErrorPacket transforms an error packet into a MyError object.
-func ParseErrorPacket(data []byte) error {
+func ParseErrorPacket(data []byte) *gomysql.MyError {
 	e := new(gomysql.MyError)
 	pos := 1
 	e.Code = binary.LittleEndian.Uint16(data[pos:])
@@ -431,6 +431,12 @@ func IsResultSetOKPacket(firstByte byte, length int) bool {
 // IsErrorPacket returns true if it's an error packet.
 func IsErrorPacket(firstByte byte) bool {
 	return firstByte == ErrHeader.Byte()
+}
+
+// IsMySQLError returns true if the error is a MySQL error.
+func IsMySQLError(err error) bool {
+	var myerr *gomysql.MyError
+	return errors.As(err, &myerr)
 }
 
 // The connection attribute names that are logged.

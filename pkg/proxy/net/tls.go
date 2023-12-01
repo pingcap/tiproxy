@@ -39,7 +39,7 @@ func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 	conn := &tlsInternalConn{p.readWriter}
 	tlsConn := tls.Client(conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
-		return errors.WithStack(errors.Wrap(ErrHandshakeTLS, err))
+		return p.wrapErr(errors.Wrap(ErrHandshakeTLS, err))
 	}
 	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn)
 	return nil

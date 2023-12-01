@@ -25,7 +25,7 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 		var response []byte
 		if _, response, err = cp.query(backendIO, "COMMIT"); err != nil {
 			// If commit fails, forward the response to the client.
-			if IsMySQLError(err) {
+			if pnet.IsMySQLError(err) {
 				if writeErr := clientIO.WritePacket(response, true); writeErr != nil {
 					return false, writeErr
 				}

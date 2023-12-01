@@ -8,6 +8,7 @@ import (
 	"compress/zlib"
 	"io"
 
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
@@ -45,7 +46,7 @@ func (p *PacketIO) SetCompressionAlgorithm(algorithm CompressAlgorithm, zstdLeve
 		p.readWriter = newCompressedReadWriter(p.readWriter, algorithm, zstdLevel, p.logger)
 	case CompressionNone:
 	default:
-		return errors.Errorf("Unknown compression algorithm %d", algorithm)
+		return errors.Wrapf(mysql.ErrMalformPacket, "Unknown compression algorithm %d", algorithm)
 	}
 	return nil
 }
@@ -272,7 +273,7 @@ func (crw *compressedReadWriter) compress(data []byte) ([]byte, error) {
 		compressWriter, err = zstd.NewWriter(&compressedPacket, zstd.WithEncoderLevel(crw.zstdLevel))
 	}
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.WithStack(errors.Wrap(mysql.ErrMalformPacket, err))
 	}
 	if _, err = compressWriter.Write(data); err != nil {
 		return nil, errors.WithStack(err)
@@ -289,12 +290,12 @@ func (crw *compressedReadWriter) uncompress(data []byte, uncompressedLength int)
 	switch crw.algorithm {
 	case CompressionZlib:
 		if compressedReader, err = zlib.NewReader(bytes.NewReader(data)); err != nil {
-			return errors.WithStack(err)
+			return errors.WithStack(errors.Wrap(mysql.ErrMalformPacket, err))
 		}
 	case CompressionZstd:
 		var decoder *zstd.Decoder
 		if decoder, err = zstd.NewReader(bytes.NewReader(data)); err != nil {
-			return errors.WithStack(err)
+			return errors.WithStack(errors.Wrap(mysql.ErrMalformPacket, err))
 		}
 		compressedReader = decoder.IOReadCloser()
 	}

@@ -148,7 +148,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		// There are 2 types of signals, which may be sent concurrently.
 		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),
-		quitSource:     SrcClientQuit,
+		quitSource:     SrcNone,
 	}
 	mgr.SetValue(ConnContextKeyConnID, connectionID)
 	return mgr
@@ -170,13 +170,16 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.clientIO = clientIO
 	err := mgr.authenticator.handshakeFirstTime(mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	if err != nil {
-		mgr.setQuitSourceByErr(err)
-		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err)
-		clientIO.WriteUserError(err)
+		src := Error2Source(err)
+		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err, src)
+		// For some errors, convert them to MySQL errors and send them to the client.
+		if clientErr := ErrToClient(err); clientErr != nil {
+			clientIO.WriteUserError(clientErr)
+		}
+		mgr.quitSource = src
 		return err
 	}
-	mgr.resetQuitSource()
-	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
+	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
@@ -191,7 +194,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
-		return nil, pnet.WrapUserError(err, err.Error())
+		return nil, errors.Wrap(ErrProxyErr, err)
 	}
 	// Reasons to wait:
 	// - The TiDB instances may not be initialized yet
@@ -211,17 +214,17 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 				addr, err = selector.Next()
 			}
 			if err != nil {
-				return nil, backoff.Permanent(pnet.WrapUserError(err, err.Error()))
+				return nil, backoff.Permanent(errors.Wrap(ErrProxyErr, err))
 			}
 			if addr == "" {
-				return nil, router.ErrNoInstanceToSelect
+				return nil, ErrProxyNoBackend
 			}
 
 			var cn net.Conn
 			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
 			selector.Finish(mgr, err == nil)
 			if err != nil {
-				return nil, errors.Wrapf(err, "dial backend %s error", addr)
+				return nil, errors.Wrap(ErrBackendHandshake, errors.Wrapf(err, "dial backend %s error", addr))
 			}
 
 			// NOTE: should use DNS name as much as possible
@@ -235,8 +238,7 @@ func (mgr *BackendConnManager) getBackendIO(cctx ConnContext, auth *Authenticato
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
 		func(err error, d time.Duration) {
 			origErr = err
-			mgr.setQuitSourceByErr(err)
-			mgr.handshakeHandler.OnHandshake(cctx, addr, err)
+			mgr.handshakeHandler.OnHandshake(cctx, addr, err, Error2Source(err))
 		},
 	)
 	cancel()
@@ -285,7 +287,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
 	}
 	if err != nil {
-		if !IsMySQLError(err) {
+		if !pnet.IsMySQLError(err) {
 			return
 		} else {
 			mgr.logger.Debug("got a mysql error", zap.Error(err), zap.Stringer("cmd", cmd))
@@ -305,7 +307,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 				mgr.authenticator.capability &^= pnet.ClientMultiStatements
 				mgr.cmdProcessor.capability &^= pnet.ClientMultiStatements
 			default:
-				err = errors.Errorf("unrecognized set_option value:%d", val)
+				err = errors.Wrapf(gomysql.ErrMalformPacket, "unrecognized set_option value:%d", val)
 				return
 			}
 		case pnet.ComChangeUser:
@@ -321,7 +323,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 			// Execute the held request no matter redirection succeeds or not.
 			_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), false)
 			addCmdMetrics(cmd, mgr.ServerAddr(), startTime)
-			if err != nil && !IsMySQLError(err) {
+			if err != nil && !pnet.IsMySQLError(err) {
 				return
 			}
 		} else if mgr.closeStatus.Load() == statusNotifyClose {
@@ -431,7 +433,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		// If the backend connection is closed, also close the client connection.
 		// Otherwise, if the client is idle, the mgr will keep retrying.
 		if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
-			mgr.quitSource = SrcBackendQuit
+			mgr.quitSource = SrcBackendNetwork
 			if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
 				mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
 			}
@@ -442,12 +444,10 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		return
 	}
 
-	defer mgr.resetQuitSource()
 	var cn net.Conn
 	cn, rs.err = net.DialTimeout("tcp", rs.to, DialTimeout)
 	if rs.err != nil {
-		mgr.quitSource = SrcBackendQuit
-		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err)
+		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err, SrcBackendNetwork)
 		return
 	}
 	newBackendIO := pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize, pnet.WithRemoteAddr(rs.to, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn))
@@ -455,8 +455,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)
 	} else {
-		mgr.setQuitSourceByErr(rs.err)
-		mgr.handshakeHandler.OnHandshake(mgr, newBackendIO.RemoteAddr().String(), rs.err)
+		mgr.handshakeHandler.OnHandshake(mgr, newBackendIO.RemoteAddr().String(), rs.err, Error2Source(rs.err))
 	}
 	if rs.err != nil {
 		if ignoredErr := newBackendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
@@ -469,7 +468,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 	mgr.backendIO.Store(newBackendIO)
 	mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
-	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil)
+	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 }
 
 // The original db in the auth info may be dropped during the session, so we need to authenticate with the current db.
@@ -553,7 +552,7 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection",
 			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()))
-		mgr.quitSource = SrcBackendQuit
+		mgr.quitSource = SrcBackendNetwork
 		if err := mgr.clientIO.GracefulClose(); err != nil {
 			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
 		}
@@ -627,7 +626,7 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	mgr.wg.Wait()
 
-	handErr := mgr.handshakeHandler.OnConnClose(mgr)
+	handErr := mgr.handshakeHandler.OnConnClose(mgr, mgr.quitSource)
 
 	var connErr error
 	var addr string
@@ -677,26 +676,16 @@ func (mgr *BackendConnManager) setKeepAlive(cfg config.KeepAlive) {
 	}
 }
 
-// quitSource will be read by OnHandshake and OnConnClose, so setQuitSourceByErr should be called before them.
 func (mgr *BackendConnManager) setQuitSourceByErr(err error) {
-	// Do not update the source if err is nil. It may be already be set.
 	if err == nil {
 		return
 	}
-	if errors.Is(err, ErrBackendConn) {
-		mgr.quitSource = SrcBackendQuit
-	} else if IsMySQLError(err) {
-		mgr.quitSource = SrcClientErr
-	} else if !errors.Is(err, ErrClientConn) {
-		mgr.quitSource = SrcProxyErr
+	// The source may be already be set.
+	// E.g. quitSource is set before TiProxy shuts down and client connection error is caused by shutdown instead of network.
+	if mgr.quitSource != SrcNone {
+		return
 	}
-}
-
-func (mgr *BackendConnManager) resetQuitSource() {
-	// SrcClientQuit is by default.
-	// Sometimes ErrClientConn is caused by GracefulClose and the quitSource is already set.
-	// Error maybe set during handshake for OnHandshake. If handshake finally succeeds, we reset it.
-	mgr.quitSource = SrcClientQuit
+	mgr.quitSource = Error2Source(err)
 }
 
 func (mgr *BackendConnManager) UpdateLogger(fields ...zap.Field) {

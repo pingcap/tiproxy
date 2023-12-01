@@ -6,6 +6,8 @@ package net
 import (
 	"testing"
 
+	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 )
@@ -60,4 +62,13 @@ func TestLogAttrs(t *testing.T) {
 	require.Contains(t, str, `"client_version": "8.1.0"`)
 	require.Contains(t, str, `"client_name": "libmysql"`)
 	require.Contains(t, str, `"program_name": "mysql"`)
+}
+
+func TestMySQLError(t *testing.T) {
+	myerr := &gomysql.MyError{}
+	require.True(t, IsMySQLError(errors.Wrap(ErrHandshakeTLS, myerr)))
+	require.False(t, IsMySQLError(errors.Wrap(myerr, ErrHandshakeTLS)))
+	require.False(t, IsMySQLError(ErrHandshakeTLS))
+	require.True(t, errors.Is(errors.Wrap(ErrHandshakeTLS, myerr), ErrHandshakeTLS))
+	require.True(t, errors.Is(errors.Wrap(myerr, ErrHandshakeTLS), ErrHandshakeTLS))
 }
