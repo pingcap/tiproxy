@@ -233,14 +233,12 @@ loop:
 		if packetErr != nil {
 			// tiproxy pp enabled, tidb pp disabled, tls disabled => invalid sequence
 			// tiproxy pp disabled, tidb pp enabled, tls disabled => invalid sequence
-			for _, p := range []string{
-				"packets out of order",
-				"(nvali): d sequence",
-				"invalid sequence",
-				"PROXY Protocol",
-			} {
-				if strings.Contains(packetErr.Message, p) {
+			if pktIdx == 0 {
+				if packetErr.Code == 1156 || packetErr.Code == 8052 {
 					return errors.Wrap(ErrBackendPPV2, packetErr)
+				}
+				if strings.Contains(packetErr.Message, "PROXY Protocol") {
+					return ErrBackendPPV2
 				}
 			}
 			return errors.Wrap(ErrClientAuthFail, packetErr)
