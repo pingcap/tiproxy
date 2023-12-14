@@ -21,12 +21,12 @@ import (
 
 type BackendStatus int
 
-func (bs *BackendStatus) ToScore() int {
-	return statusScores[*bs]
+func (bs BackendStatus) ToScore() int {
+	return statusScores[bs]
 }
 
-func (bs *BackendStatus) String() string {
-	status, ok := statusNames[*bs]
+func (bs BackendStatus) String() string {
+	status, ok := statusNames[bs]
 	if !ok {
 		return "unknown"
 	}

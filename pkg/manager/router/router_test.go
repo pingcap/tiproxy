@@ -25,7 +25,8 @@ type mockRedirectableConn struct {
 	t        *testing.T
 	kv       map[any]any
 	connID   uint64
-	from, to string
+	from     string
+	to       BackendInst
 	status   BackendStatus
 	receiver ConnEventReceiver
 }
@@ -57,10 +58,11 @@ func (conn *mockRedirectableConn) Value(k any) any {
 	return v
 }
 
-func (conn *mockRedirectableConn) Redirect(addr string) bool {
+func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 	conn.Lock()
-	require.Len(conn.t, conn.to, 0)
-	conn.to = addr
+	require.Nil(conn.t, conn.to)
+	require.True(conn.t, inst.Healthy())
+	conn.to = inst
 	conn.Unlock()
 	return true
 }
@@ -68,7 +70,7 @@ func (conn *mockRedirectableConn) Redirect(addr string) bool {
 func (conn *mockRedirectableConn) GetRedirectingAddr() string {
 	conn.Lock()
 	defer conn.Unlock()
-	return conn.to
+	return conn.to.Addr()
 }
 
 func (conn *mockRedirectableConn) NotifyBackendStatus(status BackendStatus) {
@@ -84,21 +86,21 @@ func (conn *mockRedirectableConn) ConnectionID() uint64 {
 func (conn *mockRedirectableConn) getAddr() (string, string) {
 	conn.Lock()
 	defer conn.Unlock()
-	return conn.from, conn.to
+	return conn.from, conn.to.Addr()
 }
 
 func (conn *mockRedirectableConn) redirectSucceed() {
 	conn.Lock()
-	require.Greater(conn.t, len(conn.to), 0)
-	conn.from = conn.to
-	conn.to = ""
+	require.NotNil(conn.t, conn.to)
+	conn.from = conn.to.Addr()
+	conn.to = nil
 	conn.Unlock()
 }
 
 func (conn *mockRedirectableConn) redirectFail() {
 	conn.Lock()
-	require.Greater(conn.t, len(conn.to), 0)
-	conn.to = ""
+	require.NotNil(conn.t, conn.to)
+	conn.to = nil
 	conn.Unlock()
 }
 
@@ -149,7 +151,7 @@ func (tester *routerTester) killBackends(num int) {
 		}
 		// set the ith backend as unhealthy
 		backend := tester.getBackendByIndex(index)
-		if backend.status == StatusCannotConnect {
+		if backend.Status() == StatusCannotConnect {
 			continue
 		}
 		backends[backend.addr] = &backendHealth{
@@ -183,7 +185,7 @@ func (tester *routerTester) checkBackendOrder() {
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
 		// Empty unhealthy backends should be removed.
-		if backend.status == StatusCannotConnect {
+		if backend.Status() == StatusCannotConnect {
 			require.True(tester.t, backend.connList.Len() > 0 || backend.connScore > 0)
 		}
 		curScore := backend.score()
@@ -251,18 +253,18 @@ func (tester *routerTester) redirectFinish(num int, succeed bool) {
 		}
 
 		from, to := conn.from, conn.to
-		prevCount, err := readMigrateCounter(from, to, succeed)
+		prevCount, err := readMigrateCounter(from, to.Addr(), succeed)
 		require.NoError(tester.t, err)
 		if succeed {
-			err = tester.router.OnRedirectSucceed(from, to, conn)
+			err = tester.router.OnRedirectSucceed(from, to.Addr(), conn)
 			require.NoError(tester.t, err)
 			conn.redirectSucceed()
 		} else {
-			err = tester.router.OnRedirectFail(from, to, conn)
+			err = tester.router.OnRedirectFail(from, to.Addr(), conn)
 			require.NoError(tester.t, err)
 			conn.redirectFail()
 		}
-		curCount, err := readMigrateCounter(from, to, succeed)
+		curCount, err := readMigrateCounter(from, to.Addr(), succeed)
 		require.NoError(tester.t, err)
 		require.Equal(tester.t, prevCount+1, curCount)
 
@@ -279,7 +281,7 @@ func (tester *routerTester) checkBalanced() {
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
 		// Empty unhealthy backends should be removed.
-		require.Equal(tester.t, StatusHealthy, backend.status)
+		require.Equal(tester.t, StatusHealthy, backend.Status())
 		curScore := backend.score()
 		if curScore > maxNum {
 			maxNum = curScore
@@ -886,4 +888,21 @@ func TestGetServerVersion(t *testing.T) {
 	rt.OnBackendChanged(backends, nil)
 	version := rt.ServerVersion()
 	require.True(t, version == "1.0" || version == "2.0")
+}
+
+func TestBackendHealthy(t *testing.T) {
+	// Make the connection redirect.
+	tester := newRouterTester(t)
+	tester.addBackends(1)
+	tester.addConnections(1)
+	tester.addBackends(1)
+	tester.killBackends(1)
+	tester.rebalance(1)
+
+	// The target backend becomes unhealthy during redirection.
+	conn := tester.conns[1]
+	require.True(t, conn.to.Healthy())
+	tester.killBackends(1)
+	require.False(t, conn.to.Healthy())
+	tester.redirectFinish(1, false)
 }
