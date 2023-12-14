@@ -70,6 +70,9 @@ func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 func (conn *mockRedirectableConn) GetRedirectingAddr() string {
 	conn.Lock()
 	defer conn.Unlock()
+	if conn.to == nil {
+		return ""
+	}
 	return conn.to.Addr()
 }
 
@@ -86,7 +89,11 @@ func (conn *mockRedirectableConn) ConnectionID() uint64 {
 func (conn *mockRedirectableConn) getAddr() (string, string) {
 	conn.Lock()
 	defer conn.Unlock()
-	return conn.from, conn.to.Addr()
+	var to string
+	if conn.to != nil {
+		to = conn.to.Addr()
+	}
+	return conn.from, to
 }
 
 func (conn *mockRedirectableConn) redirectSucceed() {
@@ -895,8 +902,8 @@ func TestBackendHealthy(t *testing.T) {
 	tester := newRouterTester(t)
 	tester.addBackends(1)
 	tester.addConnections(1)
-	tester.addBackends(1)
 	tester.killBackends(1)
+	tester.addBackends(1)
 	tester.rebalance(1)
 
 	// The target backend becomes unhealthy during redirection.
