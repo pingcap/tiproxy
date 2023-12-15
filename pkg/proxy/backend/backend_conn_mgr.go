@@ -18,7 +18,7 @@ import (
 	"unsafe"
 
 	"github.com/cenkalti/backoff/v4"
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -264,7 +264,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.handshakeHandler.OnTraffic(mgr)
 	}()
 	if len(request) < 1 {
-		err = gomysql.ErrMalformPacket
+		err = mysql.ErrMalformPacket
 		return
 	}
 	cmd := pnet.Command(request[0])
@@ -304,7 +304,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 				mgr.authenticator.capability &^= pnet.ClientMultiStatements
 				mgr.cmdProcessor.capability &^= pnet.ClientMultiStatements
 			default:
-				err = errors.Wrapf(gomysql.ErrMalformPacket, "unrecognized set_option value:%d", val)
+				err = errors.Wrapf(mysql.ErrMalformPacket, "unrecognized set_option value:%d", val)
 				return
 			}
 		case pnet.ComChangeUser:
@@ -359,7 +359,7 @@ func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessi
 
 func (mgr *BackendConnManager) querySessionStates(backendIO *pnet.PacketIO) (sessionStates, sessionToken string, err error) {
 	// Do not lock here because the caller already locks.
-	var result *gomysql.Resultset
+	var result *mysql.Resultset
 	if result, _, err = mgr.cmdProcessor.query(backendIO, sqlQueryState); err != nil {
 		return
 	}

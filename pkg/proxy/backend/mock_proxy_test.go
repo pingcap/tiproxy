@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"testing"
 
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
@@ -39,7 +39,7 @@ type mockProxy struct {
 
 	*proxyConfig
 	// outputs that received from the server.
-	rs *gomysql.Resultset
+	rs *mysql.Resultset
 	// execution results
 	err         error
 	logger      *zap.Logger
