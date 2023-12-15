@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -70,6 +72,31 @@ func (mer *mockEventReceiver) OnConnClosed(from string, conn router.Redirectable
 func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) {
 	e := <-mer.eventCh
 	require.Equal(t, eventName, e.eventName)
+}
+
+type mockBackendInst struct {
+	addr    string
+	healthy atomic.Bool
+}
+
+func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
+	mbi := &mockBackendInst{
+		addr: ts.tc.backendListener.Addr().String(),
+	}
+	mbi.setHealthy(true)
+	return mbi
+}
+
+func (mbi *mockBackendInst) Addr() string {
+	return mbi.addr
+}
+
+func (mbi *mockBackendInst) Healthy() bool {
+	return mbi.healthy.Load()
+}
+
+func (mbi *mockBackendInst) setHealthy(healthy bool) {
+	mbi.healthy.Store(healthy)
 }
 
 type runner struct {
@@ -147,7 +174,7 @@ func (ts *backendMgrTester) redirectSucceed4Backend(packetIO *pnet.PacketIO) err
 
 func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ *pnet.PacketIO) error {
 	backend1 := ts.mp.backendIO.Load()
-	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
+	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
 	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
 	require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
@@ -186,7 +213,7 @@ func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO *pnet.P
 	// There is no other way to verify it's not redirected.
 	// The buffer size of channel signalReceived is 0, so after the second redirect signal is sent,
 	// we can ensure that the first signal is already processed.
-	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
+	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.signalReceived <- signalTypeRedirect
 	// The backend connection is still the same.
 	require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
@@ -204,7 +231,7 @@ func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.Pac
 
 func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketIO) error {
 	backend1 := ts.mp.backendIO.Load()
-	ts.mp.Redirect(ts.tc.backendListener.Addr().String())
+	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
 	require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
 	return nil
@@ -563,7 +590,7 @@ func TestCloseWhileRedirect(t *testing.T) {
 				// Make sure the process goroutine finishes.
 				ts.mp.wg.Wait()
 				// Redirect() should not panic after Close().
-				ts.mp.Redirect(addr)
+				ts.mp.Redirect(newMockBackendInst(ts))
 				eventReceiver.checkEvent(t, eventSucceed)
 				wg.Wait()
 				eventReceiver.checkEvent(t, eventClose)
@@ -1072,5 +1099,53 @@ func TestConnAttrs(t *testing.T) {
 			},
 		},
 	}
+	ts.runTests(runners)
+}
+
+// Test the target backend becomes unhealthy during redirection.
+func TestBackendStatusChange(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	mbi := newMockBackendInst(ts)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// start a transaction to make it unredirect-able
+		{
+			client:  ts.mc.request,
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.startTxn4Backend,
+		},
+		// try to redirect but it doesn't redirect
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				ts.mp.Redirect(mbi)
+				ts.mp.signalReceived <- signalTypeRedirect
+				// the target backend becomes unhealthy now
+				mbi.healthy.Store(false)
+				return nil
+			},
+		},
+		// finish the transaction and the redirection fails
+		{
+			client: ts.mc.request,
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				backend1 := ts.mp.backendIO.Load()
+				err := ts.forwardCmd4Proxy(clientIO, backendIO)
+				require.NoError(ts.t, err)
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
+				require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
+				require.Eventually(ts.t, func() bool {
+					return strings.Contains(ts.mp.text.String(), ErrTargetUnhealthy.Error())
+				}, time.Second, 10*time.Millisecond)
+				return nil
+			},
+			backend: ts.respondWithNoTxn4Backend,
+		},
+	}
+
 	ts.runTests(runners)
 }

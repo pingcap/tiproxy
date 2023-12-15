@@ -4,6 +4,7 @@
 package router
 
 import (
+	"sync"
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
@@ -63,14 +64,23 @@ type RedirectableConn interface {
 	SetValue(key, val any)
 	Value(key any) any
 	// Redirect returns false if the current conn is not redirectable.
-	Redirect(addr string) bool
+	Redirect(backend BackendInst) bool
 	NotifyBackendStatus(status BackendStatus)
 	ConnectionID() uint64
 }
 
+// BackendInst defines a backend that a connection is redirecting to.
+type BackendInst interface {
+	Addr() string
+	Healthy() bool
+}
+
 // backendWrapper contains the connections on the backend.
 type backendWrapper struct {
-	*backendHealth
+	mu struct {
+		sync.RWMutex
+		backendHealth
+	}
 	addr string
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
 	// connScore = connList.Len() + incoming connections - outgoing connections.
@@ -80,9 +90,50 @@ type backendWrapper struct {
 	connList *glist.List[*connWrapper]
 }
 
+func (b *backendWrapper) setHealth(health backendHealth) {
+	b.mu.Lock()
+	b.mu.backendHealth = health
+	b.mu.Unlock()
+}
+
 // score calculates the score of the backend. Larger score indicates higher load.
 func (b *backendWrapper) score() int {
-	return b.status.ToScore() + b.connScore
+	b.mu.RLock()
+	score := b.mu.status.ToScore() + b.connScore
+	b.mu.RUnlock()
+	return score
+}
+
+func (b *backendWrapper) Addr() string {
+	return b.addr
+}
+
+func (b *backendWrapper) Status() BackendStatus {
+	b.mu.RLock()
+	status := b.mu.status
+	b.mu.RUnlock()
+	return status
+}
+
+func (b *backendWrapper) Healthy() bool {
+	b.mu.RLock()
+	healthy := b.mu.status == StatusHealthy
+	b.mu.RUnlock()
+	return healthy
+}
+
+func (b *backendWrapper) ServerVersion() string {
+	b.mu.RLock()
+	version := b.mu.serverVersion
+	b.mu.RUnlock()
+	return version
+}
+
+func (b *backendWrapper) String() string {
+	b.mu.RLock()
+	str := b.mu.String()
+	b.mu.RUnlock()
+	return str
 }
 
 // connWrapper wraps RedirectableConn.
