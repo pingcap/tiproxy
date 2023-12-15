@@ -7,9 +7,8 @@ import (
 	"encoding/binary"
 	"strings"
 
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/parser"
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
@@ -73,12 +72,12 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 		return err
 	}
 	switch response[0] {
-	case mysql.OKHeader:
+	case pnet.OKHeader.Byte():
 		cp.handleOKPacket(request, response)
 		return nil
-	case mysql.ErrHeader:
+	case pnet.ErrHeader.Byte():
 		return cp.handleErrorPacket(response)
-	case mysql.EOFHeader:
+	case pnet.EOFHeader.Byte():
 		if cp.capability&pnet.ClientDeprecateEOF == 0 {
 			cp.handleEOFPacket(request, response)
 		} else {
@@ -132,7 +131,7 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 		return err
 	}
 	switch response[0] {
-	case mysql.OKHeader:
+	case pnet.OKHeader.Byte():
 		// The OK packet doesn't contain a server status.
 		// See https://mariadb.com/kb/en/com_stmt_prepare/
 		numColumns := binary.LittleEndian.Uint16(response[5:])
@@ -158,7 +157,7 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 			}
 		}
 		return clientIO.Flush()
-	case mysql.ErrHeader:
+	case pnet.ErrHeader.Byte():
 		if err := clientIO.Flush(); err != nil {
 			return err
 		}
@@ -185,7 +184,7 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 		err := backendIO.ForwardUntil(clientIO, func(firstByte byte, _ int) (end, needData bool) {
 			first = firstByte
 			switch firstByte {
-			case mysql.OKHeader, mysql.ErrHeader:
+			case pnet.OKHeader.Byte(), pnet.ErrHeader.Byte():
 				return true, true
 			default:
 				return true, false
@@ -193,16 +192,16 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 		}, func(response []byte) error {
 			var err error
 			switch first {
-			case mysql.OKHeader:
+			case pnet.OKHeader.Byte():
 				status := cp.handleOKPacket(request, response)
 				serverStatus, err = status, clientIO.Flush()
-			case mysql.ErrHeader:
+			case pnet.ErrHeader.Byte():
 				if err = clientIO.Flush(); err != nil {
 					return err
 				}
 				// Subsequent statements won't be executed even if it's a multi-statement.
 				return cp.handleErrorPacket(response)
-			case mysql.LocalInFileHeader:
+			case pnet.LocalInFileHeader.Byte():
 				serverStatus, err = cp.forwardLoadInFile(clientIO, backendIO, request)
 			default:
 				serverStatus, err = cp.forwardResultSet(clientIO, backendIO, request)
@@ -213,7 +212,7 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 			return err
 		}
 		// If it's not the last statement in multi-statements, continue.
-		if serverStatus&mysql.ServerMoreResultsExists == 0 {
+		if serverStatus&pnet.ServerMoreResultsExists == 0 {
 			break
 		}
 	}
@@ -243,9 +242,9 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 		return
 	}
 	switch response[0] {
-	case mysql.OKHeader:
+	case pnet.OKHeader.Byte():
 		return cp.handleOKPacket(request, response), nil
-	case mysql.ErrHeader:
+	case pnet.ErrHeader.Byte():
 		return serverStatus, cp.handleErrorPacket(response)
 	}
 	// impossible here
@@ -262,7 +261,7 @@ func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, req
 			serverStatus = binary.LittleEndian.Uint16(response[3:])
 			// If a cursor exists, only columns are sent this time. The client will then send COM_STMT_FETCH to fetch rows.
 			// Otherwise, columns and rows are both sent once.
-			if serverStatus&mysql.ServerStatusCursorExists > 0 {
+			if serverStatus&pnet.ServerStatusCursorExists > 0 {
 				serverStatus = cp.handleEOFPacket(request, response)
 				return clientIO.Flush()
 			}
@@ -294,7 +293,7 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 		cp.logger.Warn("parse COM_CHANGE_USER packet encounters error", zap.Error(err))
 		var warning *errors.Warning
 		if !errors.As(err, &warning) {
-			return gomysql.ErrMalformPacket
+			return mysql.ErrMalformPacket
 		}
 	}
 	// The client may use the TiProxy salt to generate the auth data instead of using the TiDB salt,
@@ -312,10 +311,10 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 			return err
 		}
 		switch response[0] {
-		case mysql.OKHeader:
+		case pnet.OKHeader.Byte():
 			cp.handleOKPacket(request, response)
 			return nil
-		case mysql.ErrHeader:
+		case pnet.ErrHeader.Byte():
 			return cp.handleErrorPacket(response)
 		default:
 			// If the server sends a switch-auth request, the proxy forwards the auth data to the server.

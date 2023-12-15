@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/tidb/parser/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -202,7 +201,7 @@ func (ts *backendMgrTester) respondWithNoTxn4Backend(packetIO *pnet.PacketIO) er
 
 func (ts *backendMgrTester) startTxn4Backend(packetIO *pnet.PacketIO) error {
 	ts.mb.respondType = responseTypeOK
-	ts.mb.status = mysql.ServerStatusInTrans
+	ts.mb.status = pnet.ServerStatusInTrans
 	return ts.mb.respond(packetIO)
 }
 

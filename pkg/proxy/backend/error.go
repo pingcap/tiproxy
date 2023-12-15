@@ -4,7 +4,7 @@
 package backend
 
 import (
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
@@ -107,7 +107,7 @@ func Error2Source(err error) ErrorSource {
 	}
 	switch {
 	// ErrInvalidSequence and ErrMalformPacket may be wrapped with other errors such as ErrBackendHandshake.
-	case errors.Is(err, pnet.ErrInvalidSequence), errors.Is(err, gomysql.ErrMalformPacket):
+	case errors.Is(err, pnet.ErrInvalidSequence), errors.Is(err, mysql.ErrMalformPacket):
 		// We assume the clients and TiDB are right and treat it as TiProxy bugs.
 		return SrcProxyMalformed
 	case errors.Is(err, ErrClientHandshake), errors.Is(err, ErrClientCap):
