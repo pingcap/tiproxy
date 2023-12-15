@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 
-	"github.com/pingcap/tidb/parser/mysql"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
@@ -36,7 +35,7 @@ func newClientConfig() *clientConfig {
 		capability: defaultTestClientCapability,
 		username:   mockUsername,
 		dbName:     mockDBName,
-		authPlugin: mysql.AuthCachingSha2Password,
+		authPlugin: pnet.AuthCachingSha2Password,
 		authData:   mockAuthData,
 		attrs:      make(map[string]string),
 		cmd:        pnet.ComQuery,
@@ -107,14 +106,14 @@ func (mc *mockClient) writePassword(packetIO *pnet.PacketIO) error {
 			return err
 		}
 		switch serverPkt[0] {
-		case mysql.OKHeader:
+		case pnet.OKHeader.Byte():
 			mc.authSucceed = true
 			return nil
-		case mysql.ErrHeader:
+		case pnet.ErrHeader.Byte():
 			mc.authSucceed = false
 			mc.mysqlErr = pnet.ParseErrorPacket(serverPkt)
 			return nil
-		case mysql.AuthSwitchRequest, pnet.ShaCommand:
+		case pnet.AuthSwitchHeader.Byte(), pnet.ShaCommand:
 			if err := packetIO.WritePacket(mc.authData, true); err != nil {
 				return err
 			}
@@ -171,7 +170,7 @@ func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
 	req := &pnet.ChangeUserReq{
 		User:       mc.username,
 		DB:         mc.dbName,
-		AuthPlugin: mysql.AuthNativePassword,
+		AuthPlugin: pnet.AuthNativePassword,
 		AuthData:   mc.authData,
 		Charset:    []byte{0x11, 0x22},
 		Attrs:      mc.attrs,
@@ -186,9 +185,9 @@ func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
 			return err
 		}
 		switch resp[0] {
-		case mysql.OKHeader:
+		case pnet.OKHeader.Byte():
 			return nil
-		case mysql.ErrHeader:
+		case pnet.ErrHeader.Byte():
 			mc.mysqlErr = pnet.ParseErrorPacket(resp)
 			return nil
 		default:
@@ -211,7 +210,7 @@ func (mc *mockClient) requestPrepare(packetIO *pnet.PacketIO) error {
 		return err
 	}
 	expectedPacketNum := 0
-	if response[0] == mysql.OKHeader {
+	if response[0] == pnet.OKHeader.Byte() {
 		numColumns := binary.LittleEndian.Uint16(response[5:])
 		numParams := binary.LittleEndian.Uint16(response[7:])
 		expectedPacketNum = int(numColumns) + int(numParams)
@@ -274,7 +273,7 @@ func (mc *mockClient) readUntilResultEnd(packetIO *pnet.PacketIO) (pkt []byte, e
 		if err != nil {
 			return
 		}
-		if pkt[0] == mysql.ErrHeader {
+		if pkt[0] == pnet.ErrHeader.Byte() {
 			mc.mysqlErr = pnet.ParseErrorPacket(pkt)
 			return
 		}
@@ -316,12 +315,12 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 			return err
 		}
 		switch pkt[0] {
-		case mysql.OKHeader:
+		case pnet.OKHeader.Byte():
 			serverStatus = binary.LittleEndian.Uint16(pkt[3:])
-		case mysql.ErrHeader:
+		case pnet.ErrHeader.Byte():
 			mc.mysqlErr = pnet.ParseErrorPacket(pkt)
 			return nil
-		case mysql.LocalInFileHeader:
+		case pnet.LocalInFileHeader.Byte():
 			for i := 0; i < mc.filePkts; i++ {
 				if err = packetIO.WritePacket(mc.dataBytes, false); err != nil {
 					return err
@@ -333,7 +332,7 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 			if pkt, err = packetIO.ReadPacket(); err != nil {
 				return err
 			}
-			if pkt[0] == mysql.OKHeader {
+			if pkt[0] == pnet.OKHeader.Byte() {
 				serverStatus = binary.LittleEndian.Uint16(pkt[3:])
 			} else {
 				return nil
@@ -344,18 +343,18 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 				if pkt, err = mc.readUntilResultEnd(packetIO); err != nil {
 					return err
 				}
-				if pkt[0] == mysql.ErrHeader {
+				if pkt[0] == pnet.ErrHeader.Byte() {
 					return nil
 				}
 				serverStatus = binary.LittleEndian.Uint16(pkt[3:])
-				if serverStatus&mysql.ServerStatusCursorExists > 0 {
+				if serverStatus&pnet.ServerStatusCursorExists > 0 {
 					break
 				}
 			}
 			if pkt, err = mc.readUntilResultEnd(packetIO); err != nil {
 				return err
 			}
-			if pkt[0] == mysql.ErrHeader {
+			if pkt[0] == pnet.ErrHeader.Byte() {
 				return nil
 			}
 			if mc.capability&pnet.ClientDeprecateEOF == 0 {
@@ -364,7 +363,7 @@ func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
 				serverStatus = pnet.ParseOKPacket(pkt)
 			}
 		}
-		if serverStatus&mysql.ServerMoreResultsExists == 0 {
+		if serverStatus&pnet.ServerMoreResultsExists == 0 {
 			break
 		}
 	}

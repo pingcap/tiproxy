@@ -6,7 +6,6 @@ package backend
 import (
 	"testing"
 
-	"github.com/pingcap/tidb/parser/mysql"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 )
@@ -303,7 +302,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 			},
 			canRedirect: false,
@@ -316,7 +315,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 			},
 			canRedirect: false,
@@ -328,13 +327,13 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtFetch
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.respondType = responseTypeRow
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 			},
 			canRedirect: false,
@@ -346,13 +345,13 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtFetch
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.respondType = responseTypeRow
-					cfg.backendConfig.status = mysql.ServerStatusLastRowSend
+					cfg.backendConfig.status = pnet.ServerStatusLastRowSend
 				},
 			},
 			canRedirect: true,
@@ -364,7 +363,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtFetch
@@ -381,20 +380,20 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtExecute
 					cfg.clientConfig.prepStmtID = 2
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtFetch
 					cfg.clientConfig.prepStmtID = 2
 					cfg.backendConfig.respondType = responseTypeRow
-					cfg.backendConfig.status = mysql.ServerStatusLastRowSend
+					cfg.backendConfig.status = pnet.ServerStatusLastRowSend
 				},
 			},
 			canRedirect: false,
@@ -411,13 +410,13 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 2
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtFetch
 					cfg.clientConfig.prepStmtID = 2
 					cfg.backendConfig.respondType = responseTypeRow
-					cfg.backendConfig.status = mysql.ServerStatusLastRowSend
+					cfg.backendConfig.status = pnet.ServerStatusLastRowSend
 				},
 			},
 			canRedirect: false,
@@ -491,7 +490,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtClose
@@ -508,7 +507,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtReset
@@ -525,7 +524,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtClose
@@ -542,7 +541,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtReset
@@ -565,7 +564,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 2
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComResetConnection
@@ -586,7 +585,7 @@ func TestPreparedStmts(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 2
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComChangeUser
@@ -619,7 +618,7 @@ func TestTxnStatus(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit | pnet.ServerStatusInTrans
 				},
 			},
 			canRedirect: false,
@@ -629,7 +628,7 @@ func TestTxnStatus(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusInTrans
 				},
 			},
 			canRedirect: false,
@@ -639,7 +638,7 @@ func TestTxnStatus(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
@@ -654,12 +653,12 @@ func TestTxnStatus(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit | pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit
 				},
 			},
 			canRedirect: true,
@@ -669,12 +668,12 @@ func TestTxnStatus(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComChangeUser
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit
 				},
 			},
 			canRedirect: true,
@@ -684,12 +683,12 @@ func TestTxnStatus(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComResetConnection
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit
 				},
 			},
 			canRedirect: true,
@@ -718,13 +717,13 @@ func TestMixPrepAndTxnStatus(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtExecute
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusInTrans
 				},
 			},
 			canRedirect: false,
@@ -736,13 +735,13 @@ func TestMixPrepAndTxnStatus(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusInTrans | pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtFetch
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.respondType = responseTypeRow
-					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusLastRowSend
+					cfg.backendConfig.status = pnet.ServerStatusInTrans | pnet.ServerStatusLastRowSend
 				},
 			},
 			canRedirect: false,
@@ -754,7 +753,7 @@ func TestMixPrepAndTxnStatus(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusInTrans | pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
@@ -772,12 +771,12 @@ func TestMixPrepAndTxnStatus(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusInTrans | pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComResetConnection
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit
 				},
 			},
 			canRedirect: true,
@@ -789,13 +788,13 @@ func TestMixPrepAndTxnStatus(t *testing.T) {
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusInTrans | pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtFetch
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.respondType = responseTypeRow
-					cfg.backendConfig.status = mysql.ServerStatusInTrans | mysql.ServerStatusLastRowSend
+					cfg.backendConfig.status = pnet.ServerStatusInTrans | pnet.ServerStatusLastRowSend
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtExecute
@@ -830,14 +829,14 @@ func TestHoldRequest(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit | pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.clientConfig.sql = "begin"
 					cfg.proxyConfig.waitRedirect = true
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit
 					cfg.backendConfig.loops = 2
 				},
 			},
@@ -849,14 +848,14 @@ func TestHoldRequest(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit | pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.clientConfig.sql = "commit"
 					cfg.proxyConfig.waitRedirect = true
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit
 				},
 			},
 			holdRequest: false,
@@ -867,14 +866,14 @@ func TestHoldRequest(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit | pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtExecute
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit
 				},
 			},
 			holdRequest: false,
@@ -885,21 +884,21 @@ func TestHoldRequest(t *testing.T) {
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit | pnet.ServerStatusInTrans
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComStmtExecute
 					cfg.clientConfig.prepStmtID = 1
 					cfg.backendConfig.columns = 1
 					cfg.backendConfig.respondType = responseTypeResultSet
-					cfg.backendConfig.status = mysql.ServerStatusCursorExists
+					cfg.backendConfig.status = pnet.ServerStatusCursorExists
 				},
 				func(cfg *testConfig) {
 					cfg.clientConfig.cmd = pnet.ComQuery
 					cfg.clientConfig.sql = "begin"
 					cfg.proxyConfig.waitRedirect = true
 					cfg.backendConfig.respondType = responseTypeOK
-					cfg.backendConfig.status = mysql.ServerStatusAutocommit | mysql.ServerStatusInTrans
+					cfg.backendConfig.status = pnet.ServerStatusAutocommit | pnet.ServerStatusInTrans
 				},
 			},
 			holdRequest: false,
