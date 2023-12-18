@@ -26,6 +26,14 @@ var (
 			Help:      "Number of connections.",
 		})
 
+	DisConnCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelServer,
+			Name:      "disconnection_total",
+			Help:      "Number of disconnections.",
+		}, []string{LblType})
+
 	MaxProcsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: ModuleProxy,
