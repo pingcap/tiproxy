@@ -19,11 +19,52 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/router"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCreateConn(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	require.NoError(t, certManager.Init(&config.Config{}, lg, nil))
+	server, err := NewSQLServer(lg, config.ProxyServer{}, certManager, &panicHsHandler{})
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+	defer func() {
+		require.NoError(t, server.Close())
+	}()
+
+	createConn := func() net.Conn {
+		conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
+		require.NoError(t, err)
+		return conn
+	}
+	checkMetrics := func(totalConns, createConns int) {
+		require.Eventually(t, func() bool {
+			connGauge, err := metrics.ReadGauge(metrics.ConnGauge)
+			require.NoError(t, err)
+			if totalConns != int(connGauge) {
+				return false
+			}
+			connCounter, err := metrics.ReadCounter(metrics.CreateConnCounter)
+			require.NoError(t, err)
+			return createConns == connCounter
+		}, time.Second, 10*time.Millisecond)
+	}
+
+	checkMetrics(0, 0)
+	conn1 := createConn()
+	checkMetrics(1, 1)
+	conn2 := createConn()
+	checkMetrics(2, 2)
+	require.NoError(t, conn1.Close())
+	checkMetrics(1, 2)
+	require.NoError(t, conn2.Close())
+	checkMetrics(0, 2)
+}
 
 func TestGracefulCloseConn(t *testing.T) {
 	// Graceful shutdown finishes immediately if there's no connection.

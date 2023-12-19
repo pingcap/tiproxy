@@ -26,6 +26,14 @@ var (
 			Help:      "Number of connections.",
 		})
 
+	CreateConnCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelServer,
+			Name:      "create_connection_total",
+			Help:      "Number of create connections.",
+		})
+
 	DisConnCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: ModuleProxy,

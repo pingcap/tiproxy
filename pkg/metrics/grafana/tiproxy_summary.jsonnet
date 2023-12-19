@@ -106,6 +106,20 @@ local connectionP = graphPanel.new(
   )
 );
 
+local createConnP = graphPanel.new(
+  title='Create Connection OPM',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy create connection count per minute.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'sum(increase(tiproxy_server_create_connection_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m]))',
+    legendFormat='{{instance}}',
+  )
+);
+
 local disconnP = graphPanel.new(
   title='Disconnection OPM',
   datasource=myDS,
@@ -420,10 +434,11 @@ newDash
   serverRow
   .addPanel(cpuP, gridPos=leftPanelPos)
   .addPanel(memP, gridPos=rightPanelPos)
-  .addPanel(connectionP, gridPos=leftPanelPos)
+  .addPanel(uptimeP, gridPos=leftPanelPos)
+  .addPanel(connectionP, gridPos=rightPanelPos)
+  .addPanel(createConnP, gridPos=leftPanelPos)
   .addPanel(disconnP, gridPos=rightPanelPos)
   .addPanel(goroutineP, gridPos=leftPanelPos)
-  .addPanel(uptimeP, gridPos=rightPanelPos)
   ,
   gridPos=rowPos
 )

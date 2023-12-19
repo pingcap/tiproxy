@@ -154,6 +154,7 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
 
 	prometheus.MustRegister(ConnGauge)
+	prometheus.MustRegister(CreateConnCounter)
 	prometheus.MustRegister(DisConnCounter)
 	prometheus.MustRegister(MaxProcsGauge)
 	prometheus.MustRegister(ServerEventCounter)
