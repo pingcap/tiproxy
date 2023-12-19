@@ -439,7 +439,7 @@
                "steppedLine": false,
                "targets": [
                   {
-                     "expr": "sum(increase(tiproxy_server_create_connection_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m]))",
+                     "expr": "sum(increase(tiproxy_server_create_connection_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance)",
                      "format": "time_series",
                      "intervalFactor": 2,
                      "legendFormat": "{{instance}}",

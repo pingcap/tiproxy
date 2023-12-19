@@ -115,7 +115,7 @@ local createConnP = graphPanel.new(
 )
 .addTarget(
   prometheus.target(
-    'sum(increase(tiproxy_server_create_connection_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m]))',
+    'sum(increase(tiproxy_server_create_connection_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (instance)',
     legendFormat='{{instance}}',
   )
 );
