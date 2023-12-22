@@ -63,7 +63,7 @@ type SQLServer struct {
 }
 
 // NewSQLServer creates a new SQLServer.
-func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.CertManager, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
+func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
 	var err error
 	s := &SQLServer{
 		logger:    logger,
@@ -76,9 +76,9 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 		},
 	}
 
-	s.reset(&cfg.ProxyServerOnline)
+	s.reset(cfg)
 
-	s.addrs = strings.Split(cfg.Addr, ",")
+	s.addrs = strings.Split(cfg.Proxy.Addr, ",")
 	s.listeners = make([]net.Listener, len(s.addrs))
 	for i, addr := range s.addrs {
 		s.listeners[i], err = net.Listen("tcp", addr)
@@ -90,17 +90,17 @@ func NewSQLServer(logger *zap.Logger, cfg config.ProxyServer, certMgr *cert.Cert
 	return s, nil
 }
 
-func (s *SQLServer) reset(cfg *config.ProxyServerOnline) {
+func (s *SQLServer) reset(cfg *config.Config) {
 	s.mu.Lock()
-	s.mu.tcpKeepAlive = cfg.FrontendKeepalive.Enabled
-	s.mu.maxConnections = cfg.MaxConnections
-	s.mu.requireBackendTLS = cfg.RequireBackendTLS
-	s.mu.proxyProtocol = cfg.ProxyProtocol != ""
-	s.mu.gracefulWait = cfg.GracefulWaitBeforeShutdown
-	s.mu.gracefulClose = cfg.GracefulCloseConnTimeout
-	s.mu.healthyKeepAlive = cfg.BackendHealthyKeepalive
-	s.mu.unhealthyKeepAlive = cfg.BackendUnhealthyKeepalive
-	s.mu.connBufferSize = cfg.ConnBufferSize
+	s.mu.tcpKeepAlive = cfg.Proxy.FrontendKeepalive.Enabled
+	s.mu.maxConnections = cfg.Proxy.MaxConnections
+	s.mu.requireBackendTLS = cfg.Security.RequireBackendTLS
+	s.mu.proxyProtocol = cfg.Proxy.ProxyProtocol != ""
+	s.mu.gracefulWait = cfg.Proxy.GracefulWaitBeforeShutdown
+	s.mu.gracefulClose = cfg.Proxy.GracefulCloseConnTimeout
+	s.mu.healthyKeepAlive = cfg.Proxy.BackendHealthyKeepalive
+	s.mu.unhealthyKeepAlive = cfg.Proxy.BackendUnhealthyKeepalive
+	s.mu.connBufferSize = cfg.Proxy.ConnBufferSize
 	s.mu.Unlock()
 }
 
@@ -118,7 +118,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 					// prevent panic on closing chan
 					return
 				}
-				s.reset(&ach.Proxy.ProxyServerOnline)
+				s.reset(ach)
 			}
 		}
 	})

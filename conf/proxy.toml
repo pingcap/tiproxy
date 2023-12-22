@@ -3,7 +3,6 @@
 [proxy]
 # addr = "0.0.0.0:6000"
 # tcp-keep-alive = true
-# require-backend-tls = true
 
 # possible values:
 #   "" => disable proxy protocol.
@@ -107,6 +106,8 @@ graceful-close-conn-timeout = 15
 	[security.server-http-tls]
 	# proxy HTTP port will use this
 	# auto-certs = true
+
+# require-backend-tls = false
 
 [metrics]
 

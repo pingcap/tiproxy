@@ -28,9 +28,10 @@ import (
 
 func TestCreateConn(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := &config.Config{}
 	certManager := cert.NewCertManager()
-	require.NoError(t, certManager.Init(&config.Config{}, lg, nil))
-	server, err := NewSQLServer(lg, config.ProxyServer{}, certManager, &panicHsHandler{})
+	require.NoError(t, certManager.Init(cfg, lg, nil))
+	server, err := NewSQLServer(lg, cfg, certManager, &panicHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 	defer func() {
@@ -70,9 +71,11 @@ func TestGracefulCloseConn(t *testing.T) {
 	// Graceful shutdown finishes immediately if there's no connection.
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil)
-	cfg := config.ProxyServer{
-		ProxyServerOnline: config.ProxyServerOnline{
-			GracefulCloseConnTimeout: 10,
+	cfg := &config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				GracefulCloseConnTimeout: 10,
+			},
 		},
 	}
 	server, err := NewSQLServer(lg, cfg, nil, hsHandler)
@@ -129,7 +132,7 @@ func TestGracefulCloseConn(t *testing.T) {
 	}
 
 	// Graceful shutdown will shut down after GracefulCloseConnTimeout.
-	cfg.GracefulCloseConnTimeout = 1
+	cfg.Proxy.GracefulCloseConnTimeout = 1
 	server, err = NewSQLServer(lg, cfg, nil, hsHandler)
 	require.NoError(t, err)
 	createClientConn()
@@ -147,10 +150,12 @@ func TestGracefulCloseConn(t *testing.T) {
 func TestGracefulShutDown(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil)
-	cfg := config.ProxyServer{
-		ProxyServerOnline: config.ProxyServerOnline{
-			GracefulWaitBeforeShutdown: 2,
-			GracefulCloseConnTimeout:   10,
+	cfg := &config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				GracefulWaitBeforeShutdown: 2,
+				GracefulCloseConnTimeout:   10,
+			},
 		},
 	}
 	server, err := NewSQLServer(lg, cfg, nil, hsHandler)
@@ -182,8 +187,10 @@ func TestMultiAddr(t *testing.T) {
 	certManager := cert.NewCertManager()
 	err := certManager.Init(&config.Config{}, lg, nil)
 	require.NoError(t, err)
-	server, err := NewSQLServer(lg, config.ProxyServer{
-		Addr: "0.0.0.0:0,0.0.0.0:0",
+	server, err := NewSQLServer(lg, &config.Config{
+		Proxy: config.ProxyServer{
+			Addr: "0.0.0.0:0,0.0.0.0:0",
+		},
 	}, certManager, &panicHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
@@ -203,25 +210,27 @@ func TestWatchCfg(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil)
 	cfgch := make(chan *config.Config)
-	server, err := NewSQLServer(lg, config.ProxyServer{}, nil, hsHandler)
+	server, err := NewSQLServer(lg, &config.Config{}, nil, hsHandler)
 	require.NoError(t, err)
 	server.Run(context.Background(), cfgch)
 	cfg := &config.Config{
 		Proxy: config.ProxyServer{
 			ProxyServerOnline: config.ProxyServerOnline{
-				RequireBackendTLS:        true,
 				MaxConnections:           100,
 				ConnBufferSize:           1024 * 1024,
 				ProxyProtocol:            "v2",
 				GracefulCloseConnTimeout: 100,
 			},
 		},
+		Security: config.Security{
+			RequireBackendTLS: true,
+		},
 	}
 	cfgch <- cfg
 	require.Eventually(t, func() bool {
 		server.mu.RLock()
 		defer server.mu.RUnlock()
-		return server.mu.requireBackendTLS == cfg.Proxy.RequireBackendTLS &&
+		return server.mu.requireBackendTLS == cfg.Security.RequireBackendTLS &&
 			server.mu.maxConnections == cfg.Proxy.MaxConnections &&
 			server.mu.connBufferSize == cfg.Proxy.ConnBufferSize &&
 			server.mu.proxyProtocol == (cfg.Proxy.ProxyProtocol != "") &&
@@ -235,7 +244,7 @@ func TestRecoverPanic(t *testing.T) {
 	certManager := cert.NewCertManager()
 	err := certManager.Init(&config.Config{}, lg, nil)
 	require.NoError(t, err)
-	server, err := NewSQLServer(lg, config.ProxyServer{}, certManager, &panicHsHandler{})
+	server, err := NewSQLServer(lg, &config.Config{}, certManager, &panicHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
