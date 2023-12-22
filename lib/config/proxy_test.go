@@ -21,7 +21,6 @@ var testProxyConfig = Config{
 		Addr:    "0.0.0.0:4000",
 		PDAddrs: "127.0.0.1:4089",
 		ProxyServerOnline: ProxyServerOnline{
-			RequireBackendTLS:          true,
 			MaxConnections:             1,
 			FrontendKeepalive:          KeepAlive{Enabled: true},
 			ProxyProtocol:              "v2",
@@ -75,6 +74,7 @@ var testProxyConfig = Config{
 			Cert:               "b",
 			Key:                "c",
 		},
+		RequireBackendTLS: true,
 	},
 }
 
