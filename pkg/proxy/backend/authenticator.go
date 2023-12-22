@@ -22,6 +22,7 @@ import (
 const unknownAuthPlugin = "auth_unknown_plugin"
 const requiredFrontendCaps = pnet.ClientProtocol41
 const defRequiredBackendCaps = pnet.ClientDeprecateEOF
+const ER_INVALID_SEQUENCE = 8052
 
 // SupportedServerCapabilities is the default supported capabilities. Other server capabilities are not supported.
 // TiDB supports ClientDeprecateEOF since v6.3.0.
@@ -231,17 +232,7 @@ loop:
 			return err
 		}
 		if packetErr != nil {
-			// tiproxy pp enabled, tidb pp disabled, tls disabled => invalid sequence
-			// tiproxy pp disabled, tidb pp enabled, tls disabled => invalid sequence
-			if pktIdx == 0 {
-				if packetErr.Code == 1156 || packetErr.Code == 8052 {
-					return errors.Wrap(ErrBackendPPV2, packetErr)
-				}
-				if strings.Contains(packetErr.Message, "PROXY Protocol") {
-					return ErrBackendPPV2
-				}
-			}
-			return errors.Wrap(ErrClientAuthFail, packetErr)
+			return handleHandshakeError(pktIdx, packetErr)
 		}
 
 		pktIdx++
@@ -433,4 +424,24 @@ func setCompress(packetIO *pnet.PacketIO, capability pnet.Capability, zstdLevel 
 		algorithm = pnet.CompressionZstd
 	}
 	return packetIO.SetCompressionAlgorithm(algorithm, zstdLevel)
+}
+
+// handleHandshakeError tries to recognize the error and report more friendly messages.
+func handleHandshakeError(pktIdx int, packetErr *mysql.MyError) error {
+	if pktIdx == 0 {
+		// PPV2 errors only appear in the first packet
+
+		// mysql ERROR 1156: Got packets out of order (proxy ppv2 = true)
+		if packetErr.Code == mysql.ER_NET_PACKETS_OUT_OF_ORDER ||
+			// tidb ERROR 8052: invalid sequence, received 10 while expecting 1 (proxy ppv2 = true, db ppv2  = false)
+			packetErr.Code == ER_INVALID_SEQUENCE {
+			return errors.Wrap(ErrBackendPPV2, packetErr)
+		}
+		// tidb ERROR 1105: invalid PROXY Protocol Header (proxy ppv2 = false,  db ppv2  = true, db ppv2 fallback = false)
+		// 1105 is UNKNOWN_ERR, so we judge the error by messages
+		if strings.Contains(packetErr.Message, "PROXY Protocol") {
+			return ErrBackendPPV2
+		}
+	}
+	return errors.Wrap(ErrClientAuthFail, packetErr)
 }
