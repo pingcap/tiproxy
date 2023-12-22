@@ -79,7 +79,7 @@ const (
 	SrcClientSQLErr
 	// SrcProxyQuit includes: proxy graceful shutdown
 	SrcProxyQuit
-	// SrcProxyMalformed includes: malformed packet; invalid sequence
+	// SrcProxyMalformed includes: malformed packet
 	SrcProxyMalformed
 	// SrcProxyNoBackend includes: no backends
 	SrcProxyNoBackend
