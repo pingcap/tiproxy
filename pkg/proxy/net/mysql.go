@@ -24,7 +24,7 @@ const (
 var (
 	ServerVersion = mysql.ServerVersion
 	Collation     = uint8(mysql.DefaultCollationID)
-	Status        = mysql.ServerStatusAutocommit
+	Status        = ServerStatusAutocommit
 )
 
 // ParseInitialHandshake parses the initial handshake received from the server.
@@ -365,7 +365,7 @@ func ReadServerVersion(conn net.Conn) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if data[0] == gomysql.ERR_HEADER {
+	if data[0] == ErrHeader.Byte() {
 		return "", errors.New("read initial handshake error")
 	}
 	pos := 1

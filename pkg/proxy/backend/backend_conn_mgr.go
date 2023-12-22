@@ -18,7 +18,7 @@ import (
 	"unsafe"
 
 	"github.com/cenkalti/backoff/v4"
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -29,7 +29,8 @@ import (
 )
 
 var (
-	ErrCloseConnMgr = errors.New("failed to close connection manager")
+	ErrCloseConnMgr    = errors.New("failed to close connection manager")
+	ErrTargetUnhealthy = errors.New("target backend becomes unhealthy")
 )
 
 const (
@@ -56,10 +57,6 @@ const (
 	signalTypeGracefulClose
 	signalTypeNums
 )
-
-type signalRedirect struct {
-	newAddr string
-}
 
 type redirectResult struct {
 	err  error
@@ -114,7 +111,7 @@ type BackendConnManager struct {
 	config         *BCConfig
 	logger         *zap.Logger
 	// It will be set to nil after migration.
-	redirectInfo atomic.Pointer[signalRedirect]
+	redirectInfo atomic.Pointer[router.BackendInst]
 	// redirectResCh is used to notify the event receiver asynchronously.
 	redirectResCh      chan *redirectResult
 	closeStatus        atomic.Int32
@@ -267,7 +264,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.handshakeHandler.OnTraffic(mgr)
 	}()
 	if len(request) < 1 {
-		err = gomysql.ErrMalformPacket
+		err = mysql.ErrMalformPacket
 		return
 	}
 	cmd := pnet.Command(request[0])
@@ -307,7 +304,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 				mgr.authenticator.capability &^= pnet.ClientMultiStatements
 				mgr.cmdProcessor.capability &^= pnet.ClientMultiStatements
 			default:
-				err = errors.Wrapf(gomysql.ErrMalformPacket, "unrecognized set_option value:%d", val)
+				err = errors.Wrapf(mysql.ErrMalformPacket, "unrecognized set_option value:%d", val)
 				return
 			}
 		case pnet.ComChangeUser:
@@ -362,7 +359,7 @@ func (mgr *BackendConnManager) initSessionStates(backendIO *pnet.PacketIO, sessi
 
 func (mgr *BackendConnManager) querySessionStates(backendIO *pnet.PacketIO) (sessionStates, sessionToken string, err error) {
 	// Do not lock here because the caller already locks.
-	var result *gomysql.Resultset
+	var result *mysql.Resultset
 	if result, _, err = mgr.cmdProcessor.query(backendIO, sqlQueryState); err != nil {
 		return
 	}
@@ -407,8 +404,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	case statusNotifyClose, statusClosing, statusClosed:
 		return
 	}
-	signal := mgr.redirectInfo.Load()
-	if signal == nil {
+	backendInst := mgr.redirectInfo.Load()
+	if backendInst == nil {
 		return
 	}
 	if !mgr.cmdProcessor.finishedTxn() {
@@ -417,7 +414,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 
 	rs := &redirectResult{
 		from: mgr.ServerAddr(),
-		to:   signal.newAddr,
+		to:   (*backendInst).Addr(),
 	}
 	defer func() {
 		// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
@@ -427,6 +424,11 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		// - Avoid the risk of deadlock
 		mgr.redirectResCh <- rs
 	}()
+	// It may have been too long since the redirection signal was sent, and the target backend may be unhealthy now.
+	if !(*backendInst).Healthy() {
+		rs.err = ErrTargetUnhealthy
+		return
+	}
 	backendIO := mgr.backendIO.Load()
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
@@ -488,13 +490,13 @@ func (mgr *BackendConnManager) updateAuthInfoFromSessionStates(sessionStates []b
 
 // Redirect implements RedirectableConn.Redirect interface. It redirects the current session to the newAddr.
 // Note that the caller requires the function to be non-blocking.
-func (mgr *BackendConnManager) Redirect(newAddr string) bool {
+func (mgr *BackendConnManager) Redirect(backendInst router.BackendInst) bool {
 	// NOTE: BackendConnManager may be closing concurrently because of no lock.
 	switch mgr.closeStatus.Load() {
 	case statusNotifyClose, statusClosing, statusClosed:
 		return false
 	}
-	mgr.redirectInfo.Store(&signalRedirect{newAddr: newAddr})
+	mgr.redirectInfo.Store(&backendInst)
 	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
 	mgr.signalReceived <- signalTypeRedirect
 	return true

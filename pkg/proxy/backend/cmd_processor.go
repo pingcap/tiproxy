@@ -6,7 +6,6 @@ package backend
 import (
 	"encoding/binary"
 
-	"github.com/pingcap/tidb/parser/mysql"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
@@ -58,7 +57,7 @@ func (cp *CmdProcessor) updateServerStatus(request []byte, serverStatus uint16) 
 }
 
 func (cp *CmdProcessor) updateTxnStatus(serverStatus uint16) {
-	if serverStatus&mysql.ServerStatusInTrans > 0 {
+	if serverStatus&pnet.ServerStatusInTrans > 0 {
 		cp.serverStatus |= StatusInTrans
 	} else {
 		cp.serverStatus &^= StatusInTrans
@@ -84,11 +83,11 @@ func (cp *CmdProcessor) updatePrepStmtStatus(request []byte, serverStatus uint16
 	case pnet.ComStmtSendLongData:
 		prepStmtStatus = StatusPrepareWaitExecute
 	case pnet.ComStmtExecute:
-		if serverStatus&mysql.ServerStatusCursorExists > 0 {
+		if serverStatus&pnet.ServerStatusCursorExists > 0 {
 			prepStmtStatus = StatusPrepareWaitFetch
 		}
 	case pnet.ComStmtFetch:
-		if serverStatus&mysql.ServerStatusLastRowSend == 0 {
+		if serverStatus&pnet.ServerStatusLastRowSend == 0 {
 			prepStmtStatus = StatusPrepareWaitFetch
 		}
 	}

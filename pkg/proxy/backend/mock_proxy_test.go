@@ -5,9 +5,10 @@ package backend
 
 import (
 	"crypto/tls"
+	"fmt"
 	"testing"
 
-	gomysql "github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
@@ -38,18 +39,20 @@ type mockProxy struct {
 
 	*proxyConfig
 	// outputs that received from the server.
-	rs *gomysql.Resultset
+	rs *mysql.Resultset
 	// execution results
 	err         error
 	logger      *zap.Logger
+	text        fmt.Stringer
 	holdRequest bool
 }
 
 func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
-	lg, _ := logger.CreateLoggerForTest(t)
+	lg, text := logger.CreateLoggerForTest(t)
 	mp := &mockProxy{
 		proxyConfig:        cfg,
 		logger:             lg.Named("mockProxy"),
+		text:               text,
 		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.connectionID, cfg.bcConfig),
 	}
 	mp.cmdProcessor.capability = cfg.capability

@@ -84,7 +84,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 	for be := router.backends.Back(); be != nil; be = be.Prev() {
 		backend := be.Value
 		// These backends may be recycled, so we should not connect to them again.
-		switch backend.status {
+		switch backend.Status() {
 		case StatusCannotConnect, StatusSchemaOutdated:
 			continue
 		}
@@ -97,7 +97,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 		}
 		if !found {
 			backend.connScore++
-			router.adjustBackendList(be)
+			router.adjustBackendList(be, false)
 			return backend.addr, nil
 		}
 	}
@@ -123,7 +123,7 @@ func (router *ScoreBasedRouter) onCreateConn(addr string, conn RedirectableConn,
 		conn.SetEventReceiver(router)
 	} else {
 		backend.connScore--
-		router.adjustBackendList(be)
+		router.adjustBackendList(be, true)
 	}
 }
 
@@ -131,7 +131,7 @@ func (router *ScoreBasedRouter) removeConn(be *glist.Element[*backendWrapper], c
 	backend := be.Value
 	backend.connList.Remove(ce)
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
-	router.adjustBackendList(be)
+	router.adjustBackendList(be, true)
 }
 
 func (router *ScoreBasedRouter) addConn(be *glist.Element[*backendWrapper], conn *connWrapper) {
@@ -139,13 +139,13 @@ func (router *ScoreBasedRouter) addConn(be *glist.Element[*backendWrapper], conn
 	ce := backend.connList.PushBack(conn)
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	router.setConnWrapper(conn, ce)
-	conn.NotifyBackendStatus(backend.status)
-	router.adjustBackendList(be)
+	conn.NotifyBackendStatus(backend.Status())
+	router.adjustBackendList(be, false)
 }
 
 // adjustBackendList moves `be` after the score of `be` changes to keep the list ordered.
-func (router *ScoreBasedRouter) adjustBackendList(be *glist.Element[*backendWrapper]) {
-	if router.removeBackendIfEmpty(be) {
+func (router *ScoreBasedRouter) adjustBackendList(be *glist.Element[*backendWrapper], removeEmpty bool) {
+	if removeEmpty && router.removeBackendIfEmpty(be) {
 		return
 	}
 
@@ -193,7 +193,7 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 			if connWrapper.phase != phaseRedirectNotify {
 				connWrapper.phase = phaseRedirectNotify
 				// we dont care the results
-				_ = connWrapper.Redirect(backend.addr)
+				_ = connWrapper.Redirect(backend)
 			}
 		}
 	}
@@ -225,14 +225,15 @@ func (router *ScoreBasedRouter) ensureBackend(addr string, forward bool) *glist.
 	if be == nil {
 		// The backend should always exist if it will be needed. Add a warning and add it back.
 		router.logger.Warn("backend is not found in the router", zap.String("backend_addr", addr), zap.Stack("stack"))
-		be = router.backends.PushFront(&backendWrapper{
-			backendHealth: &backendHealth{
-				status: StatusCannotConnect,
-			},
+		backend := &backendWrapper{
 			addr:     addr,
 			connList: glist.New[*connWrapper](),
+		}
+		backend.setHealth(backendHealth{
+			status: StatusCannotConnect,
 		})
-		router.adjustBackendList(be)
+		be = router.backends.PushFront(backend)
+		router.adjustBackendList(be, false)
 	}
 	return be
 }
@@ -261,9 +262,9 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		connWrapper.phase = phaseRedirectEnd
 	} else {
 		fromBe.Value.connScore++
-		router.adjustBackendList(fromBe)
+		router.adjustBackendList(fromBe, false)
 		toBe.Value.connScore--
-		router.adjustBackendList(toBe)
+		router.adjustBackendList(toBe, true)
 		connWrapper.phase = phaseRedirectFail
 	}
 	addMigrateMetrics(from, to, succeed, connWrapper.lastRedirect)
@@ -291,18 +292,19 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*backendHea
 		if be == nil && health.status != StatusCannotConnect {
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev", "none"), zap.String("cur", health.String()))
-			be = router.backends.PushBack(&backendWrapper{
-				backendHealth: health,
-				addr:          addr,
-				connList:      glist.New[*connWrapper](),
-			})
-			router.adjustBackendList(be)
+			backend := &backendWrapper{
+				addr:     addr,
+				connList: glist.New[*connWrapper](),
+			}
+			backend.setHealth(*health)
+			be = router.backends.PushBack(backend)
+			router.adjustBackendList(be, false)
 		} else if be != nil {
 			backend := be.Value
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev", backend.String()), zap.String("cur", health.String()))
-			backend.backendHealth = health
-			router.adjustBackendList(be)
+				zap.String("prev", backend.mu.String()), zap.String("cur", health.String()))
+			backend.setHealth(*health)
+			router.adjustBackendList(be, true)
 			for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
 				conn := ele.Value
 				conn.NotifyBackendStatus(health.status)
@@ -371,12 +373,12 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 			zap.String("from", busiestBackend.addr), zap.String("to", idlestBackend.addr),
 			zap.Int("from_score", busiestBackend.score()), zap.Int("to_score", idlestBackend.score()))
 		busiestBackend.connScore--
-		router.adjustBackendList(busiestEle)
+		router.adjustBackendList(busiestEle, true)
 		idlestBackend.connScore++
-		router.adjustBackendList(idlestEle)
+		router.adjustBackendList(idlestEle, false)
 		conn.phase = phaseRedirectNotify
 		conn.lastRedirect = curTime
-		conn.Redirect(idlestBackend.addr)
+		conn.Redirect(idlestBackend)
 	}
 }
 
@@ -384,7 +386,7 @@ func (router *ScoreBasedRouter) removeBackendIfEmpty(be *glist.Element[*backendW
 	backend := be.Value
 	// If connList.Len() == 0, there won't be any outgoing connections.
 	// And if also connScore == 0, there won't be any incoming connections.
-	if backend.status == StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
+	if backend.Status() == StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
 		router.backends.Remove(be)
 		return true
 	}
@@ -406,9 +408,12 @@ func (router *ScoreBasedRouter) ConnCount() int {
 func (router *ScoreBasedRouter) updateServerVersion() {
 	for be := router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
-		if backend.backendHealth.status != StatusCannotConnect && len(backend.serverVersion) > 0 {
-			router.serverVersion = backend.serverVersion
-			return
+		if backend.Status() != StatusCannotConnect {
+			serverVersion := backend.ServerVersion()
+			if len(serverVersion) > 0 {
+				router.serverVersion = serverVersion
+				return
+			}
 		}
 	}
 }

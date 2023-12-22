@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pingcap/tidb/parser/mysql"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 )
@@ -107,18 +106,18 @@ func TestAuthPlugin(t *testing.T) {
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.clientConfig.authPlugin = mysql.AuthNativePassword
+				cfg.clientConfig.authPlugin = pnet.AuthNativePassword
 			},
 			func(cfg *testConfig) {
-				cfg.clientConfig.authPlugin = mysql.AuthCachingSha2Password
+				cfg.clientConfig.authPlugin = pnet.AuthCachingSha2Password
 			},
 		},
 		{
 			func(cfg *testConfig) {
-				cfg.backendConfig.authPlugin = mysql.AuthNativePassword
+				cfg.backendConfig.authPlugin = pnet.AuthNativePassword
 			},
 			func(cfg *testConfig) {
-				cfg.backendConfig.authPlugin = mysql.AuthCachingSha2Password
+				cfg.backendConfig.authPlugin = pnet.AuthCachingSha2Password
 			},
 		},
 		{
