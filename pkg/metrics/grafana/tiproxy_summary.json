@@ -223,7 +223,7 @@
                "dashLength": 10,
                "dashes": false,
                "datasource": "${DS_TEST-CLUSTER}",
-               "description": "TiProxy current connection counts.",
+               "description": "TiProxy uptime since the last restart.",
                "fill": 1,
                "fillGradient": 0,
                "gridPos": {
@@ -233,6 +233,92 @@
                   "y": 0
                },
                "id": 5,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "time() - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Uptime",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy current connection counts.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 12,
+                  "y": 0
+               },
+               "id": 6,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -316,7 +402,93 @@
                "dashLength": 10,
                "dashes": false,
                "datasource": "${DS_TEST-CLUSTER}",
-               "description": "TiProxy current goroutine counts.",
+               "description": "TiProxy create connection count per minute.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 7,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "sum(increase(tiproxy_server_create_connection_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance)",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Create Connection OPM",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy disconnection count per minute.",
                "fill": 1,
                "fillGradient": 0,
                "gridPos": {
@@ -325,7 +497,93 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 6,
+               "id": 8,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "sum(increase(tiproxy_server_disconnection_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (type)",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{type}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Disconnection OPM",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy current goroutine counts.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 9,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -402,92 +660,6 @@
                      "show": true
                   }
                ]
-            },
-            {
-               "aliasColors": { },
-               "bars": false,
-               "dashLength": 10,
-               "dashes": false,
-               "datasource": "${DS_TEST-CLUSTER}",
-               "description": "TiProxy uptime since the last restart.",
-               "fill": 1,
-               "fillGradient": 0,
-               "gridPos": {
-                  "h": 6,
-                  "w": 12,
-                  "x": 0,
-                  "y": 0
-               },
-               "id": 7,
-               "legend": {
-                  "alignAsTable": false,
-                  "avg": false,
-                  "current": false,
-                  "max": false,
-                  "min": false,
-                  "rightSide": true,
-                  "show": true,
-                  "sideWidth": null,
-                  "total": false,
-                  "values": false
-               },
-               "lines": true,
-               "linewidth": 1,
-               "links": [ ],
-               "nullPointMode": "null",
-               "percentage": false,
-               "pointradius": 5,
-               "points": false,
-               "renderer": "flot",
-               "repeat": null,
-               "seriesOverrides": [ ],
-               "spaceLength": 10,
-               "stack": false,
-               "steppedLine": false,
-               "targets": [
-                  {
-                     "expr": "time() - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", job=\"tiproxy\"}",
-                     "format": "time_series",
-                     "intervalFactor": 2,
-                     "legendFormat": "{{instance}}",
-                     "refId": "A"
-                  }
-               ],
-               "thresholds": [ ],
-               "timeFrom": null,
-               "timeShift": null,
-               "title": "Uptime",
-               "tooltip": {
-                  "shared": true,
-                  "sort": 0,
-                  "value_type": "individual"
-               },
-               "type": "graph",
-               "xaxis": {
-                  "buckets": null,
-                  "mode": "time",
-                  "name": null,
-                  "show": true,
-                  "values": [ ]
-               },
-               "yaxes": [
-                  {
-                     "format": "s",
-                     "label": null,
-                     "logBase": 1,
-                     "max": null,
-                     "min": null,
-                     "show": true
-                  },
-                  {
-                     "format": "s",
-                     "label": null,
-                     "logBase": 1,
-                     "max": null,
-                     "min": null,
-                     "show": true
-                  }
-               ]
             }
          ],
          "repeat": null,
@@ -507,7 +679,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 8,
+         "id": 10,
          "panels": [
             {
                "aliasColors": { },
@@ -524,7 +696,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 9,
+               "id": 11,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -615,6 +787,178 @@
                "dashLength": 10,
                "dashes": false,
                "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy P99 query durations by TiProxy instances.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 12,
+                  "y": 0
+               },
+               "id": 12,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "histogram_quantile(0.99, sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (le, instance))",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "P99 Duration By Instance",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy P99 query durations by backends.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 13,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "label_replace(histogram_quantile(0.99, sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (le, backend)), \"backend\", \"$1\", \"backend\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{backend}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "P99 Duration By Backend",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
                "description": "TiProxy query total statistics including both successful and failed ones.",
                "fill": 1,
                "fillGradient": 0,
@@ -624,7 +968,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 10,
+               "id": 14,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -710,7 +1054,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 11,
+               "id": 15,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -796,7 +1140,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 12,
+               "id": 16,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -885,7 +1229,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 13,
+         "id": 17,
          "panels": [
             {
                "aliasColors": { },
@@ -902,7 +1246,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 14,
+               "id": 18,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -979,7 +1323,7 @@
                "dashLength": 10,
                "dashes": false,
                "datasource": "${DS_TEST-CLUSTER}",
-               "description": "Number of session migrations on all backends.",
+               "description": "OPM of session migrations on all backends.",
                "fill": 1,
                "fillGradient": 0,
                "gridPos": {
@@ -988,7 +1332,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 15,
+               "id": 19,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1016,7 +1360,7 @@
                "steppedLine": false,
                "targets": [
                   {
-                     "expr": "label_replace(label_replace(tiproxy_balance_migrate_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}, \"from\", \"$1\", \"from\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\"), \"to\", \"$1\", \"to\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
+                     "expr": "label_replace(label_replace(sum(increase(tiproxy_balance_migrate_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (migrate_res, from, to), \"from\", \"$1\", \"from\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\"), \"to\", \"$1\", \"to\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
                      "format": "time_series",
                      "intervalFactor": 2,
                      "legendFormat": "{{migrate_res}}: {{from}} => {{to}}",
@@ -1026,7 +1370,7 @@
                "thresholds": [ ],
                "timeFrom": null,
                "timeShift": null,
-               "title": "Session Migrations",
+               "title": "Session Migration OPM",
                "tooltip": {
                   "shared": true,
                   "sort": 0,
@@ -1074,7 +1418,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 16,
+               "id": 20,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1177,94 +1521,8 @@
             "x": 0,
             "y": 0
          },
-         "id": 17,
+         "id": 21,
          "panels": [
-            {
-               "aliasColors": { },
-               "bars": false,
-               "dashLength": 10,
-               "dashes": false,
-               "datasource": "${DS_TEST-CLUSTER}",
-               "description": "Number of getting an available backend.",
-               "fill": 1,
-               "fillGradient": 0,
-               "gridPos": {
-                  "h": 6,
-                  "w": 12,
-                  "x": 0,
-                  "y": 0
-               },
-               "id": 18,
-               "legend": {
-                  "alignAsTable": false,
-                  "avg": false,
-                  "current": false,
-                  "max": false,
-                  "min": false,
-                  "rightSide": true,
-                  "show": true,
-                  "sideWidth": null,
-                  "total": false,
-                  "values": false
-               },
-               "lines": true,
-               "linewidth": 1,
-               "links": [ ],
-               "nullPointMode": "null",
-               "percentage": false,
-               "pointradius": 5,
-               "points": false,
-               "renderer": "flot",
-               "repeat": null,
-               "seriesOverrides": [ ],
-               "spaceLength": 10,
-               "stack": false,
-               "steppedLine": false,
-               "targets": [
-                  {
-                     "expr": "tiproxy_backend_get_backend{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
-                     "format": "time_series",
-                     "intervalFactor": 2,
-                     "legendFormat": "{{instance}} : {{res}}",
-                     "refId": "A"
-                  }
-               ],
-               "thresholds": [ ],
-               "timeFrom": null,
-               "timeShift": null,
-               "title": "Get Backend Count",
-               "tooltip": {
-                  "shared": true,
-                  "sort": 0,
-                  "value_type": "individual"
-               },
-               "type": "graph",
-               "xaxis": {
-                  "buckets": null,
-                  "mode": "time",
-                  "name": null,
-                  "show": true,
-                  "values": [ ]
-               },
-               "yaxes": [
-                  {
-                     "format": "short",
-                     "label": null,
-                     "logBase": 1,
-                     "max": null,
-                     "min": null,
-                     "show": true
-                  },
-                  {
-                     "format": "short",
-                     "label": null,
-                     "logBase": 1,
-                     "max": null,
-                     "min": null,
-                     "show": true
-                  }
-               ]
-            },
             {
                "aliasColors": { },
                "bars": false,
@@ -1277,10 +1535,10 @@
                "gridPos": {
                   "h": 6,
                   "w": 12,
-                  "x": 12,
+                  "x": 0,
                   "y": 0
                },
-               "id": 19,
+               "id": 22,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1377,10 +1635,10 @@
                "gridPos": {
                   "h": 6,
                   "w": 12,
-                  "x": 0,
+                  "x": 12,
                   "y": 0
                },
-               "id": 20,
+               "id": 23,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1419,6 +1677,92 @@
                "timeFrom": null,
                "timeShift": null,
                "title": "Ping Backend Duration",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "Duration of each health check cycle.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 24,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "tiproxy_backend_health_check_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Health Check Cycle",
                "tooltip": {
                   "shared": true,
                   "sort": 0,

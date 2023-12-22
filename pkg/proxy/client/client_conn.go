@@ -9,6 +9,7 @@ import (
 	"net"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
@@ -62,6 +63,7 @@ clean:
 		fields = append(fields, zap.Stringer("quit_source", src), zap.Error(err))
 		cc.logger.Warn(msg, fields...)
 	}
+	metrics.DisConnCounter.WithLabelValues(src.String()).Inc()
 }
 
 func (cc *ClientConnection) processMsg(ctx context.Context) error {

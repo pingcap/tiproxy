@@ -180,6 +180,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	s.mu.Unlock()
 
 	metrics.ConnGauge.Inc()
+	metrics.CreateConnCounter.Inc()
 
 	defer func() {
 		s.mu.Lock()

@@ -43,4 +43,12 @@ var (
 			Name:      "ping_duration_seconds",
 			Help:      "Time (s) of pinging the SQL port of each backend.",
 		}, []string{LblBackend})
+
+	HealthCheckCycleGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelBackend,
+			Name:      "health_check_seconds",
+			Help:      "Time (s) of each health check cycle.",
+		})
 )

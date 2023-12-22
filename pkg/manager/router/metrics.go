@@ -19,7 +19,7 @@ func checkBackendStatusMetrics(addr string, status BackendStatus) bool {
 	if err != nil {
 		return false
 	}
-	return val == 1
+	return int(val) == 1
 }
 
 func setBackendConnMetrics(addr string, conns int) {
@@ -27,7 +27,8 @@ func setBackendConnMetrics(addr string, conns int) {
 }
 
 func readBackendConnMetrics(addr string) (int, error) {
-	return metrics.ReadGauge(metrics.BackendConnGauge.WithLabelValues(addr))
+	val, err := metrics.ReadGauge(metrics.BackendConnGauge.WithLabelValues(addr))
+	return int(val), err
 }
 
 func succeedToLabel(succeed bool) string {
@@ -52,4 +53,9 @@ func readMigrateCounter(from, to string, succeed bool) (int, error) {
 func setPingBackendMetrics(addr string, succeed bool, startTime time.Time) {
 	cost := time.Since(startTime)
 	metrics.PingBackendGauge.WithLabelValues(addr).Set(cost.Seconds())
+}
+
+func readHealthCheckCycle() (time.Duration, error) {
+	seconds, err := metrics.ReadGauge(metrics.HealthCheckCycleGauge)
+	return time.Duration(int(seconds * float64(time.Second))), err
 }

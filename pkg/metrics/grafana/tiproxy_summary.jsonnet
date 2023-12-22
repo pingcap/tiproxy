@@ -106,6 +106,34 @@ local connectionP = graphPanel.new(
   )
 );
 
+local createConnP = graphPanel.new(
+  title='Create Connection OPM',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy create connection count per minute.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'sum(increase(tiproxy_server_create_connection_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (instance)',
+    legendFormat='{{instance}}',
+  )
+);
+
+local disconnP = graphPanel.new(
+  title='Disconnection OPM',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy disconnection count per minute.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'sum(increase(tiproxy_server_disconnection_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (type)',
+    legendFormat='{{type}}',
+  )
+);
+
 local goroutineP = graphPanel.new(
   title='Goroutine Count',
   datasource=myDS,
@@ -208,17 +236,31 @@ local durationP = graphPanel.new(
   )
 );
 
-local durationByBackP = graphPanel.new(
-  title='Duration By Backend',
+local durByInstP = graphPanel.new(
+  title='P99 Duration By Instance',
   datasource=myDS,
   legend_rightSide=true,
-  description='TiProxy P99 query durations by instances and backends.',
+  description='TiProxy P99 query durations by TiProxy instances.',
   format='s',
 )
 .addTarget(
   prometheus.target(
-    'label_replace(histogram_quantile(0.99, sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le, instance, backend)), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
-    legendFormat='{{instance}} | {{backend}}',
+    'histogram_quantile(0.99, sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le, instance))',
+    legendFormat='{{instance}}',
+  )
+);
+
+local durByBackP = graphPanel.new(
+  title='P99 Duration By Backend',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy P99 query durations by backends.',
+  format='s',
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(histogram_quantile(0.99, sum(rate(tiproxy_session_query_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le, backend)), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{backend}}',
   )
 );
 
@@ -281,15 +323,15 @@ local bConnP = graphPanel.new(
 );
 
 local bMigCounterP = graphPanel.new(
-  title='Session Migrations',
+  title='Session Migration OPM',
   datasource=myDS,
   legend_rightSide=true,
-  description='Number of session migrations on all backends.',
+  description='OPM of session migrations on all backends.',
   format='short',
 )
 .addTarget(
   prometheus.target(
-    'label_replace(label_replace(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}, "from", "$1", "from", "(.+-tidb-[0-9]+).*peer.*.svc.*"), "to", "$1", "to", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    'label_replace(label_replace(sum(increase(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (migrate_res, from, to), "from", "$1", "from", "(.+-tidb-[0-9]+).*peer.*.svc.*"), "to", "$1", "to", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
     legendFormat='{{migrate_res}}: {{from}} => {{to}}',
   )
 );
@@ -348,20 +390,6 @@ local bGetDurP = graphPanel.new(
   )
 );
 
-local bGetBeP = graphPanel.new(
-  title='Get Backend Count',
-  datasource=myDS,
-  legend_rightSide=true,
-  description='Number of getting an available backend.',
-  format='short',
-)
-.addTarget(
-  prometheus.target(
-    'tiproxy_backend_get_backend{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}',
-    legendFormat='{{instance}} : {{res}}',
-  )
-);
-
 local bPingBeP = graphPanel.new(
   title='Ping Backend Duration',
   datasource=myDS,
@@ -373,6 +401,21 @@ local bPingBeP = graphPanel.new(
   prometheus.target(
     'label_replace(tiproxy_backend_ping_duration_seconds{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}, "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
     legendFormat='{{instance}} | {{backend}}',
+  )
+);
+
+local bHealthCycleP =
+graphPanel.new(
+  title='Health Check Cycle',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Duration of each health check cycle.',
+  format='s',
+)
+.addTarget(
+  prometheus.target(
+    'tiproxy_backend_health_check_seconds{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}',
+    legendFormat='{{instance}}',
   )
 );
 
@@ -391,15 +434,19 @@ newDash
   serverRow
   .addPanel(cpuP, gridPos=leftPanelPos)
   .addPanel(memP, gridPos=rightPanelPos)
-  .addPanel(connectionP, gridPos=leftPanelPos)
-  .addPanel(goroutineP, gridPos=rightPanelPos)
   .addPanel(uptimeP, gridPos=leftPanelPos)
+  .addPanel(connectionP, gridPos=rightPanelPos)
+  .addPanel(createConnP, gridPos=leftPanelPos)
+  .addPanel(disconnP, gridPos=rightPanelPos)
+  .addPanel(goroutineP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )
 .addPanel(
   queryRow
   .addPanel(durationP, gridPos=leftPanelPos)
+  .addPanel(durByInstP, gridPos=rightPanelPos)
+  .addPanel(durByBackP, gridPos=leftPanelPos)
   .addPanel(cpsByInstP, gridPos=rightPanelPos)
   .addPanel(cpsByBackP, gridPos=leftPanelPos)
   .addPanel(cpsByCMDP, gridPos=rightPanelPos)
@@ -416,9 +463,9 @@ newDash
 )
 .addPanel(
   backendRow
-  .addPanel(bGetBeP, gridPos=leftPanelPos)
-  .addPanel(bGetDurP, gridPos=rightPanelPos)
-  .addPanel(bPingBeP, gridPos=leftPanelPos)
+  .addPanel(bGetDurP, gridPos=leftPanelPos)
+  .addPanel(bPingBeP, gridPos=rightPanelPos)
+  .addPanel(bHealthCycleP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )

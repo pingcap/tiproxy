@@ -172,6 +172,10 @@ func (ts *observerTestSuite) checkStatus(backend *backendServer, expectedStatus 
 	require.True(ts.t, ok)
 	require.Equal(ts.t, expectedStatus, health.status)
 	require.True(ts.t, checkBackendStatusMetrics(backend.sqlAddr, health.status))
+	cycle, err := readHealthCheckCycle()
+	require.NoError(ts.t, err)
+	require.Greater(ts.t, cycle.Nanoseconds(), int64(0))
+	require.Less(ts.t, cycle.Nanoseconds(), 3*time.Second)
 }
 
 func (ts *observerTestSuite) getBackendsFromCh() map[string]*backendHealth {

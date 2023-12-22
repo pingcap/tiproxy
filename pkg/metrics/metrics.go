@@ -154,6 +154,8 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
 
 	prometheus.MustRegister(ConnGauge)
+	prometheus.MustRegister(CreateConnCounter)
+	prometheus.MustRegister(DisConnCounter)
 	prometheus.MustRegister(MaxProcsGauge)
 	prometheus.MustRegister(ServerEventCounter)
 	prometheus.MustRegister(ServerErrCounter)
@@ -166,6 +168,7 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(GetBackendCounter)
 	prometheus.MustRegister(PingBackendGauge)
 	prometheus.MustRegister(BackendConnGauge)
+	prometheus.MustRegister(HealthCheckCycleGauge)
 	prometheus.MustRegister(MigrateCounter)
 	prometheus.MustRegister(MigrateDurationHistogram)
 }
@@ -192,10 +195,10 @@ func ReadCounter(counter prometheus.Counter) (int, error) {
 }
 
 // ReadGauge reads the value from the gauge. It is only used for testing.
-func ReadGauge(gauge prometheus.Gauge) (int, error) {
+func ReadGauge(gauge prometheus.Gauge) (float64, error) {
 	var metric dto.Metric
 	if err := gauge.Write(&metric); err != nil {
 		return 0, err
 	}
-	return int(metric.Gauge.GetValue()), nil
+	return metric.Gauge.GetValue(), nil
 }
