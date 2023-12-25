@@ -136,12 +136,12 @@ func (tester *routerTester) createConn() *mockRedirectableConn {
 }
 
 func (tester *routerTester) addBackends(num int) {
-	backends := make(map[string]*backendHealth)
+	backends := make(map[string]*BackendHealth)
 	for i := 0; i < num; i++ {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
-		backends[addr] = &backendHealth{
-			status: StatusHealthy,
+		backends[addr] = &BackendHealth{
+			Status: StatusHealthy,
 		}
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
@@ -150,7 +150,7 @@ func (tester *routerTester) addBackends(num int) {
 }
 
 func (tester *routerTester) killBackends(num int) {
-	backends := make(map[string]*backendHealth)
+	backends := make(map[string]*BackendHealth)
 	indexes := rand.Perm(tester.router.backends.Len())
 	for _, index := range indexes {
 		if len(backends) >= num {
@@ -158,11 +158,15 @@ func (tester *routerTester) killBackends(num int) {
 		}
 		// set the ith backend as unhealthy
 		backend := tester.getBackendByIndex(index)
+<<<<<<< Updated upstream
 		if backend.Status() == StatusCannotConnect {
+=======
+		if backend.Status == StatusCannotConnect {
+>>>>>>> Stashed changes
 			continue
 		}
-		backends[backend.addr] = &backendHealth{
-			status: StatusCannotConnect,
+		backends[backend.addr] = &BackendHealth{
+			Status: StatusCannotConnect,
 		}
 	}
 	tester.router.OnBackendChanged(backends, nil)
@@ -170,9 +174,9 @@ func (tester *routerTester) killBackends(num int) {
 }
 
 func (tester *routerTester) updateBackendStatusByAddr(addr string, status BackendStatus) {
-	backends := map[string]*backendHealth{
+	backends := map[string]*BackendHealth{
 		addr: {
-			status: status,
+			Status: status,
 		},
 	}
 	tester.router.OnBackendChanged(backends, nil)
@@ -192,7 +196,11 @@ func (tester *routerTester) checkBackendOrder() {
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
 		// Empty unhealthy backends should be removed.
+<<<<<<< Updated upstream
 		if backend.Status() == StatusCannotConnect {
+=======
+		if backend.Status == StatusCannotConnect {
+>>>>>>> Stashed changes
 			require.True(tester.t, backend.connList.Len() > 0 || backend.connScore > 0)
 		}
 		curScore := backend.score()
@@ -288,7 +296,11 @@ func (tester *routerTester) checkBalanced() {
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
 		// Empty unhealthy backends should be removed.
+<<<<<<< Updated upstream
 		require.Equal(tester.t, StatusHealthy, backend.Status())
+=======
+		require.Equal(tester.t, StatusHealthy, backend.Status)
+>>>>>>> Stashed changes
 		curScore := backend.score()
 		if curScore > maxNum {
 			maxNum = curScore
@@ -638,20 +650,21 @@ func TestRebalanceCornerCase(t *testing.T) {
 
 // Test all kinds of events occur concurrently.
 func TestConcurrency(t *testing.T) {
-	// Disable health check so that it just reads BackendFetcher.
+	// Disable backends check so that it just reads BackendFetcher.
 	healthCheckConfig := &config.HealthCheck{
 		Enable:   false,
 		Interval: 10 * time.Millisecond,
 	}
 	fetcher := &mockBackendFetcher{}
 	lg, _ := logger.CreateLoggerForTest(t)
+	hc := NewDefaultHealthCheck(nil, healthCheckConfig, lg)
 	router := NewScoreBasedRouter(lg)
-	err := router.Init(nil, fetcher, healthCheckConfig)
+	err := router.Init(fetcher, hc, healthCheckConfig)
 	require.NoError(t, err)
 
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	// Create 3 backends and change their status randomly.
+	// Create 3 backends and change their Status randomly.
 	fetcher.backends = map[string]*BackendInfo{
 		"0": {},
 		"1": {},
@@ -738,20 +751,14 @@ func TestConcurrency(t *testing.T) {
 
 // Test that the backends are refreshed immediately after it's empty.
 func TestRefresh(t *testing.T) {
-	backends := make([]string, 0)
-	var m sync.Mutex
-	fetcher := NewExternalFetcher(func() ([]string, error) {
-		m.Lock()
-		defer m.Unlock()
-		return backends, nil
-	})
-	// Create a router with a very long health check interval.
+	fetcher := newMockBackendFetcher()
+	hc := newMockHealthCheck()
 	lg, _ := logger.CreateLoggerForTest(t)
+	// Create a router with a very long backends check interval.
 	rt := NewScoreBasedRouter(lg)
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
-	observer, err := StartBackendObserver(lg, rt, nil, cfg, fetcher)
-	require.NoError(t, err)
+	observer := StartBackendObserver(lg, rt, cfg, fetcher, hc)
 	rt.Lock()
 	rt.observer = observer
 	rt.Unlock()
@@ -762,11 +769,8 @@ func TestRefresh(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, len(addr) == 0)
 	// Create a new backend and add to the list.
-	server := newBackendServer(t)
-	m.Lock()
-	backends = append(backends, server.sqlAddr)
-	m.Unlock()
-	defer server.close()
+	fetcher.setBackend("127.0.0.1:4000", &BackendInfo{})
+	hc.setBackend("127.0.0.1:4000", &BackendHealth{Status: StatusHealthy})
 	// The backends are refreshed very soon.
 	require.Eventually(t, func() bool {
 		addr, err = selector.Next()
@@ -784,11 +788,12 @@ func TestObserveError(t *testing.T) {
 		defer m.Unlock()
 		return backends, observeError
 	})
-	// Create a router with a very short health check interval.
+	hc := newMockHealthCheck()
+	// Create a router with a very short backends check interval.
 	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
-	observer, err := StartBackendObserver(lg, rt, nil, newHealthCheckConfigForTest(), fetcher)
-	require.NoError(t, err)
+	healthCheckConfig := newHealthCheckConfigForTest()
+	observer := StartBackendObserver(lg, rt, healthCheckConfig, fetcher, hc)
 	rt.Lock()
 	rt.observer = observer
 	rt.Unlock()
@@ -799,11 +804,10 @@ func TestObserveError(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, len(addr) == 0)
 	// Create a new backend and add to the list.
-	server := newBackendServer(t)
+	hc.setBackend("127.0.0.1:4000", &BackendHealth{Status: StatusHealthy})
 	m.Lock()
-	backends = append(backends, server.sqlAddr)
+	backends = append(backends, "127.0.0.1:4000")
 	m.Unlock()
-	defer server.close()
 	// The backends are refreshed very soon.
 	require.Eventually(t, func() bool {
 		selector.Reset()
@@ -832,17 +836,14 @@ func TestObserveError(t *testing.T) {
 }
 
 func TestDisableHealthCheck(t *testing.T) {
-	backends := []string{"127.0.0.1:4000"}
-	var m sync.Mutex
-	fetcher := NewExternalFetcher(func() ([]string, error) {
-		m.Lock()
-		defer m.Unlock()
-		return backends, nil
-	})
-	// Create a router with a very short health check interval.
+	fetcher := newMockBackendFetcher()
+	fetcher.setBackend("127.0.0.1:4000", nil)
+	healtchCheckConfig := &config.HealthCheck{Enable: false}
+	// Create a router with a very short backends check interval.
 	lg, _ := logger.CreateLoggerForTest(t)
+	hc := NewDefaultHealthCheck(nil, healtchCheckConfig, lg)
 	rt := NewScoreBasedRouter(lg)
-	err := rt.Init(nil, fetcher, &config.HealthCheck{Enable: false})
+	err := rt.Init(fetcher, hc, healtchCheckConfig)
 	require.NoError(t, err)
 	defer rt.Close()
 	// No backends and no error.
@@ -854,9 +855,7 @@ func TestDisableHealthCheck(t *testing.T) {
 		return addr == "127.0.0.1:4000"
 	}, 3*time.Second, 100*time.Millisecond)
 	// Replace the backend.
-	m.Lock()
-	backends[0] = "127.0.0.1:5000"
-	m.Unlock()
+	fetcher.setBackend("127.0.0.1:5000", nil)
 	require.Eventually(t, func() bool {
 		addr, err := selector.Next()
 		require.NoError(t, err)
@@ -882,14 +881,14 @@ func TestGetServerVersion(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	t.Cleanup(rt.Close)
-	backends := map[string]*backendHealth{
+	backends := map[string]*BackendHealth{
 		"0": {
-			status:        StatusHealthy,
-			serverVersion: "1.0",
+			Status:        StatusHealthy,
+			ServerVersion: "1.0",
 		},
 		"1": {
-			status:        StatusHealthy,
-			serverVersion: "2.0",
+			Status:        StatusHealthy,
+			ServerVersion: "2.0",
 		},
 	}
 	rt.OnBackendChanged(backends, nil)
