@@ -80,11 +80,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 	for be := router.backends.Back(); be != nil; be = be.Prev() {
 		backend := be.Value
 		// These backends may be recycled, so we should not connect to them again.
-<<<<<<< Updated upstream
 		switch backend.Status() {
-=======
-		switch backend.Status {
->>>>>>> Stashed changes
 		case StatusCannotConnect, StatusSchemaOutdated:
 			continue
 		}
@@ -139,13 +135,8 @@ func (router *ScoreBasedRouter) addConn(be *glist.Element[*backendWrapper], conn
 	ce := backend.connList.PushBack(conn)
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	router.setConnWrapper(conn, ce)
-<<<<<<< Updated upstream
 	conn.NotifyBackendStatus(backend.Status())
 	router.adjustBackendList(be, false)
-=======
-	conn.NotifyBackendStatus(backend.Status)
-	router.adjustBackendList(be)
->>>>>>> Stashed changes
 }
 
 // adjustBackendList moves `be` after the score of `be` changes to keep the list ordered.
@@ -230,19 +221,12 @@ func (router *ScoreBasedRouter) ensureBackend(addr string, forward bool) *glist.
 	if be == nil {
 		// The backend should always exist if it will be needed. Add a warning and add it back.
 		router.logger.Warn("backend is not found in the router", zap.String("backend_addr", addr), zap.Stack("stack"))
-<<<<<<< Updated upstream
 		backend := &backendWrapper{
-=======
-		be = router.backends.PushFront(&backendWrapper{
-			BackendHealth: &BackendHealth{
-				Status: StatusCannotConnect,
-			},
->>>>>>> Stashed changes
 			addr:     addr,
 			connList: glist.New[*connWrapper](),
 		}
-		backend.setHealth(backendHealth{
-			status: StatusCannotConnect,
+		backend.setHealth(BackendHealth{
+			Status: StatusCannotConnect,
 		})
 		be = router.backends.PushFront(backend)
 		router.adjustBackendList(be, false)
@@ -304,7 +288,6 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 		if be == nil && health.Status != StatusCannotConnect {
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev", "none"), zap.String("cur", health.String()))
-<<<<<<< Updated upstream
 			backend := &backendWrapper{
 				addr:     addr,
 				connList: glist.New[*connWrapper](),
@@ -318,20 +301,6 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 				zap.String("prev", backend.mu.String()), zap.String("cur", health.String()))
 			backend.setHealth(*health)
 			router.adjustBackendList(be, true)
-=======
-			be = router.backends.PushBack(&backendWrapper{
-				BackendHealth: health,
-				addr:          addr,
-				connList:      glist.New[*connWrapper](),
-			})
-			router.adjustBackendList(be)
-		} else if be != nil {
-			backend := be.Value
-			router.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev", backend.String()), zap.String("cur", health.String()))
-			backend.BackendHealth = health
-			router.adjustBackendList(be)
->>>>>>> Stashed changes
 			for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
 				conn := ele.Value
 				conn.NotifyBackendStatus(health.Status)
@@ -413,11 +382,7 @@ func (router *ScoreBasedRouter) removeBackendIfEmpty(be *glist.Element[*backendW
 	backend := be.Value
 	// If connList.Len() == 0, there won't be any outgoing connections.
 	// And if also connScore == 0, there won't be any incoming connections.
-<<<<<<< Updated upstream
 	if backend.Status() == StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
-=======
-	if backend.Status == StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
->>>>>>> Stashed changes
 		router.backends.Remove(be)
 		return true
 	}
@@ -439,18 +404,12 @@ func (router *ScoreBasedRouter) ConnCount() int {
 func (router *ScoreBasedRouter) updateServerVersion() {
 	for be := router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
-<<<<<<< Updated upstream
 		if backend.Status() != StatusCannotConnect {
 			serverVersion := backend.ServerVersion()
 			if len(serverVersion) > 0 {
 				router.serverVersion = serverVersion
 				return
 			}
-=======
-		if backend.BackendHealth.Status != StatusCannotConnect && len(backend.ServerVersion) > 0 {
-			router.serverVersion = backend.ServerVersion
-			return
->>>>>>> Stashed changes
 		}
 	}
 }

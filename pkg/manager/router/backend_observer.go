@@ -11,11 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
-<<<<<<< Updated upstream
 	"github.com/pingcap/tiproxy/pkg/metrics"
-	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-=======
->>>>>>> Stashed changes
 	"go.uber.org/zap"
 )
 

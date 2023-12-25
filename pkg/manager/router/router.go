@@ -77,14 +77,10 @@ type BackendInst interface {
 
 // backendWrapper contains the connections on the backend.
 type backendWrapper struct {
-<<<<<<< Updated upstream
 	mu struct {
 		sync.RWMutex
-		backendHealth
+		BackendHealth
 	}
-=======
-	*BackendHealth
->>>>>>> Stashed changes
 	addr string
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
 	// connScore = connList.Len() + incoming connections - outgoing connections.
@@ -94,17 +90,16 @@ type backendWrapper struct {
 	connList *glist.List[*connWrapper]
 }
 
-func (b *backendWrapper) setHealth(health backendHealth) {
+func (b *backendWrapper) setHealth(health BackendHealth) {
 	b.mu.Lock()
-	b.mu.backendHealth = health
+	b.mu.BackendHealth = health
 	b.mu.Unlock()
 }
 
 // score calculates the score of the backend. Larger score indicates higher load.
 func (b *backendWrapper) score() int {
-<<<<<<< Updated upstream
 	b.mu.RLock()
-	score := b.mu.status.ToScore() + b.connScore
+	score := b.mu.Status.ToScore() + b.connScore
 	b.mu.RUnlock()
 	return score
 }
@@ -115,21 +110,21 @@ func (b *backendWrapper) Addr() string {
 
 func (b *backendWrapper) Status() BackendStatus {
 	b.mu.RLock()
-	status := b.mu.status
+	status := b.mu.Status
 	b.mu.RUnlock()
 	return status
 }
 
 func (b *backendWrapper) Healthy() bool {
 	b.mu.RLock()
-	healthy := b.mu.status == StatusHealthy
+	healthy := b.mu.Status == StatusHealthy
 	b.mu.RUnlock()
 	return healthy
 }
 
 func (b *backendWrapper) ServerVersion() string {
 	b.mu.RLock()
-	version := b.mu.serverVersion
+	version := b.mu.ServerVersion
 	b.mu.RUnlock()
 	return version
 }
@@ -139,9 +134,6 @@ func (b *backendWrapper) String() string {
 	str := b.mu.String()
 	b.mu.RUnlock()
 	return str
-=======
-	return b.Status.ToScore() + b.connScore
->>>>>>> Stashed changes
 }
 
 // connWrapper wraps RedirectableConn.

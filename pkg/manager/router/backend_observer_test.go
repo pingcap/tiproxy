@@ -132,17 +132,12 @@ func (ts *observerTestSuite) checkStatus(addr string, expectedStatus BackendStat
 	require.Equal(ts.t, 1, len(backends))
 	health, ok := backends[addr]
 	require.True(ts.t, ok)
-<<<<<<< Updated upstream
-	require.Equal(ts.t, expectedStatus, health.status)
-	require.True(ts.t, checkBackendStatusMetrics(backend.sqlAddr, health.status))
+	require.Equal(ts.t, expectedStatus, health.Status)
+	require.True(ts.t, checkBackendStatusMetrics(addr, health.Status))
 	cycle, err := readHealthCheckCycle()
 	require.NoError(ts.t, err)
 	require.Greater(ts.t, cycle.Nanoseconds(), int64(0))
 	require.Less(ts.t, cycle.Nanoseconds(), 3*time.Second)
-=======
-	require.Equal(ts.t, expectedStatus, health.Status)
-	require.True(ts.t, checkBackendStatusMetrics(addr, health.Status))
->>>>>>> Stashed changes
 }
 
 func (ts *observerTestSuite) getBackendsFromCh() map[string]*BackendHealth {

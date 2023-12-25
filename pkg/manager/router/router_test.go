@@ -158,11 +158,7 @@ func (tester *routerTester) killBackends(num int) {
 		}
 		// set the ith backend as unhealthy
 		backend := tester.getBackendByIndex(index)
-<<<<<<< Updated upstream
 		if backend.Status() == StatusCannotConnect {
-=======
-		if backend.Status == StatusCannotConnect {
->>>>>>> Stashed changes
 			continue
 		}
 		backends[backend.addr] = &BackendHealth{
@@ -196,11 +192,7 @@ func (tester *routerTester) checkBackendOrder() {
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
 		// Empty unhealthy backends should be removed.
-<<<<<<< Updated upstream
 		if backend.Status() == StatusCannotConnect {
-=======
-		if backend.Status == StatusCannotConnect {
->>>>>>> Stashed changes
 			require.True(tester.t, backend.connList.Len() > 0 || backend.connScore > 0)
 		}
 		curScore := backend.score()
@@ -296,11 +288,7 @@ func (tester *routerTester) checkBalanced() {
 	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
 		// Empty unhealthy backends should be removed.
-<<<<<<< Updated upstream
 		require.Equal(tester.t, StatusHealthy, backend.Status())
-=======
-		require.Equal(tester.t, StatusHealthy, backend.Status)
->>>>>>> Stashed changes
 		curScore := backend.score()
 		if curScore > maxNum {
 			maxNum = curScore
