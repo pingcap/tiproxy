@@ -6,17 +6,12 @@ package router
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/http"
-	"strings"
 	"time"
 
-	"github.com/cenkalti/backoff/v4"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
-	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"go.uber.org/zap"
 )
 
@@ -58,31 +53,29 @@ var statusScores = map[BackendStatus]int{
 	StatusSchemaOutdated: 10000000,
 }
 
-type backendHealth struct {
-	status        BackendStatus
-	pingErr       error
-	serverVersion string
+type BackendHealth struct {
+	Status BackendStatus
+	// The error occurred when backends check fails. It's used to log why the backend becomes unhealthy.
+	PingErr error
+	// The backend version that returned to the client during handshake.
+	ServerVersion string
 }
 
-func (bh *backendHealth) String() string {
-	str := fmt.Sprintf("status: %s", bh.status.String())
-	if bh.pingErr != nil {
-		str += fmt.Sprintf(", err: %s", bh.pingErr.Error())
+func (bh *BackendHealth) String() string {
+	str := fmt.Sprintf("Status: %s", bh.Status.String())
+	if bh.PingErr != nil {
+		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
 	}
 	return str
 }
 
-const (
-	statusPathSuffix = "/status"
-)
-
-// BackendEventReceiver receives the event of backend status change.
+// BackendEventReceiver receives the event of backend Status change.
 type BackendEventReceiver interface {
 	// OnBackendChanged is called when the backend list changes.
-	OnBackendChanged(backends map[string]*backendHealth, err error)
+	OnBackendChanged(backends map[string]*BackendHealth, err error)
 }
 
-// BackendInfo stores the status info of each backend.
+// BackendInfo stores the Status info of each backend.
 type BackendInfo struct {
 	IP         string
 	StatusPort uint
@@ -92,11 +85,10 @@ type BackendInfo struct {
 type BackendObserver struct {
 	logger            *zap.Logger
 	healthCheckConfig *config.HealthCheck
-	// The current backend status synced to the receiver.
-	curBackendInfo map[string]*backendHealth
+	// The current backend Status synced to the receiver.
+	curBackendInfo map[string]*BackendHealth
 	fetcher        BackendFetcher
-	httpCli        *http.Client
-	httpTLS        bool
+	hc             HealthCheck
 	eventReceiver  BackendEventReceiver
 	wg             waitgroup.WaitGroup
 	cancelFunc     context.CancelFunc
@@ -104,37 +96,26 @@ type BackendObserver struct {
 }
 
 // StartBackendObserver creates a BackendObserver and starts watching.
-func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, httpCli *http.Client,
-	config *config.HealthCheck, backendFetcher BackendFetcher) (*BackendObserver, error) {
-	bo, err := NewBackendObserver(logger, eventReceiver, httpCli, config, backendFetcher)
-	if err != nil {
-		return nil, err
-	}
+func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, config *config.HealthCheck,
+	backendFetcher BackendFetcher, hc HealthCheck) *BackendObserver {
+	bo := NewBackendObserver(logger, eventReceiver, config, backendFetcher, hc)
 	bo.Start()
-	return bo, nil
+	return bo
 }
 
 // NewBackendObserver creates a BackendObserver.
-func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, httpCli *http.Client,
-	config *config.HealthCheck, backendFetcher BackendFetcher) (*BackendObserver, error) {
-	if httpCli == nil {
-		httpCli = http.DefaultClient
-	}
-	httpTLS := false
-	if v, ok := httpCli.Transport.(*http.Transport); ok && v != nil && v.TLSClientConfig != nil {
-		httpTLS = true
-	}
+func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, config *config.HealthCheck,
+	backendFetcher BackendFetcher, hc HealthCheck) *BackendObserver {
 	bo := &BackendObserver{
 		logger:            logger,
 		healthCheckConfig: config,
-		curBackendInfo:    make(map[string]*backendHealth),
-		httpCli:           httpCli,
-		httpTLS:           httpTLS,
+		curBackendInfo:    make(map[string]*BackendHealth),
+		hc:                hc,
 		eventReceiver:     eventReceiver,
 		refreshChan:       make(chan struct{}),
+		fetcher:           backendFetcher,
 	}
-	bo.fetcher = backendFetcher
-	return bo, nil
+	return bo
 }
 
 // Start starts watching.
@@ -184,117 +165,46 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 	}
 }
 
-func (bo *BackendObserver) connectWithRetry(ctx context.Context, connect func() error) error {
-	err := backoff.Retry(func() error {
-		err := connect()
-		if !isRetryableError(err) {
-			return backoff.Permanent(err)
-		}
-		return err
-	}, backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(bo.healthCheckConfig.RetryInterval), uint64(bo.healthCheckConfig.MaxRetries)), ctx))
-	return err
-}
-
-func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]*backendHealth {
-	curBackendHealth := make(map[string]*backendHealth, len(backends))
+func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]*BackendHealth {
+	curBackendHealth := make(map[string]*BackendHealth, len(backends))
 	for addr, info := range backends {
-		bh := &backendHealth{
-			status: StatusHealthy,
-		}
-		curBackendHealth[addr] = bh
-		if !bo.healthCheckConfig.Enable {
-			continue
-		}
 		if ctx.Err() != nil {
 			return nil
 		}
-
-		// Skip checking the status port if it's not fetched.
-		if info != nil && len(info.IP) > 0 {
-			// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
-			// new connections, so we must check the status port first.
-			schema := "http"
-			if bo.httpTLS {
-				schema = "https"
-			}
-			httpCli := *bo.httpCli
-			httpCli.Timeout = bo.healthCheckConfig.DialTimeout
-			url := fmt.Sprintf("%s://%s:%d%s", schema, info.IP, info.StatusPort, statusPathSuffix)
-			err := bo.connectWithRetry(ctx, func() error {
-				resp, err := httpCli.Get(url)
-				if err == nil {
-					if resp.StatusCode != http.StatusOK {
-						err = backoff.Permanent(errors.Errorf("http status %d", resp.StatusCode))
-					}
-					if ignoredErr := resp.Body.Close(); ignoredErr != nil {
-						bo.logger.Warn("close http response in health check failed", zap.Error(ignoredErr))
-					}
-				}
-				return err
-			})
-			if err != nil {
-				bh.status = StatusCannotConnect
-				bh.pingErr = errors.Wrapf(err, "connect status port failed")
-				continue
-			}
-		}
-
-		// Also dial the SQL port just in case that the SQL port hangs.
-		var serverVersion string
-		err := bo.connectWithRetry(ctx, func() error {
-			startTime := time.Now()
-			conn, err := net.DialTimeout("tcp", addr, bo.healthCheckConfig.DialTimeout)
-			setPingBackendMetrics(addr, err == nil, startTime)
-			if err != nil {
-				return err
-			}
-			if err = conn.SetReadDeadline(time.Now().Add(bo.healthCheckConfig.DialTimeout)); err != nil {
-				return err
-			}
-			serverVersion, err = pnet.ReadServerVersion(conn)
-			if ignoredErr := conn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
-				bo.logger.Warn("close connection in health check failed", zap.Error(ignoredErr))
-			}
-			bh.serverVersion = serverVersion
-			return err
-		})
-		if err != nil {
-			bh.status = StatusCannotConnect
-			bh.pingErr = errors.Wrapf(err, "connect sql port failed")
-		}
+		curBackendHealth[addr] = bo.hc.Check(ctx, addr, info)
 	}
 	return curBackendHealth
 }
 
-func (bo *BackendObserver) notifyIfChanged(bhMap map[string]*backendHealth) {
-	updatedBackends := make(map[string]*backendHealth)
+func (bo *BackendObserver) notifyIfChanged(bhMap map[string]*BackendHealth) {
+	updatedBackends := make(map[string]*BackendHealth)
 	for addr, lastHealth := range bo.curBackendInfo {
-		if lastHealth.status == StatusHealthy {
+		if lastHealth.Status == StatusHealthy {
 			if newHealth, ok := bhMap[addr]; !ok {
-				updatedBackends[addr] = &backendHealth{
-					status:  StatusCannotConnect,
-					pingErr: errors.New("removed from backend list"),
+				updatedBackends[addr] = &BackendHealth{
+					Status:  StatusCannotConnect,
+					PingErr: errors.New("removed from backend list"),
 				}
-				updateBackendStatusMetrics(addr, lastHealth.status, StatusCannotConnect)
-			} else if newHealth.status != StatusHealthy {
+				updateBackendStatusMetrics(addr, lastHealth.Status, StatusCannotConnect)
+			} else if newHealth.Status != StatusHealthy {
 				updatedBackends[addr] = newHealth
-				updateBackendStatusMetrics(addr, lastHealth.status, newHealth.status)
+				updateBackendStatusMetrics(addr, lastHealth.Status, newHealth.Status)
 			}
 		}
 	}
 	for addr, newHealth := range bhMap {
-		if newHealth.status == StatusHealthy {
+		if newHealth.Status == StatusHealthy {
 			lastHealth, ok := bo.curBackendInfo[addr]
 			if !ok {
-				lastHealth = &backendHealth{
-					status: StatusCannotConnect,
+				lastHealth = &BackendHealth{
+					Status: StatusCannotConnect,
 				}
 			}
-			if lastHealth.status != StatusHealthy {
+			if lastHealth.Status != StatusHealthy {
 				updatedBackends[addr] = newHealth
-				updateBackendStatusMetrics(addr, lastHealth.status, newHealth.status)
-			} else if lastHealth.serverVersion != newHealth.serverVersion {
-				// Not possible here: the backend finishes upgrading between two health checks.
+				updateBackendStatusMetrics(addr, lastHealth.Status, newHealth.Status)
+			} else if lastHealth.ServerVersion != newHealth.ServerVersion {
+				// Not possible here: the backend finishes upgrading between two backends checks.
 				updatedBackends[addr] = newHealth
 			}
 		}
@@ -310,22 +220,4 @@ func (bo *BackendObserver) Close() {
 		bo.cancelFunc()
 	}
 	bo.wg.Wait()
-}
-
-// When the server refused to connect, the port is shut down, so no need to retry.
-var notRetryableError = []string{
-	"connection refused",
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	for _, errStr := range notRetryableError {
-		if strings.Contains(msg, errStr) {
-			return false
-		}
-	}
-	return true
 }

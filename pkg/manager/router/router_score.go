@@ -5,7 +5,6 @@ package router
 
 import (
 	"context"
-	"net/http"
 	"sync"
 	"time"
 
@@ -44,12 +43,9 @@ func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 	}
 }
 
-func (r *ScoreBasedRouter) Init(httpCli *http.Client, fetcher BackendFetcher, cfg *config.HealthCheck) error {
+func (r *ScoreBasedRouter) Init(fetcher BackendFetcher, hc HealthCheck, cfg *config.HealthCheck) error {
 	cfg.Check()
-	observer, err := StartBackendObserver(r.logger.Named("observer"), r, httpCli, cfg, fetcher)
-	if err != nil {
-		return err
-	}
+	observer := StartBackendObserver(r.logger.Named("observer"), r, cfg, fetcher, hc)
 	r.observer = observer
 	childCtx, cancelFunc := context.WithCancel(context.Background())
 	r.cancelFunc = cancelFunc
@@ -101,7 +97,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 			return backend.addr, nil
 		}
 	}
-	// No available backends, maybe the health check result is outdated during rolling restart.
+	// No available backends, maybe the backends check result is outdated during rolling restart.
 	// Refresh the backends asynchronously in this case.
 	if router.observer != nil {
 		router.observer.Refresh()
@@ -229,8 +225,8 @@ func (router *ScoreBasedRouter) ensureBackend(addr string, forward bool) *glist.
 			addr:     addr,
 			connList: glist.New[*connWrapper](),
 		}
-		backend.setHealth(backendHealth{
-			status: StatusCannotConnect,
+		backend.setHealth(BackendHealth{
+			Status: StatusCannotConnect,
 		})
 		be = router.backends.PushFront(backend)
 		router.adjustBackendList(be, false)
@@ -283,13 +279,13 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 }
 
 // OnBackendChanged implements BackendEventReceiver.OnBackendChanged interface.
-func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*backendHealth, err error) {
+func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHealth, err error) {
 	router.Lock()
 	defer router.Unlock()
 	router.observeError = err
 	for addr, health := range backends {
 		be := router.lookupBackend(addr, true)
-		if be == nil && health.status != StatusCannotConnect {
+		if be == nil && health.Status != StatusCannotConnect {
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev", "none"), zap.String("cur", health.String()))
 			backend := &backendWrapper{
@@ -307,7 +303,7 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*backendHea
 			router.adjustBackendList(be, true)
 			for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
 				conn := ele.Value
-				conn.NotifyBackendStatus(health.status)
+				conn.NotifyBackendStatus(health.Status)
 			}
 		}
 	}

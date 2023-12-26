@@ -53,7 +53,7 @@ const (
 	// The threshold of ratio of the highest score and lowest score.
 	// If the ratio exceeds the threshold, the proxy will rebalance connections.
 	rebalanceMaxScoreRatio = 1.2
-	// After a connection fails to redirect, it may contain some unmigratable status.
+	// After a connection fails to redirect, it may contain some unmigratable Status.
 	// Limit its redirection interval to avoid unnecessary retrial to reduce latency jitter.
 	redirectFailMinInterval = 3 * time.Second
 )
@@ -79,7 +79,7 @@ type BackendInst interface {
 type backendWrapper struct {
 	mu struct {
 		sync.RWMutex
-		backendHealth
+		BackendHealth
 	}
 	addr string
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
@@ -90,16 +90,16 @@ type backendWrapper struct {
 	connList *glist.List[*connWrapper]
 }
 
-func (b *backendWrapper) setHealth(health backendHealth) {
+func (b *backendWrapper) setHealth(health BackendHealth) {
 	b.mu.Lock()
-	b.mu.backendHealth = health
+	b.mu.BackendHealth = health
 	b.mu.Unlock()
 }
 
 // score calculates the score of the backend. Larger score indicates higher load.
 func (b *backendWrapper) score() int {
 	b.mu.RLock()
-	score := b.mu.status.ToScore() + b.connScore
+	score := b.mu.Status.ToScore() + b.connScore
 	b.mu.RUnlock()
 	return score
 }
@@ -110,21 +110,21 @@ func (b *backendWrapper) Addr() string {
 
 func (b *backendWrapper) Status() BackendStatus {
 	b.mu.RLock()
-	status := b.mu.status
+	status := b.mu.Status
 	b.mu.RUnlock()
 	return status
 }
 
 func (b *backendWrapper) Healthy() bool {
 	b.mu.RLock()
-	healthy := b.mu.status == StatusHealthy
+	healthy := b.mu.Status == StatusHealthy
 	b.mu.RUnlock()
 	return healthy
 }
 
 func (b *backendWrapper) ServerVersion() string {
 	b.mu.RLock()
-	version := b.mu.serverVersion
+	version := b.mu.ServerVersion
 	b.mu.RUnlock()
 	return version
 }

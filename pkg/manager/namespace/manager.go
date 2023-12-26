@@ -40,7 +40,9 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
 	}
 	rt := router.NewScoreBasedRouter(logger.Named("router"))
-	if err := rt.Init(mgr.httpCli, fetcher, config.NewDefaultHealthCheckConfig()); err != nil {
+	healthCheckCfg := config.NewDefaultHealthCheckConfig()
+	hc := router.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
+	if err := rt.Init(fetcher, hc, healthCheckCfg); err != nil {
 		return nil, errors.Errorf("build router error: %w", err)
 	}
 	return &Namespace{
