@@ -110,6 +110,9 @@ func NewServer(cfg config.API, lg *zap.Logger,
 
 	h.registerGrpc(engine, cfg, cfgmgr)
 	h.registerAPI(engine.Group("/api"), cfg, nsmgr, cfgmgr)
+	// The paths are consistent with other components.
+	h.registerMetrics(engine.Group("metrics"))
+	h.registerDebug(engine.Group("debug"))
 
 	if handler != nil {
 		if err := handler.RegisterHTTP(engine); err != nil {
@@ -170,11 +173,12 @@ func (h *Server) attachLogger(c *gin.Context) {
 		fields = append(fields, zap.Errors("errs", errs))
 	}
 
-	if len(c.Errors) > 0 {
+	switch {
+	case len(c.Errors) > 0:
 		h.lg.Warn(path, fields...)
-	} else if strings.HasPrefix(path, "/api/debug") || strings.HasPrefix(path, "/api/metrics") {
+	case strings.Contains(path, "/debug"), strings.Contains(path, "/metrics"):
 		h.lg.Debug(path, fields...)
-	} else {
+	default:
 		h.lg.Info(path, fields...)
 	}
 }
