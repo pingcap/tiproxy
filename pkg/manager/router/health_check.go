@@ -24,7 +24,7 @@ type HealthCheck interface {
 }
 
 const (
-	statusPathSuffix = "/Status"
+	statusPathSuffix = "/status"
 )
 
 type DefaultHealthCheck struct {
