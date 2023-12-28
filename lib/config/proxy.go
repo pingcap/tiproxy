@@ -24,13 +24,7 @@ type Config struct {
 	Advance  Advance     `yaml:"advance,omitempty" toml:"advance,omitempty" json:"advance,omitempty"`
 	Workdir  string      `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
 	Security Security    `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
-	Metrics  Metrics     `yaml:"metrics,omitempty" toml:"metrics,omitempty" json:"metrics,omitempty"`
 	Log      Log         `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
-}
-
-type Metrics struct {
-	MetricsAddr     string `toml:"metrics-addr" json:"metrics-addr"`
-	MetricsInterval uint   `toml:"metrics-interval" json:"metrics-interval"`
 }
 
 type KeepAlive struct {
