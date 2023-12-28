@@ -18,7 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// HealthCheck is used to check the backends of one backend. One can pass a customized backends check function to the observer.
+// HealthCheck is used to check the backends of one backend. One can pass a customized health check function to the observer.
 type HealthCheck interface {
 	Check(ctx context.Context, addr string, info *BackendInfo) *BackendHealth
 }
@@ -57,10 +57,10 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 	if !dhc.cfg.Enable {
 		return bh
 	}
-	// Skip checking the Status port if it's not fetched.
+	// Skip checking the status port if it's not fetched.
 	if info != nil && len(info.IP) > 0 {
-		// When a backend gracefully shut down, the Status port returns 500 but the SQL port still accepts
-		// new connections, so we must check the Status port first.
+		// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
+		// new connections, so we must check the status port first.
 		schema := "http"
 		if dhc.httpTLS {
 			schema = "https"
@@ -72,17 +72,17 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 			resp, err := httpCli.Get(url)
 			if err == nil {
 				if resp.StatusCode != http.StatusOK {
-					err = backoff.Permanent(errors.Errorf("http Status %d", resp.StatusCode))
+					err = backoff.Permanent(errors.Errorf("http status %d", resp.StatusCode))
 				}
 				if ignoredErr := resp.Body.Close(); ignoredErr != nil {
-					dhc.logger.Warn("close http response in backends check failed", zap.Error(ignoredErr))
+					dhc.logger.Warn("close http response in health check failed", zap.Error(ignoredErr))
 				}
 			}
 			return err
 		})
 		if err != nil {
 			bh.Status = StatusCannotConnect
-			bh.PingErr = errors.Wrapf(err, "connect Status port failed")
+			bh.PingErr = errors.Wrapf(err, "connect status port failed")
 			return bh
 		}
 	}
@@ -101,7 +101,7 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 		}
 		serverVersion, err = pnet.ReadServerVersion(conn)
 		if ignoredErr := conn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
-			dhc.logger.Warn("close connection in backends check failed", zap.Error(ignoredErr))
+			dhc.logger.Warn("close connection in health check failed", zap.Error(ignoredErr))
 		}
 		bh.ServerVersion = serverVersion
 		return err

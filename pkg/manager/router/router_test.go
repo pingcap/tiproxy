@@ -638,12 +638,12 @@ func TestRebalanceCornerCase(t *testing.T) {
 
 // Test all kinds of events occur concurrently.
 func TestConcurrency(t *testing.T) {
-	// Disable backends check so that it just reads BackendFetcher.
+	// Disable health check so that it just reads BackendFetcher.
 	healthCheckConfig := &config.HealthCheck{
 		Enable:   false,
 		Interval: 10 * time.Millisecond,
 	}
-	fetcher := &mockBackendFetcher{}
+	fetcher := newMockBackendFetcher()
 	lg, _ := logger.CreateLoggerForTest(t)
 	hc := NewDefaultHealthCheck(nil, healthCheckConfig, lg)
 	router := NewScoreBasedRouter(lg)
@@ -652,12 +652,10 @@ func TestConcurrency(t *testing.T) {
 
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	// Create 3 backends and change their Status randomly.
-	fetcher.backends = map[string]*BackendInfo{
-		"0": {},
-		"1": {},
-		"2": {},
-	}
+	// Create 3 backends and change their status randomly.
+	fetcher.setBackend("0", &BackendInfo{})
+	fetcher.setBackend("1", &BackendInfo{})
+	fetcher.setBackend("2", &BackendInfo{})
 	wg.Run(func() {
 		for {
 			waitTime := rand.Intn(20) + 10
@@ -668,10 +666,12 @@ func TestConcurrency(t *testing.T) {
 			}
 			idx := rand.Intn(3)
 			addr := strconv.Itoa(idx)
-			if _, ok := fetcher.backends[addr]; ok {
-				delete(fetcher.backends, addr)
+			backends, err := fetcher.GetBackendList(context.Background())
+			require.NoError(t, err)
+			if _, ok := backends[addr]; ok {
+				fetcher.removeBackend(addr)
 			} else {
-				fetcher.backends[addr] = &BackendInfo{}
+				fetcher.setBackend(addr, &BackendInfo{})
 			}
 		}
 	})
@@ -742,7 +742,7 @@ func TestRefresh(t *testing.T) {
 	fetcher := newMockBackendFetcher()
 	hc := newMockHealthCheck()
 	lg, _ := logger.CreateLoggerForTest(t)
-	// Create a router with a very long backends check interval.
+	// Create a router with a very long health check interval.
 	rt := NewScoreBasedRouter(lg)
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
@@ -777,7 +777,7 @@ func TestObserveError(t *testing.T) {
 		return backends, observeError
 	})
 	hc := newMockHealthCheck()
-	// Create a router with a very short backends check interval.
+	// Create a router with a very short health check interval.
 	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	healthCheckConfig := newHealthCheckConfigForTest()
@@ -827,7 +827,7 @@ func TestDisableHealthCheck(t *testing.T) {
 	fetcher := newMockBackendFetcher()
 	fetcher.setBackend("127.0.0.1:4000", nil)
 	healtchCheckConfig := &config.HealthCheck{Enable: false}
-	// Create a router with a very short backends check interval.
+	// Create a router with a very short health check interval.
 	lg, _ := logger.CreateLoggerForTest(t)
 	hc := NewDefaultHealthCheck(nil, healtchCheckConfig, lg)
 	rt := NewScoreBasedRouter(lg)

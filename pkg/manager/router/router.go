@@ -53,7 +53,7 @@ const (
 	// The threshold of ratio of the highest score and lowest score.
 	// If the ratio exceeds the threshold, the proxy will rebalance connections.
 	rebalanceMaxScoreRatio = 1.2
-	// After a connection fails to redirect, it may contain some unmigratable Status.
+	// After a connection fails to redirect, it may contain some unmigratable status.
 	// Limit its redirection interval to avoid unnecessary retrial to reduce latency jitter.
 	redirectFailMinInterval = 3 * time.Second
 )

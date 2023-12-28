@@ -102,7 +102,7 @@ func (tc *tcpConnSuite) reconnectBackend(t *testing.T) {
 	wg.Wait()
 }
 
-func (tc *tcpConnSuite) run(clientRunner, backendRunner func(*pnet.PacketIO) error, proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) (cerr, berr, perr error) {
+func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(*pnet.PacketIO) error, proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) (cerr, berr, perr error) {
 	var wg waitgroup.WaitGroup
 	if clientRunner != nil {
 		wg.Run(func() {
@@ -110,6 +110,7 @@ func (tc *tcpConnSuite) run(clientRunner, backendRunner func(*pnet.PacketIO) err
 			if cerr != nil {
 				_ = tc.clientIO.Close()
 			}
+			t.Logf("client quit, error: %v", cerr)
 		})
 	}
 	if backendRunner != nil {
@@ -118,6 +119,7 @@ func (tc *tcpConnSuite) run(clientRunner, backendRunner func(*pnet.PacketIO) err
 			if berr != nil {
 				_ = tc.backendIO.Close()
 			}
+			t.Logf("backend quit, error: %v", berr)
 		})
 	}
 	if proxyRunner != nil {
@@ -129,6 +131,7 @@ func (tc *tcpConnSuite) run(clientRunner, backendRunner func(*pnet.PacketIO) err
 					_ = tc.proxyBIO.Close()
 				}
 			}
+			t.Logf("proxy quit, error: %v", perr)
 		})
 	}
 	wg.Wait()

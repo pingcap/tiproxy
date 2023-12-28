@@ -55,27 +55,27 @@ var statusScores = map[BackendStatus]int{
 
 type BackendHealth struct {
 	Status BackendStatus
-	// The error occurred when backends check fails. It's used to log why the backend becomes unhealthy.
+	// The error occurred when health check fails. It's used to log why the backend becomes unhealthy.
 	PingErr error
 	// The backend version that returned to the client during handshake.
 	ServerVersion string
 }
 
 func (bh *BackendHealth) String() string {
-	str := fmt.Sprintf("Status: %s", bh.Status.String())
+	str := fmt.Sprintf("status: %s", bh.Status.String())
 	if bh.PingErr != nil {
 		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
 	}
 	return str
 }
 
-// BackendEventReceiver receives the event of backend Status change.
+// BackendEventReceiver receives the event of backend status change.
 type BackendEventReceiver interface {
 	// OnBackendChanged is called when the backend list changes.
 	OnBackendChanged(backends map[string]*BackendHealth, err error)
 }
 
-// BackendInfo stores the Status info of each backend.
+// BackendInfo stores the status info of each backend.
 type BackendInfo struct {
 	IP         string
 	StatusPort uint
@@ -85,7 +85,7 @@ type BackendInfo struct {
 type BackendObserver struct {
 	logger            *zap.Logger
 	healthCheckConfig *config.HealthCheck
-	// The current backend Status synced to the receiver.
+	// The current backend status synced to the receiver.
 	curBackendInfo map[string]*BackendHealth
 	fetcher        BackendFetcher
 	hc             HealthCheck
@@ -204,7 +204,7 @@ func (bo *BackendObserver) notifyIfChanged(bhMap map[string]*BackendHealth) {
 				updatedBackends[addr] = newHealth
 				updateBackendStatusMetrics(addr, lastHealth.Status, newHealth.Status)
 			} else if lastHealth.ServerVersion != newHealth.ServerVersion {
-				// Not possible here: the backend finishes upgrading between two backends checks.
+				// Not possible here: the backend finishes upgrading between two health checks.
 				updatedBackends[addr] = newHealth
 			}
 		}

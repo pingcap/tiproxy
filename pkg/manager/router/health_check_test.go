@@ -33,7 +33,7 @@ func TestReadServerVersion(t *testing.T) {
 	backend.close()
 }
 
-// Test that the backend Status is correct when the backend starts or shuts down.
+// Test that the backend status is correct when the backend starts or shuts down.
 func TestHealthCheck(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()

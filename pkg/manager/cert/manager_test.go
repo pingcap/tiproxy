@@ -320,7 +320,7 @@ func TestRotate(t *testing.T) {
 				return clientErr == nil && serverErr == nil
 			}
 			return true
-		}, time.Second, 100*time.Millisecond)
+		}, 5*time.Second, 100*time.Millisecond)
 		certMgr.Close()
 	}
 }

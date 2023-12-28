@@ -97,7 +97,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 			return backend.addr, nil
 		}
 	}
-	// No available backends, maybe the backends check result is outdated during rolling restart.
+	// No available backends, maybe the health check result is outdated during rolling restart.
 	// Refresh the backends asynchronously in this case.
 	if router.observer != nil {
 		router.observer.Refresh()
