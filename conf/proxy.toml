@@ -109,12 +109,6 @@ graceful-close-conn-timeout = 15
 
 # require-backend-tls = false
 
-[metrics]
-
-# WARNING: know what you are doing, these two are for debugging.
-# metrics-addr = ""
-# metrics-interval = 0
-
 [advance]
 
 # ignore-wrong-namespace = true

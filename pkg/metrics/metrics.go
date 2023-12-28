@@ -8,19 +8,14 @@ package metrics
 
 import (
 	"context"
-	"fmt"
-	"net"
-	"os"
 	"runtime"
 	"sync"
 	"time"
 
-	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/systimemon"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/prometheus/client_golang/prometheus/push"
 	dto "github.com/prometheus/client_model/go"
 	"go.uber.org/zap"
 )
@@ -53,12 +48,11 @@ func NewMetricsManager() *MetricsManager {
 var registerOnce = &sync.Once{}
 
 // Init registers metrics and pushes metrics to prometheus.
-func (mm *MetricsManager) Init(ctx context.Context, logger *zap.Logger, proxyAddr string, cfg config.Metrics, cfgch <-chan *config.Config) {
+func (mm *MetricsManager) Init(ctx context.Context, logger *zap.Logger) {
 	mm.logger = logger
 	registerOnce.Do(registerProxyMetrics)
 	ctx, mm.cancel = context.WithCancel(ctx)
 	mm.setupMonitor(ctx)
-	mm.pushMetric(ctx, proxyAddr, cfg, cfgch)
 }
 
 // Close stops all goroutines.
@@ -89,65 +83,6 @@ func (mm *MetricsManager) setupMonitor(ctx context.Context) {
 	})
 }
 
-// pushMetric pushes metrics in background.
-func (mm *MetricsManager) pushMetric(ctx context.Context, proxyAddr string, cfg config.Metrics, cfgch <-chan *config.Config) {
-	mm.wg.Run(func() {
-		proxyInstance := instanceName(proxyAddr)
-		addr := cfg.MetricsAddr
-		interval := time.Duration(cfg.MetricsInterval) * time.Second
-		pusher := mm.buildPusher(addr, interval, proxyInstance)
-
-		for ctx.Err() == nil {
-			select {
-			case newCfg := <-cfgch:
-				if newCfg == nil {
-					return
-				}
-				interval = time.Duration(newCfg.Metrics.MetricsInterval) * time.Second
-				if addr != newCfg.Metrics.MetricsAddr {
-					addr = newCfg.Metrics.MetricsAddr
-					pusher = mm.buildPusher(addr, interval, proxyInstance)
-				}
-			default:
-			}
-
-			// Wait until the config is legal.
-			if interval == 0 || pusher == nil {
-				select {
-				case <-time.After(time.Second):
-					continue
-				case <-ctx.Done():
-					return
-				}
-			}
-
-			if err := pusher.Push(); err != nil {
-				mm.logger.Error("could not push metrics to prometheus pushgateway", zap.Error(err))
-			}
-			select {
-			case <-time.After(interval):
-			case <-ctx.Done():
-				return
-			}
-		}
-	})
-}
-
-func (mm *MetricsManager) buildPusher(addr string, interval time.Duration, proxyInstance string) *push.Pusher {
-	var pusher *push.Pusher
-	if len(addr) > 0 {
-		// Create a new pusher when the address changes.
-		mm.logger.Info("start prometheus push client", zap.String("server addr", addr), zap.Stringer("interval", interval))
-		pusher = push.New(addr, "tiproxy")
-		pusher = pusher.Gatherer(prometheus.DefaultGatherer)
-		pusher = pusher.Grouping("instance", proxyInstance)
-	} else {
-		mm.logger.Info("disable prometheus push client")
-		pusher = nil
-	}
-	return pusher
-}
-
 // registerProxyMetrics registers metrics.
 func registerProxyMetrics() {
 	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
@@ -171,18 +106,6 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(HealthCheckCycleGauge)
 	prometheus.MustRegister(MigrateCounter)
 	prometheus.MustRegister(MigrateDurationHistogram)
-}
-
-func instanceName(proxyAddr string) string {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return "unknown"
-	}
-	_, port, err := net.SplitHostPort(proxyAddr)
-	if err != nil {
-		return "unknown"
-	}
-	return fmt.Sprintf("%s_%s", hostname, port)
 }
 
 // ReadCounter reads the value from the counter. It is only used for testing.

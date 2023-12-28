@@ -71,7 +71,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	cfg := srv.ConfigManager.GetConfig()
 
 	// setup metrics
-	srv.MetricsManager.Init(ctx, lg.Named("metrics"), cfg.Proxy.Addr, cfg.Metrics, srv.ConfigManager.WatchConfig())
+	srv.MetricsManager.Init(ctx, lg.Named("metrics"))
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
 
 	// setup certs

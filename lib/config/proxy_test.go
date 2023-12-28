@@ -31,10 +31,6 @@ var testProxyConfig = Config{
 	API: API{
 		Addr: "0.0.0.0:3080",
 	},
-	Metrics: Metrics{
-		MetricsAddr:     "127.0.0.1:9021",
-		MetricsInterval: 15,
-	},
 	Log: Log{
 		Encoder: "tidb",
 		LogOnline: LogOnline{

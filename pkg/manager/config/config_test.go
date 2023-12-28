@@ -69,24 +69,24 @@ func TestConfigReload(t *testing.T) {
 		},
 		{
 			name:   "override empty fields",
-			precfg: `metrics.metrics-addr = ""`,
+			precfg: `api.addr = ""`,
 			precheck: func(c *config.Config) bool {
-				return c.Metrics.MetricsAddr == ""
+				return c.API.Addr == ""
 			},
-			postcfg: `metrics.metrics-addr = "gg"`,
+			postcfg: `api.addr = "0.0.0.0:3080"`,
 			postcheck: func(c *config.Config) bool {
-				return c.Metrics.MetricsAddr == "gg"
+				return c.API.Addr == "0.0.0.0:3080"
 			},
 		},
 		{
 			name:   "override non-empty fields",
-			precfg: `metrics.metrics-addr = "ee"`,
+			precfg: `api.addr = "0.0.0.0:3080"`,
 			precheck: func(c *config.Config) bool {
-				return c.Metrics.MetricsAddr == "ee"
+				return c.API.Addr == "0.0.0.0:3080"
 			},
-			postcfg: `metrics.metrics-addr = "gg"`,
+			postcfg: `api.addr = "0.0.0.0:3081"`,
 			postcheck: func(c *config.Config) bool {
-				return c.Metrics.MetricsAddr == "gg"
+				return c.API.Addr == "0.0.0.0:3081"
 			},
 		},
 		{
