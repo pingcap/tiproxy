@@ -46,7 +46,7 @@ func newHealthCheckConfigForTest() *config.HealthCheck {
 	}
 }
 
-// Test that the notified backend Status is correct when the backend starts or shuts down.
+// Test that the notified backend status is correct when the backend starts or shuts down.
 func TestObserveBackends(t *testing.T) {
 	ts := newObserverTestSuite(t)
 	t.Cleanup(ts.close)
@@ -68,7 +68,7 @@ func TestObserveBackends(t *testing.T) {
 	ts.checkStatus(backend1, StatusCannotConnect)
 }
 
-// Test that the backends check can exit when the context is cancelled.
+// Test that the health check can exit when the context is cancelled.
 func TestCancelObserver(t *testing.T) {
 	ts := newObserverTestSuite(t)
 	t.Cleanup(ts.close)
@@ -188,7 +188,11 @@ func newMockBackendFetcher() *mockBackendFetcher {
 func (mbf *mockBackendFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
 	mbf.Lock()
 	defer mbf.Unlock()
-	return mbf.backends, nil
+	backends := make(map[string]*BackendInfo, len(mbf.backends))
+	for addr, backend := range mbf.backends {
+		backends[addr] = backend
+	}
+	return backends, nil
 }
 
 func (mbf *mockBackendFetcher) setBackend(addr string, info *BackendInfo) {
