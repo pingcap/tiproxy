@@ -50,16 +50,16 @@ ignore-wrong-namespace = true
 
 [security]
 [security.server-tls]
-min-tls-version = '1.1'
+min-tls-version = '1.2'
 
 [security.server-http-tls]
-min-tls-version = '1.1'
+min-tls-version = '1.2'
 
 [security.cluster-tls]
-min-tls-version = '1.1'
+min-tls-version = '1.2'
 
 [security.sql-tls]
-min-tls-version = '1.1'
+min-tls-version = '1.2'
 
 [log]
 encoder = 'tidb'
