@@ -145,10 +145,10 @@ func NewConfig() *Config {
 	cfg.Log.LogFile.MaxBackups = 3
 
 	cfg.Advance.IgnoreWrongNamespace = true
-	cfg.Security.SQLTLS.MinTLSVersion = "1.1"
-	cfg.Security.ServerSQLTLS.MinTLSVersion = "1.1"
-	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.1"
-	cfg.Security.ClusterTLS.MinTLSVersion = "1.1"
+	cfg.Security.SQLTLS.MinTLSVersion = "1.2"
+	cfg.Security.ServerSQLTLS.MinTLSVersion = "1.2"
+	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.2"
+	cfg.Security.ClusterTLS.MinTLSVersion = "1.2"
 
 	return &cfg
 }
