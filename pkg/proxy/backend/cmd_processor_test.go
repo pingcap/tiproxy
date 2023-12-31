@@ -76,58 +76,61 @@ func TestForwardCommands(t *testing.T) {
 	for cmd, respondTypes := range cmdResponseTypes {
 		for _, respondType := range respondTypes {
 			for _, capability := range []pnet.Capability{defaultTestBackendCapability &^ pnet.ClientDeprecateEOF, defaultTestBackendCapability | pnet.ClientDeprecateEOF} {
-				cfgOvr := func(cfg *testConfig) {
-					cfg.clientConfig.cmd = cmd
-					cfg.backendConfig.respondType = respondType
-					cfg.backendConfig.capability = capability
-					cfg.clientConfig.capability = capability
-					cfg.proxyConfig.capability = capability
-				}
-				// Test more variables for some special response types.
-				switch respondType {
-				case responseTypeColumn:
-					for _, columns := range []int{1, 4096} {
-						extraCfgOvr := func(cfg *testConfig) {
-							cfg.backendConfig.columns = columns
-						}
-						runTest(cfgOvr, extraCfgOvr)
+				for _, status := range []uint16{0, pnet.ServerStatusCursorExists} {
+					cfgOvr := func(cfg *testConfig) {
+						cfg.clientConfig.cmd = cmd
+						cfg.backendConfig.respondType = respondType
+						cfg.backendConfig.capability = capability
+						cfg.backendConfig.status = status
+						cfg.clientConfig.capability = capability
+						cfg.proxyConfig.capability = capability
 					}
-				case responseTypeRow:
-					for _, rows := range []int{0, 1, 3} {
-						extraCfgOvr := func(cfg *testConfig) {
-							cfg.backendConfig.rows = rows
-						}
-						runTest(cfgOvr, extraCfgOvr)
-					}
-				case responseTypePrepareOK:
-					for _, columns := range []int{0, 1, 4096} {
-						for _, params := range []int{0, 1, 3} {
+					// Test more variables for some special response types.
+					switch respondType {
+					case responseTypeColumn:
+						for _, columns := range []int{1, 4096} {
 							extraCfgOvr := func(cfg *testConfig) {
 								cfg.backendConfig.columns = columns
-								cfg.backendConfig.params = params
 							}
 							runTest(cfgOvr, extraCfgOvr)
 						}
-					}
-				case responseTypeResultSet:
-					for _, columns := range []int{1, 4096} {
+					case responseTypeRow:
 						for _, rows := range []int{0, 1, 3} {
 							extraCfgOvr := func(cfg *testConfig) {
-								cfg.backendConfig.columns = columns
 								cfg.backendConfig.rows = rows
 							}
 							runTest(cfgOvr, extraCfgOvr)
 						}
-					}
-				case responseTypeLoadFile:
-					for _, filePkts := range []int{0, 1, 3} {
-						extraCfgOvr := func(cfg *testConfig) {
-							cfg.clientConfig.filePkts = filePkts
+					case responseTypePrepareOK:
+						for _, columns := range []int{0, 1, 4096} {
+							for _, params := range []int{0, 1, 3} {
+								extraCfgOvr := func(cfg *testConfig) {
+									cfg.backendConfig.columns = columns
+									cfg.backendConfig.params = params
+								}
+								runTest(cfgOvr, extraCfgOvr)
+							}
 						}
-						runTest(cfgOvr, extraCfgOvr)
+					case responseTypeResultSet:
+						for _, columns := range []int{1, 4096} {
+							for _, rows := range []int{0, 1, 3} {
+								extraCfgOvr := func(cfg *testConfig) {
+									cfg.backendConfig.columns = columns
+									cfg.backendConfig.rows = rows
+								}
+								runTest(cfgOvr, extraCfgOvr)
+							}
+						}
+					case responseTypeLoadFile:
+						for _, filePkts := range []int{0, 1, 3} {
+							extraCfgOvr := func(cfg *testConfig) {
+								cfg.clientConfig.filePkts = filePkts
+							}
+							runTest(cfgOvr, extraCfgOvr)
+						}
+					default:
+						runTest(cfgOvr, cfgOvr)
 					}
-				default:
-					runTest(cfgOvr, cfgOvr)
 				}
 			}
 		}
