@@ -112,11 +112,14 @@ func TestForwardCommands(t *testing.T) {
 				case responseTypeResultSet:
 					for _, columns := range []int{1, 4096} {
 						for _, rows := range []int{0, 1, 3} {
-							extraCfgOvr := func(cfg *testConfig) {
-								cfg.backendConfig.columns = columns
-								cfg.backendConfig.rows = rows
+							for _, status := range []uint16{0, pnet.ServerStatusCursorExists} {
+								extraCfgOvr := func(cfg *testConfig) {
+									cfg.backendConfig.columns = columns
+									cfg.backendConfig.rows = rows
+									cfg.backendConfig.status = status
+								}
+								runTest(cfgOvr, extraCfgOvr)
 							}
-							runTest(cfgOvr, extraCfgOvr)
 						}
 					}
 				case responseTypeLoadFile:
