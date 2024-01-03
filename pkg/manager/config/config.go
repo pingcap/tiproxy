@@ -10,13 +10,14 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
 )
 
 func (e *ConfigManager) reloadConfigFile(file string) error {
 	proxyConfigData, err := os.ReadFile(file)
 	if err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 
 	return e.SetTOMLConfig(proxyConfigData)
@@ -44,11 +45,11 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	}
 
 	if err = toml.Unmarshal(data, base); err != nil {
-		return
+		return errors.WithStack(err)
 	}
 
 	if err = toml.Unmarshal(e.overlay, base); err != nil {
-		return
+		return errors.WithStack(err)
 	}
 
 	if err = base.Check(); err != nil {
@@ -58,7 +59,7 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	e.sts.current = base
 	var buf bytes.Buffer
 	if err = toml.NewEncoder(&buf).Encode(base); err != nil {
-		return
+		return errors.WithStack(err)
 	}
 	e.sts.checksum = crc32.ChecksumIEEE(buf.Bytes())
 

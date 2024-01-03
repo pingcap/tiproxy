@@ -149,7 +149,7 @@ func TestConfigRemove(t *testing.T) {
 	require.NoError(t, os.Remove(tmpcfg))
 	time.Sleep(200 * time.Millisecond)
 
-	// but eventually re-watched the file again
+	// but eventually reload the file again
 	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "vv"`), 0644))
 	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "vv" }, 3*time.Second, 100*time.Millisecond)
 }

@@ -21,8 +21,7 @@ const (
 	pathPrefixConfig    = "config"
 )
 
-var (
-	// Define it as a variable because tests will modify it.
+const (
 	checkFileInterval = time.Second
 )
 
@@ -43,9 +42,10 @@ type ConfigManager struct {
 
 	kv *btree.BTreeG[KVValue]
 
-	lastModTime time.Time
-	overlay     []byte
-	sts         struct {
+	lastModTime       time.Time
+	checkFileInterval time.Duration
+	overlay           []byte
+	sts               struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
 		current   *config.Config
@@ -54,7 +54,9 @@ type ConfigManager struct {
 }
 
 func NewConfigManager() *ConfigManager {
-	return &ConfigManager{}
+	return &ConfigManager{
+		checkFileInterval: checkFileInterval,
+	}
 }
 
 func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, overlay *config.Config) error {
@@ -73,30 +75,33 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 	if overlay != nil {
 		e.overlay, err = overlay.ToBytes()
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 
 	if configFile != "" {
 		if err := e.checkFileAndLoad(configFile); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		e.wg.Run(func() {
-			ticker := time.NewTicker(checkFileInterval)
+			var lastErr error
+			ticker := time.NewTicker(e.checkFileInterval)
 			for {
 				select {
 				case <-nctx.Done():
 					return
 				case <-ticker.C:
-					if err = e.checkFileAndLoad(configFile); err != nil {
-						e.logger.Debug("reload config file failed", zap.Error(err))
+					// Do not report the same error to avoid log flooding.
+					if err = e.checkFileAndLoad(configFile); err != nil && errors.Is(err, lastErr) {
+						e.logger.Warn("reload config file failed", zap.Error(err))
 					}
+					lastErr = err
 				}
 			}
 		})
 	} else {
 		if err := e.SetTOMLConfig(nil); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 
@@ -106,7 +111,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 func (e *ConfigManager) checkFileAndLoad(filename string) error {
 	info, err := os.Stat(filename)
 	if err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 	if info.IsDir() {
 		return errors.New("config file is a directory")
