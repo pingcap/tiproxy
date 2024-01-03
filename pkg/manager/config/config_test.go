@@ -166,9 +166,17 @@ func TestFilePath(t *testing.T) {
 		// On linux, writing once will trigger 2 WRITE events. But on macOS, it only triggers once.
 		// So we always sleep 100ms to avoid missing any logs on the way.
 		time.Sleep(100 * time.Millisecond)
-		newCount := strings.Count(text.String(), "config file reloaded")
-		require.Equal(t, increased, newCount > count, fmt.Sprintf("now: %d, was: %d", newCount, count))
-		count = newCount
+		if increased {
+			var newCount int
+			require.Eventually(t, func() bool {
+				newCount = strings.Count(text.String(), "config file reloaded")
+				return newCount > count
+			}, 3*time.Second, 10*time.Millisecond)
+			count = newCount
+		} else {
+			newCount := strings.Count(text.String(), "config file reloaded")
+			require.Equal(t, count, newCount)
+		}
 	}
 
 	tests := []struct {
