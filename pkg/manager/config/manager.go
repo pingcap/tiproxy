@@ -82,7 +82,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 			return errors.WithStack(err)
 		}
 		e.wg.Run(func() {
-			ticker := time.NewTicker(100 * time.Millisecond)
+			ticker := time.NewTicker(checkFileInterval)
 			for {
 				select {
 				case <-nctx.Done():
