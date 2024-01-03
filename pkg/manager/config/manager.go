@@ -92,7 +92,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 		parentDir := filepath.Dir(configFile)
 
 		if err := e.reloadConfigFile(configFile); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		if err := e.wch.Add(parentDir); err != nil {
 			return errors.WithStack(err)
@@ -114,13 +114,11 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 				case ev := <-e.wch.Events:
 					e.handleFSEvent(ev, configFile)
 				case <-ticker.C:
-					// There may be concurrent issues:
+					// There may be a concurrency issue:
 					// 1. Remove the directory and the watcher removes the directory automatically
 					// 2. Create the directory and the file again within a tick
-					// 3. Add it to the watcher again, but the CREATE event is not sent
-					//
-					// Checking the watch list still have a concurrent issue because the watcher may remove the
-					// directory between WatchList and Add. We'll fix it later because it's complex to fix it entirely.
+					// 3. Add it to the watcher again, but the CREATE event is not sent and the file is not loaded
+					// So if watch failed and succeeds now, reload the file.
 					if err := e.wch.Add(parentDir); err != nil {
 						e.logger.Warn("failed to rewatch config file", zap.Error(err))
 						watchErr = err
