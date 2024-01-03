@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"hash/crc32"
 	"os"
+	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/fsnotify/fsnotify"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
@@ -21,6 +23,33 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 	}
 
 	return e.SetTOMLConfig(proxyConfigData)
+}
+
+func (e *ConfigManager) handleFSEvent(ev fsnotify.Event, f string) {
+	switch {
+	case ev.Has(fsnotify.Create), ev.Has(fsnotify.Write), ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
+		// The file may be the log file, triggering reload will cause more logs and thus cause reload again,
+		// so we need to filter the wrong files.
+		// The filesystem differs from OS to OS, so don't use string comparison.
+		f1, err := os.Stat(ev.Name)
+		if err != nil {
+			break
+		}
+		f2, err := os.Stat(f)
+		if err != nil {
+			break
+		}
+		if !os.SameFile(f1, f2) {
+			break
+		}
+		if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
+			// in case of remove/rename the file, files are not present at filesystem for a while
+			// it may be too fast to read the config file now, sleep for a while
+			time.Sleep(50 * time.Millisecond)
+		}
+		// try to reload it
+		e.logger.Info("config file reloaded", zap.Stringer("event", ev), zap.Error(e.reloadConfigFile(f)))
+	}
 }
 
 // SetTOMLConfig will do partial config update. Usually, user will expect config changes
