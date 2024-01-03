@@ -4,6 +4,7 @@
 package backend
 
 import (
+	"context"
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -121,6 +122,8 @@ func Error2Source(err error) ErrorSource {
 	case pnet.IsMySQLError(err):
 		// ErrClientAuthFail and ErrBackendHandshake may also contain MySQL error.
 		return SrcClientSQLErr
+	case errors.Is(err, context.Canceled):
+		return SrcProxyQuit
 	default:
 		// All other untracked errors are proxy errors.
 		return SrcProxyErr

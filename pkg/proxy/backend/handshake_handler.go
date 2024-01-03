@@ -26,6 +26,8 @@ const (
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
 var _ HandshakeHandler = (*CustomHandshakeHandler)(nil)
 
+// ConnContext saves the connection attributes that are read by HandshakeHandler.
+// These interfaces should not request for locks because HandshakeHandler already holds the lock.
 type ConnContext interface {
 	ClientAddr() string
 	ServerAddr() string
@@ -36,6 +38,8 @@ type ConnContext interface {
 	Value(key any) any
 }
 
+// HandshakeHandler contains the hooks that are called during the connection lifecycle.
+// All the interfaces should be called within a lock so that the interfaces of ConnContext are thread-safe.
 type HandshakeHandler interface {
 	HandleHandshakeResp(ctx ConnContext, resp *pnet.HandshakeResp) error
 	HandleHandshakeErr(ctx ConnContext, err *mysql.MyError) bool // return true means retry connect
