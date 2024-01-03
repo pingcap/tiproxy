@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
@@ -15,6 +16,7 @@ import (
 
 func testConfigManager(t *testing.T, configFile string, overlays ...*config.Config) (*ConfigManager, fmt.Stringer, context.Context) {
 	logger, text := logger.CreateLoggerForTest(t)
+	checkFileInterval = 20 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if ddl, ok := t.Deadline(); ok {
