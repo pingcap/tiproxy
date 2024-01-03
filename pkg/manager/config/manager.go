@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -44,7 +43,6 @@ type ConfigManager struct {
 
 	kv *btree.BTreeG[KVValue]
 
-	wch         *fsnotify.Watcher
 	lastModTime time.Time
 	overlay     []byte
 	sts         struct {
