@@ -5,11 +5,10 @@ package config
 
 import (
 	"context"
-	"path/filepath"
+	"os"
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -20,6 +19,10 @@ import (
 const (
 	pathPrefixNamespace = "ns"
 	pathPrefixConfig    = "config"
+)
+
+const (
+	checkFileInterval = time.Second
 )
 
 var (
@@ -39,9 +42,10 @@ type ConfigManager struct {
 
 	kv *btree.BTreeG[KVValue]
 
-	wch     *fsnotify.Watcher
-	overlay []byte
-	sts     struct {
+	lastModTime       time.Time
+	checkFileInterval time.Duration
+	overlay           []byte
+	sts               struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
 		current   *config.Config
@@ -50,7 +54,9 @@ type ConfigManager struct {
 }
 
 func NewConfigManager() *ConfigManager {
-	return &ConfigManager{}
+	return &ConfigManager{
+		checkFileInterval: checkFileInterval,
+	}
 }
 
 func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, overlay *config.Config) error {
@@ -69,69 +75,58 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 	if overlay != nil {
 		e.overlay, err = overlay.ToBytes()
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 
 	if configFile != "" {
-		e.wch, err = fsnotify.NewWatcher()
-		if err != nil {
-			return errors.WithStack(err)
+		if err := e.checkFileAndLoad(configFile); err != nil {
+			return err
 		}
-
-		// Watch the parent dir, because vim/k8s or other apps may not edit files in-place:
-		// e.g. k8s configmap is a symlink of a symlink to a file, which will only trigger
-		// a remove event for the file.
-		parentDir := filepath.Dir(configFile)
-
-		if err := e.reloadConfigFile(configFile); err != nil {
-			return errors.WithStack(err)
-		}
-		if err := e.wch.Add(parentDir); err != nil {
-			return errors.WithStack(err)
-		}
-
 		e.wg.Run(func() {
-			// Some apps will trigger rename/remove events, which means they will re-create/rename
-			// the new file to the directory. Watch possibly stopped after rename/remove events.
-			// So, we use a tick to repeatedly add the parent dir to re-watch files.
-			ticker := time.NewTicker(200 * time.Millisecond)
+			var lastErr error
+			ticker := time.NewTicker(e.checkFileInterval)
 			for {
 				select {
 				case <-nctx.Done():
 					return
-				case err := <-e.wch.Errors:
-					e.logger.Warn("failed to watch config file", zap.Error(err))
-				case ev := <-e.wch.Events:
-					e.handleFSEvent(ev, configFile)
 				case <-ticker.C:
-					// There may be concurrent issues:
-					// 1. Remove the directory and the watcher removes the directory automatically
-					// 2. Create the directory and the file again within a tick
-					// 3. Add it to the watcher again, but the CREATE event is not sent
-					//
-					// Checking the watch list still have a concurrent issue because the watcher may remove the
-					// directory between WatchList and Add. We'll fix it later because it's complex to fix it entirely.
-					exists := len(e.wch.WatchList()) > 0
-					if err := e.wch.Add(parentDir); err != nil {
-						e.logger.Warn("failed to rewatch config file", zap.Error(err))
-					} else if !exists {
-						e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(configFile)))
+					// Do not report the same error to avoid log flooding.
+					if err = e.checkFileAndLoad(configFile); err != nil && errors.Is(err, lastErr) {
+						e.logger.Warn("reload config file failed", zap.Error(err))
 					}
+					lastErr = err
 				}
 			}
 		})
 	} else {
 		if err := e.SetTOMLConfig(nil); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 
 	return nil
 }
 
+func (e *ConfigManager) checkFileAndLoad(filename string) error {
+	info, err := os.Stat(filename)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if info.IsDir() {
+		return errors.New("config file is a directory")
+	}
+	if info.ModTime() != e.lastModTime {
+		if err = e.reloadConfigFile(filename); err != nil {
+			return err
+		}
+		e.logger.Info("config file reloaded", zap.Time("file_modify_time", info.ModTime()))
+		e.lastModTime = info.ModTime()
+	}
+	return nil
+}
+
 func (e *ConfigManager) Close() error {
-	var wcherr error
 	if e.cancel != nil {
 		e.cancel()
 		e.cancel = nil
@@ -143,10 +138,5 @@ func (e *ConfigManager) Close() error {
 	e.sts.listeners = nil
 	e.sts.Unlock()
 	e.wg.Wait()
-	// close after all goroutines are done
-	if e.wch != nil {
-		wcherr = e.wch.Close()
-		e.wch = nil
-	}
-	return wcherr
+	return nil
 }
