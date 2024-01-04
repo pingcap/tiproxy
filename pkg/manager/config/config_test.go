@@ -142,7 +142,7 @@ func TestConfigRemove(t *testing.T) {
 	require.NoError(t, os.Remove(tmpcfg))
 	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "gg"`), 0644))
 
-	// check that reload still works
+	// check that re-watch still works
 	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "gg" }, 3*time.Second, 100*time.Millisecond)
 
 	// remove again but with a long sleep
@@ -277,7 +277,7 @@ func TestFilePath(t *testing.T) {
 
 		count = 0
 		cfgmgr, text, _ = testConfigManager(t, test.filename)
-		checkLog(true)
+		checkLog(false)
 
 		// Test write.
 		require.NoError(t, os.WriteFile(test.filename, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
