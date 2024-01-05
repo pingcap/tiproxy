@@ -22,6 +22,10 @@ const (
 	pathPrefixConfig    = "config"
 )
 
+const (
+	checkFileInterval = time.Second
+)
+
 var (
 	ErrNoResults   = errors.Errorf("has no results")
 	ErrFail2Update = errors.Errorf("failed to update")
@@ -39,9 +43,10 @@ type ConfigManager struct {
 
 	kv *btree.BTreeG[KVValue]
 
-	wch     *fsnotify.Watcher
-	overlay []byte
-	sts     struct {
+	wch               *fsnotify.Watcher
+	checkFileInterval time.Duration
+	overlay           []byte
+	sts               struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
 		current   *config.Config
@@ -50,7 +55,9 @@ type ConfigManager struct {
 }
 
 func NewConfigManager() *ConfigManager {
-	return &ConfigManager{}
+	return &ConfigManager{
+		checkFileInterval: checkFileInterval,
+	}
 }
 
 func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, overlay *config.Config) error {
@@ -69,7 +76,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 	if overlay != nil {
 		e.overlay, err = overlay.ToBytes()
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 
@@ -85,7 +92,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 		parentDir := filepath.Dir(configFile)
 
 		if err := e.reloadConfigFile(configFile); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		if err := e.wch.Add(parentDir); err != nil {
 			return errors.WithStack(err)
@@ -95,35 +102,38 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 			// Some apps will trigger rename/remove events, which means they will re-create/rename
 			// the new file to the directory. Watch possibly stopped after rename/remove events.
 			// So, we use a tick to repeatedly add the parent dir to re-watch files.
-			ticker := time.NewTicker(200 * time.Millisecond)
+			ticker := time.NewTicker(e.checkFileInterval)
+			var watchErr error
 			for {
 				select {
 				case <-nctx.Done():
 					return
 				case err := <-e.wch.Errors:
 					e.logger.Warn("failed to watch config file", zap.Error(err))
+					watchErr = err
 				case ev := <-e.wch.Events:
 					e.handleFSEvent(ev, configFile)
 				case <-ticker.C:
-					// There may be concurrent issues:
+					// There may be a concurrency issue:
 					// 1. Remove the directory and the watcher removes the directory automatically
 					// 2. Create the directory and the file again within a tick
-					// 3. Add it to the watcher again, but the CREATE event is not sent
-					//
-					// Checking the watch list still have a concurrent issue because the watcher may remove the
-					// directory between WatchList and Add. We'll fix it later because it's complex to fix it entirely.
-					exists := len(e.wch.WatchList()) > 0
+					// 3. Add it to the watcher again, but the CREATE event is not sent and the file is not loaded
+					// So if watch failed and succeeds now, reload the file.
 					if err := e.wch.Add(parentDir); err != nil {
 						e.logger.Warn("failed to rewatch config file", zap.Error(err))
-					} else if !exists {
-						e.logger.Info("config file reloaded", zap.Error(e.reloadConfigFile(configFile)))
+						watchErr = err
+						continue
+					}
+					if watchErr != nil {
+						watchErr = e.reloadConfigFile(configFile)
+						e.logger.Info("config file reloaded", zap.Error(watchErr))
 					}
 				}
 			}
 		})
 	} else {
 		if err := e.SetTOMLConfig(nil); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 

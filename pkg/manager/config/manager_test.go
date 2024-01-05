@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
@@ -22,6 +23,7 @@ func testConfigManager(t *testing.T, configFile string, overlays ...*config.Conf
 	}
 
 	cfgmgr := NewConfigManager()
+	cfgmgr.checkFileInterval = 20 * time.Millisecond
 	require.NoError(t, cfgmgr.Init(ctx, logger, configFile, nil))
 
 	t.Cleanup(func() {

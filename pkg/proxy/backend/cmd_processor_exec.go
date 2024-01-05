@@ -193,8 +193,8 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 			var err error
 			switch first {
 			case pnet.OKHeader.Byte():
-				status := cp.handleOKPacket(request, response)
-				serverStatus, err = status, clientIO.Flush()
+				serverStatus = cp.handleOKPacket(request, response)
+				err = clientIO.Flush()
 			case pnet.ErrHeader.Byte():
 				if err = clientIO.Flush(); err != nil {
 					return err
@@ -267,7 +267,7 @@ func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, req
 			}
 			return nil
 		})
-		if err != nil {
+		if err != nil || serverStatus&pnet.ServerStatusCursorExists > 0 {
 			return serverStatus, err
 		}
 	}

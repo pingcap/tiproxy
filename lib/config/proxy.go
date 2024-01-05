@@ -162,7 +162,7 @@ func (cfg *Config) Check() error {
 	if cfg.Workdir == "" {
 		d, err := os.Getwd()
 		if err != nil {
-			return err
+			return errors.WithStack(err)
 		}
 		cfg.Workdir = filepath.Clean(filepath.Join(d, "work"))
 	}
@@ -184,5 +184,5 @@ func (cfg *Config) Check() error {
 func (cfg *Config) ToBytes() ([]byte, error) {
 	b := new(bytes.Buffer)
 	err := toml.NewEncoder(b).Encode(cfg)
-	return b.Bytes(), err
+	return b.Bytes(), errors.WithStack(err)
 }

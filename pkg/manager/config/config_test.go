@@ -123,7 +123,7 @@ func TestConfigReload(t *testing.T) {
 
 		require.NoError(t, os.WriteFile(tmpcfg, []byte(tc.postcfg), 0644), msg)
 		if tc.postcheck != nil {
-			require.Eventually(t, func() bool { return tc.postcheck(cfgmgr1.GetConfig()) }, time.Second, 100*time.Millisecond, msg)
+			require.Eventually(t, func() bool { return tc.postcheck(cfgmgr1.GetConfig()) }, 3*time.Second, 100*time.Millisecond, msg)
 		}
 	}
 }
@@ -142,16 +142,16 @@ func TestConfigRemove(t *testing.T) {
 	require.NoError(t, os.Remove(tmpcfg))
 	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "gg"`), 0644))
 
-	// check that reload still works
-	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "gg" }, time.Second, 100*time.Millisecond)
+	// check that re-watch still works
+	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "gg" }, 3*time.Second, 100*time.Millisecond)
 
 	// remove again but with a long sleep
 	require.NoError(t, os.Remove(tmpcfg))
 	time.Sleep(200 * time.Millisecond)
 
-	// but eventually re-watched the file again
+	// but eventually reload the file again
 	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "vv"`), 0644))
-	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "vv" }, time.Second, 100*time.Millisecond)
+	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "vv" }, 3*time.Second, 100*time.Millisecond)
 }
 
 func TestFilePath(t *testing.T) {
@@ -163,12 +163,18 @@ func TestFilePath(t *testing.T) {
 
 	tmpdir := t.TempDir()
 	checkLog := func(increased bool) {
-		// On linux, writing once will trigger 2 WRITE events. But on macOS, it only triggers once.
-		// So we always sleep 100ms to avoid missing any logs on the way.
-		time.Sleep(100 * time.Millisecond)
-		newCount := strings.Count(text.String(), "config file reloaded")
-		require.Equal(t, increased, newCount > count, fmt.Sprintf("now: %d, was: %d", newCount, count))
-		count = newCount
+		if increased {
+			var newCount int
+			require.Eventually(t, func() bool {
+				newCount = strings.Count(text.String(), "config file reloaded")
+				return newCount > count
+			}, 3*time.Second, 10*time.Millisecond, "count=%d, newCount=%d", count, newCount)
+			count = newCount
+		} else {
+			time.Sleep(100 * time.Millisecond)
+			newCount := strings.Count(text.String(), "config file reloaded")
+			require.Equal(t, count, newCount)
+		}
 	}
 
 	tests := []struct {
