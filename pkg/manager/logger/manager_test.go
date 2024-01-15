@@ -184,49 +184,54 @@ func readLogFiles(t *testing.T, dir string) []os.FileInfo {
 func TestLogConcurrently(t *testing.T) {
 	dir := t.TempDir()
 	fileName := filepath.Join(dir, "proxy.log")
-	cfg := &config.Config{
-		Log: config.Log{
-			Encoder: "tidb",
-			LogOnline: config.LogOnline{
-				Level: "info",
-				LogFile: config.LogFile{
-					Filename:   fileName,
-					MaxSize:    1,
-					MaxDays:    2,
-					MaxBackups: 3,
+
+	newCfg := func() *config.Config {
+		return &config.Config{
+			Log: config.Log{
+				Encoder: "tidb",
+				LogOnline: config.LogOnline{
+					Level: "info",
+					LogFile: config.LogFile{
+						Filename:   fileName,
+						MaxSize:    1,
+						MaxDays:    2,
+						MaxBackups: 3,
+					},
 				},
 			},
-		},
+		}
 	}
 
-	lg, ch := setupLogManager(t, cfg)
+	lg, ch := setupLogManager(t, newCfg())
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	for i := 0; i < 5; i++ {
 		wg.Run(func() {
 			for ctx.Err() == nil {
-				lg = lg.Named("test_name")
-				lg.Info("test_info")
-				lg.Warn("test_warn")
-				lg.Error("test_error")
-				lg = lg.With(zap.String("with", "test_with"))
-				lg.Info("test_info")
-				lg.Warn("test_warn")
-				lg.Error("test_error")
+				namedLg := lg.Named("test_name")
+				namedLg.Info("test_info")
+				namedLg.Warn("test_warn")
+				namedLg.Error("test_error")
+				withLg := namedLg.With(zap.String("with", "test_with"))
+				withLg.Info("test_info")
+				withLg.Warn("test_warn")
+				withLg.Error("test_error")
 			}
 		})
 	}
 	wg.Run(func() {
-		newCfg := cfg.Clone()
 		for ctx.Err() == nil {
-			newCfg.Log.LogFile.MaxDays = int(rand.Int31n(10))
-			ch <- newCfg
+			cfg := newCfg()
+			cfg.Log.LogFile.MaxDays = int(rand.Int31n(10))
+			ch <- cfg
 			time.Sleep(10 * time.Millisecond)
-			newCfg.Log.LogFile.MaxBackups = int(rand.Int31n(10))
-			ch <- newCfg
+			cfg = newCfg()
+			cfg.Log.LogFile.MaxBackups = int(rand.Int31n(10))
+			ch <- cfg
 			time.Sleep(10 * time.Millisecond)
-			newCfg.Log.LogFile.MaxSize = int(rand.Int31n(10))
-			ch <- newCfg
+			cfg = newCfg()
+			cfg.Log.LogFile.MaxSize = int(rand.Int31n(10))
+			ch <- cfg
 			time.Sleep(10 * time.Millisecond)
 		}
 	})
