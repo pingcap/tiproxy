@@ -742,18 +742,11 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 				return nil
 			},
 		},
-		// 1st handshake
-		{
-			client:  ts.mc.authenticate,
-			proxy:   ts.firstHandshake4Proxy,
-			backend: ts.handshake4Backend,
-		},
-		// it will then automatically close
-		{
-			proxy: ts.checkConnClosed4Proxy,
-		},
+		// connect fails
 		{
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				require.Error(ts.t, err)
 				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
 				return nil
 			},
@@ -893,7 +886,7 @@ func TestGetBackendIO(t *testing.T) {
 				require.NoError(t, cn.Close())
 			}
 		})
-		io, err := mgr.getBackendIO(mgr, mgr.authenticator, nil)
+		io, err := mgr.getBackendIO(context.Background(), mgr, nil)
 		if err == nil {
 			require.NoError(t, io.Close())
 		}
@@ -1143,6 +1136,84 @@ func TestBackendStatusChange(t *testing.T) {
 				return nil
 			},
 			backend: ts.respondWithNoTxn4Backend,
+		},
+	}
+
+	ts.runTests(runners)
+}
+
+func TestCloseWhileConnect(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake while force close
+		{
+			client: ts.mc.authenticate,
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				go func() {
+					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+				}()
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				if err == nil {
+					mer := newMockEventReceiver()
+					ts.mp.SetEventReceiver(mer)
+				}
+				return err
+			},
+			backend: ts.handshake4Backend,
+		},
+	}
+
+	ts.runTests(runners)
+}
+
+func TestCloseWhileExecute(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// execute cmd while force close
+		{
+			client: ts.mc.request,
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				clientIO.ResetSequence()
+				request, err := clientIO.ReadPacket()
+				if err != nil {
+					return err
+				}
+				go func() {
+					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+				}()
+				return ts.mp.ExecuteCmd(context.Background(), request)
+			},
+			backend: ts.startTxn4Backend,
+		},
+	}
+
+	ts.runTests(runners)
+}
+
+func TestCloseWhileGracefulClose(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// graceful close while force close
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				go func() {
+					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+				}()
+				ts.mp.GracefulClose()
+				return nil
+			},
 		},
 	}
 

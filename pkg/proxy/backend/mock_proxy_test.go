@@ -4,6 +4,7 @@
 package backend
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"testing"
@@ -60,9 +61,10 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 }
 
 func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
-	if err := mp.authenticator.handshakeFirstTime(mp.logger, mp, clientIO, mp.handshakeHandler, func(ctx ConnContext, auth *Authenticator, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
-		return backendIO, nil
-	}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
+	if err := mp.authenticator.handshakeFirstTime(context.Background(), mp.logger, mp, clientIO, mp.handshakeHandler,
+		func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+			return backendIO, nil
+		}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
 		return err
 	}
 	mp.cmdProcessor.capability = mp.authenticator.capability

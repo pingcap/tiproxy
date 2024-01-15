@@ -152,6 +152,13 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 
 func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	s.mu.Lock()
+
+	if s.mu.status >= statusWaitShutdown {
+		s.mu.Unlock()
+		s.logger.Warn("server is shutting down while creating the connection", zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+		return
+	}
+
 	conns := uint64(len(s.mu.clients))
 	maxConns := s.mu.maxConnections
 	tcpKeepAlive := s.mu.tcpKeepAlive
