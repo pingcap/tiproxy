@@ -139,7 +139,9 @@ func (b *backendWrapper) String() string {
 // connWrapper wraps RedirectableConn.
 type connWrapper struct {
 	RedirectableConn
-	phase connPhase
+	// Reference to the target backend if it's redirecting, otherwise nil.
+	redirectingBackend *backendWrapper
 	// Last redirect start time of this connection.
 	lastRedirect time.Time
+	phase        connPhase
 }

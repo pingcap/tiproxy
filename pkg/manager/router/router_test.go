@@ -900,3 +900,23 @@ func TestBackendHealthy(t *testing.T) {
 	require.False(t, conn.to.Healthy())
 	tester.redirectFinish(1, false)
 }
+
+func TestCloseRedirectingConns(t *testing.T) {
+	// Make the connection redirect.
+	tester := newRouterTester(t)
+	tester.addBackends(1)
+	tester.addConnections(1)
+	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
+	tester.killBackends(1)
+	tester.addBackends(1)
+	tester.rebalance(1)
+	require.Equal(t, 0, tester.getBackendByIndex(0).connScore)
+	require.Equal(t, 1, tester.getBackendByIndex(1).connScore)
+	// Close the connection.
+	tester.updateBackendStatusByAddr(tester.getBackendByIndex(0).Addr(), StatusHealthy)
+	tester.closeConnections(1, true)
+	require.Equal(t, 0, tester.getBackendByIndex(0).connScore)
+	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
+	require.Equal(t, 0, tester.getBackendByIndex(0).connList.Len())
+	require.Equal(t, 0, tester.getBackendByIndex(1).connList.Len())
+}
