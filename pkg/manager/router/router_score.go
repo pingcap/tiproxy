@@ -190,6 +190,7 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 				connWrapper.phase = phaseRedirectNotify
 				// we dont care the results
 				_ = connWrapper.Redirect(backend)
+				connWrapper.redirectingBackend = backend
 			}
 		}
 	}
@@ -263,6 +264,7 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		router.adjustBackendList(toBe, true)
 		connWrapper.phase = phaseRedirectFail
 	}
+	connWrapper.redirectingBackend = nil
 	addMigrateMetrics(from, to, succeed, connWrapper.lastRedirect)
 }
 
@@ -270,11 +272,17 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn) error {
 	router.Lock()
 	defer router.Unlock()
-	// OnConnClosed is always called after processing ongoing redirect events,
-	// so the addr passed in is the right backend.
 	be := router.ensureBackend(addr, true)
-	be.Value.connScore--
-	router.removeConn(be, router.getConnWrapper(conn))
+	connWrapper := router.getConnWrapper(conn)
+	redirectingBackend := connWrapper.Value.redirectingBackend
+	// If this connection is redirecting, decrease the score of the target backend.
+	if redirectingBackend != nil {
+		redirectingBackend.connScore--
+		connWrapper.Value.redirectingBackend = nil
+	} else {
+		be.Value.connScore--
+	}
+	router.removeConn(be, connWrapper)
 	return nil
 }
 
@@ -375,6 +383,7 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 		conn.phase = phaseRedirectNotify
 		conn.lastRedirect = curTime
 		conn.Redirect(idlestBackend)
+		conn.redirectingBackend = idlestBackend
 	}
 }
 
