@@ -61,7 +61,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 	srv.LoggerManager.Init(srv.ConfigManager.WatchConfig())
-	printInfo(lg)
 
 	// setup config manager
 	if err = srv.ConfigManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, &sctx.Overlay); err != nil {
@@ -69,6 +68,8 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 	cfg := srv.ConfigManager.GetConfig()
+
+	printInfo(lg)
 
 	// setup metrics
 	srv.MetricsManager.Init(ctx, lg.Named("metrics"))
