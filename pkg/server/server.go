@@ -69,6 +69,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	}
 	cfg := srv.ConfigManager.GetConfig()
 
+	// welcome messages must be printed after initialization of configmager, because
+	// logfile backended zaplogger is enabled after cfgmgr.Init(..).
+	// otherwise, printInfo will output to stdout, which can not be redirected to the log file on tiup-cluster.
 	printInfo(lg)
 
 	// setup metrics
