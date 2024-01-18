@@ -61,7 +61,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 	srv.LoggerManager.Init(srv.ConfigManager.WatchConfig())
-	printInfo(lg)
 
 	// setup config manager
 	if err = srv.ConfigManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, &sctx.Overlay); err != nil {
@@ -69,6 +68,14 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 	cfg := srv.ConfigManager.GetConfig()
+
+	// welcome messages must be printed after initialization of configmager, because
+	// logfile backended zaplogger is enabled after cfgmgr.Init(..).
+	// otherwise, printInfo will output to stdout, which can not be redirected to the log file on tiup-cluster.
+	//
+	// TODO: there is a race condition that printInfo and logmgr may concurrently execute:
+	// logmgr may havenot been initialized with logfile yet
+	printInfo(lg)
 
 	// setup metrics
 	srv.MetricsManager.Init(ctx, lg.Named("metrics"))
