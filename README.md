@@ -10,7 +10,7 @@ TiProxy is forked from [Weir](https://github.com/tidb-incubator/weir).
 
 When a TiDB instance restarts or shuts down, TiProxy migrates backend connections on this instance to other instances. In this way, the clients won't be disconnected.
 
-For more details, please refer to the blog [Achieving Zero-Downtime Upgrades with TiDB](https://www.pingcap.com/blog/achieving-zero-downtime-upgrades-tidb/).
+For more details, please refer to the blogs [Achieving Zero-Downtime Upgrades with TiDB](https://www.pingcap.com/blog/achieving-zero-downtime-upgrades-tidb/) and [Maintaining Database Connectivity in Serverless Infrastructure with TiProxy](https://www.pingcap.com/blog/maintaining-database-connectivity-in-serverless-infra-with-tiproxy/).
 
 ### Load Balance
 
@@ -46,7 +46,7 @@ Ensuring the smooth operation of TiDB after an upgrade is crucial. TiProxy can p
 
 ## Build
 
-Build the binary in local:
+Build the binary locally:
 
 ```shell
 $ make
@@ -58,9 +58,17 @@ Build a docker image:
 $ make docker
 ```
 
-## Usage
+## Deployment
 
-### Run locally
+### Deploy with TiUP
+
+Refer to https://docs.pingcap.com/tidb/dev/tiproxy-overview#installation-and-usage.
+
+### Deploy with TiDB-Operator
+
+Refer to https://docs.pingcap.com/tidb-in-kubernetes/stable/deploy-tiproxy.
+
+### Deploy locally
 
 1. Generate a self-signed certificate, which is used for the token-based authentication between TiDB and TiProxy.
 
@@ -105,69 +113,6 @@ bin/tiproxy --config=conf/proxy.toml
 
 ```shell
 mysql -h127.0.0.1 -uroot -P6000
-```
-
-### Run in k8s
-
-1. Generate a self-signed certificate like above.
-
-2. Create secrets for session token signing certs.
-
-```shell
-$ kubectl create secret generic basic-sess -n $NAMESPACE --from-file=crt=cert.pem --from-file=key=key.pem
-```
-
-3. Create the TiDB cluster. An example of spec is as follows:
-
-```yaml
----
-apiVersion: pingcap.com/v1alpha1
-kind: TidbCluster
-metadata:
-    name: tc
-spec:
-    version: nightly
-    pd:
-        replicas: 1
-        baseImage: pingcap/pd
-    tidb:
-        replicas: 2
-        baseImage: pingcap/tidb
-        tlsClient:
-            enabled: true
-        config: |
-            graceful-wait-before-shutdown=10
-            [security]
-              session-token-signing-cert = "/var/sess/cert.pem"
-              session-token-signing-key = "/var/sess/key.pem"
-        additionalVolumes:
-        - name: "sess"
-          secret:
-              secretName: basic-sess
-              items:
-              - key: crt
-                path: cert.pem
-              - key: key
-                path: key.pem
-        additionalVolumeMounts:
-        - name: "sess"
-          mountPath: /var/sess
-          readOnly: false
-    tikv:
-        replicas: 3
-        baseImage: pingcap/tikv
-    tiproxy:
-        replicas: 1
-        baseImage: pingcap/tiproxy
-```
-
-Note that if you have enabled `tlsCluster`, you don't need to set the signing certs, `additionalVolumes` and `additionalVolumeMounts`.
-
-4. Connect to TiProxy with your client. The default port is 6000:
-
-```shell
-$ kubectl port-forward svc/tc-tiproxy 6000:6000 -n $NAMESPACE
-$ mysql -h127.0.0.1 -uroot -P6000
 ```
 
 ## Code of Conduct
