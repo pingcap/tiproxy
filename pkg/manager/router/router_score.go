@@ -279,6 +279,9 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 	if redirectingBackend != nil {
 		redirectingBackend.connScore--
 		connWrapper.Value.redirectingBackend = nil
+		if redirectingBe := router.lookupBackend(redirectingBackend.addr, true); redirectingBe != nil {
+			router.adjustBackendList(redirectingBe, true)
+		}
 	} else {
 		be.Value.connScore--
 	}
