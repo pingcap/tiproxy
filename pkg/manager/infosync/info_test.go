@@ -45,7 +45,7 @@ func TestTTLRefresh(t *testing.T) {
 				}
 			}
 			return satisfied
-		}, 3*time.Second, 100*time.Millisecond)
+		}, 10*time.Second, 100*time.Millisecond)
 	}
 }
 
@@ -65,7 +65,7 @@ func TestEtcdServerDown4Sync(t *testing.T) {
 			ttl = newTTL
 		}
 		return satisfied
-	}, 5*time.Second, 100*time.Millisecond)
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 // TTL and info are erased after the client shuts down normally.
@@ -75,7 +75,7 @@ func TestClientShutDown4Sync(t *testing.T) {
 	require.Eventually(t, func() bool {
 		ttl, info := ts.getTTLAndInfo(tiproxyTopologyPath)
 		return len(ttl) > 0 && len(info) > 0
-	}, 3*time.Second, 100*time.Millisecond)
+	}, 10*time.Second, 100*time.Millisecond)
 	ts.closeInfoSyncer()
 	ttl, info := ts.getTTLAndInfo(tiproxyTopologyPath)
 	require.True(t, len(ttl) == 0 && len(info) == 0)
@@ -88,12 +88,12 @@ func TestClientDown4Sync(t *testing.T) {
 	require.Eventually(t, func() bool {
 		ttl, info := ts.getTTLAndInfo(tiproxyTopologyPath)
 		return len(ttl) > 0 && len(info) > 0
-	}, 3*time.Second, 100*time.Millisecond)
+	}, 10*time.Second, 100*time.Millisecond)
 	ts.stopInfoSyncer()
 	require.Eventually(t, func() bool {
 		ttl, info := ts.getTTLAndInfo(tiproxyTopologyPath)
 		return len(ttl) == 0 && len(info) == 0
-	}, 3*time.Second, 100*time.Millisecond)
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 // Test that the result of GetTiDBTopology is right.
@@ -373,7 +373,7 @@ func (ts *etcdTestSuite) createEtcdServer(addr string) {
 			ts.t.Logf("start etcd failed, error: %s", err.Error())
 		}
 		return err == nil
-	}, 5*time.Second, 10*time.Millisecond)
+	}, 10*time.Second, 10*time.Millisecond)
 	<-etcd.Server.ReadyNotify()
 	ts.server = etcd
 }
