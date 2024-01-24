@@ -27,12 +27,18 @@ func NewBackOff(ctx context.Context, retryInterval time.Duration, retryCnt uint6
 }
 
 func Retry(o backoff.Operation, ctx context.Context, retryInterval time.Duration, retryCnt uint64) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	bo := NewBackOff(ctx, retryInterval, retryCnt)
 	return backoff.Retry(o, bo)
 }
 
 func RetryNotify(o backoff.Operation, ctx context.Context, retryInterval time.Duration, retryCnt uint64,
 	notify backoff.Notify, notifyInterval uint64) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	bo := NewBackOff(ctx, retryInterval, retryCnt)
 	var cnt uint64
 	return backoff.RetryNotify(o, bo, func(err error, duration time.Duration) {
