@@ -80,11 +80,11 @@ test: gocovmerge
 	rm -f .cover.*
 	go test -coverprofile=.cover.pkg ./...
 	cd lib && go test -coverprofile=../.cover.lib ./...
-	$(GOBIN)/gocovmerge .cover.* > .cover
-	go tool cover -func=.cover -o .cover.func
+	$(GOBIN)/gocovmerge .cover.* > coverage.dat
+	go tool cover -func=coverage.dat -o .cover.func
 	tail -1 .cover.func
 	rm -f .cover.*
-	go tool cover -html=.cover -o .cover.html
+#	go tool cover -html=.cover -o .cover.html
 
 clean:
 	rm -rf bin dist grafonnet-lib
