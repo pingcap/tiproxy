@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
 
 func updateBackendStatusMetrics(addr string, prevStatus, curStatus BackendStatus) {
@@ -38,11 +39,11 @@ func succeedToLabel(succeed bool) string {
 	return "fail"
 }
 
-func addMigrateMetrics(from, to string, succeed bool, startTime time.Time) {
+func addMigrateMetrics(from, to string, succeed bool, startTime monotime.Time) {
 	resLabel := succeedToLabel(succeed)
 	metrics.MigrateCounter.WithLabelValues(from, to, resLabel).Inc()
 
-	cost := time.Since(startTime)
+	cost := monotime.Since(startTime)
 	metrics.MigrateDurationHistogram.WithLabelValues(from, to, resLabel).Observe(cost.Seconds())
 }
 
@@ -50,8 +51,8 @@ func readMigrateCounter(from, to string, succeed bool) (int, error) {
 	return metrics.ReadCounter(metrics.MigrateCounter.WithLabelValues(from, to, succeedToLabel(succeed)))
 }
 
-func setPingBackendMetrics(addr string, succeed bool, startTime time.Time) {
-	cost := time.Since(startTime)
+func setPingBackendMetrics(addr string, succeed bool, startTime monotime.Time) {
+	cost := monotime.Since(startTime)
 	metrics.PingBackendGauge.WithLabelValues(addr).Set(cost.Seconds())
 }
 
