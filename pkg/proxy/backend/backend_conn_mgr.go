@@ -526,7 +526,7 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 			zap.String("to", rs.to), zap.NamedError("redirect_err", rs.err), zap.NamedError("notify_err", err))
 	} else {
 		err := eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
-		mgr.logger.Info("redirect connection succeeds", zap.String("from", rs.from),
+		mgr.logger.Debug("redirect connection succeeds", zap.String("from", rs.from),
 			zap.String("to", rs.to), zap.NamedError("notify_err", err))
 	}
 }
