@@ -377,7 +377,7 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 			break
 		}
 		conn := ce.Value
-		router.logger.Info("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
+		router.logger.Debug("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
 			zap.String("from", busiestBackend.addr), zap.String("to", idlestBackend.addr),
 			zap.Int("from_score", busiestBackend.score()), zap.Int("to_score", idlestBackend.score()))
 		busiestBackend.connScore--

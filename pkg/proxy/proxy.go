@@ -183,7 +183,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 			ConnBufferSize:     s.mu.connBufferSize,
 		})
 	s.mu.clients[connID] = clientConn
-	logger.Info("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
+	logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
 	s.mu.Unlock()
 
 	metrics.ConnGauge.Inc()
@@ -197,7 +197,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		if err := clientConn.Close(); err != nil && !pnet.IsDisconnectError(err) {
 			logger.Error("close connection fails", zap.Error(err))
 		} else {
-			logger.Info("connection closed")
+			logger.Debug("connection closed")
 		}
 		metrics.ConnGauge.Dec()
 	}()
