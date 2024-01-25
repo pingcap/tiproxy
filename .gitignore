@@ -8,5 +8,6 @@ vendor
 work
 .vscode/
 .cover*
+coverage.dat
 grafonnet-lib
 dist

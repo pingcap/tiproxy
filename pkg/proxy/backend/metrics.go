@@ -8,15 +8,16 @@ import (
 
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
 
-func addCmdMetrics(cmd pnet.Command, addr string, startTime time.Time) {
+func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 	label := cmd.String()
 	metrics.QueryTotalCounter.WithLabelValues(addr, label).Inc()
 
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
 	// However, the proxy is not aware of the statement types, so we use command types instead.
-	cost := time.Since(startTime)
+	cost := monotime.Since(startTime)
 	metrics.QueryDurationHistogram.WithLabelValues(addr, label).Observe(cost.Seconds())
 }
 

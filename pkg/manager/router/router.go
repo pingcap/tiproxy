@@ -8,6 +8,7 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
 
 // ConnEventReceiver receives connection events.
@@ -142,6 +143,6 @@ type connWrapper struct {
 	// Reference to the target backend if it's redirecting, otherwise nil.
 	redirectingBackend *backendWrapper
 	// Last redirect start time of this connection.
-	lastRedirect time.Time
+	lastRedirect monotime.Time
 	phase        connPhase
 }

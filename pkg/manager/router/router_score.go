@@ -11,6 +11,7 @@ import (
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
 
@@ -335,7 +336,7 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 }
 
 func (router *ScoreBasedRouter) rebalance(maxNum int) {
-	curTime := time.Now()
+	curTime := monotime.Now()
 	router.Lock()
 	defer router.Unlock()
 	for i := 0; i < maxNum; i++ {

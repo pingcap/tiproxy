@@ -12,6 +12,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
 
@@ -138,7 +139,7 @@ func (bo *BackendObserver) Refresh() {
 
 func (bo *BackendObserver) observe(ctx context.Context) {
 	for ctx.Err() == nil {
-		startTime := time.Now()
+		startTime := monotime.Now()
 		backendInfo, err := bo.fetcher.GetBackendList(ctx)
 		if err != nil {
 			bo.logger.Error("fetching backends encounters error", zap.Error(err))
@@ -151,7 +152,7 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 			bo.notifyIfChanged(bhMap)
 		}
 
-		cost := time.Since(startTime)
+		cost := monotime.Since(startTime)
 		metrics.HealthCheckCycleGauge.Set(cost.Seconds())
 		wait := bo.healthCheckConfig.Interval - cost
 		if wait > 0 {

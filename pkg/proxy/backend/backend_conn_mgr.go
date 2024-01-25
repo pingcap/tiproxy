@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/router"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
@@ -203,7 +204,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 	// - One TiDB may be just shut down and another is just started but not ready yet
 	bctx, cancel := context.WithTimeout(ctx, mgr.config.ConnectTimeout)
 	selector := r.GetBackendSelector()
-	startTime := time.Now()
+	startTime := monotime.Now()
 	var addr string
 	var origErr error
 	io, err := backoff.RetryNotifyWithData(
@@ -245,7 +246,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 	)
 	cancel()
 
-	duration := time.Since(startTime)
+	duration := monotime.Since(startTime)
 	addGetBackendMetrics(duration, err == nil)
 	if err != nil {
 		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.NamedError("last_err", origErr))
@@ -275,7 +276,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		return
 	}
 	cmd := pnet.Command(request[0])
-	startTime := time.Now()
+	startTime := monotime.Now()
 
 	// Once the request is accepted, it's treated in the transaction, so we don't check graceful shutdown here.
 	if mgr.closeStatus.Load() >= statusClosing {
