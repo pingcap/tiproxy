@@ -15,14 +15,14 @@ import (
 
 type cmdMetricsCache struct {
 	sync.Mutex
-	counter   map[string]map[pnet.Command]prometheus.Counter  // (addr, label) -> counter
-	histogram map[string]map[pnet.Command]prometheus.Observer // (addr, label) -> observer
+	counter   map[string][pnet.ComEnd]prometheus.Counter  // addr -> [cmd]counter
+	histogram map[string][pnet.ComEnd]prometheus.Observer // addr -> [cmd]observer
 }
 
 func newCmdMetricsCache() cmdMetricsCache {
 	return cmdMetricsCache{
-		counter:   make(map[string]map[pnet.Command]prometheus.Counter),
-		histogram: make(map[string]map[pnet.Command]prometheus.Observer),
+		counter:   make(map[string][pnet.ComEnd]prometheus.Counter),
+		histogram: make(map[string][pnet.ComEnd]prometheus.Observer),
 	}
 }
 
@@ -34,11 +34,11 @@ func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 
 	addrCounter, ok := cache.counter[addr]
 	if !ok {
-		addrCounter = make(map[pnet.Command]prometheus.Counter)
+		addrCounter = [pnet.ComEnd]prometheus.Counter{}
 		cache.counter[addr] = addrCounter
 	}
-	counter, ok := addrCounter[cmd]
-	if !ok {
+	counter := addrCounter[cmd]
+	if counter == nil {
 		counter = metrics.QueryTotalCounter.WithLabelValues(addr, cmd.String())
 		addrCounter[cmd] = counter
 	}
@@ -49,11 +49,11 @@ func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 	cost := monotime.Since(startTime)
 	addrHist, ok := cache.histogram[addr]
 	if !ok {
-		addrHist = make(map[pnet.Command]prometheus.Observer)
+		addrHist = [pnet.ComEnd]prometheus.Observer{}
 		cache.histogram[addr] = addrHist
 	}
-	hist, ok := addrHist[cmd]
-	if !ok {
+	hist := addrHist[cmd]
+	if hist == nil {
 		hist = metrics.QueryDurationHistogram.WithLabelValues(addr, cmd.String())
 		addrHist[cmd] = hist
 	}
