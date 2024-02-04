@@ -4,21 +4,60 @@
 package backend
 
 import (
+	"sync"
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
+type cmdMetricsCache struct {
+	sync.Mutex
+	counter   map[string]map[pnet.Command]prometheus.Counter  // (addr, label) -> counter
+	histogram map[string]map[pnet.Command]prometheus.Observer // (addr, label) -> observer
+}
+
+func newCmdMetricsCache() cmdMetricsCache {
+	return cmdMetricsCache{
+		counter:   make(map[string]map[pnet.Command]prometheus.Counter),
+		histogram: make(map[string]map[pnet.Command]prometheus.Observer),
+	}
+}
+
+var cache = newCmdMetricsCache()
+
 func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
-	label := cmd.String()
-	metrics.QueryTotalCounter.WithLabelValues(addr, label).Inc()
+	cache.Lock()
+	defer cache.Unlock()
+
+	addrCounter, ok := cache.counter[addr]
+	if !ok {
+		addrCounter = make(map[pnet.Command]prometheus.Counter)
+		cache.counter[addr] = addrCounter
+	}
+	counter, ok := addrCounter[cmd]
+	if !ok {
+		counter = metrics.QueryTotalCounter.WithLabelValues(addr, cmd.String())
+		addrCounter[cmd] = counter
+	}
+	counter.Inc()
 
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
 	// However, the proxy is not aware of the statement types, so we use command types instead.
 	cost := monotime.Since(startTime)
-	metrics.QueryDurationHistogram.WithLabelValues(addr, label).Observe(cost.Seconds())
+	addrHist, ok := cache.histogram[addr]
+	if !ok {
+		addrHist = make(map[pnet.Command]prometheus.Observer)
+		cache.histogram[addr] = addrHist
+	}
+	hist, ok := addrHist[cmd]
+	if !ok {
+		hist = metrics.QueryDurationHistogram.WithLabelValues(addr, cmd.String())
+		addrHist[cmd] = hist
+	}
+	hist.Observe(cost.Seconds())
 }
 
 func readCmdCounter(cmd pnet.Command, addr string) (int, error) {
