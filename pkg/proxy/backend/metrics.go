@@ -13,16 +13,21 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+type mcPerCmd struct {
+	counter  prometheus.Counter
+	observer prometheus.Observer
+}
+
 type cmdMetricsCache struct {
 	sync.Mutex
-	counter   map[string]*[pnet.ComEnd]prometheus.Counter  // addr -> [cmd]counter
-	histogram map[string]*[pnet.ComEnd]prometheus.Observer // addr -> [cmd]observer
+	// The duration labels are different with TiDB: Labels in TiDB are statement types.
+	// However, the proxy is not aware of the statement types, so we use command types instead.
+	metrics map[string]*[pnet.ComEnd]mcPerCmd
 }
 
 func newCmdMetricsCache() cmdMetricsCache {
 	return cmdMetricsCache{
-		counter:   make(map[string]*[pnet.ComEnd]prometheus.Counter),
-		histogram: make(map[string]*[pnet.ComEnd]prometheus.Observer),
+		metrics: make(map[string]*[pnet.ComEnd]mcPerCmd),
 	}
 }
 
@@ -32,32 +37,22 @@ func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 	cache.Lock()
 	defer cache.Unlock()
 
-	addrCounter, ok := cache.counter[addr]
+	addrMc, ok := cache.metrics[addr]
 	if !ok {
-		addrCounter = &[pnet.ComEnd]prometheus.Counter{}
-		cache.counter[addr] = addrCounter
+		addrMc = &[pnet.ComEnd]mcPerCmd{}
+		cache.metrics[addr] = addrMc
 	}
-	counter := addrCounter[cmd]
-	if counter == nil {
-		counter = metrics.QueryTotalCounter.WithLabelValues(addr, cmd.String())
-		addrCounter[cmd] = counter
+	mc := &addrMc[cmd]
+	if mc.counter == nil {
+		label := cmd.String()
+		*mc = mcPerCmd{
+			counter:  metrics.QueryTotalCounter.WithLabelValues(addr, label),
+			observer: metrics.QueryDurationHistogram.WithLabelValues(addr, label),
+		}
 	}
-	counter.Inc()
-
-	// The duration labels are different with TiDB: Labels in TiDB are statement types.
-	// However, the proxy is not aware of the statement types, so we use command types instead.
-	addrHist, ok := cache.histogram[addr]
-	if !ok {
-		addrHist = &[pnet.ComEnd]prometheus.Observer{}
-		cache.histogram[addr] = addrHist
-	}
-	hist := addrHist[cmd]
-	if hist == nil {
-		hist = metrics.QueryDurationHistogram.WithLabelValues(addr, cmd.String())
-		addrHist[cmd] = hist
-	}
+	mc.counter.Inc()
 	cost := monotime.Since(startTime)
-	hist.Observe(cost.Seconds())
+	mc.observer.Observe(cost.Seconds())
 }
 
 func readCmdCounter(cmd pnet.Command, addr string) (int, error) {
