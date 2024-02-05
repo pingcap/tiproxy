@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -161,14 +162,25 @@ func TestFilePath(t *testing.T) {
 		count  int
 	)
 
+	const (
+		noReload int = iota
+		reloadWrite
+		reloadCreate
+	)
+
 	tmpdir := t.TempDir()
-	checkLog := func(increased bool) {
-		if increased {
+	checkLog := func(reloadType int) {
+		if reloadType != noReload {
+			expectedCount := count + 1
+			// On linux, writing once will trigger 2 WRITE events. But on macOS, it only triggers once.
+			if reloadType == reloadWrite && runtime.GOOS == "linux" {
+				expectedCount++
+			}
 			var newCount int
 			require.Eventually(t, func() bool {
 				newCount = strings.Count(text.String(), "config file reloaded")
-				return newCount > count
-			}, 3*time.Second, 10*time.Millisecond, "count=%d, newCount=%d", count, newCount)
+				return newCount == expectedCount
+			}, 3*time.Second, 10*time.Millisecond, "count=%d, expected=%d, newCount=%d", count, expectedCount, newCount)
 			count = newCount
 		} else {
 			time.Sleep(100 * time.Millisecond)
@@ -195,7 +207,7 @@ func TestFilePath(t *testing.T) {
 				newlog := filepath.Join(tmpdir, "log1")
 				require.NoError(t, os.Rename(tmplog, newlog))
 				require.NoError(t, os.Remove(newlog))
-				checkLog(false)
+				checkLog(noReload)
 			},
 		},
 		{
@@ -242,13 +254,13 @@ func TestFilePath(t *testing.T) {
 			checker: func(filename string) {
 				require.NoError(t, os.RemoveAll("_tmp"))
 				// To update `count`.
-				checkLog(false)
+				checkLog(noReload)
 
 				require.NoError(t, os.Mkdir("_tmp", 0755))
 				f, err := os.Create("_tmp/cfg")
 				require.NoError(t, err)
 				require.NoError(t, f.Close())
-				checkLog(true)
+				checkLog(reloadCreate)
 			},
 		},
 		{
@@ -256,12 +268,12 @@ func TestFilePath(t *testing.T) {
 			filename: "cfg",
 			checker: func(filename string) {
 				require.NoError(t, os.Remove(filename))
-				checkLog(false)
+				checkLog(noReload)
 
 				f, err := os.Create(filename)
 				require.NoError(t, err)
 				require.NoError(t, f.Close())
-				checkLog(true)
+				checkLog(reloadCreate)
 			},
 		},
 	}
@@ -277,11 +289,11 @@ func TestFilePath(t *testing.T) {
 
 		count = 0
 		cfgmgr, text, _ = testConfigManager(t, test.filename)
-		checkLog(false)
+		checkLog(noReload)
 
 		// Test write.
 		require.NoError(t, os.WriteFile(test.filename, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
-		checkLog(true)
+		checkLog(reloadWrite)
 
 		// Test other.
 		if test.checker != nil {
