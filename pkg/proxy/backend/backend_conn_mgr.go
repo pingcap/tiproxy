@@ -41,6 +41,8 @@ const (
 	ConnectTimeout = 15 * time.Second
 	// CheckBackendInterval is the interval for checking if the backend is still connected.
 	CheckBackendInterval = time.Minute
+	// TickerInterval is the interval for checking backend status.
+	TickerInterval = 5 * time.Second
 )
 
 const (
@@ -75,6 +77,7 @@ const (
 type BCConfig struct {
 	HealthyKeepAlive     config.KeepAlive
 	UnhealthyKeepAlive   config.KeepAlive
+	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
 	ConnectTimeout       time.Duration
 	ConnBufferSize       int
@@ -83,6 +86,9 @@ type BCConfig struct {
 }
 
 func (cfg *BCConfig) check() {
+	if cfg.TickerInterval == time.Duration(0) {
+		cfg.TickerInterval = TickerInterval
+	}
 	if cfg.CheckBackendInterval == time.Duration(0) {
 		cfg.CheckBackendInterval = CheckBackendInterval
 	}
@@ -116,7 +122,10 @@ type BackendConnManager struct {
 	// redirectResCh is used to notify the event receiver asynchronously.
 	redirectResCh chan *redirectResult
 	// GracefulClose() sets it without lock.
-	closeStatus        atomic.Int32
+	closeStatus atomic.Int32
+	// The execution time for the last command.
+	lastCmdTime monotime.Time
+	// Checks the backend activity.
 	checkBackendTicker *time.Ticker
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc context.CancelFunc
@@ -187,7 +196,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
-	mgr.resetCheckBackendTicker()
+	mgr.lastCmdTime = monotime.Now()
+	mgr.checkBackendTicker = time.NewTicker(mgr.config.TickerInterval)
 	mgr.wg.Run(func() {
 		mgr.processSignals(childCtx)
 	})
@@ -269,6 +279,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	defer func() {
 		mgr.setQuitSourceByErr(err)
 		mgr.handshakeHandler.OnTraffic(mgr)
+		mgr.lastCmdTime = monotime.Now()
 		mgr.processLock.Unlock()
 	}()
 	if len(request) < 1 {
@@ -282,9 +293,6 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	if mgr.closeStatus.Load() >= statusClosing {
 		return
 	}
-	// The query may last over CheckBackendInterval. In this case we don't need to check the backend after the query.
-	mgr.checkBackendTicker.Stop()
-	defer mgr.resetCheckBackendTicker()
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), waitingRedirect)
@@ -560,6 +568,9 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	if mgr.closeStatus.Load() >= statusNotifyClose {
 		return
 	}
+	if monotime.Since(mgr.lastCmdTime) < mgr.config.CheckBackendInterval {
+		return
+	}
 	backendIO := mgr.backendIO.Load()
 	if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection",
@@ -569,16 +580,6 @@ func (mgr *BackendConnManager) checkBackendActive() {
 			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
 		}
 		mgr.closeStatus.CompareAndSwap(statusActive, statusClosing)
-	}
-}
-
-// Checking backend is expensive, so only check it when the client is idle for some time.
-// This function should be called within the lock.
-func (mgr *BackendConnManager) resetCheckBackendTicker() {
-	if mgr.checkBackendTicker == nil {
-		mgr.checkBackendTicker = time.NewTicker(mgr.config.CheckBackendInterval)
-	} else {
-		mgr.checkBackendTicker.Reset(mgr.config.CheckBackendInterval)
 	}
 }
 
