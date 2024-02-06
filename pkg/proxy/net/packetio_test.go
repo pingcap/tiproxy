@@ -76,7 +76,7 @@ func TestPacketIO(t *testing.T) {
 			require.NoError(t, err)
 		},
 		func(t *testing.T, srv *PacketIO) {
-			var salt [40]byte
+			var salt [20]byte
 			var msg []byte
 			var err error
 
@@ -95,10 +95,7 @@ func TestPacketIO(t *testing.T) {
 			}
 
 			// send handshake
-			require.NoError(t, srv.WriteInitialHandshake(0, salt[:], AuthNativePassword, ServerVersion, 100))
-			// salt should not be long enough
-			require.ErrorIs(t, srv.WriteInitialHandshake(0, make([]byte, 4), AuthNativePassword, ServerVersion, 100), ErrSaltNotLongEnough)
-
+			require.NoError(t, srv.WriteInitialHandshake(0, salt, AuthNativePassword, ServerVersion, 100))
 			// expect correct and wrong capability flags
 			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp()
 			require.NoError(t, err)
