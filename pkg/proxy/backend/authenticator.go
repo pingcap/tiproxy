@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
-	"fmt"
 	"net"
 	"strings"
 
@@ -36,10 +35,10 @@ const SupportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRo
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
+	salt              [20]byte
 	dbname            string // default database name
 	user              string
 	attrs             map[string]string
-	salt              []byte
 	capability        pnet.Capability
 	zstdLevel         int
 	collation         uint8
@@ -47,9 +46,13 @@ type Authenticator struct {
 	requireBackendTLS bool
 }
 
-func (auth *Authenticator) String() string {
-	return fmt.Sprintf("user:%s, dbname:%s, capability:%d, collation:%d",
-		auth.user, auth.dbname, auth.capability, auth.collation)
+func NewAuthenticator(config *BCConfig) *Authenticator {
+	auth := &Authenticator{
+		proxyProtocol:     config.ProxyProtocol,
+		requireBackendTLS: config.RequireBackendTLS,
+	}
+	GenerateSalt(&auth.salt)
+	return auth
 }
 
 func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO) error {

@@ -142,11 +142,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		connectionID:     connectionID,
 		cmdProcessor:     NewCmdProcessor(logger.Named("cp")),
 		handshakeHandler: handshakeHandler,
-		authenticator: &Authenticator{
-			proxyProtocol:     config.ProxyProtocol,
-			requireBackendTLS: config.RequireBackendTLS,
-			salt:              GenerateSalt(20),
-		},
+		authenticator:    NewAuthenticator(config),
 		// There are 2 types of signals, which may be sent concurrently.
 		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),

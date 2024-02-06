@@ -34,7 +34,7 @@ const (
 var (
 	mockUsername      = "test_user"
 	mockDBName        = "test_db"
-	mockSalt          = []byte("01234567890123456789")
+	mockSalt          = [20]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 	mockAuthData      = []byte("123456")
 	mockToken         = strings.Repeat("t", 512)
 	mockCmdStr        = "str"

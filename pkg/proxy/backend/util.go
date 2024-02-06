@@ -10,13 +10,11 @@ func Uint32N(a uint64) uint64
 
 // Buf generates a random string using ASCII characters but avoid separator character.
 // Ref https://github.com/mysql/mysql-server/blob/5.7/mysys_ssl/crypt_genhash_impl.cc#L435.
-func GenerateSalt(size int) []byte {
-	buf := make([]byte, size)
+func GenerateSalt(buf *[20]byte) {
 	for i := range buf {
 		buf[i] = byte(Uint32N(127))
 		for buf[i] == 0 || buf[i] == byte('$') {
 			buf[i] = byte(Uint32N(127))
 		}
 	}
-	return buf
 }
