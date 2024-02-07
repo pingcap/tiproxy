@@ -123,8 +123,8 @@ type BackendConnManager struct {
 	redirectResCh chan *redirectResult
 	// GracefulClose() sets it without lock.
 	closeStatus atomic.Int32
-	// The execution time for the last command.
-	lastCmdTime monotime.Time
+	// The last time when the backend is active.
+	lastActiveTime monotime.Time
 	// Checks the backend activity.
 	checkBackendTicker *time.Ticker
 	// cancelFunc is used to cancel the signal processing goroutine.
@@ -196,7 +196,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
-	mgr.lastCmdTime = monotime.Now()
+	mgr.lastActiveTime = monotime.Now()
 	mgr.checkBackendTicker = time.NewTicker(mgr.config.TickerInterval)
 	mgr.wg.Run(func() {
 		mgr.processSignals(childCtx)
@@ -279,7 +279,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	defer func() {
 		mgr.setQuitSourceByErr(err)
 		mgr.handshakeHandler.OnTraffic(mgr)
-		mgr.lastCmdTime = monotime.Now()
+		mgr.lastActiveTime = monotime.Now()
 		mgr.processLock.Unlock()
 	}()
 	if len(request) < 1 {
@@ -568,7 +568,8 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	if mgr.closeStatus.Load() >= statusNotifyClose {
 		return
 	}
-	if monotime.Since(mgr.lastCmdTime) < mgr.config.CheckBackendInterval {
+	now := monotime.Now()
+	if mgr.lastActiveTime.Add(mgr.config.CheckBackendInterval).After(now) {
 		return
 	}
 	backendIO := mgr.backendIO.Load()
@@ -580,6 +581,8 @@ func (mgr *BackendConnManager) checkBackendActive() {
 			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
 		}
 		mgr.closeStatus.CompareAndSwap(statusActive, statusClosing)
+	} else {
+		mgr.lastActiveTime = now
 	}
 }
 
