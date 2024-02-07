@@ -125,8 +125,6 @@ type BackendConnManager struct {
 	closeStatus atomic.Int32
 	// The last time when the backend is active.
 	lastActiveTime monotime.Time
-	// Checks the backend activity.
-	checkBackendTicker *time.Ticker
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc context.CancelFunc
 	clientIO   *pnet.PacketIO
@@ -197,7 +195,6 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
 	mgr.lastActiveTime = monotime.Now()
-	mgr.checkBackendTicker = time.NewTicker(mgr.config.TickerInterval)
 	mgr.wg.Run(func() {
 		mgr.processSignals(childCtx)
 	})
@@ -391,6 +388,7 @@ func (mgr *BackendConnManager) querySessionStates(backendIO *pnet.PacketIO) (ses
 // - Send redirection results to the event receiver.
 // - Check if the backend is still alive.
 func (mgr *BackendConnManager) processSignals(ctx context.Context) {
+	checkBackendTicker := time.NewTicker(mgr.config.TickerInterval)
 	for {
 		select {
 		case s := <-mgr.signalReceived:
@@ -405,9 +403,10 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 			mgr.processLock.Unlock()
 		case rs := <-mgr.redirectResCh:
 			mgr.notifyRedirectResult(ctx, rs)
-		case <-mgr.checkBackendTicker.C:
+		case <-checkBackendTicker.C:
 			mgr.checkBackendActive()
 		case <-ctx.Done():
+			checkBackendTicker.Stop()
 			return
 		}
 	}
@@ -644,9 +643,6 @@ func (mgr *BackendConnManager) Close() error {
 	}
 
 	mgr.closeStatus.Store(statusClosing)
-	if mgr.checkBackendTicker != nil {
-		mgr.checkBackendTicker.Stop()
-	}
 	if mgr.cancelFunc != nil {
 		mgr.cancelFunc()
 		mgr.cancelFunc = nil
