@@ -814,7 +814,6 @@ func TestHandlerReturnError(t *testing.T) {
 func TestOnTraffic(t *testing.T) {
 	var inBytes, outBytes uint64
 	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
 		config.proxyConfig.handler.onTraffic = func(cc ConnContext) {
 			require.Greater(t, cc.ClientInBytes(), uint64(0))
 			require.GreaterOrEqual(t, cc.ClientInBytes(), inBytes)
@@ -906,6 +905,7 @@ func TestGetBackendIO(t *testing.T) {
 
 func TestBackendInactive(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.bcConfig.TickerInterval = time.Millisecond
 		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
 	})
 	runners := []runner{
@@ -989,9 +989,7 @@ func TestBackendInactive(t *testing.T) {
 }
 
 func TestKeepAlive(t *testing.T) {
-	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
-	})
+	ts := newBackendMgrTester(t)
 	runners := []runner{
 		{
 			client: ts.mc.authenticate,
