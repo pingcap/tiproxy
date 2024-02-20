@@ -4,21 +4,55 @@
 package backend
 
 import (
+	"sync"
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
-	label := cmd.String()
-	metrics.QueryTotalCounter.WithLabelValues(addr, label).Inc()
+type mcPerCmd struct {
+	counter  prometheus.Counter
+	observer prometheus.Observer
+}
 
+type cmdMetricsCache struct {
+	sync.Mutex
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
 	// However, the proxy is not aware of the statement types, so we use command types instead.
+	metrics map[string]*[pnet.ComEnd]mcPerCmd
+}
+
+func newCmdMetricsCache() cmdMetricsCache {
+	return cmdMetricsCache{
+		metrics: make(map[string]*[pnet.ComEnd]mcPerCmd),
+	}
+}
+
+var cache = newCmdMetricsCache()
+
+func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
+	cache.Lock()
+	defer cache.Unlock()
+
+	addrMc, ok := cache.metrics[addr]
+	if !ok {
+		addrMc = &[pnet.ComEnd]mcPerCmd{}
+		cache.metrics[addr] = addrMc
+	}
+	mc := &addrMc[cmd]
+	if mc.counter == nil {
+		label := cmd.String()
+		*mc = mcPerCmd{
+			counter:  metrics.QueryTotalCounter.WithLabelValues(addr, label),
+			observer: metrics.QueryDurationHistogram.WithLabelValues(addr, label),
+		}
+	}
+	mc.counter.Inc()
 	cost := monotime.Since(startTime)
-	metrics.QueryDurationHistogram.WithLabelValues(addr, label).Observe(cost.Seconds())
+	mc.observer.Observe(cost.Seconds())
 }
 
 func readCmdCounter(cmd pnet.Command, addr string) (int, error) {
