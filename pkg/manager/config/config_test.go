@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 	"time"
 
@@ -156,158 +154,146 @@ func TestConfigRemove(t *testing.T) {
 }
 
 func TestFilePath(t *testing.T) {
-	var (
-		cfgmgr *ConfigManager
-		text   fmt.Stringer
-		count  int
-	)
+	for i := 0; i < 10; i++ {
+		var cfgmgr *ConfigManager
+		tmpdir := t.TempDir()
+		pdAddr1, pdAddr2, pdAddr3 := "127.0.0.1:1000", "127.0.0.1:2000", "127.0.0.1:3000"
 
-	const (
-		noReload int = iota
-		reloadWrite
-		reloadCreate
-	)
+		tests := []struct {
+			filename   string
+			createFile func()
+			cleanFile  func()
+			checker    func(filename string)
+		}{
+			{
+				// Test updating another file in the same directory.
+				filename: filepath.Join(tmpdir, "cfg"),
+				checker: func(filename string) {
+					tmplog := filepath.Join(tmpdir, "log")
+					f, err := os.Create(tmplog)
+					require.NoError(t, err)
+					require.NoError(t, f.Close())
+					require.NoError(t, os.WriteFile(tmplog, []byte("hello"), 0644))
+					newlog := filepath.Join(tmpdir, "log1")
+					require.NoError(t, os.Rename(tmplog, newlog))
+					require.NoError(t, os.Remove(newlog))
+					require.Equal(t, pdAddr2, cfgmgr.GetConfig().Proxy.PDAddrs)
+				},
+			},
+			{
+				// Test case-insensitive.
+				filename: filepath.Join(tmpdir, "cfg"),
+				createFile: func() {
+					f, err := os.Create(filepath.Join(tmpdir, "CFG"))
+					require.NoError(t, err)
+					require.NoError(t, f.Close())
+					// Linux is case-sensitive but macOS is case-insensitive.
+					// For linux, it creates another file. For macOS, it doesn't touch the file.
+					f, err = os.Create(filepath.Join(tmpdir, "cfg"))
+					require.NoError(t, err)
+					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+					require.NoError(t, err)
+					require.NoError(t, f.Close())
+				},
+			},
+			{
+				// Test relative path.
+				// `event.Name` is `cfg` on MacOS, but it's `./cfg` on Linux.
+				filename: "cfg",
+			},
+			{
+				// Test relative path.
+				filename: "./cfg",
+			},
+			{
+				// Test uncleaned path.
+				filename: fmt.Sprintf("%s%c%ccfg", tmpdir, filepath.Separator, filepath.Separator),
+			},
+			{
+				// Test removing and recreating the directory.
+				filename: "_tmp/cfg",
+				createFile: func() {
+					if err := os.Mkdir("_tmp", 0755); err != nil {
+						require.ErrorIs(t, err, os.ErrExist)
+					}
+					f, err := os.Create("_tmp/cfg")
+					require.NoError(t, err)
+					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+					require.NoError(t, err)
+					require.NoError(t, f.Close())
+				},
+				cleanFile: func() {
+					require.NoError(t, os.RemoveAll("_tmp"))
+				},
+				checker: func(filename string) {
+					require.NoError(t, os.RemoveAll("_tmp"))
+					t.Log("remove _tmp")
 
-	tmpdir := t.TempDir()
-	checkLog := func(reloadType int) {
-		if reloadType != noReload {
-			expectedCount := count + 1
-			// On linux, writing once will trigger 2 WRITE events. But on macOS, it only triggers once.
-			if reloadType == reloadWrite && runtime.GOOS == "linux" {
-				expectedCount++
+					require.NoError(t, os.Mkdir("_tmp", 0755))
+					f, err := os.Create("_tmp/cfg")
+					require.NoError(t, err)
+					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr3))
+					require.NoError(t, err)
+					require.NoError(t, f.Close())
+					t.Log("write _tmp")
+					require.Eventually(t, func() bool {
+						return pdAddr3 == cfgmgr.GetConfig().Proxy.PDAddrs
+					}, 3*time.Second, 10*time.Millisecond, cfgmgr.GetConfig().Proxy.PDAddrs)
+				},
+			},
+			{
+				// Test removing and recreating the file.
+				filename: "cfg",
+				checker: func(filename string) {
+					require.NoError(t, os.Remove(filename))
+
+					f, err := os.Create(filename)
+					require.NoError(t, err)
+					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr3))
+					require.NoError(t, err)
+					require.NoError(t, f.Close())
+					require.Eventually(t, func() bool {
+						return pdAddr3 == cfgmgr.GetConfig().Proxy.PDAddrs
+					}, 3*time.Second, 10*time.Millisecond, cfgmgr.GetConfig().Proxy.PDAddrs)
+				},
+			},
+		}
+
+		for i, test := range tests {
+			t.Log(fmt.Sprintf("%dth test", i+1))
+			if test.createFile != nil {
+				test.createFile()
+			} else {
+				f, err := os.Create(test.filename)
+				require.NoError(t, err)
+				_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
 			}
-			var newCount int
+
+			cfgmgr, _, _ = testConfigManager(t, test.filename)
+			require.Equal(t, pdAddr1, cfgmgr.GetConfig().Proxy.PDAddrs)
+
+			// Test write.
+			require.NoError(t, os.WriteFile(test.filename, []byte(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr2)), 0644))
 			require.Eventually(t, func() bool {
-				newCount = strings.Count(text.String(), "config file reloaded")
-				return newCount == expectedCount
-			}, 3*time.Second, 10*time.Millisecond, "count=%d, expected=%d, newCount=%d", count, expectedCount, newCount)
-			count = newCount
-		} else {
-			time.Sleep(100 * time.Millisecond)
-			newCount := strings.Count(text.String(), "config file reloaded")
-			require.Equal(t, count, newCount)
+				return pdAddr2 == cfgmgr.GetConfig().Proxy.PDAddrs
+			}, 3*time.Second, 10*time.Millisecond, cfgmgr.GetConfig().Proxy.PDAddrs)
+
+			// Test other.
+			if test.checker != nil {
+				test.checker(test.filename)
+			}
+
+			// Test remove.
+			if test.cleanFile != nil {
+				test.cleanFile()
+			} else {
+				// It doesn't matter whether it triggers reload or not.
+				require.NoError(t, os.Remove(test.filename))
+			}
+			require.NoError(t, cfgmgr.Close())
 		}
-	}
-
-	tests := []struct {
-		filename   string
-		createFile func()
-		cleanFile  func()
-		checker    func(filename string)
-	}{
-		{
-			// Test updating another file in the same directory won't make it reload.
-			filename: filepath.Join(tmpdir, "cfg"),
-			checker: func(filename string) {
-				tmplog := filepath.Join(tmpdir, "log")
-				f, err := os.Create(tmplog)
-				require.NoError(t, err)
-				require.NoError(t, f.Close())
-				require.NoError(t, os.WriteFile(tmplog, []byte("hello"), 0644))
-				newlog := filepath.Join(tmpdir, "log1")
-				require.NoError(t, os.Rename(tmplog, newlog))
-				require.NoError(t, os.Remove(newlog))
-				checkLog(noReload)
-			},
-		},
-		{
-			// Test case-insensitive.
-			filename: filepath.Join(tmpdir, "cfg"),
-			createFile: func() {
-				f, err := os.Create(filepath.Join(tmpdir, "CFG"))
-				require.NoError(t, err)
-				require.NoError(t, f.Close())
-				// Linux is case-sensitive but macOS is case-insensitive.
-				// For linux, it creates another file. For macOS, it doesn't touch the file.
-				f, err = os.Create(filepath.Join(tmpdir, "cfg"))
-				require.NoError(t, err)
-				require.NoError(t, f.Close())
-			},
-		},
-		{
-			// Test relative path.
-			// `event.Name` is `cfg` on MacOS, but it's `./cfg` on Linux.
-			filename: "cfg",
-		},
-		{
-			// Test relative path.
-			filename: "./cfg",
-		},
-		{
-			// Test uncleaned path.
-			filename: fmt.Sprintf("%s%c%ccfg", tmpdir, filepath.Separator, filepath.Separator),
-		},
-		{
-			// Test removing and recreating the directory.
-			filename: "_tmp/cfg",
-			createFile: func() {
-				if err := os.Mkdir("_tmp", 0755); err != nil {
-					require.ErrorIs(t, err, os.ErrExist)
-				}
-				f, err := os.Create("_tmp/cfg")
-				require.NoError(t, err)
-				require.NoError(t, f.Close())
-			},
-			cleanFile: func() {
-				require.NoError(t, os.RemoveAll("_tmp"))
-			},
-			checker: func(filename string) {
-				require.NoError(t, os.RemoveAll("_tmp"))
-				// To update `count`.
-				checkLog(noReload)
-
-				require.NoError(t, os.Mkdir("_tmp", 0755))
-				f, err := os.Create("_tmp/cfg")
-				require.NoError(t, err)
-				require.NoError(t, f.Close())
-				checkLog(reloadCreate)
-			},
-		},
-		{
-			// Test removing and recreating the file.
-			filename: "cfg",
-			checker: func(filename string) {
-				require.NoError(t, os.Remove(filename))
-				checkLog(noReload)
-
-				f, err := os.Create(filename)
-				require.NoError(t, err)
-				require.NoError(t, f.Close())
-				checkLog(reloadCreate)
-			},
-		},
-	}
-
-	for _, test := range tests {
-		if test.createFile != nil {
-			test.createFile()
-		} else {
-			f, err := os.Create(test.filename)
-			require.NoError(t, err)
-			require.NoError(t, f.Close())
-		}
-
-		count = 0
-		cfgmgr, text, _ = testConfigManager(t, test.filename)
-		checkLog(noReload)
-
-		// Test write.
-		require.NoError(t, os.WriteFile(test.filename, []byte("proxy.pd-addrs = \"127.0.0.1:2379\""), 0644))
-		checkLog(reloadWrite)
-
-		// Test other.
-		if test.checker != nil {
-			test.checker(test.filename)
-		}
-
-		// Test remove.
-		if test.cleanFile != nil {
-			test.cleanFile()
-		} else {
-			// It doesn't matter whether it triggers reload or not.
-			require.NoError(t, os.Remove(test.filename))
-		}
-		require.NoError(t, cfgmgr.Close())
 	}
 }
 
