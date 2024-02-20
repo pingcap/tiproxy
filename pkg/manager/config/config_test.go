@@ -260,7 +260,7 @@ func TestFilePath(t *testing.T) {
 		}
 
 		for i, test := range tests {
-			t.Log(fmt.Sprintf("%dth test", i+1))
+			t.Logf("%dth test", i+1)
 			if test.createFile != nil {
 				test.createFile()
 			} else {
