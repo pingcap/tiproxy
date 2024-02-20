@@ -325,12 +325,14 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 }
 
 func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
+	ticker := time.NewTicker(rebalanceInterval)
 	for {
-		router.rebalance(rebalanceConnsPerLoop)
 		select {
 		case <-ctx.Done():
+			ticker.Stop()
 			return
-		case <-time.After(rebalanceInterval):
+		case <-ticker.C:
+			router.rebalance(rebalanceConnsPerLoop)
 		}
 	}
 }

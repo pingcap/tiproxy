@@ -195,15 +195,14 @@ type PacketIO struct {
 	rawConn       net.Conn
 	readWriter    packetReadWriter
 	limitReader   io.LimitedReader // reuse memory to reduce allocation
-	header        []byte           // reuse memory to reduce allocation
 	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
+	header        [4]byte // reuse memory to reduce allocation
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *PacketIO {
 	p := &PacketIO{
-		header:     make([]byte, 4),
 		rawConn:    conn,
 		logger:     lg,
 		readWriter: newBasicReadWriter(conn, bufferSize),
@@ -243,7 +242,7 @@ func (p *PacketIO) GetSequence() uint8 {
 }
 
 func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
-	if err := ReadFull(p.readWriter, p.header); err != nil {
+	if err := ReadFull(p.readWriter, p.header[:]); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 	p.readWriter.SetSequence(p.header[3] + 1)
@@ -292,7 +291,7 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 	p.header[3] = sequence
 	p.readWriter.SetSequence(sequence + 1)
 
-	if _, err := p.readWriter.Write(p.header); err != nil {
+	if _, err := p.readWriter.Write(p.header[:]); err != nil {
 		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
 

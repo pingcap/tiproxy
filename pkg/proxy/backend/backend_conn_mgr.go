@@ -132,9 +132,12 @@ type BackendConnManager struct {
 	backendIO        atomic.Pointer[pnet.PacketIO]
 	backendTLS       *tls.Config
 	handshakeHandler HandshakeHandler
-	ctxmap           sync.Map
-	connectionID     uint64
-	quitSource       ErrorSource
+	ctxmap           struct {
+		sync.Mutex
+		m map[any]any
+	}
+	connectionID uint64
+	quitSource   ErrorSource
 }
 
 // NewBackendConnManager creates a BackendConnManager.
@@ -146,16 +149,13 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		connectionID:     connectionID,
 		cmdProcessor:     NewCmdProcessor(logger.Named("cp")),
 		handshakeHandler: handshakeHandler,
-		authenticator: &Authenticator{
-			proxyProtocol:     config.ProxyProtocol,
-			requireBackendTLS: config.RequireBackendTLS,
-			salt:              GenerateSalt(20),
-		},
+		authenticator:    NewAuthenticator(config),
 		// There are 2 types of signals, which may be sent concurrently.
 		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),
 		quitSource:     SrcNone,
 	}
+	mgr.ctxmap.m = make(map[any]any)
 	mgr.SetValue(ConnContextKeyConnID, connectionID)
 	return mgr
 }
@@ -618,14 +618,15 @@ func (mgr *BackendConnManager) QuitSource() ErrorSource {
 }
 
 func (mgr *BackendConnManager) SetValue(key, val any) {
-	mgr.ctxmap.Store(key, val)
+	mgr.ctxmap.Lock()
+	mgr.ctxmap.m[key] = val
+	mgr.ctxmap.Unlock()
 }
 
 func (mgr *BackendConnManager) Value(key any) any {
-	v, ok := mgr.ctxmap.Load(key)
-	if !ok {
-		return nil
-	}
+	mgr.ctxmap.Lock()
+	v := mgr.ctxmap.m[key]
+	mgr.ctxmap.Unlock()
 	return v
 }
 

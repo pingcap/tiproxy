@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1216,4 +1217,23 @@ func TestCloseWhileGracefulClose(t *testing.T) {
 	}
 
 	ts.runTests(runners)
+}
+
+func BenchmarkSyncMap(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		var m sync.Map
+		m.Store("1", "1")
+		m.Load("1")
+	}
+}
+
+func BenchmarkLockedMap(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		m := make(map[string]string)
+		var lock sync.Mutex
+		lock.Lock()
+		m["1"] = "1"
+		_ = m["1"]
+		lock.Unlock()
+	}
 }

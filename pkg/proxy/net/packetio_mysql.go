@@ -17,14 +17,8 @@ var (
 
 // WriteInitialHandshake writes an initial handshake as a server.
 // It's used for tenant-aware routing and testing.
-func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, authPlugin string, serverVersion string, connID uint64) error {
+func (p *PacketIO) WriteInitialHandshake(capability Capability, salt [20]byte, authPlugin string, serverVersion string, connID uint64) error {
 	saltLen := len(salt)
-	if saltLen < 8 {
-		return ErrSaltNotLongEnough
-	} else if saltLen > 20 {
-		saltLen = 20
-	}
-
 	data := make([]byte, 0, 128)
 
 	// min version 10
@@ -61,14 +55,14 @@ func (p *PacketIO) WriteInitialHandshake(capability Capability, salt []byte, aut
 }
 
 // WriteSwitchRequest writes a switch request to the client. It's only for testing.
-func (p *PacketIO) WriteSwitchRequest(authPlugin string, salt []byte) error {
+func (p *PacketIO) WriteSwitchRequest(authPlugin string, salt [20]byte) error {
 	length := 1 + len(authPlugin) + 1 + len(salt) + 1
 	data := make([]byte, 0, length)
 	// check https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_auth_switch_request.html
 	data = append(data, byte(AuthSwitchHeader))
 	data = append(data, authPlugin...)
 	data = append(data, 0x00)
-	data = append(data, salt...)
+	data = append(data, salt[:]...)
 	data = append(data, 0x00)
 	return p.WritePacket(data, true)
 }

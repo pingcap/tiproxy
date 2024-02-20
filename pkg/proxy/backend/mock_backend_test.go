@@ -13,10 +13,10 @@ import (
 )
 
 type backendConfig struct {
+	salt          [20]byte
 	tlsConfig     *tls.Config
 	authPlugin    string
 	sessionStates string
-	salt          []byte
 	columns       int
 	loops         int
 	params        int
