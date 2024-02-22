@@ -108,10 +108,10 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(HealthCheckCycleGauge)
 	prometheus.MustRegister(MigrateCounter)
 	prometheus.MustRegister(MigrateDurationHistogram)
-	prometheus.MustRegister(ClientBytesCounter)
-	prometheus.MustRegister(ClientPacketsCounter)
-	prometheus.MustRegister(BackendBytesCounter)
-	prometheus.MustRegister(BackendPacketsCounter)
+	prometheus.MustRegister(InboundBytesCounter)
+	prometheus.MustRegister(InboundPacketsCounter)
+	prometheus.MustRegister(OutboundBytesCounter)
+	prometheus.MustRegister(OutboundPacketsCounter)
 }
 
 // ReadCounter reads the value from the counter. It is only used for testing.

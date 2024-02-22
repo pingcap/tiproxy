@@ -21,47 +21,48 @@ type mcPerCmd struct {
 type mcPerBackend struct {
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
 	// However, the proxy is not aware of the statement types, so we use command types instead.
-	cmds           [pnet.ComEnd]mcPerCmd
-	backendBytes   prometheus.Counter
-	backendPackets prometheus.Counter
+	cmds       [pnet.ComEnd]mcPerCmd
+	inBytes    prometheus.Counter
+	inPackets  prometheus.Counter
+	outBytes   prometheus.Counter
+	outPackets prometheus.Counter
 }
 
 type cmdMetricsCache struct {
 	sync.Mutex
 	backendMetrics map[string]*mcPerBackend
-	clientBytes    prometheus.Counter
-	clientPackets  prometheus.Counter
 }
 
 func newCmdMetricsCache() cmdMetricsCache {
 	return cmdMetricsCache{
 		backendMetrics: make(map[string]*mcPerBackend),
-		clientBytes:    metrics.ClientBytesCounter,
-		clientPackets:  metrics.ClientPacketsCounter,
 	}
 }
 
 var cache = newCmdMetricsCache()
 
-func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time, clientBytes, clientPackets, backendBytes, backendPackets uint64) {
+func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time, inBytes, inPackets, outBytes, outPackets uint64) {
 	cache.Lock()
 	defer cache.Unlock()
 
-	cache.clientBytes.Add(float64(clientBytes))
-	cache.clientPackets.Add(float64(clientPackets))
-
+	// Updating traffic per IO costs too much CPU, so update it per command.
 	backendMetrics, ok := cache.backendMetrics[addr]
 	if !ok {
 		backendMetrics = &mcPerBackend{
-			cmds:           [pnet.ComEnd]mcPerCmd{},
-			backendBytes:   metrics.BackendBytesCounter.WithLabelValues(addr),
-			backendPackets: metrics.BackendPacketsCounter.WithLabelValues(addr),
+			cmds:       [pnet.ComEnd]mcPerCmd{},
+			inBytes:    metrics.InboundBytesCounter.WithLabelValues(addr),
+			inPackets:  metrics.InboundPacketsCounter.WithLabelValues(addr),
+			outBytes:   metrics.OutboundBytesCounter.WithLabelValues(addr),
+			outPackets: metrics.OutboundPacketsCounter.WithLabelValues(addr),
 		}
 		cache.backendMetrics[addr] = backendMetrics
 	}
-	backendMetrics.backendBytes.Add(float64(backendBytes))
-	backendMetrics.backendPackets.Add(float64(backendPackets))
+	backendMetrics.inBytes.Add(float64(inBytes))
+	backendMetrics.inPackets.Add(float64(inPackets))
+	backendMetrics.outBytes.Add(float64(outBytes))
+	backendMetrics.outPackets.Add(float64(outPackets))
 
+	// query metrics
 	mc := &backendMetrics.cmds[cmd]
 	if mc.counter == nil {
 		label := cmd.String()

@@ -128,9 +128,6 @@ type BackendConnManager struct {
 	closeStatus atomic.Int32
 	// The last time when the backend is active.
 	lastActiveTime monotime.Time
-	// The client traffic collected for metrics last time.
-	lastClientBytes   uint64
-	lastClientPackets uint64
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc context.CancelFunc
 	clientIO   *pnet.PacketIO
@@ -298,9 +295,12 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
+	backendIO := mgr.backendIO.Load()
+	inBytes, inPackets, outBytes, outPackets := backendIO.InBytes(), backendIO.InPackets(), backendIO.OutBytes(), backendIO.OutPackets()
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), waitingRedirect)
 	if !holdRequest {
-		mgr.addCmdMetrics(cmd, startTime)
+		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime, backendIO.InBytes()-inBytes,
+			backendIO.InPackets()-inPackets, backendIO.OutBytes()-outBytes, backendIO.OutPackets()-outPackets)
 	}
 	if err != nil {
 		if !pnet.IsMySQLError(err) {
@@ -342,8 +342,10 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	}
 	// Execute the held request no matter redirection succeeds or not.
 	if holdRequest && mgr.closeStatus.Load() < statusNotifyClose {
-		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), false)
-		mgr.addCmdMetrics(cmd, startTime)
+		backendIO = mgr.backendIO.Load()
+		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false)
+		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime, backendIO.InBytes()-inBytes,
+			backendIO.InPackets()-inPackets, backendIO.OutBytes()-outBytes, backendIO.OutPackets()-outPackets)
 		if err != nil && !pnet.IsMySQLError(err) {
 			return
 		}
@@ -351,14 +353,6 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	// Ignore MySQL errors, only return unexpected errors.
 	err = nil
 	return
-}
-
-func (mgr *BackendConnManager) addCmdMetrics(cmd pnet.Command, startTime monotime.Time) {
-	backendIO := mgr.backendIO.Load()
-	clientBytes, clientPackets := mgr.clientIO.InBytes(), mgr.clientIO.InPackets()
-	addCmdMetrics(cmd, mgr.ServerAddr(), startTime, clientBytes-mgr.lastClientBytes,
-		clientPackets-mgr.lastClientPackets, backendIO.InBytes(), backendIO.InPackets())
-	mgr.lastClientBytes, mgr.lastClientPackets = clientBytes, clientPackets
 }
 
 // SetEventReceiver implements RedirectableConn.SetEventReceiver interface.

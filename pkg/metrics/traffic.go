@@ -6,35 +6,35 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	ClientPacketsCounter = prometheus.NewCounter(
+	InboundBytesCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: ModuleProxy,
 			Subsystem: LabelTraffic,
-			Name:      "client_packets",
-			Help:      "Counter of packets from clients.",
-		})
+			Name:      "inbound_bytes",
+			Help:      "Counter of bytes from backends.",
+		}, []string{LblBackend})
 
-	BackendPacketsCounter = prometheus.NewCounterVec(
+	InboundPacketsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: ModuleProxy,
 			Subsystem: LabelTraffic,
-			Name:      "backend_packets",
+			Name:      "inbound_packets",
 			Help:      "Counter of packets from backends.",
 		}, []string{LblBackend})
 
-	ClientBytesCounter = prometheus.NewCounter(
+	OutboundBytesCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: ModuleProxy,
 			Subsystem: LabelTraffic,
-			Name:      "client_bytes",
-			Help:      "Counter of bytes from clients.",
-		})
+			Name:      "outbound_bytes",
+			Help:      "Counter of bytes to backends.",
+		}, []string{LblBackend})
 
-	BackendBytesCounter = prometheus.NewCounterVec(
+	OutboundPacketsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: ModuleProxy,
 			Subsystem: LabelTraffic,
-			Name:      "backend_bytes",
-			Help:      "Counter of bytes from backends.",
+			Name:      "outbound_packets",
+			Help:      "Counter of packets to backends.",
 		}, []string{LblBackend})
 )
