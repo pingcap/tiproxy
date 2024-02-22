@@ -3,35 +3,41 @@
 
 package router
 
+import "sync/atomic"
+
 var _ Router = &StaticRouter{}
 
 type StaticRouter struct {
-	addrs []string
-	cnt   int
+	backends []*StaticBackend
+	cnt      int
 }
 
-func NewStaticRouter(addr []string) *StaticRouter {
-	return &StaticRouter{addrs: addr}
+func NewStaticRouter(addrs []string) *StaticRouter {
+	backends := make([]*StaticBackend, 0, len(addrs))
+	for _, addr := range addrs {
+		backends = append(backends, NewStaticBackend(addr))
+	}
+	return &StaticRouter{backends: backends}
 }
 
 func (r *StaticRouter) GetBackendSelector() BackendSelector {
 	return BackendSelector{
-		routeOnce: func(excluded []string) (string, error) {
-			for _, addr := range r.addrs {
+		routeOnce: func(excluded []BackendInst) (BackendInst, error) {
+			for _, backend := range r.backends {
 				found := false
 				for _, e := range excluded {
-					if e == addr {
+					if e.Addr() == backend.Addr() {
 						found = true
 						break
 					}
 				}
 				if !found {
-					return addr, nil
+					return backend, nil
 				}
 			}
-			return "", nil
+			return nil, ErrNoBackend
 		},
-		onCreate: func(addr string, conn RedirectableConn, succeed bool) {
+		onCreate: func(backend BackendInst, conn RedirectableConn, succeed bool) {
 			if succeed {
 				r.cnt++
 			}
@@ -67,4 +73,29 @@ func (r *StaticRouter) OnRedirectFail(from, to string, conn RedirectableConn) er
 func (r *StaticRouter) OnConnClosed(addr string, conn RedirectableConn) error {
 	r.cnt--
 	return nil
+}
+
+type StaticBackend struct {
+	addr    string
+	healthy atomic.Bool
+}
+
+func NewStaticBackend(addr string) *StaticBackend {
+	backend := &StaticBackend{
+		addr: addr,
+	}
+	backend.healthy.Store(true)
+	return backend
+}
+
+func (b *StaticBackend) Addr() string {
+	return b.addr
+}
+
+func (b *StaticBackend) Healthy() bool {
+	return b.healthy.Load()
+}
+
+func (b *StaticBackend) SetHealthy(healthy bool) {
+	b.healthy.Store(healthy)
 }

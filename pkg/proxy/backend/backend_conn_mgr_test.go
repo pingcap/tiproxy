@@ -990,13 +990,15 @@ func TestBackendInactive(t *testing.T) {
 }
 
 func TestKeepAlive(t *testing.T) {
-	ts := newBackendMgrTester(t)
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.bcConfig.TickerInterval = time.Millisecond
+		config.proxyConfig.bcConfig.HealthyKeepAlive.Idle = time.Minute
+		config.proxyConfig.bcConfig.UnhealthyKeepAlive.Idle = time.Second
+	})
 	runners := []runner{
 		{
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				ts.mp.config.HealthyKeepAlive.Idle = time.Minute
-				ts.mp.config.UnhealthyKeepAlive.Idle = time.Second
 				require.NoError(t, ts.firstHandshake4Proxy(clientIO, backendIO))
 				require.Equal(t, time.Minute, ts.mp.backendIO.Load().LastKeepAlive().Idle)
 				return nil
@@ -1005,10 +1007,15 @@ func TestKeepAlive(t *testing.T) {
 		},
 		{
 			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				ts.mp.NotifyBackendStatus(router.StatusCannotConnect)
-				require.Equal(t, time.Second, ts.mp.backendIO.Load().LastKeepAlive().Idle)
-				ts.mp.NotifyBackendStatus(router.StatusHealthy)
 				require.Equal(t, time.Minute, ts.mp.backendIO.Load().LastKeepAlive().Idle)
+				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(false)
+				require.Eventually(t, func() bool {
+					return ts.mp.backendIO.Load().LastKeepAlive().Idle == time.Second
+				}, 3*time.Second, 10*time.Millisecond)
+				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(true)
+				require.Eventually(t, func() bool {
+					return ts.mp.backendIO.Load().LastKeepAlive().Idle == time.Minute
+				}, 3*time.Second, 10*time.Millisecond)
 				return nil
 			},
 		},

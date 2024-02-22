@@ -8,7 +8,12 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+)
+
+var (
+	ErrNoBackend = errors.New("no available backend")
 )
 
 // ConnEventReceiver receives connection events.
@@ -66,7 +71,6 @@ type RedirectableConn interface {
 	Value(key any) any
 	// Redirect returns false if the current conn is not redirectable.
 	Redirect(backend BackendInst) bool
-	NotifyBackendStatus(status BackendStatus)
 	ConnectionID() uint64
 }
 

@@ -72,11 +72,11 @@ func (router *ScoreBasedRouter) setConnWrapper(conn RedirectableConn, ce *glist.
 	conn.SetValue(_routerKey, ce)
 }
 
-func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
+func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, error) {
 	router.Lock()
 	defer router.Unlock()
 	if router.observeError != nil {
-		return "", router.observeError
+		return nil, router.observeError
 	}
 	for be := router.backends.Back(); be != nil; be = be.Prev() {
 		backend := be.Value
@@ -87,7 +87,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 		}
 		found := false
 		for _, ex := range excluded {
-			if ex == backend.addr {
+			if ex.Addr() == backend.Addr() {
 				found = true
 				break
 			}
@@ -95,7 +95,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 		if !found {
 			backend.connScore++
 			router.adjustBackendList(be, false)
-			return backend.addr, nil
+			return backend, nil
 		}
 	}
 	// No available backends, maybe the health check result is outdated during rolling restart.
@@ -103,13 +103,13 @@ func (router *ScoreBasedRouter) routeOnce(excluded []string) (string, error) {
 	if router.observer != nil {
 		router.observer.Refresh()
 	}
-	return "", nil
+	return nil, ErrNoBackend
 }
 
-func (router *ScoreBasedRouter) onCreateConn(addr string, conn RedirectableConn, succeed bool) {
+func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn RedirectableConn, succeed bool) {
 	router.Lock()
 	defer router.Unlock()
-	be := router.ensureBackend(addr, true)
+	be := router.ensureBackend(backendInst.Addr(), true)
 	backend := be.Value
 	if succeed {
 		connWrapper := &connWrapper{
@@ -136,7 +136,6 @@ func (router *ScoreBasedRouter) addConn(be *glist.Element[*backendWrapper], conn
 	ce := backend.connList.PushBack(conn)
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	router.setConnWrapper(conn, ce)
-	conn.NotifyBackendStatus(backend.Status())
 	router.adjustBackendList(be, false)
 }
 
@@ -313,10 +312,6 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 				zap.String("prev", backend.mu.String()), zap.String("cur", health.String()))
 			backend.setHealth(*health)
 			router.adjustBackendList(be, true)
-			for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
-				conn := ele.Value
-				conn.NotifyBackendStatus(health.Status)
-			}
 		}
 	}
 	if len(backends) > 0 {
