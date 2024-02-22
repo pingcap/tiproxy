@@ -199,6 +199,8 @@ type PacketIO struct {
 	remoteAddr    net.Addr
 	wrap          error
 	header        [4]byte // reuse memory to reduce allocation
+	inPackets     uint64
+	outPackets    uint64
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *PacketIO {
@@ -252,6 +254,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	if err := ReadFull(p.readWriter, data); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
+	p.inPackets++
 	return data, length == MaxPayloadLen, nil
 }
 
@@ -299,6 +302,7 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 		return 0, more, errors.Wrap(ErrWriteConn, err)
 	}
 
+	p.outPackets++
 	return length, more, nil
 }
 
@@ -352,6 +356,8 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 				if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
 					return p.wrapErr(errors.Wrap(ErrRelayConn, err))
 				}
+				p.inPackets++
+				dest.outPackets++
 				// For large packets, continue.
 				if length < MaxPayloadLen {
 					break
@@ -379,6 +385,14 @@ func (p *PacketIO) InBytes() uint64 {
 
 func (p *PacketIO) OutBytes() uint64 {
 	return p.readWriter.OutBytes()
+}
+
+func (p *PacketIO) InPackets() uint64 {
+	return p.inPackets
+}
+
+func (p *PacketIO) OutPackets() uint64 {
+	return p.outPackets
 }
 
 func (p *PacketIO) Flush() error {

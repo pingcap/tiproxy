@@ -30,4 +30,13 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled queries.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 29), // 0.5ms ~ 1.5days
 		}, []string{LblBackend, LblCmdType})
+
+	HandshakeDurationHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelSession,
+			Name:      "handshake_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handshakes.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 29), // 0.5ms ~ 1.5days
+		}, []string{LblBackend})
 )

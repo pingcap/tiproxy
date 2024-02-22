@@ -18,37 +18,55 @@ type mcPerCmd struct {
 	observer prometheus.Observer
 }
 
-type cmdMetricsCache struct {
-	sync.Mutex
+type mcPerBackend struct {
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
 	// However, the proxy is not aware of the statement types, so we use command types instead.
-	metrics map[string]*[pnet.ComEnd]mcPerCmd
+	cmds           [pnet.ComEnd]mcPerCmd
+	backendBytes   prometheus.Counter
+	backendPackets prometheus.Counter
+}
+
+type cmdMetricsCache struct {
+	sync.Mutex
+	backendMetrics map[string]*mcPerBackend
+	clientBytes    prometheus.Counter
+	clientPackets  prometheus.Counter
 }
 
 func newCmdMetricsCache() cmdMetricsCache {
 	return cmdMetricsCache{
-		metrics: make(map[string]*[pnet.ComEnd]mcPerCmd),
+		backendMetrics: make(map[string]*mcPerBackend),
+		clientBytes:    metrics.ClientBytesCounter,
+		clientPackets:  metrics.ClientPacketsCounter,
 	}
 }
 
 var cache = newCmdMetricsCache()
 
-func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
+func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time, clientBytes, clientPackets, backendBytes, backendPackets uint64) {
 	cache.Lock()
 	defer cache.Unlock()
 
-	addrMc, ok := cache.metrics[addr]
+	cache.clientBytes.Add(float64(clientBytes))
+	cache.clientPackets.Add(float64(clientPackets))
+
+	backendMetrics, ok := cache.backendMetrics[addr]
 	if !ok {
-		addrMc = &[pnet.ComEnd]mcPerCmd{}
-		cache.metrics[addr] = addrMc
+		backendMetrics = &mcPerBackend{
+			cmds:           [pnet.ComEnd]mcPerCmd{},
+			backendBytes:   metrics.BackendBytesCounter.WithLabelValues(addr),
+			backendPackets: metrics.BackendPacketsCounter.WithLabelValues(addr),
+		}
+		cache.backendMetrics[addr] = backendMetrics
 	}
-	mc := &addrMc[cmd]
+	backendMetrics.backendBytes.Add(float64(backendBytes))
+	backendMetrics.backendPackets.Add(float64(backendPackets))
+
+	mc := &backendMetrics.cmds[cmd]
 	if mc.counter == nil {
 		label := cmd.String()
-		*mc = mcPerCmd{
-			counter:  metrics.QueryTotalCounter.WithLabelValues(addr, label),
-			observer: metrics.QueryDurationHistogram.WithLabelValues(addr, label),
-		}
+		mc.counter = metrics.QueryTotalCounter.WithLabelValues(addr, label)
+		mc.observer = metrics.QueryDurationHistogram.WithLabelValues(addr, label)
 	}
 	mc.counter.Inc()
 	cost := monotime.Since(startTime)
