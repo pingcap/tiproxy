@@ -117,6 +117,7 @@ type BackendConnManager struct {
 	eventReceiver  unsafe.Pointer
 	config         *BCConfig
 	logger         *zap.Logger
+	curBackend     router.BackendInst
 	// Redirect() sets it without lock. It will be set to nil after migration.
 	redirectInfo atomic.Pointer[router.BackendInst]
 	// redirectResCh is used to notify the event receiver asynchronously.
@@ -213,24 +214,20 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 	selector := r.GetBackendSelector()
 	startTime := monotime.Now()
 	var addr string
+	var backend router.BackendInst
 	var origErr error
 	io, err := backoff.RetryNotifyWithData(
 		func() (*pnet.PacketIO, error) {
+			addr = ""
 			// Try to connect to all backup backends one by one.
-			addr, err = selector.Next()
-			// If all addrs are enumerated, reset and try again.
-			if err == nil && addr == "" {
-				selector.Reset()
-				addr, err = selector.Next()
-			}
-			if err != nil {
-				return nil, backoff.Permanent(errors.Wrap(ErrProxyErr, err))
-			}
-			if addr == "" {
+			if backend, err = selector.Next(); err == router.ErrNoBackend {
 				return nil, ErrProxyNoBackend
+			} else if err != nil {
+				return nil, backoff.Permanent(errors.Wrap(ErrProxyErr, err))
 			}
 
 			var cn net.Conn
+			addr = backend.Addr()
 			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
 			selector.Finish(mgr, err == nil)
 			if err != nil {
@@ -242,7 +239,8 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			// And `RemoteAddr()` will return IP addr
 			backendIO := pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize, pnet.WithRemoteAddr(addr, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn))
 			mgr.backendIO.Store(backendIO)
-			mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
+			mgr.curBackend = backend
+			mgr.setKeepAlive()
 			return backendIO, nil
 		},
 		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
@@ -405,6 +403,9 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 			mgr.notifyRedirectResult(ctx, rs)
 		case <-checkBackendTicker.C:
 			mgr.checkBackendActive()
+			mgr.processLock.Lock()
+			mgr.setKeepAlive()
+			mgr.processLock.Unlock()
 		case <-ctx.Done():
 			checkBackendTicker.Stop()
 			return
@@ -487,7 +488,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.backendIO.Store(newBackendIO)
-	mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
+	mgr.curBackend = *backendInst
+	mgr.setKeepAlive()
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 }
 
@@ -574,7 +576,8 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	backendIO := mgr.backendIO.Load()
 	if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection",
-			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()))
+			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()),
+			zap.Bool("backend_healthy", mgr.curBackend.Healthy()))
 		mgr.quitSource = SrcBackendNetwork
 		if err := mgr.clientIO.GracefulClose(); err != nil {
 			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
@@ -676,25 +679,27 @@ func (mgr *BackendConnManager) Close() error {
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
 
-// NotifyBackendStatus notifies the backend status to mgr.
-// The request to the unhealthy backend may block sometimes, instead of fail immediately.
-// So we set a shorter keep alive timeout for the unhealthy backends.
-func (mgr *BackendConnManager) NotifyBackendStatus(status router.BackendStatus) {
-	switch status {
-	case router.StatusHealthy:
-		mgr.setKeepAlive(mgr.config.HealthyKeepAlive)
-	default:
-		mgr.setKeepAlive(mgr.config.UnhealthyKeepAlive)
+// setKeepAlive sets keepalive on the backend connection based on the health status.
+// NOTE: processLock should be held before calling this function.
+func (mgr *BackendConnManager) setKeepAlive() {
+	if mgr.closeStatus.Load() >= statusClosing {
+		return
 	}
-}
-
-func (mgr *BackendConnManager) setKeepAlive(cfg config.KeepAlive) {
 	backendIO := mgr.backendIO.Load()
 	if backendIO == nil {
 		return
 	}
+
+	// The request to the unhealthy backend may block, instead of fail immediately.
+	// So we set a shorter keep alive timeout for the unhealthy backends.
+	cfg := mgr.config.HealthyKeepAlive
+	curHealthy := mgr.curBackend.Healthy()
+	if !curHealthy {
+		cfg = mgr.config.UnhealthyKeepAlive
+	}
 	if err := backendIO.SetKeepalive(cfg); err != nil {
-		mgr.logger.Warn("failed to set keepalive", zap.Stringer("backend_addr", backendIO.RemoteAddr()), zap.Error(err))
+		mgr.logger.Warn("failed to set keepalive", zap.Stringer("backend_addr", backendIO.RemoteAddr()),
+			zap.Bool("backend_healthy", curHealthy), zap.Error(err))
 	}
 }
 
