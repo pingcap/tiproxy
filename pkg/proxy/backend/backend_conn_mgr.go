@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/router"
-	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/siddontang/go/hack"
@@ -128,6 +127,8 @@ type BackendConnManager struct {
 	closeStatus atomic.Int32
 	// The last time when the backend is active.
 	lastActiveTime monotime.Time
+	// The traffic recorded last time.
+	inBytes, inPackets, outBytes, outPackets uint64
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc context.CancelFunc
 	clientIO   *pnet.PacketIO
@@ -195,7 +196,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	}
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 	endTime := monotime.Now()
-	metrics.HandshakeDurationHistogram.WithLabelValues(mgr.ServerAddr()).Observe(time.Duration(endTime - startTime).Seconds())
+	addHandshakeMetrics(mgr.ServerAddr(), time.Duration(endTime-startTime))
+	mgr.updateTraffic(mgr.backendIO.Load())
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
@@ -296,11 +298,10 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	backendIO := mgr.backendIO.Load()
-	inBytes, inPackets, outBytes, outPackets := backendIO.InBytes(), backendIO.InPackets(), backendIO.OutBytes(), backendIO.OutPackets()
-	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, mgr.backendIO.Load(), waitingRedirect)
+	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect)
 	if !holdRequest {
-		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime, backendIO.InBytes()-inBytes,
-			backendIO.InPackets()-inPackets, backendIO.OutBytes()-outBytes, backendIO.OutPackets()-outPackets)
+		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
+		mgr.updateTraffic(backendIO)
 	}
 	if err != nil {
 		if !pnet.IsMySQLError(err) {
@@ -344,8 +345,8 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	if holdRequest && mgr.closeStatus.Load() < statusNotifyClose {
 		backendIO = mgr.backendIO.Load()
 		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false)
-		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime, backendIO.InBytes()-inBytes,
-			backendIO.InPackets()-inPackets, backendIO.OutBytes()-outBytes, backendIO.OutPackets()-outPackets)
+		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
+		mgr.updateTraffic(backendIO)
 		if err != nil && !pnet.IsMySQLError(err) {
 			return
 		}
@@ -353,6 +354,12 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	// Ignore MySQL errors, only return unexpected errors.
 	err = nil
 	return
+}
+
+func (mgr *BackendConnManager) updateTraffic(backendIO *pnet.PacketIO) {
+	inBytes, inPackets, outBytes, outPackets := backendIO.InBytes(), backendIO.InPackets(), backendIO.OutBytes(), backendIO.OutPackets()
+	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets)
+	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = inBytes, inPackets, outBytes, outPackets
 }
 
 // SetEventReceiver implements RedirectableConn.SetEventReceiver interface.
@@ -494,6 +501,9 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		}
 		return
 	}
+	mgr.updateTraffic(backendIO)
+	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = 0, 0, 0, 0
+	mgr.updateTraffic(newBackendIO)
 	if ignoredErr := backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}

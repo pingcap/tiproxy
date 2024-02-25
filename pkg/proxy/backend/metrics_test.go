@@ -18,7 +18,7 @@ func BenchmarkAddCmdMetrics(b *testing.B) {
 	addr := "127.0.0.1:4000"
 	startTime := monotime.Now()
 	for i := 0; i < b.N; i++ {
-		addCmdMetrics(cmd, addr, startTime, 10, 10, 10, 10)
+		addCmdMetrics(cmd, addr, startTime)
 	}
 }
 
