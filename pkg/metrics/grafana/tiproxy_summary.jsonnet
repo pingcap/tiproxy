@@ -306,6 +306,32 @@ local cpsByCMDP = graphPanel.new(
   )
 );
 
+local hsDurP= graphPanel.new(
+  title='Handshake Duration',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy handshake durations by different percents.',
+  format='s',
+)
+.addTarget(
+  prometheus.target(
+    'histogram_quantile(0.99, sum(rate(tiproxy_session_handshake_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) by (le))',
+    legendFormat='99',
+  )
+)
+.addTarget(
+  prometheus.target(
+    'histogram_quantile(0.95, sum(rate(tiproxy_session_handshake_duration_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) by (le))',
+    legendFormat='95',
+  )
+)
+.addTarget(
+  prometheus.target(
+    'sum(rate(tiproxy_session_handshake_duration_seconds_sum{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[30s])) / sum(rate(tiproxy_session_handshake_duration_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster"}[30s]))',
+    legendFormat='avg',
+  )
+);
+
 // Balance Summary
 local balanceRow = row.new(collapse=true, title='Balance');
 local bConnP = graphPanel.new(
@@ -419,6 +445,64 @@ graphPanel.new(
   )
 );
 
+// Traffic row and its panels
+local trafficRow = row.new(collapse=true, title='Traffic');
+local inBytesP = graphPanel.new(
+  title='Bytes/Second from Backends',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Bytes per second from backends to TiProxy.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(sum(rate(tiproxy_traffic_inbound_bytes{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (instance, backend), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{backend}} => {{instance}}',
+  )
+);
+
+local inPacketsP = graphPanel.new(
+  title='Packets/Second from Backends',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='MySQL packets per second from backends to TiProxy.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(sum(rate(tiproxy_traffic_inbound_packets{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (instance, backend), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{backend}} => {{instance}}',
+  )
+);
+
+local outBytesP = graphPanel.new(
+  title='Bytes/Second to Backends',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Bytes per second from TiProxy to backends.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(sum(rate(tiproxy_traffic_outbound_bytes{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (instance, backend), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{instance}} => {{backend}}',
+  )
+);
+
+local outPacketsP = graphPanel.new(
+  title='Packets/Second to Backends',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Packets per second from TiProxy to backends.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(sum(rate(tiproxy_traffic_outbound_packets{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (instance, backend), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{instance}} => {{backend}}',
+  )
+);
+
 // Merge together.
 local panelW = 12;
 local panelH = 6;
@@ -450,6 +534,7 @@ newDash
   .addPanel(cpsByInstP, gridPos=rightPanelPos)
   .addPanel(cpsByBackP, gridPos=leftPanelPos)
   .addPanel(cpsByCMDP, gridPos=rightPanelPos)
+  .addPanel(hsDurP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )
@@ -466,6 +551,15 @@ newDash
   .addPanel(bGetDurP, gridPos=leftPanelPos)
   .addPanel(bPingBeP, gridPos=rightPanelPos)
   .addPanel(bHealthCycleP, gridPos=leftPanelPos)
+  ,
+  gridPos=rowPos
+)
+.addPanel(
+  trafficRow
+  .addPanel(inBytesP, gridPos=leftPanelPos)
+  .addPanel(inPacketsP, gridPos=rightPanelPos)
+  .addPanel(outBytesP, gridPos=leftPanelPos)
+  .addPanel(outPacketsP, gridPos=rightPanelPos)
   ,
   gridPos=rowPos
 )
