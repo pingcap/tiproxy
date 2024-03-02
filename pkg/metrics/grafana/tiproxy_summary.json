@@ -1210,6 +1210,106 @@
                      "show": true
                   }
                ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "TiProxy handshake durations by different percents.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 17,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "histogram_quantile(0.99, sum(rate(tiproxy_session_handshake_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[30s])) by (le))",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "99",
+                     "refId": "A"
+                  },
+                  {
+                     "expr": "histogram_quantile(0.95, sum(rate(tiproxy_session_handshake_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[30s])) by (le))",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "95",
+                     "refId": "B"
+                  },
+                  {
+                     "expr": "sum(rate(tiproxy_session_handshake_duration_seconds_sum{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[30s])) / sum(rate(tiproxy_session_handshake_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s]))",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "avg",
+                     "refId": "C"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Handshake Duration",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "s",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
             }
          ],
          "repeat": null,
@@ -1229,7 +1329,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 17,
+         "id": 18,
          "panels": [
             {
                "aliasColors": { },
@@ -1246,7 +1346,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 18,
+               "id": 19,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1332,7 +1432,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 19,
+               "id": 20,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1418,7 +1518,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 20,
+               "id": 21,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1521,7 +1621,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 21,
+         "id": 22,
          "panels": [
             {
                "aliasColors": { },
@@ -1538,7 +1638,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 22,
+               "id": 23,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1638,7 +1738,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 23,
+               "id": 24,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1724,7 +1824,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 24,
+               "id": 25,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1801,6 +1901,370 @@
          "repeatRowId": null,
          "showTitle": true,
          "title": "Backend",
+         "titleSize": "h6",
+         "type": "row"
+      },
+      {
+         "collapse": true,
+         "collapsed": true,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+         },
+         "id": 26,
+         "panels": [
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "Bytes per second from backends to TiProxy.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 27,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "label_replace(sum(rate(tiproxy_traffic_inbound_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, backend), \"backend\", \"$1\", \"backend\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{backend}} => {{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Bytes/Second from Backends",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "MySQL packets per second from backends to TiProxy.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 12,
+                  "y": 0
+               },
+               "id": 28,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "label_replace(sum(rate(tiproxy_traffic_inbound_packets{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, backend), \"backend\", \"$1\", \"backend\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{backend}} => {{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Packets/Second from Backends",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "Bytes per second from TiProxy to backends.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 29,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "label_replace(sum(rate(tiproxy_traffic_outbound_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, backend), \"backend\", \"$1\", \"backend\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}} => {{backend}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Bytes/Second to Backends",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "Packets per second from TiProxy to backends.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 12,
+                  "y": 0
+               },
+               "id": 30,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "label_replace(sum(rate(tiproxy_traffic_outbound_packets{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, backend), \"backend\", \"$1\", \"backend\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}} => {{backend}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Packets/Second to Backends",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
+            }
+         ],
+         "repeat": null,
+         "repeatIteration": null,
+         "repeatRowId": null,
+         "showTitle": true,
+         "title": "Traffic",
          "titleSize": "h6",
          "type": "row"
       }

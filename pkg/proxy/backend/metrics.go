@@ -18,16 +18,25 @@ type mcPerCmd struct {
 	observer prometheus.Observer
 }
 
-type cmdMetricsCache struct {
-	sync.Mutex
+type mcPerBackend struct {
 	// The duration labels are different with TiDB: Labels in TiDB are statement types.
 	// However, the proxy is not aware of the statement types, so we use command types instead.
-	metrics map[string]*[pnet.ComEnd]mcPerCmd
+	cmds              [pnet.ComEnd]mcPerCmd
+	inBytes           prometheus.Counter
+	inPackets         prometheus.Counter
+	outBytes          prometheus.Counter
+	outPackets        prometheus.Counter
+	handshakeDuration prometheus.Observer
+}
+
+type cmdMetricsCache struct {
+	sync.Mutex
+	backendMetrics map[string]*mcPerBackend
 }
 
 func newCmdMetricsCache() cmdMetricsCache {
 	return cmdMetricsCache{
-		metrics: make(map[string]*[pnet.ComEnd]mcPerCmd),
+		backendMetrics: make(map[string]*mcPerBackend),
 	}
 }
 
@@ -36,28 +45,71 @@ var cache = newCmdMetricsCache()
 func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 	cache.Lock()
 	defer cache.Unlock()
-
-	addrMc, ok := cache.metrics[addr]
-	if !ok {
-		addrMc = &[pnet.ComEnd]mcPerCmd{}
-		cache.metrics[addr] = addrMc
-	}
-	mc := &addrMc[cmd]
+	backendMetrics := ensureBackendMetrics(addr)
+	mc := &backendMetrics.cmds[cmd]
 	if mc.counter == nil {
 		label := cmd.String()
-		*mc = mcPerCmd{
-			counter:  metrics.QueryTotalCounter.WithLabelValues(addr, label),
-			observer: metrics.QueryDurationHistogram.WithLabelValues(addr, label),
-		}
+		mc.counter = metrics.QueryTotalCounter.WithLabelValues(addr, label)
+		mc.observer = metrics.QueryDurationHistogram.WithLabelValues(addr, label)
 	}
 	mc.counter.Inc()
 	cost := monotime.Since(startTime)
 	mc.observer.Observe(cost.Seconds())
 }
 
+func addTraffic(addr string, inBytes, inPackets, outBytes, outPackets uint64) {
+	cache.Lock()
+	defer cache.Unlock()
+	// Updating traffic per IO costs too much CPU, so update it per command.
+	backendMetrics := ensureBackendMetrics(addr)
+	backendMetrics.inBytes.Add(float64(inBytes))
+	backendMetrics.inPackets.Add(float64(inPackets))
+	backendMetrics.outBytes.Add(float64(outBytes))
+	backendMetrics.outPackets.Add(float64(outPackets))
+}
+
+func ensureBackendMetrics(addr string) *mcPerBackend {
+	backendMetrics, ok := cache.backendMetrics[addr]
+	if !ok {
+		backendMetrics = &mcPerBackend{
+			cmds:              [pnet.ComEnd]mcPerCmd{},
+			inBytes:           metrics.InboundBytesCounter.WithLabelValues(addr),
+			inPackets:         metrics.InboundPacketsCounter.WithLabelValues(addr),
+			outBytes:          metrics.OutboundBytesCounter.WithLabelValues(addr),
+			outPackets:        metrics.OutboundPacketsCounter.WithLabelValues(addr),
+			handshakeDuration: metrics.HandshakeDurationHistogram.WithLabelValues(addr),
+		}
+		cache.backendMetrics[addr] = backendMetrics
+	}
+	return backendMetrics
+}
+
+// Only used for testing, no need to optimize.
 func readCmdCounter(cmd pnet.Command, addr string) (int, error) {
 	label := cmd.String()
 	return metrics.ReadCounter(metrics.QueryTotalCounter.WithLabelValues(addr, label))
+}
+
+// Only used for testing, no need to optimize.
+func readTraffic(addr string) (inBytes, inPackets, outBytes, outPackets int, err error) {
+	if inBytes, err = metrics.ReadCounter(metrics.InboundBytesCounter.WithLabelValues(addr)); err != nil {
+		return
+	}
+	if inPackets, err = metrics.ReadCounter(metrics.InboundPacketsCounter.WithLabelValues(addr)); err != nil {
+		return
+	}
+	if outBytes, err = metrics.ReadCounter(metrics.OutboundBytesCounter.WithLabelValues(addr)); err != nil {
+		return
+	}
+	outPackets, err = metrics.ReadCounter(metrics.OutboundPacketsCounter.WithLabelValues(addr))
+	return
+}
+
+func addHandshakeMetrics(addr string, duration time.Duration) {
+	cache.Lock()
+	defer cache.Unlock()
+	backendMetrics := ensureBackendMetrics(addr)
+	backendMetrics.handshakeDuration.Observe(duration.Seconds())
 }
 
 func addGetBackendMetrics(duration time.Duration, succeed bool) {

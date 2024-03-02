@@ -31,6 +31,7 @@ const (
 	LabelSession = "session"
 	LabelMonitor = "monitor"
 	LabelBackend = "backend"
+	LabelTraffic = "traffic"
 )
 
 // MetricsManager manages metrics.
@@ -98,6 +99,7 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(KeepAliveCounter)
 	prometheus.MustRegister(QueryTotalCounter)
 	prometheus.MustRegister(QueryDurationHistogram)
+	prometheus.MustRegister(HandshakeDurationHistogram)
 	prometheus.MustRegister(BackendStatusGauge)
 	prometheus.MustRegister(GetBackendHistogram)
 	prometheus.MustRegister(GetBackendCounter)
@@ -106,6 +108,10 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(HealthCheckCycleGauge)
 	prometheus.MustRegister(MigrateCounter)
 	prometheus.MustRegister(MigrateDurationHistogram)
+	prometheus.MustRegister(InboundBytesCounter)
+	prometheus.MustRegister(InboundPacketsCounter)
+	prometheus.MustRegister(OutboundBytesCounter)
+	prometheus.MustRegister(OutboundPacketsCounter)
 }
 
 // ReadCounter reads the value from the counter. It is only used for testing.
