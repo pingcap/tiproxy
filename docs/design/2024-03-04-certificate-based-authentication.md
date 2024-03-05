@@ -13,9 +13,14 @@ TiDB supports certificate-based authentication. It validates the certificate req
 
 TiProxy supports both client-side and server-side TLS but it doesn't support cert-based authentication. Users connect to TiProxy with one certificate, but TiProxy connects to TiDB with another certificate. TiDB validates the certificate from TiProxy but not the one from the user, so the user fails to login.
 
+Besides, statements `SHOW STATUS` and `STATUS` currently show different results. `SHOW STATUS` shows the TLS information between TiProxy and TiDB, while `STATUS` shows the TLS information between the client and TiProxy.
+
+<img src="../imgs/cert-tls.png" alt="TLS certificates are different" width=400></img>
+
 ## Goals
 
-Support all of `require subject`、`require issuer`、`require san`, and `require cipher` options.
+- Support all of `require subject`、`require issuer`、`require san`, and `require cipher` options.
+- The TLS information of `SHOW STATUS` and `STATUS` are consistent.
 
 ## Proposal
 
@@ -25,7 +30,7 @@ Support all of `require subject`、`require issuer`、`require san`, and `requir
 2. When a client connects to TiProxy, TiProxy reads the subject, issuer, SAN, and cipher of the client certificate and generates a signature by the signing certificate.
 3. TiProxy connects to TiDB and passes the subject, issuer, SAN, and cipher of the client certificate, together with the signature, in the connection attribute field of the handshake packet.
 4. TiDB reads the data from the connection attribute. It validates the TLS information by checking the signature with the signing certificate `session-token-signing-cert`.
-5. TiDB then checks the subject, issuer, SAN, and cipher against the requirement in the system table `mysql.user`.
+5. TiDB replaces the TiProxy TLS information with the information in the connection attribute. It uses new TLS information to validate certificate requirements and output to `SHOW STATUS`.
 
 This is similar to JWT. TiProxy doesn't need to validate the certificate by itself. Instead, it uses the signing certificate to make TiDB trust itself and then passes the client certificate information to TiDB.
 
