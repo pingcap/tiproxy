@@ -1297,6 +1297,49 @@ func TestTrafficMetrics(t *testing.T) {
 	ts.runTests(runners)
 }
 
+func TestDisconnectLog(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	tests := []struct {
+		runner  runner
+		checker checker
+	}{
+		{
+			// 1st handshake
+			runner: runner{
+				client:  ts.mc.authenticate,
+				proxy:   ts.firstHandshake4Proxy,
+				backend: ts.handshake4Backend,
+			},
+		},
+		{
+			// proxy logs SQL when the backend disconnects
+			runner: runner{
+				client: func(packetIO *pnet.PacketIO) error {
+					ts.mc.sql = "select 1"
+					return ts.mc.request(packetIO)
+				},
+				proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+					err := ts.forwardCmd4Proxy(clientIO, backendIO)
+					_ = clientIO.Close()
+					return err
+				},
+				backend: func(packetIO *pnet.PacketIO) error {
+					return packetIO.Close()
+				},
+			},
+			checker: func(t *testing.T, ts *testSuite) {
+				require.True(t, pnet.IsDisconnectError(ts.mc.err))
+				require.ErrorIs(t, ts.mp.err, ErrBackendConn)
+				require.True(t, strings.Contains(ts.mp.text.String(), "select ?"))
+			},
+		},
+	}
+	// Do not run ts.runTests(runners) to skip the general checker.
+	for _, test := range tests {
+		ts.runAndCheck(ts.t, test.checker, test.runner.client, test.runner.backend, test.runner.proxy)
+	}
+}
+
 func BenchmarkSyncMap(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		var m sync.Map

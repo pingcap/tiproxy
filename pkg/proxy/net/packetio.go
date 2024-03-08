@@ -247,7 +247,11 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	if err := ReadFull(p.readWriter, p.header[:]); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
-	p.readWriter.SetSequence(p.header[3] + 1)
+	sequence, pktSequence := p.header[3], p.readWriter.Sequence()
+	if sequence != pktSequence {
+		p.logger.Warn("sequence mismatch", zap.Uint8("expected", pktSequence), zap.Uint8("actual", sequence))
+	}
+	p.readWriter.SetSequence(sequence + 1)
 
 	length := int(p.header[0]) | int(p.header[1])<<8 | int(p.header[2])<<16
 	data := make([]byte, length)
@@ -349,7 +353,11 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 			}
 		} else {
 			for {
-				p.readWriter.SetSequence(header[3] + 1)
+				sequence, pktSequence := header[3], p.readWriter.Sequence()
+				if sequence != pktSequence {
+					p.logger.Warn("sequence mismatch", zap.Uint8("expected", pktSequence), zap.Uint8("actual", sequence))
+				}
+				p.readWriter.SetSequence(sequence + 1)
 				// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
 				dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
 				p.limitReader.N = int64(length + 4)
