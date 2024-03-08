@@ -283,15 +283,15 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.setQuitSourceByErr(err)
 		mgr.handshakeHandler.OnTraffic(mgr)
 		now := monotime.Now()
-		cmd, data := pnet.Command(request[0]), request[1:]
-		var query string
-		if cmd == pnet.ComQuery {
-			query = parser.Normalize(pnet.ParseQueryPacket(data))
-			if len(query) > 256 {
-				query = query[:256]
-			}
-		}
 		if err != nil && errors.Is(err, ErrBackendConn) {
+			cmd, data := pnet.Command(request[0]), request[1:]
+			var query string
+			if cmd == pnet.ComQuery {
+				query = parser.Normalize(pnet.ParseQueryPacket(data))
+				if len(query) > 256 {
+					query = query[:256]
+				}
+			}
 			// idle_time: maybe the idle time exceeds wait_timeout?
 			// execute_time and query: maybe this query causes TiDB OOM?
 			mgr.logger.Info("backend disconnects", zap.Duration("idle_time", time.Duration(now-mgr.lastActiveTime)),
