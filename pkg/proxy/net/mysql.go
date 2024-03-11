@@ -467,3 +467,12 @@ func Attr2ZapFields(attrs map[string]string) []zap.Field {
 	}
 	return fields
 }
+
+// ParseQueryPacket returns the statement in the CMD_QUERY packet.
+// data is the payload after byte CMD_QUERY.
+func ParseQueryPacket(data []byte) string {
+	if len(data) > 0 && data[len(data)-1] == 0 {
+		data = data[:len(data)-1]
+	}
+	return hack.String(data)
+}

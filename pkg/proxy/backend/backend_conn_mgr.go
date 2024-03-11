@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-
 	"net"
 	"os"
 	"strings"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -277,11 +277,27 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 // ExecuteCmd forwards messages between the client and the backend.
 // If it finds that the session is ready for redirection, it migrates the session.
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
+	startTime := monotime.Now()
 	mgr.processLock.Lock()
 	defer func() {
 		mgr.setQuitSourceByErr(err)
 		mgr.handshakeHandler.OnTraffic(mgr)
-		mgr.lastActiveTime = monotime.Now()
+		now := monotime.Now()
+		if err != nil && errors.Is(err, ErrBackendConn) {
+			cmd, data := pnet.Command(request[0]), request[1:]
+			var query string
+			if cmd == pnet.ComQuery {
+				query = parser.Normalize(pnet.ParseQueryPacket(data))
+				if len(query) > 256 {
+					query = query[:256]
+				}
+			}
+			// idle_time: maybe the idle time exceeds wait_timeout?
+			// execute_time and query: maybe this query causes TiDB OOM?
+			mgr.logger.Info("backend disconnects", zap.Duration("idle_time", time.Duration(now-mgr.lastActiveTime)),
+				zap.Duration("execute_time", time.Duration(now-startTime)), zap.Stringer("cmd", cmd), zap.String("query", query))
+		}
+		mgr.lastActiveTime = now
 		mgr.processLock.Unlock()
 	}()
 	if len(request) < 1 {
@@ -289,7 +305,6 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		return
 	}
 	cmd := pnet.Command(request[0])
-	startTime := monotime.Now()
 
 	// Once the request is accepted, it's treated in the transaction, so we don't check graceful shutdown here.
 	if mgr.closeStatus.Load() >= statusClosing {
