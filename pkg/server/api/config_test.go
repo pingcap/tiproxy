@@ -124,8 +124,10 @@ func TestAcceptType(t *testing.T) {
 		var cfg config.Config
 		switch expectedType {
 		case "json":
+			require.Contains(t, r.Header.Get("Content-Type"), "application/json")
 			require.NoError(t, json.Unmarshal(data, &cfg))
 		default:
+			require.Contains(t, r.Header.Get("Content-Type"), "application/toml")
 			require.NoError(t, toml.Unmarshal(data, &cfg))
 		}
 	}
