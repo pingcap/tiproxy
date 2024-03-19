@@ -39,8 +39,9 @@ func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *mysq
 		err = errors.WithStack(mysql.ErrMalformPacket)
 	default:
 		var rs *mysql.Result
-		rs, err = cp.readResultSet(packetIO, response)
-		result = rs.Resultset
+		if rs, err = cp.readResultSet(packetIO, response); err == nil {
+			result = rs.Resultset
+		}
 	}
 	return
 }

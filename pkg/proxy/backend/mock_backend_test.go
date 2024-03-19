@@ -28,6 +28,7 @@ type backendConfig struct {
 	proxyProtocol bool
 	authSucceed   bool
 	abnormalExit  bool
+	exitInResult  bool
 }
 
 func newBackendConfig() *backendConfig {
@@ -292,6 +293,12 @@ func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, v
 			if err := packetIO.WritePacket(field.Dump(), false); err != nil {
 				return err
 			}
+		}
+		if mb.exitInResult {
+			if err := packetIO.Flush(); err != nil {
+				return err
+			}
+			return packetIO.Close()
 		}
 
 		if status&mysql.SERVER_STATUS_CURSOR_EXISTS == 0 {

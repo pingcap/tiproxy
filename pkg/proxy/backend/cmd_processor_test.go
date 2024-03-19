@@ -1068,3 +1068,35 @@ func TestNetworkError(t *testing.T) {
 	ts.query(t, proxyErrChecker)
 	clean()
 }
+
+// Test that TiProxy won't panic when query encounters an error.
+func TestQueryError(t *testing.T) {
+	tc := newTCPConnSuite(t)
+	tests := []struct {
+		cfg cfgOverrider
+		c   checker
+	}{
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.abnormalExit = true
+			},
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.respondType = responseTypeErr
+			},
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.respondType = responseTypeResultSet
+				cfg.backendConfig.columns = 1
+				cfg.backendConfig.exitInResult = true
+			},
+		},
+	}
+	for _, test := range tests {
+		ts, clean := newTestSuite(t, tc, test.cfg)
+		ts.query(t, func(t *testing.T, ts *testSuite) {})
+		clean()
+	}
+}
