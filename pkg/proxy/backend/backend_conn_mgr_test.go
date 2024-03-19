@@ -1340,6 +1340,33 @@ func TestDisconnectLog(t *testing.T) {
 	}
 }
 
+func TestProcessSignalsPanic(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				// Mock panic in `mgr.processSignals()`.
+				ts.mp.handler.onHandshake = func(connContext ConnContext, s string, err error, source ErrorSource) {
+					panic("mock panic")
+				}
+				ts.mp.Redirect(newMockBackendInst(ts))
+				// Panic won't set error so it's still treated as success. It's fine because it will close anyway.
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
+				// Do not wait for eventClose because `clean` will wait for it.
+				return nil
+			},
+			backend: ts.redirectSucceed4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
 func BenchmarkSyncMap(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		var m sync.Map

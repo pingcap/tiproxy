@@ -19,7 +19,6 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/pingcap/tiproxy/pkg/util"
 	"go.uber.org/zap"
 )
 
@@ -108,7 +107,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 	// Create another context because it still needs to run after graceful shutdown.
 	ctx, s.cancelFunc = context.WithCancel(context.Background())
 
-	s.wg.Run(func() {
+	s.wg.RunWithRecover(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -121,7 +120,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 				s.reset(ach)
 			}
 		}
-	})
+	}, nil, s.logger)
 
 	for i := range s.listeners {
 		j := i
@@ -141,9 +140,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 						continue
 					}
 
-					s.wg.Run(func() {
-						util.WithRecovery(func() { s.onConn(ctx, conn, s.addrs[j]) }, nil, s.logger)
-					})
+					s.wg.RunWithRecover(func() { s.onConn(ctx, conn, s.addrs[j]) }, nil, s.logger)
 				}
 			}
 		})

@@ -47,9 +47,9 @@ func (lm *LoggerManager) Init(cfgch <-chan *config.Config) {
 	ctx, cancel := context.WithCancel(context.Background())
 	lm.cancel = cancel
 
-	lm.wg.Run(func() {
+	lm.wg.RunWithRecover(func() {
 		lm.watchCfg(ctx, cfgch)
-	})
+	}, nil, lm.logger)
 }
 
 func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Config) {

@@ -82,7 +82,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 			return err
 		}
 
-		e.wg.Run(func() {
+		e.wg.RunWithRecover(func() {
 			// Read the file periodically and reload the config if it changes.
 			//
 			// We tried other ways to watch file:
@@ -100,7 +100,7 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 					}
 				}
 			}
-		})
+		}, nil, e.logger)
 	} else {
 		if err := e.SetTOMLConfig(nil); err != nil {
 			return err
