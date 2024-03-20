@@ -18,6 +18,8 @@ func TestIsDisconnectErr(t *testing.T) {
 		syscall.ETIMEDOUT,
 		os.ErrDeadlineExceeded,
 		context.DeadlineExceeded,
+		errors.Wrap(errors.New("mock"), syscall.ETIMEDOUT),
+		errors.Wrap(syscall.ETIMEDOUT, errors.New("mock")),
 	}
 	for _, err := range disConnErrors {
 		require.True(t, IsDisconnectError(err))

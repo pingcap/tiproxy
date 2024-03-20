@@ -4,6 +4,7 @@
 package net
 
 import (
+	"context"
 	"io"
 	"os"
 	"syscall"
@@ -23,8 +24,10 @@ var (
 // IsDisconnectError returns whether the error is caused by peer disconnection.
 func IsDisconnectError(err error) bool {
 	switch {
+	// Do not use os.Timeout(err) because it doesn't unwrap the error.
 	case errors.Is(err, io.EOF), errors.Is(err, syscall.EPIPE), errors.Is(err, syscall.ECONNRESET),
-		errors.Is(err, syscall.ECONNABORTED), os.IsTimeout(err):
+		errors.Is(err, syscall.ECONNABORTED), errors.Is(err, syscall.ETIMEDOUT), errors.Is(err, os.ErrDeadlineExceeded),
+		errors.Is(err, context.DeadlineExceeded):
 		return true
 	}
 	return false
