@@ -182,7 +182,7 @@ func ReadFull(prw packetReadWriter, b []byte) error {
 	for n := 0; n < m; {
 		nn, err := prw.Read(b[n:])
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		n += nn
 	}
@@ -220,7 +220,7 @@ func (p *PacketIO) ApplyOpts(opts ...PacketIOption) {
 }
 
 func (p *PacketIO) wrapErr(err error) error {
-	return errors.WithStack(errors.Wrap(p.wrap, err))
+	return errors.Wrap(p.wrap, err)
 }
 
 func (p *PacketIO) LocalAddr() net.Addr {
@@ -371,7 +371,7 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 					break
 				}
 				if header, err = p.readWriter.Peek(4); err != nil {
-					return p.wrapErr(errors.Wrap(ErrReadConn, err))
+					return p.wrapErr(errors.Wrap(ErrReadConn, errors.WithStack(err)))
 				}
 				length = int(header[0]) | int(header[1])<<8 | int(header[2])<<16
 			}
@@ -405,7 +405,7 @@ func (p *PacketIO) OutPackets() uint64 {
 
 func (p *PacketIO) Flush() error {
 	if err := p.readWriter.Flush(); err != nil {
-		return p.wrapErr(errors.Wrap(ErrFlushConn, err))
+		return p.wrapErr(errors.Wrap(ErrFlushConn, errors.WithStack(err)))
 	}
 	return nil
 }
@@ -443,7 +443,7 @@ func (p *PacketIO) Close() error {
 		}
 	*/
 	if err := p.readWriter.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-		errs = append(errs, err)
+		errs = append(errs, errors.WithStack(err))
 	}
 	return p.wrapErr(errors.Collect(ErrCloseConn, errs...))
 }

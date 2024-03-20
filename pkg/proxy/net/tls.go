@@ -28,7 +28,7 @@ func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionStat
 	conn := &tlsInternalConn{p.readWriter}
 	tlsConn := tls.Server(conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
-		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(ErrHandshakeTLS, err))
+		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(ErrHandshakeTLS, errors.WithStack(err)))
 	}
 	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn)
 	return tlsConn.ConnectionState(), nil
@@ -39,7 +39,7 @@ func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 	conn := &tlsInternalConn{p.readWriter}
 	tlsConn := tls.Client(conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
-		return p.wrapErr(errors.Wrap(ErrHandshakeTLS, err))
+		return p.wrapErr(errors.Wrap(ErrHandshakeTLS, errors.WithStack(err)))
 	}
 	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn)
 	return nil

@@ -4,6 +4,10 @@
 package net
 
 import (
+	"io"
+	"os"
+	"syscall"
+
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
@@ -15,3 +19,13 @@ var (
 	ErrCloseConn    = errors.New("failed to close the connection")
 	ErrHandshakeTLS = errors.New("failed to complete tls handshake")
 )
+
+// IsDisconnectError returns whether the error is caused by peer disconnection.
+func IsDisconnectError(err error) bool {
+	switch {
+	case errors.Is(err, io.EOF), errors.Is(err, syscall.EPIPE), errors.Is(err, syscall.ECONNRESET),
+		errors.Is(err, syscall.ECONNABORTED), os.IsTimeout(err):
+		return true
+	}
+	return false
+}
