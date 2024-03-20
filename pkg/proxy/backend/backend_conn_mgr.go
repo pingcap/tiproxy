@@ -203,9 +203,13 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
 	mgr.lastActiveTime = endTime
-	mgr.wg.Run(func() {
+	mgr.wg.RunWithRecover(func() {
 		mgr.processSignals(childCtx)
-	})
+	}, func(_ any) {
+		// If we do not clean up, the router may retain the connection forever and the TiDB won't be released in the
+		// Serverless Tier.
+		_ = mgr.Close()
+	}, mgr.logger)
 	return nil
 }
 
@@ -422,22 +426,26 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 	for {
 		select {
 		case s := <-mgr.signalReceived:
-			// Redirect the session immediately just in case the session is finishedTxn.
-			mgr.processLock.Lock()
-			switch s {
-			case signalTypeGracefulClose:
-				mgr.tryGracefulClose(ctx)
-			case signalTypeRedirect:
-				mgr.tryRedirect(ctx)
-			}
-			mgr.processLock.Unlock()
+			func() {
+				// Redirect the session immediately just in case the session is finishedTxn.
+				mgr.processLock.Lock()
+				defer mgr.processLock.Unlock()
+				switch s {
+				case signalTypeGracefulClose:
+					mgr.tryGracefulClose(ctx)
+				case signalTypeRedirect:
+					mgr.tryRedirect(ctx)
+				}
+			}()
 		case rs := <-mgr.redirectResCh:
 			mgr.notifyRedirectResult(ctx, rs)
 		case <-checkBackendTicker.C:
-			mgr.checkBackendActive()
-			mgr.processLock.Lock()
-			mgr.setKeepAlive()
-			mgr.processLock.Unlock()
+			func() {
+				mgr.checkBackendActive()
+				mgr.processLock.Lock()
+				defer mgr.processLock.Unlock()
+				mgr.setKeepAlive()
+			}()
 		case <-ctx.Done():
 			checkBackendTicker.Stop()
 			return

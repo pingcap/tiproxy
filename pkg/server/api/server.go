@@ -130,9 +130,9 @@ func NewServer(cfg config.API, lg *zap.Logger,
 		IdleTimeout:       DefConnTimeout,
 	}
 
-	h.wg.Run(func() {
+	h.wg.RunWithRecover(func() {
 		lg.Info("HTTP closed", zap.Error(hsrv.Serve(h.listener)))
-	})
+	}, nil, h.lg)
 
 	return h, nil
 }

@@ -109,9 +109,9 @@ func (is *InfoSyncer) Init(ctx context.Context, cfg *config.Config, certMgr *cer
 
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	is.cancelFunc = cancelFunc
-	is.wg.Run(func() {
+	is.wg.RunWithRecover(func() {
 		is.updateTopologyLivenessLoop(childCtx, topologyInfo)
-	})
+	}, nil, is.lg)
 	return nil
 }
 

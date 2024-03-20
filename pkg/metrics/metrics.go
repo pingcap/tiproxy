@@ -79,9 +79,9 @@ func (mm *MetricsManager) setupMonitor(ctx context.Context) {
 			KeepAliveCounter.Inc()
 		}
 	}
-	mm.wg.Run(func() {
+	mm.wg.RunWithRecover(func() {
 		systimemon.StartMonitor(ctx, mm.logger, time.Now, systimeErrHandler, successCallBack)
-	})
+	}, nil, mm.logger)
 }
 
 // registerProxyMetrics registers metrics.
