@@ -99,7 +99,7 @@ func Error2Source(err error) ErrorSource {
 		return SrcNone
 	}
 	// Disconnection errors may come from other errors such as ErrProxyNoBackend and ErrBackendHandshake.
-	// ErrClientConn and ErrBackendConn may include non-connection errors.
+	// ErrClientConn and ErrBackendConn may include non-connection errors such as wrong PPV2 format, TLS cert error.
 	if pnet.IsDisconnectError(err) {
 		if errors.Is(err, ErrClientConn) {
 			return SrcClientNetwork
