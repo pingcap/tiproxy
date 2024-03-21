@@ -1297,6 +1297,76 @@ func TestTrafficMetrics(t *testing.T) {
 	ts.runTests(runners)
 }
 
+func TestDisconnectLog(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	tests := []struct {
+		runner  runner
+		checker checker
+	}{
+		{
+			// 1st handshake
+			runner: runner{
+				client:  ts.mc.authenticate,
+				proxy:   ts.firstHandshake4Proxy,
+				backend: ts.handshake4Backend,
+			},
+		},
+		{
+			// proxy logs SQL when the backend disconnects
+			runner: runner{
+				client: func(packetIO *pnet.PacketIO) error {
+					ts.mc.sql = "select 1"
+					return ts.mc.request(packetIO)
+				},
+				proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+					err := ts.forwardCmd4Proxy(clientIO, backendIO)
+					_ = clientIO.Close()
+					return err
+				},
+				backend: func(packetIO *pnet.PacketIO) error {
+					return packetIO.Close()
+				},
+			},
+			checker: func(t *testing.T, ts *testSuite) {
+				require.True(t, pnet.IsDisconnectError(ts.mc.err))
+				require.ErrorIs(t, ts.mp.err, ErrBackendConn)
+				require.True(t, strings.Contains(ts.mp.text.String(), "select ?"))
+			},
+		},
+	}
+	// Do not run ts.runTests(runners) to skip the general checker.
+	for _, test := range tests {
+		ts.runAndCheck(ts.t, test.checker, test.runner.client, test.runner.backend, test.runner.proxy)
+	}
+}
+
+func TestProcessSignalsPanic(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				// Mock panic in `mgr.processSignals()`.
+				ts.mp.handler.onHandshake = func(connContext ConnContext, s string, err error, source ErrorSource) {
+					panic("mock panic")
+				}
+				ts.mp.Redirect(newMockBackendInst(ts))
+				// Panic won't set error so it's still treated as success. It's fine because it will close anyway.
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
+				// Do not wait for eventClose because `clean` will wait for it.
+				return nil
+			},
+			backend: ts.redirectSucceed4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
 func BenchmarkSyncMap(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		var m sync.Map

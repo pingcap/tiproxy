@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, method string, path string, rd io.Reader, f func(*testing.T, *http.Response))) {
+func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, method string, path string, rd io.Reader, header map[string]string, f func(*testing.T, *http.Response))) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	ready := atomic.NewBool(true)
 	cfgmgr := mgrcfg.NewConfigManager()
@@ -43,12 +43,15 @@ func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, meth
 	})
 
 	addr := fmt.Sprintf("http://%s", srv.listener.Addr().String())
-	return srv, func(t *testing.T, method, pa string, rd io.Reader, f func(*testing.T, *http.Response)) {
+	return srv, func(t *testing.T, method, pa string, rd io.Reader, header map[string]string, f func(*testing.T, *http.Response)) {
 		if pa[0] != '/' {
 			pa = "/" + pa
 		}
 		req, err := http.NewRequest(method, fmt.Sprintf("%s%s", addr, pa), rd)
 		require.NoError(t, err)
+		for key, value := range header {
+			req.Header.Set(key, value)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		f(t, resp)

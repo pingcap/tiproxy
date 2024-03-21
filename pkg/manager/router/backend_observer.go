@@ -123,6 +123,7 @@ func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, 
 func (bo *BackendObserver) Start() {
 	childCtx, cancelFunc := context.WithCancel(context.Background())
 	bo.cancelFunc = cancelFunc
+	// Failing to observe backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	bo.wg.Run(func() {
 		bo.observe(childCtx)
 	})

@@ -6,6 +6,7 @@ package api
 import (
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -35,10 +36,11 @@ func (h *Server) ConfigSet(c *gin.Context) {
 }
 
 func (h *Server) ConfigGet(c *gin.Context) {
-	switch c.Query("format") {
-	case "json":
+	// TiDB cluster_config uses format=json, while tiproxyctl expects toml (both PUT and GET) by default.
+	// Users can choose the format on TiDB-Dashboard.
+	if strings.EqualFold(c.Query("format"), "json") || c.GetHeader("Accept") == "application/json" {
 		c.JSON(http.StatusOK, h.mgr.cfg.GetConfig())
-	default:
+	} else {
 		c.TOML(http.StatusOK, h.mgr.cfg.GetConfig())
 	}
 }

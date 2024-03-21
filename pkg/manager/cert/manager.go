@@ -98,6 +98,7 @@ func (cm *CertManager) SQLTLS() *tls.Config {
 // The proxy periodically reloads certs. If it fails, we will retry in the next round.
 // If configuration changes, it only affects new connections by returning new *tls.Config.
 func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Config) {
+	// Failing to reload certs may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	cm.wg.Run(func() {
 		for {
 			select {

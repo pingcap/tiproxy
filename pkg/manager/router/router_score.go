@@ -50,6 +50,7 @@ func (r *ScoreBasedRouter) Init(fetcher BackendFetcher, hc HealthCheck, cfg *con
 	r.observer = observer
 	childCtx, cancelFunc := context.WithCancel(context.Background())
 	r.cancelFunc = cancelFunc
+	// Failing to rebalance backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	r.wg.Run(func() {
 		r.rebalanceLoop(childCtx)
 	})
