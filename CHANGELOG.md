@@ -1,5 +1,25 @@
 # Change Log
 
+## [v1.0.0] 2024.3.25
+
+### Improvements
+
+- Replace `time.Time` with mono-time to optimize duration calculation [#461](https://github.com/pingcap/tiproxy/pull/461)
+- Change the log level of some logs from info to debug [#463](https://github.com/pingcap/tiproxy/pull/463)
+- Optimize updating metrics to improve the performance by around 3% [#467](https://github.com/pingcap/tiproxy/pull/467)
+- Reduce GC CPU usage by 1% in the case of plenty of connections [#474](https://github.com/pingcap/tiproxy/pull/474)
+- Add metrics for traffic and handshake [#477](https://github.com/pingcap/tiproxy/pull/477)
+- Add alert rules [#481](https://github.com/pingcap/tiproxy/pull/481)
+- Support get JSON format config for `/api/admin/config` by setting `Accept='application/json'` in the request header [#484](https://github.com/pingcap/tiproxy/pull/484)
+
+### Fixes
+
+- Fix that welcome logs may not printed [#454](https://github.com/pingcap/tiproxy/pull/454)
+- Fix that rebalance may not work after session migrations are interrupted [#459](https://github.com/pingcap/tiproxy/pull/459)
+- Fix the bug that the config file may not be reloaded if the directory is removed and recreated immediately [#475](https://github.com/pingcap/tiproxy/pull/475)
+- Fix panic when a TiDB fails during session migration [#486](https://github.com/pingcap/tiproxy/pull/486)
+- Fix the bug that some goroutines are not recovered after they panic [#488](https://github.com/pingcap/tiproxy/pull/488)
+
 ## [v0.2.0] 2024.1.16
 
 ### Improvements
