@@ -56,6 +56,7 @@ type ProxyServerOnline struct {
 
 type ProxyServer struct {
 	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
+	AdvertiseAddr     string `yaml:"advertise-addr,omitempty" toml:"advertise-addr,omitempty" json:"advertise-addr,omitempty"`
 	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
 	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }

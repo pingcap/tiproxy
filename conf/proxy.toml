@@ -2,6 +2,7 @@
 
 [proxy]
 # addr = "0.0.0.0:6000"
+# advertise-addr = ""
 # tcp-keep-alive = true
 
 # possible values:
