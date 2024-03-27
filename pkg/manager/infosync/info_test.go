@@ -182,32 +182,38 @@ func TestGetTopology(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
 	for _, cas := range []struct {
-		ip          string
-		port        string
-		non_unicast bool
+		addr          string
+		advertiseAddr string
+		port          string
+		nonUnicast    bool
 	}{
-		{":34", "34", true},
-		{"0.0.0.0:34", "34", true},
-		{"255.255.255.255:34", "34", true},
-		{"239.255.255.255:34", "34", true},
-		{"[FF02::1:FF47]:34", "34", true},
-		{"127.0.0.1:34", "34", false},
-		{"[F02::1:FF47]:34", "34", false},
-		{"192.0.0.1:6049", "6049", false},
+		{":34", "", "34", true},
+		{"0.0.0.0:34", "", "34", true},
+		{"255.255.255.255:34", "", "34", true},
+		{"239.255.255.255:34", "", "34", true},
+		{"[FF02::1:FF47]:34", "", "34", true},
+		{"127.0.0.1:34", "", "34", false},
+		{"[F02::1:FF47]:34", "", "34", false},
+		{"192.0.0.1:6049", "", "6049", false},
+		{"0.0.0.0:1000", "tc-tiproxy-0.tc-tiproxy-peer.ns.svc", "1000", false},
 	} {
 		is, err := ts.is.getTopologyInfo(&config.Config{
 			Proxy: config.ProxyServer{
-				Addr: cas.ip,
+				Addr:          cas.addr,
+				AdvertiseAddr: cas.advertiseAddr,
 			},
 			API: config.API{
-				Addr: cas.ip,
+				Addr: cas.addr,
 			},
 		})
 		require.NoError(t, err)
-		ip, _, err := net.SplitHostPort(cas.ip)
-		require.NoError(t, err)
-		if cas.non_unicast {
-			ip = sys.GetGlobalUnicastIP()
+		ip := cas.advertiseAddr
+		if len(ip) == 0 {
+			ip, _, err = net.SplitHostPort(cas.addr)
+			require.NoError(t, err)
+			if cas.nonUnicast {
+				ip = sys.GetGlobalUnicastIP()
+			}
 		}
 		require.Equal(t, ip, is.IP)
 		require.Equal(t, cas.port, is.Port)
