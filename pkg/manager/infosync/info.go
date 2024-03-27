@@ -169,11 +169,16 @@ func (is *InfoSyncer) getTopologyInfo(cfg *config.Config) (*TopologyInfo, error)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	// reporting a non unicast IP makes no sense, try to find one
-	// loopback/linklocal-unicast are not global unicast IP, but are valid local unicast IP
-	if pip := net.ParseIP(ip); ip == "" || pip.Equal(net.IPv4bcast) || pip.IsUnspecified() || pip.IsMulticast() {
-		if v := sys.GetGlobalUnicastIP(); v != "" {
-			ip = v
+	// AdvertiseAddr may be a DNS in k8s and certificate SAN typically contains DNS but not IP.
+	if len(cfg.Proxy.AdvertiseAddr) > 0 {
+		ip = cfg.Proxy.AdvertiseAddr
+	} else {
+		// reporting a non unicast IP makes no sense, try to find one
+		// loopback/linklocal-unicast are not global unicast IP, but are valid local unicast IP
+		if pip := net.ParseIP(ip); ip == "" || pip.Equal(net.IPv4bcast) || pip.IsUnspecified() || pip.IsMulticast() {
+			if v := sys.GetGlobalUnicastIP(); v != "" {
+				ip = v
+			}
 		}
 	}
 	return &TopologyInfo{
