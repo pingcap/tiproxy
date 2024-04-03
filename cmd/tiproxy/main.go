@@ -31,6 +31,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&sctx.ConfigFile, "config", "", "proxy config file path")
 	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Log.Encoder, "log_encoder", "", "log in format of tidb, console, or json")
 	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Log.Level, "log_level", "", "log level")
+	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Proxy.AdvertiseAddr, "advertise-addr", "", "advertise address")
 
 	metrics.MaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 
