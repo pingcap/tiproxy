@@ -6,6 +6,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -90,6 +91,7 @@ type BackendObserver struct {
 	curBackendInfo map[string]*BackendHealth
 	fetcher        BackendFetcher
 	hc             HealthCheck
+	wgp            *waitgroup.WaitGroupPool
 	eventReceiver  BackendEventReceiver
 	wg             waitgroup.WaitGroup
 	cancelFunc     context.CancelFunc
@@ -112,6 +114,7 @@ func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, 
 		healthCheckConfig: config,
 		curBackendInfo:    make(map[string]*BackendHealth),
 		hc:                hc,
+		wgp:               waitgroup.NewWaitGroupPool(10, time.Minute),
 		eventReceiver:     eventReceiver,
 		refreshChan:       make(chan struct{}),
 		fetcher:           backendFetcher,
@@ -169,12 +172,32 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 
 func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]*BackendHealth {
 	curBackendHealth := make(map[string]*BackendHealth, len(backends))
-	for addr, info := range backends {
-		if ctx.Err() != nil {
-			return nil
+	// Serverless tier checks health in Gateway instead of in TiProxy.
+	if !bo.healthCheckConfig.Enable {
+		for addr := range backends {
+			curBackendHealth[addr] = &BackendHealth{
+				Status: StatusHealthy,
+			}
 		}
-		curBackendHealth[addr] = bo.hc.Check(ctx, addr, info)
+		return curBackendHealth
 	}
+
+	// Each goroutine checks one backend.
+	var lock sync.Mutex
+	for addr, info := range backends {
+		func(addr string) {
+			bo.wgp.RunWithRecover(func() {
+				if ctx.Err() != nil {
+					return
+				}
+				health := bo.hc.Check(ctx, addr, info)
+				lock.Lock()
+				curBackendHealth[addr] = health
+				lock.Unlock()
+			}, nil, bo.logger)
+		}(addr)
+	}
+	bo.wgp.Wait()
 	return curBackendHealth
 }
 
@@ -222,4 +245,5 @@ func (bo *BackendObserver) Close() {
 		bo.cancelFunc()
 	}
 	bo.wg.Wait()
+	bo.wgp.Close()
 }

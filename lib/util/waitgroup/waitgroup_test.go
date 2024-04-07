@@ -5,6 +5,7 @@ package waitgroup
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
@@ -28,4 +29,22 @@ func TestWithRecoveryPanic(t *testing.T) {
 		panic("mock panic2")
 	}, nil)
 	wg.Wait()
+}
+
+func TestWaitGroupPool(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	wgp := NewWaitGroupPool(5, time.Millisecond)
+	for i := 0; i < 10; i++ {
+		wgp.RunWithRecover(func() {
+			time.Sleep(10 * time.Millisecond)
+		}, nil, lg)
+	}
+	wgp.Wait()
+	time.Sleep(10 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		wgp.RunWithRecover(func() {
+			time.Sleep(10 * time.Millisecond)
+		}, nil, lg)
+	}
+	wgp.Close()
 }
