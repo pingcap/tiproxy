@@ -111,6 +111,17 @@ func TestCancelObserver(t *testing.T) {
 	}
 }
 
+func TestDisableHealthCheck2(t *testing.T) {
+	ts := newObserverTestSuite(t)
+	ts.bo.healthCheckConfig.Enable = false
+	t.Cleanup(ts.close)
+
+	backend1 := ts.addBackend()
+	ts.setHealth(backend1, StatusCannotConnect)
+	ts.bo.Start()
+	ts.checkStatus(backend1, StatusHealthy)
+}
+
 type observerTestSuite struct {
 	t           *testing.T
 	bo          *BackendObserver
