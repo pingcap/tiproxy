@@ -102,7 +102,7 @@ require (
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stathat/consistent v1.0.0 // indirect
-	github.com/tiancaiamao/gp v0.0.0-20221221095600-1a473d1f9b4b // indirect
+	github.com/tiancaiamao/gp v0.0.0-20230126082955-4f9e4f1ed9b5 // indirect
 	github.com/tikv/client-go/v2 v2.0.4-0.20221226080148-018c59dbd837 // indirect
 	github.com/tikv/pd/client v0.0.0-20221031025758-80f0d8ca4d07 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect

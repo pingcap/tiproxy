@@ -68,6 +68,22 @@ func TestObserveBackends(t *testing.T) {
 	ts.checkStatus(backend1, StatusCannotConnect)
 }
 
+func TestObserveInParallel(t *testing.T) {
+	ts := newObserverTestSuite(t)
+	t.Cleanup(ts.close)
+
+	var backend string
+	for i := 0; i < 100; i++ {
+		backend = ts.addBackend()
+	}
+	ts.bo.Start()
+	backends := ts.getBackendsFromCh()
+	require.Equal(ts.t, 100, len(backends))
+	// Wait for next loop.
+	ts.setHealth(backend, StatusCannotConnect)
+	ts.checkStatus(backend, StatusCannotConnect)
+}
+
 // Test that the health check can exit when the context is cancelled.
 func TestCancelObserver(t *testing.T) {
 	ts := newObserverTestSuite(t)
@@ -93,6 +109,17 @@ func TestCancelObserver(t *testing.T) {
 		cancelFunc()
 		wg.Wait()
 	}
+}
+
+func TestDisableHealthCheck2(t *testing.T) {
+	ts := newObserverTestSuite(t)
+	ts.bo.healthCheckConfig.Enable = false
+	t.Cleanup(ts.close)
+
+	backend1 := ts.addBackend()
+	ts.setHealth(backend1, StatusCannotConnect)
+	ts.bo.Start()
+	ts.checkStatus(backend1, StatusHealthy)
 }
 
 type observerTestSuite struct {
