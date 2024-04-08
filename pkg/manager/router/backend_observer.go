@@ -17,6 +17,13 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// Goroutines are created lazily, so the pool may not create so many goroutines.
+	// If the pool is full, it will still create new goroutines, but not return to the pool after use.
+	goPoolSize = 100
+	goMaxIdle  = time.Minute
+)
+
 type BackendStatus int
 
 func (bs BackendStatus) ToScore() int {
@@ -114,7 +121,7 @@ func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, 
 		healthCheckConfig: config,
 		curBackendInfo:    make(map[string]*BackendHealth),
 		hc:                hc,
-		wgp:               waitgroup.NewWaitGroupPool(10, time.Minute),
+		wgp:               waitgroup.NewWaitGroupPool(goPoolSize, goMaxIdle),
 		eventReceiver:     eventReceiver,
 		refreshChan:       make(chan struct{}),
 		fetcher:           backendFetcher,
