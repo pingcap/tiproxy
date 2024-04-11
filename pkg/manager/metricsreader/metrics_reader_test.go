@@ -6,12 +6,9 @@ package metricsreader
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,7 +62,7 @@ func TestReadMetrics(t *testing.T) {
 			return test.respBody
 		}
 		httpHandler.getRespBody.Store(&f)
-		msg := fmt.Sprintf("%dth test", i)
+		msg := fmt.Sprintf("%dth test %s", i, test.promQL)
 		var qr QueryResult
 		require.Eventually(t, func() bool {
 			<-ch
@@ -123,7 +120,7 @@ func TestMultiExprs(t *testing.T) {
 
 	waitResultReady(t, mr, ch, len(tests))
 	for i, test := range tests {
-		msg := fmt.Sprintf("%dth test", i)
+		msg := fmt.Sprintf("%dth test %s", i, test.promQL)
 		qr := mr.GetQueryResult(uint64(i + 1))
 		require.NoError(t, qr.Err, msg)
 		require.Equal(t, test.expectedString, qr.Value.String(), msg)
@@ -183,7 +180,7 @@ func TestBackendLabel(t *testing.T) {
 
 	waitResultReady(t, mr, ch, len(tests))
 	for i, test := range tests {
-		msg := fmt.Sprintf("%dth test", i)
+		msg := fmt.Sprintf("%dth test %s", i, test.promQL)
 		qr := mr.GetQueryResult(uint64(i + 1))
 		require.NoError(t, qr.Err, msg)
 		require.Equal(t, test.expectedString, qr.Value.String(), msg)
@@ -258,7 +255,7 @@ func TestMultiSubscribers(t *testing.T) {
 					}
 
 					for i, test := range tests {
-						msg := fmt.Sprintf("%dth test", i)
+						msg := fmt.Sprintf("%dth test %s", i, test.promQL)
 						qr := mr.GetQueryResult(uint64(i + 1))
 						require.NoError(t, qr.Err, msg)
 						require.Equal(t, test.expectedString, qr.Value.String(), msg)
@@ -322,57 +319,6 @@ func setupTypicalMetricsReader(t *testing.T) (*mockHttpHandler, MetricsReader) {
 	mr.Start(context.Background())
 	t.Cleanup(mr.Close)
 	return httpHandler, mr
-}
-
-type mockPromFetcher struct {
-	getPromInfo func(ctx context.Context) (*infosync.PrometheusInfo, error)
-}
-
-func (mpf *mockPromFetcher) GetPromInfo(ctx context.Context) (*infosync.PrometheusInfo, error) {
-	return mpf.getPromInfo(ctx)
-}
-
-func newMockPromFetcher(port int) *mockPromFetcher {
-	return &mockPromFetcher{
-		getPromInfo: func(ctx context.Context) (*infosync.PrometheusInfo, error) {
-			return &infosync.PrometheusInfo{
-				IP:   "127.0.0.1",
-				Port: port,
-			}, nil
-		},
-	}
-}
-
-type mockHttpHandler struct {
-	getRespBody atomic.Pointer[func(reqBody string) string]
-	wg          waitgroup.WaitGroup
-	t           *testing.T
-	server      *http.Server
-}
-
-func (handler *mockHttpHandler) Start() int {
-	statusListener, addr := startListener(handler.t, "")
-	_, port := parseHostPort(handler.t, addr)
-	handler.server = &http.Server{Addr: addr, Handler: handler}
-	handler.wg.Run(func() {
-		_ = handler.server.Serve(statusListener)
-	})
-	return int(port)
-}
-
-func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	body, err := io.ReadAll(r.Body)
-	require.NoError(handler.t, err)
-	respBody := (*handler.getRespBody.Load())(string(body))
-	require.True(handler.t, len(respBody) > 0, string(body))
-	_, err = w.Write([]byte(respBody))
-	require.NoError(handler.t, err)
-}
-
-func (handler *mockHttpHandler) Close() {
-	require.NoError(handler.t, handler.server.Close())
-	handler.wg.Wait()
 }
 
 func waitResultReady(t *testing.T, mr MetricsReader, ch <-chan struct{}, resultNum int) {
