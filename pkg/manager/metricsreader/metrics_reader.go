@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"go.uber.org/zap"
@@ -175,7 +175,7 @@ func (dmr *DefaultMetricsReader) queryOnce(ctx context.Context, promQLAPI promv1
 	qr.Err = backoff.Retry(func() error {
 		var err error
 		qr.Value, _, err = promQLAPI.QueryRange(childCtx, promQL, promRange)
-		if !isRetryableError(err) {
+		if !pnet.IsRetryableError(err) {
 			return backoff.Permanent(errors.WithStack(err))
 		}
 		return errors.WithStack(err)
@@ -237,23 +237,4 @@ func (dmr *DefaultMetricsReader) Close() {
 		close(ch)
 	}
 	dmr.Unlock()
-}
-
-// TODO: Move health_check to this package and remove this duplicated function.
-// When the server refused to connect, the port is shut down, so no need to retry.
-var notRetryableError = []string{
-	"connection refused",
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	for _, errStr := range notRetryableError {
-		if strings.Contains(msg, errStr) {
-			return false
-		}
-	}
-	return true
 }

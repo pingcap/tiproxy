@@ -6,8 +6,6 @@ package metricsreader
 import (
 	"context"
 	"fmt"
-	"net"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -334,28 +332,10 @@ func waitResultReady(t *testing.T, mr MetricsReader, ch <-chan struct{}, resultN
 	}, 3*time.Second, time.Millisecond)
 }
 
-// TODO: move health_check to this package and remove these duplicated functions.
 func newHealthCheckConfigForTest() *config.HealthCheck {
 	return &config.HealthCheck{
 		Enable:          true,
 		MetricsInterval: 10 * time.Millisecond,
 		MetricsTimeout:  100 * time.Millisecond,
 	}
-}
-
-func startListener(t *testing.T, addr string) (net.Listener, string) {
-	if len(addr) == 0 {
-		addr = "127.0.0.1:0"
-	}
-	listener, err := net.Listen("tcp", addr)
-	require.NoError(t, err)
-	return listener, listener.Addr().String()
-}
-
-func parseHostPort(t *testing.T, addr string) (string, uint) {
-	host, port, err := net.SplitHostPort(addr)
-	require.NoError(t, err)
-	p, err := strconv.ParseUint(port, 10, 32)
-	require.NoError(t, err)
-	return host, uint(p)
 }

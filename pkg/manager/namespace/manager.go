@@ -14,15 +14,15 @@ import (
 	"sync"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/manager/observer"
 	"github.com/pingcap/tiproxy/pkg/manager/router"
 	"go.uber.org/zap"
 )
 
 type NamespaceManager struct {
 	sync.RWMutex
-	tpFetcher     router.TopologyFetcher
+	tpFetcher     observer.TopologyFetcher
 	promFetcher   metricsreader.PromInfoFetcher
 	metricsReader metricsreader.MetricsReader
 	httpCli       *http.Client
@@ -38,24 +38,25 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
 	// init BackendFetcher
-	var fetcher router.BackendFetcher
+	var fetcher observer.BackendFetcher
 	healthCheckCfg := config.NewDefaultHealthCheckConfig()
 	if !reflect.ValueOf(mgr.tpFetcher).IsNil() {
-		fetcher = router.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), healthCheckCfg)
+		fetcher = observer.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), healthCheckCfg)
 	} else {
-		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
+		fetcher = observer.NewStaticFetcher(cfg.Backend.Instances)
 	}
 
 	// init Router
 	rt := router.NewScoreBasedRouter(logger.Named("router"))
-	hc := router.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
-	if err := rt.Init(fetcher, hc, healthCheckCfg); err != nil {
-		return nil, errors.Errorf("build router error: %w", err)
-	}
+	hc := observer.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
+	bo := observer.NewDefaultBackendObserver(logger.Named("observer"), healthCheckCfg, fetcher, hc)
+	bo.Start(context.Background(), rt)
+	rt.Init(context.Background(), bo)
 
 	return &Namespace{
 		name:   cfg.Namespace,
 		user:   cfg.Frontend.User,
+		bo:     bo,
 		router: rt,
 	}, nil
 }
@@ -87,7 +88,7 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher router.TopologyFetcher,
+func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client) error {
 	mgr.Lock()
 	mgr.tpFetcher = tpFetcher
