@@ -221,6 +221,28 @@ func TestGetTopology(t *testing.T) {
 	}
 }
 
+func TestGetPromInfo(t *testing.T) {
+	ts := newEtcdTestSuite(t)
+	t.Cleanup(ts.close)
+	info, err := ts.is.GetPromInfo(context.Background())
+	require.NoError(t, err)
+	require.Nil(t, info)
+
+	pInfo := &PrometheusInfo{
+		IP:         "111.111.111.111",
+		BinaryPath: "/bin",
+		Port:       9090,
+	}
+	ts.setPromInfo(pInfo)
+	info, err = ts.is.GetPromInfo(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, pInfo, info)
+
+	ts.shutdownServer()
+	_, err = ts.is.GetPromInfo(context.Background())
+	require.Error(t, err)
+}
+
 // Test that fetching retries when etcd server is down until the server is up again.
 func TestEtcdServerDown4Fetch(t *testing.T) {
 	ts := newEtcdTestSuite(t)
@@ -265,11 +287,14 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 	require.NoError(t, err)
 	is := NewInfoSyncer(lg)
 	is.syncConfig = syncConfig{
-		sessionTTL:    1,
-		refreshIntvl:  50 * time.Millisecond,
-		putTimeout:    1 * time.Second,
-		putRetryIntvl: 10 * time.Millisecond,
-		putRetryCnt:   3,
+		sessionTTL:        1,
+		refreshIntvl:      50 * time.Millisecond,
+		putTimeout:        1 * time.Second,
+		putRetryIntvl:     10 * time.Millisecond,
+		putRetryCnt:       3,
+		getPromTimeout:    100 * time.Millisecond,
+		getPromRetryIntvl: 0,
+		getPromRetryCnt:   2,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	err = is.Init(ctx, cfg, certMgr)
@@ -354,6 +379,13 @@ func (ts *etcdTestSuite) updateInfo(sqlAddr string, info *tidbinfo.TopologyInfo)
 	data, err := json.Marshal(info)
 	require.NoError(ts.t, err)
 	_, err = ts.kv.Put(context.Background(), path.Join(tidbinfo.TopologyInformationPath, sqlAddr, infoSuffix), string(data))
+	require.NoError(ts.t, err)
+}
+
+func (ts *etcdTestSuite) setPromInfo(info *PrometheusInfo) {
+	data, err := json.Marshal(info)
+	require.NoError(ts.t, err)
+	_, err = ts.kv.Put(context.Background(), promTopologyPath, string(data))
 	require.NoError(ts.t, err)
 }
 
