@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -75,6 +76,10 @@ func NewDefaultMetricsReader(lg *zap.Logger, promFetcher PromInfoFetcher, cfg *c
 }
 
 func (dmr *DefaultMetricsReader) Start(ctx context.Context) {
+	// No PD, using static backends.
+	if dmr.promFetcher == nil || reflect.ValueOf(dmr.promFetcher).IsNil() {
+		return
+	}
 	childCtx, cancel := context.WithCancel(ctx)
 	dmr.cancel = cancel
 	dmr.wg.RunWithRecover(func() {

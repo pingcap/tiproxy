@@ -97,9 +97,8 @@ func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *Backen
 	if ctx.Err() != nil {
 		return
 	}
+	// Using static backends, no status port.
 	if info == nil || len(info.IP) == 0 {
-		bh.Status = StatusCannotConnect
-		bh.PingErr = errors.New("no status port to read status")
 		return
 	}
 	schema := "http"
