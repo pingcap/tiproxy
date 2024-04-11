@@ -101,7 +101,7 @@ func TestCancelObserver(t *testing.T) {
 		childCtx, cancelFunc := context.WithCancel(context.Background())
 		var wg waitgroup.WaitGroup
 		wg.Run(func() {
-			for childCtx.Err() != nil {
+			for childCtx.Err() == nil {
 				ts.bo.checkHealth(childCtx, info)
 			}
 		})
