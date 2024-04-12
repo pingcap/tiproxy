@@ -1,11 +1,10 @@
 // Copyright 2023 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package observer
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -24,74 +23,20 @@ const (
 	goMaxIdle  = time.Minute
 )
 
-type BackendStatus int
-
-func (bs BackendStatus) ToScore() int {
-	return statusScores[bs]
-}
-
-func (bs BackendStatus) String() string {
-	status, ok := statusNames[bs]
-	if !ok {
-		return "unknown"
-	}
-	return status
-}
-
-const (
-	StatusHealthy BackendStatus = iota
-	StatusCannotConnect
-	StatusMemoryHigh
-	StatusRunSlow
-	StatusSchemaOutdated
-)
-
-var statusNames = map[BackendStatus]string{
-	StatusHealthy:        "healthy",
-	StatusCannotConnect:  "down",
-	StatusMemoryHigh:     "memory high",
-	StatusRunSlow:        "run slow",
-	StatusSchemaOutdated: "schema outdated",
-}
-
-var statusScores = map[BackendStatus]int{
-	StatusHealthy:        0,
-	StatusCannotConnect:  10000000,
-	StatusMemoryHigh:     5000,
-	StatusRunSlow:        5000,
-	StatusSchemaOutdated: 10000000,
-}
-
-type BackendHealth struct {
-	Status BackendStatus
-	// The error occurred when health check fails. It's used to log why the backend becomes unhealthy.
-	PingErr error
-	// The backend version that returned to the client during handshake.
-	ServerVersion string
-}
-
-func (bh *BackendHealth) String() string {
-	str := fmt.Sprintf("status: %s", bh.Status.String())
-	if bh.PingErr != nil {
-		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
-	}
-	return str
-}
-
 // BackendEventReceiver receives the event of backend status change.
 type BackendEventReceiver interface {
 	// OnBackendChanged is called when the backend list changes.
 	OnBackendChanged(backends map[string]*BackendHealth, err error)
 }
 
-// BackendInfo stores the status info of each backend.
-type BackendInfo struct {
-	IP         string
-	StatusPort uint
+type BackendObserver interface {
+	Start(ctx context.Context, eventReceiver BackendEventReceiver)
+	Refresh()
+	Close()
 }
 
-// BackendObserver refreshes backend list and notifies BackendEventReceiver.
-type BackendObserver struct {
+// DefaultBackendObserver refreshes backend list and notifies BackendEventReceiver.
+type DefaultBackendObserver struct {
 	logger            *zap.Logger
 	healthCheckConfig *config.HealthCheck
 	// The current backend status synced to the receiver.
@@ -105,24 +50,16 @@ type BackendObserver struct {
 	refreshChan    chan struct{}
 }
 
-// StartBackendObserver creates a BackendObserver and starts watching.
-func StartBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, config *config.HealthCheck,
-	backendFetcher BackendFetcher, hc HealthCheck) *BackendObserver {
-	bo := NewBackendObserver(logger, eventReceiver, config, backendFetcher, hc)
-	bo.Start()
-	return bo
-}
-
-// NewBackendObserver creates a BackendObserver.
-func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, config *config.HealthCheck,
-	backendFetcher BackendFetcher, hc HealthCheck) *BackendObserver {
-	bo := &BackendObserver{
+// NewDefaultBackendObserver creates a BackendObserver.
+func NewDefaultBackendObserver(logger *zap.Logger, config *config.HealthCheck,
+	backendFetcher BackendFetcher, hc HealthCheck) *DefaultBackendObserver {
+	config.Check()
+	bo := &DefaultBackendObserver{
 		logger:            logger,
 		healthCheckConfig: config,
 		curBackendInfo:    make(map[string]*BackendHealth),
 		hc:                hc,
 		wgp:               waitgroup.NewWaitGroupPool(goPoolSize, goMaxIdle),
-		eventReceiver:     eventReceiver,
 		refreshChan:       make(chan struct{}),
 		fetcher:           backendFetcher,
 	}
@@ -130,8 +67,9 @@ func NewBackendObserver(logger *zap.Logger, eventReceiver BackendEventReceiver, 
 }
 
 // Start starts watching.
-func (bo *BackendObserver) Start() {
-	childCtx, cancelFunc := context.WithCancel(context.Background())
+func (bo *DefaultBackendObserver) Start(ctx context.Context, eventReceiver BackendEventReceiver) {
+	bo.eventReceiver = eventReceiver
+	childCtx, cancelFunc := context.WithCancel(ctx)
 	bo.cancelFunc = cancelFunc
 	// Failing to observe backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	bo.wg.Run(func() {
@@ -140,7 +78,7 @@ func (bo *BackendObserver) Start() {
 }
 
 // Refresh indicates the observer to refresh immediately.
-func (bo *BackendObserver) Refresh() {
+func (bo *DefaultBackendObserver) Refresh() {
 	// If the observer happens to be refreshing, skip this round.
 	select {
 	case bo.refreshChan <- struct{}{}:
@@ -148,7 +86,7 @@ func (bo *BackendObserver) Refresh() {
 	}
 }
 
-func (bo *BackendObserver) observe(ctx context.Context) {
+func (bo *DefaultBackendObserver) observe(ctx context.Context) {
 	for ctx.Err() == nil {
 		startTime := monotime.Now()
 		backendInfo, err := bo.fetcher.GetBackendList(ctx)
@@ -177,7 +115,7 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 	}
 }
 
-func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]*BackendHealth {
+func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[string]*BackendInfo) map[string]*BackendHealth {
 	curBackendHealth := make(map[string]*BackendHealth, len(backends))
 	// Serverless tier checks health in Gateway instead of in TiProxy.
 	if !bo.healthCheckConfig.Enable {
@@ -208,7 +146,7 @@ func (bo *BackendObserver) checkHealth(ctx context.Context, backends map[string]
 	return curBackendHealth
 }
 
-func (bo *BackendObserver) notifyIfChanged(bhMap map[string]*BackendHealth) {
+func (bo *DefaultBackendObserver) notifyIfChanged(bhMap map[string]*BackendHealth) {
 	updatedBackends := make(map[string]*BackendHealth)
 	for addr, lastHealth := range bo.curBackendInfo {
 		if lastHealth.Status == StatusHealthy {
@@ -247,7 +185,7 @@ func (bo *BackendObserver) notifyIfChanged(bhMap map[string]*BackendHealth) {
 }
 
 // Close releases all resources.
-func (bo *BackendObserver) Close() {
+func (bo *DefaultBackendObserver) Close() {
 	if bo.cancelFunc != nil {
 		bo.cancelFunc()
 	}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"syscall"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -31,4 +32,22 @@ func IsDisconnectError(err error) bool {
 		return true
 	}
 	return false
+}
+
+// When the server refused to connect, the port is shut down, so no need to retry.
+var notRetryableError = []string{
+	"connection refused",
+}
+
+func IsRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, errStr := range notRetryableError {
+		if strings.Contains(msg, errStr) {
+			return false
+		}
+	}
+	return true
 }

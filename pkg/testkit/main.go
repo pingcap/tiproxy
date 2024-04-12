@@ -5,6 +5,7 @@ package testkit
 
 import (
 	"net"
+	"strconv"
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -70,4 +71,21 @@ func TestTCPConnWithListener(t *testing.T, listen func(*testing.T, string, strin
 		})
 		wg.Wait()
 	}
+}
+
+func StartListener(t *testing.T, addr string) (net.Listener, string) {
+	if len(addr) == 0 {
+		addr = "127.0.0.1:0"
+	}
+	listener, err := net.Listen("tcp", addr)
+	require.NoError(t, err)
+	return listener, listener.Addr().String()
+}
+
+func ParseHostPort(t *testing.T, addr string) (string, uint) {
+	host, port, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	p, err := strconv.ParseUint(port, 10, 32)
+	require.NoError(t, err)
+	return host, uint(p)
 }

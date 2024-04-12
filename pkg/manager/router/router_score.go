@@ -9,8 +9,8 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
-	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/manager/observer"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
@@ -26,7 +26,7 @@ var _ Router = &ScoreBasedRouter{}
 type ScoreBasedRouter struct {
 	sync.Mutex
 	logger     *zap.Logger
-	observer   *BackendObserver
+	observer   observer.BackendObserver
 	cancelFunc context.CancelFunc
 	wg         waitgroup.WaitGroup
 	// A list of *backendWrapper. The backends are in descending order of scores.
@@ -44,17 +44,14 @@ func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 	}
 }
 
-func (r *ScoreBasedRouter) Init(fetcher BackendFetcher, hc HealthCheck, cfg *config.HealthCheck) error {
-	cfg.Check()
-	observer := StartBackendObserver(r.logger.Named("observer"), r, cfg, fetcher, hc)
-	r.observer = observer
-	childCtx, cancelFunc := context.WithCancel(context.Background())
+func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver) {
+	r.observer = ob
+	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
 	// Failing to rebalance backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	r.wg.Run(func() {
 		r.rebalanceLoop(childCtx)
 	})
-	return nil
 }
 
 // GetBackendSelector implements Router.GetBackendSelector interface.
@@ -83,7 +80,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, 
 		backend := be.Value
 		// These backends may be recycled, so we should not connect to them again.
 		switch backend.Status() {
-		case StatusCannotConnect, StatusSchemaOutdated:
+		case observer.StatusCannotConnect, observer.StatusSchemaOutdated:
 			continue
 		}
 		found := false
@@ -227,8 +224,8 @@ func (router *ScoreBasedRouter) ensureBackend(addr string, forward bool) *glist.
 			addr:     addr,
 			connList: glist.New[*connWrapper](),
 		}
-		backend.setHealth(BackendHealth{
-			Status: StatusCannotConnect,
+		backend.setHealth(observer.BackendHealth{
+			Status: observer.StatusCannotConnect,
 		})
 		be = router.backends.PushFront(backend)
 		router.adjustBackendList(be, false)
@@ -291,13 +288,13 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 }
 
 // OnBackendChanged implements BackendEventReceiver.OnBackendChanged interface.
-func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHealth, err error) {
+func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*observer.BackendHealth, err error) {
 	router.Lock()
 	defer router.Unlock()
 	router.observeError = err
 	for addr, health := range backends {
 		be := router.lookupBackend(addr, true)
-		if be == nil && health.Status != StatusCannotConnect {
+		if be == nil && health.Status != observer.StatusCannotConnect {
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev", "none"), zap.String("cur", health.String()))
 			backend := &backendWrapper{
@@ -393,7 +390,7 @@ func (router *ScoreBasedRouter) removeBackendIfEmpty(be *glist.Element[*backendW
 	backend := be.Value
 	// If connList.Len() == 0, there won't be any outgoing connections.
 	// And if also connScore == 0, there won't be any incoming connections.
-	if backend.Status() == StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
+	if backend.Status() == observer.StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
 		router.backends.Remove(be)
 		return true
 	}
@@ -415,7 +412,7 @@ func (router *ScoreBasedRouter) ConnCount() int {
 func (router *ScoreBasedRouter) updateServerVersion() {
 	for be := router.backends.Front(); be != nil; be = be.Next() {
 		backend := be.Value
-		if backend.Status() != StatusCannotConnect {
+		if backend.Status() != observer.StatusCannotConnect {
 			serverVersion := backend.ServerVersion()
 			if len(serverVersion) > 0 {
 				router.serverVersion = serverVersion
@@ -437,10 +434,6 @@ func (router *ScoreBasedRouter) Close() {
 	if router.cancelFunc != nil {
 		router.cancelFunc()
 		router.cancelFunc = nil
-	}
-	if router.observer != nil {
-		router.observer.Close()
-		router.observer = nil
 	}
 	router.wg.Wait()
 	// Router only refers to RedirectableConn, it doesn't manage RedirectableConn.

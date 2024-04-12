@@ -1,7 +1,7 @@
 // Copyright 2023 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package observer
 
 import (
 	"context"

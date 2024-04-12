@@ -12,6 +12,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
+	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,8 +43,8 @@ type mockHttpHandler struct {
 }
 
 func (handler *mockHttpHandler) Start() int {
-	statusListener, addr := startListener(handler.t, "")
-	_, port := parseHostPort(handler.t, addr)
+	statusListener, addr := testkit.StartListener(handler.t, "")
+	_, port := testkit.ParseHostPort(handler.t, addr)
 	handler.server = &http.Server{Addr: addr, Handler: handler}
 	handler.wg.Run(func() {
 		_ = handler.server.Serve(statusListener)

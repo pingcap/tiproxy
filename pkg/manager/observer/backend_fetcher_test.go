@@ -1,7 +1,7 @@
 // Copyright 2023 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package observer
 
 import (
 	"context"
@@ -115,20 +115,4 @@ func TestPDFetcher(t *testing.T) {
 		test.check(info)
 		require.NoError(t, err)
 	}
-}
-
-type mockTpFetcher struct {
-	t     *testing.T
-	infos map[string]*infosync.TiDBInfo
-	err   error
-}
-
-func newMockTpFetcher(t *testing.T) *mockTpFetcher {
-	return &mockTpFetcher{
-		t: t,
-	}
-}
-
-func (ft *mockTpFetcher) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBInfo, error) {
-	return ft.infos, ft.err
 }
