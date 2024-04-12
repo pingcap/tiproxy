@@ -75,7 +75,11 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	//
 	// TODO: there is a race condition that printInfo and logmgr may concurrently execute:
 	// logmgr may havenot been initialized with logfile yet
+	// Make sure the TiProxy info is always printed.
+	level := lg.Level()
+	srv.LoggerManager.SetLoggerLevel(zap.InfoLevel)
 	printInfo(lg)
+	srv.LoggerManager.SetLoggerLevel(level)
 
 	// setup metrics
 	srv.MetricsManager.Init(ctx, lg.Named("metrics"))
