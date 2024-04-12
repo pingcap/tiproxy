@@ -9,6 +9,7 @@ import (
 
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/manager/observer"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
 
@@ -84,7 +85,7 @@ type BackendInst interface {
 type backendWrapper struct {
 	mu struct {
 		sync.RWMutex
-		BackendHealth
+		observer.BackendHealth
 	}
 	addr string
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
@@ -95,7 +96,7 @@ type backendWrapper struct {
 	connList *glist.List[*connWrapper]
 }
 
-func (b *backendWrapper) setHealth(health BackendHealth) {
+func (b *backendWrapper) setHealth(health observer.BackendHealth) {
 	b.mu.Lock()
 	b.mu.BackendHealth = health
 	b.mu.Unlock()
@@ -113,7 +114,7 @@ func (b *backendWrapper) Addr() string {
 	return b.addr
 }
 
-func (b *backendWrapper) Status() BackendStatus {
+func (b *backendWrapper) Status() observer.BackendStatus {
 	b.mu.RLock()
 	status := b.mu.Status
 	b.mu.RUnlock()
@@ -122,7 +123,7 @@ func (b *backendWrapper) Status() BackendStatus {
 
 func (b *backendWrapper) Healthy() bool {
 	b.mu.RLock()
-	healthy := b.mu.Status == StatusHealthy
+	healthy := b.mu.Status == observer.StatusHealthy
 	b.mu.RUnlock()
 	return healthy
 }

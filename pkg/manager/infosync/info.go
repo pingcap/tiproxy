@@ -29,12 +29,16 @@ import (
 
 const (
 	tiproxyTopologyPath = "/topology/tiproxy"
+	promTopologyPath    = "/topology/prometheus"
 
 	topologySessionTTL    = 45
 	topologyRefreshIntvl  = 30 * time.Second
 	topologyPutTimeout    = 2 * time.Second
 	topologyPutRetryIntvl = 1 * time.Second
 	topologyPutRetryCnt   = 3
+	getPromTimeout        = 2 * time.Second
+	getPromRetryIntvl     = 0
+	getPromRetryCnt       = 3
 	logInterval           = 10
 
 	ttlSuffix  = "ttl"
@@ -55,11 +59,14 @@ type InfoSyncer struct {
 }
 
 type syncConfig struct {
-	sessionTTL    int
-	refreshIntvl  time.Duration
-	putTimeout    time.Duration
-	putRetryIntvl time.Duration
-	putRetryCnt   uint64
+	sessionTTL        int
+	refreshIntvl      time.Duration
+	putTimeout        time.Duration
+	putRetryIntvl     time.Duration
+	putRetryCnt       uint64
+	getPromTimeout    time.Duration
+	getPromRetryIntvl time.Duration
+	getPromRetryCnt   uint64
 }
 
 // TopologyInfo is the info of TiProxy.
@@ -81,15 +88,25 @@ type TiDBInfo struct {
 	TTL string
 }
 
+// PrometheusInfo is the info of prometheus.
+type PrometheusInfo struct {
+	IP         string `json:"ip"`
+	BinaryPath string `json:"binary_path"`
+	Port       int    `json:"port"`
+}
+
 func NewInfoSyncer(lg *zap.Logger) *InfoSyncer {
 	return &InfoSyncer{
 		lg: lg,
 		syncConfig: syncConfig{
-			sessionTTL:    topologySessionTTL,
-			refreshIntvl:  topologyRefreshIntvl,
-			putTimeout:    topologyPutTimeout,
-			putRetryIntvl: topologyPutRetryIntvl,
-			putRetryCnt:   topologyPutRetryCnt,
+			sessionTTL:        topologySessionTTL,
+			refreshIntvl:      topologyRefreshIntvl,
+			putTimeout:        topologyPutTimeout,
+			putRetryIntvl:     topologyPutRetryIntvl,
+			putRetryCnt:       topologyPutRetryCnt,
+			getPromTimeout:    getPromTimeout,
+			getPromRetryCnt:   getPromRetryCnt,
+			getPromRetryIntvl: getPromRetryIntvl,
 		},
 	}
 }
@@ -279,6 +296,28 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBInfo
 		}
 	}
 	return infos, nil
+}
+
+func (is *InfoSyncer) GetPromInfo(ctx context.Context) (*PrometheusInfo, error) {
+	var res *clientv3.GetResponse
+	err := retry.Retry(func() error {
+		childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.getPromTimeout)
+		var err error
+		res, err = is.etcdCli.Get(childCtx, promTopologyPath, clientv3.WithPrefix())
+		cancel()
+		return errors.WithStack(err)
+	}, ctx, is.syncConfig.getPromRetryIntvl, is.syncConfig.getPromRetryCnt)
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Kvs) == 0 {
+		return nil, nil
+	}
+	var info PrometheusInfo
+	if err = json.Unmarshal(res.Kvs[0].Value, &info); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return &info, nil
 }
 
 func (is *InfoSyncer) Close() error {

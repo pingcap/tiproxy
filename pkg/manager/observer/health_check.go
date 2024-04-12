@@ -1,14 +1,13 @@
 // Copyright 2023 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package observer
 
 import (
 	"context"
 	"fmt"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -58,42 +57,21 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 	if !dhc.cfg.Enable {
 		return bh
 	}
-	// Skip checking the status port if it's not fetched.
-	if info != nil && len(info.IP) > 0 {
-		// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
-		// new connections, so we must check the status port first.
-		schema := "http"
-		if dhc.httpTLS {
-			schema = "https"
-		}
-		httpCli := *dhc.httpCli
-		httpCli.Timeout = dhc.cfg.DialTimeout
-		url := fmt.Sprintf("%s://%s:%d%s", schema, info.IP, info.StatusPort, statusPathSuffix)
-		err := dhc.connectWithRetry(ctx, func() error {
-			resp, err := httpCli.Get(url)
-			if err == nil {
-				if resp.StatusCode != http.StatusOK {
-					err = backoff.Permanent(errors.Errorf("http status %d", resp.StatusCode))
-				}
-				if ignoredErr := resp.Body.Close(); ignoredErr != nil {
-					dhc.logger.Warn("close http response in health check failed", zap.Error(ignoredErr))
-				}
-			}
-			return err
-		})
-		if err != nil {
-			bh.Status = StatusCannotConnect
-			bh.PingErr = errors.Wrapf(err, "connect status port failed")
-			return bh
-		}
+	dhc.checkStatusPort(ctx, info, bh)
+	if bh.Status != StatusHealthy {
+		return bh
 	}
+	dhc.checkSqlPort(ctx, addr, bh)
+	return bh
+}
 
+func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh *BackendHealth) {
 	// Also dial the SQL port just in case that the SQL port hangs.
 	var serverVersion string
 	err := dhc.connectWithRetry(ctx, func() error {
 		startTime := monotime.Now()
 		conn, err := net.DialTimeout("tcp", addr, dhc.cfg.DialTimeout)
-		setPingBackendMetrics(addr, err == nil, startTime)
+		setPingBackendMetrics(addr, startTime)
 		if err != nil {
 			return err
 		}
@@ -111,34 +89,50 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 		bh.Status = StatusCannotConnect
 		bh.PingErr = errors.Wrapf(err, "connect sql port failed")
 	}
-	return bh
+}
+
+// When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
+// new connections.
+func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *BackendInfo, bh *BackendHealth) {
+	if ctx.Err() != nil {
+		return
+	}
+	// Using static backends, no status port.
+	if info == nil || len(info.IP) == 0 {
+		return
+	}
+	schema := "http"
+	if dhc.httpTLS {
+		schema = "https"
+	}
+	httpCli := *dhc.httpCli
+	httpCli.Timeout = dhc.cfg.DialTimeout
+	url := fmt.Sprintf("%s://%s:%d%s", schema, info.IP, info.StatusPort, statusPathSuffix)
+	err := dhc.connectWithRetry(ctx, func() error {
+		resp, err := httpCli.Get(url)
+		if err == nil {
+			if resp.StatusCode != http.StatusOK {
+				err = backoff.Permanent(errors.Errorf("http status %d", resp.StatusCode))
+			}
+			if ignoredErr := resp.Body.Close(); ignoredErr != nil {
+				dhc.logger.Warn("close http response in health check failed", zap.Error(ignoredErr))
+			}
+		}
+		return err
+	})
+	if err != nil {
+		bh.Status = StatusCannotConnect
+		bh.PingErr = errors.Wrapf(err, "connect status port failed")
+	}
 }
 
 func (dhc *DefaultHealthCheck) connectWithRetry(ctx context.Context, connect func() error) error {
 	err := backoff.Retry(func() error {
 		err := connect()
-		if !isRetryableError(err) {
+		if !pnet.IsRetryableError(err) {
 			return backoff.Permanent(err)
 		}
 		return err
 	}, backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx))
 	return err
-}
-
-// When the server refused to connect, the port is shut down, so no need to retry.
-var notRetryableError = []string{
-	"connection refused",
-}
-
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	for _, errStr := range notRetryableError {
-		if strings.Contains(msg, errStr) {
-			return false
-		}
-	}
-	return true
 }
