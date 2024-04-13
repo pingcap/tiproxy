@@ -52,6 +52,10 @@ func (lm *LoggerManager) Init(cfgch <-chan *config.Config) {
 	}, nil, lm.logger)
 }
 
+func (lm *LoggerManager) SetLoggerLevel(l zapcore.Level) {
+	lm.level.SetLevel(l)
+}
+
 func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Config) {
 	for {
 		select {
