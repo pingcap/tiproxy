@@ -14,9 +14,9 @@ import (
 	"sync"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/pkg/manager/metricsreader"
-	"github.com/pingcap/tiproxy/pkg/manager/observer"
-	"github.com/pingcap/tiproxy/pkg/manager/router"
+	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"go.uber.org/zap"
 )
 
