@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pingcap/tiproxy/pkg/manager/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/stretchr/testify/require"
 )
 

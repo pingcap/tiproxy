@@ -7,8 +7,8 @@
 package namespace
 
 import (
-	"github.com/pingcap/tiproxy/pkg/manager/observer"
-	"github.com/pingcap/tiproxy/pkg/manager/router"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/router"
 )
 
 type Namespace struct {
