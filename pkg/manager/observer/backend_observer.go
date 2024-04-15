@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
@@ -23,31 +22,28 @@ const (
 	goMaxIdle  = time.Minute
 )
 
-// BackendEventReceiver receives the event of backend status change.
-type BackendEventReceiver interface {
-	// OnBackendChanged is called when the backend list changes.
-	OnBackendChanged(backends map[string]*BackendHealth, err error)
-}
+var _ BackendObserver = (*DefaultBackendObserver)(nil)
 
 type BackendObserver interface {
-	Start(ctx context.Context, eventReceiver BackendEventReceiver)
+	Start(ctx context.Context)
+	Subscribe(name string) <-chan HealthResult
 	Refresh()
 	Close()
 }
 
 // DefaultBackendObserver refreshes backend list and notifies BackendEventReceiver.
 type DefaultBackendObserver struct {
+	sync.Mutex
+	subscribers       map[string]chan HealthResult
+	curBackends       map[string]*BackendHealth
+	wg                waitgroup.WaitGroup
+	refreshChan       chan struct{}
+	fetcher           BackendFetcher
+	hc                HealthCheck
+	cancelFunc        context.CancelFunc
 	logger            *zap.Logger
 	healthCheckConfig *config.HealthCheck
-	// The current backend status synced to the receiver.
-	curBackendInfo map[string]*BackendHealth
-	fetcher        BackendFetcher
-	hc             HealthCheck
-	wgp            *waitgroup.WaitGroupPool
-	eventReceiver  BackendEventReceiver
-	wg             waitgroup.WaitGroup
-	cancelFunc     context.CancelFunc
-	refreshChan    chan struct{}
+	wgp               *waitgroup.WaitGroupPool
 }
 
 // NewDefaultBackendObserver creates a BackendObserver.
@@ -57,18 +53,18 @@ func NewDefaultBackendObserver(logger *zap.Logger, config *config.HealthCheck,
 	bo := &DefaultBackendObserver{
 		logger:            logger,
 		healthCheckConfig: config,
-		curBackendInfo:    make(map[string]*BackendHealth),
 		hc:                hc,
 		wgp:               waitgroup.NewWaitGroupPool(goPoolSize, goMaxIdle),
 		refreshChan:       make(chan struct{}),
 		fetcher:           backendFetcher,
+		subscribers:       make(map[string]chan HealthResult),
+		curBackends:       make(map[string]*BackendHealth),
 	}
 	return bo
 }
 
 // Start starts watching.
-func (bo *DefaultBackendObserver) Start(ctx context.Context, eventReceiver BackendEventReceiver) {
-	bo.eventReceiver = eventReceiver
+func (bo *DefaultBackendObserver) Start(ctx context.Context) {
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	bo.cancelFunc = cancelFunc
 	// Failing to observe backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
@@ -90,16 +86,15 @@ func (bo *DefaultBackendObserver) observe(ctx context.Context) {
 	for ctx.Err() == nil {
 		startTime := monotime.Now()
 		backendInfo, err := bo.fetcher.GetBackendList(ctx)
+		var result HealthResult
 		if err != nil {
 			bo.logger.Error("fetching backends encounters error", zap.Error(err))
-			bo.eventReceiver.OnBackendChanged(nil, err)
+			result.err = err
 		} else {
-			bhMap := bo.checkHealth(ctx, backendInfo)
-			if ctx.Err() != nil {
-				return
-			}
-			bo.notifyIfChanged(bhMap)
+			result.backends = bo.checkHealth(ctx, backendInfo)
 		}
+		bo.updateHealthResult(result)
+		bo.notifySubscribers(ctx, result)
 
 		cost := monotime.Since(startTime)
 		metrics.HealthCheckCycleGauge.Set(cost.Seconds())
@@ -130,7 +125,7 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 	// Each goroutine checks one backend.
 	var lock sync.Mutex
 	for addr, info := range backends {
-		func(addr string) {
+		func(addr string, info *BackendInfo) {
 			bo.wgp.RunWithRecover(func() {
 				if ctx.Err() != nil {
 					return
@@ -140,48 +135,60 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 				curBackendHealth[addr] = health
 				lock.Unlock()
 			}, nil, bo.logger)
-		}(addr)
+		}(addr, info)
 	}
 	bo.wgp.Wait()
 	return curBackendHealth
 }
 
-func (bo *DefaultBackendObserver) notifyIfChanged(bhMap map[string]*BackendHealth) {
-	updatedBackends := make(map[string]*BackendHealth)
-	for addr, lastHealth := range bo.curBackendInfo {
-		if lastHealth.Status == StatusHealthy {
-			if newHealth, ok := bhMap[addr]; !ok {
-				updatedBackends[addr] = &BackendHealth{
-					Status:  StatusCannotConnect,
-					PingErr: errors.New("removed from backend list"),
-				}
-				updateBackendStatusMetrics(addr, lastHealth.Status, StatusCannotConnect)
-			} else if newHealth.Status != StatusHealthy {
-				updatedBackends[addr] = newHealth
-				updateBackendStatusMetrics(addr, lastHealth.Status, newHealth.Status)
-			}
+func (bo *DefaultBackendObserver) Subscribe(name string) <-chan HealthResult {
+	ch := make(chan HealthResult, 1)
+	bo.Lock()
+	bo.subscribers[name] = ch
+	bo.Unlock()
+	return ch
+}
+
+func (bo *DefaultBackendObserver) updateHealthResult(result HealthResult) {
+	if result.err != nil {
+		return
+	}
+	for addr, newHealth := range result.backends {
+		if newHealth.Status == StatusCannotConnect {
+			continue
+		}
+		if oldHealth, ok := bo.curBackends[addr]; !ok || oldHealth.Status == StatusCannotConnect {
+			updateBackendStatusMetrics(addr, StatusCannotConnect, StatusHealthy)
 		}
 	}
-	for addr, newHealth := range bhMap {
-		if newHealth.Status == StatusHealthy {
-			lastHealth, ok := bo.curBackendInfo[addr]
-			if !ok {
-				lastHealth = &BackendHealth{
-					Status: StatusCannotConnect,
-				}
-			}
-			if lastHealth.Status != StatusHealthy {
-				updatedBackends[addr] = newHealth
-				updateBackendStatusMetrics(addr, lastHealth.Status, newHealth.Status)
-			} else if lastHealth.ServerVersion != newHealth.ServerVersion {
-				// Not possible here: the backend finishes upgrading between two health checks.
-				updatedBackends[addr] = newHealth
-			}
+	for addr, oldHealth := range bo.curBackends {
+		if oldHealth.Status == StatusCannotConnect {
+			continue
+		}
+		if newHealth, ok := result.backends[addr]; !ok || newHealth.Status == StatusCannotConnect {
+			updateBackendStatusMetrics(addr, StatusHealthy, StatusCannotConnect)
 		}
 	}
-	// Notify it even when the updatedBackends is empty, in order to clear the last error.
-	bo.eventReceiver.OnBackendChanged(updatedBackends, nil)
-	bo.curBackendInfo = bhMap
+	bo.curBackends = result.backends
+}
+
+func (bo *DefaultBackendObserver) notifySubscribers(ctx context.Context, result HealthResult) {
+	if ctx.Err() != nil {
+		return
+	}
+	bo.Lock()
+	defer bo.Unlock()
+	for name, ch := range bo.subscribers {
+		// If the subscriber is busy and doesn't read the channel, just skip and continue.
+		// Now that the event may be missing, we must notify the whole backend list to the subscriber.
+		select {
+		case ch <- result:
+		case <-time.After(50 * time.Millisecond):
+			bo.logger.Warn("fails to notify health result", zap.String("receiver", name))
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // Close releases all resources.
@@ -190,5 +197,10 @@ func (bo *DefaultBackendObserver) Close() {
 		bo.cancelFunc()
 	}
 	bo.wg.Wait()
+	bo.Lock()
+	for _, ch := range bo.subscribers {
+		close(ch)
+	}
+	bo.Unlock()
 	bo.wgp.Close()
 }

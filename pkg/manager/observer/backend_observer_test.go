@@ -15,26 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockEventReceiver struct {
-	backendChan chan map[string]*BackendHealth
-	errChan     chan error
-}
-
-func (mer *mockEventReceiver) OnBackendChanged(backends map[string]*BackendHealth, err error) {
-	if err != nil {
-		mer.errChan <- err
-	} else if len(backends) > 0 {
-		mer.backendChan <- backends
-	}
-}
-
-func newMockEventReceiver(backendChan chan map[string]*BackendHealth, errChan chan error) *mockEventReceiver {
-	return &mockEventReceiver{
-		backendChan: backendChan,
-		errChan:     errChan,
-	}
-}
-
 func newHealthCheckConfigForTest() *config.HealthCheck {
 	return &config.HealthCheck{
 		Enable:        true,
@@ -49,7 +29,7 @@ func newHealthCheckConfigForTest() *config.HealthCheck {
 func TestObserveBackends(t *testing.T) {
 	ts := newObserverTestSuite(t)
 	t.Cleanup(ts.close)
-	ts.bo.Start(context.Background(), ts.mer)
+	ts.bo.Start(context.Background())
 
 	backend1 := ts.addBackend()
 	ts.checkStatus(backend1, StatusHealthy)
@@ -75,9 +55,10 @@ func TestObserveInParallel(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		backend = ts.addBackend()
 	}
-	ts.bo.Start(context.Background(), ts.mer)
-	backends := ts.getBackendsFromCh()
-	require.Equal(ts.t, 100, len(backends))
+	ts.bo.Start(context.Background())
+	result := ts.getResultFromCh()
+	require.NoError(t, result.Error())
+	require.Len(ts.t, result.Backends(), 100)
 	// Wait for next loop.
 	ts.setHealth(backend, StatusCannotConnect)
 	ts.checkStatus(backend, StatusCannotConnect)
@@ -117,34 +98,70 @@ func TestDisableHealthCheck(t *testing.T) {
 
 	backend1 := ts.addBackend()
 	ts.setHealth(backend1, StatusCannotConnect)
-	ts.bo.Start(context.Background(), ts.mer)
+	ts.bo.Start(context.Background())
 	ts.checkStatus(backend1, StatusHealthy)
 }
 
+func TestMultiSubscribers(t *testing.T) {
+	ts := newObserverTestSuite(t)
+	t.Cleanup(ts.close)
+	subscribers := make([]<-chan HealthResult, 0, 10)
+	for i := 0; i < cap(subscribers); i++ {
+		subscribers = append(subscribers, ts.bo.Subscribe(fmt.Sprintf("receiver%d", i)))
+	}
+
+	backend := ts.addBackend()
+	ts.bo.Start(context.Background())
+	ts.getResultFromCh()
+	for _, subscriber := range subscribers {
+		require.Eventually(t, func() bool {
+			result := <-subscriber
+			require.NoError(t, result.Error())
+			if len(result.Backends()) == 0 {
+				return false
+			}
+			health, ok := result.Backends()[backend]
+			require.True(t, ok)
+			require.Equal(t, StatusHealthy, health.Status)
+			return true
+		}, 3*time.Second, time.Millisecond)
+	}
+
+	ts.setHealth(backend, StatusCannotConnect)
+	ts.getResultFromCh()
+	for _, subscriber := range subscribers {
+		require.Eventually(t, func() bool {
+			result := <-subscriber
+			require.NoError(t, result.Error())
+			require.Len(t, result.Backends(), 1)
+			health, ok := result.Backends()[backend]
+			require.True(t, ok)
+			return health.Status == StatusCannotConnect
+		}, 3*time.Second, time.Millisecond)
+	}
+}
+
 type observerTestSuite struct {
-	t           *testing.T
-	bo          *DefaultBackendObserver
-	hc          *mockHealthCheck
-	fetcher     *mockBackendFetcher
-	mer         *mockEventReceiver
-	backendIdx  int
-	backendChan chan map[string]*BackendHealth
+	t          *testing.T
+	bo         *DefaultBackendObserver
+	hc         *mockHealthCheck
+	fetcher    *mockBackendFetcher
+	subscriber <-chan HealthResult
+	backendIdx int
 }
 
 func newObserverTestSuite(t *testing.T) *observerTestSuite {
-	backendChan := make(chan map[string]*BackendHealth, 1)
-	mer := newMockEventReceiver(backendChan, make(chan error, 1))
 	fetcher := newMockBackendFetcher()
 	hc := newMockHealthCheck()
 	lg, _ := logger.CreateLoggerForTest(t)
 	bo := NewDefaultBackendObserver(lg, newHealthCheckConfigForTest(), fetcher, hc)
+	subscriber := bo.Subscribe("receiver")
 	return &observerTestSuite{
-		t:           t,
-		bo:          bo,
-		fetcher:     fetcher,
-		hc:          hc,
-		mer:         mer,
-		backendChan: backendChan,
+		t:          t,
+		bo:         bo,
+		fetcher:    fetcher,
+		hc:         hc,
+		subscriber: subscriber,
 	}
 }
 
@@ -156,26 +173,30 @@ func (ts *observerTestSuite) close() {
 }
 
 func (ts *observerTestSuite) checkStatus(addr string, expectedStatus BackendStatus) {
-	backends := ts.getBackendsFromCh()
-	require.Equal(ts.t, 1, len(backends))
-	health, ok := backends[addr]
-	require.True(ts.t, ok)
-	require.Equal(ts.t, expectedStatus, health.Status)
-	require.True(ts.t, checkBackendStatusMetrics(addr, health.Status))
+	result := ts.getResultFromCh()
+	require.NoError(ts.t, result.Error())
+	health, ok := result.Backends()[addr]
+	if expectedStatus == StatusHealthy {
+		require.True(ts.t, ok)
+		require.Equal(ts.t, expectedStatus, health.Status)
+	} else {
+		require.True(ts.t, !ok || health.Status == expectedStatus)
+	}
+	require.True(ts.t, checkBackendStatusMetrics(addr, expectedStatus))
 	cycle, err := readHealthCheckCycle()
 	require.NoError(ts.t, err)
 	require.Greater(ts.t, cycle.Nanoseconds(), int64(0))
 	require.Less(ts.t, cycle.Nanoseconds(), 3*time.Second)
 }
 
-func (ts *observerTestSuite) getBackendsFromCh() map[string]*BackendHealth {
-	var backends map[string]*BackendHealth
+func (ts *observerTestSuite) getResultFromCh() HealthResult {
 	select {
-	case backends = <-ts.backendChan:
+	case result := <-ts.subscriber:
+		return result
 	case <-time.After(3 * time.Second):
 		ts.t.Fatal("timeout")
+		return HealthResult{}
 	}
-	return backends
 }
 
 func (ts *observerTestSuite) addBackend() string {

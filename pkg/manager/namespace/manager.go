@@ -50,7 +50,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	rt := router.NewScoreBasedRouter(logger.Named("router"))
 	hc := observer.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
 	bo := observer.NewDefaultBackendObserver(logger.Named("observer"), healthCheckCfg, fetcher, hc)
-	bo.Start(context.Background(), rt)
+	bo.Start(context.Background())
 	rt.Init(context.Background(), bo)
 
 	return &Namespace{

@@ -135,6 +135,13 @@ func (b *backendWrapper) ServerVersion() string {
 	return version
 }
 
+func (b *backendWrapper) Equals(health observer.BackendHealth) bool {
+	b.mu.RLock()
+	equal := b.mu.BackendHealth.Equals(health)
+	b.mu.RUnlock()
+	return equal
+}
+
 func (b *backendWrapper) String() string {
 	b.mu.RLock()
 	str := b.mu.String()

@@ -24,8 +24,9 @@ type routerTester struct {
 	t         *testing.T
 	router    *ScoreBasedRouter
 	connID    uint64
-	conns     map[uint64]*mockRedirectableConn
 	backendID int
+	backends  map[string]*observer.BackendHealth
+	conns     map[uint64]*mockRedirectableConn
 }
 
 func newRouterTester(t *testing.T) *routerTester {
@@ -33,9 +34,10 @@ func newRouterTester(t *testing.T) *routerTester {
 	router := NewScoreBasedRouter(lg)
 	t.Cleanup(router.Close)
 	return &routerTester{
-		t:      t,
-		router: router,
-		conns:  make(map[uint64]*mockRedirectableConn),
+		t:        t,
+		router:   router,
+		backends: make(map[string]*observer.BackendHealth),
+		conns:    make(map[uint64]*mockRedirectableConn),
 	}
 }
 
@@ -44,47 +46,65 @@ func (tester *routerTester) createConn() *mockRedirectableConn {
 	return newMockRedirectableConn(tester.t, tester.connID)
 }
 
+func (tester *routerTester) notifyHealth() {
+	result := observer.NewHealthResult(tester.backends, nil)
+	tester.router.updateBackendHealth(result)
+}
+
 func (tester *routerTester) addBackends(num int) {
-	backends := make(map[string]*observer.BackendHealth)
 	for i := 0; i < num; i++ {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
-		backends[addr] = &observer.BackendHealth{
+		tester.backends[addr] = &observer.BackendHealth{
 			Status: observer.StatusHealthy,
 		}
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
-	tester.router.OnBackendChanged(backends, nil)
+	tester.notifyHealth()
 	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) killBackends(num int) {
-	backends := make(map[string]*observer.BackendHealth)
-	indexes := rand.Perm(tester.router.backends.Len())
-	for _, index := range indexes {
+	killed := 0
+	for _, health := range tester.backends {
+		if killed >= num {
+			break
+		}
+		if health.Status == observer.StatusCannotConnect {
+			continue
+		}
+		health.Status = observer.StatusCannotConnect
+		killed++
+	}
+	tester.notifyHealth()
+	tester.checkBackendOrder()
+}
+
+func (tester *routerTester) removeBackends(num int) {
+	backends := make([]string, 0, num)
+	for addr := range tester.backends {
 		if len(backends) >= num {
 			break
 		}
-		// set the ith backend as unhealthy
-		backend := tester.getBackendByIndex(index)
-		if backend.Status() == observer.StatusCannotConnect {
-			continue
-		}
-		backends[backend.addr] = &observer.BackendHealth{
-			Status: observer.StatusCannotConnect,
-		}
+		backends = append(backends, addr)
 	}
-	tester.router.OnBackendChanged(backends, nil)
+	for _, addr := range backends {
+		delete(tester.backends, addr)
+	}
+	tester.notifyHealth()
 	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) updateBackendStatusByAddr(addr string, status observer.BackendStatus) {
-	backends := map[string]*observer.BackendHealth{
-		addr: {
+	health, ok := tester.backends[addr]
+	if ok {
+		health.Status = status
+	} else {
+		tester.backends[addr] = &observer.BackendHealth{
 			Status: status,
-		},
+		}
 	}
-	tester.router.OnBackendChanged(backends, nil)
+	tester.notifyHealth()
 	tester.checkBackendOrder()
 }
 
@@ -236,6 +256,7 @@ func (tester *routerTester) checkBackendConnMetrics() {
 func (tester *routerTester) clear() {
 	tester.conns = make(map[uint64]*mockRedirectableConn)
 	tester.router.backends.Init()
+	tester.backends = make(map[string]*observer.BackendHealth)
 }
 
 // Test that the backends are always ordered by scores.
@@ -541,7 +562,7 @@ func TestConcurrency(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	router := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
-	bo.Start(context.Background(), router)
+	bo.Start(context.Background())
 	router.Init(context.Background(), bo)
 	t.Cleanup(router.Close)
 	t.Cleanup(bo.Close)
@@ -633,7 +654,7 @@ func TestRefresh(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
-	bo.Start(context.Background(), rt)
+	bo.Start(context.Background())
 	rt.Init(context.Background(), bo)
 	t.Cleanup(rt.Close)
 	t.Cleanup(bo.Close)
@@ -643,28 +664,35 @@ func TestRefresh(t *testing.T) {
 	require.Equal(t, ErrNoBackend, err)
 	// Refresh is called internally and there comes a new one.
 	bo.notify(nil)
-	_, err = selector.Next()
-	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		_, err = selector.Next()
+		return err == nil
+	}, 3*time.Second, 10*time.Millisecond)
 }
 
 func TestObserveError(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
-	bo.Start(context.Background(), rt)
+	bo.Start(context.Background())
 	rt.Init(context.Background(), bo)
 	t.Cleanup(rt.Close)
 	t.Cleanup(bo.Close)
 	// Mock an observe error.
 	bo.notify(errors.New("mock observe error"))
-	selector := rt.GetBackendSelector()
-	_, err := selector.Next()
-	require.True(t, err != nil && err != ErrNoBackend)
+	require.Eventually(t, func() bool {
+		selector := rt.GetBackendSelector()
+		_, err := selector.Next()
+		return err != nil && err != ErrNoBackend
+	}, 3*time.Second, 10*time.Millisecond)
 	// Clear the observe error.
 	bo.addBackend("0")
 	bo.notify(nil)
-	_, err = selector.Next()
-	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		selector := rt.GetBackendSelector()
+		_, err := selector.Next()
+		return err == nil
+	}, 3*time.Second, 10*time.Millisecond)
 }
 
 func TestSetBackendStatus(t *testing.T) {
@@ -695,7 +723,8 @@ func TestGetServerVersion(t *testing.T) {
 			ServerVersion: "2.0",
 		},
 	}
-	rt.OnBackendChanged(backends, nil)
+	result := observer.NewHealthResult(backends, nil)
+	rt.updateBackendHealth(result)
 	version := rt.ServerVersion()
 	require.True(t, version == "1.0" || version == "2.0")
 }
@@ -735,4 +764,21 @@ func TestCloseRedirectingConns(t *testing.T) {
 	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
 	require.Equal(t, 0, tester.getBackendByIndex(0).connList.Len())
 	require.Equal(t, 0, tester.getBackendByIndex(1).connList.Len())
+}
+
+func TestUpdateBackendHealth(t *testing.T) {
+	tester := newRouterTester(t)
+	tester.addBackends(3)
+	// Test some backends are not in the list anymore.
+	tester.removeBackends(1)
+	tester.checkBackendNum(2)
+	// Test some backends failed.
+	tester.killBackends(1)
+	tester.checkBackendNum(1)
+	tester.addBackends(2)
+	tester.checkBackendNum(3)
+	// The backend won't be removed when there are connections on it.
+	tester.addConnections(90)
+	tester.killBackends(1)
+	tester.checkBackendNum(3)
 }
