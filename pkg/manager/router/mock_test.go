@@ -99,8 +99,8 @@ func (conn *mockRedirectableConn) redirectFail() {
 
 type mockBackendObserver struct {
 	sync.Mutex
-	healths       map[string]*observer.BackendHealth
-	eventReceiver observer.BackendEventReceiver
+	healths    map[string]*observer.BackendHealth
+	subscriber chan observer.HealthResult
 }
 
 func newMockBackendObserver() *mockBackendObserver {
@@ -128,8 +128,14 @@ func (mbo *mockBackendObserver) addBackend(addr string) {
 	}
 }
 
-func (mbo *mockBackendObserver) Start(ctx context.Context, eventReceiver observer.BackendEventReceiver) {
-	mbo.eventReceiver = eventReceiver
+func (mbo *mockBackendObserver) Start(ctx context.Context) {
+}
+
+func (mbo *mockBackendObserver) Subscribe(name string) <-chan observer.HealthResult {
+	mbo.Lock()
+	defer mbo.Unlock()
+	mbo.subscriber = make(chan observer.HealthResult)
+	return mbo.subscriber
 }
 
 func (mbo *mockBackendObserver) Refresh() {
@@ -138,13 +144,16 @@ func (mbo *mockBackendObserver) Refresh() {
 
 func (mbo *mockBackendObserver) notify(err error) {
 	mbo.Lock()
+	defer mbo.Unlock()
 	healths := make(map[string]*observer.BackendHealth, len(mbo.healths))
 	for addr, health := range mbo.healths {
 		healths[addr] = health
 	}
-	mbo.Unlock()
-	mbo.eventReceiver.OnBackendChanged(healths, err)
+	mbo.subscriber <- observer.NewHealthResult(healths, err)
 }
 
 func (mbo *mockBackendObserver) Close() {
+	mbo.Lock()
+	defer mbo.Unlock()
+	close(mbo.subscriber)
 }

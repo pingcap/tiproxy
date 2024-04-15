@@ -228,6 +228,7 @@ func (dmr *DefaultMetricsReader) notifySubscribers(ctx context.Context) {
 		case <-time.After(100 * time.Millisecond):
 			dmr.lg.Warn("fails to notify metrics result", zap.String("receiver", name))
 		case <-ctx.Done():
+			return
 		}
 	}
 }
