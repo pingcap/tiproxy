@@ -7,11 +7,11 @@ import (
 	"context"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
+	"go.uber.org/atomic"
 )
 
 type mockTpFetcher struct {
@@ -93,13 +93,18 @@ func (mhc *mockHealthCheck) removeBackend(addr string) {
 }
 
 type mockHttpHandler struct {
-	t      *testing.T
-	httpOK atomic.Bool
-	wait   atomic.Int64
+	t        *testing.T
+	httpOK   atomic.Bool
+	respBody atomic.String
+	wait     atomic.Int64
 }
 
 func (handler *mockHttpHandler) setHTTPResp(succeed bool) {
 	handler.httpOK.Store(succeed)
+}
+
+func (handler *mockHttpHandler) setHTTPRespBody(body string) {
+	handler.respBody.Store(body)
 }
 
 func (handler *mockHttpHandler) setHTTPWait(wait time.Duration) {
@@ -113,6 +118,7 @@ func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	if handler.httpOK.Load() {
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(handler.respBody.Load()))
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 	}

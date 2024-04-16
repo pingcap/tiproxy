@@ -58,6 +58,44 @@ func NewDefaultHealthCheck(httpCli *http.Client, cfg *config.HealthCheck, logger
 	}
 }
 
+func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *BackendInfo) *BackendHealth {
+	bh := &BackendHealth{
+		Status: StatusHealthy,
+	}
+	if !dhc.cfg.Enable {
+		return bh
+	}
+	dhc.checkStatusPort(ctx, info, bh)
+	if bh.Status != StatusHealthy {
+		return bh
+	}
+	dhc.checkSqlPort(ctx, addr, bh)
+	return bh
+}
+
+func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh *BackendHealth) {
+	// Also dial the SQL port just in case that the SQL port hangs.
+	err := dhc.connectWithRetry(ctx, func() error {
+		startTime := monotime.Now()
+		conn, err := net.DialTimeout("tcp", addr, dhc.cfg.DialTimeout)
+		setPingBackendMetrics(addr, startTime)
+		if err != nil {
+			return err
+		}
+		if err = conn.SetReadDeadline(time.Now().Add(dhc.cfg.DialTimeout)); err != nil {
+			return err
+		}
+		if ignoredErr := conn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+			dhc.logger.Warn("close connection in health check failed", zap.Error(ignoredErr))
+		}
+		return err
+	})
+	if err != nil {
+		bh.Status = StatusCannotConnect
+		bh.PingErr = errors.Wrapf(err, "connect sql port failed")
+	}
+}
+
 func (dhc *DefaultHealthCheck) backendStatusCheck(httpCli *http.Client, url string, bh *BackendHealth) error {
 	resp, err := httpCli.Get(url)
 	if err == nil {
@@ -88,47 +126,6 @@ func (dhc *DefaultHealthCheck) backendStatusCheck(httpCli *http.Client, url stri
 	return err
 }
 
-func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *BackendInfo) *BackendHealth {
-	bh := &BackendHealth{
-		Status: StatusHealthy,
-	}
-	if !dhc.cfg.Enable {
-		return bh
-	}
-	dhc.checkStatusPort(ctx, info, bh)
-	if bh.Status != StatusHealthy {
-		return bh
-	}
-	dhc.checkSqlPort(ctx, addr, bh)
-	return bh
-}
-
-func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh *BackendHealth) {
-	// Also dial the SQL port just in case that the SQL port hangs.
-	var serverVersion string
-	err := dhc.connectWithRetry(ctx, func() error {
-		startTime := monotime.Now()
-		conn, err := net.DialTimeout("tcp", addr, dhc.cfg.DialTimeout)
-		setPingBackendMetrics(addr, startTime)
-		if err != nil {
-			return err
-		}
-		if err = conn.SetReadDeadline(time.Now().Add(dhc.cfg.DialTimeout)); err != nil {
-			return err
-		}
-		serverVersion, err = pnet.ReadServerVersion(conn)
-		if ignoredErr := conn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
-			dhc.logger.Warn("close connection in health check failed", zap.Error(ignoredErr))
-		}
-		bh.ServerVersion = serverVersion
-		return err
-	})
-	if err != nil {
-		bh.Status = StatusCannotConnect
-		bh.PingErr = errors.Wrapf(err, "connect sql port failed")
-	}
-}
-
 // When a backend gracefully shut down, the status port returns 500 but the SQL port still accepts
 // new connections.
 func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *BackendInfo, bh *BackendHealth) {
@@ -147,16 +144,7 @@ func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *Backen
 	httpCli.Timeout = dhc.cfg.DialTimeout
 	url := fmt.Sprintf("%s://%s:%d%s", schema, info.IP, info.StatusPort, statusPathSuffix)
 	err := dhc.connectWithRetry(ctx, func() error {
-		resp, err := httpCli.Get(url)
-		if err == nil {
-			if resp.StatusCode != http.StatusOK {
-				err = backoff.Permanent(errors.Errorf("http status %d", resp.StatusCode))
-			}
-			if ignoredErr := resp.Body.Close(); ignoredErr != nil {
-				dhc.logger.Warn("close http response in health check failed", zap.Error(ignoredErr))
-			}
-		}
-		return err
+		return dhc.backendStatusCheck(&httpCli, url, bh)
 	})
 	if err != nil {
 		bh.Status = StatusCannotConnect
