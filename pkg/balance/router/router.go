@@ -57,9 +57,6 @@ const (
 	// The number of connections to rebalance during each interval.
 	// Limit the number to avoid creating too many connections suddenly on a backend.
 	rebalanceConnsPerLoop = 10
-	// The threshold of ratio of the highest score and lowest score.
-	// If the ratio exceeds the threshold, the proxy will rebalance connections.
-	rebalanceMaxScoreRatio = 1.2
 	// After a connection fails to redirect, it may contain some unmigratable status.
 	// Limit its redirection interval to avoid unnecessary retrial to reduce latency jitter.
 	redirectFailMinInterval = 3 * time.Second
@@ -94,6 +91,15 @@ type backendWrapper struct {
 	// A list of *connWrapper and is ordered by the connecting or redirecting time.
 	// connList only includes the connections that are currently on this backend.
 	connList *glist.List[*connWrapper]
+}
+
+func newBackendWrapper(addr string, health observer.BackendHealth) *backendWrapper {
+	wrapper := &backendWrapper{
+		addr:     addr,
+		connList: glist.New[*connWrapper](),
+	}
+	wrapper.setHealth(health)
+	return wrapper
 }
 
 func (b *backendWrapper) setHealth(health observer.BackendHealth) {

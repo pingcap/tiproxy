@@ -27,6 +27,7 @@ var _ BackendObserver = (*DefaultBackendObserver)(nil)
 type BackendObserver interface {
 	Start(ctx context.Context)
 	Subscribe(name string) <-chan HealthResult
+	Unsubscribe(name string)
 	Refresh()
 	Close()
 }
@@ -149,6 +150,15 @@ func (bo *DefaultBackendObserver) Subscribe(name string) <-chan HealthResult {
 	return ch
 }
 
+func (bo *DefaultBackendObserver) Unsubscribe(name string) {
+	bo.Lock()
+	defer bo.Unlock()
+	if ch, ok := bo.subscribers[name]; ok {
+		close(ch)
+		delete(bo.subscribers, name)
+	}
+}
+
 func (bo *DefaultBackendObserver) updateHealthResult(result HealthResult) {
 	if result.err != nil {
 		return
@@ -158,6 +168,12 @@ func (bo *DefaultBackendObserver) updateHealthResult(result HealthResult) {
 			continue
 		}
 		if oldHealth, ok := bo.curBackends[addr]; !ok || oldHealth.Status == StatusCannotConnect {
+			prev := "none"
+			if oldHealth != nil {
+				prev = oldHealth.String()
+			}
+			bo.logger.Info("update backend", zap.String("backend_addr", addr),
+				zap.String("prev", prev), zap.String("cur", newHealth.String()))
 			updateBackendStatusMetrics(addr, StatusCannotConnect, StatusHealthy)
 		}
 	}
@@ -166,6 +182,12 @@ func (bo *DefaultBackendObserver) updateHealthResult(result HealthResult) {
 			continue
 		}
 		if newHealth, ok := result.backends[addr]; !ok || newHealth.Status == StatusCannotConnect {
+			cur := "not in list"
+			if newHealth != nil {
+				cur = newHealth.String()
+			}
+			bo.logger.Info("update backend", zap.String("backend_addr", addr),
+				zap.String("prev", oldHealth.String()), zap.String("cur", cur))
 			updateBackendStatusMetrics(addr, StatusHealthy, StatusCannotConnect)
 		}
 	}

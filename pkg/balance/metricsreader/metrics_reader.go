@@ -45,6 +45,7 @@ type MetricsReader interface {
 	RemoveQueryExpr(id uint64)
 	GetQueryResult(id uint64) QueryResult
 	Subscribe(receiverName string) <-chan struct{}
+	Unsubscribe(receiverName string)
 	Close()
 }
 
@@ -216,6 +217,15 @@ func (dmr *DefaultMetricsReader) Subscribe(receiverName string) <-chan struct{} 
 	dmr.notifyCh[receiverName] = ch
 	dmr.Unlock()
 	return ch
+}
+
+func (dmr *DefaultMetricsReader) Unsubscribe(receiverName string) {
+	dmr.Lock()
+	defer dmr.Unlock()
+	if ch, ok := dmr.notifyCh[receiverName]; ok {
+		close(ch)
+		delete(dmr.notifyCh, receiverName)
+	}
 }
 
 func (dmr *DefaultMetricsReader) notifySubscribers(ctx context.Context) {

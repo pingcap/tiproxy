@@ -139,6 +139,10 @@ func TestMultiSubscribers(t *testing.T) {
 			return health.Status == StatusCannotConnect
 		}, 3*time.Second, time.Millisecond)
 	}
+
+	for i := 0; i < cap(subscribers); i++ {
+		ts.bo.Unsubscribe(fmt.Sprintf("receiver%d", i))
+	}
 }
 
 type observerTestSuite struct {
