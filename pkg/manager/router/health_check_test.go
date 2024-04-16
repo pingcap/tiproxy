@@ -5,9 +5,11 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +24,7 @@ func TestReadServerVersion(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hc := NewDefaultHealthCheck(nil, newHealthCheckConfigForTest(), lg)
 	backend, info := newBackendServer(t)
+	backend.mockHttpHandler.respBodyOK.Store(true)
 	backend.serverVersion.Store("1.0")
 	health := hc.Check(context.Background(), backend.sqlAddr, info)
 	require.Equal(t, "1.0", health.ServerVersion)
@@ -30,7 +33,18 @@ func TestReadServerVersion(t *testing.T) {
 	backend.startSQLServer()
 	health = hc.Check(context.Background(), backend.sqlAddr, info)
 	require.Equal(t, "2.0", health.ServerVersion)
+	backend.stopSQLServer()
+
+	//test for respBody not ok
+	backend.mockHttpHandler.respBodyOK.Store(false)
+	backend.startSQLServer()
+	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	require.Equal(t, StatusCannotConnect, health.Status)
+	require.NotNil(t, health.PingErr)
+	require.Equal(t, true, strings.Contains(health.PingErr.Error(), "unexpected end of JSON input"))
+
 	backend.close()
+
 }
 
 // Test that the backend status is correct when the backend starts or shuts down.
@@ -39,6 +53,7 @@ func TestHealthCheck(t *testing.T) {
 	cfg := newHealthCheckConfigForTest()
 	hc := NewDefaultHealthCheck(nil, cfg, lg)
 	backend, info := newBackendServer(t)
+	backend.mockHttpHandler.respBodyOK.Store(true)
 	health := hc.Check(context.Background(), backend.sqlAddr, info)
 	require.Equal(t, StatusHealthy, health.Status)
 
@@ -67,12 +82,11 @@ func TestHealthCheck(t *testing.T) {
 }
 
 type backendServer struct {
-	t             *testing.T
-	sqlListener   net.Listener
-	sqlAddr       string
-	statusServer  *http.Server
-	statusAddr    string
-	serverVersion atomic.String
+	t            *testing.T
+	sqlListener  net.Listener
+	sqlAddr      string
+	statusServer *http.Server
+	statusAddr   string
 	*mockHttpHandler
 	wg         waitgroup.WaitGroup
 	ip         string
@@ -93,9 +107,11 @@ func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
 }
 
 type mockHttpHandler struct {
-	t      *testing.T
-	httpOK atomic.Bool
-	wait   atomic.Int64
+	t             *testing.T
+	httpOK        atomic.Bool
+	respBodyOK    atomic.Bool
+	wait          atomic.Int64
+	serverVersion atomic.String
 }
 
 func (handler *mockHttpHandler) setHTTPResp(succeed bool) {
@@ -113,6 +129,15 @@ func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	if handler.httpOK.Load() {
 		w.WriteHeader(http.StatusOK)
+		if handler.respBodyOK.Load() {
+			resp := backendHttpStatusRespBody{
+				Connections: 0,
+				Version:     handler.serverVersion.Load(),
+				GitHash:     "",
+			}
+			body, _ := json.Marshal(resp)
+			_, _ = w.Write(body)
+		}
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
