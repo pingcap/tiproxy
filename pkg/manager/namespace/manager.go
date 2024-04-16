@@ -7,23 +7,27 @@
 package namespace
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"reflect"
 	"sync"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/pkg/manager/router"
+	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"go.uber.org/zap"
 )
 
 type NamespaceManager struct {
 	sync.RWMutex
-	tpFetcher router.TopologyFetcher
-	httpCli   *http.Client
-	logger    *zap.Logger
-	nsm       map[string]*Namespace
+	tpFetcher     observer.TopologyFetcher
+	promFetcher   metricsreader.PromInfoFetcher
+	metricsReader metricsreader.MetricsReader
+	httpCli       *http.Client
+	logger        *zap.Logger
+	nsm           map[string]*Namespace
 }
 
 func NewNamespaceManager() *NamespaceManager {
@@ -33,21 +37,26 @@ func NewNamespaceManager() *NamespaceManager {
 func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
-	var fetcher router.BackendFetcher
-	if !reflect.ValueOf(mgr.tpFetcher).IsNil() {
-		fetcher = router.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), config.NewDefaultHealthCheckConfig())
-	} else {
-		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
-	}
-	rt := router.NewScoreBasedRouter(logger.Named("router"))
+	// init BackendFetcher
+	var fetcher observer.BackendFetcher
 	healthCheckCfg := config.NewDefaultHealthCheckConfig()
-	hc := router.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
-	if err := rt.Init(fetcher, hc, healthCheckCfg); err != nil {
-		return nil, errors.Errorf("build router error: %w", err)
+	if !reflect.ValueOf(mgr.tpFetcher).IsNil() {
+		fetcher = observer.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), healthCheckCfg)
+	} else {
+		fetcher = observer.NewStaticFetcher(cfg.Backend.Instances)
 	}
+
+	// init Router
+	rt := router.NewScoreBasedRouter(logger.Named("router"))
+	hc := observer.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
+	bo := observer.NewDefaultBackendObserver(logger.Named("observer"), healthCheckCfg, fetcher, hc)
+	bo.Start(context.Background())
+	rt.Init(context.Background(), bo)
+
 	return &Namespace{
 		name:   cfg.Namespace,
 		user:   cfg.Frontend.User,
+		bo:     bo,
 		router: rt,
 	}, nil
 }
@@ -79,29 +88,34 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher router.TopologyFetcher, httpCli *http.Client) error {
+func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
+	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client) error {
 	mgr.Lock()
 	mgr.tpFetcher = tpFetcher
+	mgr.promFetcher = promFetcher
 	mgr.httpCli = httpCli
 	mgr.logger = logger
+	healthCheckCfg := config.NewDefaultHealthCheckConfig()
+	mgr.metricsReader = metricsreader.NewDefaultMetricsReader(logger.Named("mr"), mgr.promFetcher, healthCheckCfg)
 	mgr.Unlock()
 
+	mgr.metricsReader.Start(context.Background())
 	return mgr.CommitNamespaces(nscs, nil)
 }
 
-func (n *NamespaceManager) GetNamespace(nm string) (*Namespace, bool) {
-	n.RLock()
-	defer n.RUnlock()
+func (mgr *NamespaceManager) GetNamespace(nm string) (*Namespace, bool) {
+	mgr.RLock()
+	defer mgr.RUnlock()
 
-	ns, ok := n.nsm[nm]
+	ns, ok := mgr.nsm[nm]
 	return ns, ok
 }
 
-func (n *NamespaceManager) GetNamespaceByUser(user string) (*Namespace, bool) {
-	n.RLock()
-	defer n.RUnlock()
+func (mgr *NamespaceManager) GetNamespaceByUser(user string) (*Namespace, bool) {
+	mgr.RLock()
+	defer mgr.RUnlock()
 
-	for _, ns := range n.nsm {
+	for _, ns := range mgr.nsm {
 		if ns.User() == user {
 			return ns, true
 		}
@@ -109,12 +123,12 @@ func (n *NamespaceManager) GetNamespaceByUser(user string) (*Namespace, bool) {
 	return nil, false
 }
 
-func (n *NamespaceManager) RedirectConnections() []error {
-	n.RLock()
-	defer n.RUnlock()
+func (mgr *NamespaceManager) RedirectConnections() []error {
+	mgr.RLock()
+	defer mgr.RUnlock()
 
 	var errs []error
-	for _, ns := range n.nsm {
+	for _, ns := range mgr.nsm {
 		err1 := ns.GetRouter().RedirectConnections()
 		if err1 != nil {
 			errs = append(errs, err1)
@@ -123,11 +137,12 @@ func (n *NamespaceManager) RedirectConnections() []error {
 	return errs
 }
 
-func (n *NamespaceManager) Close() error {
-	n.RLock()
-	for _, ns := range n.nsm {
+func (mgr *NamespaceManager) Close() error {
+	mgr.RLock()
+	for _, ns := range mgr.nsm {
 		ns.Close()
 	}
-	n.RUnlock()
+	mgr.RUnlock()
+	mgr.metricsReader.Close()
 	return nil
 }

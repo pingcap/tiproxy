@@ -7,12 +7,14 @@
 package namespace
 
 import (
-	"github.com/pingcap/tiproxy/pkg/manager/router"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/router"
 )
 
 type Namespace struct {
 	name   string
 	user   string
+	bo     observer.BackendObserver
 	router router.Router
 }
 
@@ -30,4 +32,5 @@ func (n *Namespace) GetRouter() router.Router {
 
 func (n *Namespace) Close() {
 	n.router.Close()
+	n.bo.Close()
 }

@@ -4,24 +4,9 @@
 package router
 
 import (
-	"time"
-
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
-
-func updateBackendStatusMetrics(addr string, prevStatus, curStatus BackendStatus) {
-	metrics.BackendStatusGauge.WithLabelValues(addr, prevStatus.String()).Set(0)
-	metrics.BackendStatusGauge.WithLabelValues(addr, curStatus.String()).Set(1)
-}
-
-func checkBackendStatusMetrics(addr string, status BackendStatus) bool {
-	val, err := metrics.ReadGauge(metrics.BackendStatusGauge.WithLabelValues(addr, status.String()))
-	if err != nil {
-		return false
-	}
-	return int(val) == 1
-}
 
 func setBackendConnMetrics(addr string, conns int) {
 	metrics.BackendConnGauge.WithLabelValues(addr).Set(float64(conns))
@@ -49,14 +34,4 @@ func addMigrateMetrics(from, to string, succeed bool, startTime monotime.Time) {
 
 func readMigrateCounter(from, to string, succeed bool) (int, error) {
 	return metrics.ReadCounter(metrics.MigrateCounter.WithLabelValues(from, to, succeedToLabel(succeed)))
-}
-
-func setPingBackendMetrics(addr string, succeed bool, startTime monotime.Time) {
-	cost := monotime.Since(startTime)
-	metrics.PingBackendGauge.WithLabelValues(addr).Set(cost.Seconds())
-}
-
-func readHealthCheckCycle() (time.Duration, error) {
-	seconds, err := metrics.ReadGauge(metrics.HealthCheckCycleGauge)
-	return time.Duration(int(seconds * float64(time.Second))), err
 }

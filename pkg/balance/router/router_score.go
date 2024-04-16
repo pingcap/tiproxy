@@ -9,8 +9,9 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
-	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
@@ -26,7 +27,8 @@ var _ Router = &ScoreBasedRouter{}
 type ScoreBasedRouter struct {
 	sync.Mutex
 	logger     *zap.Logger
-	observer   *BackendObserver
+	observer   observer.BackendObserver
+	healthCh   <-chan observer.HealthResult
 	cancelFunc context.CancelFunc
 	wg         waitgroup.WaitGroup
 	// A list of *backendWrapper. The backends are in descending order of scores.
@@ -44,17 +46,15 @@ func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 	}
 }
 
-func (r *ScoreBasedRouter) Init(fetcher BackendFetcher, hc HealthCheck, cfg *config.HealthCheck) error {
-	cfg.Check()
-	observer := StartBackendObserver(r.logger.Named("observer"), r, cfg, fetcher, hc)
-	r.observer = observer
-	childCtx, cancelFunc := context.WithCancel(context.Background())
+func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver) {
+	r.observer = ob
+	r.healthCh = r.observer.Subscribe("score_based_router")
+	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
 	// Failing to rebalance backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	r.wg.Run(func() {
 		r.rebalanceLoop(childCtx)
 	})
-	return nil
 }
 
 // GetBackendSelector implements Router.GetBackendSelector interface.
@@ -83,7 +83,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, 
 		backend := be.Value
 		// These backends may be recycled, so we should not connect to them again.
 		switch backend.Status() {
-		case StatusCannotConnect, StatusSchemaOutdated:
+		case observer.StatusCannotConnect, observer.StatusSchemaOutdated:
 			continue
 		}
 		found := false
@@ -227,8 +227,8 @@ func (router *ScoreBasedRouter) ensureBackend(addr string, forward bool) *glist.
 			addr:     addr,
 			connList: glist.New[*connWrapper](),
 		}
-		backend.setHealth(BackendHealth{
-			Status: StatusCannotConnect,
+		backend.setHealth(observer.BackendHealth{
+			Status: observer.StatusCannotConnect,
 		})
 		be = router.backends.PushFront(backend)
 		router.adjustBackendList(be, false)
@@ -290,14 +290,30 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 	return nil
 }
 
-// OnBackendChanged implements BackendEventReceiver.OnBackendChanged interface.
-func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHealth, err error) {
+func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.HealthResult) {
 	router.Lock()
 	defer router.Unlock()
-	router.observeError = err
+	router.observeError = healthResults.Error()
+	if router.observeError != nil {
+		return
+	}
+
+	// `backends` contain all the backends, not only the updated ones.
+	backends := healthResults.Backends()
+	// If some backends are removed from the list, add them to `backends`.
+	for be := router.backends.Front(); be != nil; be = be.Next() {
+		addr := be.Value.addr
+		if _, ok := backends[addr]; !ok {
+			backends[addr] = &observer.BackendHealth{
+				Status:  observer.StatusCannotConnect,
+				PingErr: errors.New("removed from backend list"),
+			}
+		}
+	}
+	var serverVersion string
 	for addr, health := range backends {
 		be := router.lookupBackend(addr, true)
-		if be == nil && health.Status != StatusCannotConnect {
+		if be == nil && health.Status != observer.StatusCannotConnect {
 			router.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev", "none"), zap.String("cur", health.String()))
 			backend := &backendWrapper{
@@ -305,18 +321,24 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 				connList: glist.New[*connWrapper](),
 			}
 			backend.setHealth(*health)
+			serverVersion = health.ServerVersion
 			be = router.backends.PushBack(backend)
 			router.adjustBackendList(be, false)
 		} else if be != nil {
 			backend := be.Value
-			router.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev", backend.mu.String()), zap.String("cur", health.String()))
-			backend.setHealth(*health)
-			router.adjustBackendList(be, true)
+			if !backend.Equals(*health) {
+				router.logger.Info("update backend", zap.String("backend_addr", addr),
+					zap.String("prev", backend.String()), zap.String("cur", health.String()))
+				backend.setHealth(*health)
+				router.adjustBackendList(be, true)
+				if health.Status != observer.StatusCannotConnect {
+					serverVersion = health.ServerVersion
+				}
+			}
 		}
 	}
-	if len(backends) > 0 {
-		router.updateServerVersion()
+	if len(serverVersion) > 0 {
+		router.serverVersion = serverVersion
 	}
 }
 
@@ -327,6 +349,8 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 		case <-ctx.Done():
 			ticker.Stop()
 			return
+		case healthResults := <-router.healthCh:
+			router.updateBackendHealth(healthResults)
 		case <-ticker.C:
 			router.rebalance(rebalanceConnsPerLoop)
 		}
@@ -393,7 +417,7 @@ func (router *ScoreBasedRouter) removeBackendIfEmpty(be *glist.Element[*backendW
 	backend := be.Value
 	// If connList.Len() == 0, there won't be any outgoing connections.
 	// And if also connScore == 0, there won't be any incoming connections.
-	if backend.Status() == StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
+	if backend.Status() == observer.StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
 		router.backends.Remove(be)
 		return true
 	}
@@ -411,20 +435,6 @@ func (router *ScoreBasedRouter) ConnCount() int {
 	return j
 }
 
-// It's called within a lock.
-func (router *ScoreBasedRouter) updateServerVersion() {
-	for be := router.backends.Front(); be != nil; be = be.Next() {
-		backend := be.Value
-		if backend.Status() != StatusCannotConnect {
-			serverVersion := backend.ServerVersion()
-			if len(serverVersion) > 0 {
-				router.serverVersion = serverVersion
-				return
-			}
-		}
-	}
-}
-
 func (router *ScoreBasedRouter) ServerVersion() string {
 	router.Lock()
 	version := router.serverVersion
@@ -437,10 +447,6 @@ func (router *ScoreBasedRouter) Close() {
 	if router.cancelFunc != nil {
 		router.cancelFunc()
 		router.cancelFunc = nil
-	}
-	if router.observer != nil {
-		router.observer.Close()
-		router.observer = nil
 	}
 	router.wg.Wait()
 	// Router only refers to RedirectableConn, it doesn't manage RedirectableConn.

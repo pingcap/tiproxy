@@ -1,7 +1,7 @@
 // Copyright 2023 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package observer
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
@@ -44,7 +45,6 @@ func TestReadServerVersion(t *testing.T) {
 	require.Equal(t, true, strings.Contains(health.PingErr.Error(), "unexpected end of JSON input"))
 
 	backend.close()
-
 }
 
 // Test that the backend status is correct when the backend starts or shuts down.
@@ -53,7 +53,6 @@ func TestHealthCheck(t *testing.T) {
 	cfg := newHealthCheckConfigForTest()
 	hc := NewDefaultHealthCheck(nil, cfg, lg)
 	backend, info := newBackendServer(t)
-	backend.mockHttpHandler.respBodyOK.Store(true)
 	health := hc.Check(context.Background(), backend.sqlAddr, info)
 	require.Equal(t, StatusHealthy, health.Status)
 
@@ -106,43 +105,6 @@ func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
 	}
 }
 
-type mockHttpHandler struct {
-	t             *testing.T
-	httpOK        atomic.Bool
-	respBodyOK    atomic.Bool
-	wait          atomic.Int64
-	serverVersion atomic.String
-}
-
-func (handler *mockHttpHandler) setHTTPResp(succeed bool) {
-	handler.httpOK.Store(succeed)
-}
-
-func (handler *mockHttpHandler) setHTTPWait(wait time.Duration) {
-	handler.wait.Store(int64(wait))
-}
-
-func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	wait := handler.wait.Load()
-	if wait > 0 {
-		time.Sleep(time.Duration(wait))
-	}
-	if handler.httpOK.Load() {
-		w.WriteHeader(http.StatusOK)
-		if handler.respBodyOK.Load() {
-			resp := backendHttpStatusRespBody{
-				Connections: 0,
-				Version:     handler.serverVersion.Load(),
-				GitHash:     "",
-			}
-			body, _ := json.Marshal(resp)
-			_, _ = w.Write(body)
-		}
-	} else {
-		w.WriteHeader(http.StatusInternalServerError)
-	}
-}
-
 func (srv *backendServer) startHTTPServer() {
 	if srv.mockHttpHandler == nil {
 		srv.mockHttpHandler = &mockHttpHandler{
@@ -150,8 +112,8 @@ func (srv *backendServer) startHTTPServer() {
 		}
 	}
 	var statusListener net.Listener
-	statusListener, srv.statusAddr = startListener(srv.t, srv.statusAddr)
-	srv.ip, srv.statusPort = parseHostPort(srv.t, srv.statusAddr)
+	statusListener, srv.statusAddr = testkit.StartListener(srv.t, srv.statusAddr)
+	srv.ip, srv.statusPort = testkit.ParseHostPort(srv.t, srv.statusAddr)
 	srv.statusServer = &http.Server{Addr: srv.statusAddr, Handler: srv.mockHttpHandler}
 	srv.wg.Run(func() {
 		_ = srv.statusServer.Serve(statusListener)
@@ -164,7 +126,7 @@ func (srv *backendServer) stopHTTPServer() {
 }
 
 func (srv *backendServer) startSQLServer() {
-	srv.sqlListener, srv.sqlAddr = startListener(srv.t, srv.sqlAddr)
+	srv.sqlListener, srv.sqlAddr = testkit.StartListener(srv.t, srv.sqlAddr)
 	srv.wg.Run(func() {
 		for {
 			conn, err := srv.sqlListener.Accept()
@@ -189,21 +151,4 @@ func (srv *backendServer) close() {
 	srv.stopHTTPServer()
 	srv.stopSQLServer()
 	srv.wg.Wait()
-}
-
-func startListener(t *testing.T, addr string) (net.Listener, string) {
-	if len(addr) == 0 {
-		addr = "127.0.0.1:0"
-	}
-	listener, err := net.Listen("tcp", addr)
-	require.NoError(t, err)
-	return listener, listener.Addr().String()
-}
-
-func parseHostPort(t *testing.T, addr string) (string, uint) {
-	host, port, err := net.SplitHostPort(addr)
-	require.NoError(t, err)
-	p, err := strconv.ParseUint(port, 10, 32)
-	require.NoError(t, err)
-	return host, uint(p)
 }

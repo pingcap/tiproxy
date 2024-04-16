@@ -1,12 +1,11 @@
 // Copyright 2023 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package observer
 
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,26 +14,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
 )
-
-type mockEventReceiver struct {
-	backendChan chan map[string]*BackendHealth
-	errChan     chan error
-}
-
-func (mer *mockEventReceiver) OnBackendChanged(backends map[string]*BackendHealth, err error) {
-	if err != nil {
-		mer.errChan <- err
-	} else if len(backends) > 0 {
-		mer.backendChan <- backends
-	}
-}
-
-func newMockEventReceiver(backendChan chan map[string]*BackendHealth, errChan chan error) *mockEventReceiver {
-	return &mockEventReceiver{
-		backendChan: backendChan,
-		errChan:     errChan,
-	}
-}
 
 func newHealthCheckConfigForTest() *config.HealthCheck {
 	return &config.HealthCheck{
@@ -50,7 +29,7 @@ func newHealthCheckConfigForTest() *config.HealthCheck {
 func TestObserveBackends(t *testing.T) {
 	ts := newObserverTestSuite(t)
 	t.Cleanup(ts.close)
-	ts.bo.Start()
+	ts.bo.Start(context.Background())
 
 	backend1 := ts.addBackend()
 	ts.checkStatus(backend1, StatusHealthy)
@@ -76,9 +55,10 @@ func TestObserveInParallel(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		backend = ts.addBackend()
 	}
-	ts.bo.Start()
-	backends := ts.getBackendsFromCh()
-	require.Equal(ts.t, 100, len(backends))
+	ts.bo.Start(context.Background())
+	result := ts.getResultFromCh()
+	require.NoError(t, result.Error())
+	require.Len(ts.t, result.Backends(), 100)
 	// Wait for next loop.
 	ts.setHealth(backend, StatusCannotConnect)
 	ts.checkStatus(backend, StatusCannotConnect)
@@ -101,7 +81,7 @@ func TestCancelObserver(t *testing.T) {
 		childCtx, cancelFunc := context.WithCancel(context.Background())
 		var wg waitgroup.WaitGroup
 		wg.Run(func() {
-			for childCtx.Err() != nil {
+			for childCtx.Err() == nil {
 				ts.bo.checkHealth(childCtx, info)
 			}
 		})
@@ -111,39 +91,77 @@ func TestCancelObserver(t *testing.T) {
 	}
 }
 
-func TestDisableHealthCheck2(t *testing.T) {
+func TestDisableHealthCheck(t *testing.T) {
 	ts := newObserverTestSuite(t)
 	ts.bo.healthCheckConfig.Enable = false
 	t.Cleanup(ts.close)
 
 	backend1 := ts.addBackend()
 	ts.setHealth(backend1, StatusCannotConnect)
-	ts.bo.Start()
+	ts.bo.Start(context.Background())
 	ts.checkStatus(backend1, StatusHealthy)
 }
 
+func TestMultiSubscribers(t *testing.T) {
+	ts := newObserverTestSuite(t)
+	t.Cleanup(ts.close)
+	subscribers := make([]<-chan HealthResult, 0, 10)
+	for i := 0; i < cap(subscribers); i++ {
+		subscribers = append(subscribers, ts.bo.Subscribe(fmt.Sprintf("receiver%d", i)))
+	}
+
+	backend := ts.addBackend()
+	ts.bo.Start(context.Background())
+	ts.getResultFromCh()
+	for _, subscriber := range subscribers {
+		require.Eventually(t, func() bool {
+			result := <-subscriber
+			require.NoError(t, result.Error())
+			if len(result.Backends()) == 0 {
+				return false
+			}
+			health, ok := result.Backends()[backend]
+			require.True(t, ok)
+			require.Equal(t, StatusHealthy, health.Status)
+			return true
+		}, 3*time.Second, time.Millisecond)
+	}
+
+	ts.setHealth(backend, StatusCannotConnect)
+	ts.getResultFromCh()
+	for _, subscriber := range subscribers {
+		require.Eventually(t, func() bool {
+			result := <-subscriber
+			require.NoError(t, result.Error())
+			require.Len(t, result.Backends(), 1)
+			health, ok := result.Backends()[backend]
+			require.True(t, ok)
+			return health.Status == StatusCannotConnect
+		}, 3*time.Second, time.Millisecond)
+	}
+}
+
 type observerTestSuite struct {
-	t           *testing.T
-	bo          *BackendObserver
-	hc          *mockHealthCheck
-	fetcher     *mockBackendFetcher
-	backendIdx  int
-	backendChan chan map[string]*BackendHealth
+	t          *testing.T
+	bo         *DefaultBackendObserver
+	hc         *mockHealthCheck
+	fetcher    *mockBackendFetcher
+	subscriber <-chan HealthResult
+	backendIdx int
 }
 
 func newObserverTestSuite(t *testing.T) *observerTestSuite {
-	backendChan := make(chan map[string]*BackendHealth, 1)
-	mer := newMockEventReceiver(backendChan, make(chan error, 1))
 	fetcher := newMockBackendFetcher()
 	hc := newMockHealthCheck()
 	lg, _ := logger.CreateLoggerForTest(t)
-	bo := NewBackendObserver(lg, mer, newHealthCheckConfigForTest(), fetcher, hc)
+	bo := NewDefaultBackendObserver(lg, newHealthCheckConfigForTest(), fetcher, hc)
+	subscriber := bo.Subscribe("receiver")
 	return &observerTestSuite{
-		t:           t,
-		bo:          bo,
-		fetcher:     fetcher,
-		hc:          hc,
-		backendChan: backendChan,
+		t:          t,
+		bo:         bo,
+		fetcher:    fetcher,
+		hc:         hc,
+		subscriber: subscriber,
 	}
 }
 
@@ -155,26 +173,30 @@ func (ts *observerTestSuite) close() {
 }
 
 func (ts *observerTestSuite) checkStatus(addr string, expectedStatus BackendStatus) {
-	backends := ts.getBackendsFromCh()
-	require.Equal(ts.t, 1, len(backends))
-	health, ok := backends[addr]
-	require.True(ts.t, ok)
-	require.Equal(ts.t, expectedStatus, health.Status)
-	require.True(ts.t, checkBackendStatusMetrics(addr, health.Status))
+	result := ts.getResultFromCh()
+	require.NoError(ts.t, result.Error())
+	health, ok := result.Backends()[addr]
+	if expectedStatus == StatusHealthy {
+		require.True(ts.t, ok)
+		require.Equal(ts.t, expectedStatus, health.Status)
+	} else {
+		require.True(ts.t, !ok || health.Status == expectedStatus)
+	}
+	require.True(ts.t, checkBackendStatusMetrics(addr, expectedStatus))
 	cycle, err := readHealthCheckCycle()
 	require.NoError(ts.t, err)
 	require.Greater(ts.t, cycle.Nanoseconds(), int64(0))
 	require.Less(ts.t, cycle.Nanoseconds(), 3*time.Second)
 }
 
-func (ts *observerTestSuite) getBackendsFromCh() map[string]*BackendHealth {
-	var backends map[string]*BackendHealth
+func (ts *observerTestSuite) getResultFromCh() HealthResult {
 	select {
-	case backends = <-ts.backendChan:
+	case result := <-ts.subscriber:
+		return result
 	case <-time.After(3 * time.Second):
 		ts.t.Fatal("timeout")
+		return HealthResult{}
 	}
-	return backends
 }
 
 func (ts *observerTestSuite) addBackend() string {
@@ -199,82 +221,4 @@ func (ts *observerTestSuite) setHealth(addr string, health BackendStatus) {
 func (ts *observerTestSuite) removeBackend(addr string) {
 	ts.fetcher.removeBackend(addr)
 	ts.hc.removeBackend(addr)
-}
-
-type mockBackendFetcher struct {
-	sync.Mutex
-	backends map[string]*BackendInfo
-}
-
-func newMockBackendFetcher() *mockBackendFetcher {
-	return &mockBackendFetcher{
-		backends: make(map[string]*BackendInfo),
-	}
-}
-
-func (mbf *mockBackendFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
-	mbf.Lock()
-	defer mbf.Unlock()
-	backends := make(map[string]*BackendInfo, len(mbf.backends))
-	for addr, backend := range mbf.backends {
-		backends[addr] = backend
-	}
-	return backends, nil
-}
-
-func (mbf *mockBackendFetcher) setBackend(addr string, info *BackendInfo) {
-	mbf.Lock()
-	defer mbf.Unlock()
-	mbf.backends[addr] = info
-}
-
-func (mbf *mockBackendFetcher) removeBackend(addr string) {
-	mbf.Lock()
-	defer mbf.Unlock()
-	delete(mbf.backends, addr)
-}
-
-// ExternalFetcher fetches backend list from a given callback.
-type ExternalFetcher struct {
-	backendGetter func() ([]string, error)
-}
-
-func NewExternalFetcher(backendGetter func() ([]string, error)) *ExternalFetcher {
-	return &ExternalFetcher{
-		backendGetter: backendGetter,
-	}
-}
-
-func (ef *ExternalFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
-	addrs, err := ef.backendGetter()
-	return backendListToMap(addrs), err
-}
-
-type mockHealthCheck struct {
-	sync.Mutex
-	backends map[string]*BackendHealth
-}
-
-func newMockHealthCheck() *mockHealthCheck {
-	return &mockHealthCheck{
-		backends: make(map[string]*BackendHealth),
-	}
-}
-
-func (mhc *mockHealthCheck) Check(_ context.Context, addr string, _ *BackendInfo) *BackendHealth {
-	mhc.Lock()
-	defer mhc.Unlock()
-	return mhc.backends[addr]
-}
-
-func (mhc *mockHealthCheck) setBackend(addr string, health *BackendHealth) {
-	mhc.Lock()
-	defer mhc.Unlock()
-	mhc.backends[addr] = health
-}
-
-func (mhc *mockHealthCheck) removeBackend(addr string) {
-	mhc.Lock()
-	defer mhc.Unlock()
-	delete(mhc.backends, addr)
 }
