@@ -50,7 +50,7 @@ func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver) {
 	r.observer = ob
 	r.healthCh = r.observer.Subscribe("score_based_router")
-	r.createFactors(ctx)
+	r.createFactors()
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
 	// Failing to rebalance backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
@@ -59,7 +59,7 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 	})
 }
 
-func (r *ScoreBasedRouter) createFactors(ctx context.Context) {
+func (r *ScoreBasedRouter) createFactors() {
 	r.factors = []Factor{
 		NewFactorHealth(),
 		NewFactorConnCount(),
@@ -96,7 +96,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, 
 	}
 	for _, factor := range router.factors {
 		backends = factor.Route(backends)
-		// Exclude the backends that already tried.
+		// Exclude the backends that are already tried.
 		for _, e := range excluded {
 			addr := e.Addr()
 			for i, backend := range backends {
@@ -292,45 +292,61 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 		case healthResults := <-router.healthCh:
 			router.updateBackendHealth(healthResults)
 		case <-ticker.C:
-			router.rebalance(rebalanceConnsPerLoop)
+			router.rebalance()
 		}
 	}
 }
 
-func (router *ScoreBasedRouter) rebalance(maxNum int) {
+func (router *ScoreBasedRouter) rebalance() {
 	curTime := monotime.Now()
 	router.Lock()
 	defer router.Unlock()
-	for i := 0; i < maxNum; i++ {
-		// Get the unbalanced backends.
-		backends := make([]*backendWrapper, len(router.backends))
-		for _, backend := range router.backends {
-			backends = append(backends, backend)
+
+	// Find the unbalanced backends.
+	backends := make([]*backendWrapper, 0, len(router.backends))
+	for _, backend := range router.backends {
+		backends = append(backends, backend)
+	}
+	var hint BalanceHint
+	var factorIdx int
+	var factor Factor
+	for factorIdx, factor = range router.factors {
+		hint = factor.Balance(backends)
+		switch hint.tp {
+		case typeNoBackends:
+			return
+		case typeBalanced:
+			backends = hint.toBackends
+			continue
 		}
-		var fromBackends, toBackends []*backendWrapper
-		var factor Factor
-		for _, factor = range router.factors {
-			fromBackends, toBackends = factor.Balance(backends)
-			// All backends are unhealthy.
-			if len(toBackends) == 0 {
-				return
-			}
-			// This factor is unbalanced, let's migrate.
-			if len(fromBackends) > 0 {
-				break
-			}
-			// This factor is balanced, continue the next round.
-			backends = toBackends
-		}
-		// All factors are balanced.
-		if len(fromBackends) == 0 {
+		// This factor is unbalanced.
+		break
+	}
+	// All factors are balanced.
+	if hint.tp != typeUnbalanced {
+		return
+	}
+
+	// Find the best target backend by iterating the following factors.
+	toBackends := hint.toBackends
+	for factorIdx++; factorIdx < len(router.factors); factorIdx++ {
+		if len(toBackends) <= 1 {
 			break
 		}
+		toBackends = router.factors[factorIdx].Route(toBackends)
+	}
+	// Impossible here.
+	if len(toBackends) == 0 {
+		return
+	}
 
+	// Migrate connCount connections.
+	toIdx := 0
+	for i := 0; i < hint.connCount; i++ {
 		// Get the connection to be migrated.
 		var fromBackend *backendWrapper
 		var ce *glist.Element[*connWrapper]
-		for _, fromBackend = range fromBackends {
+		for _, fromBackend = range hint.fromBackends {
 			for ele := fromBackend.connList.Front(); ele != nil; ele = ele.Next() {
 				conn := ele.Value
 				switch conn.phase {
@@ -351,22 +367,31 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 			break
 		}
 
-		// Get the target backend.
-		toBackend := toBackends[0]
+		// Choose the target backend in round-robin.
+		// toBackends may not be the best targets after some migrations, never mind.
+		toBackend := toBackends[toIdx]
+		toIdx++
+		if toIdx >= len(toBackends) {
+			toIdx = 0
+		}
 
 		// Migrate the connection.
-		conn := ce.Value
-		router.logger.Debug("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
-			zap.String("from", fromBackend.addr), zap.String("to", toBackend.addr),
-			zap.String("factor", factor.Name()))
-		fromBackend.connScore--
-		router.removeBackendIfEmpty(fromBackend)
-		toBackend.connScore++
-		conn.phase = phaseRedirectNotify
-		conn.lastRedirect = curTime
-		conn.Redirect(toBackend)
-		conn.redirectingBackend = toBackend
+		router.redirectConn(ce.Value, fromBackend, toBackend, factor, curTime)
 	}
+}
+
+func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toBackend *backendWrapper,
+	factor Factor, curTime monotime.Time) {
+	router.logger.Debug("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
+		zap.String("from", fromBackend.addr), zap.String("to", toBackend.addr),
+		zap.String("factor", factor.Name()))
+	fromBackend.connScore--
+	router.removeBackendIfEmpty(fromBackend)
+	toBackend.connScore++
+	conn.phase = phaseRedirectNotify
+	conn.lastRedirect = curTime
+	conn.Redirect(toBackend)
+	conn.redirectingBackend = toBackend
 }
 
 func (router *ScoreBasedRouter) removeBackendIfEmpty(backend *backendWrapper) bool {
@@ -403,6 +428,8 @@ func (router *ScoreBasedRouter) Close() {
 		router.cancelFunc = nil
 	}
 	router.wg.Wait()
-	router.observer.Unsubscribe("score_based_router")
+	if router.observer != nil {
+		router.observer.Unsubscribe("score_based_router")
+	}
 	// Router only refers to RedirectableConn, it doesn't manage RedirectableConn.
 }

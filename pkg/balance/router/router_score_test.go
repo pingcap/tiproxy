@@ -5,7 +5,6 @@ package router
 
 import (
 	"context"
-	"math"
 	"math/rand"
 	"reflect"
 	"strconv"
@@ -61,7 +60,6 @@ func (tester *routerTester) addBackends(num int) {
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
 	tester.notifyHealth()
-	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) killBackends(num int) {
@@ -77,7 +75,6 @@ func (tester *routerTester) killBackends(num int) {
 		killed++
 	}
 	tester.notifyHealth()
-	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) removeBackends(num int) {
@@ -92,7 +89,6 @@ func (tester *routerTester) removeBackends(num int) {
 		delete(tester.backends, addr)
 	}
 	tester.notifyHealth()
-	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) updateBackendStatusByAddr(addr string, status observer.BackendStatus) {
@@ -105,29 +101,13 @@ func (tester *routerTester) updateBackendStatusByAddr(addr string, status observ
 		}
 	}
 	tester.notifyHealth()
-	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) getBackendByIndex(index int) *backendWrapper {
-	be := tester.router.backends.Front()
-	for i := 0; be != nil && i < index; be, i = be.Next(), i+1 {
-	}
-	require.NotNil(tester.t, be)
-	return be.Value
-}
-
-func (tester *routerTester) checkBackendOrder() {
-	score := math.MaxInt
-	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
-		backend := be.Value
-		// Empty unhealthy backends should be removed.
-		if backend.Status() == observer.StatusCannotConnect {
-			require.True(tester.t, backend.connList.Len() > 0 || backend.connScore > 0)
-		}
-		curScore := backend.score()
-		require.GreaterOrEqual(tester.t, score, curScore)
-		score = curScore
-	}
+	addr := strconv.Itoa(index + 1)
+	backend := tester.router.backends[addr]
+	require.NotNil(tester.t, backend)
+	return backend
 }
 
 func (tester *routerTester) simpleRoute(conn RedirectableConn) BackendInst {
@@ -148,7 +128,6 @@ func (tester *routerTester) addConnections(num int) {
 		conn.from = backend
 		tester.conns[conn.connID] = conn
 	}
-	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) closeConnections(num int, redirecting bool) {
@@ -173,12 +152,10 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 		require.NoError(tester.t, err)
 		delete(tester.conns, conn.connID)
 	}
-	tester.checkBackendOrder()
 }
 
-func (tester *routerTester) rebalance(num int) {
-	tester.router.rebalance(num)
-	tester.checkBackendOrder()
+func (tester *routerTester) rebalance() {
+	tester.router.rebalance()
 }
 
 func (tester *routerTester) redirectFinish(num int, succeed bool) {
@@ -209,25 +186,6 @@ func (tester *routerTester) redirectFinish(num int, succeed bool) {
 			break
 		}
 	}
-	tester.checkBackendOrder()
-}
-
-func (tester *routerTester) checkBalanced() {
-	maxNum, minNum := 0, math.MaxInt
-	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
-		backend := be.Value
-		// Empty unhealthy backends should be removed.
-		require.Equal(tester.t, observer.StatusHealthy, backend.Status())
-		curScore := backend.score()
-		if curScore > maxNum {
-			maxNum = curScore
-		}
-		if curScore < minNum {
-			minNum = curScore
-		}
-	}
-	ratio := float64(maxNum) / float64(minNum+1)
-	require.LessOrEqual(tester.t, ratio, rebalanceMaxScoreRatio)
 }
 
 func (tester *routerTester) checkRedirectingNum(num int) {
@@ -241,103 +199,143 @@ func (tester *routerTester) checkRedirectingNum(num int) {
 }
 
 func (tester *routerTester) checkBackendNum(num int) {
-	require.Equal(tester.t, num, tester.router.backends.Len())
+	require.Equal(tester.t, num, len(tester.router.backends))
 }
 
 func (tester *routerTester) checkBackendConnMetrics() {
-	for be := tester.router.backends.Front(); be != nil; be = be.Next() {
-		backend := be.Value
-		val, err := readBackendConnMetrics(backend.addr)
+	for addr, backend := range tester.router.backends {
+		val, err := readBackendConnMetrics(addr)
 		require.NoError(tester.t, err)
-		require.Equal(tester.t, backend.connList.Len(), val)
+		require.Equal(tester.t, backend.ConnCount(), val)
 	}
 }
 
 func (tester *routerTester) clear() {
 	tester.conns = make(map[uint64]*mockRedirectableConn)
-	tester.router.backends.Init()
+	tester.router.backends = make(map[string]*backendWrapper)
 	tester.backends = make(map[string]*observer.BackendHealth)
 }
 
-// Test that the backends are always ordered by scores.
-func TestBackendScore(t *testing.T) {
+func TestRouteWithOneFactor(t *testing.T) {
 	tester := newRouterTester(t)
 	tester.addBackends(3)
-	tester.killBackends(2)
-	tester.addConnections(100)
-	tester.checkBackendConnMetrics()
-	// 90 not redirecting
-	tester.closeConnections(10, false)
-	tester.checkBackendConnMetrics()
-	// make sure rebalance will work
-	tester.addBackends(3)
-	// 40 not redirecting, 50 redirecting
-	tester.rebalance(50)
-	tester.checkRedirectingNum(50)
-	// 40 not redirecting, 40 redirecting
-	tester.closeConnections(10, true)
-	tester.checkRedirectingNum(40)
-	// 50 not redirecting, 30 redirecting
-	tester.redirectFinish(10, true)
-	tester.checkRedirectingNum(30)
-	// 60 not redirecting, 20 redirecting
-	tester.redirectFinish(10, false)
-	tester.checkRedirectingNum(20)
-	// 50 not redirecting, 20 redirecting
-	tester.closeConnections(10, false)
-	tester.checkRedirectingNum(20)
-}
+	factor := &mockFactor{}
+	tester.router.factors = []Factor{factor}
 
-// Test that the connections are always balanced after rebalance and routing.
-func TestConnBalanced(t *testing.T) {
-	tester := newRouterTester(t)
-	tester.addBackends(3)
-
-	// balanced after routing
-	tester.addConnections(100)
-	tester.checkBalanced()
-
-	tests := []func(){
-		func() {
-			// balanced after scale in
-			tester.killBackends(1)
-		},
-		func() {
-			// balanced after scale out
-			tester.addBackends(1)
-		},
-		func() {
-			// balanced after closing connections
-			tester.closeConnections(10, false)
-		},
+	// return no backends
+	factor.route = func(backends []*backendWrapper) []*backendWrapper {
+		return nil
 	}
+	selector := tester.router.GetBackendSelector()
+	_, err := selector.Next()
+	require.ErrorIs(t, err, ErrNoBackend)
 
-	for _, tt := range tests {
-		tt()
-		tester.rebalance(100)
-		tester.redirectFinish(100, true)
-		tester.checkBalanced()
-		tester.checkBackendConnMetrics()
+	// return one backend
+	var addr string
+	factor.route = func(backends []*backendWrapper) []*backendWrapper {
+		addr = backends[0].addr
+		return backends[:1]
+	}
+	selector = tester.router.GetBackendSelector()
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	require.NotNil(t, backend)
+	require.Equal(t, addr, backend.Addr())
+
+	// return multiple backends
+	factor.route = func(backends []*backendWrapper) []*backendWrapper {
+		return backends
+	}
+	selector = tester.router.GetBackendSelector()
+	insts := make(map[string]BackendInst)
+	for i := 0; i < 3; i++ {
+		backend, err = selector.Next()
+		require.NoError(t, err)
+		require.NotNil(t, backend)
+		_, ok := insts[backend.Addr()]
+		require.False(t, ok)
+		insts[backend.Addr()] = backend
 	}
 }
 
-// Test that routing fails when there's no healthy backends.
-func TestNoBackends(t *testing.T) {
+func TestMultipleFactors(t *testing.T) {
 	tester := newRouterTester(t)
-	conn := tester.createConn()
-	backend := tester.simpleRoute(conn)
-	require.True(t, backend == nil || reflect.ValueOf(backend).IsNil())
-	tester.addBackends(1)
-	tester.addConnections(10)
-	tester.killBackends(1)
-	backend = tester.simpleRoute(conn)
-	require.True(t, backend == nil || reflect.ValueOf(backend).IsNil())
+	tester.addBackends(3)
+	factor1, factor2 := &mockFactor{}, &mockFactor{}
+	tester.router.factors = []Factor{factor1, factor2}
+	returnEmpty := func(backends []*backendWrapper) []*backendWrapper {
+		return nil
+	}
+	var addr string
+	returnOne := func(backends []*backendWrapper) []*backendWrapper {
+		addr = backends[0].addr
+		return backends[:1]
+	}
+	returnAll := func(backends []*backendWrapper) []*backendWrapper {
+		return backends
+	}
+
+	expectEmpty := func() {
+		selector := tester.router.GetBackendSelector()
+		_, err := selector.Next()
+		require.ErrorIs(t, err, ErrNoBackend)
+	}
+	expectOne := func() {
+		selector := tester.router.GetBackendSelector()
+		backend, err := selector.Next()
+		require.NoError(t, err)
+		require.NotNil(t, backend)
+		require.Equal(t, addr, backend.Addr())
+	}
+	expectAll := func() {
+		selector := tester.router.GetBackendSelector()
+		insts := make(map[string]BackendInst)
+		for i := 0; i < 3; i++ {
+			backend, err := selector.Next()
+			require.NoError(t, err)
+			require.NotNil(t, backend)
+			_, ok := insts[backend.Addr()]
+			require.False(t, ok)
+			insts[backend.Addr()] = backend
+		}
+	}
+	// empty + any
+	factor1.route = returnEmpty
+	expectEmpty()
+
+	// 1 backend + any
+	factor1.route = returnOne
+	expectOne()
+
+	// 3 backends + empty
+	factor1.route = returnAll
+	factor2.route = returnEmpty
+	expectEmpty()
+
+	// 3 backends + 1 backend
+	factor2.route = returnOne
+	expectOne()
+
+	// 3 backends + 3 backends
+	factor2.route = returnAll
+	expectAll()
+}
+
+func TestBalance(t *testing.T) {
+
 }
 
 // Test that the backends returned by the BackendSelector are complete and different.
 func TestSelectorReturnOrder(t *testing.T) {
 	tester := newRouterTester(t)
 	tester.addBackends(3)
+	tester.router.factors = []Factor{
+		&mockFactor{
+			route: func(backends []*backendWrapper) []*backendWrapper {
+				return backends
+			},
+		},
+	}
 	selector := tester.router.GetBackendSelector()
 	for i := 0; i < 3; i++ {
 		addrs := make(map[string]struct{}, 3)
@@ -370,6 +368,7 @@ func TestSelectorReturnOrder(t *testing.T) {
 // Test that the backends are balanced even when routing are concurrent.
 func TestRouteConcurrently(t *testing.T) {
 	tester := newRouterTester(t)
+	tester.router.createFactors()
 	tester.addBackends(3)
 	addrs := make(map[string]int, 3)
 	selectors := make([]BackendSelector, 0, 30)
@@ -398,165 +397,6 @@ func TestRouteConcurrently(t *testing.T) {
 	}
 }
 
-// Test that the backends are balanced during rolling restart.
-func TestRollingRestart(t *testing.T) {
-	tester := newRouterTester(t)
-	backendNum := 3
-	tester.addBackends(backendNum)
-	tester.addConnections(100)
-	tester.checkBalanced()
-
-	backendAddrs := make([]string, 0, backendNum)
-	for i := 0; i < backendNum; i++ {
-		backendAddrs = append(backendAddrs, tester.getBackendByIndex(i).addr)
-	}
-
-	for i := 0; i < backendNum+1; i++ {
-		if i > 0 {
-			tester.updateBackendStatusByAddr(backendAddrs[i-1], observer.StatusHealthy)
-			tester.rebalance(100)
-			tester.redirectFinish(100, true)
-			tester.checkBalanced()
-		}
-		if i < backendNum {
-			tester.updateBackendStatusByAddr(backendAddrs[i], observer.StatusCannotConnect)
-			tester.rebalance(100)
-			tester.redirectFinish(100, true)
-			tester.checkBalanced()
-		}
-	}
-}
-
-// Test the corner cases of rebalance.
-func TestRebalanceCornerCase(t *testing.T) {
-	tester := newRouterTester(t)
-	tests := []func(){
-		func() {
-			// Balancer won't work when there's no backend.
-			tester.rebalance(10)
-			tester.checkRedirectingNum(0)
-		},
-		func() {
-			// Balancer won't work when there's only one backend.
-			tester.addBackends(1)
-			tester.addConnections(10)
-			tester.rebalance(10)
-			tester.checkRedirectingNum(0)
-		},
-		func() {
-			// Router should have already balanced it.
-			tester.addBackends(1)
-			tester.addConnections(10)
-			tester.addBackends(1)
-			tester.addConnections(10)
-			tester.rebalance(10)
-			tester.checkRedirectingNum(0)
-		},
-		func() {
-			// Balancer won't work when all the backends are unhealthy.
-			tester.addBackends(2)
-			tester.addConnections(20)
-			tester.killBackends(2)
-			tester.rebalance(10)
-			tester.checkRedirectingNum(0)
-		},
-		func() {
-			// The parameter limits the redirecting num.
-			tester.addBackends(2)
-			tester.addConnections(50)
-			tester.killBackends(1)
-			tester.rebalance(5)
-			tester.checkRedirectingNum(5)
-		},
-		func() {
-			// All the connections are redirected to the new healthy one and the unhealthy backends are removed.
-			tester.addBackends(1)
-			tester.addConnections(10)
-			tester.killBackends(1)
-			tester.addBackends(1)
-			tester.rebalance(10)
-			tester.checkRedirectingNum(10)
-			tester.checkBackendNum(2)
-			backend := tester.getBackendByIndex(1)
-			require.Equal(t, 10, backend.connScore)
-			tester.redirectFinish(10, true)
-			tester.checkBackendNum(1)
-		},
-		func() {
-			// Connections won't be redirected again before redirection finishes.
-			tester.addBackends(1)
-			tester.addConnections(10)
-			tester.killBackends(1)
-			tester.addBackends(1)
-			tester.rebalance(10)
-			tester.checkRedirectingNum(10)
-			tester.killBackends(1)
-			tester.addBackends(1)
-			tester.rebalance(10)
-			tester.checkRedirectingNum(10)
-			backend := tester.getBackendByIndex(0)
-			require.Equal(t, 10, backend.connScore)
-			require.Equal(t, 0, backend.connList.Len())
-			backend = tester.getBackendByIndex(1)
-			require.Equal(t, 0, backend.connScore)
-			require.Equal(t, 10, backend.connList.Len())
-		},
-		func() {
-			// After redirection fails, the connections are moved back to the unhealthy backends.
-			tester.addBackends(1)
-			tester.addConnections(10)
-			tester.killBackends(1)
-			tester.addBackends(1)
-			tester.rebalance(10)
-			tester.checkBackendNum(2)
-			tester.redirectFinish(10, false)
-			tester.checkBackendNum(2)
-		},
-		func() {
-			// It won't rebalance when there's no connection.
-			tester.addBackends(1)
-			tester.addConnections(10)
-			tester.closeConnections(10, false)
-			tester.rebalance(10)
-			tester.checkRedirectingNum(0)
-		},
-		func() {
-			// It won't rebalance when there's only 1 connection.
-			tester.addBackends(1)
-			tester.addConnections(1)
-			tester.addBackends(1)
-			tester.rebalance(1)
-			tester.checkRedirectingNum(0)
-		},
-		func() {
-			// It won't rebalance when only 2 connections are on 3 backends.
-			tester.addBackends(2)
-			tester.addConnections(2)
-			tester.addBackends(1)
-			tester.rebalance(1)
-			tester.checkRedirectingNum(0)
-		},
-		func() {
-			// Connections will be redirected again immediately after failure.
-			tester.addBackends(1)
-			tester.addConnections(10)
-			tester.killBackends(1)
-			tester.addBackends(1)
-			tester.rebalance(10)
-			tester.redirectFinish(10, false)
-			tester.killBackends(1)
-			tester.addBackends(1)
-			tester.rebalance(10)
-			tester.checkRedirectingNum(0)
-		},
-	}
-
-	for _, test := range tests {
-		test()
-		tester.clear()
-	}
-}
-
 // Test all kinds of events occur concurrently.
 func TestConcurrency(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
@@ -564,8 +404,8 @@ func TestConcurrency(t *testing.T) {
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
 	router.Init(context.Background(), bo)
-	t.Cleanup(router.Close)
 	t.Cleanup(bo.Close)
+	t.Cleanup(router.Close)
 
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -656,8 +496,8 @@ func TestRefresh(t *testing.T) {
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
 	rt.Init(context.Background(), bo)
-	t.Cleanup(rt.Close)
 	t.Cleanup(bo.Close)
+	t.Cleanup(rt.Close)
 	// The initial backends are empty.
 	selector := rt.GetBackendSelector()
 	_, err := selector.Next()
@@ -736,7 +576,7 @@ func TestBackendHealthy(t *testing.T) {
 	tester.addConnections(1)
 	tester.killBackends(1)
 	tester.addBackends(1)
-	tester.rebalance(1)
+	tester.rebalance()
 
 	// The target backend becomes unhealthy during redirection.
 	conn := tester.conns[1]
@@ -754,7 +594,7 @@ func TestCloseRedirectingConns(t *testing.T) {
 	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
 	tester.killBackends(1)
 	tester.addBackends(1)
-	tester.rebalance(1)
+	tester.rebalance()
 	require.Equal(t, 0, tester.getBackendByIndex(0).connScore)
 	require.Equal(t, 1, tester.getBackendByIndex(1).connScore)
 	// Close the connection.

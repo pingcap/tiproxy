@@ -53,10 +53,7 @@ const (
 
 const (
 	// The interval to rebalance connections.
-	rebalanceInterval = 10 * time.Millisecond
-	// The number of connections to rebalance during each interval.
-	// Limit the number to avoid creating too many connections suddenly on a backend.
-	rebalanceConnsPerLoop = 10
+	rebalanceInterval = time.Second
 	// After a connection fails to redirect, it may contain some unmigratable status.
 	// Limit its redirection interval to avoid unnecessary retrial to reduce latency jitter.
 	redirectFailMinInterval = 3 * time.Second
@@ -139,6 +136,10 @@ func (b *backendWrapper) ServerVersion() string {
 	version := b.mu.ServerVersion
 	b.mu.RUnlock()
 	return version
+}
+
+func (b *backendWrapper) ConnCount() int {
+	return b.connList.Len()
 }
 
 func (b *backendWrapper) Equals(health observer.BackendHealth) bool {

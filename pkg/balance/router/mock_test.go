@@ -99,13 +99,14 @@ func (conn *mockRedirectableConn) redirectFail() {
 
 type mockBackendObserver struct {
 	sync.Mutex
-	healths    map[string]*observer.BackendHealth
-	subscriber chan observer.HealthResult
+	healths     map[string]*observer.BackendHealth
+	subscribers map[string]chan observer.HealthResult
 }
 
 func newMockBackendObserver() *mockBackendObserver {
 	return &mockBackendObserver{
-		healths: make(map[string]*observer.BackendHealth),
+		healths:     make(map[string]*observer.BackendHealth),
+		subscribers: make(map[string]chan observer.HealthResult),
 	}
 }
 
@@ -134,8 +135,18 @@ func (mbo *mockBackendObserver) Start(ctx context.Context) {
 func (mbo *mockBackendObserver) Subscribe(name string) <-chan observer.HealthResult {
 	mbo.Lock()
 	defer mbo.Unlock()
-	mbo.subscriber = make(chan observer.HealthResult)
-	return mbo.subscriber
+	subscriber := make(chan observer.HealthResult)
+	mbo.subscribers[name] = subscriber
+	return subscriber
+}
+
+func (mbo *mockBackendObserver) Unsubscribe(name string) {
+	mbo.Lock()
+	defer mbo.Unlock()
+	if subscriber, ok := mbo.subscribers[name]; ok {
+		close(subscriber)
+		delete(mbo.subscribers, name)
+	}
 }
 
 func (mbo *mockBackendObserver) Refresh() {
@@ -149,11 +160,32 @@ func (mbo *mockBackendObserver) notify(err error) {
 	for addr, health := range mbo.healths {
 		healths[addr] = health
 	}
-	mbo.subscriber <- observer.NewHealthResult(healths, err)
+	for _, subscriber := range mbo.subscribers {
+		subscriber <- observer.NewHealthResult(healths, err)
+	}
 }
 
 func (mbo *mockBackendObserver) Close() {
 	mbo.Lock()
 	defer mbo.Unlock()
-	close(mbo.subscriber)
+	for _, subscriber := range mbo.subscribers {
+		close(subscriber)
+	}
+}
+
+type mockFactor struct {
+	route   func(backends []*backendWrapper) []*backendWrapper
+	balance func(backends []*backendWrapper) BalanceHint
+}
+
+func (mf *mockFactor) Name() string {
+	return "mock"
+}
+
+func (mf *mockFactor) Route(backends []*backendWrapper) []*backendWrapper {
+	return mf.route(backends)
+}
+
+func (mf *mockFactor) Balance(backends []*backendWrapper) BalanceHint {
+	return mf.balance(backends)
 }
