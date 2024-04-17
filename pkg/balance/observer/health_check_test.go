@@ -5,31 +5,43 @@ package observer
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
-	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
 )
 
 func TestReadServerVersion(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hc := NewDefaultHealthCheck(nil, newHealthCheckConfigForTest(), lg)
 	backend, info := newBackendServer(t)
-	backend.serverVersion.Store("1.0")
+	backend.setServerVersion("1.0")
+	//backend.serverVersion.Store("1.0")
 	health := hc.Check(context.Background(), backend.sqlAddr, info)
 	require.Equal(t, "1.0", health.ServerVersion)
 	backend.stopSQLServer()
-	backend.serverVersion.Store("2.0")
+	//backend.serverVersion.Store("2.0")
+	backend.setServerVersion("2.0")
 	backend.startSQLServer()
 	health = hc.Check(context.Background(), backend.sqlAddr, info)
 	require.Equal(t, "2.0", health.ServerVersion)
+	backend.stopSQLServer()
+
+	//test for respBody not ok
+	backend.mockHttpHandler.setHTTPRespBody("")
+	backend.startSQLServer()
+	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	require.Equal(t, StatusCannotConnect, health.Status)
+	require.NotNil(t, health.PingErr)
+	require.Equal(t, true, strings.Contains(health.PingErr.Error(), "unexpected end of JSON input"))
+
 	backend.close()
 }
 
@@ -39,6 +51,7 @@ func TestHealthCheck(t *testing.T) {
 	cfg := newHealthCheckConfigForTest()
 	hc := NewDefaultHealthCheck(nil, cfg, lg)
 	backend, info := newBackendServer(t)
+	backend.setServerVersion("1.0")
 	health := hc.Check(context.Background(), backend.sqlAddr, info)
 	require.Equal(t, StatusHealthy, health.Status)
 
@@ -67,12 +80,11 @@ func TestHealthCheck(t *testing.T) {
 }
 
 type backendServer struct {
-	t             *testing.T
-	sqlListener   net.Listener
-	sqlAddr       string
-	statusServer  *http.Server
-	statusAddr    string
-	serverVersion atomic.String
+	t            *testing.T
+	sqlListener  net.Listener
+	sqlAddr      string
+	statusServer *http.Server
+	statusAddr   string
 	*mockHttpHandler
 	wg         waitgroup.WaitGroup
 	ip         string
@@ -85,13 +97,22 @@ func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
 	}
 	backend.startHTTPServer()
 	backend.setHTTPResp(true)
+	backend.setHTTPRespBody("")
 	backend.startSQLServer()
 	return backend, &BackendInfo{
 		IP:         backend.ip,
 		StatusPort: backend.statusPort,
 	}
 }
-
+func (srv *backendServer) setServerVersion(version string) {
+	resp := backendHttpStatusRespBody{
+		Connections: 0,
+		Version:     version,
+		GitHash:     "",
+	}
+	body, _ := json.Marshal(resp)
+	srv.mockHttpHandler.setHTTPRespBody(string(body))
+}
 func (srv *backendServer) startHTTPServer() {
 	if srv.mockHttpHandler == nil {
 		srv.mockHttpHandler = &mockHttpHandler{
@@ -119,9 +140,6 @@ func (srv *backendServer) startSQLServer() {
 			conn, err := srv.sqlListener.Accept()
 			if err != nil {
 				// listener is closed
-				break
-			}
-			if err = pnet.WriteServerVersion(conn, srv.serverVersion.Load()); err != nil {
 				break
 			}
 			_ = conn.Close()
