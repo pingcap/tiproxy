@@ -174,18 +174,23 @@ func (mbo *mockBackendObserver) Close() {
 }
 
 type mockFactor struct {
-	route   func(backends []*backendWrapper) []*backendWrapper
-	balance func(backends []*backendWrapper) BalanceHint
+	bitNum       int
+	balanceCount int
+	updateScore  func(backends []*backendWrapper)
 }
 
 func (mf *mockFactor) Name() string {
 	return "mock"
 }
 
-func (mf *mockFactor) Route(backends []*backendWrapper) []*backendWrapper {
-	return mf.route(backends)
+func (mf *mockFactor) UpdateScore(backends []*backendWrapper) {
+	mf.updateScore(backends)
 }
 
-func (mf *mockFactor) Balance(backends []*backendWrapper) BalanceHint {
-	return mf.balance(backends)
+func (mf *mockFactor) ScoreBitNum() int {
+	return mf.bitNum
+}
+
+func (mf *mockFactor) BalanceCount(from, to *backendWrapper) int {
+	return mf.balanceCount
 }

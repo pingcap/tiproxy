@@ -86,13 +86,15 @@ func (router *ScoreBasedRouter) setConnWrapper(conn RedirectableConn, ce *glist.
 func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, error) {
 	router.Lock()
 	defer router.Unlock()
-	// For the serverless tier.
 	if router.observeError != nil {
 		return nil, router.observeError
 	}
 
 	backends := make([]*backendWrapper, 0, len(router.backends))
 	for _, backend := range router.backends {
+		if !backend.Healthy() {
+			continue
+		}
 		// Exclude the backends that are already tried.
 		found := false
 		for _, e := range excluded {
@@ -101,31 +103,41 @@ func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, 
 				break
 			}
 		}
-		if !found {
-			backends = append(backends, backend)
+		if found {
+			continue
 		}
+		backend.clearScore()
+		backends = append(backends, backend)
 	}
 
-	if len(backends) > 0 {
-		for _, factor := range router.factors {
-			factor.UpdateScore(backends)
+	if len(backends) == 0 {
+		// No available backends, maybe the health check result is outdated during rolling restart.
+		// Refresh the backends asynchronously in this case.
+		if router.observer != nil {
+			router.observer.Refresh()
 		}
-		sort.Slice(backends, func(i, j int) bool {
-			return backends[i].score() < backends[j].score()
-		})
-		bestBackend := backends[0]
-		if bestBackend.Healthy() {
-			bestBackend.connScore++
-			return bestBackend, nil
-		}
+		return nil, ErrNoBackend
 	}
 
-	// No available backends, maybe the health check result is outdated during rolling restart.
-	// Refresh the backends asynchronously in this case.
-	if router.observer != nil {
-		router.observer.Refresh()
+	if len(backends) == 1 {
+		backends[0].connScore++
+		return backends[0], nil
 	}
-	return nil, ErrNoBackend
+
+	for _, factor := range router.factors {
+		factor.UpdateScore(backends)
+	}
+	bestBackend := backends[0]
+	minScore := bestBackend.score()
+	for i := 1; i < len(backends); i++ {
+		score := backends[i].score()
+		if score < minScore {
+			minScore = score
+			bestBackend = backends[i]
+		}
+	}
+	bestBackend.connScore++
+	return bestBackend, nil
 }
 
 func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn RedirectableConn, succeed bool) {
@@ -323,15 +335,18 @@ func (router *ScoreBasedRouter) rebalance() {
 	sort.Slice(backends, func(i, j int) bool {
 		return backends[i].score() < backends[j].score()
 	})
+	idlest := backends[0]
+	if !idlest.Healthy() {
+		return
+	}
 	var busiest *backendWrapper
 	// Skip the backends without connections.
-	for i := len(backends) - 1; i >= 0; i++ {
+	for i := len(backends) - 1; i >= 0; i-- {
 		if backends[i].connScore > 0 {
 			busiest = backends[i]
 			break
 		}
 	}
-	idlest := backends[0]
 	if busiest == idlest {
 		return
 	}
@@ -383,7 +398,8 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 	factor Factor, curTime monotime.Time) {
 	router.logger.Debug("begin redirect connection", zap.Uint64("connID", conn.ConnectionID()),
 		zap.String("from", fromBackend.addr), zap.String("to", toBackend.addr),
-		zap.String("factor", factor.Name()))
+		zap.String("factor", factor.Name()), zap.Uint64("from_score", fromBackend.score()),
+		zap.Uint64("to_score", toBackend.score()))
 	fromBackend.connScore--
 	router.removeBackendIfEmpty(fromBackend)
 	toBackend.connScore++
