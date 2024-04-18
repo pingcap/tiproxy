@@ -3,12 +3,10 @@
 
 package router
 
-import "sort"
-
 const (
-	// balanceCount4Health indicates how many connections to balance per second.
+	// balanceCount4Health indicates how many connections to balance in each round.
 	// If some backends are unhealthy, migrate fast but do not put too much pressure on TiDB.
-	balanceCount4Health = 1000
+	balanceCount4Health = 10
 )
 
 var _ Factor = (*FactorHealth)(nil)
@@ -24,72 +22,20 @@ func (fh *FactorHealth) Name() string {
 	return "health"
 }
 
-func (fh *FactorHealth) Route(backends []*backendWrapper) []*backendWrapper {
-	if len(backends) == 0 {
-		return backends
-	}
-	sort.Slice(backends, func(i, j int) bool {
-		return backends[i].Healthy() && !backends[j].Healthy()
-	})
-	for i, backend := range backends {
+func (fh *FactorHealth) UpdateScore(backends []*backendWrapper) {
+	for _, backend := range backends {
+		score := 0
 		if !backend.Healthy() {
-			return backends[:i]
+			score = 1
 		}
+		backend.addScore(score, 1)
 	}
-	return backends
 }
 
-func (fh *FactorHealth) Balance(backends []*backendWrapper) BalanceHint {
-	if len(backends) == 0 {
-		return BalanceHint{
-			tp: typeNoBackends,
-		}
-	}
-	// healthy < unhealthy without connections < unhealthy with connections
-	sort.Slice(backends, func(i, j int) bool {
-		if !backends[j].Healthy() {
-			if backends[i].Healthy() {
-				return true
-			}
-			return backends[i].ConnCount() < backends[j].ConnCount()
-		}
-		return false
-	})
+func (fh *FactorHealth) ScoreBitNum() int {
+	return 1
+}
 
-	healthyLast := -1
-	for i, backend := range backends {
-		if !backend.Healthy() {
-			break
-		}
-		healthyLast = i
-	}
-	// All the backends are unhealthy.
-	if healthyLast < 0 {
-		return BalanceHint{
-			tp: typeNoBackends,
-		}
-	}
-
-	unhealthyFirst := len(backends)
-	for i := len(backends) - 1; i >= 0; i-- {
-		if backends[i].Healthy() || backends[i].ConnCount() == 0 {
-			break
-		}
-		unhealthyFirst = i
-	}
-	// All the backends are healthy, or no unhealthy backends have connections.
-	if unhealthyFirst >= len(backends) {
-		return BalanceHint{
-			tp:         typeBalanced,
-			toBackends: backends[:healthyLast+1],
-		}
-	}
-
-	// Unbalanced.
-	return BalanceHint{
-		tp:           typeUnbalanced,
-		fromBackends: backends[unhealthyFirst:],
-		toBackends:   backends[:healthyLast+1],
-		connCount:    balanceCount4Health,
-	}
+func (fh *FactorHealth) BalanceCount(from, to *backendWrapper) int {
+	return balanceCount4Health
 }

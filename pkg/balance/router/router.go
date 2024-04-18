@@ -81,7 +81,8 @@ type backendWrapper struct {
 		sync.RWMutex
 		observer.BackendHealth
 	}
-	addr string
+	addr      string
+	scoreBits uint64
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
 	// connScore = connList.Len() + incoming connections - outgoing connections.
 	connScore int
@@ -105,12 +106,17 @@ func (b *backendWrapper) setHealth(health observer.BackendHealth) {
 	b.mu.Unlock()
 }
 
+func (b *backendWrapper) addScore(score int, bitNum int) {
+	b.scoreBits = b.scoreBits<<bitNum | uint64(score)
+}
+
+func (b *backendWrapper) clearScore() {
+	b.scoreBits = 0
+}
+
 // score calculates the score of the backend. Larger score indicates higher load.
-func (b *backendWrapper) score() int {
-	b.mu.RLock()
-	score := b.mu.Status.ToScore() + b.connScore
-	b.mu.RUnlock()
-	return score
+func (b *backendWrapper) score() uint64 {
+	return b.scoreBits
 }
 
 func (b *backendWrapper) Addr() string {

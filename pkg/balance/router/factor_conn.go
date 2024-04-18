@@ -3,16 +3,13 @@
 
 package router
 
-import "sort"
-
 const (
 	// The threshold of ratio of the most connection count and least count.
 	// If the ratio exceeds the threshold, we migrate connections.
 	connBalancedRatio = 1.2
-	// balanceSeconds4Conn indicates the time left to balance 2 backends.
-	// Migrate the connections slow and steady, otherwise it may cause CPU unbalanced.
-	// The actual time is much longer because it will migrate slower and slower.
-	balanceSeconds4Conn = 60
+	// balanceCount4Conn indicates how many connections to balance in each round.
+	// This is not urgent, so migrate slowly.
+	balanceCount4Conn = 1
 )
 
 var _ Factor = (*FactorConnCount)(nil)
@@ -28,57 +25,26 @@ func (fcc *FactorConnCount) Name() string {
 	return "conn"
 }
 
-func (fcc *FactorConnCount) Route(backends []*backendWrapper) []*backendWrapper {
-	if len(backends) == 0 {
-		return backends
-	}
-	// Use connScore instead of connCount, otherwise all the connections are routed to the same one at once.
-	sort.Slice(backends, func(i, j int) bool {
-		return backends[i].connScore < backends[j].connScore
-	})
-	connScore := backends[0].connScore
-	for i := range backends {
-		if backends[i].connScore > connScore {
-			return backends[:i]
+func (fcc *FactorConnCount) UpdateScore(backends []*backendWrapper) {
+	for _, backend := range backends {
+		score := backend.connScore
+		if score >= 1<<16 {
+			score = 1<<16 - 1
 		}
+		backend.addScore(score, 16)
 	}
-	return backends
 }
 
-func (fcc *FactorConnCount) Balance(backends []*backendWrapper) BalanceHint {
-	if len(backends) == 0 {
-		return BalanceHint{
-			tp: typeNoBackends,
-		}
+func (fcc *FactorConnCount) ScoreBitNum() int {
+	return 16
+}
+
+func (fcc *FactorConnCount) BalanceCount(from, to *backendWrapper) int {
+	// If CPU factor is disabled, we need connCount factor.
+	// If CPU factor is enabled, we don't need connCount factor.
+	// If label factor is also enabled, we'd better disable connCount factor.
+	if float64(from.connScore) > float64(to.connScore+1)*connBalancedRatio {
+		return balanceCount4Conn
 	}
-	sort.Slice(backends, func(i, j int) bool {
-		return backends[i].connScore < backends[j].connScore
-	})
-	minConnCount, maxConnCount := backends[0].connScore, backends[len(backends)-1].connScore
-	gap := float64(maxConnCount) - float64(minConnCount+1)*connBalancedRatio
-	if gap <= 0 {
-		// Already balanced.
-		return BalanceHint{
-			tp:         typeBalanced,
-			toBackends: backends,
-		}
-	}
-	hint := BalanceHint{
-		tp: typeUnbalanced,
-	}
-	for i, backend := range backends {
-		if backend.connScore > minConnCount {
-			hint.toBackends = backends[:i]
-			break
-		}
-	}
-	for i := len(backends) - 1; i >= 0; i-- {
-		if backends[i].connScore < maxConnCount {
-			hint.fromBackends = backends[i+1:]
-			break
-		}
-	}
-	// connCount is at least 1.
-	hint.connCount = int(gap/(1+connBalancedRatio)/balanceSeconds4Conn + 1)
-	return hint
+	return 0
 }

@@ -28,9 +28,7 @@ type BalanceHint struct {
 type Factor interface {
 	// Name returns the name of the factor.
 	Name() string
-	// Route returns the backends that a new connection should be routed to.
-	// If multiple backends are healthy and balanced, return them all.
-	Route(backends []*backendWrapper) []*backendWrapper
-	// Balance returns the source and target backends that the router should migrate connections from and to.
-	Balance(backends []*backendWrapper) BalanceHint
+	UpdateScore(backends []*backendWrapper)
+	ScoreBitNum() int
+	BalanceCount(from, to *backendWrapper) int
 }

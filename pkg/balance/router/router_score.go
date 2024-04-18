@@ -5,6 +5,7 @@ package router
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -92,28 +93,31 @@ func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, 
 
 	backends := make([]*backendWrapper, 0, len(router.backends))
 	for _, backend := range router.backends {
-		backends = append(backends, backend)
-	}
-	for _, factor := range router.factors {
-		backends = factor.Route(backends)
 		// Exclude the backends that are already tried.
+		found := false
 		for _, e := range excluded {
-			addr := e.Addr()
-			for i, backend := range backends {
-				if backend.Addr() == addr {
-					backends = append(backends[:i], backends[i+1:]...)
-					break
-				}
+			if backend.Addr() == e.Addr() {
+				found = true
+				break
 			}
 		}
-		if len(backends) <= 1 {
-			break
+		if !found {
+			backends = append(backends, backend)
 		}
 	}
+
 	if len(backends) > 0 {
-		backend := backends[0]
-		backend.connScore++
-		return backend, nil
+		for _, factor := range router.factors {
+			factor.UpdateScore(backends)
+		}
+		sort.Slice(backends, func(i, j int) bool {
+			return backends[i].score() < backends[j].score()
+		})
+		bestBackend := backends[0]
+		if bestBackend.Healthy() {
+			bestBackend.connScore++
+			return bestBackend, nil
+		}
 	}
 
 	// No available backends, maybe the health check result is outdated during rolling restart.
@@ -302,81 +306,76 @@ func (router *ScoreBasedRouter) rebalance() {
 	router.Lock()
 	defer router.Unlock()
 
-	// Find the unbalanced backends.
 	backends := make([]*backendWrapper, 0, len(router.backends))
 	for _, backend := range router.backends {
 		backends = append(backends, backend)
+		backend.clearScore()
 	}
-	var hint BalanceHint
-	var factorIdx int
-	var factor Factor
-	for factorIdx, factor = range router.factors {
-		hint = factor.Balance(backends)
-		switch hint.tp {
-		case typeNoBackends:
-			return
-		case typeBalanced:
-			backends = hint.toBackends
-			continue
-		}
-		// This factor is unbalanced.
-		break
-	}
-	// All factors are balanced.
-	if hint.tp != typeUnbalanced {
+	if len(backends) <= 1 {
 		return
 	}
 
-	// Find the best target backend by iterating the following factors.
-	toBackends := hint.toBackends
-	for factorIdx++; factorIdx < len(router.factors); factorIdx++ {
-		if len(toBackends) <= 1 {
+	totalBitNum := 0
+	for _, factor := range router.factors {
+		factor.UpdateScore(backends)
+		totalBitNum += factor.ScoreBitNum()
+	}
+	sort.Slice(backends, func(i, j int) bool {
+		return backends[i].score() < backends[j].score()
+	})
+	var busiest *backendWrapper
+	// Skip the backends without connections.
+	for i := len(backends) - 1; i >= 0; i++ {
+		if backends[i].connScore > 0 {
+			busiest = backends[i]
 			break
 		}
-		toBackends = router.factors[factorIdx].Route(toBackends)
 	}
-	// Impossible here.
-	if len(toBackends) == 0 {
+	idlest := backends[0]
+	if busiest == idlest {
 		return
+	}
+
+	fromScore, toScore := busiest.score(), idlest.score()
+	var factor Factor
+	var balanceCount int
+	for _, factor = range router.factors {
+		bitNum := factor.ScoreBitNum()
+		score1 := fromScore << (64 - totalBitNum) >> (64 - bitNum)
+		score2 := toScore << (64 - totalBitNum) >> (64 - bitNum)
+		if score1 > score2 {
+			balanceCount = factor.BalanceCount(busiest, idlest)
+			if balanceCount > 0 {
+				break
+			}
+		}
+		totalBitNum -= bitNum
 	}
 
 	// Migrate connCount connections.
-	toIdx := 0
-	for i := 0; i < hint.connCount; i++ {
-		// Get the connection to be migrated.
-		var fromBackend *backendWrapper
+	for i := 0; i < balanceCount; i++ {
 		var ce *glist.Element[*connWrapper]
-		for _, fromBackend = range hint.fromBackends {
-			for ele := fromBackend.connList.Front(); ele != nil; ele = ele.Next() {
-				conn := ele.Value
-				switch conn.phase {
-				case phaseRedirectNotify:
-					// A connection cannot be redirected again when it has not finished redirecting.
+		for ele := busiest.connList.Front(); ele != nil; ele = ele.Next() {
+			conn := ele.Value
+			switch conn.phase {
+			case phaseRedirectNotify:
+				// A connection cannot be redirected again when it has not finished redirecting.
+				continue
+			case phaseRedirectFail:
+				// If it failed recently, it will probably fail this time.
+				if conn.lastRedirect.Add(redirectFailMinInterval).After(curTime) {
 					continue
-				case phaseRedirectFail:
-					// If it failed recently, it will probably fail this time.
-					if conn.lastRedirect.Add(redirectFailMinInterval).After(curTime) {
-						continue
-					}
 				}
-				ce = ele
-				break
 			}
+			ce = ele
+			break
 		}
 		if ce == nil {
 			break
 		}
 
-		// Choose the target backend in round-robin.
-		// toBackends may not be the best targets after some migrations, never mind.
-		toBackend := toBackends[toIdx]
-		toIdx++
-		if toIdx >= len(toBackends) {
-			toIdx = 0
-		}
-
 		// Migrate the connection.
-		router.redirectConn(ce.Value, fromBackend, toBackend, factor, curTime)
+		router.redirectConn(ce.Value, busiest, idlest, factor, curTime)
 	}
 }
 
