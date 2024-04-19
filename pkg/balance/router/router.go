@@ -53,13 +53,7 @@ const (
 
 const (
 	// The interval to rebalance connections.
-	rebalanceInterval = 10 * time.Millisecond
-	// The number of connections to rebalance during each interval.
-	// Limit the number to avoid creating too many connections suddenly on a backend.
-	rebalanceConnsPerLoop = 10
-	// The threshold of ratio of the highest score and lowest score.
-	// If the ratio exceeds the threshold, the proxy will rebalance connections.
-	rebalanceMaxScoreRatio = 1.2
+	rebalanceInterval = time.Second
 	// After a connection fails to redirect, it may contain some unmigratable status.
 	// Limit its redirection interval to avoid unnecessary retrial to reduce latency jitter.
 	redirectFailMinInterval = 3 * time.Second
@@ -88,6 +82,9 @@ type backendWrapper struct {
 		observer.BackendHealth
 	}
 	addr string
+	// The score composed by all factors. Each factor sets some bits of the score.
+	// The higher the score is, the more unhealthy / busy the backend is.
+	scoreBits uint64
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
 	// connScore = connList.Len() + incoming connections - outgoing connections.
 	connScore int
@@ -96,18 +93,31 @@ type backendWrapper struct {
 	connList *glist.List[*connWrapper]
 }
 
+func newBackendWrapper(addr string, health observer.BackendHealth) *backendWrapper {
+	wrapper := &backendWrapper{
+		addr:     addr,
+		connList: glist.New[*connWrapper](),
+	}
+	wrapper.setHealth(health)
+	return wrapper
+}
+
 func (b *backendWrapper) setHealth(health observer.BackendHealth) {
 	b.mu.Lock()
 	b.mu.BackendHealth = health
 	b.mu.Unlock()
 }
 
-// score calculates the score of the backend. Larger score indicates higher load.
-func (b *backendWrapper) score() int {
-	b.mu.RLock()
-	score := b.mu.Status.ToScore() + b.connScore
-	b.mu.RUnlock()
-	return score
+func (b *backendWrapper) addScore(score int, bitNum int) {
+	b.scoreBits = b.scoreBits<<bitNum | uint64(score)
+}
+
+func (b *backendWrapper) clearScore() {
+	b.scoreBits = 0
+}
+
+func (b *backendWrapper) score() uint64 {
+	return b.scoreBits
 }
 
 func (b *backendWrapper) Addr() string {
@@ -133,6 +143,10 @@ func (b *backendWrapper) ServerVersion() string {
 	version := b.mu.ServerVersion
 	b.mu.RUnlock()
 	return version
+}
+
+func (b *backendWrapper) ConnCount() int {
+	return b.connList.Len()
 }
 
 func (b *backendWrapper) Equals(health observer.BackendHealth) bool {

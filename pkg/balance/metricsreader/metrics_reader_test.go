@@ -242,16 +242,17 @@ func TestMultiSubscribers(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		func(i int) {
 			wg.Run(func() {
-				ch := mr.Subscribe(fmt.Sprintf("test%d", i))
+				id := fmt.Sprintf("test%d", i)
+				ch := mr.Subscribe(id)
+				defer mr.Unsubscribe(id)
 				for childCtx.Err() == nil {
 					select {
 					case <-ch:
 					case <-time.After(500 * time.Millisecond):
 						t.Fatal("block for over 500ms")
 					case <-childCtx.Done():
-						return
+						break
 					}
-
 					for i, test := range tests {
 						msg := fmt.Sprintf("%dth test %s", i, test.promQL)
 						qr := mr.GetQueryResult(uint64(i + 1))
