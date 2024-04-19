@@ -5,7 +5,7 @@ package router
 
 import (
 	"context"
-	"sort"
+	"math"
 	"sync"
 	"time"
 
@@ -314,63 +314,76 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 }
 
 func (router *ScoreBasedRouter) rebalance() {
-	curTime := monotime.Now()
 	router.Lock()
 	defer router.Unlock()
 
+	if len(router.backends) <= 1 {
+		return
+	}
 	backends := make([]*backendWrapper, 0, len(router.backends))
 	for _, backend := range router.backends {
 		backends = append(backends, backend)
 		backend.clearScore()
 	}
-	if len(backends) <= 1 {
-		return
-	}
 
+	// Get the unbalanced backends and their scores.
 	totalBitNum := 0
 	for _, factor := range router.factors {
 		factor.UpdateScore(backends)
 		totalBitNum += factor.ScoreBitNum()
 	}
-	sort.Slice(backends, func(i, j int) bool {
-		return backends[i].score() < backends[j].score()
-	})
-	idlest := backends[0]
-	if !idlest.Healthy() {
-		return
-	}
-	var busiest *backendWrapper
-	// Skip the backends without connections.
-	for i := len(backends) - 1; i >= 0; i-- {
-		if backends[i].connScore > 0 {
-			busiest = backends[i]
-			break
+	var idlestBackend, busiestBackend *backendWrapper
+	minScore, maxScore := uint64(math.MaxUint64), uint64(0)
+	for _, backend := range backends {
+		score := backend.score()
+		// Skip the unhealthy backends.
+		if score < minScore && backend.Healthy() {
+			minScore = score
+			idlestBackend = backend
+		}
+		// Skip the backends without connections.
+		if score > maxScore && backend.connScore > 0 {
+			maxScore = score
+			busiestBackend = backend
 		}
 	}
-	if busiest == idlest {
+	if idlestBackend == nil || busiestBackend == nil || idlestBackend == busiestBackend {
 		return
 	}
 
-	fromScore, toScore := busiest.score(), idlest.score()
+	// Get the unbalanced factor and the connection count to migrate.
 	var factor Factor
 	var balanceCount int
 	for _, factor = range router.factors {
 		bitNum := factor.ScoreBitNum()
-		score1 := fromScore << (64 - totalBitNum) >> (64 - bitNum)
-		score2 := toScore << (64 - totalBitNum) >> (64 - bitNum)
+		score1 := maxScore << (64 - totalBitNum) >> (64 - bitNum)
+		score2 := minScore << (64 - totalBitNum) >> (64 - bitNum)
 		if score1 > score2 {
-			balanceCount = factor.BalanceCount(busiest, idlest)
+			// The previous factors are ordered, so this factor won't violate them.
+			// E.g.
+			// backend1 factor scores: 1, 1
+			// backend2 factor scores: 0, 0
+			// Balancing the second factor won't make the first factor unbalanced.
+			balanceCount = factor.BalanceCount(busiestBackend, idlestBackend)
 			if balanceCount > 0 {
 				break
 			}
+		} else if score1 < score2 {
+			// Stop it once a factor is in the opposite order, otherwise a subsequent factor may violate this one.
+			// E.g.
+			// backend1 factor scores: 1, 0, 1
+			// backend2 factor scores: 0, 1, 0
+			// Balancing the third factor may make the second factor unbalanced, although it's in the same order with the first factor.
+			break
 		}
 		totalBitNum -= bitNum
 	}
 
 	// Migrate connCount connections.
+	curTime := monotime.Now()
 	for i := 0; i < balanceCount; i++ {
 		var ce *glist.Element[*connWrapper]
-		for ele := busiest.connList.Front(); ele != nil; ele = ele.Next() {
+		for ele := busiestBackend.connList.Front(); ele != nil; ele = ele.Next() {
 			conn := ele.Value
 			switch conn.phase {
 			case phaseRedirectNotify:
@@ -388,9 +401,7 @@ func (router *ScoreBasedRouter) rebalance() {
 		if ce == nil {
 			break
 		}
-
-		// Migrate the connection.
-		router.redirectConn(ce.Value, busiest, idlest, factor, curTime)
+		router.redirectConn(ce.Value, busiestBackend, idlestBackend, factor, curTime)
 	}
 }
 

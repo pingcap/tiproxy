@@ -11,5 +11,6 @@ type Factor interface {
 	// ScoreBitNum returns the bit number of the score.
 	ScoreBitNum() int
 	// BalanceCount returns the count of connections to balance in this round.
+	// 0 indicates balanced (within the threshold) or the migration speed is limited.
 	BalanceCount(from, to *backendWrapper) int
 }

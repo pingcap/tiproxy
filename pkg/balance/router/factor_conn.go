@@ -15,10 +15,13 @@ const (
 var _ Factor = (*FactorConnCount)(nil)
 
 type FactorConnCount struct {
+	bitNum int
 }
 
 func NewFactorConnCount() *FactorConnCount {
-	return &FactorConnCount{}
+	return &FactorConnCount{
+		bitNum: 16,
+	}
 }
 
 func (fcc *FactorConnCount) Name() string {
@@ -28,21 +31,18 @@ func (fcc *FactorConnCount) Name() string {
 func (fcc *FactorConnCount) UpdateScore(backends []*backendWrapper) {
 	for _, backend := range backends {
 		score := backend.connScore
-		if score >= 1<<16 {
-			score = 1<<16 - 1
+		if score >= 1<<fcc.bitNum {
+			score = 1<<fcc.bitNum - 1
 		}
-		backend.addScore(score, 16)
+		backend.addScore(score, fcc.bitNum)
 	}
 }
 
 func (fcc *FactorConnCount) ScoreBitNum() int {
-	return 16
+	return fcc.bitNum
 }
 
 func (fcc *FactorConnCount) BalanceCount(from, to *backendWrapper) int {
-	// If CPU factor is disabled, we need connCount factor.
-	// If CPU factor is enabled, we don't need connCount factor.
-	// If label factor is also enabled, we'd better disable connCount factor.
 	if float64(from.connScore) > float64(to.connScore+1)*connBalancedRatio {
 		return balanceCount4Conn
 	}

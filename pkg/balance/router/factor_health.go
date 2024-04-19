@@ -12,10 +12,13 @@ const (
 var _ Factor = (*FactorHealth)(nil)
 
 type FactorHealth struct {
+	bitNum int
 }
 
 func NewFactorHealth() *FactorHealth {
-	return &FactorHealth{}
+	return &FactorHealth{
+		bitNum: 1,
+	}
 }
 
 func (fh *FactorHealth) Name() string {
@@ -28,12 +31,12 @@ func (fh *FactorHealth) UpdateScore(backends []*backendWrapper) {
 		if !backend.Healthy() {
 			score = 1
 		}
-		backend.addScore(score, 1)
+		backend.addScore(score, fh.bitNum)
 	}
 }
 
 func (fh *FactorHealth) ScoreBitNum() int {
-	return 1
+	return fh.bitNum
 }
 
 func (fh *FactorHealth) BalanceCount(from, to *backendWrapper) int {
