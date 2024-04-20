@@ -306,6 +306,20 @@ func TestNoPromAddr(t *testing.T) {
 	}
 }
 
+func TestGetPromAPI_NoPromAddr(t *testing.T) {
+	mpf := &mockPromFetcher{
+		getPromInfo: func(ctx context.Context) (*infosync.PrometheusInfo, error) {
+			return nil, nil
+		},
+	}
+	lg, _ := logger.CreateLoggerForTest(t)
+	mr := NewDefaultMetricsReader(lg, mpf, newHealthCheckConfigForTest())
+	promInfo, err := mr.getPromAPI(context.Background())
+	require.Nil(t, promInfo)
+	require.NotNil(t, err)
+	require.Equal(t, true, strings.Contains(err.Error(), "no prometheus info found"))
+}
+
 func setupTypicalMetricsReader(t *testing.T) (*mockHttpHandler, MetricsReader) {
 	httpHandler := &mockHttpHandler{
 		t: t,

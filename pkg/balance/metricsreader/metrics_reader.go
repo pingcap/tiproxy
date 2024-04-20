@@ -107,9 +107,15 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context) {
 // Always refresh the prometheus Address just in case it changes.
 func (dmr *DefaultMetricsReader) getPromAPI(ctx context.Context) (promv1.API, error) {
 	promInfo, err := dmr.promFetcher.GetPromInfo(ctx)
-	if promInfo == nil && dmr.getPromRes != getPromFail {
-		dmr.getPromRes = getPromFail
+	if promInfo == nil {
+		if dmr.getPromRes != getPromFail {
+			dmr.getPromRes = getPromFail
+		}
+		if err == nil {
+			err = errors.New("no prometheus info found")
+		}
 		dmr.lg.Warn("get prometheus address fails", zap.Error(err))
+		return nil, err
 	}
 	if err != nil {
 		return nil, err
