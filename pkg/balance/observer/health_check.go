@@ -60,13 +60,13 @@ func NewDefaultHealthCheck(httpCli *http.Client, cfg *config.HealthCheck, logger
 
 func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *BackendInfo) *BackendHealth {
 	bh := &BackendHealth{
-		Status: StatusHealthy,
+		Healthy: true,
 	}
 	if !dhc.cfg.Enable {
 		return bh
 	}
 	dhc.checkStatusPort(ctx, info, bh)
-	if bh.Status != StatusHealthy {
+	if !bh.Healthy {
 		return bh
 	}
 	dhc.checkSqlPort(ctx, addr, bh)
@@ -91,7 +91,7 @@ func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh
 		return err
 	})
 	if err != nil {
-		bh.Status = StatusCannotConnect
+		bh.Healthy = false
 		bh.PingErr = errors.Wrapf(err, "connect sql port failed")
 	}
 }
@@ -147,7 +147,7 @@ func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *Backen
 		return dhc.backendStatusCheck(&httpCli, url, bh)
 	})
 	if err != nil {
-		bh.Status = StatusCannotConnect
+		bh.Healthy = false
 		bh.PingErr = errors.Wrapf(err, "connect status port failed")
 	}
 }

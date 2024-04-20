@@ -114,18 +114,14 @@ func (mbo *mockBackendObserver) toggleBackendHealth(addr string) {
 	mbo.Lock()
 	defer mbo.Unlock()
 	health := mbo.healths[addr]
-	if health.Status == observer.StatusHealthy {
-		health.Status = observer.StatusCannotConnect
-	} else {
-		health.Status = observer.StatusHealthy
-	}
+	health.Healthy = !health.Healthy
 }
 
 func (mbo *mockBackendObserver) addBackend(addr string) {
 	mbo.Lock()
 	defer mbo.Unlock()
 	mbo.healths[addr] = &observer.BackendHealth{
-		Status: observer.StatusHealthy,
+		Healthy: true,
 	}
 }
 

@@ -201,7 +201,7 @@ func (router *ScoreBasedRouter) ensureBackend(addr string) *backendWrapper {
 	// The backend should always exist if it will be needed. Add a warning and add it back.
 	router.logger.Warn("backend is not found in the router", zap.String("backend_addr", addr), zap.Stack("stack"))
 	backend = newBackendWrapper(addr, observer.BackendHealth{
-		Status: observer.StatusCannotConnect,
+		Healthy: false,
 	})
 	router.backends[addr] = backend
 	return backend
@@ -272,7 +272,7 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	for addr := range router.backends {
 		if _, ok := backends[addr]; !ok {
 			backends[addr] = &observer.BackendHealth{
-				Status:  observer.StatusCannotConnect,
+				Healthy: false,
 				PingErr: errors.New("removed from backend list"),
 			}
 		}
@@ -280,14 +280,14 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	var serverVersion string
 	for addr, health := range backends {
 		backend, ok := router.backends[addr]
-		if !ok && health.Status != observer.StatusCannotConnect {
+		if !ok && health.Healthy {
 			router.backends[addr] = newBackendWrapper(addr, *health)
 			serverVersion = health.ServerVersion
 		} else if ok {
 			if !backend.Equals(*health) {
 				backend.setHealth(*health)
 				router.removeBackendIfEmpty(backend)
-				if health.Status != observer.StatusCannotConnect {
+				if health.Healthy {
 					serverVersion = health.ServerVersion
 				}
 			}
@@ -423,7 +423,7 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 func (router *ScoreBasedRouter) removeBackendIfEmpty(backend *backendWrapper) bool {
 	// If connList.Len() == 0, there won't be any outgoing connections.
 	// And if also connScore == 0, there won't be any incoming connections.
-	if backend.Status() == observer.StatusCannotConnect && backend.connList.Len() == 0 && backend.connScore <= 0 {
+	if !backend.Healthy() && backend.connList.Len() == 0 && backend.connScore <= 0 {
 		delete(router.backends, backend.addr)
 		return true
 	}

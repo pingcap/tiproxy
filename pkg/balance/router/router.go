@@ -124,16 +124,9 @@ func (b *backendWrapper) Addr() string {
 	return b.addr
 }
 
-func (b *backendWrapper) Status() observer.BackendStatus {
-	b.mu.RLock()
-	status := b.mu.Status
-	b.mu.RUnlock()
-	return status
-}
-
 func (b *backendWrapper) Healthy() bool {
 	b.mu.RLock()
-	healthy := b.mu.Status == observer.StatusHealthy
+	healthy := b.mu.Healthy
 	b.mu.RUnlock()
 	return healthy
 }

@@ -5,46 +5,8 @@ package observer
 
 import "fmt"
 
-type BackendStatus int
-
-func (bs BackendStatus) ToScore() int {
-	return statusScores[bs]
-}
-
-func (bs BackendStatus) String() string {
-	status, ok := statusNames[bs]
-	if !ok {
-		return "unknown"
-	}
-	return status
-}
-
-const (
-	StatusHealthy BackendStatus = iota
-	StatusCannotConnect
-	StatusMemoryHigh
-	StatusRunSlow
-	StatusSchemaOutdated
-)
-
-var statusNames = map[BackendStatus]string{
-	StatusHealthy:        "healthy",
-	StatusCannotConnect:  "down",
-	StatusMemoryHigh:     "memory high",
-	StatusRunSlow:        "run slow",
-	StatusSchemaOutdated: "schema outdated",
-}
-
-var statusScores = map[BackendStatus]int{
-	StatusHealthy:        0,
-	StatusCannotConnect:  10000000,
-	StatusMemoryHigh:     5000,
-	StatusRunSlow:        5000,
-	StatusSchemaOutdated: 10000000,
-}
-
 type BackendHealth struct {
-	Status BackendStatus
+	Healthy bool
 	// The error occurred when health check fails. It's used to log why the backend becomes unhealthy.
 	PingErr error
 	// The backend version that returned to the client during handshake.
@@ -52,11 +14,11 @@ type BackendHealth struct {
 }
 
 func (bh *BackendHealth) Equals(health BackendHealth) bool {
-	return bh.Status == health.Status && bh.ServerVersion == health.ServerVersion
+	return bh.Healthy == health.Healthy && bh.ServerVersion == health.ServerVersion
 }
 
 func (bh *BackendHealth) String() string {
-	str := fmt.Sprintf("status: %s", bh.Status.String())
+	str := getHealthLabel(bh.Healthy)
 	if bh.PingErr != nil {
 		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
 	}

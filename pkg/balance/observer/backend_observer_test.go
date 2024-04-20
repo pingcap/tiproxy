@@ -32,19 +32,19 @@ func TestObserveBackends(t *testing.T) {
 	ts.bo.Start(context.Background())
 
 	backend1 := ts.addBackend()
-	ts.checkStatus(backend1, StatusHealthy)
-	ts.setHealth(backend1, StatusCannotConnect)
-	ts.checkStatus(backend1, StatusCannotConnect)
-	ts.setHealth(backend1, StatusHealthy)
-	ts.checkStatus(backend1, StatusHealthy)
+	ts.checkStatus(backend1, true)
+	ts.setHealth(backend1, false)
+	ts.checkStatus(backend1, false)
+	ts.setHealth(backend1, true)
+	ts.checkStatus(backend1, true)
 
 	backend2 := ts.addBackend()
-	ts.checkStatus(backend2, StatusHealthy)
+	ts.checkStatus(backend2, true)
 	ts.removeBackend(backend2)
-	ts.checkStatus(backend2, StatusCannotConnect)
+	ts.checkStatus(backend2, false)
 
-	ts.setHealth(backend1, StatusCannotConnect)
-	ts.checkStatus(backend1, StatusCannotConnect)
+	ts.setHealth(backend1, false)
+	ts.checkStatus(backend1, false)
 }
 
 func TestObserveInParallel(t *testing.T) {
@@ -60,8 +60,8 @@ func TestObserveInParallel(t *testing.T) {
 	require.NoError(t, result.Error())
 	require.Len(ts.t, result.Backends(), 100)
 	// Wait for next loop.
-	ts.setHealth(backend, StatusCannotConnect)
-	ts.checkStatus(backend, StatusCannotConnect)
+	ts.setHealth(backend, false)
+	ts.checkStatus(backend, false)
 }
 
 // Test that the health check can exit when the context is cancelled.
@@ -97,9 +97,9 @@ func TestDisableHealthCheck(t *testing.T) {
 	t.Cleanup(ts.close)
 
 	backend1 := ts.addBackend()
-	ts.setHealth(backend1, StatusCannotConnect)
+	ts.setHealth(backend1, false)
 	ts.bo.Start(context.Background())
-	ts.checkStatus(backend1, StatusHealthy)
+	ts.checkStatus(backend1, true)
 }
 
 func TestMultiSubscribers(t *testing.T) {
@@ -122,12 +122,12 @@ func TestMultiSubscribers(t *testing.T) {
 			}
 			health, ok := result.Backends()[backend]
 			require.True(t, ok)
-			require.Equal(t, StatusHealthy, health.Status)
+			require.True(t, health.Healthy)
 			return true
 		}, 3*time.Second, time.Millisecond)
 	}
 
-	ts.setHealth(backend, StatusCannotConnect)
+	ts.setHealth(backend, false)
 	ts.getResultFromCh()
 	for _, subscriber := range subscribers {
 		require.Eventually(t, func() bool {
@@ -136,7 +136,7 @@ func TestMultiSubscribers(t *testing.T) {
 			require.Len(t, result.Backends(), 1)
 			health, ok := result.Backends()[backend]
 			require.True(t, ok)
-			return health.Status == StatusCannotConnect
+			return !health.Healthy
 		}, 3*time.Second, time.Millisecond)
 	}
 
@@ -176,17 +176,16 @@ func (ts *observerTestSuite) close() {
 	}
 }
 
-func (ts *observerTestSuite) checkStatus(addr string, expectedStatus BackendStatus) {
+func (ts *observerTestSuite) checkStatus(addr string, expectedHealthy bool) {
 	result := ts.getResultFromCh()
 	require.NoError(ts.t, result.Error())
 	health, ok := result.Backends()[addr]
-	if expectedStatus == StatusHealthy {
-		require.True(ts.t, ok)
-		require.Equal(ts.t, expectedStatus, health.Status)
+	if expectedHealthy {
+		require.True(ts.t, ok && health.Healthy)
 	} else {
-		require.True(ts.t, !ok || health.Status == expectedStatus)
+		require.True(ts.t, !ok || !health.Healthy)
 	}
-	require.True(ts.t, checkBackendStatusMetrics(addr, expectedStatus))
+	require.True(ts.t, checkBackendStatusMetrics(addr, expectedHealthy))
 	cycle, err := readHealthCheckCycle()
 	require.NoError(ts.t, err)
 	require.Greater(ts.t, cycle.Nanoseconds(), int64(0))
@@ -211,14 +210,14 @@ func (ts *observerTestSuite) addBackend() string {
 		StatusPort: uint(ts.backendIdx),
 	})
 	ts.hc.setBackend(addr, &BackendHealth{
-		Status: StatusHealthy,
+		Healthy: true,
 	})
 	return addr
 }
 
-func (ts *observerTestSuite) setHealth(addr string, health BackendStatus) {
+func (ts *observerTestSuite) setHealth(addr string, healthy bool) {
 	ts.hc.setBackend(addr, &BackendHealth{
-		Status: health,
+		Healthy: healthy,
 	})
 }
 
