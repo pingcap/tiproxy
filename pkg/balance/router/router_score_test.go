@@ -57,7 +57,7 @@ func (tester *routerTester) addBackends(num int) {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
 		tester.backends[addr] = &observer.BackendHealth{
-			Status: observer.StatusHealthy,
+			Healthy: true,
 		}
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
@@ -70,10 +70,10 @@ func (tester *routerTester) killBackends(num int) {
 		if killed >= num {
 			break
 		}
-		if health.Status == observer.StatusCannotConnect {
+		if !health.Healthy {
 			continue
 		}
-		health.Status = observer.StatusCannotConnect
+		health.Healthy = false
 		killed++
 	}
 	tester.notifyHealth()
@@ -93,13 +93,13 @@ func (tester *routerTester) removeBackends(num int) {
 	tester.notifyHealth()
 }
 
-func (tester *routerTester) updateBackendStatusByAddr(addr string, status observer.BackendStatus) {
+func (tester *routerTester) updateBackendStatusByAddr(addr string, healthy bool) {
 	health, ok := tester.backends[addr]
 	if ok {
-		health.Status = status
+		health.Healthy = healthy
 	} else {
 		tester.backends[addr] = &observer.BackendHealth{
-			Status: status,
+			Healthy: healthy,
 		}
 	}
 	tester.notifyHealth()
@@ -196,7 +196,7 @@ func (tester *routerTester) checkBalanced() {
 	maxNum, minNum := 0, math.MaxInt
 	for _, backend := range tester.router.backends {
 		// Empty unhealthy backends should be removed.
-		require.Equal(tester.t, observer.StatusHealthy, backend.Status())
+		require.True(tester.t, backend.Healthy())
 		curScore := backend.connScore
 		if curScore > maxNum {
 			maxNum = curScore
@@ -392,13 +392,13 @@ func TestRollingRestart(t *testing.T) {
 
 	for i := 0; i < backendNum+1; i++ {
 		if i > 0 {
-			tester.updateBackendStatusByAddr(backendAddrs[i-1], observer.StatusHealthy)
+			tester.updateBackendStatusByAddr(backendAddrs[i-1], true)
 			tester.rebalance(100)
 			tester.redirectFinish(100, true)
 			tester.checkBalanced()
 		}
 		if i < backendNum {
-			tester.updateBackendStatusByAddr(backendAddrs[i], observer.StatusCannotConnect)
+			tester.updateBackendStatusByAddr(backendAddrs[i], false)
 			tester.rebalance(100)
 			tester.redirectFinish(100, true)
 			tester.checkBalanced()
@@ -682,7 +682,7 @@ func TestSetBackendStatus(t *testing.T) {
 	for _, conn := range tester.conns {
 		require.False(t, conn.from.Healthy())
 	}
-	tester.updateBackendStatusByAddr(tester.getBackendByIndex(0).addr, observer.StatusHealthy)
+	tester.updateBackendStatusByAddr(tester.getBackendByIndex(0).addr, true)
 	for _, conn := range tester.conns {
 		require.True(t, conn.from.Healthy())
 	}
@@ -694,11 +694,11 @@ func TestGetServerVersion(t *testing.T) {
 	t.Cleanup(rt.Close)
 	backends := map[string]*observer.BackendHealth{
 		"0": {
-			Status:        observer.StatusHealthy,
+			Healthy:       true,
 			ServerVersion: "1.0",
 		},
 		"1": {
-			Status:        observer.StatusHealthy,
+			Healthy:       true,
 			ServerVersion: "2.0",
 		},
 	}
@@ -737,7 +737,7 @@ func TestCloseRedirectingConns(t *testing.T) {
 	require.Equal(t, 0, tester.getBackendByIndex(0).connScore)
 	require.Equal(t, 1, tester.getBackendByIndex(1).connScore)
 	// Close the connection.
-	tester.updateBackendStatusByAddr(tester.getBackendByIndex(0).Addr(), observer.StatusHealthy)
+	tester.updateBackendStatusByAddr(tester.getBackendByIndex(0).Addr(), true)
 	tester.closeConnections(1, true)
 	require.Equal(t, 0, tester.getBackendByIndex(0).connScore)
 	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)

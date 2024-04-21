@@ -27,11 +27,7 @@ func TestFactorHealth(t *testing.T) {
 	}
 	backends := make([]*backendWrapper, 0, len(tests))
 	for _, test := range tests {
-		status := observer.StatusHealthy
-		if !test.healthy {
-			status = observer.StatusCannotConnect
-		}
-		backend := newBackendWrapper("", observer.BackendHealth{Status: status})
+		backend := newBackendWrapper("", observer.BackendHealth{Healthy: test.healthy})
 		backends = append(backends, backend)
 	}
 	factor.UpdateScore(backends)

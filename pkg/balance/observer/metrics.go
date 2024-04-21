@@ -10,17 +10,29 @@ import (
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
 
-func updateBackendStatusMetrics(addr string, prevStatus, curStatus BackendStatus) {
-	metrics.BackendStatusGauge.WithLabelValues(addr, prevStatus.String()).Set(0)
-	metrics.BackendStatusGauge.WithLabelValues(addr, curStatus.String()).Set(1)
+const (
+	healthyLabel   = "healthy"
+	unhealthyLabel = "down"
+)
+
+func updateBackendStatusMetrics(addr string, prevHealthy, curHealthy bool) {
+	metrics.BackendStatusGauge.WithLabelValues(addr, getHealthLabel(prevHealthy)).Set(0)
+	metrics.BackendStatusGauge.WithLabelValues(addr, getHealthLabel(curHealthy)).Set(1)
 }
 
-func checkBackendStatusMetrics(addr string, status BackendStatus) bool {
-	val, err := metrics.ReadGauge(metrics.BackendStatusGauge.WithLabelValues(addr, status.String()))
+func checkBackendStatusMetrics(addr string, healthy bool) bool {
+	val, err := metrics.ReadGauge(metrics.BackendStatusGauge.WithLabelValues(addr, getHealthLabel(healthy)))
 	if err != nil {
 		return false
 	}
 	return int(val) == 1
+}
+
+func getHealthLabel(healthy bool) string {
+	if healthy {
+		return healthyLabel
+	}
+	return unhealthyLabel
 }
 
 func setPingBackendMetrics(addr string, startTime monotime.Time) {
