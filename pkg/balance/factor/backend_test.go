@@ -1,7 +1,7 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package factor
 
 import (
 	"testing"
@@ -25,14 +25,17 @@ func TestAddScore(t *testing.T) {
 			bitNums:       []int{1, 1, 10},
 			expectedScore: 1<<11 + 10,
 		},
+		{
+			scores:        []int{100, 100},
+			bitNums:       []int{3, 5},
+			expectedScore: (1<<3-1)<<5 + 1<<5 - 1,
+		},
 	}
-	for _, test := range tests {
-		backend := &backendWrapper{}
+	for idx, test := range tests {
+		backend := newScoredBackend(nil)
 		for i := 0; i < len(test.scores); i++ {
 			backend.addScore(test.scores[i], test.bitNums[i])
 		}
-		require.Equal(t, test.expectedScore, backend.score())
-		backend.clearScore()
-		require.Equal(t, uint64(0), backend.score())
+		require.Equal(t, test.expectedScore, backend.score(), "test idx: %d", idx)
 	}
 }

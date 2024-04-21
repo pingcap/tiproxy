@@ -1,7 +1,7 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package factor
 
 import (
 	"testing"
@@ -28,14 +28,16 @@ func TestFactorConnCount(t *testing.T) {
 			expectedScore: 1<<factor.bitNum - 1,
 		},
 	}
-	backends := make([]*backendWrapper, 0, len(tests))
+	backends := make([]scoredBackend, 0, len(tests))
 	for _, test := range tests {
-		backends = append(backends, &backendWrapper{
-			connScore: test.connScore,
+		backends = append(backends, scoredBackend{
+			Backend: &mockBackend{
+				connScore: test.connScore,
+			},
 		})
 	}
 	factor.UpdateScore(backends)
 	for i, test := range tests {
-		require.Equal(t, test.expectedScore, backends[i].score())
+		require.Equal(t, test.expectedScore, backends[i].score(), "test idx: %d", i)
 	}
 }
