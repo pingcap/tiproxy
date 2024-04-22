@@ -4,12 +4,12 @@
 package factor
 
 const (
-	// ConnBalancedRatio is the threshold of ratio of the most connection count and least count.
+	// connBalancedRatio is the threshold of ratio of the most connection count and least count.
 	// If the ratio exceeds the threshold, we migrate connections.
-	ConnBalancedRatio = 1.2
-	// BalanceCount4Conn indicates how many connections to balance in each round.
+	connBalancedRatio = 1.2
+	// balanceCount4Conn indicates how many connections to balance in each round.
 	// This is not urgent, so migrate slowly.
-	BalanceCount4Conn = 1
+	balanceCount4Conn = 1
 )
 
 var _ Factor = (*FactorConnCount)(nil)
@@ -39,8 +39,8 @@ func (fcc *FactorConnCount) ScoreBitNum() int {
 }
 
 func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) int {
-	if float64(from.ConnScore()) > float64(to.ConnScore()+1)*ConnBalancedRatio {
-		return BalanceCount4Conn
+	if float64(from.ConnScore()) > float64(to.ConnScore()+1)*connBalancedRatio {
+		return balanceCount4Conn
 	}
 	return 0
 }

@@ -3,22 +3,18 @@
 
 package factor
 
-type Backend interface {
-	// ConnScore = current connections + incoming connections - outgoing connections.
-	ConnScore() int
-	Healthy() bool
-}
+import "github.com/pingcap/tiproxy/pkg/balance/policy"
 
 type scoredBackend struct {
-	Backend
+	policy.BackendCtx
 	// The score composed by all factors. Each factor sets some bits of the score.
 	// The higher the score is, the more unhealthy / busy the backend is.
 	scoreBits uint64
 }
 
-func newScoredBackend(backend Backend) scoredBackend {
+func newScoredBackend(backend policy.BackendCtx) scoredBackend {
 	return scoredBackend{
-		Backend: backend,
+		BackendCtx: backend,
 	}
 }
 

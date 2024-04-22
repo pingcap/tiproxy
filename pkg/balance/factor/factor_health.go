@@ -4,9 +4,9 @@
 package factor
 
 const (
-	// BalanceCount4Health indicates how many connections to balance in each round.
+	// balanceCount4Health indicates how many connections to balance in each round.
 	// If some backends are unhealthy, migrate fast but do not put too much pressure on TiDB.
-	BalanceCount4Health = 10
+	balanceCount4Health = 10
 )
 
 var _ Factor = (*FactorHealth)(nil)
@@ -40,5 +40,5 @@ func (fh *FactorHealth) ScoreBitNum() int {
 }
 
 func (fh *FactorHealth) BalanceCount(from, to scoredBackend) int {
-	return BalanceCount4Health
+	return balanceCount4Health
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/stretchr/testify/require"
 )
 
@@ -276,8 +277,8 @@ func TestBalanceWith3Factors(t *testing.T) {
 	}
 }
 
-func createBackends(num int) []Backend {
-	backends := make([]Backend, 0, num)
+func createBackends(num int) []policy.BackendCtx {
+	backends := make([]policy.BackendCtx, 0, num)
 	for i := 0; i < num; i++ {
 		backends = append(backends, newMockBackend(true, 100))
 	}

@@ -3,7 +3,9 @@
 
 package factor
 
-var _ Backend = (*mockBackend)(nil)
+import "github.com/pingcap/tiproxy/pkg/balance/policy"
+
+var _ policy.BackendCtx = (*mockBackend)(nil)
 
 type mockBackend struct {
 	healthy   bool

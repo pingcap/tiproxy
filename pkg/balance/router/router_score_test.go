@@ -15,8 +15,8 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
-	"github.com/pingcap/tiproxy/pkg/balance/factor"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/stretchr/testify/require"
 )
@@ -33,6 +33,7 @@ type routerTester struct {
 func newRouterTester(t *testing.T) *routerTester {
 	lg, _ := logger.CreateLoggerForTest(t)
 	router := NewScoreBasedRouter(lg)
+	router.policy = policy.NewSimpleBalancePolicy()
 	router.policy.Init()
 	t.Cleanup(router.Close)
 	return &routerTester{
@@ -207,7 +208,7 @@ func (tester *routerTester) checkBalanced() {
 		}
 	}
 	ratio := float64(maxNum) / float64(minNum+1)
-	require.LessOrEqual(tester.t, ratio, factor.ConnBalancedRatio)
+	require.LessOrEqual(tester.t, ratio, policy.ConnBalancedRatio)
 }
 
 func (tester *routerTester) checkRedirectingNum(num int) {
@@ -443,53 +444,53 @@ func TestRebalanceCornerCase(t *testing.T) {
 		func() {
 			// The parameter limits the redirecting num.
 			tester.addBackends(2)
-			tester.addConnections(5 * factor.BalanceCount4Health)
+			tester.addConnections(5 * policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.rebalance(1)
-			tester.checkRedirectingNum(factor.BalanceCount4Health)
+			tester.checkRedirectingNum(policy.BalanceCount4Health)
 		},
 		func() {
 			// All the connections are redirected to the new healthy one and the unhealthy backends are removed.
 			tester.addBackends(1)
-			tester.addConnections(factor.BalanceCount4Health)
+			tester.addConnections(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
-			tester.checkRedirectingNum(factor.BalanceCount4Health)
+			tester.checkRedirectingNum(policy.BalanceCount4Health)
 			tester.checkBackendNum(2)
 			backend := tester.getBackendByIndex(1)
-			require.Equal(t, factor.BalanceCount4Health, backend.connScore)
-			tester.redirectFinish(factor.BalanceCount4Health, true)
+			require.Equal(t, policy.BalanceCount4Health, backend.connScore)
+			tester.redirectFinish(policy.BalanceCount4Health, true)
 			tester.checkBackendNum(1)
 		},
 		func() {
 			// Connections won't be redirected again before redirection finishes.
 			tester.addBackends(1)
-			tester.addConnections(factor.BalanceCount4Health)
+			tester.addConnections(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
-			tester.checkRedirectingNum(factor.BalanceCount4Health)
+			tester.checkRedirectingNum(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
-			tester.checkRedirectingNum(factor.BalanceCount4Health)
+			tester.checkRedirectingNum(policy.BalanceCount4Health)
 			backend := tester.getBackendByIndex(0)
 			require.Equal(t, 0, backend.connScore)
-			require.Equal(t, factor.BalanceCount4Health, backend.connList.Len())
+			require.Equal(t, policy.BalanceCount4Health, backend.connList.Len())
 			backend = tester.getBackendByIndex(1)
-			require.Equal(t, factor.BalanceCount4Health, backend.connScore)
+			require.Equal(t, policy.BalanceCount4Health, backend.connScore)
 			require.Equal(t, 0, backend.connList.Len())
 		},
 		func() {
 			// After redirection fails, the connections are moved back to the unhealthy backends.
 			tester.addBackends(1)
-			tester.addConnections(factor.BalanceCount4Health)
+			tester.addConnections(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
 			tester.checkBackendNum(2)
-			tester.redirectFinish(factor.BalanceCount4Health, false)
+			tester.redirectFinish(policy.BalanceCount4Health, false)
 			tester.checkBackendNum(2)
 		},
 		func() {
@@ -519,11 +520,11 @@ func TestRebalanceCornerCase(t *testing.T) {
 		func() {
 			// Connections will be redirected again immediately after failure.
 			tester.addBackends(1)
-			tester.addConnections(factor.BalanceCount4Health)
+			tester.addConnections(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
-			tester.redirectFinish(factor.BalanceCount4Health, false)
+			tester.redirectFinish(policy.BalanceCount4Health, false)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
@@ -543,7 +544,7 @@ func TestConcurrency(t *testing.T) {
 	router := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	router.Init(context.Background(), bo)
+	router.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
 	t.Cleanup(bo.Close)
 	t.Cleanup(router.Close)
 
@@ -635,7 +636,7 @@ func TestRefresh(t *testing.T) {
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo)
+	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// The initial backends are empty.
@@ -655,7 +656,7 @@ func TestObserveError(t *testing.T) {
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo)
+	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// Mock an observe error.

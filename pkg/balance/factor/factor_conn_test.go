@@ -31,7 +31,7 @@ func TestFactorConnCount(t *testing.T) {
 	backends := make([]scoredBackend, 0, len(tests))
 	for _, test := range tests {
 		backends = append(backends, scoredBackend{
-			Backend: &mockBackend{
+			BackendCtx: &mockBackend{
 				connScore: test.connScore,
 			},
 		})

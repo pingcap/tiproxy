@@ -1,0 +1,26 @@
+// Copyright 2024 PingCAP, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+package policy
+
+var _ BackendCtx = (*mockBackend)(nil)
+
+type mockBackend struct {
+	healthy   bool
+	connScore int
+}
+
+func newMockBackend(healthy bool, connScore int) *mockBackend {
+	return &mockBackend{
+		healthy:   healthy,
+		connScore: connScore,
+	}
+}
+
+func (mb *mockBackend) Healthy() bool {
+	return mb.healthy
+}
+
+func (mb *mockBackend) ConnScore() int {
+	return mb.connScore
+}

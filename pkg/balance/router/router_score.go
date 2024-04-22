@@ -12,8 +12,8 @@ import (
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
-	"github.com/pingcap/tiproxy/pkg/balance/factor"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
@@ -29,7 +29,7 @@ var _ Router = &ScoreBasedRouter{}
 type ScoreBasedRouter struct {
 	sync.Mutex
 	logger     *zap.Logger
-	policy     factor.BalancePolicy
+	policy     policy.BalancePolicy
 	observer   observer.BackendObserver
 	healthCh   <-chan observer.HealthResult
 	cancelFunc context.CancelFunc
@@ -46,14 +46,14 @@ func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 	return &ScoreBasedRouter{
 		logger:   logger,
 		backends: make(map[string]*backendWrapper),
-		policy:   factor.NewFactorBasedBalance(logger.Named("fm")),
 	}
 }
 
-func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver) {
+func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver, balancePolicy policy.BalancePolicy) {
 	r.observer = ob
 	r.healthCh = r.observer.Subscribe("score_based_router")
-	r.policy.Init()
+	r.policy = balancePolicy
+	balancePolicy.Init()
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
 	// Failing to rebalance backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
@@ -85,7 +85,7 @@ func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, 
 		return nil, router.observeError
 	}
 
-	backends := make([]factor.Backend, 0, len(router.backends))
+	backends := make([]policy.BackendCtx, 0, len(router.backends))
 	for _, backend := range router.backends {
 		if !backend.Healthy() {
 			continue
@@ -298,7 +298,7 @@ func (router *ScoreBasedRouter) rebalance() {
 	if len(router.backends) <= 1 {
 		return
 	}
-	backends := make([]factor.Backend, 0, len(router.backends))
+	backends := make([]policy.BackendCtx, 0, len(router.backends))
 	for _, backend := range router.backends {
 		backends = append(backends, backend)
 	}

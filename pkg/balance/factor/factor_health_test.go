@@ -27,7 +27,7 @@ func TestFactorHealth(t *testing.T) {
 	backends := make([]scoredBackend, 0, len(tests))
 	for _, test := range tests {
 		backend := scoredBackend{
-			Backend: &mockBackend{
+			BackendCtx: &mockBackend{
 				healthy: test.healthy,
 			},
 		}

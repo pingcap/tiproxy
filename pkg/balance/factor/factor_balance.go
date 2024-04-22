@@ -5,6 +5,7 @@ package factor
 
 import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"go.uber.org/zap"
 )
 
@@ -12,17 +13,10 @@ const (
 	maxBitNum = 64
 )
 
-type BalancePolicy interface {
-	Init()
-	UpdatePolicy()
-	BackendToRoute(backends []Backend) Backend
-	BackendsToBalance(backends []Backend) (from, to Backend, balanceCount int, reason []zap.Field)
-}
+var _ policy.BalancePolicy = (*FactorBasedBalance)(nil)
 
-var _ BalancePolicy = (*FactorBasedBalance)(nil)
-
-// FactorBasedBalance manages factors.
-// It's not concurrency-safe, DO NOT visit it concurrently.
+// FactorBasedBalance is the default balance policy.
+// It's not concurrency-safe for now.
 type FactorBasedBalance struct {
 	factors []Factor
 	lg      *zap.Logger
@@ -39,7 +33,7 @@ func NewFactorBasedBalance(lg *zap.Logger) *FactorBasedBalance {
 }
 
 // Init creates factors at the first time.
-// TODO: create factors according to config.
+// TODO: create factors according to config and update policy when config changes.
 func (fm *FactorBasedBalance) Init() {
 	fm.factors = []Factor{
 		NewFactorHealth(),
@@ -49,11 +43,6 @@ func (fm *FactorBasedBalance) Init() {
 	if err != nil {
 		panic(err.Error())
 	}
-}
-
-// UpdatePolicy updates the factor list according to the changed config.
-func (fm *FactorBasedBalance) UpdatePolicy() {
-
 }
 
 func (fm *FactorBasedBalance) updateBitNum() error {
@@ -69,7 +58,7 @@ func (fm *FactorBasedBalance) updateBitNum() error {
 }
 
 // BackendToRoute returns the idlest backend.
-func (fm *FactorBasedBalance) BackendToRoute(backends []Backend) Backend {
+func (fm *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) policy.BackendCtx {
 	if len(backends) == 0 {
 		return nil
 	}
@@ -94,13 +83,13 @@ func (fm *FactorBasedBalance) BackendToRoute(backends []Backend) Backend {
 			idlestBackend = scoredBackends[i]
 		}
 	}
-	return idlestBackend.Backend
+	return idlestBackend.BackendCtx
 }
 
 // BackendsToBalance returns the busiest/unhealthy backend and the idlest backend.
 // balanceCount: the count of connections to migrate in this round. 0 indicates no need to balance.
 // reason: the debug information to be logged.
-func (fm *FactorBasedBalance) BackendsToBalance(backends []Backend) (from, to Backend, balanceCount int, reason []zap.Field) {
+func (fm *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (from, to policy.BackendCtx, balanceCount int, reason []zap.Field) {
 	if len(backends) <= 1 {
 		return
 	}
@@ -114,9 +103,10 @@ func (fm *FactorBasedBalance) BackendsToBalance(backends []Backend) (from, to Ba
 	}
 
 	// Get the unbalanced backends and their scores.
-	var idlestBackend, busiestBackend scoredBackend
+	var idlestBackend, busiestBackend *scoredBackend
 	minScore, maxScore := uint64(1<<maxBitNum-1), uint64(0)
-	for _, backend := range scoredBackends {
+	for i := 0; i < len(scoredBackends); i++ {
+		backend := &scoredBackends[i]
 		score := backend.score()
 		// Skip the unhealthy backends.
 		if score < minScore && backend.Healthy() {
@@ -129,7 +119,7 @@ func (fm *FactorBasedBalance) BackendsToBalance(backends []Backend) (from, to Ba
 			busiestBackend = backend
 		}
 	}
-	if idlestBackend.Backend == nil || busiestBackend.Backend == nil || idlestBackend.Backend == busiestBackend.Backend {
+	if idlestBackend == nil || busiestBackend == nil || idlestBackend == busiestBackend {
 		return
 	}
 
@@ -146,7 +136,7 @@ func (fm *FactorBasedBalance) BackendsToBalance(backends []Backend) (from, to Ba
 			// backend1 factor scores: 1, 1
 			// backend2 factor scores: 0, 0
 			// Balancing the second factor won't make the first factor unbalanced.
-			balanceCount = factor.BalanceCount(busiestBackend, idlestBackend)
+			balanceCount = factor.BalanceCount(*busiestBackend, *idlestBackend)
 			if balanceCount > 0 {
 				break
 			}
@@ -165,5 +155,5 @@ func (fm *FactorBasedBalance) BackendsToBalance(backends []Backend) (from, to Ba
 		zap.Uint64("from_score", maxScore),
 		zap.Uint64("to_score", minScore),
 	}
-	return busiestBackend.Backend, idlestBackend.Backend, balanceCount, fields
+	return busiestBackend.BackendCtx, idlestBackend.BackendCtx, balanceCount, fields
 }
