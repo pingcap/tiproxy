@@ -1,10 +1,10 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package factor
 
 const (
-	// The threshold of ratio of the most connection count and least count.
+	// connBalancedRatio is the threshold of ratio of the most connection count and least count.
 	// If the ratio exceeds the threshold, we migrate connections.
 	connBalancedRatio = 1.2
 	// balanceCount4Conn indicates how many connections to balance in each round.
@@ -28,13 +28,9 @@ func (fcc *FactorConnCount) Name() string {
 	return "conn"
 }
 
-func (fcc *FactorConnCount) UpdateScore(backends []*backendWrapper) {
-	for _, backend := range backends {
-		score := backend.connScore
-		if score >= 1<<fcc.bitNum {
-			score = 1<<fcc.bitNum - 1
-		}
-		backend.addScore(score, fcc.bitNum)
+func (fcc *FactorConnCount) UpdateScore(backends []scoredBackend) {
+	for i := 0; i < len(backends); i++ {
+		backends[i].addScore(backends[i].ConnScore(), fcc.bitNum)
 	}
 }
 
@@ -42,8 +38,8 @@ func (fcc *FactorConnCount) ScoreBitNum() int {
 	return fcc.bitNum
 }
 
-func (fcc *FactorConnCount) BalanceCount(from, to *backendWrapper) int {
-	if float64(from.connScore) > float64(to.connScore+1)*connBalancedRatio {
+func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) int {
+	if float64(from.ConnScore()) > float64(to.ConnScore()+1)*connBalancedRatio {
 		return balanceCount4Conn
 	}
 	return 0

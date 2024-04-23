@@ -16,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,8 @@ type routerTester struct {
 func newRouterTester(t *testing.T) *routerTester {
 	lg, _ := logger.CreateLoggerForTest(t)
 	router := NewScoreBasedRouter(lg)
-	router.createFactors()
+	router.policy = policy.NewSimpleBalancePolicy()
+	router.policy.Init()
 	t.Cleanup(router.Close)
 	return &routerTester{
 		t:        t,
@@ -206,7 +208,7 @@ func (tester *routerTester) checkBalanced() {
 		}
 	}
 	ratio := float64(maxNum) / float64(minNum+1)
-	require.LessOrEqual(tester.t, ratio, connBalancedRatio)
+	require.LessOrEqual(tester.t, ratio, policy.ConnBalancedRatio)
 }
 
 func (tester *routerTester) checkRedirectingNum(num int) {
@@ -442,53 +444,53 @@ func TestRebalanceCornerCase(t *testing.T) {
 		func() {
 			// The parameter limits the redirecting num.
 			tester.addBackends(2)
-			tester.addConnections(5 * balanceCount4Health)
+			tester.addConnections(5 * policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.rebalance(1)
-			tester.checkRedirectingNum(balanceCount4Health)
+			tester.checkRedirectingNum(policy.BalanceCount4Health)
 		},
 		func() {
 			// All the connections are redirected to the new healthy one and the unhealthy backends are removed.
 			tester.addBackends(1)
-			tester.addConnections(balanceCount4Health)
+			tester.addConnections(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
-			tester.checkRedirectingNum(balanceCount4Health)
+			tester.checkRedirectingNum(policy.BalanceCount4Health)
 			tester.checkBackendNum(2)
 			backend := tester.getBackendByIndex(1)
-			require.Equal(t, balanceCount4Health, backend.connScore)
-			tester.redirectFinish(balanceCount4Health, true)
+			require.Equal(t, policy.BalanceCount4Health, backend.connScore)
+			tester.redirectFinish(policy.BalanceCount4Health, true)
 			tester.checkBackendNum(1)
 		},
 		func() {
 			// Connections won't be redirected again before redirection finishes.
 			tester.addBackends(1)
-			tester.addConnections(balanceCount4Health)
+			tester.addConnections(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
-			tester.checkRedirectingNum(balanceCount4Health)
+			tester.checkRedirectingNum(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
-			tester.checkRedirectingNum(balanceCount4Health)
+			tester.checkRedirectingNum(policy.BalanceCount4Health)
 			backend := tester.getBackendByIndex(0)
 			require.Equal(t, 0, backend.connScore)
-			require.Equal(t, balanceCount4Health, backend.connList.Len())
+			require.Equal(t, policy.BalanceCount4Health, backend.connList.Len())
 			backend = tester.getBackendByIndex(1)
-			require.Equal(t, balanceCount4Health, backend.connScore)
+			require.Equal(t, policy.BalanceCount4Health, backend.connScore)
 			require.Equal(t, 0, backend.connList.Len())
 		},
 		func() {
 			// After redirection fails, the connections are moved back to the unhealthy backends.
 			tester.addBackends(1)
-			tester.addConnections(balanceCount4Health)
+			tester.addConnections(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
 			tester.checkBackendNum(2)
-			tester.redirectFinish(balanceCount4Health, false)
+			tester.redirectFinish(policy.BalanceCount4Health, false)
 			tester.checkBackendNum(2)
 		},
 		func() {
@@ -518,11 +520,11 @@ func TestRebalanceCornerCase(t *testing.T) {
 		func() {
 			// Connections will be redirected again immediately after failure.
 			tester.addBackends(1)
-			tester.addConnections(balanceCount4Health)
+			tester.addConnections(policy.BalanceCount4Health)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
-			tester.redirectFinish(balanceCount4Health, false)
+			tester.redirectFinish(policy.BalanceCount4Health, false)
 			tester.killBackends(1)
 			tester.addBackends(1)
 			tester.rebalance(1)
@@ -542,7 +544,7 @@ func TestConcurrency(t *testing.T) {
 	router := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	router.Init(context.Background(), bo)
+	router.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
 	t.Cleanup(bo.Close)
 	t.Cleanup(router.Close)
 
@@ -634,7 +636,7 @@ func TestRefresh(t *testing.T) {
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo)
+	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// The initial backends are empty.
@@ -654,7 +656,7 @@ func TestObserveError(t *testing.T) {
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo)
+	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// Mock an observe error.
@@ -760,284 +762,4 @@ func TestUpdateBackendHealth(t *testing.T) {
 	tester.addConnections(90)
 	tester.killBackends(1)
 	tester.checkBackendNum(3)
-}
-
-func TestRouteWithOneFactor(t *testing.T) {
-	tester := newRouterTester(t)
-	tester.addBackends(3)
-	factor := &mockFactor{bitNum: 2}
-	tester.router.factors = []Factor{factor}
-
-	tests := []struct {
-		scores        []int
-		expectedOrder []int
-	}{
-		{
-			scores:        []int{1, 2, 3},
-			expectedOrder: []int{1, 2, 3},
-		},
-		{
-			scores:        []int{3, 2, 1},
-			expectedOrder: []int{3, 2, 1},
-		},
-	}
-	for tIdx, test := range tests {
-		factor.updateScore = func(backends []*backendWrapper) {
-			for _, backend := range backends {
-				idx, err := strconv.Atoi(backend.addr)
-				require.NoError(t, err)
-				backend.addScore(test.scores[idx-1], factor.bitNum)
-			}
-		}
-		selector := tester.router.GetBackendSelector()
-		msg := "test index %d, select index %d"
-		for i := 0; i < 3; i++ {
-			backend, err := selector.Next()
-			require.NoError(t, err, msg, tIdx, i)
-			idx, err := strconv.Atoi(backend.Addr())
-			require.NoError(t, err)
-			require.Equal(t, test.expectedOrder[i], idx, msg, tIdx, i)
-		}
-	}
-}
-
-func TestRouteWith2Factors(t *testing.T) {
-	tester := newRouterTester(t)
-	tester.addBackends(3)
-	factor1, factor2 := &mockFactor{bitNum: 1}, &mockFactor{bitNum: 12}
-	tester.router.factors = []Factor{factor1, factor2}
-
-	tests := []struct {
-		scores1       []int
-		scores2       []int
-		expectedOrder []int
-	}{
-		{
-			scores1:       []int{1, 0, 0},
-			scores2:       []int{0, 100, 200},
-			expectedOrder: []int{2, 3, 1},
-		},
-		{
-			scores1:       []int{1, 1, 0},
-			scores2:       []int{0, 100, 200},
-			expectedOrder: []int{3, 1, 2},
-		},
-		{
-			scores1:       []int{1, 1, 1},
-			scores2:       []int{0, 100, 200},
-			expectedOrder: []int{1, 2, 3},
-		},
-		{
-			scores1:       []int{0, 0, 0},
-			scores2:       []int{200, 100, 0},
-			expectedOrder: []int{3, 2, 1},
-		},
-		{
-			scores1:       []int{0, 1, 0},
-			scores2:       []int{100, 0, 0},
-			expectedOrder: []int{3, 1, 2},
-		},
-	}
-	for tIdx, test := range tests {
-		factor1.updateScore = func(backends []*backendWrapper) {
-			for _, backend := range backends {
-				idx, err := strconv.Atoi(backend.addr)
-				require.NoError(t, err)
-				backend.addScore(test.scores1[idx-1], factor1.bitNum)
-			}
-		}
-		factor2.updateScore = func(backends []*backendWrapper) {
-			for _, backend := range backends {
-				idx, err := strconv.Atoi(backend.addr)
-				require.NoError(t, err)
-				backend.addScore(test.scores2[idx-1], factor2.bitNum)
-			}
-		}
-		selector := tester.router.GetBackendSelector()
-		msg := "test index %d, select index %d"
-		for i := 0; i < 3; i++ {
-			backend, err := selector.Next()
-			require.NoError(t, err, msg, tIdx, i)
-			idx, err := strconv.Atoi(backend.Addr())
-			require.NoError(t, err)
-			require.Equal(t, test.expectedOrder[i], idx, msg, tIdx, i)
-		}
-	}
-}
-
-func TestBalanceWithOneFactor(t *testing.T) {
-	tester := newRouterTester(t)
-	tester.addBackends(3)
-	// Connections are balanced according to the default factors.
-	tester.addConnections(30)
-	factor := &mockFactor{bitNum: 2, balanceCount: 1}
-	tester.router.factors = []Factor{factor}
-
-	tests := []struct {
-		scores        []int
-		expectedConns []int
-	}{
-		{
-			scores:        []int{1, 2, 3},
-			expectedConns: []int{11, 10, 9},
-		},
-		{
-			scores:        []int{3, 2, 1},
-			expectedConns: []int{9, 10, 11},
-		},
-		{
-			scores:        []int{1, 1, 1},
-			expectedConns: []int{10, 10, 10},
-		},
-	}
-	for tIdx, test := range tests {
-		factor.updateScore = func(backends []*backendWrapper) {
-			for _, backend := range backends {
-				idx, err := strconv.Atoi(backend.addr)
-				require.NoError(t, err)
-				backend.addScore(test.scores[idx-1], factor.bitNum)
-			}
-		}
-		// Make sure the connScore is recovered.
-		for _, backend := range tester.router.backends {
-			require.Equal(t, 10, backend.connScore)
-		}
-		tester.rebalance(1)
-		msg := "test index %d, addr %s"
-		for addr, backend := range tester.router.backends {
-			idx, err := strconv.Atoi(addr)
-			require.NoError(t, err)
-			require.Equal(t, test.expectedConns[idx-1], backend.connScore, msg, tIdx, addr)
-		}
-		// Recover the migration.
-		tester.redirectFinish(1, false)
-	}
-}
-
-func TestBalanceWith2Factors(t *testing.T) {
-	tester := newRouterTester(t)
-	tester.addBackends(3)
-	// Connections are balanced according to the default factors.
-	tester.addConnections(300)
-	factor1, factor2 := &mockFactor{bitNum: 1, balanceCount: 2}, &mockFactor{bitNum: 12, balanceCount: 1}
-	tester.router.factors = []Factor{factor1, factor2}
-
-	tests := []struct {
-		scores1       []int
-		scores2       []int
-		expectedConns []int
-	}{
-		{
-			scores1:       []int{1, 0, 0},
-			scores2:       []int{0, 100, 200},
-			expectedConns: []int{98, 102, 100},
-		},
-		{
-			scores1:       []int{1, 1, 0},
-			scores2:       []int{0, 100, 200},
-			expectedConns: []int{100, 98, 102},
-		},
-		{
-			scores1:       []int{1, 1, 1},
-			scores2:       []int{0, 100, 200},
-			expectedConns: []int{101, 100, 99},
-		},
-		{
-			scores1:       []int{0, 0, 0},
-			scores2:       []int{200, 100, 0},
-			expectedConns: []int{99, 100, 101},
-		},
-		{
-			scores1:       []int{0, 1, 0},
-			scores2:       []int{100, 0, 0},
-			expectedConns: []int{100, 98, 102},
-		},
-		{
-			scores1:       []int{0, 0, 0},
-			scores2:       []int{100, 100, 100},
-			expectedConns: []int{100, 100, 100},
-		},
-	}
-	for tIdx, test := range tests {
-		factor1.updateScore = func(backends []*backendWrapper) {
-			for _, backend := range backends {
-				idx, err := strconv.Atoi(backend.addr)
-				require.NoError(t, err)
-				backend.addScore(test.scores1[idx-1], factor1.bitNum)
-			}
-		}
-		factor2.updateScore = func(backends []*backendWrapper) {
-			for _, backend := range backends {
-				idx, err := strconv.Atoi(backend.addr)
-				require.NoError(t, err)
-				backend.addScore(test.scores2[idx-1], factor2.bitNum)
-			}
-		}
-		// Make sure the connScore is recovered.
-		for _, backend := range tester.router.backends {
-			require.Equal(t, 100, backend.connScore)
-		}
-		tester.rebalance(1)
-		msg := "test index %d, addr %s"
-		for addr, backend := range tester.router.backends {
-			idx, err := strconv.Atoi(addr)
-			require.NoError(t, err)
-			require.Equal(t, test.expectedConns[idx-1], backend.connScore, msg, tIdx, addr)
-		}
-		// Recover the migration.
-		tester.redirectFinish(2, false)
-	}
-}
-
-func TestBalanceWith3Factors(t *testing.T) {
-	tester := newRouterTester(t)
-	tester.addBackends(2)
-	// Connections are balanced according to the default factors.
-	tester.addConnections(200)
-	factors := []*mockFactor{{bitNum: 1}, {bitNum: 2}, {bitNum: 2}}
-	tester.router.factors = []Factor{factors[0], factors[1], factors[2]}
-
-	tests := []struct {
-		scores        [2][3]int
-		balanceCounts [3]int
-		expectedConns [2]int
-	}{
-		{
-			scores:        [2][3]int{{1, 1, 1}, {0, 1, 0}},
-			balanceCounts: [3]int{0, 10, 1},
-			expectedConns: [2]int{99, 101},
-		},
-		{
-			scores:        [2][3]int{{1, 0, 1}, {0, 1, 0}},
-			balanceCounts: [3]int{0, 10, 1},
-			expectedConns: [2]int{100, 100},
-		},
-	}
-	for tIdx, test := range tests {
-		for factorIdx, factor := range factors {
-			func(factorIdx int, factor *mockFactor) {
-				factor.balanceCount = test.balanceCounts[factorIdx]
-				factor.updateScore = func(backends []*backendWrapper) {
-					for _, backend := range backends {
-						idx, err := strconv.Atoi(backend.addr)
-						require.NoError(t, err)
-						backend.addScore(test.scores[idx-1][factorIdx], factor.bitNum)
-					}
-				}
-			}(factorIdx, factor)
-		}
-		// Make sure the connScore is recovered.
-		for _, backend := range tester.router.backends {
-			require.Equal(t, 100, backend.connScore)
-		}
-		tester.rebalance(1)
-		msg := "test index %d, addr %s"
-		for addr, backend := range tester.router.backends {
-			idx, err := strconv.Atoi(addr)
-			require.NoError(t, err)
-			require.Equal(t, test.expectedConns[idx-1], backend.connScore, msg, tIdx, addr)
-		}
-		// Recover the migration.
-		tester.redirectFinish(1, false)
-	}
 }

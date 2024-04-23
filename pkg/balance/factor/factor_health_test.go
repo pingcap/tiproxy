@@ -1,12 +1,11 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package router
+package factor
 
 import (
 	"testing"
 
-	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,13 +24,17 @@ func TestFactorHealth(t *testing.T) {
 			expectedScore: 1,
 		},
 	}
-	backends := make([]*backendWrapper, 0, len(tests))
+	backends := make([]scoredBackend, 0, len(tests))
 	for _, test := range tests {
-		backend := newBackendWrapper("", observer.BackendHealth{Healthy: test.healthy})
+		backend := scoredBackend{
+			BackendCtx: &mockBackend{
+				healthy: test.healthy,
+			},
+		}
 		backends = append(backends, backend)
 	}
 	factor.UpdateScore(backends)
 	for i, test := range tests {
-		require.Equal(t, test.expectedScore, backends[i].score())
+		require.Equal(t, test.expectedScore, backends[i].score(), "test idx: %d", i)
 	}
 }

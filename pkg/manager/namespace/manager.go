@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/pkg/balance/factor"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
@@ -51,7 +52,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	hc := observer.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
 	bo := observer.NewDefaultBackendObserver(logger.Named("observer"), healthCheckCfg, fetcher, hc)
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo)
+	rt.Init(context.Background(), bo, factor.NewFactorBasedBalance(logger.Named("factor")))
 
 	return &Namespace{
 		name:   cfg.Namespace,

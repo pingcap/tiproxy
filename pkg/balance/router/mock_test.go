@@ -168,25 +168,3 @@ func (mbo *mockBackendObserver) Close() {
 		close(subscriber)
 	}
 }
-
-type mockFactor struct {
-	bitNum       int
-	balanceCount int
-	updateScore  func(backends []*backendWrapper)
-}
-
-func (mf *mockFactor) Name() string {
-	return "mock"
-}
-
-func (mf *mockFactor) UpdateScore(backends []*backendWrapper) {
-	mf.updateScore(backends)
-}
-
-func (mf *mockFactor) ScoreBitNum() int {
-	return mf.bitNum
-}
-
-func (mf *mockFactor) BalanceCount(from, to *backendWrapper) int {
-	return mf.balanceCount
-}

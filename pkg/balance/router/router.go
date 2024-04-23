@@ -82,9 +82,6 @@ type backendWrapper struct {
 		observer.BackendHealth
 	}
 	addr string
-	// The score composed by all factors. Each factor sets some bits of the score.
-	// The higher the score is, the more unhealthy / busy the backend is.
-	scoreBits uint64
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
 	// connScore = connList.Len() + incoming connections - outgoing connections.
 	connScore int
@@ -108,16 +105,8 @@ func (b *backendWrapper) setHealth(health observer.BackendHealth) {
 	b.mu.Unlock()
 }
 
-func (b *backendWrapper) addScore(score int, bitNum int) {
-	b.scoreBits = b.scoreBits<<bitNum | uint64(score)
-}
-
-func (b *backendWrapper) clearScore() {
-	b.scoreBits = 0
-}
-
-func (b *backendWrapper) score() uint64 {
-	return b.scoreBits
+func (b *backendWrapper) ConnScore() int {
+	return b.connScore
 }
 
 func (b *backendWrapper) Addr() string {
