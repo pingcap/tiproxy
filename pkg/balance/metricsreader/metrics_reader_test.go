@@ -63,7 +63,11 @@ func TestReadMetrics(t *testing.T) {
 		msg := fmt.Sprintf("%dth test %s", i, test.promQL)
 		var qr QueryResult
 		require.Eventually(t, func() bool {
-			<-ch
+			select {
+			case <-ch:
+			case <-time.After(3 * time.Second):
+				t.Fatal("timeout")
+			}
 			qr = mr.GetQueryResult(id)
 			return qr.Value != nil || qr.Err != nil
 		}, 3*time.Second, time.Millisecond, msg)
@@ -125,7 +129,11 @@ func TestMultiExprs(t *testing.T) {
 	}
 	mr.RemoveQueryExpr(1)
 	require.Eventually(t, func() bool {
-		<-ch
+		select {
+		case <-ch:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timeout")
+		}
 		qr := mr.GetQueryResult(uint64(1))
 		return qr.Value == nil && qr.Err == nil
 	}, 3*time.Second, time.Millisecond)
@@ -278,10 +286,13 @@ func TestPromUnavailable(t *testing.T) {
 		PromQL: "any",
 		Range:  time.Minute,
 	})
-	<-ch
-	qr := mr.GetQueryResult(id)
-	require.True(t, qr.Empty())
-	require.Error(t, qr.Err)
+	select {
+	case <-ch:
+		t.Fatal("should not notify")
+	case <-time.After(100 * time.Millisecond):
+		qr := mr.GetQueryResult(id)
+		require.True(t, qr.Empty())
+	}
 }
 
 func TestNoPromAddr(t *testing.T) {
@@ -336,7 +347,11 @@ func setupTypicalMetricsReader(t *testing.T) (*mockHttpHandler, MetricsReader) {
 
 func waitResultReady(t *testing.T, mr MetricsReader, ch <-chan struct{}, resultNum int) {
 	require.Eventually(t, func() bool {
-		<-ch
+		select {
+		case <-ch:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timeout")
+		}
 		for i := 0; i < resultNum; i++ {
 			qr := mr.GetQueryResult(uint64(i + 1))
 			if qr.Value == nil && qr.Err == nil {

@@ -3,11 +3,28 @@
 
 package metricsreader
 
-import "github.com/prometheus/common/model"
+import (
+	"time"
+
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	"github.com/prometheus/common/model"
+)
+
+const (
+	LabelNameInstance = "instance"
+)
+
+type QueryExpr struct {
+	PromQL   string
+	Range    time.Duration
+	HasLabel bool
+}
 
 type QueryResult struct {
-	Value model.Value
-	Err   error
+	Value      model.Value
+	Err        error
+	UpdateTime monotime.Time
 }
 
 func (qr QueryResult) Empty() bool {
@@ -27,4 +44,24 @@ func (qr QueryResult) Empty() bool {
 		// We don't need other value types.
 		return false
 	}
+}
+
+// GetMetric4Backend returns metric of a backend.
+func (qr QueryResult) GetMetric4Backend(backend policy.BackendCtx) []model.SamplePair {
+	if qr.Value == nil {
+		return nil
+	}
+	if qr.Value.Type() != model.ValMatrix {
+		return nil
+	}
+	matrix := qr.Value.(model.Matrix)
+	for _, m := range matrix {
+		if label, ok := m.Metric[LabelNameInstance]; ok {
+			// FIXME: this is incorrect.
+			if (string)(label) == backend.Addr() {
+				return m.Values
+			}
+		}
+	}
+	return nil
 }

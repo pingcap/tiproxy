@@ -3,13 +3,20 @@
 
 package factor
 
-import "github.com/pingcap/tiproxy/pkg/balance/policy"
+import (
+	"context"
+
+	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
+)
 
 var _ policy.BackendCtx = (*mockBackend)(nil)
 
 type mockBackend struct {
-	healthy   bool
+	addr      string
 	connScore int
+	connCount int
+	healthy   bool
 }
 
 func newMockBackend(healthy bool, connScore int) *mockBackend {
@@ -25,6 +32,14 @@ func (mb *mockBackend) Healthy() bool {
 
 func (mb *mockBackend) ConnScore() int {
 	return mb.connScore
+}
+
+func (mb *mockBackend) Addr() string {
+	return mb.addr
+}
+
+func (mb *mockBackend) ConnCount() int {
+	return mb.connCount
 }
 
 var _ Factor = (*mockFactor)(nil)
@@ -49,4 +64,40 @@ func (mf *mockFactor) ScoreBitNum() int {
 
 func (mf *mockFactor) BalanceCount(from, to scoredBackend) int {
 	return mf.balanceCount
+}
+
+var _ metricsreader.MetricsReader = (*mockMetricsReader)(nil)
+
+type mockMetricsReader struct {
+	queryID uint64
+	qr      metricsreader.QueryResult
+}
+
+func newMockMetricsReader() *mockMetricsReader {
+	return &mockMetricsReader{}
+}
+
+func (mmr *mockMetricsReader) Start(ctx context.Context) {
+}
+
+func (mmr *mockMetricsReader) AddQueryExpr(queryExpr metricsreader.QueryExpr) uint64 {
+	mmr.queryID++
+	return mmr.queryID
+}
+
+func (mmr *mockMetricsReader) RemoveQueryExpr(id uint64) {
+}
+
+func (mmr *mockMetricsReader) GetQueryResult(id uint64) metricsreader.QueryResult {
+	return mmr.qr
+}
+
+func (mmr *mockMetricsReader) Subscribe(receiverName string) <-chan struct{} {
+	return nil
+}
+
+func (mmr *mockMetricsReader) Unsubscribe(receiverName string) {
+}
+
+func (mmr *mockMetricsReader) Close() {
 }

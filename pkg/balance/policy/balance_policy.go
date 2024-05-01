@@ -12,6 +12,9 @@ type BalancePolicy interface {
 }
 
 type BackendCtx interface {
+	Addr() string
+	// ConnCount indicates the count of current connections.
+	ConnCount() int
 	// ConnScore = current connections + incoming connections - outgoing connections.
 	ConnScore() int
 	Healthy() bool
