@@ -99,7 +99,7 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context) {
 	}, nil, dmr.lg)
 }
 
-// Always refresh the prometheus Address just in case it changes.
+// Always refresh the prometheus address just in case it changes.
 func (dmr *DefaultMetricsReader) getPromAPI(ctx context.Context) (promv1.API, error) {
 	promInfo, err := dmr.promFetcher.GetPromInfo(ctx)
 	if promInfo == nil {

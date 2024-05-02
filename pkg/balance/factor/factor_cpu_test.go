@@ -61,6 +61,11 @@ func TestCPUBalanceOnce(t *testing.T) {
 			scoreOrder:   []int{1, 0},
 			balanceCount: 0,
 		},
+		{
+			cpus:         [][]float64{{1.0}, {0.9}, {0.8}, {0.7}, {0.6}, {0.5}, {0.4}, {0.3}, {0.1}},
+			scoreOrder:   []int{8, 7, 6, 5, 4, 3, 2, 1, 0},
+			balanceCount: balanceCount4Cpu,
+		},
 	}
 
 	for i, test := range tests {
@@ -105,6 +110,12 @@ func TestCPUBalanceContinuously(t *testing.T) {
 			newConnScores: []int{0, 0},
 		},
 		{
+			cpus:          [][]float64{{0.01}, {0.02}},
+			connCounts:    []int{100, 200},
+			connScores:    []int{100, 200},
+			newConnScores: []int{100, 200},
+		},
+		{
 			cpus:          [][]float64{{0.1, 0.1, 0.1, 0.1, 0.1}, {0.05, 0.07, 0.05, 0.04, 0.03}},
 			connCounts:    []int{200, 100},
 			connScores:    []int{200, 100},
@@ -127,6 +138,12 @@ func TestCPUBalanceContinuously(t *testing.T) {
 			connCounts:    []int{200, 100},
 			connScores:    []int{180, 120},
 			newConnScores: []int{170, 130},
+		},
+		{
+			cpus:          [][]float64{{0.5, 0.4, 0.6, 0.5, 0.5}, {0.2, 0.1, 0.2, 0.1, 0.2}},
+			connCounts:    []int{200, 100},
+			connScores:    []int{0, 300},
+			newConnScores: []int{86, 214},
 		},
 		{
 			cpus:          [][]float64{{0.5, 0.4, 0.6, 0.5, 0.5}, {}},

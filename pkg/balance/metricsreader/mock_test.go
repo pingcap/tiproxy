@@ -36,10 +36,19 @@ func newMockPromFetcher(port int) *mockPromFetcher {
 }
 
 type mockHttpHandler struct {
+	statusCode  atomic.Int32
 	getRespBody atomic.Pointer[func(reqBody string) string]
 	wg          waitgroup.WaitGroup
 	t           *testing.T
 	server      *http.Server
+}
+
+func newMockHttpHandler(t *testing.T) *mockHttpHandler {
+	handler := &mockHttpHandler{
+		t: t,
+	}
+	handler.statusCode.Store(http.StatusOK)
+	return handler
 }
 
 func (handler *mockHttpHandler) Start() int {
@@ -53,7 +62,11 @@ func (handler *mockHttpHandler) Start() int {
 }
 
 func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
+	code := int(handler.statusCode.Load())
+	w.WriteHeader(code)
+	if code != http.StatusOK {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	require.NoError(handler.t, err)
 	respBody := (*handler.getRespBody.Load())(string(body))

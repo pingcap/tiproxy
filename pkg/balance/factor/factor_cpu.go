@@ -178,12 +178,17 @@ func (fc *FactorCPU) updateCpuPerConn() {
 		}
 	}
 	if totalConns > 0 {
-		fc.usagePerConn = totalUsage / float64(totalConns)
+		usagePerConn := totalUsage / float64(totalConns)
 		// When the cluster is idle and the clients are connecting to it all at once (e.g. when sysbench starts),
 		// the CPU usage lags behind, so the usagePerConn may be very low. In this case, all the connections may be
 		// routed to the same backend just because the CPU usage of the backend is a little lower.
-		if fc.usagePerConn < minCpuPerConn && totalUsage < 0.2 {
-			fc.usagePerConn = minCpuPerConn
+		if usagePerConn < minCpuPerConn {
+			// If the average usage is below 10%, we take the cluster as just started and don't update usagePerConn.
+			if totalUsage/float64(len(fc.snapshot)) > 0.1 {
+				fc.usagePerConn = usagePerConn
+			}
+		} else {
+			fc.usagePerConn = usagePerConn
 		}
 	}
 	if fc.usagePerConn <= 0 {

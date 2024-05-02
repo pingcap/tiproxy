@@ -6,6 +6,7 @@ package metricsreader
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -276,9 +277,43 @@ func TestMultiSubscribers(t *testing.T) {
 }
 
 func TestPromUnavailable(t *testing.T) {
-	mpf := newMockPromFetcher(10000)
+	httpHandler, mr := setupTypicalMetricsReader(t)
+	f := func(reqBody string) string {
+		return `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"any"},"values":[[1712738879.406,"0"]]}]}}`
+	}
+	httpHandler.getRespBody.Store(&f)
+	id := mr.AddQueryExpr(QueryExpr{
+		PromQL: "any",
+		Range:  time.Minute,
+	})
+	require.Eventually(t, func() bool {
+		qr := mr.GetQueryResult(id)
+		return !qr.Empty()
+	}, 3*time.Second, 10*time.Millisecond)
+
+	httpHandler.statusCode.Store(http.StatusInternalServerError)
+	require.Eventually(t, func() bool {
+		// The qr doesn't update anymore.
+		qr := mr.GetQueryResult(id)
+		time.Sleep(100 * time.Millisecond)
+		return qr.UpdateTime == mr.GetQueryResult(id).UpdateTime
+	}, 3*time.Second, time.Millisecond)
+}
+
+func TestNoPromAddr(t *testing.T) {
+	mpf := &mockPromFetcher{
+		getPromInfo: func(ctx context.Context) (*infosync.PrometheusInfo, error) {
+			return nil, nil
+		},
+	}
 	lg, _ := logger.CreateLoggerForTest(t)
-	mr := NewDefaultMetricsReader(lg, mpf, newHealthCheckConfigForTest())
+	cfg := newHealthCheckConfigForTest()
+	mr := NewDefaultMetricsReader(lg, mpf, cfg)
+	promInfo, err := mr.getPromAPI(context.Background())
+	require.Nil(t, promInfo)
+	require.NotNil(t, err)
+	require.Equal(t, true, strings.Contains(err.Error(), "no prometheus info found"))
+
 	mr.Start(context.Background())
 	t.Cleanup(mr.Close)
 	ch := mr.Subscribe("test")
@@ -289,52 +324,14 @@ func TestPromUnavailable(t *testing.T) {
 	select {
 	case <-ch:
 		t.Fatal("should not notify")
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(10 * cfg.MetricsInterval):
 		qr := mr.GetQueryResult(id)
 		require.True(t, qr.Empty())
 	}
 }
 
-func TestNoPromAddr(t *testing.T) {
-	mpf := &mockPromFetcher{
-		getPromInfo: func(ctx context.Context) (*infosync.PrometheusInfo, error) {
-			return nil, nil
-		},
-	}
-	lg, _ := logger.CreateLoggerForTest(t)
-	mr := NewDefaultMetricsReader(lg, mpf, newHealthCheckConfigForTest())
-	mr.Start(context.Background())
-	t.Cleanup(mr.Close)
-	ch := mr.Subscribe("test")
-	mr.AddQueryExpr(QueryExpr{
-		PromQL: "any",
-		Range:  time.Minute,
-	})
-	select {
-	case <-ch:
-		t.Fatal("should not notify")
-	case <-time.After(100 * time.Millisecond):
-	}
-}
-
-func TestGetPromAPI_NoPromAddr(t *testing.T) {
-	mpf := &mockPromFetcher{
-		getPromInfo: func(ctx context.Context) (*infosync.PrometheusInfo, error) {
-			return nil, nil
-		},
-	}
-	lg, _ := logger.CreateLoggerForTest(t)
-	mr := NewDefaultMetricsReader(lg, mpf, newHealthCheckConfigForTest())
-	promInfo, err := mr.getPromAPI(context.Background())
-	require.Nil(t, promInfo)
-	require.NotNil(t, err)
-	require.Equal(t, true, strings.Contains(err.Error(), "no prometheus info found"))
-}
-
 func setupTypicalMetricsReader(t *testing.T) (*mockHttpHandler, MetricsReader) {
-	httpHandler := &mockHttpHandler{
-		t: t,
-	}
+	httpHandler := newMockHttpHandler(t)
 	port := httpHandler.Start()
 	t.Cleanup(httpHandler.Close)
 	mpf := newMockPromFetcher(port)
