@@ -13,7 +13,7 @@ import (
 
 func TestRouteWithOneFactor(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	fm := NewFactorBasedBalance(lg)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
 	factor := &mockFactor{bitNum: 2}
 	fm.factors = []Factor{factor}
 	require.NoError(t, fm.updateBitNum())
@@ -45,7 +45,7 @@ func TestRouteWithOneFactor(t *testing.T) {
 
 func TestRouteWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	fm := NewFactorBasedBalance(lg)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
 	factor1, factor2 := &mockFactor{bitNum: 1}, &mockFactor{bitNum: 12}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
@@ -100,7 +100,7 @@ func TestRouteWith2Factors(t *testing.T) {
 
 func TestBalanceWithOneFactor(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	fm := NewFactorBasedBalance(lg)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
 	factor := &mockFactor{bitNum: 2, balanceCount: 1}
 	fm.factors = []Factor{factor}
 	require.NoError(t, fm.updateBitNum())
@@ -149,7 +149,7 @@ func TestBalanceWithOneFactor(t *testing.T) {
 
 func TestBalanceWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	fm := NewFactorBasedBalance(lg)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
 	factor1, factor2 := &mockFactor{bitNum: 1, balanceCount: 2}, &mockFactor{bitNum: 12, balanceCount: 1}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
@@ -228,7 +228,7 @@ func TestBalanceWith2Factors(t *testing.T) {
 
 func TestBalanceWith3Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	fm := NewFactorBasedBalance(lg)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
 	factors := []*mockFactor{{bitNum: 1}, {bitNum: 2}, {bitNum: 2}}
 	fm.factors = []Factor{factors[0], factors[1], factors[2]}
 	require.NoError(t, fm.updateBitNum())
