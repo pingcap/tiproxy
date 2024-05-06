@@ -60,7 +60,8 @@ func NewDefaultHealthCheck(httpCli *http.Client, cfg *config.HealthCheck, logger
 
 func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *BackendInfo) *BackendHealth {
 	bh := &BackendHealth{
-		Healthy: true,
+		BackendInfo: *info,
+		Healthy:     true,
 	}
 	if !dhc.cfg.Enable {
 		return bh
