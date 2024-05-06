@@ -18,16 +18,11 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"go.uber.org/zap"
 )
-
-type QueryExpr struct {
-	PromQL   string
-	Range    time.Duration
-	HasLabel bool
-}
 
 const (
 	getPromNone = iota
@@ -104,7 +99,7 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context) {
 	}, nil, dmr.lg)
 }
 
-// Always refresh the prometheus Address just in case it changes.
+// Always refresh the prometheus address just in case it changes.
 func (dmr *DefaultMetricsReader) getPromAPI(ctx context.Context) (promv1.API, error) {
 	promInfo, err := dmr.promFetcher.GetPromInfo(ctx)
 	if promInfo == nil {
@@ -153,7 +148,12 @@ func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) (map[uint64]Qu
 	results := make(map[uint64]QueryResult, len(copyedMap))
 	now := time.Now()
 	for id, expr := range copyedMap {
-		results[id] = dmr.queryMetric(ctx, promQLAPI, expr, now)
+		qr := dmr.queryMetric(ctx, promQLAPI, expr, now)
+		// Only update the result when it succeeds.
+		if qr.Err == nil {
+			qr.UpdateTime = monotime.Now()
+			results[id] = qr
+		}
 	}
 	return results, nil
 }

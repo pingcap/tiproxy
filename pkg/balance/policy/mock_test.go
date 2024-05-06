@@ -24,3 +24,11 @@ func (mb *mockBackend) Healthy() bool {
 func (mb *mockBackend) ConnScore() int {
 	return mb.connScore
 }
+
+func (mb *mockBackend) ConnCount() int {
+	return mb.connScore
+}
+
+func (mb *mockBackend) Addr() string {
+	return ""
+}
