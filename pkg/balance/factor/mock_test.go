@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 )
 
@@ -40,6 +41,10 @@ func (mb *mockBackend) Addr() string {
 
 func (mb *mockBackend) ConnCount() int {
 	return mb.connCount
+}
+
+func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
+	return observer.BackendInfo{}
 }
 
 var _ Factor = (*mockFactor)(nil)

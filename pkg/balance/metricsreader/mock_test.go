@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
@@ -78,4 +80,41 @@ func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 func (handler *mockHttpHandler) Close() {
 	require.NoError(handler.t, handler.server.Close())
 	handler.wg.Wait()
+}
+
+var _ policy.BackendCtx = (*mockBackend)(nil)
+
+type mockBackend struct {
+	observer.BackendInfo
+	addr string
+}
+
+func newMockBackend(addr string, ip string, port uint) *mockBackend {
+	return &mockBackend{
+		BackendInfo: observer.BackendInfo{
+			IP:         ip,
+			StatusPort: port,
+		},
+		addr: addr,
+	}
+}
+
+func (mb *mockBackend) Healthy() bool {
+	return false
+}
+
+func (mb *mockBackend) ConnScore() int {
+	return 0
+}
+
+func (mb *mockBackend) ConnCount() int {
+	return 0
+}
+
+func (mb *mockBackend) Addr() string {
+	return mb.addr
+}
+
+func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
+	return mb.BackendInfo
 }

@@ -4,6 +4,9 @@
 package metricsreader
 
 import (
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
@@ -55,10 +58,19 @@ func (qr QueryResult) GetMetric4Backend(backend policy.BackendCtx) []model.Sampl
 		return nil
 	}
 	matrix := qr.Value.(model.Matrix)
+	addr := backend.Addr()
+	var labelValue string
+	if strings.Contains(addr, ".svc:") {
+		// In operator deployment, the label value of `instance` is the pod name.
+		labelValue = addr[:strings.Index(addr, ".")]
+	} else {
+		// In tiup deployment, the label value of `instance` is hostname:statusPort.
+		backendInfo := backend.GetBackendInfo()
+		labelValue = net.JoinHostPort(backendInfo.IP, strconv.Itoa(int(backendInfo.StatusPort)))
+	}
 	for _, m := range matrix {
 		if label, ok := m.Metric[LabelNameInstance]; ok {
-			// FIXME: this is incorrect.
-			if (string)(label) == backend.Addr() {
+			if labelValue == (string)(label) {
 				return m.Values
 			}
 		}
