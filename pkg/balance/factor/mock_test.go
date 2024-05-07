@@ -14,6 +14,7 @@ import (
 var _ policy.BackendCtx = (*mockBackend)(nil)
 
 type mockBackend struct {
+	observer.BackendInfo
 	addr      string
 	connScore int
 	connCount int
@@ -44,7 +45,7 @@ func (mb *mockBackend) ConnCount() int {
 }
 
 func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
-	return observer.BackendInfo{}
+	return mb.BackendInfo
 }
 
 var _ Factor = (*mockFactor)(nil)
