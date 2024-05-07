@@ -31,7 +31,7 @@ func TestCreateConn(t *testing.T) {
 	cfg := &config.Config{}
 	certManager := cert.NewCertManager()
 	require.NoError(t, certManager.Init(cfg, lg, nil))
-	server, err := NewSQLServer(lg, cfg, certManager, &panicHsHandler{})
+	server, err := NewSQLServer(lg, cfg, certManager, &mockHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 	defer func() {
@@ -149,7 +149,9 @@ func TestGracefulCloseConn(t *testing.T) {
 
 func TestGracefulShutDown(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	hsHandler := backend.NewDefaultHandshakeHandler(nil)
+	certManager := cert.NewCertManager()
+	err := certManager.Init(&config.Config{}, lg, nil)
+	require.NoError(t, err)
 	cfg := &config.Config{
 		Proxy: config.ProxyServer{
 			ProxyServerOnline: config.ProxyServerOnline{
@@ -158,16 +160,20 @@ func TestGracefulShutDown(t *testing.T) {
 			},
 		},
 	}
-	server, err := NewSQLServer(lg, cfg, nil, hsHandler)
+	server, err := NewSQLServer(lg, cfg, certManager, &mockHsHandler{})
 	require.NoError(t, err)
+	server.Run(context.Background(), nil)
 
 	var wg waitgroup.WaitGroup
 	wg.Run(func() {
 		// Wait until the server begins to shut down.
 		require.Eventually(t, server.IsClosing, 500*time.Millisecond, 10*time.Millisecond)
-		// The listener should be open.
-		conn1, err := net.Dial("tcp", server.listeners[0].Addr().String())
+		// The listener should be open and handshake should proceed.
+		_, port, err := net.SplitHostPort(server.listeners[0].Addr().String())
 		require.NoError(t, err)
+		mdb, err := sql.Open("mysql", fmt.Sprintf("root@tcp(localhost:%s)/test", port))
+		require.NoError(t, err)
+		require.ErrorContains(t, mdb.Ping(), "no router")
 		// The listener should be closed after GracefulWaitBeforeShutdown.
 		require.Eventually(t, func() bool {
 			conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
@@ -176,7 +182,6 @@ func TestGracefulShutDown(t *testing.T) {
 			}
 			return err != nil
 		}, 3*time.Second, 100*time.Millisecond)
-		require.NoError(t, conn1.Close())
 	})
 	require.NoError(t, server.Close())
 	wg.Wait()
@@ -191,7 +196,7 @@ func TestMultiAddr(t *testing.T) {
 		Proxy: config.ProxyServer{
 			Addr: "0.0.0.0:0,0.0.0.0:0",
 		},
-	}, certManager, &panicHsHandler{})
+	}, certManager, &mockHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -244,7 +249,14 @@ func TestRecoverPanic(t *testing.T) {
 	certManager := cert.NewCertManager()
 	err := certManager.Init(&config.Config{}, lg, nil)
 	require.NoError(t, err)
-	server, err := NewSQLServer(lg, &config.Config{}, certManager, &panicHsHandler{})
+	server, err := NewSQLServer(lg, &config.Config{}, certManager, &mockHsHandler{
+		handshakeResp: func(ctx backend.ConnContext, _ *pnet.HandshakeResp) error {
+			if ctx.Value(backend.ConnContextKeyConnID).(uint64) == 0 {
+				panic("HandleHandshakeResp panic")
+			}
+			return nil
+		},
+	})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -264,23 +276,24 @@ func TestRecoverPanic(t *testing.T) {
 	certManager.Close()
 }
 
-type panicHsHandler struct {
+type mockHsHandler struct {
 	backend.DefaultHandshakeHandler
+	handshakeResp func(ctx backend.ConnContext, _ *pnet.HandshakeResp) error
 }
 
 // HandleHandshakeResp only panics for the first connections.
-func (handler *panicHsHandler) HandleHandshakeResp(ctx backend.ConnContext, _ *pnet.HandshakeResp) error {
-	if ctx.Value(backend.ConnContextKeyConnID).(uint64) == 0 {
-		panic("HandleHandshakeResp panic")
+func (handler *mockHsHandler) HandleHandshakeResp(ctx backend.ConnContext, resp *pnet.HandshakeResp) error {
+	if handler.handshakeResp != nil {
+		return handler.handshakeResp(ctx, resp)
 	}
 	return nil
 }
 
-func (handler *panicHsHandler) GetServerVersion() string {
+func (handler *mockHsHandler) GetServerVersion() string {
 	return "5.7"
 }
 
 // GetRouter returns an error for the second connection.
-func (handler *panicHsHandler) GetRouter(backend.ConnContext, *pnet.HandshakeResp) (router.Router, error) {
+func (handler *mockHsHandler) GetRouter(backend.ConnContext, *pnet.HandshakeResp) (router.Router, error) {
 	return nil, errors.New("no router")
 }
