@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	tidbinfo "github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/sys"
@@ -119,13 +118,13 @@ func TestFetchTiDBTopology(t *testing.T) {
 			check: func(info map[string]*TiDBInfo) {
 				require.Len(ts.t, info, 1)
 				require.Equal(ts.t, "123456789", info["1.1.1.1:4000"].TTL)
-				require.Nil(ts.t, info["1.1.1.1:4000"].TopologyInfo)
+				require.Nil(ts.t, info["1.1.1.1:4000"].TiDBTopologyInfo)
 			},
 		},
 		{
 			// Then update info.
 			update: func() {
-				ts.updateInfo("1.1.1.1:4000", &tidbinfo.TopologyInfo{
+				ts.updateInfo("1.1.1.1:4000", &TiDBTopologyInfo{
 					IP:         "1.1.1.1",
 					StatusPort: 10080,
 				})
@@ -133,7 +132,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 			check: func(info map[string]*TiDBInfo) {
 				require.Len(ts.t, info, 1)
 				require.Equal(ts.t, "123456789", info["1.1.1.1:4000"].TTL)
-				require.NotNil(ts.t, info["1.1.1.1:4000"].TopologyInfo)
+				require.NotNil(ts.t, info["1.1.1.1:4000"].TiDBTopologyInfo)
 				require.Equal(ts.t, "1.1.1.1", info["1.1.1.1:4000"].IP)
 				require.Equal(ts.t, uint(10080), info["1.1.1.1:4000"].StatusPort)
 			},
@@ -142,7 +141,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 			// Add another backend.
 			update: func() {
 				ts.updateTTL("2.2.2.2:4000", []byte("123456789"))
-				ts.updateInfo("2.2.2.2:4000", &tidbinfo.TopologyInfo{
+				ts.updateInfo("2.2.2.2:4000", &TiDBTopologyInfo{
 					IP:         "2.2.2.2",
 					StatusPort: 10080,
 				})
@@ -150,7 +149,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 			check: func(info map[string]*TiDBInfo) {
 				require.Len(ts.t, info, 2)
 				require.Equal(ts.t, "123456789", info["2.2.2.2:4000"].TTL)
-				require.NotNil(ts.t, info["2.2.2.2:4000"].TopologyInfo)
+				require.NotNil(ts.t, info["2.2.2.2:4000"].TiDBTopologyInfo)
 				require.Equal(ts.t, "2.2.2.2", info["2.2.2.2:4000"].IP)
 				require.Equal(ts.t, uint(10080), info["2.2.2.2:4000"].StatusPort)
 			},
@@ -163,7 +162,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 			check: func(info map[string]*TiDBInfo) {
 				require.Len(ts.t, info, 2)
 				require.Empty(ts.t, info["2.2.2.2:4000"].TTL)
-				require.NotNil(ts.t, info["2.2.2.2:4000"].TopologyInfo)
+				require.NotNil(ts.t, info["2.2.2.2:4000"].TiDBTopologyInfo)
 			},
 		},
 	}
@@ -365,20 +364,20 @@ func (ts *etcdTestSuite) getTTLAndInfo(prefix string) (string, string) {
 
 // Update the TTL for a backend.
 func (ts *etcdTestSuite) updateTTL(addr string, ttl []byte) {
-	_, err := ts.kv.Put(context.Background(), path.Join(tidbinfo.TopologyInformationPath, addr, ttlSuffix), string(ttl))
+	_, err := ts.kv.Put(context.Background(), path.Join(tidbTopologyInformationPath, addr, ttlSuffix), string(ttl))
 	require.NoError(ts.t, err)
 }
 
 func (ts *etcdTestSuite) deleteTTL(addr string) {
-	_, err := ts.kv.Delete(context.Background(), path.Join(tidbinfo.TopologyInformationPath, addr, ttlSuffix))
+	_, err := ts.kv.Delete(context.Background(), path.Join(tidbTopologyInformationPath, addr, ttlSuffix))
 	require.NoError(ts.t, err)
 }
 
 // Update the TopologyInfo for a backend.
-func (ts *etcdTestSuite) updateInfo(sqlAddr string, info *tidbinfo.TopologyInfo) {
+func (ts *etcdTestSuite) updateInfo(sqlAddr string, info *TiDBTopologyInfo) {
 	data, err := json.Marshal(info)
 	require.NoError(ts.t, err)
-	_, err = ts.kv.Put(context.Background(), path.Join(tidbinfo.TopologyInformationPath, sqlAddr, infoSuffix), string(data))
+	_, err = ts.kv.Put(context.Background(), path.Join(tidbTopologyInformationPath, sqlAddr, infoSuffix), string(data))
 	require.NoError(ts.t, err)
 }
 

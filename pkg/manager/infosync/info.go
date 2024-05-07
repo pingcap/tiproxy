@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	tidbinfo "github.com/pingcap/tidb/domain/infosync"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
@@ -30,6 +29,9 @@ import (
 const (
 	tiproxyTopologyPath = "/topology/tiproxy"
 	promTopologyPath    = "/topology/prometheus"
+
+	// tidbTopologyInformationPath means etcd path for storing topology info.
+	tidbTopologyInformationPath = "/topology/tidb"
 
 	topologySessionTTL    = 45
 	topologyRefreshIntvl  = 30 * time.Second
@@ -80,10 +82,21 @@ type TopologyInfo struct {
 	StartTimestamp int64  `json:"start_timestamp"`
 }
 
+// TiDBTopologyInfo is the topology info of TiDB.
+type TiDBTopologyInfo struct {
+	Version        string            `json:"version"`
+	GitHash        string            `json:"git_hash"`
+	IP             string            `json:"ip"`
+	StatusPort     uint              `json:"status_port"`
+	DeployPath     string            `json:"deploy_path"`
+	StartTimestamp int64             `json:"start_timestamp"`
+	Labels         map[string]string `json:"labels"`
+}
+
 // TiDBInfo is the info of TiDB.
 type TiDBInfo struct {
 	// TopologyInfo is parsed from the /info path.
-	*tidbinfo.TopologyInfo
+	*TiDBTopologyInfo
 	// TTL is parsed from the /ttl path.
 	TTL string
 }
@@ -258,7 +271,7 @@ func (is *InfoSyncer) removeTopology(ctx context.Context) error {
 
 func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBInfo, error) {
 	// etcdCli.Get will retry infinitely internally.
-	res, err := is.etcdCli.Get(ctx, tidbinfo.TopologyInformationPath, clientv3.WithPrefix())
+	res, err := is.etcdCli.Get(ctx, tidbTopologyInformationPath, clientv3.WithPrefix())
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -266,14 +279,14 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBInfo
 	infos := make(map[string]*TiDBInfo, len(res.Kvs)/2)
 	for _, kv := range res.Kvs {
 		var ttl, addr string
-		var topology *tidbinfo.TopologyInfo
+		var topology *TiDBTopologyInfo
 		key := hack.String(kv.Key)
 		switch {
 		case strings.HasSuffix(key, ttlSuffix):
-			addr = key[len(tidbinfo.TopologyInformationPath)+1 : len(key)-len(ttlSuffix)-1]
+			addr = key[len(tidbTopologyInformationPath)+1 : len(key)-len(ttlSuffix)-1]
 			ttl = hack.String(kv.Value)
 		case strings.HasSuffix(key, infoSuffix):
-			addr = key[len(tidbinfo.TopologyInformationPath)+1 : len(key)-len(infoSuffix)-1]
+			addr = key[len(tidbTopologyInformationPath)+1 : len(key)-len(infoSuffix)-1]
 			if err = json.Unmarshal(kv.Value, &topology); err != nil {
 				is.lg.Error("unmarshal topology info failed", zap.String("key", key),
 					zap.String("value", hack.String(kv.Value)), zap.Error(err))
@@ -292,7 +305,7 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBInfo
 		if len(ttl) > 0 {
 			info.TTL = hack.String(kv.Value)
 		} else {
-			info.TopologyInfo = topology
+			info.TiDBTopologyInfo = topology
 		}
 	}
 	return infos, nil
