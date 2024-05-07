@@ -6,6 +6,7 @@ package observer
 import "fmt"
 
 type BackendHealth struct {
+	BackendInfo
 	Healthy bool
 	// The error occurred when health check fails. It's used to log why the backend becomes unhealthy.
 	PingErr error

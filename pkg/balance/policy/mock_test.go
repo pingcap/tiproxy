@@ -3,6 +3,8 @@
 
 package policy
 
+import "github.com/pingcap/tiproxy/pkg/balance/observer"
+
 var _ BackendCtx = (*mockBackend)(nil)
 
 type mockBackend struct {
@@ -31,4 +33,8 @@ func (mb *mockBackend) ConnCount() int {
 
 func (mb *mockBackend) Addr() string {
 	return ""
+}
+
+func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
+	return observer.BackendInfo{}
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -85,7 +86,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 		updateScore(fc, backends)
 		sortedIdx := make([]int, 0, len(test.cpus))
 		for _, backend := range backends {
-			idx, err := strconv.Atoi(backend.Addr())
+			idx, err := strconv.Atoi(backend.GetBackendInfo().IP)
 			require.NoError(t, err)
 			sortedIdx = append(sortedIdx, idx)
 		}
@@ -199,7 +200,7 @@ func TestCPUBalanceContinuously(t *testing.T) {
 		}
 		connScores := make([]int, len(test.connScores))
 		for _, backend := range backends {
-			idx, err := strconv.Atoi(backend.Addr())
+			idx, err := strconv.Atoi(backend.GetBackendInfo().IP)
 			require.NoError(t, err)
 			connScores[idx] = backend.ConnScore()
 		}
@@ -246,10 +247,14 @@ func TestNoCPUMetric(t *testing.T) {
 }
 
 func createBackend(backendIdx, connCount, connScore int) scoredBackend {
-	addr := strconv.Itoa(backendIdx)
+	host := strconv.Itoa(backendIdx)
 	return scoredBackend{
 		BackendCtx: &mockBackend{
-			addr:      addr,
+			BackendInfo: observer.BackendInfo{
+				IP:         host,
+				StatusPort: 10080,
+			},
+			addr:      host + ":4000",
 			connCount: connCount,
 			connScore: connScore,
 			healthy:   true,
@@ -258,8 +263,8 @@ func createBackend(backendIdx, connCount, connScore int) scoredBackend {
 }
 
 func createSampleStream(cpus []float64, backendIdx int) *model.SampleStream {
-	addr := strconv.Itoa(backendIdx)
-	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(addr)}
+	host := strconv.Itoa(backendIdx)
+	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(host + ":10080")}
 	pairs := make([]model.SamplePair, 0, len(cpus))
 	for _, cpu := range cpus {
 		pairs = append(pairs, model.SamplePair{Value: model.SampleValue(cpu)})

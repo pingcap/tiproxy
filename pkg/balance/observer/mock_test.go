@@ -86,6 +86,14 @@ func (mhc *mockHealthCheck) setBackend(addr string, health *BackendHealth) {
 	mhc.backends[addr] = health
 }
 
+func (mhc *mockHealthCheck) setHealth(addr string, healthy bool) {
+	mhc.Lock()
+	defer mhc.Unlock()
+	health := *mhc.backends[addr]
+	health.Healthy = healthy
+	mhc.backends[addr] = &health
+}
+
 func (mhc *mockHealthCheck) removeBackend(addr string) {
 	mhc.Lock()
 	defer mhc.Unlock()

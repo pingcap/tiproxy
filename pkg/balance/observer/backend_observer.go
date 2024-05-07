@@ -115,9 +115,10 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 	curBackendHealth := make(map[string]*BackendHealth, len(backends))
 	// Serverless tier checks health in Gateway instead of in TiProxy.
 	if !bo.healthCheckConfig.Enable {
-		for addr := range backends {
+		for addr, backend := range backends {
 			curBackendHealth[addr] = &BackendHealth{
-				Healthy: true,
+				BackendInfo: *backend,
+				Healthy:     true,
 			}
 		}
 		return curBackendHealth

@@ -131,6 +131,13 @@ func (b *backendWrapper) ConnCount() int {
 	return b.connList.Len()
 }
 
+func (b *backendWrapper) GetBackendInfo() observer.BackendInfo {
+	b.mu.RLock()
+	info := b.mu.BackendInfo
+	b.mu.RUnlock()
+	return info
+}
+
 func (b *backendWrapper) Equals(health observer.BackendHealth) bool {
 	b.mu.RLock()
 	equal := b.mu.BackendHealth.Equals(health)

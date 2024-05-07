@@ -5,6 +5,7 @@ package router
 
 import (
 	"context"
+	"net"
 	"reflect"
 	"sync"
 	"time"
@@ -178,7 +179,12 @@ func (router *ScoreBasedRouter) ensureBackend(addr string) *backendWrapper {
 	}
 	// The backend should always exist if it will be needed. Add a warning and add it back.
 	router.logger.Warn("backend is not found in the router", zap.String("backend_addr", addr), zap.Stack("stack"))
+	ip, _, _ := net.SplitHostPort(addr)
 	backend = newBackendWrapper(addr, observer.BackendHealth{
+		BackendInfo: observer.BackendInfo{
+			IP:         ip,
+			StatusPort: 10080, // impossible anyway
+		},
 		Healthy: false,
 	})
 	router.backends[addr] = backend
@@ -247,11 +253,12 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	// `backends` contain all the backends, not only the updated ones.
 	backends := healthResults.Backends()
 	// If some backends are removed from the list, add them to `backends`.
-	for addr := range router.backends {
+	for addr, backend := range router.backends {
 		if _, ok := backends[addr]; !ok {
 			backends[addr] = &observer.BackendHealth{
-				Healthy: false,
-				PingErr: errors.New("removed from backend list"),
+				BackendInfo: backend.GetBackendInfo(),
+				Healthy:     false,
+				PingErr:     errors.New("removed from backend list"),
 			}
 		}
 	}

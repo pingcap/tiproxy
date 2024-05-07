@@ -3,7 +3,10 @@
 
 package policy
 
-import "go.uber.org/zap"
+import (
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"go.uber.org/zap"
+)
 
 type BalancePolicy interface {
 	Init()
@@ -18,4 +21,5 @@ type BackendCtx interface {
 	// ConnScore = current connections + incoming connections - outgoing connections.
 	ConnScore() int
 	Healthy() bool
+	GetBackendInfo() observer.BackendInfo
 }
