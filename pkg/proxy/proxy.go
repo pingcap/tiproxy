@@ -148,40 +148,38 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 }
 
 func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
-	s.mu.Lock()
+	tcpKeepAlive, logger, connID, clientConn := func() (bool, *zap.Logger, uint64, *client.ClientConnection) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
-	if s.mu.status >= statusWaitShutdown {
-		s.mu.Unlock()
-		s.logger.Warn("server is shutting down while creating the connection", zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+		conns := uint64(len(s.mu.clients))
+		maxConns := s.mu.maxConnections
+		// 'maxConns == 0' => unlimited connections
+		if maxConns != 0 && conns >= maxConns {
+			s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+			return false, nil, 0, nil
+		}
+
+		connID := s.mu.connID
+		s.mu.connID++
+		logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
+			zap.String("addr", addr))
+		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),
+			s.hsHandler, connID, addr, &backend.BCConfig{
+				ProxyProtocol:      s.mu.proxyProtocol,
+				RequireBackendTLS:  s.mu.requireBackendTLS,
+				HealthyKeepAlive:   s.mu.healthyKeepAlive,
+				UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
+				ConnBufferSize:     s.mu.connBufferSize,
+			})
+		s.mu.clients[connID] = clientConn
+		logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
+		return s.mu.tcpKeepAlive, logger, connID, clientConn
+	}()
+
+	if clientConn == nil {
 		return
 	}
-
-	conns := uint64(len(s.mu.clients))
-	maxConns := s.mu.maxConnections
-	tcpKeepAlive := s.mu.tcpKeepAlive
-
-	// 'maxConns == 0' => unlimited connections
-	if maxConns != 0 && conns >= maxConns {
-		s.mu.Unlock()
-		s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
-		return
-	}
-
-	connID := s.mu.connID
-	s.mu.connID++
-	logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
-		zap.String("addr", addr))
-	clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),
-		s.hsHandler, connID, addr, &backend.BCConfig{
-			ProxyProtocol:      s.mu.proxyProtocol,
-			RequireBackendTLS:  s.mu.requireBackendTLS,
-			HealthyKeepAlive:   s.mu.healthyKeepAlive,
-			UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
-			ConnBufferSize:     s.mu.connBufferSize,
-		})
-	s.mu.clients[connID] = clientConn
-	logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
-	s.mu.Unlock()
 
 	metrics.ConnGauge.Inc()
 	metrics.CreateConnCounter.Inc()
