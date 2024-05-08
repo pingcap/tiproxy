@@ -51,7 +51,7 @@ func (pf *PDFetcher) GetBackendList(ctx context.Context) (map[string]*BackendInf
 			continue
 		}
 		// If topology is empty, maybe the backend is not ready yet.
-		if backend.TopologyInfo == nil {
+		if backend.TiDBTopologyInfo == nil {
 			continue
 		}
 		infos[addr] = &BackendInfo{
