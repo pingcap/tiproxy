@@ -189,6 +189,7 @@ func (dmr *DefaultMetricsReader) queryOnce(ctx context.Context, promQLAPI promv1
 	qr.Err = backoff.Retry(func() error {
 		var err error
 		qr.Value, _, err = promQLAPI.QueryRange(childCtx, promQL, promRange)
+		dmr.lg.Info("begin query", zap.String("query", promQL), zap.Any("range", promRange), zap.Error(err))
 		if !pnet.IsRetryableError(err) {
 			return backoff.Permanent(errors.WithStack(err))
 		}
