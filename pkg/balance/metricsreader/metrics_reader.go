@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -172,7 +173,7 @@ func (dmr *DefaultMetricsReader) queryMetric(ctx context.Context, promQLAPI prom
 		promQL := fmt.Sprintf(expr.PromQL, label)
 		qr = dmr.queryOnce(ctx, promQLAPI, promQL, promRange)
 		if qr.Err != nil {
-			break
+			continue
 		}
 		if !qr.Empty() {
 			expr.PromQL = promQL
@@ -190,7 +191,7 @@ func (dmr *DefaultMetricsReader) queryOnce(ctx context.Context, promQLAPI promv1
 		var err error
 		qr.Value, _, err = promQLAPI.QueryRange(childCtx, promQL, promRange)
 		dmr.lg.Info("begin query", zap.String("query", promQL), zap.Any("range", promRange), zap.Error(err))
-		if !pnet.IsRetryableError(err) {
+		if !pnet.IsRetryableError(err) || (err != nil && strings.Contains(err.Error(), "parse error")) {
 			return backoff.Permanent(errors.WithStack(err))
 		}
 		return errors.WithStack(err)
