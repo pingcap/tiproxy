@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/common/model"
+	"go.uber.org/zap"
 )
 
 const (
@@ -50,14 +51,16 @@ type FactorCPU struct {
 	mr           metricsreader.MetricsReader
 	queryID      uint64
 	bitNum       int
+	lg           *zap.Logger
 }
 
-func NewFactorCPU(mr metricsreader.MetricsReader) *FactorCPU {
+func NewFactorCPU(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorCPU {
 	return &FactorCPU{
 		mr:       mr,
 		queryID:  mr.AddQueryExpr(cpuQueryExpr),
 		bitNum:   5,
 		snapshot: make(map[string]backendSnapshot),
+		lg:       lg,
 	}
 }
 
@@ -66,6 +69,9 @@ func (fc *FactorCPU) Name() string {
 }
 
 func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
+	for _, backend := range backends {
+		fc.lg.Info(backend.Addr(), zap.String("IP", backend.GetBackendInfo().IP), zap.Uint("status port", backend.GetBackendInfo().StatusPort))
+	}
 	if len(backends) <= 1 {
 		return
 	}
@@ -73,7 +79,7 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 	if qr.Err != nil || qr.Empty() {
 		return
 	}
-
+	fc.lg.Info("query result", zap.Any("result", qr))
 	if qr.UpdateTime != fc.lastMetricTime {
 		// Metrics have updated.
 		fc.lastMetricTime = qr.UpdateTime
@@ -106,6 +112,9 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 			avgUsage = 1
 		}
 		backends[i].addScore(int(avgUsage*100)/cpuScoreStep, fc.bitNum)
+	}
+	for addr, snapshot := range fc.snapshot {
+		fc.lg.Info("snapshot", zap.String("addr", addr), zap.Any("usage", snapshot.avgUsage))
 	}
 }
 
