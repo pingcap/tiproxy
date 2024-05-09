@@ -147,8 +147,10 @@ func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) (map[uint64]Qu
 	dmr.Unlock()
 	results := make(map[uint64]QueryResult, len(copyedMap))
 	now := time.Now()
+	dmr.lg.Info("begin read exprs", zap.Any("exprs", copyedMap))
 	for id, expr := range copyedMap {
 		qr := dmr.queryMetric(ctx, promQLAPI, expr, now)
+		dmr.lg.Info("read expr", zap.Any("expr", expr), zap.Any("result", qr))
 		// Only update the result when it succeeds.
 		if qr.Err == nil {
 			qr.UpdateTime = monotime.Now()
