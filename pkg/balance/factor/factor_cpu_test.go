@@ -82,7 +82,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 				Value:      model.Matrix(values),
 			},
 		}
-		fc := NewFactorCPU(mmr, nil)
+		fc := NewFactorCPU(mmr)
 		updateScore(fc, backends)
 		sortedIdx := make([]int, 0, len(test.cpus))
 		for _, backend := range backends {
@@ -173,7 +173,7 @@ func TestCPUBalanceContinuously(t *testing.T) {
 	}
 
 	mmr := newMockMetricsReader()
-	fc := NewFactorCPU(mmr, nil)
+	fc := NewFactorCPU(mmr)
 	for i, test := range tests {
 		backends := make([]scoredBackend, 0, len(test.cpus))
 		values := make([]*model.SampleStream, 0, len(test.cpus))
@@ -227,7 +227,7 @@ func TestNoCPUMetric(t *testing.T) {
 	}
 
 	mmr := newMockMetricsReader()
-	fc := NewFactorCPU(mmr, nil)
+	fc := NewFactorCPU(mmr)
 	backends := make([]scoredBackend, 0, 2)
 	for i := 0; i < 2; i++ {
 		backends = append(backends, createBackend(i, i*100, i*100))
