@@ -40,7 +40,7 @@ func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *Fact
 func (fbb *FactorBasedBalance) Init() {
 	fbb.factors = []Factor{
 		NewFactorHealth(),
-		NewFactorCPU(fbb.mr, fbb.lg),
+		NewFactorCPU(fbb.mr),
 		NewFactorConnCount(),
 	}
 	err := fbb.updateBitNum()

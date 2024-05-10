@@ -9,7 +9,6 @@ import (
 	"net"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -148,14 +147,14 @@ func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) (map[uint64]Qu
 	dmr.Unlock()
 	results := make(map[uint64]QueryResult, len(copyedMap))
 	now := time.Now()
-	dmr.lg.Info("begin read exprs", zap.Any("exprs", copyedMap))
 	for id, expr := range copyedMap {
 		qr := dmr.queryMetric(ctx, promQLAPI, expr, now)
-		dmr.lg.Info("read expr", zap.Any("expr", expr), zap.Any("result", qr))
 		// Only update the result when it succeeds.
 		if qr.Err == nil {
 			qr.UpdateTime = monotime.Now()
 			results[id] = qr
+		} else {
+			dmr.lg.Warn("querying metrics fails", zap.String("expr", expr.PromQL), zap.Error(qr.Err))
 		}
 	}
 	return results, nil
@@ -190,12 +189,11 @@ func (dmr *DefaultMetricsReader) queryOnce(ctx context.Context, promQLAPI promv1
 	qr.Err = backoff.Retry(func() error {
 		var err error
 		qr.Value, _, err = promQLAPI.QueryRange(childCtx, promQL, promRange)
-		dmr.lg.Info("begin query", zap.String("query", promQL), zap.Any("range", promRange), zap.Error(err))
-		if !pnet.IsRetryableError(err) || (err != nil && strings.Contains(err.Error(), "parse error")) {
+		if !pnet.IsRetryableError(err) {
 			return backoff.Permanent(errors.WithStack(err))
 		}
 		return errors.WithStack(err)
-	}, backoff.WithContext(backoff.NewConstantBackOff(0), childCtx))
+	}, backoff.WithContext(backoff.NewExponentialBackOff(), childCtx))
 	cancel()
 	return qr
 }
