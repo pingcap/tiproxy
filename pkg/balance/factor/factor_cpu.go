@@ -73,6 +73,7 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 	if qr.Err != nil || qr.Empty() {
 		return
 	}
+
 	if qr.UpdateTime != fc.lastMetricTime {
 		// Metrics have updated.
 		fc.lastMetricTime = qr.UpdateTime
