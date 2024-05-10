@@ -153,6 +153,8 @@ func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) (map[uint64]Qu
 		if qr.Err == nil {
 			qr.UpdateTime = monotime.Now()
 			results[id] = qr
+		} else {
+			dmr.lg.Warn("querying metrics fails", zap.String("expr", expr.PromQL), zap.Error(qr.Err))
 		}
 	}
 	return results, nil
@@ -170,7 +172,7 @@ func (dmr *DefaultMetricsReader) queryMetric(ctx context.Context, promQLAPI prom
 		promQL := fmt.Sprintf(expr.PromQL, label)
 		qr = dmr.queryOnce(ctx, promQLAPI, promQL, promRange)
 		if qr.Err != nil {
-			break
+			continue
 		}
 		if !qr.Empty() {
 			expr.PromQL = promQL
@@ -191,7 +193,7 @@ func (dmr *DefaultMetricsReader) queryOnce(ctx context.Context, promQLAPI promv1
 			return backoff.Permanent(errors.WithStack(err))
 		}
 		return errors.WithStack(err)
-	}, backoff.WithContext(backoff.NewConstantBackOff(0), childCtx))
+	}, backoff.WithContext(backoff.NewExponentialBackOff(), childCtx))
 	cancel()
 	return qr
 }

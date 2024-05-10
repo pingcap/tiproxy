@@ -27,7 +27,7 @@ var _ Factor = (*FactorCPU)(nil)
 
 var (
 	cpuQueryExpr = metricsreader.QueryExpr{
-		PromQL:   `rate(process_cpu_seconds_total/tidb_server_maxprocs{%s="tidb"}[15s])`,
+		PromQL:   `rate(process_cpu_seconds_total{%s="tidb"}[30s])/tidb_server_maxprocs`,
 		HasLabel: true,
 		Range:    3 * time.Minute,
 	}
