@@ -6,6 +6,7 @@ package policy
 import (
 	"sort"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"go.uber.org/zap"
 )
 
@@ -29,7 +30,7 @@ func NewSimpleBalancePolicy() *SimpleBalancePolicy {
 	return &SimpleBalancePolicy{}
 }
 
-func (sbp *SimpleBalancePolicy) Init() {
+func (sbp *SimpleBalancePolicy) Init(cfg *config.Config) {
 }
 
 func (sbp *SimpleBalancePolicy) BackendToRoute(backends []BackendCtx) BackendCtx {
@@ -76,4 +77,7 @@ func sortBackends(backends []BackendCtx) {
 		}
 		return backends[i].Healthy() == backends[j].Healthy() && backends[i].ConnScore() < backends[j].ConnScore()
 	})
+}
+
+func (sbp *SimpleBalancePolicy) SetConfig(cfg *config.Config) {
 }

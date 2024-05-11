@@ -6,6 +6,7 @@ package factor
 import (
 	"context"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
@@ -54,6 +55,7 @@ type mockFactor struct {
 	bitNum       int
 	balanceCount int
 	updateScore  func(backends []scoredBackend)
+	cfg          *config.Config
 }
 
 func (mf *mockFactor) Name() string {
@@ -70,6 +72,10 @@ func (mf *mockFactor) ScoreBitNum() int {
 
 func (mf *mockFactor) BalanceCount(from, to scoredBackend) int {
 	return mf.balanceCount
+}
+
+func (mf *mockFactor) SetConfig(cfg *config.Config) {
+	mf.cfg = cfg
 }
 
 var _ metricsreader.MetricsReader = (*mockMetricsReader)(nil)

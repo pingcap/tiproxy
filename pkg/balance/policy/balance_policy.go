@@ -4,14 +4,16 @@
 package policy
 
 import (
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"go.uber.org/zap"
 )
 
 type BalancePolicy interface {
-	Init()
+	Init(cfg *config.Config)
 	BackendToRoute(backends []BackendCtx) BackendCtx
 	BackendsToBalance(backends []BackendCtx) (from, to BackendCtx, balanceCount int, reason []zap.Field)
+	SetConfig(cfg *config.Config)
 }
 
 type BackendCtx interface {

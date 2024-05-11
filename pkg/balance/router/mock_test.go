@@ -7,10 +7,14 @@ import (
 	"context"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zapcore"
 )
 
 type mockRedirectableConn struct {
@@ -167,4 +171,30 @@ func (mbo *mockBackendObserver) Close() {
 	for _, subscriber := range mbo.subscribers {
 		close(subscriber)
 	}
+}
+
+var _ policy.BalancePolicy = (*mockBalancePolicy)(nil)
+
+type mockBalancePolicy struct {
+	cfg atomic.Pointer[config.Config]
+}
+
+func (m *mockBalancePolicy) Init(cfg *config.Config) {
+	m.cfg.Store(cfg)
+}
+
+func (m *mockBalancePolicy) BackendToRoute(backends []policy.BackendCtx) policy.BackendCtx {
+	return nil
+}
+
+func (m *mockBalancePolicy) BackendsToBalance(backends []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount int, reason []zapcore.Field) {
+	return nil, nil, 0, nil
+}
+
+func (m *mockBalancePolicy) SetConfig(cfg *config.Config) {
+	m.cfg.Store(cfg)
+}
+
+func (m *mockBalancePolicy) getConfig() *config.Config {
+	return m.cfg.Load()
 }

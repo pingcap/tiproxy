@@ -4,6 +4,7 @@
 package factor
 
 import (
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
@@ -37,7 +38,7 @@ func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *Fact
 
 // Init creates factors at the first time.
 // TODO: create factors according to config and update policy when config changes.
-func (fbb *FactorBasedBalance) Init() {
+func (fbb *FactorBasedBalance) Init(cfg *config.Config) {
 	fbb.factors = []Factor{
 		NewFactorHealth(),
 		NewFactorCPU(fbb.mr),
@@ -47,6 +48,7 @@ func (fbb *FactorBasedBalance) Init() {
 	if err != nil {
 		panic(err.Error())
 	}
+	fbb.SetConfig(cfg)
 }
 
 func (fbb *FactorBasedBalance) updateBitNum() error {
@@ -160,4 +162,10 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 		zap.Uint64("to_score", minScore),
 	}
 	return busiestBackend.BackendCtx, idlestBackend.BackendCtx, balanceCount, fields
+}
+
+func (fbb *FactorBasedBalance) SetConfig(cfg *config.Config) {
+	for _, factor := range fbb.factors {
+		factor.SetConfig(cfg)
+	}
 }

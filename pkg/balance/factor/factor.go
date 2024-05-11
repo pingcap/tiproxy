@@ -3,6 +3,8 @@
 
 package factor
 
+import "github.com/pingcap/tiproxy/lib/config"
+
 type Factor interface {
 	// Name returns the name of the factor.
 	Name() string
@@ -13,4 +15,5 @@ type Factor interface {
 	// BalanceCount returns the count of connections to balance in this round.
 	// 0 indicates balanced (within the threshold) or the migration speed is limited.
 	BalanceCount(from, to scoredBackend) int
+	SetConfig(cfg *config.Config)
 }

@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/common/model"
@@ -226,4 +227,7 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) int {
 		return balanceCount4Cpu
 	}
 	return 0
+}
+
+func (fcc *FactorCPU) SetConfig(cfg *config.Config) {
 }
