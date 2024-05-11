@@ -292,6 +292,24 @@ func TestSetFactorConfig(t *testing.T) {
 	}
 }
 
+// Even if the factor doesn't add a score, the score is still updated so that we can find the unbalanced factor
+// by locating the unbalanced bits.
+func TestScoreAlwaysUpdated(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
+	factors := []*mockFactor{{bitNum: 1}, {bitNum: 2}}
+	fm.factors = []Factor{factors[0], factors[1]}
+	factors[0].updateScore = func(backends []scoredBackend) {
+		for i := 0; i < len(backends); i++ {
+			backends[i].addScore(1, 1)
+		}
+	}
+	factors[1].updateScore = func(backends []scoredBackend) {}
+	backends := createBackends(1)
+	scoredBackends := fm.updateScore(backends)
+	require.EqualValues(t, 1<<2, scoredBackends[0].score())
+}
+
 func createBackends(num int) []policy.BackendCtx {
 	backends := make([]policy.BackendCtx, 0, num)
 	for i := 0; i < num; i++ {

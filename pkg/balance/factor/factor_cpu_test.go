@@ -241,7 +241,7 @@ func TestNoCPUMetric(t *testing.T) {
 			UpdateTime: test.updateTime,
 			Value:      model.Matrix(values),
 		}
-		fc.UpdateScore(backends)
+		updateScore(fc, backends)
 		require.Equal(t, backends[0].score(), backends[1].score(), "test index %d", i)
 	}
 }
