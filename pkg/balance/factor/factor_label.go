@@ -33,7 +33,6 @@ func (fl *FactorLabel) Name() string {
 
 func (fl *FactorLabel) UpdateScore(backends []scoredBackend) {
 	if len(fl.labelName) == 0 || len(fl.selfLabelVal) == 0 || len(backends) <= 1 {
-		setEmptyScore(backends, fl.bitNum)
 		return
 	}
 	for i := 0; i < len(backends); i++ {

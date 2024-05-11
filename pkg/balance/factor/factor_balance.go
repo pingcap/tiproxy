@@ -64,6 +64,22 @@ func (fbb *FactorBasedBalance) updateBitNum() error {
 	return nil
 }
 
+// updateScore updates backend scores.
+func (fbb *FactorBasedBalance) updateScore(backends []policy.BackendCtx) []scoredBackend {
+	scoredBackends := fbb.cachedList[:0]
+	for _, backend := range backends {
+		scoredBackends = append(scoredBackends, newScoredBackend(backend))
+	}
+	for _, factor := range fbb.factors {
+		bitNum := factor.ScoreBitNum()
+		for j := 0; j < len(scoredBackends); j++ {
+			scoredBackends[j].prepareScore(bitNum)
+		}
+		factor.UpdateScore(scoredBackends)
+	}
+	return scoredBackends
+}
+
 // BackendToRoute returns the idlest backend.
 func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) policy.BackendCtx {
 	if len(backends) == 0 {
@@ -72,14 +88,8 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	if len(backends) == 1 {
 		return backends[0]
 	}
-	scoredBackends := fbb.cachedList[:0]
-	for _, backend := range backends {
-		scoredBackends = append(scoredBackends, newScoredBackend(backend))
-	}
-	// Update backend scores.
-	for _, factor := range fbb.factors {
-		factor.UpdateScore(scoredBackends)
-	}
+	scoredBackends := fbb.updateScore(backends)
+
 	// Find the idlest backend.
 	idlestBackend := scoredBackends[0]
 	minScore := idlestBackend.score()
@@ -100,14 +110,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 	if len(backends) <= 1 {
 		return
 	}
-	// Update backend scores.
-	scoredBackends := fbb.cachedList[:0]
-	for _, backend := range backends {
-		scoredBackends = append(scoredBackends, newScoredBackend(backend))
-	}
-	for _, factor := range fbb.factors {
-		factor.UpdateScore(scoredBackends)
-	}
+	scoredBackends := fbb.updateScore(backends)
 
 	// Get the unbalanced backends and their scores.
 	var idlestBackend, busiestBackend *scoredBackend

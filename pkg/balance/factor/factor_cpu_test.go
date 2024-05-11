@@ -241,15 +241,8 @@ func TestNoCPUMetric(t *testing.T) {
 			UpdateTime: test.updateTime,
 			Value:      model.Matrix(values),
 		}
-		for j := 0; j < len(backends); j++ {
-			// set the score to 1
-			backends[j].addScore(1, 1)
-		}
-		scoreBefore := backends[0].score()
 		fc.UpdateScore(backends)
 		require.Equal(t, backends[0].score(), backends[1].score(), "test index %d", i)
-		// score must be updated
-		require.Greater(t, backends[0].score(), scoreBefore, "test index %d", i)
 	}
 }
 

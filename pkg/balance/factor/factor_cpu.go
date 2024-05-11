@@ -68,12 +68,10 @@ func (fc *FactorCPU) Name() string {
 
 func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 	if len(backends) <= 1 {
-		setEmptyScore(backends, fc.bitNum)
 		return
 	}
 	qr := fc.mr.GetQueryResult(fc.queryID)
 	if qr.Err != nil || qr.Empty() {
-		setEmptyScore(backends, fc.bitNum)
 		return
 	}
 
@@ -85,7 +83,6 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 	}
 	if monotime.Since(fc.lastMetricTime) > metricExpDuration {
 		// The metrics have not been updated for a long time (maybe Prometheus is unavailable).
-		setEmptyScore(backends, fc.bitNum)
 		return
 	}
 
