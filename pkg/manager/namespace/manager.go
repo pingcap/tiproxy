@@ -18,17 +18,19 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
+	mconfig "github.com/pingcap/tiproxy/pkg/manager/config"
 	"go.uber.org/zap"
 )
 
 type NamespaceManager struct {
 	sync.RWMutex
+	nsm           map[string]*Namespace
 	tpFetcher     observer.TopologyFetcher
 	promFetcher   metricsreader.PromInfoFetcher
 	metricsReader metricsreader.MetricsReader
 	httpCli       *http.Client
 	logger        *zap.Logger
-	nsm           map[string]*Namespace
+	cfgMgr        *mconfig.ConfigManager
 }
 
 func NewNamespaceManager() *NamespaceManager {
@@ -52,7 +54,8 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	hc := observer.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
 	bo := observer.NewDefaultBackendObserver(logger.Named("observer"), healthCheckCfg, fetcher, hc)
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo, factor.NewFactorBasedBalance(logger.Named("factor"), mgr.metricsReader))
+	balancePolicy := factor.NewFactorBasedBalance(logger.Named("factor"), mgr.metricsReader)
+	rt.Init(context.Background(), bo, balancePolicy, mgr.cfgMgr.GetConfig(), mgr.cfgMgr.WatchConfig())
 
 	return &Namespace{
 		name:   cfg.Namespace,
@@ -90,7 +93,7 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 }
 
 func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
-	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client) error {
+	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager) error {
 	mgr.Lock()
 	mgr.tpFetcher = tpFetcher
 	mgr.promFetcher = promFetcher
@@ -98,6 +101,7 @@ func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, 
 	mgr.logger = logger
 	healthCheckCfg := config.NewDefaultHealthCheckConfig()
 	mgr.metricsReader = metricsreader.NewDefaultMetricsReader(logger.Named("mr"), mgr.promFetcher, healthCheckCfg)
+	mgr.cfgMgr = cfgMgr
 	mgr.Unlock()
 
 	mgr.metricsReader.Start(context.Background())

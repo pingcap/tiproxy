@@ -3,6 +3,8 @@
 
 package factor
 
+import "github.com/pingcap/tiproxy/lib/config"
+
 const (
 	// balanceCount4Health indicates how many connections to balance in each round.
 	// If some backends are unhealthy, migrate fast but do not put too much pressure on TiDB.
@@ -41,4 +43,7 @@ func (fh *FactorHealth) ScoreBitNum() int {
 
 func (fh *FactorHealth) BalanceCount(from, to scoredBackend) int {
 	return balanceCount4Health
+}
+
+func (fcc *FactorHealth) SetConfig(cfg *config.Config) {
 }

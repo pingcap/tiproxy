@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -34,7 +35,7 @@ func newRouterTester(t *testing.T) *routerTester {
 	lg, _ := logger.CreateLoggerForTest(t)
 	router := NewScoreBasedRouter(lg)
 	router.policy = policy.NewSimpleBalancePolicy()
-	router.policy.Init()
+	router.policy.Init(nil)
 	t.Cleanup(router.Close)
 	return &routerTester{
 		t:        t,
@@ -544,7 +545,7 @@ func TestConcurrency(t *testing.T) {
 	router := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	router.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
+	router.Init(context.Background(), bo, policy.NewSimpleBalancePolicy(), nil, make(<-chan *config.Config))
 	t.Cleanup(bo.Close)
 	t.Cleanup(router.Close)
 
@@ -636,7 +637,7 @@ func TestRefresh(t *testing.T) {
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
+	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy(), nil, make(<-chan *config.Config))
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// The initial backends are empty.
@@ -656,7 +657,7 @@ func TestObserveError(t *testing.T) {
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy())
+	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy(), nil, make(<-chan *config.Config))
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// Mock an observe error.
@@ -762,4 +763,24 @@ func TestUpdateBackendHealth(t *testing.T) {
 	tester.addConnections(90)
 	tester.killBackends(1)
 	tester.checkBackendNum(3)
+}
+
+func TestWatchConfig(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
+	cfgCh := make(chan *config.Config)
+	policy := &mockBalancePolicy{}
+	cfg := &config.Config{
+		Labels: map[string]string{"k1": "v1"},
+	}
+	router.Init(context.Background(), newMockBackendObserver(), policy, cfg, cfgCh)
+	t.Cleanup(router.Close)
+
+	require.Equal(t, "v1", policy.getConfig().Labels["k1"])
+	cfgCh <- &config.Config{
+		Labels: map[string]string{"k1": "v2"},
+	}
+	require.Eventually(t, func() bool {
+		return policy.getConfig().Labels["k1"] == "v2"
+	}, 3*time.Second, 10*time.Millisecond)
 }

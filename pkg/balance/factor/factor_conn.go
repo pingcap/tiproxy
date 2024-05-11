@@ -3,6 +3,8 @@
 
 package factor
 
+import "github.com/pingcap/tiproxy/lib/config"
+
 const (
 	// connBalancedRatio is the threshold of ratio of the most connection count and least count.
 	// If the ratio exceeds the threshold, we migrate connections.
@@ -43,4 +45,7 @@ func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) int {
 		return balanceCount4Conn
 	}
 	return 0
+}
+
+func (fcc *FactorConnCount) SetConfig(cfg *config.Config) {
 }

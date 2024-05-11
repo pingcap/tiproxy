@@ -6,6 +6,7 @@ package factor
 import (
 	"testing"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/stretchr/testify/require"
@@ -240,13 +241,13 @@ func TestBalanceWith3Factors(t *testing.T) {
 		toIdx         int
 		count         int
 	}{
-		//{
-		//	scores:        [2][3]int{{1, 1, 1}, {0, 1, 0}},
-		//	balanceCounts: [3]int{0, 10, 1},
-		//	fromIdx:       0,
-		//	toIdx:         1,
-		//	count:         1,
-		//},
+		{
+			scores:        [2][3]int{{1, 1, 1}, {0, 1, 0}},
+			balanceCounts: [3]int{0, 10, 1},
+			fromIdx:       0,
+			toIdx:         1,
+			count:         1,
+		},
 		{
 			scores:        [2][3]int{{1, 0, 1}, {0, 1, 0}},
 			balanceCounts: [3]int{0, 10, 1},
@@ -274,6 +275,20 @@ func TestBalanceWith3Factors(t *testing.T) {
 			require.Nil(t, from, "test index %d", tIdx)
 			require.Nil(t, to, "test index %d", tIdx)
 		}
+	}
+}
+
+func TestSetFactorConfig(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
+	factors := []*mockFactor{{bitNum: 1}, {bitNum: 2}, {bitNum: 2}}
+	fm.factors = []Factor{factors[0], factors[1], factors[2]}
+	cfg := &config.Config{
+		Labels: map[string]string{"k1": "v1"},
+	}
+	fm.SetConfig(cfg)
+	for _, factor := range factors {
+		require.Equal(t, "v1", factor.cfg.Labels["k1"])
 	}
 }
 

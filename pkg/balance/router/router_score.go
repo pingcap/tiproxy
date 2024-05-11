@@ -11,6 +11,7 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
@@ -33,6 +34,7 @@ type ScoreBasedRouter struct {
 	policy     policy.BalancePolicy
 	observer   observer.BackendObserver
 	healthCh   <-chan observer.HealthResult
+	cfgCh      <-chan *config.Config
 	cancelFunc context.CancelFunc
 	wg         waitgroup.WaitGroup
 	// A list of *backendWrapper. The backends are in descending order of scores.
@@ -50,13 +52,14 @@ func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 	}
 }
 
-func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver, balancePolicy policy.BalancePolicy) {
+func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver, balancePolicy policy.BalancePolicy, cfg *config.Config, cfgCh <-chan *config.Config) {
 	r.observer = ob
 	r.healthCh = r.observer.Subscribe("score_based_router")
 	r.policy = balancePolicy
-	balancePolicy.Init()
+	balancePolicy.Init(cfg)
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
+	r.cfgCh = cfgCh
 	// Failing to rebalance backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	r.wg.Run(func() {
 		r.rebalanceLoop(childCtx)
@@ -292,6 +295,8 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 			return
 		case healthResults := <-router.healthCh:
 			router.updateBackendHealth(healthResults)
+		case cfg := <-router.cfgCh:
+			router.policy.SetConfig(cfg)
 		case <-ticker.C:
 			router.rebalance()
 		}
