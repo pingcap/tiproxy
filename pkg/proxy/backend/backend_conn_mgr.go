@@ -75,6 +75,15 @@ const (
 	statusClosed
 )
 
+// Default values for ExponentialBackOff
+// See https://pkg.go.dev/github.com/cenkalti/backoff/v4
+const (
+	defaultExponentialBackOffInitialInterval     = 100 * time.Millisecond
+	defaultExponentialBackOffRandomizationFactor = 0.5
+	defaultExponentialBackOffMultiplier          = 2
+	defaultExponentionBackOffMaxInterval         = 4 * time.Second
+)
+
 type BCConfig struct {
 	HealthyKeepAlive     config.KeepAlive
 	UnhealthyKeepAlive   config.KeepAlive
@@ -213,6 +222,20 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO *pnet.Packe
 	return nil
 }
 
+func (mgr *BackendConnManager) newExponentialBackOff() *backoff.ExponentialBackOff {
+	b := &backoff.ExponentialBackOff{
+		InitialInterval:     defaultExponentialBackOffInitialInterval,
+		RandomizationFactor: defaultExponentialBackOffRandomizationFactor,
+		Multiplier:          defaultExponentialBackOffMultiplier,
+		MaxInterval:         defaultExponentionBackOffMaxInterval,
+		MaxElapsedTime:      mgr.config.ConnectTimeout,
+		Stop:                backoff.Stop,
+		Clock:               backoff.SystemClock,
+	}
+	b.Reset()
+	return b
+}
+
 func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
@@ -254,7 +277,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			mgr.setKeepAlive()
 			return backendIO, nil
 		},
-		backoff.WithContext(backoff.NewConstantBackOff(200*time.Millisecond), bctx),
+		backoff.WithContext(mgr.newExponentialBackOff(), bctx),
 		func(err error, d time.Duration) {
 			origErr = err
 			mgr.handshakeHandler.OnHandshake(cctx, addr, err, Error2Source(err))
