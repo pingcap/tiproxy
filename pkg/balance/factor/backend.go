@@ -28,3 +28,12 @@ func (b *scoredBackend) addScore(score int, bitNum int) {
 func (b *scoredBackend) score() uint64 {
 	return b.scoreBits
 }
+
+// setEmptyScore sets the score of the current factor to 0.
+// The score should always be set to shift the bits even if the scores of all backends are the same
+// because BackendsToBalance looks for the unbalanced factor by the location of bits.
+func setEmptyScore(backends []scoredBackend, bitNum int) {
+	for i := 0; i < len(backends); i++ {
+		backends[i].addScore(0, bitNum)
+	}
+}

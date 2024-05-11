@@ -51,6 +51,7 @@ func TestPDFetcher(t *testing.T) {
 				"1.1.1.1:4000": {
 					TTL: "123456789",
 					TiDBTopologyInfo: &infosync.TiDBTopologyInfo{
+						Labels:     map[string]string{"k1": "v1"},
 						IP:         "1.1.1.1",
 						StatusPort: 10080,
 					},
@@ -61,6 +62,7 @@ func TestPDFetcher(t *testing.T) {
 				require.NotNil(t, m["1.1.1.1:4000"])
 				require.Equal(t, "1.1.1.1", m["1.1.1.1:4000"].IP)
 				require.Equal(t, uint(10080), m["1.1.1.1:4000"].StatusPort)
+				require.Equal(t, map[string]string{"k1": "v1"}, m["1.1.1.1:4000"].Labels)
 			},
 		},
 		{

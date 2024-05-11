@@ -42,6 +42,7 @@ func (fbb *FactorBasedBalance) Init(cfg *config.Config) {
 	fbb.factors = []Factor{
 		NewFactorHealth(),
 		NewFactorCPU(fbb.mr),
+		NewFactorLabel(),
 		NewFactorConnCount(),
 	}
 	err := fbb.updateBitNum()

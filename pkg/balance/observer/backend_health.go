@@ -28,6 +28,7 @@ func (bh *BackendHealth) String() string {
 
 // BackendInfo stores the status info of each backend.
 type BackendInfo struct {
+	Labels     map[string]string
 	IP         string
 	StatusPort uint
 }
