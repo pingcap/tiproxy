@@ -25,6 +25,7 @@ type Config struct {
 	Workdir  string            `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
 	Security Security          `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
 	Log      Log               `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
+	Balance  Balance           `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
 	Labels   map[string]string `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty"`
 }
 
@@ -113,6 +114,14 @@ type Security struct {
 	ClusterTLS        TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
 	SQLTLS            TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
 	RequireBackendTLS bool      `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
+}
+
+type Balance struct {
+	Label LabelBalance `yaml:"label,omitempty" toml:"label,omitempty" json:"label,omitempty"`
+}
+
+type LabelBalance struct {
+	LabelName string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {

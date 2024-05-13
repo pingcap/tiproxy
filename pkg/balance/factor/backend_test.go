@@ -34,6 +34,7 @@ func TestAddScore(t *testing.T) {
 	for idx, test := range tests {
 		backend := newScoredBackend(nil)
 		for i := 0; i < len(test.scores); i++ {
+			backend.prepareScore(test.bitNums[i])
 			backend.addScore(test.scores[i], test.bitNums[i])
 		}
 		require.Equal(t, test.expectedScore, backend.score(), "test idx: %d", idx)
