@@ -39,7 +39,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	} else {
 		fetcher = router.NewStaticFetcher(cfg.Backend.Instances)
 	}
-	rt := router.NewScoreBasedRouter(logger.Named("router"))
+	rt := router.NewScoreBasedRouter(logger.Named("router"), true)
 	healthCheckCfg := config.NewDefaultHealthCheckConfig()
 	hc := router.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
 	if err := rt.Init(fetcher, hc, healthCheckCfg); err != nil {

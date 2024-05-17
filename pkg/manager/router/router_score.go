@@ -33,14 +33,17 @@ type ScoreBasedRouter struct {
 	backends     *glist.List[*backendWrapper]
 	observeError error
 	// Only store the version of a random backend, so the client may see a wrong version when backends are upgrading.
-	serverVersion string
+	serverVersion     string
+	enableZeroBackend bool
+	inZeroBackendMode bool
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
-func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
+func NewScoreBasedRouter(logger *zap.Logger, enableZeroBackend bool) *ScoreBasedRouter {
 	return &ScoreBasedRouter{
-		logger:   logger,
-		backends: glist.New[*backendWrapper](),
+		logger:            logger,
+		backends:          glist.New[*backendWrapper](),
+		enableZeroBackend: enableZeroBackend,
 	}
 }
 
@@ -314,9 +317,39 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 			backend.setHealth(*health)
 			router.adjustBackendList(be, true)
 		}
+		if health.Status == StatusHealthy {
+			router.inZeroBackendMode = false
+		}
 	}
+	// router.logger.Info(
+	// 	"debug backend change",
+	// 	zap.Int("len", router.backends.Len()),
+	// 	zap.Bool("zero_backend", router.inZeroBackendMode),
+	// 	zap.Any("backends", router.backends),
+	// )
 	if len(backends) > 0 {
 		router.updateServerVersion()
+	}
+	if router.enableZeroBackend && len(backends) > 0 {
+		inZeroBackendMode := true
+		for be := router.backends.Front(); be != nil; be = be.Next() {
+			backend := be.Value
+			if backend.Healthy() {
+				inZeroBackendMode = false
+				break
+			}
+		}
+		router.inZeroBackendMode = inZeroBackendMode
+		if inZeroBackendMode {
+			router.logger.Info("last backend become unhealthy, notify connections to save session")
+			for be := router.backends.Front(); be != nil; be = be.Next() {
+				backend := be.Value
+				for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
+					conn := ele.Value
+					conn.SaveSession()
+				}
+			}
+		}
 	}
 }
 
@@ -430,6 +463,10 @@ func (router *ScoreBasedRouter) ServerVersion() string {
 	version := router.serverVersion
 	router.Unlock()
 	return version
+}
+
+func (router *ScoreBasedRouter) InZeroBackendMode() bool {
+	return router.inZeroBackendMode
 }
 
 // Close implements Router.Close interface.

@@ -59,6 +59,10 @@ func (r *StaticRouter) ServerVersion() string {
 	return ""
 }
 
+func (r *StaticRouter) InZeroBackendMode() bool {
+	return false
+}
+
 func (r *StaticRouter) Close() {
 }
 

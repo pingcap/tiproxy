@@ -139,9 +139,12 @@ func (bo *BackendObserver) Refresh() {
 }
 
 func (bo *BackendObserver) observe(ctx context.Context) {
+	refresh := false
 	for ctx.Err() == nil {
 		startTime := monotime.Now()
-		backendInfo, err := bo.fetcher.GetBackendList(ctx)
+		backendInfo, err := bo.fetcher.GetBackendList(ctx, refresh)
+		refresh = false
+		// bo.logger.Info("debug GetBackendList", zap.Any("backendInfo", backendInfo))
 		if err != nil {
 			bo.logger.Error("fetching backends encounters error", zap.Error(err))
 			bo.eventReceiver.OnBackendChanged(nil, err)
@@ -160,6 +163,7 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 			select {
 			case <-time.After(wait):
 			case <-bo.refreshChan:
+				refresh = true
 			case <-ctx.Done():
 				return
 			}

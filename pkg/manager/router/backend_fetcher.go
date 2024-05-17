@@ -18,7 +18,8 @@ var _ BackendFetcher = (*StaticFetcher)(nil)
 
 // BackendFetcher is an interface to fetch the backend list.
 type BackendFetcher interface {
-	GetBackendList(context.Context) (map[string]*BackendInfo, error)
+	// refresh is used to force flush backend list in zero backend mode
+	GetBackendList(ctx context.Context, refresh bool) (map[string]*BackendInfo, error)
 }
 
 // TopologyFetcher is an interface to fetch the tidb topology from ETCD.
@@ -42,7 +43,7 @@ func NewPDFetcher(tpFetcher TopologyFetcher, logger *zap.Logger, config *config.
 	}
 }
 
-func (pf *PDFetcher) GetBackendList(ctx context.Context) (map[string]*BackendInfo, error) {
+func (pf *PDFetcher) GetBackendList(ctx context.Context, _ bool) (map[string]*BackendInfo, error) {
 	backends := pf.fetchBackendList(ctx)
 	infos := make(map[string]*BackendInfo, len(backends))
 	for addr, backend := range backends {
@@ -96,7 +97,7 @@ func NewStaticFetcher(staticAddrs []string) *StaticFetcher {
 	}
 }
 
-func (sf *StaticFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
+func (sf *StaticFetcher) GetBackendList(context.Context, bool) (map[string]*BackendInfo, error) {
 	return sf.backends, nil
 }
 

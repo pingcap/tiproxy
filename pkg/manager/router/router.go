@@ -34,6 +34,8 @@ type Router interface {
 	ConnCount() int
 	// ServerVersion returns the TiDB version.
 	ServerVersion() string
+	// InZeroBackendMode indicates all backends unhealthy, and we have kept client connections
+	InZeroBackendMode() bool
 	Close()
 }
 
@@ -72,6 +74,7 @@ type RedirectableConn interface {
 	// Redirect returns false if the current conn is not redirectable.
 	Redirect(backend BackendInst) bool
 	ConnectionID() uint64
+	SaveSession() bool
 }
 
 // BackendInst defines a backend that a connection is redirecting to.

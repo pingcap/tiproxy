@@ -80,6 +80,10 @@ func (conn *mockRedirectableConn) ConnectionID() uint64 {
 	return conn.connID
 }
 
+func (conn *mockRedirectableConn) SaveSession() bool {
+	return true
+}
+
 func (conn *mockRedirectableConn) getAddr() (string, string) {
 	conn.Lock()
 	defer conn.Unlock()
@@ -115,7 +119,7 @@ type routerTester struct {
 
 func newRouterTester(t *testing.T) *routerTester {
 	lg, _ := logger.CreateLoggerForTest(t)
-	router := NewScoreBasedRouter(lg)
+	router := NewScoreBasedRouter(lg, false)
 	t.Cleanup(router.Close)
 	return &routerTester{
 		t:      t,
@@ -631,7 +635,7 @@ func TestConcurrency(t *testing.T) {
 	fetcher := newMockBackendFetcher()
 	lg, _ := logger.CreateLoggerForTest(t)
 	hc := NewDefaultHealthCheck(nil, healthCheckConfig, lg)
-	router := NewScoreBasedRouter(lg)
+	router := NewScoreBasedRouter(lg, false)
 	err := router.Init(fetcher, hc, healthCheckConfig)
 	require.NoError(t, err)
 
@@ -651,7 +655,7 @@ func TestConcurrency(t *testing.T) {
 			}
 			idx := rand.Intn(3)
 			addr := strconv.Itoa(idx)
-			backends, err := fetcher.GetBackendList(context.Background())
+			backends, err := fetcher.GetBackendList(context.Background(), false)
 			require.NoError(t, err)
 			if _, ok := backends[addr]; ok {
 				fetcher.removeBackend(addr)
@@ -728,7 +732,7 @@ func TestRefresh(t *testing.T) {
 	hc := newMockHealthCheck()
 	lg, _ := logger.CreateLoggerForTest(t)
 	// Create a router with a very long health check interval.
-	rt := NewScoreBasedRouter(lg)
+	rt := NewScoreBasedRouter(lg, false)
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
 	observer := StartBackendObserver(lg, rt, cfg, fetcher, hc)
@@ -762,7 +766,7 @@ func TestObserveError(t *testing.T) {
 	hc := newMockHealthCheck()
 	// Create a router with a very short health check interval.
 	lg, _ := logger.CreateLoggerForTest(t)
-	rt := NewScoreBasedRouter(lg)
+	rt := NewScoreBasedRouter(lg, false)
 	err := rt.Init(fetcher, hc, newHealthCheckConfigForTest())
 	require.NoError(t, err)
 	defer rt.Close()
@@ -805,7 +809,7 @@ func TestDisableHealthCheck(t *testing.T) {
 	// Create a router with a very short health check interval.
 	lg, _ := logger.CreateLoggerForTest(t)
 	hc := NewDefaultHealthCheck(nil, healtchCheckConfig, lg)
-	rt := NewScoreBasedRouter(lg)
+	rt := NewScoreBasedRouter(lg, false)
 	err := rt.Init(fetcher, hc, healtchCheckConfig)
 	require.NoError(t, err)
 	defer rt.Close()
@@ -842,7 +846,7 @@ func TestSetBackendStatus(t *testing.T) {
 
 func TestGetServerVersion(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	rt := NewScoreBasedRouter(lg)
+	rt := NewScoreBasedRouter(lg, false)
 	t.Cleanup(rt.Close)
 	backends := map[string]*BackendHealth{
 		"0": {
