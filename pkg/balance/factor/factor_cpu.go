@@ -15,9 +15,9 @@ import (
 
 const (
 	cpuEwmaAlpha = 0.5
-	// If some metrics are missing, we use the old one temporarily for no longer than metricExpDuration.
-	metricExpDuration = 2 * time.Minute
-	cpuScoreStep      = 5
+	// If some metrics are missing, we use the old one temporarily for no longer than cpuMetricExpDuration.
+	cpuMetricExpDuration = 2 * time.Minute
+	cpuScoreStep         = 5
 	// 0.001 represents for 0.1%
 	minCpuPerConn    = 0.001
 	cpuBalancedRatio = 1.3
@@ -34,7 +34,7 @@ var (
 	}
 )
 
-type backendSnapshot struct {
+type cpuBackendSnapshot struct {
 	updatedTime monotime.Time
 	avgUsage    float64
 	latestUsage float64
@@ -43,7 +43,7 @@ type backendSnapshot struct {
 
 type FactorCPU struct {
 	// The snapshot of backend statistics when the matrix was updated.
-	snapshot map[string]backendSnapshot
+	snapshot map[string]cpuBackendSnapshot
 	// The updated time of the metric that we've read last time.
 	lastMetricTime monotime.Time
 	// The estimated average CPU usage used by one connection.
@@ -58,7 +58,7 @@ func NewFactorCPU(mr metricsreader.MetricsReader) *FactorCPU {
 		mr:       mr,
 		queryID:  mr.AddQueryExpr(cpuQueryExpr),
 		bitNum:   5,
-		snapshot: make(map[string]backendSnapshot),
+		snapshot: make(map[string]cpuBackendSnapshot),
 	}
 }
 
@@ -81,7 +81,7 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 		fc.updateSnapshot(qr, backends)
 		fc.updateCpuPerConn()
 	}
-	if monotime.Since(fc.lastMetricTime) > metricExpDuration {
+	if monotime.Since(fc.lastMetricTime) > cpuMetricExpDuration {
 		// The metrics have not been updated for a long time (maybe Prometheus is unavailable).
 		return
 	}
@@ -111,7 +111,7 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 }
 
 func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []scoredBackend) {
-	snapshots := make(map[string]backendSnapshot, len(fc.snapshot))
+	snapshots := make(map[string]cpuBackendSnapshot, len(fc.snapshot))
 	for _, backend := range backends {
 		addr := backend.Addr()
 		valid := false
@@ -121,7 +121,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 		if len(pairs) > 0 {
 			avgUsage, latestUsage := calcAvgUsage(pairs)
 			if avgUsage >= 0 {
-				snapshots[addr] = backendSnapshot{
+				snapshots[addr] = cpuBackendSnapshot{
 					avgUsage:    avgUsage,
 					latestUsage: latestUsage,
 					connCount:   backend.ConnCount(),
@@ -133,7 +133,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 		// Merge the old snapshot just in case some metrics have missed for a short period.
 		if !valid {
 			if snapshot, ok := fc.snapshot[addr]; ok {
-				if monotime.Since(snapshot.updatedTime) < metricExpDuration {
+				if monotime.Since(snapshot.updatedTime) < cpuMetricExpDuration {
 					snapshots[addr] = snapshot
 				}
 			}
@@ -229,5 +229,5 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) int {
 	return 0
 }
 
-func (fcc *FactorCPU) SetConfig(cfg *config.Config) {
+func (fc *FactorCPU) SetConfig(cfg *config.Config) {
 }
