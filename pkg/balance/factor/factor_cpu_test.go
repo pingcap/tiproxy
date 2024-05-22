@@ -5,12 +5,10 @@ package factor
 
 import (
 	"math"
-	"sort"
 	"strconv"
 	"testing"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
-	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -218,7 +216,7 @@ func TestNoCPUMetric(t *testing.T) {
 		},
 		{
 			cpus:       [][]float64{{1.0}, {0.0}},
-			updateTime: monotime.Now().Sub(metricExpDuration * 2),
+			updateTime: monotime.Now().Sub(cpuMetricExpDuration * 2),
 		},
 		{
 			cpus:       [][]float64{{math.NaN()}, {math.NaN()}},
@@ -244,40 +242,4 @@ func TestNoCPUMetric(t *testing.T) {
 		updateScore(fc, backends)
 		require.Equal(t, backends[0].score(), backends[1].score(), "test index %d", i)
 	}
-}
-
-func createBackend(backendIdx, connCount, connScore int) scoredBackend {
-	host := strconv.Itoa(backendIdx)
-	return scoredBackend{
-		BackendCtx: &mockBackend{
-			BackendInfo: observer.BackendInfo{
-				IP:         host,
-				StatusPort: 10080,
-			},
-			addr:      host + ":4000",
-			connCount: connCount,
-			connScore: connScore,
-			healthy:   true,
-		},
-	}
-}
-
-func createSampleStream(cpus []float64, backendIdx int) *model.SampleStream {
-	host := strconv.Itoa(backendIdx)
-	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(host + ":10080")}
-	pairs := make([]model.SamplePair, 0, len(cpus))
-	for _, cpu := range cpus {
-		pairs = append(pairs, model.SamplePair{Value: model.SampleValue(cpu)})
-	}
-	return &model.SampleStream{Metric: labelSet, Values: pairs}
-}
-
-func updateScore(fc *FactorCPU, backends []scoredBackend) {
-	for i := 0; i < len(backends); i++ {
-		backends[i].scoreBits = 0
-	}
-	fc.UpdateScore(backends)
-	sort.Slice(backends, func(i, j int) bool {
-		return backends[i].score() < backends[j].score()
-	})
 }
