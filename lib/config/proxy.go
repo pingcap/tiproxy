@@ -116,14 +116,6 @@ type Security struct {
 	RequireBackendTLS bool      `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
 }
 
-type Balance struct {
-	Label LabelBalance `yaml:"label,omitempty" toml:"label,omitempty" json:"label,omitempty"`
-}
-
-type LabelBalance struct {
-	LabelName string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty"`
-}
-
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
 	frontend.Enabled = true
 	backendHealthy.Enabled = true
@@ -160,6 +152,8 @@ func NewConfig() *Config {
 	cfg.Security.ServerSQLTLS.MinTLSVersion = "1.2"
 	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.2"
 	cfg.Security.ClusterTLS.MinTLSVersion = "1.2"
+
+	cfg.Balance.Error = DefaultErrorBalance()
 
 	return &cfg
 }

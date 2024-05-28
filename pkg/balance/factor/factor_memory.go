@@ -102,25 +102,8 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 	}
 
 	for i := 0; i < len(backends); i++ {
-		usage := 1.0
-		timeToOOM := time.Duration(0)
 		addr := backends[i].Addr()
-		if snapshot, ok := fm.snapshot[addr]; ok {
-			usage = snapshot.memUsage
-			timeToOOM = snapshot.timeToOOM
-		}
-		// If the metric of one backend is missing, treat it as unhealthy.
-		// If the metrics of all backends are missing, give them the same scores.
-		if usage < 0 || usage > 1 {
-			usage = 1
-		}
-		score := 0
-		for j := 0; j < len(oomRiskLevels); j++ {
-			if usage > oomRiskLevels[j].memUsage || timeToOOM < oomRiskLevels[j].timeToOOM {
-				score = len(oomRiskLevels) - j
-				break
-			}
-		}
+		score := fm.calcMemScore(addr)
 		backends[i].addScore(score, fm.bitNum)
 	}
 }
@@ -132,7 +115,7 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 		valid := false
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
-		pairs := qr.GetMetric4Backend(backend)
+		pairs := qr.GetSamplePair4Backend(backend)
 		if len(pairs) > 0 {
 			latestUsage, timeToOOM := calcMemUsage(pairs)
 			if latestUsage >= 0 {
@@ -187,6 +170,28 @@ func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToO
 	return
 }
 
+func (fm *FactorMemory) calcMemScore(addr string) int {
+	usage := 1.0
+	timeToOOM := time.Duration(0)
+	if snapshot, ok := fm.snapshot[addr]; ok {
+		usage = snapshot.memUsage
+		timeToOOM = snapshot.timeToOOM
+	}
+	// If the metric of one backend is missing, treat it as unhealthy.
+	// If the metrics of all backends are missing, give them the same scores.
+	if usage < 0 || usage > 1 {
+		usage = 1
+	}
+	score := 0
+	for j := 0; j < len(oomRiskLevels); j++ {
+		if usage > oomRiskLevels[j].memUsage || timeToOOM < oomRiskLevels[j].timeToOOM {
+			score = len(oomRiskLevels) - j
+			break
+		}
+	}
+	return score
+}
+
 func (fm *FactorMemory) ScoreBitNum() int {
 	return fm.bitNum
 }
@@ -195,7 +200,9 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) int {
 	// The risk level may change frequently, e.g. last time timeToOOM was 30s and connections were migrated away,
 	// then this time it becomes 60s and the connections are migrated back.
 	// So we only rebalance when the difference of risk levels of 2 backends is big enough.
-	if from.score()-to.score() > 1 {
+	fromScore := fm.calcMemScore(from.Addr())
+	toScore := fm.calcMemScore(to.Addr())
+	if fromScore-toScore > 1 {
 		return balanceCount4Mem
 	}
 	return 0

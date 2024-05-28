@@ -117,7 +117,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 		valid := false
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
-		pairs := qr.GetMetric4Backend(backend)
+		pairs := qr.GetSamplePair4Backend(backend)
 		if len(pairs) > 0 {
 			avgUsage, latestUsage := calcAvgUsage(pairs)
 			if avgUsage >= 0 {
