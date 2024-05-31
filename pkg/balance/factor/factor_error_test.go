@@ -35,7 +35,7 @@ func TestErrorScore(t *testing.T) {
 			Value:      model.Matrix(values),
 		},
 	}
-	fm := NewFactorMemory(mmr)
+	fm := NewFactorError(mmr)
 	fm.UpdateScore(backends)
 	for i, test := range tests {
 		require.Equal(t, test.score, backends[i].score(), "test index %d", i)

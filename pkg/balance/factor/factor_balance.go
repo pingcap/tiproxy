@@ -41,7 +41,7 @@ func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *Fact
 func (fbb *FactorBasedBalance) Init(cfg *config.Config) {
 	fbb.factors = []Factor{
 		NewFactorHealth(),
-		NewFactorError(fbb.mr, cfg),
+		NewFactorError(fbb.mr),
 		NewFactorMemory(fbb.mr),
 		NewFactorCPU(fbb.mr),
 		NewFactorLabel(),

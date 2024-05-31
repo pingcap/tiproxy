@@ -29,6 +29,49 @@ const (
 	valueRangeAbnormal
 )
 
+type errDefinition struct {
+	promQL           string
+	failThreshold    int
+	recoverThreshold int
+}
+
+var (
+	// errDefinitions predefines the default error indicators.
+	//
+	// The chosen metrics must meet some requirements:
+	//  1. To treat a backend as normal, all the metrics should be normal.
+	//     E.g. tidb_session_schema_lease_error_total is always 0 even if the backend doesn't recover when it has no connection,
+	//     so we need other metrics to judge whether the backend recovers.
+	//  2. Unstable (not only unavailable) network should also be treated as abnormal.
+	//     E.g. Renewing lease may succeed sometimes and `time() - tidb_domain_lease_expire_time` may look normal
+	//     even when the network is unstable, so we need other metrics to judge unstable network.
+	//  3. `failThreshold - recoverThreshold` should be big enough so that TiProxy won't mistakenly migrate connections.
+	//     E.g. If TiKV is unavailable, all backends may report the same errors. We can ensure the error is caused by this TiDB
+	//     only when other TiDB report much less errors.
+	//  4. The metric value of a normal backend with high CPS should be less than `failThreshold` and the value of an abnormal backend
+	//     with 0 CPS should be greater than `recoverThreshold`.
+	//     E.g. tidb_tikvclient_backoff_seconds_count may be high when CPS is high on a normal backend, and may be very low
+	//     when CPS is 0 on an abnormal backend.
+	//  5. Normal metrics must keep for some time before treating the backend as normal to avoid frequent migration.
+	//     E.g. Unstable network may lead to repeated fluctuations of error counts.
+	errDefinitions = []errDefinition{
+		{
+			// may be caused by disconnection to PD
+			// test with no connection: around 80
+			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[1m])) by (instance)`,
+			failThreshold:    100,
+			recoverThreshold: 10,
+		},
+		{
+			// may be caused by disconnection to TiKV
+			// test with no connection: regionMiss is around 1300, tikvRPC is around 40
+			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type=~"regionMiss|tikvRPC"}[1m])) by (instance)`,
+			failThreshold:    1000,
+			recoverThreshold: 100,
+		},
+	}
+)
+
 var _ Factor = (*FactorError)(nil)
 
 // The snapshot of backend statistics when the metric was updated.
@@ -52,25 +95,24 @@ type FactorError struct {
 	bitNum     int
 }
 
-func NewFactorError(mr metricsreader.MetricsReader, cfg *config.Config) *FactorError {
+func NewFactorError(mr metricsreader.MetricsReader) *FactorError {
 	return &FactorError{
 		mr:         mr,
 		snapshot:   make(map[string]errBackendSnapshot),
-		indicators: initErrIndicator(mr, cfg),
+		indicators: initErrIndicator(mr),
 		bitNum:     2,
 	}
 }
 
-func initErrIndicator(mr metricsreader.MetricsReader, cfg *config.Config) []errIndicator {
-	indicatorCfgs := cfg.Balance.Error.Indicators
-	indicators := make([]errIndicator, 0, len(indicatorCfgs))
-	for _, indicatorDef := range indicatorCfgs {
+func initErrIndicator(mr metricsreader.MetricsReader) []errIndicator {
+	indicators := make([]errIndicator, 0, len(errDefinitions))
+	for _, def := range errDefinitions {
 		indicator := errIndicator{
 			queryExpr: metricsreader.QueryExpr{
-				PromQL: indicatorDef.QueryExpr,
+				PromQL: def.promQL,
 			},
-			failThreshold:    indicatorDef.FailThreshold,
-			recoverThreshold: indicatorDef.RecoverThreshold,
+			failThreshold:    def.failThreshold,
+			recoverThreshold: def.recoverThreshold,
 		}
 		indicator.queryID = mr.AddQueryExpr(indicator.queryExpr)
 		indicators = append(indicators, indicator)
@@ -206,5 +248,4 @@ func (fe *FactorError) BalanceCount(from, to scoredBackend) int {
 }
 
 func (fe *FactorError) SetConfig(cfg *config.Config) {
-	fe.indicators = initErrIndicator(fe.mr, cfg)
 }
