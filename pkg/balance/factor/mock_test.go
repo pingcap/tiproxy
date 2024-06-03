@@ -86,11 +86,13 @@ var _ metricsreader.MetricsReader = (*mockMetricsReader)(nil)
 
 type mockMetricsReader struct {
 	queryID uint64
-	qr      metricsreader.QueryResult
+	qrs     map[uint64]metricsreader.QueryResult
 }
 
 func newMockMetricsReader() *mockMetricsReader {
-	return &mockMetricsReader{}
+	return &mockMetricsReader{
+		qrs: make(map[uint64]metricsreader.QueryResult),
+	}
 }
 
 func (mmr *mockMetricsReader) Start(ctx context.Context) {
@@ -105,7 +107,7 @@ func (mmr *mockMetricsReader) RemoveQueryExpr(id uint64) {
 }
 
 func (mmr *mockMetricsReader) GetQueryResult(id uint64) metricsreader.QueryResult {
-	return mmr.qr
+	return mmr.qrs[id]
 }
 
 func (mmr *mockMetricsReader) Subscribe(receiverName string) <-chan struct{} {
@@ -143,6 +145,13 @@ func createSampleStream(cpus []float64, backendIdx int) *model.SampleStream {
 		pairs = append(pairs, model.SamplePair{Timestamp: ts, Value: model.SampleValue(cpu)})
 	}
 	return &model.SampleStream{Metric: labelSet, Values: pairs}
+}
+
+func createSample(value float64, backendIdx int) *model.Sample {
+	host := strconv.Itoa(backendIdx)
+	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(host + ":10080")}
+	ts := model.Time(time.Now().UnixMilli())
+	return &model.Sample{Metric: labelSet, Timestamp: ts, Value: model.SampleValue(value)}
 }
 
 func updateScore(fc Factor, backends []scoredBackend) {

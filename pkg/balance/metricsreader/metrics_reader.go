@@ -161,7 +161,7 @@ func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) (map[uint64]Qu
 }
 
 func (dmr *DefaultMetricsReader) queryMetric(ctx context.Context, promQLAPI promv1.API, expr QueryExpr, curTime time.Time) QueryResult {
-	promRange := promv1.Range{Start: curTime.Add(-expr.Range), End: curTime, Step: 15 * time.Second}
+	promRange := expr.PromRange(curTime)
 	if !expr.HasLabel {
 		return dmr.queryOnce(ctx, promQLAPI, expr.PromQL, promRange)
 	}
@@ -188,7 +188,11 @@ func (dmr *DefaultMetricsReader) queryOnce(ctx context.Context, promQLAPI promv1
 	var qr QueryResult
 	qr.Err = backoff.Retry(func() error {
 		var err error
-		qr.Value, _, err = promQLAPI.QueryRange(childCtx, promQL, promRange)
+		if promRange.Start.IsZero() {
+			qr.Value, _, err = promQLAPI.Query(childCtx, promQL, time.Time{})
+		} else {
+			qr.Value, _, err = promQLAPI.QueryRange(childCtx, promQL, promRange)
+		}
 		if !pnet.IsRetryableError(err) {
 			return backoff.Permanent(errors.WithStack(err))
 		}

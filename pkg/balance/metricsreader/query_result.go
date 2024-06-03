@@ -11,6 +11,7 @@ import (
 
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 )
 
@@ -22,6 +23,13 @@ type QueryExpr struct {
 	PromQL   string
 	Range    time.Duration
 	HasLabel bool
+}
+
+func (qe QueryExpr) PromRange(curTime time.Time) promv1.Range {
+	if qe.Range == 0 {
+		return promv1.Range{}
+	}
+	return promv1.Range{Start: curTime.Add(-qe.Range), End: curTime, Step: 15 * time.Second}
 }
 
 type QueryResult struct {
@@ -49,8 +57,8 @@ func (qr QueryResult) Empty() bool {
 	}
 }
 
-// GetMetric4Backend returns metric of a backend.
-func (qr QueryResult) GetMetric4Backend(backend policy.BackendCtx) []model.SamplePair {
+// GetSamplePair4Backend returns metric of a backend from a matrix.
+func (qr QueryResult) GetSamplePair4Backend(backend policy.BackendCtx) []model.SamplePair {
 	if qr.Value == nil {
 		return nil
 	}
@@ -58,16 +66,7 @@ func (qr QueryResult) GetMetric4Backend(backend policy.BackendCtx) []model.Sampl
 		return nil
 	}
 	matrix := qr.Value.(model.Matrix)
-	addr := backend.Addr()
-	var labelValue string
-	if strings.Contains(addr, ".svc:") {
-		// In operator deployment, the label value of `instance` is the pod name.
-		labelValue = addr[:strings.Index(addr, ".")]
-	} else {
-		// In tiup deployment, the label value of `instance` is hostname:statusPort.
-		backendInfo := backend.GetBackendInfo()
-		labelValue = net.JoinHostPort(backendInfo.IP, strconv.Itoa(int(backendInfo.StatusPort)))
-	}
+	labelValue := getLabel4Backend(backend)
 	for _, m := range matrix {
 		if label, ok := m.Metric[LabelNameInstance]; ok {
 			if labelValue == (string)(label) {
@@ -76,4 +75,35 @@ func (qr QueryResult) GetMetric4Backend(backend policy.BackendCtx) []model.Sampl
 		}
 	}
 	return nil
+}
+
+// GetSample4Backend returns metric of a backend from a vector.
+func (qr QueryResult) GetSample4Backend(backend policy.BackendCtx) *model.Sample {
+	if qr.Value == nil {
+		return nil
+	}
+	if qr.Value.Type() != model.ValVector {
+		return nil
+	}
+	vector := qr.Value.(model.Vector)
+	labelValue := getLabel4Backend(backend)
+	for _, m := range vector {
+		if label, ok := m.Metric[LabelNameInstance]; ok {
+			if labelValue == (string)(label) {
+				return m
+			}
+		}
+	}
+	return nil
+}
+
+func getLabel4Backend(backend policy.BackendCtx) string {
+	addr := backend.Addr()
+	if strings.Contains(addr, ".svc:") {
+		// In operator deployment, the label value of `instance` is the pod name.
+		return addr[:strings.Index(addr, ".")]
+	}
+	// In tiup deployment, the label value of `instance` is hostname:statusPort.
+	backendInfo := backend.GetBackendInfo()
+	return net.JoinHostPort(backendInfo.IP, strconv.Itoa(int(backendInfo.StatusPort)))
 }

@@ -75,9 +75,11 @@ func TestCPUBalanceOnce(t *testing.T) {
 			values = append(values, createSampleStream(test.cpus[j], j))
 		}
 		mmr := &mockMetricsReader{
-			qr: metricsreader.QueryResult{
-				UpdateTime: monotime.Now(),
-				Value:      model.Matrix(values),
+			qrs: map[uint64]metricsreader.QueryResult{
+				1: {
+					UpdateTime: monotime.Now(),
+					Value:      model.Matrix(values),
+				},
 			},
 		}
 		fc := NewFactorCPU(mmr)
@@ -179,7 +181,7 @@ func TestCPUBalanceContinuously(t *testing.T) {
 			backends = append(backends, createBackend(j, test.connCounts[j], test.connScores[j]))
 			values = append(values, createSampleStream(test.cpus[j], j))
 		}
-		mmr.qr = metricsreader.QueryResult{
+		mmr.qrs[1] = metricsreader.QueryResult{
 			UpdateTime: monotime.Now(),
 			Value:      model.Matrix(values),
 		}
@@ -235,7 +237,7 @@ func TestNoCPUMetric(t *testing.T) {
 		for j := 0; j < len(test.cpus); j++ {
 			values = append(values, createSampleStream(test.cpus[j], j))
 		}
-		mmr.qr = metricsreader.QueryResult{
+		mmr.qrs[1] = metricsreader.QueryResult{
 			UpdateTime: test.updateTime,
 			Value:      model.Matrix(values),
 		}
