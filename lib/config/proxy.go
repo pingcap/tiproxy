@@ -161,8 +161,6 @@ func NewConfig() *Config {
 	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.2"
 	cfg.Security.ClusterTLS.MinTLSVersion = "1.2"
 
-	cfg.Balance.Error = DefaultErrorBalance()
-
 	return &cfg
 }
 
