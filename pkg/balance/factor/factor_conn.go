@@ -10,7 +10,7 @@ const (
 	// If the ratio exceeds the threshold, we migrate connections.
 	connBalancedRatio = 1.2
 	// balanceCount4Conn indicates how many connections to balance in each round.
-	// This is not urgent, so migrate slowly.
+	// Always migrate 1 connection because we don't know the CPU usage here and we may migrate too many connections.
 	balanceCount4Conn = 1
 )
 

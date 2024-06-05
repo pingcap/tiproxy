@@ -17,7 +17,7 @@ const (
 	// If some metrics are missing, we use the old one temporarily for no longer than memMetricExpDuration.
 	memMetricExpDuration = 1 * time.Minute
 	// balanceCount4Mem indicates how many connections to balance in each round.
-	balanceCount4Mem = 10
+	balanceCount4Mem = 1000
 )
 
 var _ Factor = (*FactorCPU)(nil)

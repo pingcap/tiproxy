@@ -298,12 +298,12 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 		case cfg := <-router.cfgCh:
 			router.policy.SetConfig(cfg)
 		case <-ticker.C:
-			router.rebalance()
+			router.rebalance(ctx)
 		}
 	}
 }
 
-func (router *ScoreBasedRouter) rebalance() {
+func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	router.Lock()
 	defer router.Unlock()
 
@@ -323,7 +323,11 @@ func (router *ScoreBasedRouter) rebalance() {
 
 	// Migrate connCount connections.
 	curTime := monotime.Now()
-	for i := 0; i < balanceCount; i++ {
+	for i := 0; i < balanceCount && ctx.Err() == nil; i++ {
+		// Sleep between migration to reduce the peak pressure.
+		if i > 0 {
+			time.Sleep(10 * time.Microsecond)
+		}
 		var ce *glist.Element[*connWrapper]
 		for ele := fromBackend.connList.Front(); ele != nil; ele = ele.Next() {
 			conn := ele.Value

@@ -8,7 +8,7 @@ import "github.com/pingcap/tiproxy/lib/config"
 const (
 	// balanceCount4Health indicates how many connections to balance in each round.
 	// If some backends are unhealthy, migrate fast but do not put too much pressure on TiDB.
-	balanceCount4Health = 10
+	balanceCount4Health = 1000
 )
 
 var _ Factor = (*FactorHealth)(nil)
