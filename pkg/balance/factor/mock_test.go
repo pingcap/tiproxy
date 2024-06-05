@@ -136,12 +136,12 @@ func createBackend(backendIdx, connCount, connScore int) scoredBackend {
 	}
 }
 
-func createSampleStream(cpus []float64, backendIdx int) *model.SampleStream {
+func createSampleStream(values []float64, backendIdx int) *model.SampleStream {
 	host := strconv.Itoa(backendIdx)
 	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(host + ":10080")}
-	pairs := make([]model.SamplePair, 0, len(cpus))
-	for i, cpu := range cpus {
-		ts := model.Time(time.Now().UnixMilli() - int64(15000*(len(cpus)-i)))
+	pairs := make([]model.SamplePair, 0, len(values))
+	for i, cpu := range values {
+		ts := model.Time(time.Now().UnixMilli() - int64(15000*(len(values)-i)))
 		pairs = append(pairs, model.SamplePair{Timestamp: ts, Value: model.SampleValue(cpu)})
 	}
 	return &model.SampleStream{Metric: labelSet, Values: pairs}

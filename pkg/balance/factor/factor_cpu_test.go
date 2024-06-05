@@ -17,53 +17,69 @@ import (
 func TestCPUBalanceOnce(t *testing.T) {
 	tests := []struct {
 		cpus         []float64
+		connCounts   []int
 		scoreOrder   []int
 		balanceCount int
 	}{
 		{
 			cpus:         []float64{0, 0.2},
+			connCounts:   []int{0, 0},
 			scoreOrder:   []int{0, 1},
 			balanceCount: 0,
 		},
 		{
 			cpus:         []float64{0.25, 0.5, 0, 1},
+			connCounts:   []int{10, 10, 10, 10},
 			scoreOrder:   []int{2, 0, 1, 3},
 			balanceCount: 1,
 		},
 		{
 			cpus:         []float64{0.25, math.NaN(), 0.5},
+			connCounts:   []int{10, 10, 10},
 			scoreOrder:   []int{0, 2, 1},
 			balanceCount: 1,
 		},
 		{
 			cpus:         []float64{0.92, 0.76},
+			connCounts:   []int{10, 10},
 			scoreOrder:   []int{1, 0},
 			balanceCount: 1,
 		},
 		{
 			cpus:         []float64{0.42, 0.59},
+			connCounts:   []int{10, 10},
 			scoreOrder:   []int{0, 1},
 			balanceCount: 1,
 		},
 		{
 			cpus:         []float64{0.1, 0.25},
+			connCounts:   []int{0, 0},
 			scoreOrder:   []int{0, 1},
 			balanceCount: 0,
 		},
 		{
 			cpus:         []float64{0.1, 0.35},
+			connCounts:   []int{10, 10},
 			scoreOrder:   []int{0, 1},
 			balanceCount: 1,
 		},
 		{
 			cpus:         []float64{0.95, math.NaN()},
+			connCounts:   []int{0, 0},
 			scoreOrder:   []int{0, 1},
 			balanceCount: 0,
 		},
 		{
 			cpus:         []float64{1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.1},
+			connCounts:   []int{0, 0, 0, 0, 0, 0, 0, 0, 0},
 			scoreOrder:   []int{8, 7, 6, 5, 4, 3, 2, 1, 0},
 			balanceCount: 1,
+		},
+		{
+			cpus:         []float64{0.4, 0.8},
+			connCounts:   []int{2000, 4000},
+			scoreOrder:   []int{0, 1},
+			balanceCount: 8,
 		},
 	}
 
@@ -71,7 +87,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 		backends := make([]scoredBackend, 0, len(test.cpus))
 		values := make([]*model.Sample, 0, len(test.cpus))
 		for j := 0; j < len(test.cpus); j++ {
-			backends = append(backends, createBackend(j, 0, 0))
+			backends = append(backends, createBackend(j, test.connCounts[j], test.connCounts[j]))
 			values = append(values, createSample(test.cpus[j], j))
 		}
 		mmr := &mockMetricsReader{
