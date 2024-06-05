@@ -106,9 +106,6 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 		if avgUsage < 0 || avgUsage > 1 {
 			avgUsage = 1
 		}
-		if avgUsage < 0.1 {
-			avgUsage = 0
-		}
 		backends[i].addScore(int(avgUsage*100)/cpuScoreStep, fc.bitNum)
 	}
 }
