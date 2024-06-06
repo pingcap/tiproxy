@@ -14,30 +14,30 @@ import (
 )
 
 const (
-	cpuEwmaAlpha = 0.5
 	// If some metrics are missing, we use the old one temporarily for no longer than cpuMetricExpDuration.
 	cpuMetricExpDuration = 2 * time.Minute
 	cpuScoreStep         = 5
 	// 0.001 represents for 0.1%
 	minCpuPerConn    = 0.001
-	cpuBalancedRatio = 1.3
-	balanceCount4Cpu = 1
+	cpuBalancedRatio = 1.2
+	// If the CPU difference of 2 backends is 30% and we're narrowing it to 20% in 30 seconds(rounds),
+	// then in each round, we migrate ((30% - 20%) / 2) / usagePerConn / 30 = 1 / usagePerConn / 600 connections.
+	balanceRatio4Cpu = 600
 )
 
 var _ Factor = (*FactorCPU)(nil)
 
 var (
 	cpuQueryExpr = metricsreader.QueryExpr{
-		PromQL:   `rate(process_cpu_seconds_total{%s="tidb"}[30s])/tidb_server_maxprocs`,
+		// The CPU usage is smoothed by rate[1m].
+		PromQL:   `rate(process_cpu_seconds_total{%s="tidb"}[1m])/tidb_server_maxprocs`,
 		HasLabel: true,
-		Range:    3 * time.Minute,
 	}
 )
 
 type cpuBackendSnapshot struct {
 	updatedTime monotime.Time
 	avgUsage    float64
-	latestUsage float64
 	connCount   int
 }
 
@@ -117,13 +117,12 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 		valid := false
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
-		pairs := qr.GetSamplePair4Backend(backend)
-		if len(pairs) > 0 {
-			avgUsage, latestUsage := calcAvgUsage(pairs)
+		sample := qr.GetSample4Backend(backend)
+		if sample != nil {
+			avgUsage := calcAvgUsage(sample)
 			if avgUsage >= 0 {
 				snapshots[addr] = cpuBackendSnapshot{
 					avgUsage:    avgUsage,
-					latestUsage: latestUsage,
 					connCount:   backend.ConnCount(),
 					updatedTime: qr.UpdateTime,
 				}
@@ -142,28 +141,12 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 	fc.snapshot = snapshots
 }
 
-func calcAvgUsage(usageHistory []model.SamplePair) (avgUsage, latestUsage float64) {
-	avgUsage, latestUsage = -1, -1
-	if len(usageHistory) == 0 {
-		return
-	}
-	// The CPU usage jitters too much, so use the EWMA algorithm to make it smooth.
-	for _, usage := range usageHistory {
-		value := float64(usage.Value)
-		if math.IsNaN(value) {
-			continue
-		}
-		latestUsage = value
-		if avgUsage < 0 {
-			avgUsage = value
-		} else {
-			avgUsage = avgUsage*(1-cpuEwmaAlpha) + value*cpuEwmaAlpha
-		}
-	}
-	if avgUsage > 1 {
+func calcAvgUsage(sample *model.Sample) float64 {
+	avgUsage := float64(sample.Value)
+	if math.IsNaN(avgUsage) || avgUsage > 1 {
 		avgUsage = 1
 	}
-	return
+	return avgUsage
 }
 
 // Estimate the average CPU usage used by one connection.
@@ -173,8 +156,8 @@ func calcAvgUsage(usageHistory []model.SamplePair) (avgUsage, latestUsage float6
 func (fc *FactorCPU) updateCpuPerConn() {
 	totalUsage, totalConns := 0.0, 0
 	for _, backend := range fc.snapshot {
-		if backend.latestUsage > 0 && backend.connCount > 0 {
-			totalUsage += backend.latestUsage
+		if backend.avgUsage > 0 && backend.connCount > 0 {
+			totalUsage += backend.avgUsage
 			totalConns += backend.connCount
 		}
 	}
@@ -223,8 +206,11 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) int {
 	}
 	// The higher the CPU usage, the more sensitive the load balance should be.
 	// E.g. 10% vs 25% don't need rebalance, but 80% vs 95% need rebalance.
-	if 1.1-toUsage > (1.1-fromUsage)*cpuBalancedRatio {
-		return balanceCount4Cpu
+	if 1.3-toUsage > (1.3-fromUsage)*cpuBalancedRatio {
+		if balanceCount := int(1 / fc.usagePerConn / balanceRatio4Cpu); balanceCount > 1 {
+			return balanceCount
+		}
+		return 1
 	}
 	return 0
 }

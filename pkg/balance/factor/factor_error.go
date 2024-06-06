@@ -15,7 +15,7 @@ import (
 
 const (
 	errMetricExpDuration = 1 * time.Minute
-	balanceCount4Err     = 10
+	balanceCount4Err     = 1000
 )
 
 type valueRange int

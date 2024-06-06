@@ -161,7 +161,7 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 
 func (tester *routerTester) rebalance(num int) {
 	for i := 0; i < num; i++ {
-		tester.router.rebalance()
+		tester.router.rebalance(context.Background())
 	}
 }
 
