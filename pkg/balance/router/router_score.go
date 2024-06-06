@@ -42,6 +42,8 @@ type ScoreBasedRouter struct {
 	observeError error
 	// Only store the version of a random backend, so the client may see a wrong version when backends are upgrading.
 	serverVersion string
+	// To limit the speed of redirection.
+	lastRedirectTime monotime.Time
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
@@ -303,6 +305,9 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 	}
 }
 
+// Rebalance every a short time and migrate only a few connections in each round so that:
+// - The lock is not held too long
+// - The connections are migrated to different backends
 func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	router.Lock()
 	defer router.Unlock()
@@ -321,13 +326,22 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	}
 	fromBackend, toBackend := busiestBackend.(*backendWrapper), idlestBackend.(*backendWrapper)
 
-	// Migrate connCount connections.
+	// Control the speed of migration.
 	curTime := monotime.Now()
-	for i := 0; i < balanceCount && ctx.Err() == nil; i++ {
-		// Sleep between migration to reduce the peak pressure.
-		if i > 0 {
-			time.Sleep(10 * time.Microsecond)
+	if balanceCount*int(rebalanceInterval) >= int(time.Second) {
+		// If we need to migrate multiple connections in each round, calculate the connection count for each round.
+		balanceCount = balanceCount * int(rebalanceInterval) / int(time.Second)
+	} else {
+		// If we need to wait for multiple rounds to migrate a connection, calculate the interval for each connection.
+		intervalPerConn := time.Second / time.Duration(balanceCount)
+		if curTime-router.lastRedirectTime >= monotime.Time(intervalPerConn) {
+			balanceCount = 1
+		} else {
+			return
 		}
+	}
+	// Migrate balanceCount connections.
+	for i := 0; i < balanceCount && ctx.Err() == nil; i++ {
 		var ce *glist.Element[*connWrapper]
 		for ele := fromBackend.connList.Front(); ele != nil; ele = ele.Next() {
 			conn := ele.Value
@@ -348,6 +362,7 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 			break
 		}
 		router.redirectConn(ce.Value, fromBackend, toBackend, reason, curTime)
+		router.lastRedirectTime = curTime
 	}
 }
 

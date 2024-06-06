@@ -14,9 +14,9 @@ const (
 	// ConnBalancedRatio is the threshold of ratio of the most connection count and least count.
 	// If the ratio exceeds the threshold, we migrate connections.
 	ConnBalancedRatio = 1.2
-	// BalanceCount4Health indicates how many connections to balance in each round.
+	// BalanceCount4Health indicates how many connections to balance per second.
 	// If some backends are unhealthy, migrate fast but do not put too much pressure on TiDB.
-	BalanceCount4Health = 10
+	BalanceCount4Health = 1000
 )
 
 var _ BalancePolicy = (*SimpleBalancePolicy)(nil)

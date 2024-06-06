@@ -176,7 +176,9 @@ func (mbo *mockBackendObserver) Close() {
 var _ policy.BalancePolicy = (*mockBalancePolicy)(nil)
 
 type mockBalancePolicy struct {
-	cfg atomic.Pointer[config.Config]
+	cfg               atomic.Pointer[config.Config]
+	backendsToBalance func([]policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount int, reason []zapcore.Field)
+	backendToRoute    func([]policy.BackendCtx) policy.BackendCtx
 }
 
 func (m *mockBalancePolicy) Init(cfg *config.Config) {
@@ -184,10 +186,16 @@ func (m *mockBalancePolicy) Init(cfg *config.Config) {
 }
 
 func (m *mockBalancePolicy) BackendToRoute(backends []policy.BackendCtx) policy.BackendCtx {
+	if m.backendToRoute != nil {
+		return m.backendToRoute(backends)
+	}
 	return nil
 }
 
 func (m *mockBalancePolicy) BackendsToBalance(backends []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount int, reason []zapcore.Field) {
+	if m.backendsToBalance != nil {
+		return m.backendsToBalance(backends)
+	}
 	return nil, nil, 0, nil
 }
 

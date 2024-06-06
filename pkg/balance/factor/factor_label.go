@@ -6,7 +6,7 @@ package factor
 import "github.com/pingcap/tiproxy/lib/config"
 
 const (
-	// balanceCount4Label indicates how many connections to balance in each round.
+	// balanceCount4Label indicates how many connections to balance per second.
 	balanceCount4Label = 1
 )
 

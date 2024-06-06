@@ -20,7 +20,7 @@ const (
 	// 0.001 represents for 0.1%
 	minCpuPerConn    = 0.001
 	cpuBalancedRatio = 1.2
-	// If the CPU difference of 2 backends is 30% and we're narrowing it to 20% in 30 seconds(rounds),
+	// If the CPU difference of 2 backends is 30% and we're narrowing it to 20% in 30 seconds,
 	// then in each round, we migrate ((30% - 20%) / 2) / usagePerConn / 30 = 1 / usagePerConn / 600 connections.
 	balanceRatio4Cpu = 600
 )

@@ -12,6 +12,7 @@ import (
 type BalancePolicy interface {
 	Init(cfg *config.Config)
 	BackendToRoute(backends []BackendCtx) BackendCtx
+	// balanceCount is the count of connections to balance per second.
 	BackendsToBalance(backends []BackendCtx) (from, to BackendCtx, balanceCount int, reason []zap.Field)
 	SetConfig(cfg *config.Config)
 }
