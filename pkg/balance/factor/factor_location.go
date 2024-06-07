@@ -9,7 +9,7 @@ const (
 	// locationLabelName indicates the label name that location-based balance should be based on.
 	// We use `zone` because the follower read in TiDB also uses `zone` to decide location.
 	locationLabelName = "zone"
-	// balanceCount4Location indicates how many connections to balance in each round.
+	// balanceCount4Location indicates how many connections to balance per second.
 	balanceCount4Location = 1
 )
 

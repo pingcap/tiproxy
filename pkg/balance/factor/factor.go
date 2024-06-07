@@ -12,8 +12,8 @@ type Factor interface {
 	UpdateScore(backends []scoredBackend)
 	// ScoreBitNum returns the bit number of the score.
 	ScoreBitNum() int
-	// BalanceCount returns the count of connections to balance in this round.
-	// 0 indicates balanced (within the threshold) or the migration speed is limited.
+	// BalanceCount returns the count of connections to balance per second.
+	// 0 indicates the factor is already balanced.
 	BalanceCount(from, to scoredBackend) int
 	SetConfig(cfg *config.Config)
 }

@@ -53,7 +53,7 @@ const (
 
 const (
 	// The interval to rebalance connections.
-	rebalanceInterval = time.Second
+	rebalanceInterval = 10 * time.Millisecond
 	// After a connection fails to redirect, it may contain some unmigratable status.
 	// Limit its redirection interval to avoid unnecessary retrial to reduce latency jitter.
 	redirectFailMinInterval = 3 * time.Second

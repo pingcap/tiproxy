@@ -15,7 +15,8 @@ import (
 
 const (
 	errMetricExpDuration = 1 * time.Minute
-	balanceCount4Err     = 1000
+	// balanceSeconds4Error indicates the time (in seconds) to migrate all the connections.
+	balanceSeconds4Error = 10
 )
 
 type valueRange int
@@ -242,7 +243,14 @@ func (fe *FactorError) BalanceCount(from, to scoredBackend) int {
 	fromScore := fe.caclErrScore(from.Addr())
 	toScore := fe.caclErrScore(to.Addr())
 	if fromScore-toScore > 1 {
-		return balanceCount4Err
+		// Assuming that the source and target backends have similar connections at first.
+		// We wish the connections to be migrated in 10 seconds but only a few are migrated in each round.
+		// If we use from.ConnScore() / 10, the migration will be slower and slower.
+		conns := (from.ConnScore() + to.ConnScore()) / (balanceSeconds4Error * 2)
+		if conns > 0 {
+			return conns
+		}
+		return 1
 	}
 	return 0
 }
