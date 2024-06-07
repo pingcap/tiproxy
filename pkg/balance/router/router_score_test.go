@@ -804,31 +804,54 @@ func TestControlSpeed(t *testing.T) {
 
 	tests := []struct {
 		balanceCount     int
+		rounds           int
+		interval         time.Duration
 		expectedCountMin int
 		expectedCountMax int
 	}{
 		{
 			balanceCount:     0,
+			rounds:           2,
+			interval:         time.Second,
 			expectedCountMin: 0,
 			expectedCountMax: 0,
 		},
 		{
 			balanceCount:     1,
+			rounds:           1,
+			interval:         10 * time.Millisecond,
 			expectedCountMin: 1,
 			expectedCountMax: 2,
 		},
 		{
+			balanceCount:     1,
+			rounds:           100,
+			interval:         100 * time.Millisecond,
+			expectedCountMin: 9,
+			expectedCountMax: 11,
+		},
+		{
 			balanceCount:     10,
-			expectedCountMin: 1,
-			expectedCountMax: 10,
+			rounds:           10,
+			interval:         100 * time.Millisecond,
+			expectedCountMin: 9,
+			expectedCountMax: 20,
 		},
 		{
 			balanceCount:     100,
+			rounds:           10,
 			expectedCountMin: 10,
 			expectedCountMax: 10,
 		},
 		{
 			balanceCount:     1000,
+			rounds:           1,
+			expectedCountMin: 10,
+			expectedCountMax: 10,
+		},
+		{
+			balanceCount:     1000,
+			rounds:           10,
 			expectedCountMin: 100,
 			expectedCountMax: 100,
 		},
@@ -840,9 +863,9 @@ func TestControlSpeed(t *testing.T) {
 		}
 		tester.router.lastRedirectTime = monotime.Time(0)
 		require.Equal(t, total, tester.getBackendByIndex(0).connScore)
-		for j := 0; j < 10; j++ {
+		for j := 0; j < test.rounds; j++ {
 			tester.router.rebalance(context.Background())
-			tester.router.lastRedirectTime -= monotime.Time(rebalanceInterval)
+			tester.router.lastRedirectTime -= monotime.Time(test.interval)
 		}
 		redirectingNum := total - tester.getBackendByIndex(0).connScore
 		// Define a bound because the test may be slow.
