@@ -82,6 +82,9 @@ func (mf *mockFactor) SetConfig(cfg *config.Config) {
 	mf.cfg = cfg
 }
 
+func (mf *mockFactor) Close() {
+}
+
 var _ metricsreader.MetricsReader = (*mockMetricsReader)(nil)
 
 type mockMetricsReader struct {

@@ -49,3 +49,6 @@ func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) int {
 
 func (fcc *FactorConnCount) SetConfig(cfg *config.Config) {
 }
+
+func (fcc *FactorConnCount) Close() {
+}

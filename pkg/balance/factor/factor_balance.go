@@ -22,10 +22,17 @@ var _ policy.BalancePolicy = (*FactorBasedBalance)(nil)
 type FactorBasedBalance struct {
 	factors []Factor
 	// to reduce memory allocation
-	cachedList  []scoredBackend
-	mr          metricsreader.MetricsReader
-	lg          *zap.Logger
-	totalBitNum int
+	cachedList      []scoredBackend
+	mr              metricsreader.MetricsReader
+	lg              *zap.Logger
+	factorHealth    *FactorHealth
+	factorLabel     *FactorLabel
+	factorError     *FactorError
+	factorMemory    *FactorMemory
+	factorCPU       *FactorCPU
+	factorLocation  *FactorLocation
+	factorConnCount *FactorConnCount
+	totalBitNum     int
 }
 
 func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *FactorBasedBalance {
@@ -39,20 +46,86 @@ func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *Fact
 // Init creates factors at the first time.
 // TODO: create factors according to config and update policy when config changes.
 func (fbb *FactorBasedBalance) Init(cfg *config.Config) {
-	fbb.factors = []Factor{
-		NewFactorHealth(),
-		NewFactorLabel(),
-		NewFactorError(fbb.mr),
-		NewFactorMemory(fbb.mr),
-		NewFactorCPU(fbb.mr),
-		NewFactorLocation(),
-		NewFactorConnCount(),
+	fbb.factors = make([]Factor, 0, 7)
+	fbb.setFactors(cfg)
+}
+
+func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
+	fbb.factors = fbb.factors[:0]
+
+	if fbb.factorHealth == nil {
+		fbb.factorHealth = NewFactorHealth()
 	}
+	fbb.factors = append(fbb.factors, fbb.factorHealth)
+
+	if cfg.Balance.Label.Enable && cfg.Balance.Label.LabelName != "" {
+		if fbb.factorLabel == nil {
+			fbb.factorLabel = NewFactorLabel()
+		}
+		fbb.factors = append(fbb.factors, fbb.factorLabel)
+	} else if fbb.factorLabel != nil {
+		fbb.factorLabel.Close()
+		fbb.factorLabel = nil
+	}
+
+	if cfg.Balance.Location.Enable {
+		if fbb.factorLocation == nil {
+			fbb.factorLocation = NewFactorLocation()
+		}
+	} else if fbb.factorLocation != nil {
+		fbb.factorLocation.Close()
+		fbb.factorLocation = nil
+	}
+	if cfg.Balance.Location.Enable && cfg.Balance.Location.LocationFirst {
+		fbb.factors = append(fbb.factors, fbb.factorLocation)
+	}
+
+	if cfg.Balance.Error.Enable {
+		if fbb.factorError == nil {
+			fbb.factorError = NewFactorError(fbb.mr)
+		}
+		fbb.factors = append(fbb.factors, fbb.factorError)
+	} else if fbb.factorError != nil {
+		fbb.factorError.Close()
+		fbb.factorError = nil
+	}
+
+	if cfg.Balance.Memory.Enable {
+		if fbb.factorMemory == nil {
+			fbb.factorMemory = NewFactorMemory(fbb.mr)
+		}
+		fbb.factors = append(fbb.factors, fbb.factorMemory)
+	} else if fbb.factorMemory != nil {
+		fbb.factorMemory.Close()
+		fbb.factorMemory = nil
+	}
+
+	if cfg.Balance.CPU.Enable {
+		if fbb.factorCPU == nil {
+			fbb.factorCPU = NewFactorCPU(fbb.mr)
+		}
+		fbb.factors = append(fbb.factors, fbb.factorCPU)
+	} else if fbb.factorCPU != nil {
+		fbb.factorCPU.Close()
+		fbb.factorCPU = nil
+	}
+
+	if cfg.Balance.Location.Enable && !cfg.Balance.Location.LocationFirst {
+		fbb.factors = append(fbb.factors, fbb.factorLocation)
+	}
+
+	if fbb.factorConnCount == nil {
+		fbb.factorConnCount = NewFactorConnCount()
+	}
+	fbb.factors = append(fbb.factors, fbb.factorConnCount)
+
 	err := fbb.updateBitNum()
 	if err != nil {
 		panic(err.Error())
 	}
-	fbb.SetConfig(cfg)
+	for _, factor := range fbb.factors {
+		factor.SetConfig(cfg)
+	}
 }
 
 func (fbb *FactorBasedBalance) updateBitNum() error {
@@ -172,7 +245,11 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 }
 
 func (fbb *FactorBasedBalance) SetConfig(cfg *config.Config) {
+	fbb.setFactors(cfg)
+}
+
+func (fbb *FactorBasedBalance) Close() {
 	for _, factor := range fbb.factors {
-		factor.SetConfig(cfg)
+		factor.Close()
 	}
 }

@@ -52,5 +52,8 @@ func (fh *FactorHealth) BalanceCount(from, to scoredBackend) int {
 	return 1
 }
 
-func (fcc *FactorHealth) SetConfig(cfg *config.Config) {
+func (fh *FactorHealth) SetConfig(cfg *config.Config) {
+}
+
+func (fh *FactorHealth) Close() {
 }

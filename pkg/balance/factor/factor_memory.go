@@ -217,3 +217,7 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) int {
 
 func (fm *FactorMemory) SetConfig(cfg *config.Config) {
 }
+
+func (fm *FactorMemory) Close() {
+	fm.mr.RemoveQueryExpr(fm.queryID)
+}

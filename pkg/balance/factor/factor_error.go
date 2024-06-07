@@ -257,3 +257,9 @@ func (fe *FactorError) BalanceCount(from, to scoredBackend) int {
 
 func (fe *FactorError) SetConfig(cfg *config.Config) {
 }
+
+func (fe *FactorError) Close() {
+	for _, indicator := range fe.indicators {
+		fe.mr.RemoveQueryExpr(indicator.queryID)
+	}
+}

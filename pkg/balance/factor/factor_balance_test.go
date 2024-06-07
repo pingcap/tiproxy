@@ -278,20 +278,6 @@ func TestBalanceWith3Factors(t *testing.T) {
 	}
 }
 
-func TestSetFactorConfig(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
-	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factors := []*mockFactor{{bitNum: 1}, {bitNum: 2}, {bitNum: 2}}
-	fm.factors = []Factor{factors[0], factors[1], factors[2]}
-	cfg := &config.Config{
-		Labels: map[string]string{"k1": "v1"},
-	}
-	fm.SetConfig(cfg)
-	for _, factor := range factors {
-		require.Equal(t, "v1", factor.cfg.Labels["k1"])
-	}
-}
-
 // Even if the factor doesn't add a score, the score is still updated so that we can find the unbalanced factor
 // by locating the unbalanced bits.
 func TestScoreAlwaysUpdated(t *testing.T) {
@@ -316,4 +302,71 @@ func createBackends(num int) []policy.BackendCtx {
 		backends = append(backends, newMockBackend(true, 100))
 	}
 	return backends
+}
+
+func TestSetFactors(t *testing.T) {
+	tests := []struct {
+		setFunc       func(balance *config.Balance)
+		expectedNames []string
+	}{
+		{
+			setFunc:       func(balance *config.Balance) {},
+			expectedNames: []string{"health", "label", "error", "memory", "cpu", "location", "conn"},
+		},
+		{
+			setFunc: func(balance *config.Balance) {
+				balance.Location.LocationFirst = true
+			},
+			expectedNames: []string{"health", "label", "location", "error", "memory", "cpu", "conn"},
+		},
+		{
+			setFunc: func(balance *config.Balance) {
+				balance.Label.Enable = false
+			},
+			expectedNames: []string{"health", "error", "memory", "cpu", "location", "conn"},
+		},
+		{
+			setFunc: func(balance *config.Balance) {
+				balance.Label.Enable = false
+				balance.Error.Enable = false
+				balance.Memory.Enable = false
+				balance.CPU.Enable = false
+				balance.Location.Enable = false
+			},
+			expectedNames: []string{"health", "conn"},
+		},
+	}
+
+	lg, _ := logger.CreateLoggerForTest(t)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
+	for i, test := range tests {
+		cfg := &config.Config{
+			Balance: config.Balance{
+				Label: config.LabelBalance{
+					Enable:    true,
+					LabelName: "group",
+				},
+				Error: config.ErrorBalance{
+					Enable: true,
+				},
+				Memory: config.MemoryBalance{
+					Enable: true,
+				},
+				CPU: config.CPUBalance{
+					Enable: true,
+				},
+				Location: config.LocationBalance{
+					Enable: true,
+				},
+			},
+		}
+		fm.Init(cfg)
+		test.setFunc(&cfg.Balance)
+		fm.SetConfig(cfg)
+		require.Len(t, fm.factors, len(test.expectedNames), "test index %d", i)
+		for j := 0; j < len(fm.factors); j++ {
+			require.Equal(t, test.expectedNames[j], fm.factors[j].Name(), "test index %d", i)
+		}
+	}
+	fm.Close()
 }
