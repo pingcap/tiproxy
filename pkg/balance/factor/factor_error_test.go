@@ -119,7 +119,7 @@ func TestErrorBalance(t *testing.T) {
 				{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].recoverThreshold + 1)},
 				{float64(errDefinitions[0].recoverThreshold - 1), float64(errDefinitions[1].recoverThreshold - 1)}},
 			scores:       []uint64{2, 0},
-			balanceCount: balanceCount4Err,
+			balanceCount: 1,
 		},
 	}
 
@@ -212,5 +212,77 @@ func TestNoErrorMetrics(t *testing.T) {
 		}
 		updateScore(fm, backends)
 		require.Equal(t, backends[0].score(), backends[1].score(), "test index %d", i)
+	}
+}
+
+func TestErrorBalanceCount(t *testing.T) {
+	tests := []struct {
+		conns    []int
+		minCount int
+		maxCount int
+	}{
+		{
+			conns:    []int{1, 0},
+			minCount: 1,
+			maxCount: 1,
+		},
+		{
+			conns:    []int{10, 0},
+			minCount: 1,
+			maxCount: 4,
+		},
+		{
+			conns:    []int{10, 10},
+			minCount: 1,
+			maxCount: 4,
+		},
+		{
+			conns:    []int{100, 10},
+			minCount: 5,
+			maxCount: 20,
+		},
+		{
+			conns:    []int{1000, 100},
+			minCount: 50,
+			maxCount: 100,
+		},
+		{
+			conns:    []int{100, 1000},
+			minCount: 50,
+			maxCount: 100,
+		},
+		{
+			conns:    []int{10000, 10000},
+			minCount: 500,
+			maxCount: 1000,
+		},
+	}
+
+	values := []*model.Sample{
+		createSample(99999999, 0),
+		createSample(0, 1),
+	}
+	mmr := &mockMetricsReader{
+		qrs: map[uint64]metricsreader.QueryResult{
+			1: {
+				UpdateTime: monotime.Now(),
+				Value:      model.Vector(values),
+			},
+			2: {
+				UpdateTime: monotime.Now(),
+				Value:      model.Vector(values),
+			},
+		},
+	}
+	fe := NewFactorError(mmr)
+	for i, test := range tests {
+		backends := []scoredBackend{
+			createBackend(0, test.conns[0], test.conns[0]),
+			createBackend(1, test.conns[1], test.conns[1]),
+		}
+		fe.UpdateScore(backends)
+		count := fe.BalanceCount(backends[0], backends[1])
+		require.GreaterOrEqual(t, count, test.minCount, "test idx: %d", i)
+		require.LessOrEqual(t, count, test.maxCount, "test idx: %d", i)
 	}
 }

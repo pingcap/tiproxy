@@ -38,3 +38,67 @@ func TestFactorHealth(t *testing.T) {
 		require.Equal(t, test.expectedScore, backends[i].score(), "test idx: %d", i)
 	}
 }
+
+func TestHealthBalanceCount(t *testing.T) {
+	factor := NewFactorHealth()
+	tests := []struct {
+		conns    []int
+		minCount int
+		maxCount int
+	}{
+		{
+			conns:    []int{1, 0},
+			minCount: 1,
+			maxCount: 1,
+		},
+		{
+			conns:    []int{10, 0},
+			minCount: 1,
+			maxCount: 5,
+		},
+		{
+			conns:    []int{10, 10},
+			minCount: 1,
+			maxCount: 5,
+		},
+		{
+			conns:    []int{100, 10},
+			minCount: 10,
+			maxCount: 40,
+		},
+		{
+			conns:    []int{1000, 100},
+			minCount: 100,
+			maxCount: 200,
+		},
+		{
+			conns:    []int{100, 1000},
+			minCount: 100,
+			maxCount: 200,
+		},
+		{
+			conns:    []int{10000, 10000},
+			minCount: 1000,
+			maxCount: 2000,
+		},
+	}
+	for i, test := range tests {
+		backends := []scoredBackend{
+			{
+				BackendCtx: &mockBackend{
+					healthy:   false,
+					connScore: test.conns[0],
+				},
+			},
+			{
+				BackendCtx: &mockBackend{
+					healthy:   true,
+					connScore: test.conns[1],
+				},
+			},
+		}
+		count := factor.BalanceCount(backends[0], backends[1])
+		require.GreaterOrEqual(t, count, test.minCount, "test idx: %d", i)
+		require.LessOrEqual(t, count, test.maxCount, "test idx: %d", i)
+	}
+}

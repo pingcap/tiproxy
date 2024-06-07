@@ -6,9 +6,9 @@ package factor
 import "github.com/pingcap/tiproxy/lib/config"
 
 const (
-	// balanceCount4Health indicates how many connections to balance in each round.
+	// balanceSeconds4Health indicates the time (in seconds) to migrate all the connections.
 	// If some backends are unhealthy, migrate fast but do not put too much pressure on TiDB.
-	balanceCount4Health = 1000
+	balanceSeconds4Health = 5
 )
 
 var _ Factor = (*FactorHealth)(nil)
@@ -42,7 +42,14 @@ func (fh *FactorHealth) ScoreBitNum() int {
 }
 
 func (fh *FactorHealth) BalanceCount(from, to scoredBackend) int {
-	return balanceCount4Health
+	// Assuming that the source and target backends have similar connections at first.
+	// We wish the connections to be migrated in 5 seconds but only a few are migrated in each round.
+	// If we use from.ConnScore() / 5, the migration will be slower and slower.
+	conns := (from.ConnScore() + to.ConnScore()) / (balanceSeconds4Health * 2)
+	if conns > 0 {
+		return conns
+	}
+	return 1
 }
 
 func (fcc *FactorHealth) SetConfig(cfg *config.Config) {

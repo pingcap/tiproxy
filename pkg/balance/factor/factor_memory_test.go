@@ -136,12 +136,12 @@ func TestMemoryBalance(t *testing.T) {
 		{
 			memory:       [][]float64{{0.2, 0.15}, {0.81, 0.82}},
 			scores:       []uint64{0, 2},
-			balanceCount: balanceCount4Mem,
+			balanceCount: 1,
 		},
 		{
 			memory:       [][]float64{{0.2, 0.15}, {0.81, 0.82}, {0.65, 0.65}},
 			scores:       []uint64{0, 2, 1},
-			balanceCount: balanceCount4Mem,
+			balanceCount: 1,
 		},
 	}
 
@@ -211,5 +211,73 @@ func TestNoMemMetrics(t *testing.T) {
 		}
 		updateScore(fm, backends)
 		require.Equal(t, backends[0].score(), backends[1].score(), "test index %d", i)
+	}
+}
+
+func TestMemoryBalanceCount(t *testing.T) {
+	tests := []struct {
+		conns    []int
+		minCount int
+		maxCount int
+	}{
+		{
+			conns:    []int{1, 0},
+			minCount: 1,
+			maxCount: 1,
+		},
+		{
+			conns:    []int{10, 0},
+			minCount: 1,
+			maxCount: 4,
+		},
+		{
+			conns:    []int{10, 10},
+			minCount: 1,
+			maxCount: 4,
+		},
+		{
+			conns:    []int{100, 10},
+			minCount: 5,
+			maxCount: 20,
+		},
+		{
+			conns:    []int{1000, 100},
+			minCount: 50,
+			maxCount: 100,
+		},
+		{
+			conns:    []int{100, 1000},
+			minCount: 50,
+			maxCount: 100,
+		},
+		{
+			conns:    []int{10000, 10000},
+			minCount: 500,
+			maxCount: 1000,
+		},
+	}
+
+	values := []*model.SampleStream{
+		createSampleStream([]float64{1.0, 1.0}, 0),
+		createSampleStream([]float64{0, 0}, 1),
+	}
+	mmr := &mockMetricsReader{
+		qrs: map[uint64]metricsreader.QueryResult{
+			1: {
+				UpdateTime: monotime.Now(),
+				Value:      model.Matrix(values),
+			},
+		},
+	}
+	fm := NewFactorMemory(mmr)
+	for i, test := range tests {
+		backends := []scoredBackend{
+			createBackend(0, test.conns[0], test.conns[0]),
+			createBackend(1, test.conns[1], test.conns[1]),
+		}
+		fm.UpdateScore(backends)
+		count := fm.BalanceCount(backends[0], backends[1])
+		require.GreaterOrEqual(t, count, test.minCount, "test idx: %d", i)
+		require.LessOrEqual(t, count, test.maxCount, "test idx: %d", i)
 	}
 }
