@@ -102,9 +102,10 @@ func (conn *mockRedirectableConn) redirectFail() {
 }
 
 type mockBackendObserver struct {
-	sync.Mutex
-	healths     map[string]*observer.BackendHealth
-	subscribers map[string]chan observer.HealthResult
+	healthLock     sync.Mutex
+	healths        map[string]*observer.BackendHealth
+	subscriberLock sync.Mutex
+	subscribers    map[string]chan observer.HealthResult
 }
 
 func newMockBackendObserver() *mockBackendObserver {
@@ -115,15 +116,15 @@ func newMockBackendObserver() *mockBackendObserver {
 }
 
 func (mbo *mockBackendObserver) toggleBackendHealth(addr string) {
-	mbo.Lock()
-	defer mbo.Unlock()
+	mbo.healthLock.Lock()
+	defer mbo.healthLock.Unlock()
 	health := mbo.healths[addr]
 	health.Healthy = !health.Healthy
 }
 
 func (mbo *mockBackendObserver) addBackend(addr string) {
-	mbo.Lock()
-	defer mbo.Unlock()
+	mbo.healthLock.Lock()
+	defer mbo.healthLock.Unlock()
 	mbo.healths[addr] = &observer.BackendHealth{
 		Healthy: true,
 	}
@@ -133,16 +134,16 @@ func (mbo *mockBackendObserver) Start(ctx context.Context) {
 }
 
 func (mbo *mockBackendObserver) Subscribe(name string) <-chan observer.HealthResult {
-	mbo.Lock()
-	defer mbo.Unlock()
+	mbo.subscriberLock.Lock()
+	defer mbo.subscriberLock.Unlock()
 	subscriber := make(chan observer.HealthResult)
 	mbo.subscribers[name] = subscriber
 	return subscriber
 }
 
 func (mbo *mockBackendObserver) Unsubscribe(name string) {
-	mbo.Lock()
-	defer mbo.Unlock()
+	mbo.subscriberLock.Lock()
+	defer mbo.subscriberLock.Unlock()
 	if subscriber, ok := mbo.subscribers[name]; ok {
 		close(subscriber)
 		delete(mbo.subscribers, name)
@@ -154,20 +155,22 @@ func (mbo *mockBackendObserver) Refresh() {
 }
 
 func (mbo *mockBackendObserver) notify(err error) {
-	mbo.Lock()
-	defer mbo.Unlock()
+	mbo.healthLock.Lock()
 	healths := make(map[string]*observer.BackendHealth, len(mbo.healths))
 	for addr, health := range mbo.healths {
 		healths[addr] = health
 	}
+	mbo.healthLock.Unlock()
+	mbo.subscriberLock.Lock()
 	for _, subscriber := range mbo.subscribers {
 		subscriber <- observer.NewHealthResult(healths, err)
 	}
+	mbo.subscriberLock.Unlock()
 }
 
 func (mbo *mockBackendObserver) Close() {
-	mbo.Lock()
-	defer mbo.Unlock()
+	mbo.subscriberLock.Lock()
+	defer mbo.subscriberLock.Unlock()
 	for _, subscriber := range mbo.subscribers {
 		close(subscriber)
 	}
