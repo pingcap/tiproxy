@@ -59,3 +59,6 @@ func (fl *FactorLabel) SetConfig(cfg *config.Config) {
 		fl.selfLabelVal = cfg.Labels[fl.labelName]
 	}
 }
+
+func (fl *FactorLabel) Close() {
+}

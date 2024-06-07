@@ -58,3 +58,6 @@ func (fl *FactorLocation) SetConfig(cfg *config.Config) {
 		fl.selfLocation = cfg.Labels[locationLabelName]
 	}
 }
+
+func (fl *FactorLocation) Close() {
+}

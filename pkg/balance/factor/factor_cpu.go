@@ -217,3 +217,7 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) int {
 
 func (fc *FactorCPU) SetConfig(cfg *config.Config) {
 }
+
+func (fc *FactorCPU) Close() {
+	fc.mr.RemoveQueryExpr(fc.queryID)
+}

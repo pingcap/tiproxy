@@ -16,4 +16,5 @@ type Factor interface {
 	// 0 indicates the factor is already balanced.
 	BalanceCount(from, to scoredBackend) int
 	SetConfig(cfg *config.Config)
+	Close()
 }
