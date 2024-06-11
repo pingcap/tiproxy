@@ -54,7 +54,7 @@ func (fl *FactorLabel) BalanceCount(from, to scoredBackend) int {
 }
 
 func (fl *FactorLabel) SetConfig(cfg *config.Config) {
-	fl.labelName = cfg.Balance.Label.LabelName
+	fl.labelName = cfg.Balance.LabelName
 	if len(fl.labelName) > 0 && cfg.Labels != nil {
 		fl.selfLabelVal = cfg.Labels[fl.labelName]
 	}

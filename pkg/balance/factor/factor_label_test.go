@@ -69,7 +69,7 @@ func TestFactorLabelOneBackend(t *testing.T) {
 		factor.SetConfig(&config.Config{
 			Labels: selfLabels,
 			Balance: config.Balance{
-				Label: config.LabelBalance{LabelName: test.labelName},
+				LabelName: test.labelName,
 			},
 		})
 		factor.UpdateScore(backends)
@@ -127,7 +127,7 @@ func TestFactorLabelMultiBackends(t *testing.T) {
 	factor.SetConfig(&config.Config{
 		Labels: map[string]string{"k1": "v1"},
 		Balance: config.Balance{
-			Label: config.LabelBalance{LabelName: "k1"},
+			LabelName: "k1",
 		},
 	})
 	factor.UpdateScore(backends)

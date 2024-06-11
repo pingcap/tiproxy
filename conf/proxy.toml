@@ -115,12 +115,4 @@ graceful-close-conn-timeout = 15
 # ignore-wrong-namespace = true
 
 [balance]
-[balance.error]
-# enable = true
-[balance.memory]
-# enable = true
-[balance.cpu]
-# enable = true
-[balance.location]
-# enable = true
-# location-frist = true
+# policy = "resource"

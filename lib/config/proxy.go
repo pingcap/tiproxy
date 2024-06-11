@@ -183,6 +183,10 @@ func (cfg *Config) Check() error {
 		return errors.Wrapf(ErrInvalidConfigValue, "conn-buffer-size must be between 1K and 16M")
 	}
 
+	if err := cfg.Balance.Check(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
