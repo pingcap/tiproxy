@@ -311,29 +311,39 @@ func TestSetFactors(t *testing.T) {
 	}{
 		{
 			setFunc:       func(balance *config.Balance) {},
-			expectedNames: []string{"health", "label", "error", "memory", "cpu", "location", "conn"},
+			expectedNames: []string{"status", "health", "memory", "cpu", "location", "conn"},
 		},
 		{
 			setFunc: func(balance *config.Balance) {
-				balance.Location.LocationFirst = true
+				balance.Policy = config.BalancePolicyLocation
 			},
-			expectedNames: []string{"health", "label", "location", "error", "memory", "cpu", "conn"},
+			expectedNames: []string{"status", "location", "health", "memory", "cpu", "conn"},
 		},
 		{
 			setFunc: func(balance *config.Balance) {
-				balance.Label.Enable = false
+				balance.LabelName = "group"
 			},
-			expectedNames: []string{"health", "error", "memory", "cpu", "location", "conn"},
+			expectedNames: []string{"status", "label", "health", "memory", "cpu", "location", "conn"},
 		},
 		{
 			setFunc: func(balance *config.Balance) {
-				balance.Label.Enable = false
-				balance.Error.Enable = false
-				balance.Memory.Enable = false
-				balance.CPU.Enable = false
-				balance.Location.Enable = false
+				balance.Policy = config.BalancePolicyLocation
+				balance.LabelName = "group"
 			},
-			expectedNames: []string{"health", "conn"},
+			expectedNames: []string{"status", "label", "location", "health", "memory", "cpu", "conn"},
+		},
+		{
+			setFunc: func(balance *config.Balance) {
+				balance.Policy = config.BalancePolicyConnection
+			},
+			expectedNames: []string{"status", "conn"},
+		},
+		{
+			setFunc: func(balance *config.Balance) {
+				balance.Policy = config.BalancePolicyConnection
+				balance.LabelName = "group"
+			},
+			expectedNames: []string{"status", "label", "conn"},
 		},
 	}
 
@@ -342,22 +352,7 @@ func TestSetFactors(t *testing.T) {
 	for i, test := range tests {
 		cfg := &config.Config{
 			Balance: config.Balance{
-				Label: config.LabelBalance{
-					Enable:    true,
-					LabelName: "group",
-				},
-				Error: config.ErrorBalance{
-					Enable: true,
-				},
-				Memory: config.MemoryBalance{
-					Enable: true,
-				},
-				CPU: config.CPUBalance{
-					Enable: true,
-				},
-				Location: config.LocationBalance{
-					Enable: true,
-				},
+				Policy: config.BalancePolicyResource,
 			},
 		}
 		fm.Init(cfg)
