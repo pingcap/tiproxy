@@ -118,3 +118,7 @@ func (mb *mockBackend) Addr() string {
 func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
 	return mb.BackendInfo
 }
+
+func (mb *mockBackend) Local() bool {
+	return true
+}

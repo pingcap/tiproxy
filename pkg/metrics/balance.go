@@ -15,6 +15,7 @@ const (
 	LblBackend       = "backend"
 	LblFrom          = "from"
 	LblTo            = "to"
+	LblReason        = "reason"
 	LblMigrateResult = "migrate_res"
 )
 
@@ -33,7 +34,7 @@ var (
 			Subsystem: LabelBalance,
 			Name:      "migrate_total",
 			Help:      "Number and result of session migration.",
-		}, []string{LblFrom, LblTo, LblMigrateResult})
+		}, []string{LblFrom, LblTo, LblReason, LblMigrateResult})
 
 	MigrateDurationHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{

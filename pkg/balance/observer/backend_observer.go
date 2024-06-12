@@ -41,6 +41,7 @@ type DefaultBackendObserver struct {
 	refreshChan       chan struct{}
 	fetcher           BackendFetcher
 	hc                HealthCheck
+	cfgGetter         config.ConfigGetter
 	cancelFunc        context.CancelFunc
 	logger            *zap.Logger
 	healthCheckConfig *config.HealthCheck
@@ -48,8 +49,8 @@ type DefaultBackendObserver struct {
 }
 
 // NewDefaultBackendObserver creates a BackendObserver.
-func NewDefaultBackendObserver(logger *zap.Logger, config *config.HealthCheck,
-	backendFetcher BackendFetcher, hc HealthCheck) *DefaultBackendObserver {
+func NewDefaultBackendObserver(logger *zap.Logger, config *config.HealthCheck, backendFetcher BackendFetcher, hc HealthCheck,
+	cfgGetter config.ConfigGetter) *DefaultBackendObserver {
 	config.Check()
 	bo := &DefaultBackendObserver{
 		logger:            logger,
@@ -60,6 +61,7 @@ func NewDefaultBackendObserver(logger *zap.Logger, config *config.HealthCheck,
 		fetcher:           backendFetcher,
 		subscribers:       make(map[string]chan HealthResult),
 		curBackends:       make(map[string]*BackendHealth),
+		cfgGetter:         cfgGetter,
 	}
 	return bo
 }
@@ -126,6 +128,7 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 
 	// Each goroutine checks one backend.
 	var lock sync.Mutex
+	cfg := bo.cfgGetter.GetConfig()
 	for addr, info := range backends {
 		func(addr string, info *BackendInfo) {
 			bo.wgp.RunWithRecover(func() {
@@ -133,6 +136,7 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 					return
 				}
 				health := bo.hc.Check(ctx, addr, info)
+				health.setLocal(cfg)
 				lock.Lock()
 				curBackendHealth[addr] = health
 				lock.Unlock()

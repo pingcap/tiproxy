@@ -148,6 +148,71 @@ func TestMultiSubscribers(t *testing.T) {
 	}
 }
 
+func TestLocal(t *testing.T) {
+	ts := newObserverTestSuite(t)
+	cfgGetter := ts.bo.cfgGetter.(*mockConfigGetter)
+	t.Cleanup(ts.close)
+	ts.bo.Start(context.Background())
+
+	tests := []struct {
+		selfLabels    map[string]string
+		backendLabels map[string]string
+		local         bool
+	}{
+		{
+			selfLabels:    nil,
+			backendLabels: nil,
+			local:         true,
+		},
+		{
+			selfLabels:    nil,
+			backendLabels: map[string]string{"a": "b"},
+			local:         true,
+		},
+		{
+			selfLabels:    map[string]string{"a": "b"},
+			backendLabels: map[string]string{"a": "b"},
+			local:         true,
+		},
+		{
+			selfLabels:    map[string]string{locationLabelName: "b"},
+			backendLabels: map[string]string{"a": "b"},
+			local:         false,
+		},
+		{
+			selfLabels:    map[string]string{locationLabelName: "b"},
+			backendLabels: map[string]string{locationLabelName: "c"},
+			local:         false,
+		},
+		{
+			selfLabels:    map[string]string{locationLabelName: "b"},
+			backendLabels: map[string]string{locationLabelName: "c", "a": "c"},
+			local:         false,
+		},
+		{
+			selfLabels:    map[string]string{locationLabelName: "b"},
+			backendLabels: map[string]string{locationLabelName: "b", "a": "c"},
+			local:         true,
+		},
+	}
+
+	for i, test := range tests {
+		backend, _ := ts.addBackend()
+		ts.setLabels(backend, test.backendLabels)
+		cfg := &config.Config{
+			Labels: test.selfLabels,
+		}
+		cfgGetter.setConfig(cfg)
+		require.Eventually(ts.t, func() bool {
+			result := ts.getResultFromCh()
+			require.NoError(ts.t, result.Error())
+			health := result.Backends()[backend]
+			return health.Local == test.local
+		}, 3*time.Second, 10*time.Millisecond, "test case %d", i)
+		ts.removeBackend(backend)
+	}
+}
+
 type observerTestSuite struct {
 	t          *testing.T
 	bo         *DefaultBackendObserver
@@ -161,7 +226,7 @@ func newObserverTestSuite(t *testing.T) *observerTestSuite {
 	fetcher := newMockBackendFetcher()
 	hc := newMockHealthCheck()
 	lg, _ := logger.CreateLoggerForTest(t)
-	bo := NewDefaultBackendObserver(lg, newHealthCheckConfigForTest(), fetcher, hc)
+	bo := NewDefaultBackendObserver(lg, newHealthCheckConfigForTest(), fetcher, hc, newMockConfigGetter(&config.Config{}))
 	subscriber := bo.Subscribe("receiver")
 	return &observerTestSuite{
 		t:          t,
@@ -227,6 +292,10 @@ func (ts *observerTestSuite) addBackend() (string, BackendInfo) {
 
 func (ts *observerTestSuite) setHealth(addr string, healthy bool) {
 	ts.hc.setHealth(addr, healthy)
+}
+
+func (ts *observerTestSuite) setLabels(addr string, labels map[string]string) {
+	ts.fetcher.setLabels(addr, labels)
 }
 
 func (ts *observerTestSuite) removeBackend(addr string) {

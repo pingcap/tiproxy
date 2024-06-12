@@ -35,6 +35,10 @@ func (mb *mockBackend) Addr() string {
 	return ""
 }
 
+func (mb *mockBackend) Local() bool {
+	return true
+}
+
 func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
 	return observer.BackendInfo{}
 }

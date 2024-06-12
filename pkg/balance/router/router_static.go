@@ -99,3 +99,7 @@ func (b *StaticBackend) Healthy() bool {
 func (b *StaticBackend) SetHealthy(healthy bool) {
 	b.healthy.Store(healthy)
 }
+
+func (b *StaticBackend) Local() bool {
+	return true
+}

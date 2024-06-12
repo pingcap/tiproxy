@@ -3,7 +3,17 @@
 
 package observer
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/pingcap/tiproxy/lib/config"
+)
+
+var (
+	// locationLabelName indicates the label name that decides the location of TiProxy and backends.
+	// We use `zone` because the follower read in TiDB also uses `zone` to decide location.
+	locationLabelName = "zone"
+)
 
 type BackendHealth struct {
 	BackendInfo
@@ -12,6 +22,25 @@ type BackendHealth struct {
 	PingErr error
 	// The backend version that returned to the client during handshake.
 	ServerVersion string
+	// Whether the backend in the same zone with TiProxy. If TiProxy location is undefined, take all backends as local.
+	Local bool
+}
+
+func (bh *BackendHealth) setLocal(cfg *config.Config) {
+	if cfg.Labels == nil {
+		bh.Local = true
+		return
+	}
+	selfLocation, ok := cfg.Labels[locationLabelName]
+	if !ok || len(selfLocation) == 0 {
+		bh.Local = true
+		return
+	}
+	if bh.Labels != nil && bh.Labels[locationLabelName] == selfLocation {
+		bh.Local = true
+		return
+	}
+	bh.Local = false
 }
 
 func (bh *BackendHealth) Equals(health BackendHealth) bool {

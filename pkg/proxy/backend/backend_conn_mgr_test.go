@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -77,6 +78,7 @@ func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) {
 type mockBackendInst struct {
 	addr    string
 	healthy atomic.Bool
+	local   atomic.Bool
 }
 
 func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
@@ -97,6 +99,14 @@ func (mbi *mockBackendInst) Healthy() bool {
 
 func (mbi *mockBackendInst) setHealthy(healthy bool) {
 	mbi.healthy.Store(healthy)
+}
+
+func (mbi *mockBackendInst) Local() bool {
+	return mbi.local.Load()
+}
+
+func (mbi *mockBackendInst) setLocal(local bool) {
+	mbi.local.Store(local)
 }
 
 type runner struct {
@@ -1254,6 +1264,10 @@ func TestTrafficMetrics(t *testing.T) {
 				require.True(t, inBytes2 > inBytes && inPackets2 > inPackets && outBytes2 > outBytes && outPackets2 > outPackets)
 				require.True(t, inBytes2 > 4096 && inPackets2 > 1000)
 				inBytes, inPackets, outBytes, outPackets = inBytes2, inPackets2, outBytes2, outPackets2
+				// The first backend is local, so no cross-az traffic.
+				crossLocationFlow, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
+				require.NoError(t, err)
+				require.True(t, crossLocationFlow == 0)
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
@@ -1265,8 +1279,14 @@ func TestTrafficMetrics(t *testing.T) {
 		},
 		// 2nd handshake: redirect
 		{
-			client:  nil,
-			proxy:   ts.redirectSucceed4Proxy,
+			client: nil,
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				backendInst := newMockBackendInst(ts)
+				backendInst.setLocal(false)
+				ts.mp.Redirect(backendInst)
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
+				return nil
+			},
 			backend: ts.redirectSucceed4Backend,
 		},
 		// the traffic should still increase after redirection
@@ -1284,6 +1304,10 @@ func TestTrafficMetrics(t *testing.T) {
 				inBytes2, inPackets2, outBytes2, outPackets2, err := readTraffic(addr)
 				require.NoError(t, err)
 				require.True(t, inBytes2 > inBytes1 && inPackets2 > inPackets1 && outBytes2 > outBytes1 && outPackets2 > outPackets1)
+				// The second backend is remote, so exists cross-az traffic.
+				crossLocationFlow, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
+				require.NoError(t, err)
+				require.True(t, crossLocationFlow > 0)
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {

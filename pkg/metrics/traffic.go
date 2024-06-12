@@ -37,4 +37,12 @@ var (
 			Name:      "outbound_packets",
 			Help:      "Counter of packets to backends.",
 		}, []string{LblBackend})
+
+	CrossLocationBytesCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelTraffic,
+			Name:      "cross_location_bytes",
+			Help:      "Counter of bytes between TiProxy and cross-location backends.",
+		})
 )

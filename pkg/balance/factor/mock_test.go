@@ -24,6 +24,7 @@ type mockBackend struct {
 	connScore int
 	connCount int
 	healthy   bool
+	local     bool
 }
 
 func newMockBackend(healthy bool, connScore int) *mockBackend {
@@ -51,6 +52,10 @@ func (mb *mockBackend) ConnCount() int {
 
 func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
 	return mb.BackendInfo
+}
+
+func (mb *mockBackend) Local() bool {
+	return mb.local
 }
 
 var _ Factor = (*mockFactor)(nil)

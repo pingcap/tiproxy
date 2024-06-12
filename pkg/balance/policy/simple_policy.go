@@ -44,24 +44,26 @@ func (sbp *SimpleBalancePolicy) BackendToRoute(backends []BackendCtx) BackendCtx
 	return nil
 }
 
-func (sbp *SimpleBalancePolicy) BackendsToBalance(backends []BackendCtx) (from, to BackendCtx, balanceCount int, reason []zap.Field) {
+func (sbp *SimpleBalancePolicy) BackendsToBalance(backends []BackendCtx) (from, to BackendCtx, balanceCount int, reason string, logFields []zap.Field) {
 	if len(backends) <= 1 {
 		return
 	}
 	sortBackends(backends)
 	from, to = backends[len(backends)-1], backends[0]
 	if !to.Healthy() || from.ConnScore() <= 0 {
-		return nil, nil, 0, nil
+		return nil, nil, 0, "", nil
 	}
 	if !from.Healthy() {
 		balanceCount = BalanceCount4Health
+		reason = "status"
 	} else {
 		if float64(from.ConnScore()) <= float64(to.ConnScore()+1)*ConnBalancedRatio {
-			return nil, nil, 0, nil
+			return nil, nil, 0, "", nil
 		}
 		balanceCount = 1
+		reason = "conn"
 	}
-	reason = []zap.Field{
+	logFields = []zap.Field{
 		zap.Bool("from_healthy", from.Healthy()),
 		zap.Bool("to_healthy", to.Healthy()),
 		zap.Int("from_score", from.ConnScore()),
