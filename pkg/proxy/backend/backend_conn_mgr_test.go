@@ -86,6 +86,7 @@ func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
 		addr: ts.tc.backendListener.Addr().String(),
 	}
 	mbi.setHealthy(true)
+	mbi.setLocal(true)
 	return mbi
 }
 
@@ -1258,6 +1259,8 @@ func TestTrafficMetrics(t *testing.T) {
 				inBytes, inPackets, outBytes, outPackets, err = readTraffic(addr)
 				require.NoError(t, err)
 				require.True(t, inBytes > 0 && inPackets > 0 && outBytes > 0 && outPackets > 0)
+				crossLocationBytes, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
+				require.NoError(t, err)
 				require.NoError(t, ts.forwardCmd4Proxy(clientIO, backendIO))
 				inBytes2, inPackets2, outBytes2, outPackets2, err := readTraffic(addr)
 				require.NoError(t, err)
@@ -1265,9 +1268,9 @@ func TestTrafficMetrics(t *testing.T) {
 				require.True(t, inBytes2 > 4096 && inPackets2 > 1000)
 				inBytes, inPackets, outBytes, outPackets = inBytes2, inPackets2, outBytes2, outPackets2
 				// The first backend is local, so no cross-az traffic.
-				crossLocationFlow, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
+				crossLocationBytes2, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
 				require.NoError(t, err)
-				require.True(t, crossLocationFlow == 0)
+				require.True(t, crossLocationBytes2 == crossLocationBytes)
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
@@ -1300,14 +1303,16 @@ func TestTrafficMetrics(t *testing.T) {
 				inBytes1, inPackets1, outBytes1, outPackets1, err := readTraffic(addr)
 				require.NoError(t, err)
 				require.True(t, inBytes1 > inBytes && inPackets1 > inPackets && outBytes1 > outBytes && outPackets1 > outPackets)
+				crossLocationBytes, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
+				require.NoError(t, err)
 				require.NoError(t, ts.forwardCmd4Proxy(clientIO, backendIO))
 				inBytes2, inPackets2, outBytes2, outPackets2, err := readTraffic(addr)
 				require.NoError(t, err)
 				require.True(t, inBytes2 > inBytes1 && inPackets2 > inPackets1 && outBytes2 > outBytes1 && outPackets2 > outPackets1)
 				// The second backend is remote, so exists cross-az traffic.
-				crossLocationFlow, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
+				crossLocationBytes2, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
 				require.NoError(t, err)
-				require.True(t, crossLocationFlow > 0)
+				require.True(t, crossLocationBytes2 > crossLocationBytes)
 				return nil
 			},
 			backend: func(packetIO *pnet.PacketIO) error {
