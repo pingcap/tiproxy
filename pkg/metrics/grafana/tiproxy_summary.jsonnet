@@ -388,6 +388,20 @@ local bMigDurP = graphPanel.new(
   )
 );
 
+local bMigReasonP = graphPanel.new(
+  title='Session Migration Reasons',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Reasons of session migrations per minute.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'sum(increase(tiproxy_balance_migrate_total{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (reason)',
+    legendFormat='{{reason}}',
+  )
+);
+
 // Backend Summary
 local backendRow = row.new(collapse=true, title='Backend');
 local bGetDurP = graphPanel.new(
@@ -503,6 +517,20 @@ local outPacketsP = graphPanel.new(
   )
 );
 
+local crossBytesP = graphPanel.new(
+  title='Cross Location Bytes/Second',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Bytes per second between TiProxy and cross-location backends.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'sum(rate(tiproxy_traffic_cross_location_bytes{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (instance)',
+    legendFormat='{{instance}}',
+  )
+);
+
 // Merge together.
 local panelW = 12;
 local panelH = 6;
@@ -543,6 +571,7 @@ newDash
   .addPanel(bConnP, gridPos=leftPanelPos)
   .addPanel(bMigCounterP, gridPos=rightPanelPos)
   .addPanel(bMigDurP, gridPos=leftPanelPos)
+  .addPanel(bMigReasonP, gridPos=rightPanelPos)
   ,
   gridPos=rowPos
 )
@@ -560,6 +589,7 @@ newDash
   .addPanel(inPacketsP, gridPos=rightPanelPos)
   .addPanel(outBytesP, gridPos=leftPanelPos)
   .addPanel(outPacketsP, gridPos=rightPanelPos)
+  .addPanel(crossBytesP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )

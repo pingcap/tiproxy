@@ -168,6 +168,7 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 			connWrapper := ce.Value
 			if connWrapper.phase != phaseRedirectNotify {
 				connWrapper.phase = phaseRedirectNotify
+				connWrapper.redirectReason = "test"
 				// Ignore the results.
 				_ = connWrapper.Redirect(backend)
 				connWrapper.redirectingBackend = backend
@@ -225,7 +226,7 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		connWrapper.phase = phaseRedirectFail
 	}
 	connWrapper.redirectingBackend = nil
-	addMigrateMetrics(from, to, succeed, connWrapper.lastRedirect)
+	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
@@ -320,7 +321,7 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 		backends = append(backends, backend)
 	}
 
-	busiestBackend, idlestBackend, balanceCount, reason := router.policy.BackendsToBalance(backends)
+	busiestBackend, idlestBackend, balanceCount, reason, logFields := router.policy.BackendsToBalance(backends)
 	if balanceCount == 0 {
 		return
 	}
@@ -361,24 +362,25 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 		if ce == nil {
 			break
 		}
-		router.redirectConn(ce.Value, fromBackend, toBackend, reason, curTime)
+		router.redirectConn(ce.Value, fromBackend, toBackend, reason, logFields, curTime)
 		router.lastRedirectTime = curTime
 	}
 }
 
 func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toBackend *backendWrapper,
-	reason []zap.Field, curTime monotime.Time) {
+	reason string, logFields []zap.Field, curTime monotime.Time) {
 	fields := []zap.Field{
 		zap.Uint64("connID", conn.ConnectionID()),
 		zap.String("from", fromBackend.addr),
 		zap.String("to", toBackend.addr),
 	}
-	fields = append(fields, reason...)
+	fields = append(fields, logFields...)
 	router.logger.Debug("begin redirect connection", fields...)
 	fromBackend.connScore--
 	router.removeBackendIfEmpty(fromBackend)
 	toBackend.connScore++
 	conn.phase = phaseRedirectNotify
+	conn.redirectReason = reason
 	conn.lastRedirect = curTime
 	conn.Redirect(toBackend)
 	conn.redirectingBackend = toBackend

@@ -858,8 +858,8 @@ func TestControlSpeed(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		bp.backendsToBalance = func(bc []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount int, reason []zapcore.Field) {
-			return tester.getBackendByIndex(0), tester.getBackendByIndex(1), test.balanceCount, nil
+		bp.backendsToBalance = func(bc []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount int, reason string, logFields []zapcore.Field) {
+			return tester.getBackendByIndex(0), tester.getBackendByIndex(1), test.balanceCount, "conn", nil
 		}
 		tester.router.lastRedirectTime = monotime.Time(0)
 		require.Equal(t, total, tester.getBackendByIndex(0).connScore)

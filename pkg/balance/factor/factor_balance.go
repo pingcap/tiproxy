@@ -176,7 +176,7 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 // BackendsToBalance returns the busiest/unhealthy backend and the idlest backend.
 // balanceCount: the count of connections to migrate in this round. 0 indicates no need to balance.
 // reason: the debug information to be logged.
-func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (from, to policy.BackendCtx, balanceCount int, reason []zap.Field) {
+func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (from, to policy.BackendCtx, balanceCount int, reason string, logFields []zap.Field) {
 	if len(backends) <= 1 {
 		return
 	}
@@ -226,16 +226,17 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			// backend1 factor scores: 1, 0, 1
 			// backend2 factor scores: 0, 1, 0
 			// Balancing the third factor may make the second factor unbalanced, although it's in the same order with the first factor.
-			return nil, nil, 0, nil
+			return
 		}
 		leftBitNum -= bitNum
 	}
+	reason = factor.Name()
 	fields := []zap.Field{
-		zap.String("factor", factor.Name()),
+		zap.String("factor", reason),
 		zap.Uint64("from_score", maxScore),
 		zap.Uint64("to_score", minScore),
 	}
-	return busiestBackend.BackendCtx, idlestBackend.BackendCtx, balanceCount, fields
+	return busiestBackend.BackendCtx, idlestBackend.BackendCtx, balanceCount, reason, fields
 }
 
 func (fbb *FactorBasedBalance) SetConfig(cfg *config.Config) {

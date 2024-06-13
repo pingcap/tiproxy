@@ -24,14 +24,22 @@ func succeedToLabel(succeed bool) string {
 	return "fail"
 }
 
-func addMigrateMetrics(from, to string, succeed bool, startTime monotime.Time) {
+func addMigrateMetrics(from, to, reason string, succeed bool, startTime monotime.Time) {
 	resLabel := succeedToLabel(succeed)
-	metrics.MigrateCounter.WithLabelValues(from, to, resLabel).Inc()
+	metrics.MigrateCounter.WithLabelValues(from, to, reason, resLabel).Inc()
 
 	cost := monotime.Since(startTime)
 	metrics.MigrateDurationHistogram.WithLabelValues(from, to, resLabel).Observe(cost.Seconds())
 }
 
 func readMigrateCounter(from, to string, succeed bool) (int, error) {
-	return metrics.ReadCounter(metrics.MigrateCounter.WithLabelValues(from, to, succeedToLabel(succeed)))
+	v1, err := metrics.ReadCounter(metrics.MigrateCounter.WithLabelValues(from, to, "status", succeedToLabel(succeed)))
+	if err != nil {
+		return v1, err
+	}
+	v2, err := metrics.ReadCounter(metrics.MigrateCounter.WithLabelValues(from, to, "conn", succeedToLabel(succeed)))
+	if err != nil {
+		return v2, err
+	}
+	return v1 + v2, nil
 }

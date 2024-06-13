@@ -73,6 +73,7 @@ type RedirectableConn interface {
 type BackendInst interface {
 	Addr() string
 	Healthy() bool
+	Local() bool
 }
 
 // backendWrapper contains the connections on the backend.
@@ -131,6 +132,13 @@ func (b *backendWrapper) ConnCount() int {
 	return b.connList.Len()
 }
 
+func (b *backendWrapper) Local() bool {
+	b.mu.RLock()
+	local := b.mu.Local
+	b.mu.RUnlock()
+	return local
+}
+
 func (b *backendWrapper) GetBackendInfo() observer.BackendInfo {
 	b.mu.RLock()
 	info := b.mu.BackendInfo
@@ -155,6 +163,8 @@ func (b *backendWrapper) String() string {
 // connWrapper wraps RedirectableConn.
 type connWrapper struct {
 	RedirectableConn
+	// The reason why the redirection happens.
+	redirectReason string
 	// Reference to the target backend if it's redirecting, otherwise nil.
 	redirectingBackend *backendWrapper
 	// Last redirect start time of this connection.

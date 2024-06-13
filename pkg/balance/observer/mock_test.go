@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"go.uber.org/atomic"
 )
@@ -57,6 +58,12 @@ func (mbf *mockBackendFetcher) setBackend(addr string, info *BackendInfo) {
 	mbf.backends[addr] = info
 }
 
+func (mbf *mockBackendFetcher) setLabels(addr string, labels map[string]string) {
+	mbf.Lock()
+	defer mbf.Unlock()
+	mbf.backends[addr].Labels = labels
+}
+
 func (mbf *mockBackendFetcher) removeBackend(addr string) {
 	mbf.Lock()
 	defer mbf.Unlock()
@@ -74,9 +81,10 @@ func newMockHealthCheck() *mockHealthCheck {
 	}
 }
 
-func (mhc *mockHealthCheck) Check(_ context.Context, addr string, _ *BackendInfo) *BackendHealth {
+func (mhc *mockHealthCheck) Check(_ context.Context, addr string, info *BackendInfo) *BackendHealth {
 	mhc.Lock()
 	defer mhc.Unlock()
+	mhc.backends[addr].BackendInfo = *info
 	return mhc.backends[addr]
 }
 
@@ -130,4 +138,22 @@ func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
+}
+
+type mockConfigGetter struct {
+	cfg atomic.Pointer[config.Config]
+}
+
+func (cfgGetter *mockConfigGetter) GetConfig() *config.Config {
+	return cfgGetter.cfg.Load()
+}
+
+func (cfgGetter *mockConfigGetter) setConfig(cfg *config.Config) {
+	cfgGetter.cfg.Store(cfg)
+}
+
+func newMockConfigGetter(cfg *config.Config) *mockConfigGetter {
+	cfgGetter := &mockConfigGetter{}
+	cfgGetter.setConfig(cfg)
+	return cfgGetter
 }

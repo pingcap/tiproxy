@@ -400,7 +400,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 
 func (mgr *BackendConnManager) updateTraffic(backendIO *pnet.PacketIO) {
 	inBytes, inPackets, outBytes, outPackets := backendIO.InBytes(), backendIO.InPackets(), backendIO.OutBytes(), backendIO.OutPackets()
-	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets)
+	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets, mgr.curBackend.Local())
 	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = inBytes, inPackets, outBytes, outPackets
 }
 

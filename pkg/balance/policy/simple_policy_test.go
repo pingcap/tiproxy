@@ -15,6 +15,7 @@ func TestSimplePolicy(t *testing.T) {
 		routeIdx int
 		fromIdx  int
 		toIdx    int
+		reason   string
 	}{
 		{
 			backends: []BackendCtx{newMockBackend(false, 0)},
@@ -45,6 +46,7 @@ func TestSimplePolicy(t *testing.T) {
 			routeIdx: 1,
 			fromIdx:  0,
 			toIdx:    1,
+			reason:   "conn",
 		},
 		{
 			backends: []BackendCtx{newMockBackend(true, 0), newMockBackend(true, 0)},
@@ -79,12 +81,13 @@ func TestSimplePolicy(t *testing.T) {
 		} else {
 			require.Nil(t, backend)
 		}
-		from, to, _, _ := sbp.BackendsToBalance(test.backends)
+		from, to, _, reason, _ := sbp.BackendsToBalance(test.backends)
 		if test.fromIdx >= 0 {
 			require.Equal(t, fromBackend.healthy, from.Healthy(), "test idx: %d", idx)
 			require.Equal(t, fromBackend.connScore, from.ConnScore(), "test idx: %d", idx)
 			require.Equal(t, toBackend.healthy, to.Healthy(), "test idx: %d", idx)
 			require.Equal(t, toBackend.connScore, to.ConnScore(), "test idx: %d", idx)
+			require.Equal(t, test.reason, reason, "test idx: %d", idx)
 		} else {
 			require.Nil(t, from, "test idx: %d", idx)
 			require.Nil(t, to, "test idx: %d", idx)

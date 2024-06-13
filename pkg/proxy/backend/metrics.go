@@ -57,7 +57,10 @@ func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 	mc.observer.Observe(cost.Seconds())
 }
 
-func addTraffic(addr string, inBytes, inPackets, outBytes, outPackets uint64) {
+func addTraffic(addr string, inBytes, inPackets, outBytes, outPackets uint64, local bool) {
+	if !local {
+		metrics.CrossLocationBytesCounter.Add(float64(inBytes + outBytes))
+	}
 	cache.Lock()
 	defer cache.Unlock()
 	// Updating traffic per IO costs too much CPU, so update it per command.
