@@ -14,10 +14,14 @@ import (
 )
 
 const (
+	// The backend sometimes OOM before reaching 100% memory usage. oomMemoryUsage indicates the memory usage when OOM.
+	oomMemoryUsage = 0.9
 	// If some metrics are missing, we use the old one temporarily for no longer than memMetricExpDuration.
 	memMetricExpDuration = 1 * time.Minute
-	// balanceSeconds4Memory indicates the time (in seconds) to migrate all the connections.
-	balanceSeconds4Memory = 10
+	// balanceSeconds4HighMemory indicates the time (in seconds) to migrate all the connections when memory is high.
+	balanceSeconds4HighMemory = 60
+	// balanceSeconds4OOMRisk indicates the time (in seconds) to migrate all the connections when there's an OOM risk.
+	balanceSeconds4OOMRisk = 10
 )
 
 var _ Factor = (*FactorCPU)(nil)
@@ -41,8 +45,8 @@ type oomRiskLevel struct {
 // We only need to rescue as many connections as possible when the backend is going OOM.
 var (
 	oomRiskLevels = []oomRiskLevel{
-		{memUsage: 0.8, timeToOOM: 45 * time.Second},
-		{memUsage: 0.6, timeToOOM: 3 * time.Minute},
+		{memUsage: 0.75, timeToOOM: time.Minute},
+		{memUsage: 0.6, timeToOOM: 5 * time.Minute},
 	}
 )
 
@@ -103,7 +107,7 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 
 	for i := 0; i < len(backends); i++ {
 		addr := backends[i].Addr()
-		score := fm.calcMemScore(addr)
+		score, _ := fm.calcMemScore(addr)
 		backends[i].addScore(score, fm.bitNum)
 	}
 }
@@ -141,7 +145,7 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 
 func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToOOM time.Duration) {
 	latestUsage = -1
-	timeToOOM = time.Duration(0)
+	timeToOOM = time.Duration(math.MaxInt64)
 	if len(usageHistory) == 0 {
 		return
 	}
@@ -151,8 +155,8 @@ func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToO
 		if math.IsNaN(value) {
 			continue
 		}
-		if value > 1 {
-			value = 1
+		if value > oomMemoryUsage {
+			value = oomMemoryUsage
 		}
 		if latestUsage < 0 {
 			latestUsage = value
@@ -160,9 +164,7 @@ func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToO
 		} else {
 			diff := latestUsage - value
 			if diff > 0.0001 {
-				timeToOOM = time.Duration(float64(latestTime-usageHistory[i].Timestamp)*(1.0-latestUsage)/diff) * time.Millisecond
-			} else {
-				timeToOOM = time.Duration(math.MaxInt64)
+				timeToOOM = time.Duration(float64(latestTime-usageHistory[i].Timestamp)*(oomMemoryUsage-latestUsage)/diff) * time.Millisecond
 			}
 			break
 		}
@@ -170,26 +172,30 @@ func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToO
 	return
 }
 
-func (fm *FactorMemory) calcMemScore(addr string) int {
+func (fm *FactorMemory) calcMemScore(addr string) (int, bool) {
 	usage := 1.0
 	timeToOOM := time.Duration(0)
-	if snapshot, ok := fm.snapshot[addr]; ok {
+	snapshot, ok := fm.snapshot[addr]
+	if ok {
 		usage = snapshot.memUsage
 		timeToOOM = snapshot.timeToOOM
 	}
-	// If the metric of one backend is missing, treat it as unhealthy.
-	// If the metrics of all backends are missing, give them the same scores.
-	if usage < 0 || usage > 1 {
-		usage = 1
+	// If one backend misses metric, maybe its version < v8.0.0. When the backends rolling upgrade to v8.1.0,
+	// we don't want the connections are migrated all at once because of memory imbalance. Typical score is 0,
+	// so give it 0.
+	if !ok || usage < 0 {
+		return 0, false
 	}
 	score := 0
 	for j := 0; j < len(oomRiskLevels); j++ {
-		if usage > oomRiskLevels[j].memUsage || timeToOOM < oomRiskLevels[j].timeToOOM {
-			score = len(oomRiskLevels) - j
-			break
+		if timeToOOM < oomRiskLevels[j].timeToOOM {
+			return len(oomRiskLevels) - j, true
+		}
+		if usage > oomRiskLevels[j].memUsage {
+			return len(oomRiskLevels) - j, false
 		}
 	}
-	return score
+	return score, false
 }
 
 func (fm *FactorMemory) ScoreBitNum() int {
@@ -200,19 +206,25 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) int {
 	// The risk level may change frequently, e.g. last time timeToOOM was 30s and connections were migrated away,
 	// then this time it becomes 60s and the connections are migrated back.
 	// So we only rebalance when the difference of risk levels of 2 backends is big enough.
-	fromScore := fm.calcMemScore(from.Addr())
-	toScore := fm.calcMemScore(to.Addr())
-	if fromScore-toScore > 1 {
-		// Assuming that the source and target backends have similar connections at first.
-		// We wish the connections to be migrated in 10 seconds but only a few are migrated in each round.
-		// If we use from.ConnScore() / 10, the migration will be slower and slower.
-		conns := (from.ConnScore() + to.ConnScore()) / (balanceSeconds4Memory * 2)
-		if conns > 0 {
-			return conns
-		}
-		return 1
+	fromScore, isOOM := fm.calcMemScore(from.Addr())
+	toScore, _ := fm.calcMemScore(to.Addr())
+	if fromScore-toScore <= 1 {
+		return 0
 	}
-	return 0
+	// Assuming all backends have high memory and the user scales out a new backend, we don't want all the connections
+	// are migrated all at once.
+	seconds := balanceSeconds4HighMemory
+	if isOOM {
+		seconds = balanceSeconds4OOMRisk
+	}
+	// Assuming that the source and target backends have similar connections at first.
+	// We wish the connections to be migrated in 10 seconds but only a few are migrated in each round.
+	// If we use from.ConnScore() / 10, the migration will be slower and slower.
+	conns := (from.ConnScore() + to.ConnScore()) / (seconds * 2)
+	if conns > 0 {
+		return conns
+	}
+	return 1
 }
 
 func (fm *FactorMemory) SetConfig(cfg *config.Config) {
