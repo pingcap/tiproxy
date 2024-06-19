@@ -39,8 +39,6 @@ type MetricsReader interface {
 	AddQueryExpr(queryExpr QueryExpr) uint64
 	RemoveQueryExpr(id uint64)
 	GetQueryResult(id uint64) QueryResult
-	Subscribe(receiverName string) <-chan struct{}
-	Unsubscribe(receiverName string)
 	Close()
 }
 
@@ -50,7 +48,6 @@ type DefaultMetricsReader struct {
 	sync.Mutex
 	queryExprs   map[uint64]QueryExpr
 	queryResults map[uint64]QueryResult
-	notifyCh     map[string]chan struct{}
 	wg           waitgroup.WaitGroup
 	promFetcher  PromInfoFetcher
 	cancel       context.CancelFunc
@@ -67,7 +64,6 @@ func NewDefaultMetricsReader(lg *zap.Logger, promFetcher PromInfoFetcher, cfg *c
 		cfg:          cfg,
 		queryExprs:   make(map[uint64]QueryExpr),
 		queryResults: make(map[uint64]QueryResult),
-		notifyCh:     make(map[string]chan struct{}),
 	}
 }
 
@@ -88,7 +84,6 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context) {
 				dmr.Lock()
 				dmr.queryResults = results
 				dmr.Unlock()
-				dmr.notifySubscribers(ctx)
 			}
 			select {
 			case <-ticker.C:
@@ -223,46 +218,9 @@ func (dmr *DefaultMetricsReader) GetQueryResult(id uint64) QueryResult {
 	return dmr.queryResults[id]
 }
 
-func (dmr *DefaultMetricsReader) Subscribe(receiverName string) <-chan struct{} {
-	ch := make(chan struct{}, 1)
-	dmr.Lock()
-	dmr.notifyCh[receiverName] = ch
-	dmr.Unlock()
-	return ch
-}
-
-func (dmr *DefaultMetricsReader) Unsubscribe(receiverName string) {
-	dmr.Lock()
-	defer dmr.Unlock()
-	if ch, ok := dmr.notifyCh[receiverName]; ok {
-		close(ch)
-		delete(dmr.notifyCh, receiverName)
-	}
-}
-
-func (dmr *DefaultMetricsReader) notifySubscribers(ctx context.Context) {
-	dmr.Lock()
-	defer dmr.Unlock()
-	for name, ch := range dmr.notifyCh {
-		// If one receiver blocks or panics and doesn't read the channel, we should skip and continue.
-		select {
-		case ch <- struct{}{}:
-		case <-time.After(100 * time.Millisecond):
-			dmr.lg.Warn("fails to notify metrics result", zap.String("receiver", name))
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
 func (dmr *DefaultMetricsReader) Close() {
 	if dmr.cancel != nil {
 		dmr.cancel()
 	}
 	dmr.wg.Wait()
-	dmr.Lock()
-	for _, ch := range dmr.notifyCh {
-		close(ch)
-	}
-	dmr.Unlock()
 }
