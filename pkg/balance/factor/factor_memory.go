@@ -51,7 +51,7 @@ var (
 )
 
 type memBackendSnapshot struct {
-	updatedTime monotime.Time
+	updatedTime time.Time
 	memUsage    float64
 	timeToOOM   time.Duration
 }
@@ -121,20 +121,24 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
 		if len(pairs) > 0 {
-			latestUsage, timeToOOM := calcMemUsage(pairs)
-			if latestUsage >= 0 {
-				snapshots[addr] = memBackendSnapshot{
-					updatedTime: qr.UpdateTime,
-					memUsage:    latestUsage,
-					timeToOOM:   timeToOOM,
+			updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
+			// If this backend is not updated, ignore it.
+			if snapshot, ok := fm.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
+				latestUsage, timeToOOM := calcMemUsage(pairs)
+				if latestUsage >= 0 {
+					snapshots[addr] = memBackendSnapshot{
+						updatedTime: updateTime,
+						memUsage:    latestUsage,
+						timeToOOM:   timeToOOM,
+					}
+					valid = true
 				}
-				valid = true
 			}
 		}
 		// Merge the old snapshot just in case some metrics have missed for a short period.
 		if !valid {
 			if snapshot, ok := fm.snapshot[addr]; ok {
-				if monotime.Since(snapshot.updatedTime) < memMetricExpDuration {
+				if time.Since(snapshot.updatedTime) < memMetricExpDuration {
 					snapshots[addr] = snapshot
 				}
 			}

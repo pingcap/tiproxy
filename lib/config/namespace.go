@@ -32,7 +32,7 @@ const (
 	healthCheckMaxRetries    = 3
 	healthCheckRetryInterval = 1 * time.Second
 	healthCheckTimeout       = 2 * time.Second
-	readMetricsInterval      = 15 * time.Second
+	readMetricsInterval      = 5 * time.Second
 	readMetricsTimeout       = 3 * time.Second
 )
 
