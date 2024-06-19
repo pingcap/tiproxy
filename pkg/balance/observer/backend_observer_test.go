@@ -206,8 +206,8 @@ func TestLocal(t *testing.T) {
 		require.Eventually(ts.t, func() bool {
 			result := ts.getResultFromCh()
 			require.NoError(ts.t, result.Error())
-			health := result.Backends()[backend]
-			return health.Local == test.local
+			health, ok := result.Backends()[backend]
+			return ok && health.Local == test.local
 		}, 3*time.Second, 10*time.Millisecond, "test case %d", i)
 		ts.removeBackend(backend)
 	}
