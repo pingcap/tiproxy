@@ -21,11 +21,11 @@ func TestHealthScore(t *testing.T) {
 	}{
 		{
 			errCounts: []float64{math.NaN(), math.NaN()},
-			score:     2,
+			score:     0,
 		},
 		{
 			errCounts: []float64{math.NaN(), 0},
-			score:     2,
+			score:     0,
 		},
 		{
 			errCounts: []float64{float64(errDefinitions[0].failThreshold + 1), 0},
@@ -88,13 +88,13 @@ func TestHealthBalance(t *testing.T) {
 	}{
 		{
 			errCounts: [][]float64{{math.NaN(), math.NaN()}, {math.NaN(), math.NaN()}},
-			scores:    []uint64{2, 2},
+			scores:    []uint64{0, 0},
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
 				{math.NaN(), math.NaN()}},
-			scores: []uint64{1, 2},
+			scores: []uint64{1, 0},
 		},
 		{
 			errCounts: [][]float64{

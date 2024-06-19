@@ -194,11 +194,12 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 }
 
 func calcValueRange(sample *model.Sample, indicator errIndicator) valueRange {
+	// A backend is typically normal, so if its metric misses, take it as normal.
 	if sample == nil {
-		return valueRangeAbnormal
+		return valueRangeNormal
 	}
 	if math.IsNaN(float64(sample.Value)) {
-		return valueRangeAbnormal
+		return valueRangeNormal
 	}
 	value := int(sample.Value)
 	if indicator.failThreshold > indicator.recoverThreshold {
