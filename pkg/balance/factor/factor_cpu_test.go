@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
@@ -77,7 +78,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 		values := make([]*model.SampleStream, 0, len(test.cpus))
 		for j := 0; j < len(test.cpus); j++ {
 			backends = append(backends, createBackend(j, 0, 0))
-			values = append(values, createSampleStream(test.cpus[j], j))
+			values = append(values, createSampleStream(test.cpus[j], j, model.Now()))
 		}
 		mmr := &mockMetricsReader{
 			qrs: map[uint64]metricsreader.QueryResult{
@@ -185,13 +186,15 @@ func TestCPUBalanceContinuously(t *testing.T) {
 
 	mmr := newMockMetricsReader()
 	fc := NewFactorCPU(mmr)
+	curTime := model.Now().Add(-10 * time.Second)
 	for i, test := range tests {
 		backends := make([]scoredBackend, 0, len(test.cpus))
 		values := make([]*model.SampleStream, 0, len(test.cpus))
 		for j := 0; j < len(test.cpus); j++ {
 			backends = append(backends, createBackend(j, test.connCounts[j], test.connScores[j]))
-			values = append(values, createSampleStream(test.cpus[j], j))
+			values = append(values, createSampleStream(test.cpus[j], j, curTime))
 		}
+		curTime = curTime.Add(time.Millisecond)
 		mmr.qrs[1] = metricsreader.QueryResult{
 			UpdateTime: monotime.Now(),
 			Value:      model.Matrix(values),
@@ -221,38 +224,74 @@ func TestCPUBalanceContinuously(t *testing.T) {
 
 func TestNoCPUMetric(t *testing.T) {
 	tests := []struct {
-		cpus       []float64
+		cpus       [][]float64
 		updateTime monotime.Time
 	}{
 		{
 			cpus: nil,
 		},
 		{
-			cpus:       []float64{1.0, 0.0},
-			updateTime: monotime.Now().Sub(cpuMetricExpDuration * 2),
+			cpus:       [][]float64{{1.0}, {0.0}},
+			updateTime: monotime.Now().Add(-cpuMetricExpDuration * 2),
 		},
 		{
-			cpus:       []float64{math.NaN(), math.NaN()},
+			cpus:       [][]float64{{math.NaN()}, {math.NaN()}},
 			updateTime: monotime.Now(),
+		},
+	}
+	mmr := newMockMetricsReader()
+	fc := NewFactorCPU(mmr)
+	backends := []scoredBackend{createBackend(0, 0, 0), createBackend(1, 0, 0)}
+	for i, test := range tests {
+		values := make([]*model.SampleStream, 0, len(test.cpus))
+		for j := 0; j < len(test.cpus); j++ {
+			ss := createSampleStream(test.cpus[j], j, model.Time(test.updateTime/monotime.Time(time.Millisecond)))
+			values = append(values, ss)
+		}
+		mmr.qrs[1] = metricsreader.QueryResult{
+			UpdateTime: test.updateTime,
+			Value:      model.Matrix(values),
+		}
+		updateScore(fc, backends)
+		require.Equal(t, backends[0].score(), backends[1].score(), "test index %d", i)
+	}
+}
+
+func TestCPUResultNotUpdated(t *testing.T) {
+	now := model.Now()
+	tests := []struct {
+		cpu           float64
+		updateTime    model.Time
+		expectedScore int
+	}{
+		{
+			cpu:           0.1,
+			updateTime:    now,
+			expectedScore: 2,
+		},
+		{
+			cpu:           0.1,
+			updateTime:    now,
+			expectedScore: 2,
+		},
+		{
+			cpu:           0.3,
+			updateTime:    now.Add(time.Second),
+			expectedScore: 6,
 		},
 	}
 
 	mmr := newMockMetricsReader()
 	fc := NewFactorCPU(mmr)
-	backends := make([]scoredBackend, 0, 2)
-	for i := 0; i < 2; i++ {
-		backends = append(backends, createBackend(i, i*100, i*100))
-	}
+	backends := []scoredBackend{createBackend(0, 0, 0), createBackend(1, 0, 0)}
 	for i, test := range tests {
-		values := make([]*model.Sample, 0, len(test.cpus))
-		for j := 0; j < len(test.cpus); j++ {
-			values = append(values, createSample(test.cpus[j], j))
-		}
+		array := []float64{test.cpu}
+		values := []*model.SampleStream{createSampleStream(array, 0, test.updateTime), createSampleStream(array, 1, test.updateTime)}
 		mmr.qrs[1] = metricsreader.QueryResult{
-			UpdateTime: test.updateTime,
-			Value:      model.Vector(values),
+			UpdateTime: monotime.Now(),
+			Value:      model.Matrix(values),
 		}
 		updateScore(fc, backends)
-		require.Equal(t, backends[0].score(), backends[1].score(), "test index %d", i)
+		require.EqualValues(t, test.expectedScore, backends[0].score(), "test index %d", i)
 	}
 }

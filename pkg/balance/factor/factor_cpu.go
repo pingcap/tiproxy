@@ -37,7 +37,8 @@ var (
 )
 
 type cpuBackendSnapshot struct {
-	updatedTime monotime.Time
+	// the latest time in the query result
+	updatedTime time.Time
 	// smoothed CPU usage, used to decide whether to migrate
 	avgUsage float64
 	// timely CPU usage, used to score and decide the balance count
@@ -105,21 +106,26 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
 		if len(pairs) > 0 {
-			avgUsage, latestUsage := calcAvgUsage(pairs)
-			if avgUsage >= 0 {
-				snapshots[addr] = cpuBackendSnapshot{
-					avgUsage:    avgUsage,
-					latestUsage: latestUsage,
-					connCount:   backend.ConnCount(),
-					updatedTime: qr.UpdateTime,
+			updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
+			// The time point of updating each backend is different, so only partial of the backends are updated every time.
+			// If this backend is not updated, ignore it.
+			if snapshot, ok := fc.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
+				avgUsage, latestUsage := calcAvgUsage(pairs)
+				if avgUsage >= 0 {
+					snapshots[addr] = cpuBackendSnapshot{
+						avgUsage:    avgUsage,
+						latestUsage: latestUsage,
+						connCount:   backend.ConnCount(),
+						updatedTime: updateTime,
+					}
+					valid = true
 				}
-				valid = true
 			}
 		}
 		// Merge the old snapshot just in case some metrics have missed for a short period.
 		if !valid {
 			if snapshot, ok := fc.snapshot[addr]; ok {
-				if monotime.Since(snapshot.updatedTime) < cpuMetricExpDuration {
+				if time.Since(snapshot.updatedTime) < cpuMetricExpDuration {
 					snapshots[addr] = snapshot
 				}
 			}

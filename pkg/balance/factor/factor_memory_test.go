@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
@@ -89,7 +90,7 @@ func TestMemoryScore(t *testing.T) {
 	values := make([]*model.SampleStream, 0, len(tests))
 	for i, test := range tests {
 		backends = append(backends, createBackend(i, 0, 0))
-		values = append(values, createSampleStream(test.memory, i))
+		values = append(values, createSampleStream(test.memory, i, model.Now()))
 	}
 	mmr := &mockMetricsReader{
 		qrs: map[uint64]metricsreader.QueryResult{
@@ -154,7 +155,7 @@ func TestMemoryBalance(t *testing.T) {
 		values := make([]*model.SampleStream, 0, len(test.memory))
 		for j := 0; j < len(test.memory); j++ {
 			backends = append(backends, createBackend(j, 0, 0))
-			values = append(values, createSampleStream(test.memory[j], j))
+			values = append(values, createSampleStream(test.memory[j], j, model.Now()))
 		}
 		mmr := &mockMetricsReader{
 			qrs: map[uint64]metricsreader.QueryResult{
@@ -207,7 +208,9 @@ func TestNoMemMetrics(t *testing.T) {
 	for i, test := range tests {
 		values := make([]*model.SampleStream, 0, len(test.mem))
 		for j := 0; j < len(test.mem); j++ {
-			values = append(values, createSampleStream(test.mem[j], j))
+			ss := createSampleStream(test.mem[j], j, model.Now())
+			ss.Values[0].Timestamp = model.Time(test.updateTime / monotime.Time(time.Millisecond))
+			values = append(values, ss)
 		}
 		mmr.qrs[1] = metricsreader.QueryResult{
 			UpdateTime: test.updateTime,
@@ -267,8 +270,8 @@ func TestMemoryBalanceCount(t *testing.T) {
 			backend1 = []float64{0.9, 0.9}
 		}
 		values := []*model.SampleStream{
-			createSampleStream(backend1, 0),
-			createSampleStream([]float64{0, 0}, 1),
+			createSampleStream(backend1, 0, model.Now()),
+			createSampleStream([]float64{0, 0}, 1, model.Now()),
 		}
 		mmr := &mockMetricsReader{
 			qrs: map[uint64]metricsreader.QueryResult{
