@@ -399,7 +399,7 @@ func (mb *mockBackend) respondSessionStates(packetIO *pnet.PacketIO) error {
 	names := []string{sessionStatesCol, sessionTokenCol}
 	values := [][]any{
 		{
-			mb.sessionStates, mockCmdStr,
+			mb.sessionStates, mockSessionToken,
 		},
 	}
 	return mb.writeResultSet(packetIO, names, values)

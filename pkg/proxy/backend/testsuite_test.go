@@ -41,6 +41,7 @@ var (
 	mockCmdInt        = 100
 	mockCmdBytes      = []byte("01234567890123456789")
 	mockSessionStates = "{\"current-db\":\"test_db\"}"
+	mockSessionToken  = "{\"username\": \"str\"}"
 )
 
 type testConfig struct {

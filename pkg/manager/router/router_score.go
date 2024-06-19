@@ -33,18 +33,23 @@ type ScoreBasedRouter struct {
 	backends     *glist.List[*backendWrapper]
 	observeError error
 	// Only store the version of a random backend, so the client may see a wrong version when backends are upgrading.
-	serverVersion     string
-	enableZeroBackend bool
-	inZeroBackendMode bool
+	serverVersion string
+
+	enablePause    bool
+	pausedConnList *glist.List[*connWrapper]
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
-func NewScoreBasedRouter(logger *zap.Logger, enableZeroBackend bool) *ScoreBasedRouter {
-	return &ScoreBasedRouter{
-		logger:            logger,
-		backends:          glist.New[*backendWrapper](),
-		enableZeroBackend: enableZeroBackend,
+func NewScoreBasedRouter(logger *zap.Logger, enablePause bool) *ScoreBasedRouter {
+	router := &ScoreBasedRouter{
+		logger:      logger,
+		backends:    glist.New[*backendWrapper](),
+		enablePause: enablePause,
 	}
+	if enablePause {
+		router.pausedConnList = glist.New[*connWrapper]()
+	}
+	return router
 }
 
 func (r *ScoreBasedRouter) Init(fetcher BackendFetcher, hc HealthCheck, cfg *config.HealthCheck) error {
@@ -116,11 +121,20 @@ func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn Redir
 	be := router.ensureBackend(backendInst.Addr(), true)
 	backend := be.Value
 	if succeed {
-		connWrapper := &connWrapper{
-			RedirectableConn: conn,
-			phase:            phaseNotRedirected,
+		var cw *connWrapper
+		// conn may be a paused connection, we need to remove it from pausedConnList if so.
+		v := conn.Value(_routerKey)
+		if v != nil {
+			cw = router.getConnWrapper(conn).Value
+			cw.phase = phaseNone
+			router.removePausedConn(router.getConnWrapper(conn))
+		} else {
+			cw = &connWrapper{
+				RedirectableConn: conn,
+				phase:            phaseNone,
+			}
 		}
-		router.addConn(be, connWrapper)
+		router.addConn(be, cw)
 		conn.SetEventReceiver(router)
 	} else {
 		backend.connScore--
@@ -141,6 +155,15 @@ func (router *ScoreBasedRouter) addConn(be *glist.Element[*backendWrapper], conn
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	router.setConnWrapper(conn, ce)
 	router.adjustBackendList(be, false)
+}
+
+func (router *ScoreBasedRouter) addPausedConn(conn *connWrapper) {
+	ce := router.pausedConnList.PushBack(conn)
+	router.setConnWrapper(conn, ce)
+}
+
+func (router *ScoreBasedRouter) removePausedConn(ce *glist.Element[*connWrapper]) {
+	router.pausedConnList.Remove(ce)
 }
 
 // adjustBackendList moves `be` after the score of `be` changes to keep the list ordered.
@@ -260,7 +283,7 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 	if succeed {
 		router.removeConn(fromBe, router.getConnWrapper(conn))
 		router.addConn(toBe, connWrapper)
-		connWrapper.phase = phaseRedirectEnd
+		connWrapper.phase = phaseNone
 	} else {
 		fromBe.Value.connScore++
 		router.adjustBackendList(fromBe, false)
@@ -272,24 +295,55 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 	addMigrateMetrics(from, to, succeed, connWrapper.lastRedirect)
 }
 
+// OnPauseSucceed implements ConnEventReceiver.OnPauseSucceed interface.
+func (router *ScoreBasedRouter) OnPauseSucceed(addr string, conn RedirectableConn) error {
+	router.onPauseFinished(addr, conn, true)
+	return nil
+}
+
+// OnPauseFail implements ConnEventReceiver.OnPauseFail interface.
+func (router *ScoreBasedRouter) OnPauseFail(addr string, conn RedirectableConn) error {
+	router.onPauseFinished(addr, conn, false)
+	return nil
+}
+
+func (router *ScoreBasedRouter) onPauseFinished(addr string, conn RedirectableConn, succeed bool) {
+	router.Lock()
+	defer router.Unlock()
+	be := router.ensureBackend(addr, true)
+	connWrapper := router.getConnWrapper(conn).Value
+	if succeed {
+		router.removeConn(be, router.getConnWrapper(conn))
+		router.addPausedConn(connWrapper)
+		connWrapper.phase = phaseNone
+	} else {
+		connWrapper.phase = phasePauseFail
+	}
+}
+
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
 func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn) error {
 	router.Lock()
 	defer router.Unlock()
-	be := router.ensureBackend(addr, true)
 	connWrapper := router.getConnWrapper(conn)
-	redirectingBackend := connWrapper.Value.redirectingBackend
-	// If this connection is redirecting, decrease the score of the target backend.
-	if redirectingBackend != nil {
-		redirectingBackend.connScore--
-		connWrapper.Value.redirectingBackend = nil
-		if redirectingBe := router.lookupBackend(redirectingBackend.addr, true); redirectingBe != nil {
-			router.adjustBackendList(redirectingBe, true)
+	if len(addr) > 0 {
+		be := router.ensureBackend(addr, true)
+		redirectingBackend := connWrapper.Value.redirectingBackend
+		// If this connection is redirecting, decrease the score of the target backend.
+		if redirectingBackend != nil {
+			redirectingBackend.connScore--
+			connWrapper.Value.redirectingBackend = nil
+			if redirectingBe := router.lookupBackend(redirectingBackend.addr, true); redirectingBe != nil {
+				router.adjustBackendList(redirectingBe, true)
+			}
+		} else {
+			be.Value.connScore--
 		}
+		router.removeConn(be, connWrapper)
 	} else {
-		be.Value.connScore--
+		// addr is empty indicates the connection has been paused
+		router.removePausedConn(connWrapper)
 	}
-	router.removeConn(be, connWrapper)
 	return nil
 }
 
@@ -317,36 +371,32 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 			backend.setHealth(*health)
 			router.adjustBackendList(be, true)
 		}
-		if health.Status == StatusHealthy {
-			router.inZeroBackendMode = false
-		}
 	}
-	// router.logger.Info(
-	// 	"debug backend change",
-	// 	zap.Int("len", router.backends.Len()),
-	// 	zap.Bool("zero_backend", router.inZeroBackendMode),
-	// 	zap.Any("backends", router.backends),
-	// )
 	if len(backends) > 0 {
 		router.updateServerVersion()
 	}
-	if router.enableZeroBackend && len(backends) > 0 {
-		inZeroBackendMode := true
+	if router.enablePause && len(backends) > 0 {
+		pause := true
 		for be := router.backends.Front(); be != nil; be = be.Next() {
 			backend := be.Value
 			if backend.Healthy() {
-				inZeroBackendMode = false
+				pause = false
 				break
 			}
 		}
-		router.inZeroBackendMode = inZeroBackendMode
-		if inZeroBackendMode {
-			router.logger.Info("last backend become unhealthy, notify connections to save session")
+		if pause {
+			router.logger.Info("last backend become unhealthy, notify connections to pause")
 			for be := router.backends.Front(); be != nil; be = be.Next() {
 				backend := be.Value
+				backend.connScore--
 				for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
 					conn := ele.Value
-					conn.SaveSession()
+					switch conn.phase {
+					case phasePauseNotify, phaseRedirectNotify:
+						continue
+					}
+					conn.phase = phasePauseNotify
+					conn.Pause()
 				}
 			}
 		}
@@ -395,6 +445,8 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 			case phaseRedirectNotify:
 				// A connection cannot be redirected again when it has not finished redirecting.
 				continue
+			case phasePauseNotify:
+				continue
 			case phaseRedirectFail:
 				// If it failed recently, it will probably fail this time.
 				if conn.lastRedirect.Add(redirectFailMinInterval).After(curTime) {
@@ -441,6 +493,7 @@ func (router *ScoreBasedRouter) ConnCount() int {
 		backend := be.Value
 		j += backend.connList.Len()
 	}
+	j += router.pausedConnList.Len()
 	return j
 }
 
@@ -463,10 +516,6 @@ func (router *ScoreBasedRouter) ServerVersion() string {
 	version := router.serverVersion
 	router.Unlock()
 	return version
-}
-
-func (router *ScoreBasedRouter) InZeroBackendMode() bool {
-	return router.inZeroBackendMode
 }
 
 // Close implements Router.Close interface.

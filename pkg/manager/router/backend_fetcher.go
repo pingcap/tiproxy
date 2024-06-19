@@ -18,7 +18,6 @@ var _ BackendFetcher = (*StaticFetcher)(nil)
 
 // BackendFetcher is an interface to fetch the backend list.
 type BackendFetcher interface {
-	// refresh is used to force flush backend list in zero backend mode
 	GetBackendList(ctx context.Context, refresh bool) (map[string]*BackendInfo, error)
 }
 

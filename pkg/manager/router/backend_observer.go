@@ -144,7 +144,6 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 		startTime := monotime.Now()
 		backendInfo, err := bo.fetcher.GetBackendList(ctx, refresh)
 		refresh = false
-		// bo.logger.Info("debug GetBackendList", zap.Any("backendInfo", backendInfo))
 		if err != nil {
 			bo.logger.Error("fetching backends encounters error", zap.Error(err))
 			bo.eventReceiver.OnBackendChanged(nil, err)

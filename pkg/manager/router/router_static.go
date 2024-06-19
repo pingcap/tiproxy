@@ -59,10 +59,6 @@ func (r *StaticRouter) ServerVersion() string {
 	return ""
 }
 
-func (r *StaticRouter) InZeroBackendMode() bool {
-	return false
-}
-
 func (r *StaticRouter) Close() {
 }
 
@@ -71,6 +67,14 @@ func (r *StaticRouter) OnRedirectSucceed(from, to string, conn RedirectableConn)
 }
 
 func (r *StaticRouter) OnRedirectFail(from, to string, conn RedirectableConn) error {
+	return nil
+}
+
+func (r *StaticRouter) OnPauseSucceed(addr string, conn RedirectableConn) error {
+	return nil
+}
+
+func (r *StaticRouter) OnPauseFail(addr string, conn RedirectableConn) error {
 	return nil
 }
 
