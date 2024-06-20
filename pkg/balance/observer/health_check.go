@@ -100,26 +100,27 @@ func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh
 func (dhc *DefaultHealthCheck) backendStatusCheck(httpCli *http.Client, url string, bh *BackendHealth) error {
 	resp, err := httpCli.Get(url)
 	if err == nil {
+		defer func() {
+			if ignoredErr := resp.Body.Close(); ignoredErr != nil {
+				dhc.logger.Warn("close http response in health check failed", zap.Error(ignoredErr))
+			}
+		}()
 
 		if resp.StatusCode != http.StatusOK {
-			err = backoff.Permanent(errors.Errorf("http status %d", resp.StatusCode))
+			return backoff.Permanent(errors.Errorf("http status %d", resp.StatusCode))
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			dhc.logger.Error("read response body in healthy check failed ", zap.Error(err))
+			dhc.logger.Error("read response body in healthy check failed", zap.String("url", url), zap.Error(err))
 			return err
 		}
 
 		var respBody backendHttpStatusRespBody
 		err = json.Unmarshal(body, &respBody)
 		if err != nil {
-			dhc.logger.Error("unmarshal body in healthy check failed", zap.String("resp body", string(body)), zap.Error(err))
+			dhc.logger.Error("unmarshal body in healthy check failed", zap.String("url", url), zap.String("resp body", string(body)), zap.Error(err))
 			return err
-		}
-
-		if ignoredErr := resp.Body.Close(); ignoredErr != nil {
-			dhc.logger.Warn("close http response in health check failed", zap.Error(ignoredErr))
 		}
 
 		bh.ServerVersion = respBody.Version

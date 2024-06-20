@@ -23,11 +23,9 @@ func TestReadServerVersion(t *testing.T) {
 	hc := NewDefaultHealthCheck(nil, newHealthCheckConfigForTest(), lg)
 	backend, info := newBackendServer(t)
 	backend.setServerVersion("1.0")
-	//backend.serverVersion.Store("1.0")
 	health := hc.Check(context.Background(), backend.sqlAddr, info)
 	require.Equal(t, "1.0", health.ServerVersion)
 	backend.stopSQLServer()
-	//backend.serverVersion.Store("2.0")
 	backend.setServerVersion("2.0")
 	backend.startSQLServer()
 	health = hc.Check(context.Background(), backend.sqlAddr, info)
@@ -47,7 +45,7 @@ func TestReadServerVersion(t *testing.T) {
 
 // Test that the backend status is correct when the backend starts or shuts down.
 func TestHealthCheck(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
+	lg, text := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()
 	hc := NewDefaultHealthCheck(nil, cfg, lg)
 	backend, info := newBackendServer(t)
@@ -65,6 +63,7 @@ func TestHealthCheck(t *testing.T) {
 	backend.setHTTPResp(false)
 	health = hc.Check(context.Background(), backend.sqlAddr, info)
 	require.False(t, health.Healthy)
+	require.NotContains(t, text.String(), "unmarshal body")
 	backend.setHTTPResp(true)
 	health = hc.Check(context.Background(), backend.sqlAddr, info)
 	require.True(t, health.Healthy)
@@ -113,6 +112,7 @@ func (srv *backendServer) setServerVersion(version string) {
 	body, _ := json.Marshal(resp)
 	srv.mockHttpHandler.setHTTPRespBody(string(body))
 }
+
 func (srv *backendServer) startHTTPServer() {
 	if srv.mockHttpHandler == nil {
 		srv.mockHttpHandler = &mockHttpHandler{
