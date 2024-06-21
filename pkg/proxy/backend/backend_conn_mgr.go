@@ -527,27 +527,28 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		rs.err = ErrTargetUnhealthy
 		return
 	}
+
 	backendIO := mgr.backendIO.Load()
-	var sessionStates, sessionToken string
 	if backendIO == nil {
 		mgr.logger.Info("session paused, skip redirect")
 		return
-	} else {
-		if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
-			// If the backend connection is closed, also close the client connection.
-			// Otherwise, if the client is idle, the mgr will keep retrying.
-			if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
-				mgr.quitSource = SrcBackendNetwork
-				if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
-					mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
-				}
+	}
+
+	var sessionStates, sessionToken string
+	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
+		// If the backend connection is closed, also close the client connection.
+		// Otherwise, if the client is idle, the mgr will keep retrying.
+		if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
+			mgr.quitSource = SrcBackendNetwork
+			if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
+				mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
 			}
-			return
 		}
-		if ctx.Err() != nil {
-			rs.err = ctx.Err()
-			return
-		}
+		return
+	}
+	if ctx.Err() != nil {
+		rs.err = ctx.Err()
+		return
 	}
 	if rs.err = mgr.updateAuthInfoFromSessionStates(hack.Slice(sessionStates)); rs.err != nil {
 		return
