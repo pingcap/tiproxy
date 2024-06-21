@@ -239,22 +239,22 @@ func TestHealthBalanceCount(t *testing.T) {
 		{
 			conns:    []int{100, 10},
 			minCount: 5,
-			maxCount: 20,
+			maxCount: 40,
 		},
 		{
 			conns:    []int{1000, 100},
-			minCount: 50,
-			maxCount: 300,
+			minCount: 100,
+			maxCount: 400,
 		},
 		{
 			conns:    []int{100, 1000},
-			minCount: 50,
-			maxCount: 200,
+			minCount: 100,
+			maxCount: 400,
 		},
 		{
 			conns:    []int{10000, 10000},
-			minCount: 500,
-			maxCount: 2000,
+			minCount: 1000,
+			maxCount: 4000,
 		},
 	}
 

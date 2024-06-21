@@ -21,7 +21,7 @@ const (
 	// balanceSeconds4HighMemory indicates the time (in seconds) to migrate all the connections when memory is high.
 	balanceSeconds4HighMemory = 60
 	// balanceSeconds4OOMRisk indicates the time (in seconds) to migrate all the connections when there's an OOM risk.
-	balanceSeconds4OOMRisk = 10
+	balanceSeconds4OOMRisk = 5
 )
 
 var _ Factor = (*FactorCPU)(nil)

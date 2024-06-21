@@ -16,7 +16,7 @@ import (
 const (
 	errMetricExpDuration = 1 * time.Minute
 	// balanceSeconds4Health indicates the time (in seconds) to migrate all the connections.
-	balanceSeconds4Health = 10
+	balanceSeconds4Health = 5
 )
 
 type valueRange int
