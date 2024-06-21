@@ -112,6 +112,7 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(InboundPacketsCounter)
 	prometheus.MustRegister(OutboundBytesCounter)
 	prometheus.MustRegister(OutboundPacketsCounter)
+	prometheus.MustRegister(CrossLocationBytesCounter)
 }
 
 // ReadCounter reads the value from the counter. It is only used for testing.

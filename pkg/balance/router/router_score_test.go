@@ -114,6 +114,13 @@ func (tester *routerTester) updateBackendStatusByAddr(addr string, healthy bool)
 	tester.notifyHealth()
 }
 
+func (tester *routerTester) updateBackendLocalityByAddr(addr string, local bool) {
+	health, ok := tester.backends[addr]
+	require.True(tester.t, ok)
+	health.Local = local
+	tester.notifyHealth()
+}
+
 func (tester *routerTester) getBackendByIndex(index int) *backendWrapper {
 	addr := strconv.Itoa(index + 1)
 	backend := tester.router.backends[addr]
@@ -758,6 +765,11 @@ func TestCloseRedirectingConns(t *testing.T) {
 func TestUpdateBackendHealth(t *testing.T) {
 	tester := newRouterTester(t, nil)
 	tester.addBackends(3)
+	// Test locality of some backends are changed.
+	tester.updateBackendLocalityByAddr(tester.getBackendByIndex(0).Addr(), false)
+	tester.updateBackendLocalityByAddr(tester.getBackendByIndex(1).Addr(), true)
+	require.Equal(t, false, tester.router.backends[tester.getBackendByIndex(0).Addr()].Local())
+	require.Equal(t, true, tester.router.backends[tester.getBackendByIndex(1).Addr()].Local())
 	// Test some backends are not in the list anymore.
 	tester.removeBackends(1)
 	tester.checkBackendNum(2)
