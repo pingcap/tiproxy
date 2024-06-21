@@ -249,17 +249,17 @@ func TestMemoryBalanceCount(t *testing.T) {
 		},
 		{
 			conns:                []int{1000, 100},
-			oomCountRange:        []int{50, 100},
+			oomCountRange:        []int{50, 200},
 			highMemoryCountRange: []int{5, 50},
 		},
 		{
 			conns:                []int{100, 1000},
-			oomCountRange:        []int{50, 100},
+			oomCountRange:        []int{50, 200},
 			highMemoryCountRange: []int{5, 50},
 		},
 		{
 			conns:                []int{10000, 10000},
-			oomCountRange:        []int{500, 1000},
+			oomCountRange:        []int{500, 2000},
 			highMemoryCountRange: []int{50, 500},
 		},
 	}

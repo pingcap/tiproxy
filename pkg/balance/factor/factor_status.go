@@ -7,7 +7,7 @@ import "github.com/pingcap/tiproxy/lib/config"
 
 const (
 	// balanceSeconds4Status indicates the time (in seconds) to migrate all the connections.
-	// If some backends are down, migrate fast but do not put too much pressure on TiDB.
+	// A typical TiDB graceful shutdown time is 15s. The health check delay is 3s and we have at most 12s.
 	balanceSeconds4Status = 5
 )
 
@@ -42,14 +42,20 @@ func (fs *FactorStatus) ScoreBitNum() int {
 }
 
 func (fs *FactorStatus) BalanceCount(from, to scoredBackend) int {
-	// Assuming that the source and target backends have similar connections at first.
 	// We wish the connections to be migrated in 5 seconds but only a few are migrated in each round.
-	// If we use from.ConnScore() / 5, the migration will be slower and slower.
-	conns := (from.ConnScore() + to.ConnScore()) / (balanceSeconds4Status * 2)
-	if conns > 0 {
-		return conns
+	// Recording the balance count at the first migration will make the factor stateful and complicated.
+	// We wish to calcuate the balance count only based on the parameters passed in.
+	//
+	// Assuming A has 28 connections and B has 0 connection. We're migrating all connections from A to B in 5s.
+	// If we use from / 5 + 1, each migration will be 6, 5, 4, 3, 3, 2, 2, 1, 1, 1. It takes 10 seconds.
+	// If we use (from+to) / 10 + 1, each migration will be 3, 3, 3, 3, 3, 3, 3, 3, 3, 1. It takes 10 seconds.
+	// If we use the max value of the 2 formula, each migration will be 6, 5, 4, 3, 3, 3, 3, 1. It takes 8 seconds.
+	// If we use max(from, to) / 5 + 1, each migration will be 6, 5, 4, 4, 4, 5. It takes 6 seconds.
+	connCount := from.ConnScore()
+	if to.ConnScore() > connCount {
+		connCount = to.ConnScore()
 	}
-	return 1
+	return connCount/balanceSeconds4Status + 1
 }
 
 func (fs *FactorStatus) SetConfig(cfg *config.Config) {

@@ -243,17 +243,16 @@ func (fh *FactorHealth) BalanceCount(from, to scoredBackend) int {
 	// Only migrate connections when one is valueRangeNormal and the other is valueRangeAbnormal.
 	fromScore := fh.caclErrScore(from.Addr())
 	toScore := fh.caclErrScore(to.Addr())
-	if fromScore-toScore > 1 {
-		// Assuming that the source and target backends have similar connections at first.
-		// We wish the connections to be migrated in 10 seconds but only a few are migrated in each round.
-		// If we use from.ConnScore() / 10, the migration will be slower and slower.
-		conns := (from.ConnScore() + to.ConnScore()) / (balanceSeconds4Health * 2)
-		if conns > 0 {
-			return conns
-		}
-		return 1
+	if fromScore-toScore <= 1 {
+		return 0
 	}
-	return 0
+	// We wish the connections to be migrated in time but only a few are migrated in each round.
+	// The formula is the same as FactorStatus.
+	connCount := from.ConnScore()
+	if to.ConnScore() > connCount {
+		connCount = to.ConnScore()
+	}
+	return connCount/balanceSeconds4Health + 1
 }
 
 func (fh *FactorHealth) SetConfig(cfg *config.Config) {

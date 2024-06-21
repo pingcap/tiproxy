@@ -221,14 +221,13 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) int {
 	if isOOM {
 		seconds = balanceSeconds4OOMRisk
 	}
-	// Assuming that the source and target backends have similar connections at first.
-	// We wish the connections to be migrated in 10 seconds but only a few are migrated in each round.
-	// If we use from.ConnScore() / 10, the migration will be slower and slower.
-	conns := (from.ConnScore() + to.ConnScore()) / (seconds * 2)
-	if conns > 0 {
-		return conns
+	// We wish the connections to be migrated in time but only a few are migrated in each round.
+	// The formula is the same as FactorStatus.
+	connCount := from.ConnScore()
+	if to.ConnScore() > connCount {
+		connCount = to.ConnScore()
 	}
-	return 1
+	return connCount/seconds + 1
 }
 
 func (fm *FactorMemory) SetConfig(cfg *config.Config) {

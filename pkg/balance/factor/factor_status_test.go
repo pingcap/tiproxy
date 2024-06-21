@@ -69,17 +69,17 @@ func TestStatusBalanceCount(t *testing.T) {
 		{
 			conns:    []int{1000, 100},
 			minCount: 100,
-			maxCount: 200,
+			maxCount: 300,
 		},
 		{
 			conns:    []int{100, 1000},
 			minCount: 100,
-			maxCount: 200,
+			maxCount: 300,
 		},
 		{
 			conns:    []int{10000, 10000},
 			minCount: 1000,
-			maxCount: 2000,
+			maxCount: 3000,
 		},
 	}
 
