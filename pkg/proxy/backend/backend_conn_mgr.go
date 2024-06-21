@@ -351,7 +351,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	if mgr.backendIO.Load() == nil {
 		err = mgr.resume(ctx)
 		if err != nil {
-			mgr.logger.Info("resume failed", zap.Error(err))
+			mgr.logger.Error("resume failed", zap.Error(err))
 			return
 		}
 	}
