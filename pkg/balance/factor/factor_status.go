@@ -51,6 +51,7 @@ func (fs *FactorStatus) BalanceCount(from, to scoredBackend) int {
 	// If we use (from+to) / 10 + 1, each migration will be 3, 3, 3, 3, 3, 3, 3, 3, 3, 1. It takes 10 seconds.
 	// If we use the max value of the 2 formula, each migration will be 6, 5, 4, 3, 3, 3, 3, 1. It takes 8 seconds.
 	// If we use max(from, to) / 5 + 1, each migration will be 6, 5, 4, 4, 4, 5. It takes 6 seconds.
+	// If we use (from+to) / 5 + 1, the migration is too fast if A and B has similar connection counts at first.
 	connCount := from.ConnScore()
 	if to.ConnScore() > connCount {
 		connCount = to.ConnScore()
