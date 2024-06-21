@@ -116,3 +116,6 @@ graceful-close-conn-timeout = 15
 
 [balance]
 # policy = "resource"
+
+[labels]
+zone = 'zone_0'

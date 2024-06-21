@@ -44,7 +44,7 @@ func (bh *BackendHealth) setLocal(cfg *config.Config) {
 }
 
 func (bh *BackendHealth) Equals(health BackendHealth) bool {
-	return bh.Healthy == health.Healthy && bh.ServerVersion == health.ServerVersion
+	return bh.Healthy == health.Healthy && bh.ServerVersion == health.ServerVersion && bh.Local == health.Local
 }
 
 func (bh *BackendHealth) String() string {
