@@ -134,9 +134,9 @@ type routerTester struct {
 	backendID int
 }
 
-func newRouterTester(t *testing.T, enablePause bool) *routerTester {
+func newRouterTester(t *testing.T, cfgFns ...RouterConfigFunc) *routerTester {
 	lg, _ := logger.CreateLoggerForTest(t)
-	router := NewScoreBasedRouter(lg, enablePause)
+	router := NewScoreBasedRouter(lg, cfgFns...)
 	t.Cleanup(router.Close)
 	return &routerTester{
 		t:      t,
@@ -380,7 +380,7 @@ func (tester *routerTester) clear() {
 
 // Test that the backends are always ordered by scores.
 func TestBackendScore(t *testing.T) {
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	tester.addBackends(3)
 	tester.killBackends(2)
 	tester.addConnections(100)
@@ -409,7 +409,7 @@ func TestBackendScore(t *testing.T) {
 
 // Test that the connections are always balanced after rebalance and routing.
 func TestConnBalanced(t *testing.T) {
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	tester.addBackends(3)
 
 	// balanced after routing
@@ -442,7 +442,7 @@ func TestConnBalanced(t *testing.T) {
 
 // Test that routing fails when there's no healthy backends.
 func TestNoBackends(t *testing.T) {
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	conn := tester.createConn()
 	backend := tester.simpleRoute(conn)
 	require.True(t, backend == nil || reflect.ValueOf(backend).IsNil())
@@ -455,7 +455,7 @@ func TestNoBackends(t *testing.T) {
 
 // Test that the backends returned by the BackendSelector are complete and different.
 func TestSelectorReturnOrder(t *testing.T) {
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	tester.addBackends(3)
 	selector := tester.router.GetBackendSelector()
 	for i := 0; i < 3; i++ {
@@ -488,7 +488,7 @@ func TestSelectorReturnOrder(t *testing.T) {
 
 // Test that the backends are balanced even when routing are concurrent.
 func TestRouteConcurrently(t *testing.T) {
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	tester.addBackends(3)
 	addrs := make(map[string]int, 3)
 	selectors := make([]BackendSelector, 0, 30)
@@ -519,7 +519,7 @@ func TestRouteConcurrently(t *testing.T) {
 
 // Test that the backends are balanced during rolling restart.
 func TestRollingRestart(t *testing.T) {
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	backendNum := 3
 	tester.addBackends(backendNum)
 	tester.addConnections(100)
@@ -548,7 +548,7 @@ func TestRollingRestart(t *testing.T) {
 
 // Test the corner cases of rebalance.
 func TestRebalanceCornerCase(t *testing.T) {
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	tests := []func(){
 		func() {
 			// Balancer won't work when there's no backend.
@@ -686,7 +686,7 @@ func TestConcurrency(t *testing.T) {
 	fetcher := newMockBackendFetcher()
 	lg, _ := logger.CreateLoggerForTest(t)
 	hc := NewDefaultHealthCheck(nil, healthCheckConfig, lg)
-	router := NewScoreBasedRouter(lg, false)
+	router := NewScoreBasedRouter(lg)
 	err := router.Init(fetcher, hc, healthCheckConfig)
 	require.NoError(t, err)
 
@@ -783,7 +783,7 @@ func TestRefresh(t *testing.T) {
 	hc := newMockHealthCheck()
 	lg, _ := logger.CreateLoggerForTest(t)
 	// Create a router with a very long health check interval.
-	rt := NewScoreBasedRouter(lg, false)
+	rt := NewScoreBasedRouter(lg)
 	cfg := config.NewDefaultHealthCheckConfig()
 	cfg.Interval = time.Minute
 	observer := StartBackendObserver(lg, rt, cfg, fetcher, hc)
@@ -817,7 +817,7 @@ func TestObserveError(t *testing.T) {
 	hc := newMockHealthCheck()
 	// Create a router with a very short health check interval.
 	lg, _ := logger.CreateLoggerForTest(t)
-	rt := NewScoreBasedRouter(lg, false)
+	rt := NewScoreBasedRouter(lg)
 	err := rt.Init(fetcher, hc, newHealthCheckConfigForTest())
 	require.NoError(t, err)
 	defer rt.Close()
@@ -860,7 +860,7 @@ func TestDisableHealthCheck(t *testing.T) {
 	// Create a router with a very short health check interval.
 	lg, _ := logger.CreateLoggerForTest(t)
 	hc := NewDefaultHealthCheck(nil, healtchCheckConfig, lg)
-	rt := NewScoreBasedRouter(lg, false)
+	rt := NewScoreBasedRouter(lg)
 	err := rt.Init(fetcher, hc, healtchCheckConfig)
 	require.NoError(t, err)
 	defer rt.Close()
@@ -882,7 +882,7 @@ func TestDisableHealthCheck(t *testing.T) {
 }
 
 func TestSetBackendStatus(t *testing.T) {
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	tester.addBackends(1)
 	tester.addConnections(10)
 	tester.killBackends(1)
@@ -897,7 +897,7 @@ func TestSetBackendStatus(t *testing.T) {
 
 func TestGetServerVersion(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	rt := NewScoreBasedRouter(lg, false)
+	rt := NewScoreBasedRouter(lg)
 	t.Cleanup(rt.Close)
 	backends := map[string]*BackendHealth{
 		"0": {
@@ -916,7 +916,7 @@ func TestGetServerVersion(t *testing.T) {
 
 func TestBackendHealthy(t *testing.T) {
 	// Make the connection redirect.
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	tester.addBackends(1)
 	tester.addConnections(1)
 	tester.killBackends(1)
@@ -933,7 +933,7 @@ func TestBackendHealthy(t *testing.T) {
 
 func TestCloseRedirectingConns(t *testing.T) {
 	// Make the connection redirect.
-	tester := newRouterTester(t, false)
+	tester := newRouterTester(t)
 	tester.addBackends(1)
 	tester.addConnections(1)
 	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
@@ -952,7 +952,7 @@ func TestCloseRedirectingConns(t *testing.T) {
 }
 
 func TestConnPauseResume(t *testing.T) {
-	tester := newRouterTester(t, true)
+	tester := newRouterTester(t, WithPauseEnabled())
 	tester.addBackends(1)
 	tester.addConnections(5)
 	tester.killBackends(1)

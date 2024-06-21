@@ -21,6 +21,24 @@ const (
 
 var _ Router = &ScoreBasedRouter{}
 
+type RouterConfig struct {
+	EnablePause bool
+}
+
+func NewDefaultRouterConfig() *RouterConfig {
+	return &RouterConfig{
+		EnablePause: false,
+	}
+}
+
+type RouterConfigFunc func(*RouterConfig)
+
+func WithPauseEnabled() RouterConfigFunc {
+	return func(cfg *RouterConfig) {
+		cfg.EnablePause = true
+	}
+}
+
 // ScoreBasedRouter is an implementation of Router interface.
 // It routes a connection based on score.
 type ScoreBasedRouter struct {
@@ -33,23 +51,24 @@ type ScoreBasedRouter struct {
 	backends     *glist.List[*backendWrapper]
 	observeError error
 	// Only store the version of a random backend, so the client may see a wrong version when backends are upgrading.
-	serverVersion string
-
-	enablePause    bool
+	serverVersion  string
 	pausedConnList *glist.List[*connWrapper]
+	config         *RouterConfig
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
-func NewScoreBasedRouter(logger *zap.Logger, enablePause bool) *ScoreBasedRouter {
-	router := &ScoreBasedRouter{
-		logger:      logger,
-		backends:    glist.New[*backendWrapper](),
-		enablePause: enablePause,
+func NewScoreBasedRouter(logger *zap.Logger, cfgFns ...RouterConfigFunc) *ScoreBasedRouter {
+	config := NewDefaultRouterConfig()
+	for _, cfgFn := range cfgFns {
+		cfgFn(config)
 	}
-	if enablePause {
-		router.pausedConnList = glist.New[*connWrapper]()
+
+	return &ScoreBasedRouter{
+		logger:         logger,
+		backends:       glist.New[*backendWrapper](),
+		pausedConnList: glist.New[*connWrapper](),
+		config:         config,
 	}
-	return router
 }
 
 func (r *ScoreBasedRouter) Init(fetcher BackendFetcher, hc HealthCheck, cfg *config.HealthCheck) error {
@@ -317,6 +336,7 @@ func (router *ScoreBasedRouter) onPauseFinished(addr string, conn RedirectableCo
 		router.addPausedConn(connWrapper)
 		connWrapper.phase = phaseNone
 	} else {
+		be.Value.connScore++
 		connWrapper.phase = phasePauseFail
 	}
 }
@@ -375,7 +395,7 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 	if len(backends) > 0 {
 		router.updateServerVersion()
 	}
-	if router.enablePause && len(backends) > 0 {
+	if router.config.EnablePause && len(backends) > 0 {
 		pause := true
 		for be := router.backends.Front(); be != nil; be = be.Next() {
 			backend := be.Value
@@ -388,11 +408,15 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 			router.logger.Info("last backend become unhealthy, notify connections to pause")
 			for be := router.backends.Front(); be != nil; be = be.Next() {
 				backend := be.Value
-				backend.connScore--
 				for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
+					backend.connScore--
 					conn := ele.Value
 					switch conn.phase {
-					case phasePauseNotify, phaseRedirectNotify:
+					case phasePauseNotify:
+						continue
+					case phaseRedirectNotify:
+						router.logger.Info("connection is redirecting, maybe a new backend is alive. skip pause")
+						backend.connScore++
 						continue
 					}
 					conn.phase = phasePauseNotify
