@@ -884,7 +884,7 @@ func (mgr *BackendConnManager) notifyPauseResult(addr string, pauseErr error) {
 	if pauseErr != nil {
 		err := eventReceiver.OnPauseFail(addr, mgr)
 		mgr.logger.Warn("pause connection failed", zap.String("addr", addr),
-			zap.NamedError("redirect_err", pauseErr), zap.NamedError("notify_err", err))
+			zap.NamedError("pause_err", pauseErr), zap.NamedError("notify_err", err))
 	} else {
 		err := eventReceiver.OnPauseSucceed(addr, mgr)
 		mgr.logger.Debug("pause connection succeeds", zap.String("from", addr),
