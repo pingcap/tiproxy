@@ -669,21 +669,28 @@ func (mgr *BackendConnManager) checkBackendActive() {
 		return
 	}
 	backendIO := mgr.backendIO.Load()
-	if backendIO == nil && mgr.lastPauseTime != 0 && monotime.Since(mgr.lastPauseTime) < mgr.config.PausedConnTimeout {
-		return
-	}
-	if !backendIO.IsPeerActive() {
+	if backendIO == nil {
+		if mgr.lastPauseTime != 0 && monotime.Since(mgr.lastPauseTime) < mgr.config.PausedConnTimeout {
+			return
+		}
+		mgr.logger.Info("paused conn timeout, close client connection", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()))
+		mgr.closeClientConn()
+	} else if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection",
 			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()),
 			zap.Bool("backend_healthy", mgr.curBackend.Healthy()))
-		mgr.quitSource = SrcBackendNetwork
-		if err := mgr.clientIO.GracefulClose(); err != nil {
-			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
-		}
-		mgr.closeStatus.CompareAndSwap(statusActive, statusClosing)
+		mgr.closeClientConn()
 	} else {
 		mgr.lastActiveTime = now
 	}
+}
+
+func (mgr *BackendConnManager) closeClientConn() {
+	mgr.quitSource = SrcBackendNetwork
+	if err := mgr.clientIO.GracefulClose(); err != nil {
+		mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+	}
+	mgr.closeStatus.CompareAndSwap(statusActive, statusClosing)
 }
 
 func (mgr *BackendConnManager) ClientAddr() string {
@@ -862,9 +869,10 @@ func (mgr *BackendConnManager) tryPause(ctx context.Context) {
 		sessionStates: sessionStates,
 		sessionToken:  sessionToken,
 	})
+	addr := mgr.ServerAddr()
 	mgr.backendIO.Store(nil)
 	mgr.lastPauseTime = monotime.Now()
-	mgr.notifyPauseResult(mgr.ServerAddr(), nil)
+	mgr.notifyPauseResult(addr, nil)
 }
 
 // notify pause result to eventReceiver.

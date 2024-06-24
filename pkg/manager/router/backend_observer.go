@@ -139,6 +139,8 @@ func (bo *BackendObserver) Refresh() {
 }
 
 func (bo *BackendObserver) observe(ctx context.Context) {
+	// refresh means the fetcher request is triggerd by calling Refresh() actively.
+	// It typically indicates their are no available backends.
 	refresh := false
 	for ctx.Err() == nil {
 		startTime := monotime.Now()

@@ -414,7 +414,9 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 					case phasePauseNotify:
 						continue
 					case phaseRedirectNotify:
-						router.logger.Debug("connection is redirecting, maybe a new backend is alive. skip pause")
+						// When the connection is redirecting, it won't be paused
+						router.logger.Debug("connection is redirecting, maybe a new backend is alive. skip pause",
+							zap.Uint64("connID", conn.ConnectionID()))
 						continue
 					}
 					backend.connScore--
