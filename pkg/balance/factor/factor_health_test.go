@@ -82,44 +82,49 @@ func TestHealthScore(t *testing.T) {
 
 func TestHealthBalance(t *testing.T) {
 	tests := []struct {
-		errCounts    [][]float64
-		scores       []uint64
-		balanceCount int
+		errCounts [][]float64
+		scores    []uint64
+		balanced  bool
 	}{
 		{
 			errCounts: [][]float64{{math.NaN(), math.NaN()}, {math.NaN(), math.NaN()}},
 			scores:    []uint64{0, 0},
+			balanced:  true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
 				{math.NaN(), math.NaN()}},
-			scores: []uint64{1, 0},
+			scores:   []uint64{1, 0},
+			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
-			scores: []uint64{1, 1},
+			scores:   []uint64{1, 1},
+			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].recoverThreshold - 1), float64(errDefinitions[1].recoverThreshold - 1)},
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
-			scores: []uint64{0, 1},
+			scores:   []uint64{0, 1},
+			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].recoverThreshold + 1)},
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
-			scores: []uint64{2, 1},
+			scores:   []uint64{2, 1},
+			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].recoverThreshold + 1)},
 				{float64(errDefinitions[0].recoverThreshold - 1), float64(errDefinitions[1].recoverThreshold - 1)}},
-			scores:       []uint64{2, 0},
-			balanceCount: 1,
+			scores:   []uint64{2, 0},
+			balanced: false,
 		},
 	}
 
@@ -128,7 +133,7 @@ func TestHealthBalance(t *testing.T) {
 		values1 := make([]*model.Sample, 0, len(test.errCounts))
 		values2 := make([]*model.Sample, 0, len(test.errCounts))
 		for j := 0; j < len(test.errCounts); j++ {
-			backends = append(backends, createBackend(j, 0, 0))
+			backends = append(backends, createBackend(j, 100, 100))
 			values1 = append(values1, createSample(test.errCounts[j][0], j))
 			values2 = append(values2, createSample(test.errCounts[j][1], j))
 		}
@@ -156,7 +161,7 @@ func TestHealthBalance(t *testing.T) {
 		})
 		from, to := backends[len(backends)-1], backends[0]
 		balanceCount := fh.BalanceCount(from, to)
-		require.Equal(t, test.balanceCount, balanceCount, "test index %d", i)
+		require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
 

@@ -109,44 +109,44 @@ func TestMemoryScore(t *testing.T) {
 
 func TestMemoryBalance(t *testing.T) {
 	tests := []struct {
-		memory       [][]float64
-		scores       []uint64
-		balanceCount int
+		memory   [][]float64
+		scores   []uint64
+		balanced bool
 	}{
 		{
-			memory:       [][]float64{{0.2, 0.3}, {0.3, 0.4}},
-			scores:       []uint64{1, 1},
-			balanceCount: 0,
+			memory:   [][]float64{{0.2, 0.3}, {0.3, 0.4}},
+			scores:   []uint64{1, 1},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.21, 0.22}, {0.5, 0.55}},
-			scores:       []uint64{0, 1},
-			balanceCount: 0,
+			memory:   [][]float64{{0.21, 0.22}, {0.5, 0.55}},
+			scores:   []uint64{0, 1},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.5, 0.7}, {0.71, 0.74}},
-			scores:       []uint64{2, 1},
-			balanceCount: 0,
+			memory:   [][]float64{{0.5, 0.7}, {0.71, 0.74}},
+			scores:   []uint64{2, 1},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.85, 0.75}, {0.85, 0.85}},
-			scores:       []uint64{1, 2},
-			balanceCount: 0,
+			memory:   [][]float64{{0.85, 0.75}, {0.85, 0.85}},
+			scores:   []uint64{1, 2},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.6, 0.75}, {0.81, 0.82}},
-			scores:       []uint64{2, 2},
-			balanceCount: 0,
+			memory:   [][]float64{{0.6, 0.75}, {0.81, 0.82}},
+			scores:   []uint64{2, 2},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.2, 0.15}, {0.81, 0.82}},
-			scores:       []uint64{0, 2},
-			balanceCount: 1,
+			memory:   [][]float64{{0.2, 0.15}, {0.81, 0.82}},
+			scores:   []uint64{0, 2},
+			balanced: false,
 		},
 		{
-			memory:       [][]float64{{0.2, 0.15}, {0.81, 0.82}, {0.65, 0.65}},
-			scores:       []uint64{0, 2, 1},
-			balanceCount: 1,
+			memory:   [][]float64{{0.2, 0.15}, {0.81, 0.82}, {0.65, 0.65}},
+			scores:   []uint64{0, 2, 1},
+			balanced: false,
 		},
 	}
 
@@ -154,7 +154,7 @@ func TestMemoryBalance(t *testing.T) {
 		backends := make([]scoredBackend, 0, len(test.memory))
 		values := make([]*model.SampleStream, 0, len(test.memory))
 		for j := 0; j < len(test.memory); j++ {
-			backends = append(backends, createBackend(j, 0, 0))
+			backends = append(backends, createBackend(j, 100, 100))
 			values = append(values, createSampleStream(test.memory[j], j, model.Now()))
 		}
 		mmr := &mockMetricsReader{
@@ -177,7 +177,7 @@ func TestMemoryBalance(t *testing.T) {
 		})
 		from, to := backends[len(backends)-1], backends[0]
 		balanceCount := fm.BalanceCount(from, to)
-		require.Equal(t, test.balanceCount, balanceCount, "test index %d", i)
+		require.EqualValues(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
 
