@@ -914,13 +914,13 @@ func (mgr *BackendConnManager) resume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	mgr.logger.Info("start to handshakeSecondTime")
+	mgr.logger.Debug("start to handshakeSecondTime")
 	if err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, state.sessionToken); err == nil {
 		err = mgr.initSessionStates(newBackendIO, state.sessionStates)
 	} else {
 		mgr.handshakeHandler.OnHandshake(mgr, newBackendIO.RemoteAddr().String(), err, Error2Source(err))
 	}
-	mgr.logger.Info("finish to handshakeSecondTime")
+	mgr.logger.Debug("finish to handshakeSecondTime")
 	if err != nil {
 		if ignoredErr := newBackendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 			mgr.logger.Error("close new backend connection failed", zap.Error(ignoredErr))
