@@ -209,8 +209,8 @@ func TestCPUBalanceContinuously(t *testing.T) {
 			if balanceCount == 0 {
 				break
 			}
-			backends[len(backends)-1].BackendCtx.(*mockBackend).connScore -= balanceCount
-			backends[0].BackendCtx.(*mockBackend).connScore += balanceCount
+			backends[len(backends)-1].BackendCtx.(*mockBackend).connScore -= int(balanceCount)
+			backends[0].BackendCtx.(*mockBackend).connScore += int(balanceCount)
 		}
 		connScores := make([]int, len(test.connScores))
 		for _, backend := range backends {

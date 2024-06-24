@@ -16,7 +16,7 @@ import (
 const (
 	errMetricExpDuration = 1 * time.Minute
 	// balanceSeconds4Health indicates the time (in seconds) to migrate all the connections.
-	balanceSeconds4Health = 5
+	balanceSeconds4Health = 5.0
 )
 
 type valueRange int
@@ -79,6 +79,8 @@ var _ Factor = (*FactorHealth)(nil)
 type healthBackendSnapshot struct {
 	updatedTime monotime.Time
 	valueRange  valueRange
+	// Record the balance count when the backend becomes unhealthy so that it won't be smaller in the next rounds.
+	balanceCount float64
 }
 
 type errIndicator struct {
@@ -185,9 +187,20 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 			}
 			continue
 		}
+		// Set balance count if the backend is unhealthy, otherwise reset it to 0.
+		var balanceCount float64
+		if valueRange >= valueRangeAbnormal {
+			if existSnapshot && snapshot.balanceCount > 0.0001 {
+				balanceCount = snapshot.balanceCount
+			} else {
+				balanceCount = float64(backend.ConnScore()) / balanceSeconds4Health
+			}
+		}
+
 		snapshots[addr] = healthBackendSnapshot{
-			updatedTime: updatedTime,
-			valueRange:  valueRange,
+			updatedTime:  updatedTime,
+			valueRange:   valueRange,
+			balanceCount: balanceCount,
 		}
 	}
 	fh.snapshot = snapshots
@@ -221,38 +234,22 @@ func calcValueRange(sample *model.Sample, indicator errIndicator) valueRange {
 }
 
 func (fh *FactorHealth) caclErrScore(addr string) int {
-	snapshot, ok := fh.snapshot[addr]
-	if !ok {
-		return 2
-	}
-	switch snapshot.valueRange {
-	case valueRangeNormal:
-		return 0
-	case valueRangeMid:
-		return 1
-	default:
-		return 2
-	}
+	// If the backend has no metrics (not in snapshot), take it as healthy.
+	return int(fh.snapshot[addr].valueRange)
 }
 
 func (fh *FactorHealth) ScoreBitNum() int {
 	return fh.bitNum
 }
 
-func (fh *FactorHealth) BalanceCount(from, to scoredBackend) int {
+func (fh *FactorHealth) BalanceCount(from, to scoredBackend) float64 {
 	// Only migrate connections when one is valueRangeNormal and the other is valueRangeAbnormal.
 	fromScore := fh.caclErrScore(from.Addr())
 	toScore := fh.caclErrScore(to.Addr())
 	if fromScore-toScore <= 1 {
 		return 0
 	}
-	// We wish the connections to be migrated in time but only a few are migrated in each round.
-	// The formula is the same as FactorStatus.
-	connCount := from.ConnScore()
-	if to.ConnScore() > connCount {
-		connCount = to.ConnScore()
-	}
-	return connCount/balanceSeconds4Health + 1
+	return fh.snapshot[from.Addr()].balanceCount
 }
 
 func (fh *FactorHealth) SetConfig(cfg *config.Config) {

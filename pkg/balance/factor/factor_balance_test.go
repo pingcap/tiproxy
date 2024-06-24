@@ -258,7 +258,7 @@ func TestBalanceWith3Factors(t *testing.T) {
 	for tIdx, test := range tests {
 		for factorIdx, factor := range factors {
 			func(factorIdx int, factor *mockFactor) {
-				factor.balanceCount = test.balanceCounts[factorIdx]
+				factor.balanceCount = float64(test.balanceCounts[factorIdx])
 				factor.updateScore = func(backends []scoredBackend) {
 					for i := 0; i < len(backends); i++ {
 						backends[i].addScore(test.scores[i][factorIdx], factor.bitNum)

@@ -43,7 +43,7 @@ func (fl *FactorLocation) ScoreBitNum() int {
 	return fl.bitNum
 }
 
-func (fl *FactorLocation) BalanceCount(from, to scoredBackend) int {
+func (fl *FactorLocation) BalanceCount(from, to scoredBackend) float64 {
 	return balanceCount4Location
 }
 

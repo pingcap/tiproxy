@@ -815,7 +815,7 @@ func TestControlSpeed(t *testing.T) {
 	tester.addConnections(total)
 
 	tests := []struct {
-		balanceCount     int
+		balanceCount     float64
 		rounds           int
 		interval         time.Duration
 		expectedCountMin int
@@ -867,10 +867,38 @@ func TestControlSpeed(t *testing.T) {
 			expectedCountMin: 100,
 			expectedCountMax: 100,
 		},
+		{
+			balanceCount:     1.1,
+			rounds:           1000,
+			interval:         10 * time.Millisecond,
+			expectedCountMin: 10,
+			expectedCountMax: 20,
+		},
+		{
+			balanceCount:     0.9,
+			rounds:           1000,
+			interval:         10 * time.Millisecond,
+			expectedCountMin: 5,
+			expectedCountMax: 20,
+		},
+		{
+			balanceCount:     0.5,
+			rounds:           1000,
+			interval:         10 * time.Millisecond,
+			expectedCountMin: 5,
+			expectedCountMax: 5,
+		},
+		{
+			balanceCount:     0.1,
+			rounds:           1000,
+			interval:         10 * time.Millisecond,
+			expectedCountMin: 1,
+			expectedCountMax: 2,
+		},
 	}
 
 	for _, test := range tests {
-		bp.backendsToBalance = func(bc []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount int, reason string, logFields []zapcore.Field) {
+		bp.backendsToBalance = func(bc []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
 			return tester.getBackendByIndex(0), tester.getBackendByIndex(1), test.balanceCount, "conn", nil
 		}
 		tester.router.lastRedirectTime = monotime.Time(0)

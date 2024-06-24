@@ -44,7 +44,7 @@ func (sbp *SimpleBalancePolicy) BackendToRoute(backends []BackendCtx) BackendCtx
 	return nil
 }
 
-func (sbp *SimpleBalancePolicy) BackendsToBalance(backends []BackendCtx) (from, to BackendCtx, balanceCount int, reason string, logFields []zap.Field) {
+func (sbp *SimpleBalancePolicy) BackendsToBalance(backends []BackendCtx) (from, to BackendCtx, balanceCount float64, reason string, logFields []zap.Field) {
 	if len(backends) <= 1 {
 		return
 	}

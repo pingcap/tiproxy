@@ -42,65 +42,45 @@ func TestFactorStatus(t *testing.T) {
 
 func TestStatusBalanceCount(t *testing.T) {
 	tests := []struct {
-		conns    []int
-		minCount int
-		maxCount int
+		conn    int
+		healthy bool
+		count   float64
 	}{
 		{
-			conns:    []int{1, 0},
-			minCount: 1,
-			maxCount: 1,
+			conn:    100,
+			healthy: false,
+			count:   100 / balanceSeconds4Status,
 		},
 		{
-			conns:    []int{10, 0},
-			minCount: 1,
-			maxCount: 5,
+			conn:    50,
+			healthy: false,
+			count:   100 / balanceSeconds4Status,
 		},
 		{
-			conns:    []int{10, 10},
-			minCount: 1,
-			maxCount: 5,
+			conn:    100,
+			healthy: true,
+			count:   0,
 		},
 		{
-			conns:    []int{100, 10},
-			minCount: 10,
-			maxCount: 40,
-		},
-		{
-			conns:    []int{1000, 100},
-			minCount: 100,
-			maxCount: 300,
-		},
-		{
-			conns:    []int{100, 1000},
-			minCount: 100,
-			maxCount: 300,
-		},
-		{
-			conns:    []int{10000, 10000},
-			minCount: 1000,
-			maxCount: 3000,
+			conn:    50,
+			healthy: false,
+			count:   50 / balanceSeconds4Status,
 		},
 	}
 
+	backends := make([]scoredBackend, 0, 2)
+	backends = append(backends, createBackend(0, 0, 0))
+	backends = append(backends, createBackend(1, 0, 0))
+	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
 	fs := NewFactorStatus()
 	for i, test := range tests {
-		backends := []scoredBackend{
-			{
-				BackendCtx: &mockBackend{
-					healthy:   false,
-					connScore: test.conns[0],
-				},
-			},
-			{
-				BackendCtx: &mockBackend{
-					healthy:   true,
-					connScore: test.conns[1],
-				},
-			},
+		unhealthyBackend.healthy = test.healthy
+		unhealthyBackend.connScore = test.conn
+		fs.UpdateScore(backends)
+		if test.count == 0 {
+			continue
 		}
 		count := fs.BalanceCount(backends[0], backends[1])
-		require.GreaterOrEqual(t, count, test.minCount, "test idx: %d", i)
-		require.LessOrEqual(t, count, test.maxCount, "test idx: %d", i)
+		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }
