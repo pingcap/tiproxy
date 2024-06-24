@@ -409,16 +409,15 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 			for be := router.backends.Front(); be != nil; be = be.Next() {
 				backend := be.Value
 				for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
-					backend.connScore--
 					conn := ele.Value
 					switch conn.phase {
 					case phasePauseNotify:
 						continue
 					case phaseRedirectNotify:
-						router.logger.Info("connection is redirecting, maybe a new backend is alive. skip pause")
-						backend.connScore++
+						router.logger.Debug("connection is redirecting, maybe a new backend is alive. skip pause")
 						continue
 					}
+					backend.connScore--
 					conn.phase = phasePauseNotify
 					conn.Pause()
 				}
