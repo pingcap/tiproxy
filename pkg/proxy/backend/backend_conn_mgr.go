@@ -856,23 +856,25 @@ func (mgr *BackendConnManager) tryPause(ctx context.Context) {
 	if backendIO == nil {
 		err := errors.New("backend is nil")
 		mgr.logger.Error("failed to get backend when pause", zap.Error(err))
-		mgr.notifyPauseResult(mgr.ServerAddr(), err)
 		return
 	}
+	addr := mgr.ServerAddr()
 	sessionStates, sessionToken, err := mgr.querySessionStates(backendIO)
 	if err != nil {
 		mgr.logger.Error("query session failed when pause", zap.Error(err))
-		mgr.notifyPauseResult(mgr.ServerAddr(), err)
+		mgr.notifyPauseResult(addr, err)
 		return
 	}
 	mgr.sessionState.Store(&SessionState{
 		sessionStates: sessionStates,
 		sessionToken:  sessionToken,
 	})
-	addr := mgr.ServerAddr()
 	mgr.backendIO.Store(nil)
 	mgr.lastPauseTime = monotime.Now()
 	mgr.notifyPauseResult(addr, nil)
+	if ignoredErr := backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+		mgr.logger.Error("close paused backend connection failed", zap.Error(ignoredErr))
+	}
 }
 
 // notify pause result to eventReceiver.
