@@ -9,9 +9,11 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/go-mysql-org/go-mysql/packet"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/testkit"
@@ -75,6 +77,12 @@ func TestHealthCheck(t *testing.T) {
 	health = hc.Check(context.Background(), backend.sqlAddr, info)
 	require.True(t, health.Healthy)
 
+	backend.setSqlResp(false)
+	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	require.False(t, health.Healthy)
+	backend.setSqlResp(true)
+	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	require.True(t, health.Healthy)
 	backend.close()
 }
 
@@ -88,6 +96,7 @@ type backendServer struct {
 	wg         waitgroup.WaitGroup
 	ip         string
 	statusPort uint
+	sqlResp    atomic.Bool
 }
 
 func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
@@ -97,6 +106,7 @@ func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
 	backend.startHTTPServer()
 	backend.setHTTPResp(true)
 	backend.setHTTPRespBody("")
+	backend.setSqlResp(true)
 	backend.startSQLServer()
 	return backend, &BackendInfo{
 		IP:         backend.ip,
@@ -133,6 +143,10 @@ func (srv *backendServer) stopHTTPServer() {
 	require.NoError(srv.t, err)
 }
 
+func (srv *backendServer) setSqlResp(sqlResp bool) {
+	srv.sqlResp.Store(sqlResp)
+}
+
 func (srv *backendServer) startSQLServer() {
 	srv.sqlListener, srv.sqlAddr = testkit.StartListener(srv.t, srv.sqlAddr)
 	srv.wg.Run(func() {
@@ -141,6 +155,11 @@ func (srv *backendServer) startSQLServer() {
 			if err != nil {
 				// listener is closed
 				break
+			}
+			if srv.sqlResp.Load() {
+				data := []byte{0, 0, 0, 0, 0}
+				c := packet.NewConn(conn)
+				require.NoError(srv.t, c.WritePacket(data))
 			}
 			_ = conn.Close()
 		}

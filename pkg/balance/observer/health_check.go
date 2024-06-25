@@ -86,6 +86,9 @@ func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh
 		if err = conn.SetReadDeadline(time.Now().Add(dhc.cfg.DialTimeout)); err != nil {
 			return err
 		}
+		if err = pnet.CheckSqlPort(conn); err != nil {
+			return err
+		}
 		if ignoredErr := conn.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 			dhc.logger.Warn("close connection in health check failed", zap.Error(ignoredErr))
 		}

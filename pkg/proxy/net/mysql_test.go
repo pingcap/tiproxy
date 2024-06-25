@@ -4,11 +4,14 @@
 package net
 
 import (
+	"net"
 	"testing"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/go-mysql-org/go-mysql/packet"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,4 +74,39 @@ func TestMySQLError(t *testing.T) {
 	require.False(t, IsMySQLError(ErrHandshakeTLS))
 	require.True(t, errors.Is(errors.Wrap(ErrHandshakeTLS, myerr), ErrHandshakeTLS))
 	require.True(t, errors.Is(errors.Wrap(myerr, ErrHandshakeTLS), ErrHandshakeTLS))
+}
+
+func TestCheckSqlPort(t *testing.T) {
+	// normal
+	testkit.TestTCPConn(t,
+		func(t *testing.T, c net.Conn) {
+			err := CheckSqlPort(c)
+			require.NoError(t, err)
+		},
+		func(t *testing.T, c net.Conn) {
+			data := []byte{0, 0, 0, 0, 0}
+			conn := packet.NewConn(c)
+			require.NoError(t, conn.WritePacket(data))
+		}, 1)
+
+	// no write
+	testkit.TestTCPConn(t,
+		func(t *testing.T, c net.Conn) {
+			err := CheckSqlPort(c)
+			require.Error(t, err)
+		},
+		func(t *testing.T, c net.Conn) {
+		}, 1)
+
+	// write error code
+	testkit.TestTCPConn(t,
+		func(t *testing.T, c net.Conn) {
+			err := CheckSqlPort(c)
+			require.Error(t, err)
+		},
+		func(t *testing.T, c net.Conn) {
+			data := []byte{0, 0, 0, 0, 0xff}
+			conn := packet.NewConn(c)
+			require.NoError(t, conn.WritePacket(data))
+		}, 1)
 }
