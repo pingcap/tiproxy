@@ -109,44 +109,44 @@ func TestMemoryScore(t *testing.T) {
 
 func TestMemoryBalance(t *testing.T) {
 	tests := []struct {
-		memory       [][]float64
-		scores       []uint64
-		balanceCount int
+		memory   [][]float64
+		scores   []uint64
+		balanced bool
 	}{
 		{
-			memory:       [][]float64{{0.2, 0.3}, {0.3, 0.4}},
-			scores:       []uint64{1, 1},
-			balanceCount: 0,
+			memory:   [][]float64{{0.2, 0.3}, {0.3, 0.4}},
+			scores:   []uint64{1, 1},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.21, 0.22}, {0.5, 0.55}},
-			scores:       []uint64{0, 1},
-			balanceCount: 0,
+			memory:   [][]float64{{0.21, 0.22}, {0.5, 0.55}},
+			scores:   []uint64{0, 1},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.5, 0.7}, {0.71, 0.74}},
-			scores:       []uint64{2, 1},
-			balanceCount: 0,
+			memory:   [][]float64{{0.5, 0.7}, {0.71, 0.74}},
+			scores:   []uint64{2, 1},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.85, 0.75}, {0.85, 0.85}},
-			scores:       []uint64{1, 2},
-			balanceCount: 0,
+			memory:   [][]float64{{0.85, 0.75}, {0.85, 0.85}},
+			scores:   []uint64{1, 2},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.6, 0.75}, {0.81, 0.82}},
-			scores:       []uint64{2, 2},
-			balanceCount: 0,
+			memory:   [][]float64{{0.6, 0.75}, {0.81, 0.82}},
+			scores:   []uint64{2, 2},
+			balanced: true,
 		},
 		{
-			memory:       [][]float64{{0.2, 0.15}, {0.81, 0.82}},
-			scores:       []uint64{0, 2},
-			balanceCount: 1,
+			memory:   [][]float64{{0.2, 0.15}, {0.81, 0.82}},
+			scores:   []uint64{0, 2},
+			balanced: false,
 		},
 		{
-			memory:       [][]float64{{0.2, 0.15}, {0.81, 0.82}, {0.65, 0.65}},
-			scores:       []uint64{0, 2, 1},
-			balanceCount: 1,
+			memory:   [][]float64{{0.2, 0.15}, {0.81, 0.82}, {0.65, 0.65}},
+			scores:   []uint64{0, 2, 1},
+			balanced: false,
 		},
 	}
 
@@ -154,7 +154,7 @@ func TestMemoryBalance(t *testing.T) {
 		backends := make([]scoredBackend, 0, len(test.memory))
 		values := make([]*model.SampleStream, 0, len(test.memory))
 		for j := 0; j < len(test.memory); j++ {
-			backends = append(backends, createBackend(j, 0, 0))
+			backends = append(backends, createBackend(j, 100, 100))
 			values = append(values, createSampleStream(test.memory[j], j, model.Now()))
 		}
 		mmr := &mockMetricsReader{
@@ -177,7 +177,7 @@ func TestMemoryBalance(t *testing.T) {
 		})
 		from, to := backends[len(backends)-1], backends[0]
 		balanceCount := fm.BalanceCount(from, to)
-		require.Equal(t, test.balanceCount, balanceCount, "test index %d", i)
+		require.EqualValues(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
 
@@ -223,78 +223,79 @@ func TestNoMemMetrics(t *testing.T) {
 
 func TestMemoryBalanceCount(t *testing.T) {
 	tests := []struct {
-		conns                []int
-		oomCountRange        []int
-		highMemoryCountRange []int
+		conn      int
+		riskLevel int
+		count     float64
 	}{
 		{
-			conns:                []int{1, 0},
-			oomCountRange:        []int{1, 1},
-			highMemoryCountRange: []int{1, 1},
+			conn:      120,
+			riskLevel: 1,
+			count:     120 / balanceSeconds4HighMemory,
 		},
 		{
-			conns:                []int{10, 0},
-			oomCountRange:        []int{1, 4},
-			highMemoryCountRange: []int{1, 2},
+			conn:      60,
+			riskLevel: 1,
+			count:     120 / balanceSeconds4HighMemory,
 		},
 		{
-			conns:                []int{10, 10},
-			oomCountRange:        []int{1, 4},
-			highMemoryCountRange: []int{1, 2},
+			conn:      60,
+			riskLevel: 2,
+			count:     60 / balanceSeconds4OOMRisk,
 		},
 		{
-			conns:                []int{100, 10},
-			oomCountRange:        []int{5, 20},
-			highMemoryCountRange: []int{1, 5},
+			conn:      30,
+			riskLevel: 2,
+			count:     60 / balanceSeconds4OOMRisk,
 		},
 		{
-			conns:                []int{1000, 100},
-			oomCountRange:        []int{50, 100},
-			highMemoryCountRange: []int{5, 50},
+			conn:      60,
+			riskLevel: 0,
+			count:     0,
 		},
 		{
-			conns:                []int{100, 1000},
-			oomCountRange:        []int{50, 100},
-			highMemoryCountRange: []int{5, 50},
-		},
-		{
-			conns:                []int{10000, 10000},
-			oomCountRange:        []int{500, 1000},
-			highMemoryCountRange: []int{50, 500},
+			conn:      60,
+			riskLevel: 1,
+			count:     60 / balanceSeconds4HighMemory,
 		},
 	}
 
-	for j := 0; j < 2; j++ {
-		backend1 := []float64{0, 0.4}
-		if j == 0 {
-			backend1 = []float64{0.9, 0.9}
+	mmr := &mockMetricsReader{
+		qrs: map[uint64]metricsreader.QueryResult{},
+	}
+	ts := model.Now().Add(-100 * time.Millisecond)
+	updateMmr := func(riskLevel int) {
+		var usage []float64
+		switch riskLevel {
+		case 0:
+			usage = []float64{0.1, 0.1}
+		case 1:
+			usage = []float64{0.8, 0.8}
+		case 2:
+			usage = []float64{0.1, 0.4}
 		}
+		ts = ts.Add(time.Millisecond)
 		values := []*model.SampleStream{
-			createSampleStream(backend1, 0, model.Now()),
-			createSampleStream([]float64{0, 0}, 1, model.Now()),
+			createSampleStream(usage, 0, ts),
+			createSampleStream([]float64{0, 0}, 1, ts),
 		}
-		mmr := &mockMetricsReader{
-			qrs: map[uint64]metricsreader.QueryResult{
-				1: {
-					UpdateTime: monotime.Now(),
-					Value:      model.Matrix(values),
-				},
-			},
+		mmr.qrs[1] = metricsreader.QueryResult{
+			UpdateTime: monotime.Now(),
+			Value:      model.Matrix(values),
 		}
-		fm := NewFactorMemory(mmr)
-		for i, test := range tests {
-			backends := []scoredBackend{
-				createBackend(0, test.conns[0], test.conns[0]),
-				createBackend(1, test.conns[1], test.conns[1]),
-			}
-			fm.UpdateScore(backends)
-			count := fm.BalanceCount(backends[0], backends[1])
-			countRange := test.oomCountRange
-			if j == 0 {
-				countRange = test.highMemoryCountRange
-			}
-			require.GreaterOrEqual(t, count, countRange[0], "test idx: %d %d", i, j)
-			require.LessOrEqual(t, count, countRange[1], "test idx: %d %d", i, j)
+	}
+	fs := NewFactorMemory(mmr)
+	backends := make([]scoredBackend, 0, 2)
+	backends = append(backends, createBackend(0, 0, 0))
+	backends = append(backends, createBackend(1, 0, 0))
+	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
+	for i, test := range tests {
+		updateMmr(test.riskLevel)
+		unhealthyBackend.connScore = test.conn
+		fs.UpdateScore(backends)
+		if test.riskLevel == 0 {
+			continue
 		}
+		count := fs.BalanceCount(backends[0], backends[1])
+		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }

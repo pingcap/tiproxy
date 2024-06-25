@@ -40,7 +40,7 @@ func (fcc *FactorConnCount) ScoreBitNum() int {
 	return fcc.bitNum
 }
 
-func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) int {
+func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) float64 {
 	if float64(from.ConnScore()) > float64(to.ConnScore()+1)*connBalancedRatio {
 		return balanceCount4Conn
 	}

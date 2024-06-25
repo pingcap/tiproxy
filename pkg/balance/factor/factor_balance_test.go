@@ -137,7 +137,7 @@ func TestBalanceWithOneFactor(t *testing.T) {
 		}
 		backends := createBackends(len(test.scores))
 		from, to, count, reason, _ := fm.BackendsToBalance(backends)
-		require.Equal(t, test.count, count, "test index %d", tIdx)
+		require.EqualValues(t, test.count, count, "test index %d", tIdx)
 		if test.count > 0 {
 			require.Equal(t, backends[test.fromIdx], from, "test index %d", tIdx)
 			require.Equal(t, backends[test.toIdx], to, "test index %d", tIdx)
@@ -217,7 +217,7 @@ func TestBalanceWith2Factors(t *testing.T) {
 		}
 		backends := createBackends(len(test.scores1))
 		from, to, count, _, _ := fm.BackendsToBalance(backends)
-		require.Equal(t, test.count, count, "test index %d", tIdx)
+		require.EqualValues(t, test.count, count, "test index %d", tIdx)
 		if test.count > 0 {
 			require.Equal(t, backends[test.fromIdx], from, "test index %d", tIdx)
 			require.Equal(t, backends[test.toIdx], to, "test index %d", tIdx)
@@ -258,7 +258,7 @@ func TestBalanceWith3Factors(t *testing.T) {
 	for tIdx, test := range tests {
 		for factorIdx, factor := range factors {
 			func(factorIdx int, factor *mockFactor) {
-				factor.balanceCount = test.balanceCounts[factorIdx]
+				factor.balanceCount = float64(test.balanceCounts[factorIdx])
 				factor.updateScore = func(backends []scoredBackend) {
 					for i := 0; i < len(backends); i++ {
 						backends[i].addScore(test.scores[i][factorIdx], factor.bitNum)
@@ -268,7 +268,7 @@ func TestBalanceWith3Factors(t *testing.T) {
 		}
 		backends := createBackends(len(test.scores))
 		from, to, count, _, _ := fm.BackendsToBalance(backends)
-		require.Equal(t, test.count, count, "test index %d", tIdx)
+		require.EqualValues(t, test.count, count, "test index %d", tIdx)
 		if test.count > 0 {
 			require.Equal(t, backends[test.fromIdx], from, "test index %d", tIdx)
 			require.Equal(t, backends[test.toIdx], to, "test index %d", tIdx)

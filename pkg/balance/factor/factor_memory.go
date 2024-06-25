@@ -19,9 +19,9 @@ const (
 	// If some metrics are missing, we use the old one temporarily for no longer than memMetricExpDuration.
 	memMetricExpDuration = 1 * time.Minute
 	// balanceSeconds4HighMemory indicates the time (in seconds) to migrate all the connections when memory is high.
-	balanceSeconds4HighMemory = 60
+	balanceSeconds4HighMemory = 60.0
 	// balanceSeconds4OOMRisk indicates the time (in seconds) to migrate all the connections when there's an OOM risk.
-	balanceSeconds4OOMRisk = 10
+	balanceSeconds4OOMRisk = 5.0
 )
 
 var _ Factor = (*FactorCPU)(nil)
@@ -50,10 +50,28 @@ var (
 	}
 )
 
+// 2: high risk
+// 1: low risk
+// 0: no risk
+func getRiskLevel(usage float64, timeToOOM time.Duration) (int, bool) {
+	level := 0
+	for j := 0; j < len(oomRiskLevels); j++ {
+		if timeToOOM < oomRiskLevels[j].timeToOOM {
+			return len(oomRiskLevels) - j, true
+		}
+		if usage > oomRiskLevels[j].memUsage {
+			return len(oomRiskLevels) - j, false
+		}
+	}
+	return level, false
+}
+
 type memBackendSnapshot struct {
 	updatedTime time.Time
 	memUsage    float64
 	timeToOOM   time.Duration
+	// Record the balance count when the backend has OOM risk so that it won't be smaller in the next rounds.
+	balanceCount float64
 }
 
 type FactorMemory struct {
@@ -120,27 +138,27 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
+		snapshot, existsSnapshot := fm.snapshot[addr]
 		if len(pairs) > 0 {
 			updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
 			// If this backend is not updated, ignore it.
-			if snapshot, ok := fm.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
+			if !existsSnapshot || snapshot.updatedTime.Before(updateTime) {
 				latestUsage, timeToOOM := calcMemUsage(pairs)
 				if latestUsage >= 0 {
 					snapshots[addr] = memBackendSnapshot{
-						updatedTime: updateTime,
-						memUsage:    latestUsage,
-						timeToOOM:   timeToOOM,
+						updatedTime:  updateTime,
+						memUsage:     latestUsage,
+						timeToOOM:    timeToOOM,
+						balanceCount: fm.calcBalanceCount(backend, latestUsage, timeToOOM),
 					}
 					valid = true
 				}
 			}
 		}
 		// Merge the old snapshot just in case some metrics have missed for a short period.
-		if !valid {
-			if snapshot, ok := fm.snapshot[addr]; ok {
-				if time.Since(snapshot.updatedTime) < memMetricExpDuration {
-					snapshots[addr] = snapshot
-				}
+		if !valid && existsSnapshot {
+			if time.Since(snapshot.updatedTime) < memMetricExpDuration {
+				snapshots[addr] = snapshot
 			}
 		}
 	}
@@ -190,29 +208,12 @@ func (fm *FactorMemory) calcMemScore(addr string) (int, bool) {
 	if !ok || usage < 0 {
 		return 0, false
 	}
-	score := 0
-	for j := 0; j < len(oomRiskLevels); j++ {
-		if timeToOOM < oomRiskLevels[j].timeToOOM {
-			return len(oomRiskLevels) - j, true
-		}
-		if usage > oomRiskLevels[j].memUsage {
-			return len(oomRiskLevels) - j, false
-		}
-	}
-	return score, false
+	return getRiskLevel(usage, timeToOOM)
 }
 
-func (fm *FactorMemory) ScoreBitNum() int {
-	return fm.bitNum
-}
-
-func (fm *FactorMemory) BalanceCount(from, to scoredBackend) int {
-	// The risk level may change frequently, e.g. last time timeToOOM was 30s and connections were migrated away,
-	// then this time it becomes 60s and the connections are migrated back.
-	// So we only rebalance when the difference of risk levels of 2 backends is big enough.
-	fromScore, isOOM := fm.calcMemScore(from.Addr())
-	toScore, _ := fm.calcMemScore(to.Addr())
-	if fromScore-toScore <= 1 {
+func (fm *FactorMemory) calcBalanceCount(backend scoredBackend, usage float64, timeToOOM time.Duration) float64 {
+	score, isOOM := getRiskLevel(usage, timeToOOM)
+	if score < 2 {
 		return 0
 	}
 	// Assuming all backends have high memory and the user scales out a new backend, we don't want all the connections
@@ -221,14 +222,28 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) int {
 	if isOOM {
 		seconds = balanceSeconds4OOMRisk
 	}
-	// Assuming that the source and target backends have similar connections at first.
-	// We wish the connections to be migrated in 10 seconds but only a few are migrated in each round.
-	// If we use from.ConnScore() / 10, the migration will be slower and slower.
-	conns := (from.ConnScore() + to.ConnScore()) / (seconds * 2)
-	if conns > 0 {
-		return conns
+	balanceCount := float64(backend.ConnScore()) / seconds
+	// If the migration started eariler, reuse the balance count.
+	if snapshot := fm.snapshot[backend.Addr()]; snapshot.balanceCount > balanceCount {
+		return snapshot.balanceCount
 	}
-	return 1
+	return balanceCount
+}
+
+func (fm *FactorMemory) ScoreBitNum() int {
+	return fm.bitNum
+}
+
+func (fm *FactorMemory) BalanceCount(from, to scoredBackend) float64 {
+	// The risk level may change frequently, e.g. last time timeToOOM was 30s and connections were migrated away,
+	// then this time it becomes 60s and the connections are migrated back.
+	// So we only rebalance when the difference of risk levels of 2 backends is big enough.
+	fromScore, _ := fm.calcMemScore(from.Addr())
+	toScore, _ := fm.calcMemScore(to.Addr())
+	if fromScore-toScore <= 1 {
+		return 0
+	}
+	return fm.snapshot[from.Addr()].balanceCount
 }
 
 func (fm *FactorMemory) SetConfig(cfg *config.Config) {

@@ -49,7 +49,7 @@ func (fl *FactorLabel) ScoreBitNum() int {
 	return fl.bitNum
 }
 
-func (fl *FactorLabel) BalanceCount(from, to scoredBackend) int {
+func (fl *FactorLabel) BalanceCount(from, to scoredBackend) float64 {
 	return balanceCount4Label
 }
 

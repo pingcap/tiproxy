@@ -208,17 +208,14 @@ func (fc *FactorCPU) ScoreBitNum() int {
 	return fc.bitNum
 }
 
-func (fc *FactorCPU) BalanceCount(from, to scoredBackend) int {
+func (fc *FactorCPU) BalanceCount(from, to scoredBackend) float64 {
 	fromAvgUsage, fromLatestUsage := fc.getUsage(from)
 	toAvgUsage, toLatestUsage := fc.getUsage(to)
 	// The higher the CPU usage, the more sensitive the load balance should be.
 	// E.g. 10% vs 25% don't need rebalance, but 80% vs 95% need rebalance.
 	// Use the average usage to avoid thrash when CPU jitters too much and use the latest usage to avoid migrate too many connections.
 	if 1.3-toAvgUsage > (1.3-fromAvgUsage)*cpuBalancedRatio && 1.3-toLatestUsage > (1.3-fromLatestUsage)*cpuBalancedRatio {
-		if balanceCount := int(1 / fc.usagePerConn / balanceRatio4Cpu); balanceCount > 1 {
-			return balanceCount
-		}
-		return 1
+		return 1 / fc.usagePerConn / balanceRatio4Cpu
 	}
 	return 0
 }

@@ -62,7 +62,7 @@ var _ Factor = (*mockFactor)(nil)
 
 type mockFactor struct {
 	bitNum       int
-	balanceCount int
+	balanceCount float64
 	updateScore  func(backends []scoredBackend)
 	cfg          *config.Config
 }
@@ -79,7 +79,7 @@ func (mf *mockFactor) ScoreBitNum() int {
 	return mf.bitNum
 }
 
-func (mf *mockFactor) BalanceCount(from, to scoredBackend) int {
+func (mf *mockFactor) BalanceCount(from, to scoredBackend) float64 {
 	return mf.balanceCount
 }
 

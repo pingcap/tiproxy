@@ -14,7 +14,7 @@ type Factor interface {
 	ScoreBitNum() int
 	// BalanceCount returns the count of connections to balance per second.
 	// 0 indicates the factor is already balanced.
-	BalanceCount(from, to scoredBackend) int
+	BalanceCount(from, to scoredBackend) float64
 	SetConfig(cfg *config.Config)
 	Close()
 }

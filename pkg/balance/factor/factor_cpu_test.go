@@ -17,59 +17,59 @@ import (
 
 func TestCPUBalanceOnce(t *testing.T) {
 	tests := []struct {
-		cpus         [][]float64
-		scoreOrder   []int
-		balanceCount int
+		cpus       [][]float64
+		scoreOrder []int
+		balanced   bool
 	}{
 		{
-			cpus:         [][]float64{{0}, {0.2}},
-			scoreOrder:   []int{0, 1},
-			balanceCount: 0,
+			cpus:       [][]float64{{0}, {0.2}},
+			scoreOrder: []int{0, 1},
+			balanced:   true,
 		},
 		{
-			cpus:         [][]float64{{1, 0.5, 0.25}, {0, 0.25, 0.5}, {0, 0, 0}, {1, 1, 1}},
-			scoreOrder:   []int{2, 0, 1, 3},
-			balanceCount: 1,
+			cpus:       [][]float64{{1, 0.5, 0.25}, {0, 0.25, 0.5}, {0, 0, 0}, {1, 1, 1}},
+			scoreOrder: []int{2, 0, 1, 3},
+			balanced:   false,
 		},
 		{
-			cpus:         [][]float64{{0.25}, {}, {0.5}},
-			scoreOrder:   []int{0, 2, 1},
-			balanceCount: 1,
+			cpus:       [][]float64{{0.25}, {}, {0.5}},
+			scoreOrder: []int{0, 2, 1},
+			balanced:   false,
 		},
 		{
-			cpus:         [][]float64{{0.95, 0.92, 0.93, 0.94, 0.92, 0.94}, {0.81, 0.79, 0.82, 0.83, 0.76, 0.78}},
-			scoreOrder:   []int{1, 0},
-			balanceCount: 1,
+			cpus:       [][]float64{{0.95, 0.92, 0.93, 0.94, 0.92, 0.94}, {0.81, 0.79, 0.82, 0.83, 0.76, 0.78}},
+			scoreOrder: []int{1, 0},
+			balanced:   false,
 		},
 		{
-			cpus:         [][]float64{{0.35, 0.42, 0.37, 0.45, 0.42, 0.44}, {0.56, 0.62, 0.58, 0.57, 0.59, 0.63}},
-			scoreOrder:   []int{0, 1},
-			balanceCount: 1,
+			cpus:       [][]float64{{0.35, 0.42, 0.37, 0.45, 0.42, 0.44}, {0.56, 0.62, 0.58, 0.57, 0.59, 0.63}},
+			scoreOrder: []int{0, 1},
+			balanced:   false,
 		},
 		{
-			cpus:         [][]float64{{0, 0.1, 0, 0.1}, {0.15, 0.1, 0.15, 0.15}, {0.1, 0, 0.1, 0}},
-			scoreOrder:   []int{2, 0, 1},
-			balanceCount: 0,
+			cpus:       [][]float64{{0, 0.1, 0, 0.1}, {0.15, 0.1, 0.15, 0.15}, {0.1, 0, 0.1, 0}},
+			scoreOrder: []int{2, 0, 1},
+			balanced:   true,
 		},
 		{
-			cpus:         [][]float64{{0.5}, {}, {0.1, 0.3, 0.4}},
-			scoreOrder:   []int{2, 0, 1},
-			balanceCount: 1,
+			cpus:       [][]float64{{0.5}, {}, {0.1, 0.3, 0.4}},
+			scoreOrder: []int{2, 0, 1},
+			balanced:   false,
 		},
 		{
-			cpus:         [][]float64{{1.0}, {0.97}},
-			scoreOrder:   []int{1, 0},
-			balanceCount: 0,
+			cpus:       [][]float64{{1.0}, {0.97}},
+			scoreOrder: []int{1, 0},
+			balanced:   true,
 		},
 		{
-			cpus:         [][]float64{{0.8, 0.2, 0.8, 0.2}, {0.3, 0.5, 0.3, 0.5}},
-			scoreOrder:   []int{0, 1},
-			balanceCount: 0,
+			cpus:       [][]float64{{0.8, 0.2, 0.8, 0.2}, {0.3, 0.5, 0.3, 0.5}},
+			scoreOrder: []int{0, 1},
+			balanced:   true,
 		},
 		{
-			cpus:         [][]float64{{1.0}, {0.9}, {0.8}, {0.7}, {0.6}, {0.5}, {0.4}, {0.3}, {0.1}},
-			scoreOrder:   []int{8, 7, 6, 5, 4, 3, 2, 1, 0},
-			balanceCount: 1,
+			cpus:       [][]float64{{1.0}, {0.9}, {0.8}, {0.7}, {0.6}, {0.5}, {0.4}, {0.3}, {0.1}},
+			scoreOrder: []int{8, 7, 6, 5, 4, 3, 2, 1, 0},
+			balanced:   false,
 		},
 	}
 
@@ -99,7 +99,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 		require.Equal(t, test.scoreOrder, sortedIdx, "test index %d", i)
 		from, to := backends[len(backends)-1], backends[0]
 		balanceCount := fc.BalanceCount(from, to)
-		require.Equal(t, test.balanceCount, balanceCount, "test index %d", i)
+		require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
 
@@ -209,8 +209,9 @@ func TestCPUBalanceContinuously(t *testing.T) {
 			if balanceCount == 0 {
 				break
 			}
-			backends[len(backends)-1].BackendCtx.(*mockBackend).connScore -= balanceCount
-			backends[0].BackendCtx.(*mockBackend).connScore += balanceCount
+			count := int(balanceCount + 0.9999)
+			backends[len(backends)-1].BackendCtx.(*mockBackend).connScore -= count
+			backends[0].BackendCtx.(*mockBackend).connScore += count
 		}
 		connScores := make([]int, len(test.connScores))
 		for _, backend := range backends {

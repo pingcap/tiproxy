@@ -329,20 +329,21 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 
 	// Control the speed of migration.
 	curTime := monotime.Now()
-	if balanceCount*int(rebalanceInterval) >= int(time.Second) {
+	migrationInterval := time.Duration(float64(time.Second) / balanceCount)
+	count := 0
+	if migrationInterval < rebalanceInterval*2 {
 		// If we need to migrate multiple connections in each round, calculate the connection count for each round.
-		balanceCount = balanceCount * int(rebalanceInterval) / int(time.Second)
+		count = int((rebalanceInterval-1)/migrationInterval) + 1
 	} else {
 		// If we need to wait for multiple rounds to migrate a connection, calculate the interval for each connection.
-		intervalPerConn := time.Second / time.Duration(balanceCount)
-		if curTime-router.lastRedirectTime >= monotime.Time(intervalPerConn) {
-			balanceCount = 1
+		if curTime-router.lastRedirectTime >= monotime.Time(migrationInterval) {
+			count = 1
 		} else {
 			return
 		}
 	}
 	// Migrate balanceCount connections.
-	for i := 0; i < balanceCount && ctx.Err() == nil; i++ {
+	for i := 0; i < count && ctx.Err() == nil; i++ {
 		var ce *glist.Element[*connWrapper]
 		for ele := fromBackend.connList.Front(); ele != nil; ele = ele.Next() {
 			conn := ele.Value

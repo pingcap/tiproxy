@@ -176,7 +176,7 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 // BackendsToBalance returns the busiest/unhealthy backend and the idlest backend.
 // balanceCount: the count of connections to migrate in this round. 0 indicates no need to balance.
 // reason: the debug information to be logged.
-func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (from, to policy.BackendCtx, balanceCount int, reason string, logFields []zap.Field) {
+func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (from, to policy.BackendCtx, balanceCount float64, reason string, logFields []zap.Field) {
 	if len(backends) <= 1 {
 		return
 	}
@@ -217,7 +217,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			// backend2 factor scores: 0, 0
 			// Balancing the second factor won't make the first factor unbalanced.
 			balanceCount = factor.BalanceCount(*busiestBackend, *idlestBackend)
-			if balanceCount > 0 {
+			if balanceCount > 0.0001 {
 				break
 			}
 		} else if score1 < score2 {

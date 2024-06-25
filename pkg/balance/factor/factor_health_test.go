@@ -82,44 +82,49 @@ func TestHealthScore(t *testing.T) {
 
 func TestHealthBalance(t *testing.T) {
 	tests := []struct {
-		errCounts    [][]float64
-		scores       []uint64
-		balanceCount int
+		errCounts [][]float64
+		scores    []uint64
+		balanced  bool
 	}{
 		{
 			errCounts: [][]float64{{math.NaN(), math.NaN()}, {math.NaN(), math.NaN()}},
 			scores:    []uint64{0, 0},
+			balanced:  true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
 				{math.NaN(), math.NaN()}},
-			scores: []uint64{1, 0},
+			scores:   []uint64{1, 0},
+			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
-			scores: []uint64{1, 1},
+			scores:   []uint64{1, 1},
+			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].recoverThreshold - 1), float64(errDefinitions[1].recoverThreshold - 1)},
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
-			scores: []uint64{0, 1},
+			scores:   []uint64{0, 1},
+			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].recoverThreshold + 1)},
 				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
-			scores: []uint64{2, 1},
+			scores:   []uint64{2, 1},
+			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].recoverThreshold + 1)},
 				{float64(errDefinitions[0].recoverThreshold - 1), float64(errDefinitions[1].recoverThreshold - 1)}},
-			scores:       []uint64{2, 0},
-			balanceCount: 1,
+			scores:   []uint64{2, 0},
+			balanced: false,
 		},
 	}
 
@@ -128,7 +133,7 @@ func TestHealthBalance(t *testing.T) {
 		values1 := make([]*model.Sample, 0, len(test.errCounts))
 		values2 := make([]*model.Sample, 0, len(test.errCounts))
 		for j := 0; j < len(test.errCounts); j++ {
-			backends = append(backends, createBackend(j, 0, 0))
+			backends = append(backends, createBackend(j, 100, 100))
 			values1 = append(values1, createSample(test.errCounts[j][0], j))
 			values2 = append(values2, createSample(test.errCounts[j][1], j))
 		}
@@ -156,7 +161,7 @@ func TestHealthBalance(t *testing.T) {
 		})
 		from, to := backends[len(backends)-1], backends[0]
 		balanceCount := fh.BalanceCount(from, to)
-		require.Equal(t, test.balanceCount, balanceCount, "test index %d", i)
+		require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
 
@@ -217,72 +222,63 @@ func TestNoHealthMetrics(t *testing.T) {
 
 func TestHealthBalanceCount(t *testing.T) {
 	tests := []struct {
-		conns    []int
-		minCount int
-		maxCount int
+		conn    int
+		healthy bool
+		count   float64
 	}{
 		{
-			conns:    []int{1, 0},
-			minCount: 1,
-			maxCount: 1,
+			conn:    100,
+			healthy: false,
+			count:   100 / balanceSeconds4Health,
 		},
 		{
-			conns:    []int{10, 0},
-			minCount: 1,
-			maxCount: 4,
+			conn:    50,
+			healthy: false,
+			count:   100 / balanceSeconds4Health,
 		},
 		{
-			conns:    []int{10, 10},
-			minCount: 1,
-			maxCount: 4,
+			conn:    100,
+			healthy: true,
+			count:   0,
 		},
 		{
-			conns:    []int{100, 10},
-			minCount: 5,
-			maxCount: 20,
-		},
-		{
-			conns:    []int{1000, 100},
-			minCount: 50,
-			maxCount: 100,
-		},
-		{
-			conns:    []int{100, 1000},
-			minCount: 50,
-			maxCount: 100,
-		},
-		{
-			conns:    []int{10000, 10000},
-			minCount: 500,
-			maxCount: 1000,
+			conn:    50,
+			healthy: false,
+			count:   50 / balanceSeconds4Health,
 		},
 	}
 
-	values := []*model.Sample{
-		createSample(99999999, 0),
-		createSample(0, 1),
-	}
+	backends := make([]scoredBackend, 0, 2)
+	backends = append(backends, createBackend(0, 0, 0))
+	backends = append(backends, createBackend(1, 0, 0))
+	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
 	mmr := &mockMetricsReader{
-		qrs: map[uint64]metricsreader.QueryResult{
-			1: {
-				UpdateTime: monotime.Now(),
-				Value:      model.Vector(values),
-			},
-			2: {
-				UpdateTime: monotime.Now(),
-				Value:      model.Vector(values),
-			},
-		},
+		qrs: map[uint64]metricsreader.QueryResult{},
 	}
 	fh := NewFactorHealth(mmr)
-	for i, test := range tests {
-		backends := []scoredBackend{
-			createBackend(0, test.conns[0], test.conns[0]),
-			createBackend(1, test.conns[1], test.conns[1]),
+	updateMmr := func(healthy bool) {
+		number := 0.0
+		if !healthy {
+			number = 99999999.0
 		}
+		values := []*model.Sample{
+			createSample(number, 0),
+			createSample(0, 1),
+		}
+		mmr.qrs[1] = metricsreader.QueryResult{
+			UpdateTime: monotime.Now(),
+			Value:      model.Vector(values),
+		}
+		mmr.qrs[2] = mmr.qrs[1]
+	}
+	for i, test := range tests {
+		updateMmr(test.healthy)
+		unhealthyBackend.connScore = test.conn
 		fh.UpdateScore(backends)
+		if test.count == 0 {
+			continue
+		}
 		count := fh.BalanceCount(backends[0], backends[1])
-		require.GreaterOrEqual(t, count, test.minCount, "test idx: %d", i)
-		require.LessOrEqual(t, count, test.maxCount, "test idx: %d", i)
+		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }
