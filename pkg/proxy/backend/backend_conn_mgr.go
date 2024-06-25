@@ -865,6 +865,12 @@ func (mgr *BackendConnManager) tryPause(ctx context.Context) {
 		mgr.notifyPauseResult(addr, err)
 		return
 	}
+	if err = mgr.updateAuthInfoFromSessionStates(hack.Slice(sessionStates)); err != nil {
+		mgr.logger.Error("update auth info failed when pause", zap.Error(err))
+		mgr.notifyPauseResult(addr, err)
+		return
+	}
+	mgr.updateTraffic(backendIO)
 	mgr.sessionState.Store(&SessionState{
 		sessionStates: sessionStates,
 		sessionToken:  sessionToken,
@@ -908,26 +914,28 @@ func (mgr *BackendConnManager) resume(ctx context.Context) error {
 		return err
 	}
 
-	clientResp := pnet.HandshakeResp{User: token.Username}
 	mgr.logger.Info("start to resume session")
+	clientResp := pnet.HandshakeResp{User: token.Username}
 	newBackendIO, err := mgr.getBackendIO(ctx, mgr, &clientResp)
 	if err != nil {
 		return err
 	}
-	mgr.logger.Debug("start to handshakeSecondTime")
 	if err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, state.sessionToken); err == nil {
 		err = mgr.initSessionStates(newBackendIO, state.sessionStates)
 	} else {
 		mgr.handshakeHandler.OnHandshake(mgr, newBackendIO.RemoteAddr().String(), err, Error2Source(err))
 	}
-	mgr.logger.Debug("finish to handshakeSecondTime")
 	if err != nil {
 		if ignoredErr := newBackendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 			mgr.logger.Error("close new backend connection failed", zap.Error(ignoredErr))
 		}
+		// backendIO has been set in getBackendIO, if second handshake failed, set it to nil.
+		mgr.backendIO.Store(nil)
 		return err
 	}
-	mgr.backendIO.Store(newBackendIO)
+	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = 0, 0, 0, 0
+	mgr.updateTraffic(newBackendIO)
+	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 	mgr.lastPauseTime = 0
 	mgr.sessionState.Store(nil)
 
