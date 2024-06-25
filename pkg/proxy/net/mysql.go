@@ -358,32 +358,17 @@ func ParseChangeUser(data []byte, capability Capability) (*ChangeUserReq, error)
 	return req, err
 }
 
-// ReadServerVersion only reads server version.
-func ReadServerVersion(conn net.Conn) (string, error) {
+// CheckSqlPort checks whether the SQL port is available.
+func CheckSqlPort(conn net.Conn) error {
 	c := packet.NewConn(conn)
 	data, err := c.ReadPacket()
 	if err != nil {
-		return "", err
+		return err
 	}
 	if data[0] == ErrHeader.Byte() {
-		return "", errors.New("read initial handshake error")
+		return errors.New("read initial handshake error")
 	}
-	pos := 1
-	version := data[pos : pos+bytes.IndexByte(data[pos:], 0x00)]
-	return string(version), nil
-}
-
-// WriteServerVersion only writes server version. It's only used for testing.
-func WriteServerVersion(conn net.Conn, serverVersion string) error {
-	data := make([]byte, 0, 128)
-	data = append(data, []byte{0, 0, 0, 0}...)
-	// min version 10
-	data = append(data, 10)
-	// server version[NUL]
-	data = append(data, serverVersion...)
-	data = append(data, 0)
-	c := packet.NewConn(conn)
-	return c.WritePacket(data)
+	return nil
 }
 
 // ParseOKPacket parses an OK packet and only returns server status.
