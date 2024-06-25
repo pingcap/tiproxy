@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	getPromNone = iota
-	getPromOK
-	getPromFail
+	readResultNone = iota
+	readResultOK
+	readResultFail
 )
 
 type PromInfoFetcher interface {
@@ -54,7 +54,7 @@ type DefaultMetricsReader struct {
 	lg           *zap.Logger
 	cfg          *config.HealthCheck
 	lastID       uint64
-	getPromRes   int
+	readResult   int
 }
 
 func NewDefaultMetricsReader(lg *zap.Logger, promFetcher PromInfoFetcher, cfg *config.HealthCheck) *DefaultMetricsReader {
@@ -79,11 +79,21 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context) {
 		defer ticker.Stop()
 		for childCtx.Err() == nil {
 			if results, err := dmr.readMetrics(childCtx); err != nil {
-				dmr.lg.Warn("read metrics failed", zap.Error(err))
-			} else if len(results) > 0 {
-				dmr.Lock()
-				dmr.queryResults = results
-				dmr.Unlock()
+				// If there are successive errors, only log it once.
+				if dmr.readResult != readResultFail {
+					dmr.readResult = readResultFail
+					dmr.lg.Warn("read metrics failed", zap.Error(err))
+				}
+			} else {
+				if dmr.readResult != readResultOK {
+					dmr.readResult = readResultOK
+					dmr.lg.Debug("read metrics succeed")
+				}
+				if len(results) > 0 {
+					dmr.Lock()
+					dmr.queryResults = results
+					dmr.Unlock()
+				}
 			}
 			select {
 			case <-ticker.C:
@@ -98,13 +108,9 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context) {
 func (dmr *DefaultMetricsReader) getPromAPI(ctx context.Context) (promv1.API, error) {
 	promInfo, err := dmr.promFetcher.GetPromInfo(ctx)
 	if promInfo == nil {
-		if dmr.getPromRes != getPromFail {
-			dmr.getPromRes = getPromFail
-		}
 		if err == nil {
 			err = errors.New("no prometheus info found")
 		}
-		dmr.lg.Warn("get prometheus address fails", zap.Error(err))
 		return nil, err
 	}
 	if err != nil {
@@ -112,10 +118,6 @@ func (dmr *DefaultMetricsReader) getPromAPI(ctx context.Context) (promv1.API, er
 	}
 	// TODO: support TLS and authentication.
 	promAddr := fmt.Sprintf("http://%s", net.JoinHostPort(promInfo.IP, strconv.Itoa(promInfo.Port)))
-	if dmr.getPromRes != getPromOK {
-		dmr.getPromRes = getPromOK
-		dmr.lg.Info("get prometheus address succeeds", zap.String("addr", promAddr))
-	}
 	promClient, err := api.NewClient(api.Config{
 		Address: promAddr,
 	})

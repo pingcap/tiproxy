@@ -208,7 +208,7 @@ func TestNoPromAddr(t *testing.T) {
 			return nil, nil
 		},
 	}
-	lg, _ := logger.CreateLoggerForTest(t)
+	lg, text := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()
 	mr := NewDefaultMetricsReader(lg, mpf, cfg)
 	promInfo, err := mr.getPromAPI(context.Background())
@@ -225,6 +225,7 @@ func TestNoPromAddr(t *testing.T) {
 	time.Sleep(10 * cfg.MetricsInterval)
 	qr := mr.GetQueryResult(id)
 	require.True(t, qr.Empty())
+	require.Equal(t, 1, strings.Count(text.String(), "no prometheus info found"))
 }
 
 func setupTypicalMetricsReader(t *testing.T) (*mockHttpHandler, MetricsReader) {
