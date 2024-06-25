@@ -58,15 +58,17 @@ var (
 	errDefinitions = []errDefinition{
 		{
 			// may be caused by disconnection to PD
-			// test with no connection: around 80
-			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[1m])) by (instance)`,
-			failThreshold:    100,
+			// test with no connection in no network: around 80/m
+			// test with 100 connections in unstable network: [50, 135]/2m
+			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[2m])) by (instance)`,
+			failThreshold:    50,
 			recoverThreshold: 10,
 		},
 		{
 			// may be caused by disconnection to TiKV
-			// test with no connection: regionMiss is around 1300, tikvRPC is around 40
-			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type=~"regionMiss|tikvRPC"}[1m])) by (instance)`,
+			// test with no connection in no network: regionMiss is around 1300/m, tikvRPC is around 40/m
+			// test with 100 connections in unstable network: [1000, 3300]/2m
+			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type=~"regionMiss|tikvRPC"}[2m])) by (instance)`,
 			failThreshold:    1000,
 			recoverThreshold: 100,
 		},
