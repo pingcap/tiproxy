@@ -76,7 +76,7 @@ func TestCancelObserver(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		ts.addBackend()
 	}
-	info, err := ts.fetcher.GetBackendList(context.Background())
+	info, err := ts.fetcher.GetBackendList(context.Background(), false)
 	require.NoError(t, err)
 	require.Len(t, info, 10)
 
@@ -185,7 +185,7 @@ func newMockBackendFetcher() *mockBackendFetcher {
 	}
 }
 
-func (mbf *mockBackendFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
+func (mbf *mockBackendFetcher) GetBackendList(context.Context, bool) (map[string]*BackendInfo, error) {
 	mbf.Lock()
 	defer mbf.Unlock()
 	backends := make(map[string]*BackendInfo, len(mbf.backends))
@@ -218,7 +218,7 @@ func NewExternalFetcher(backendGetter func() ([]string, error)) *ExternalFetcher
 	}
 }
 
-func (ef *ExternalFetcher) GetBackendList(context.Context) (map[string]*BackendInfo, error) {
+func (ef *ExternalFetcher) GetBackendList(context.Context, bool) (map[string]*BackendInfo, error) {
 	addrs, err := ef.backendGetter()
 	return backendListToMap(addrs), err
 }

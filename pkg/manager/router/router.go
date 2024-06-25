@@ -20,6 +20,8 @@ var (
 type ConnEventReceiver interface {
 	OnRedirectSucceed(from, to string, conn RedirectableConn) error
 	OnRedirectFail(from, to string, conn RedirectableConn) error
+	OnPauseSucceed(addr string, conn RedirectableConn) error
+	OnPauseFail(addr string, conn RedirectableConn) error
 	OnConnClosed(addr string, conn RedirectableConn) error
 }
 
@@ -41,13 +43,15 @@ type connPhase int
 
 const (
 	// The session is never redirected.
-	phaseNotRedirected connPhase = iota
+	phaseNone connPhase = iota
 	// The session is redirecting.
 	phaseRedirectNotify
-	// The session redirected successfully last time.
-	phaseRedirectEnd
 	// The session failed to redirect last time.
 	phaseRedirectFail
+	// The session is pausing.
+	phasePauseNotify
+	// The session failed to pause last time.
+	phasePauseFail
 )
 
 const (
@@ -72,6 +76,7 @@ type RedirectableConn interface {
 	// Redirect returns false if the current conn is not redirectable.
 	Redirect(backend BackendInst) bool
 	ConnectionID() uint64
+	Pause() bool
 }
 
 // BackendInst defines a backend that a connection is redirecting to.

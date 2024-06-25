@@ -111,7 +111,7 @@ func TestPDFetcher(t *testing.T) {
 		if test.ctx == nil {
 			test.ctx = context.Background()
 		}
-		info, err := pf.GetBackendList(test.ctx)
+		info, err := pf.GetBackendList(test.ctx, false)
 		test.check(info)
 		require.NoError(t, err)
 	}

@@ -44,6 +44,8 @@ const (
 	CheckBackendInterval = time.Minute
 	// TickerInterval is the interval for checking backend status.
 	TickerInterval = 5 * time.Second
+	// DefaultPausedConnTimeout is the maximum duration a paused connection can last before being closed.
+	DefaultPausedConnTimeout = 8 * time.Hour
 )
 
 const (
@@ -58,6 +60,7 @@ type signalType int
 
 const (
 	signalTypeRedirect signalType = iota
+	signalTypePause
 	signalTypeGracefulClose
 	signalTypeNums
 )
@@ -93,6 +96,7 @@ type BCConfig struct {
 	ConnBufferSize       int
 	ProxyProtocol        bool
 	RequireBackendTLS    bool
+	PausedConnTimeout    time.Duration
 }
 
 func (cfg *BCConfig) check() {
@@ -104,6 +108,9 @@ func (cfg *BCConfig) check() {
 	}
 	if cfg.ConnectTimeout == time.Duration(0) {
 		cfg.ConnectTimeout = ConnectTimeout
+	}
+	if cfg.PausedConnTimeout == time.Duration(0) {
+		cfg.PausedConnTimeout = DefaultPausedConnTimeout
 	}
 }
 
@@ -136,13 +143,17 @@ type BackendConnManager struct {
 	closeStatus atomic.Int32
 	// The last time when the backend is active.
 	lastActiveTime monotime.Time
+	// The last time when the connection is paused.
+	lastPauseTime monotime.Time
 	// The traffic recorded last time.
 	inBytes, inPackets, outBytes, outPackets uint64
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc context.CancelFunc
 	clientIO   *pnet.PacketIO
 	// backendIO may be written during redirection and be read in ExecuteCmd/Redirect/setKeepalive.
-	backendIO        atomic.Pointer[pnet.PacketIO]
+	backendIO atomic.Pointer[pnet.PacketIO]
+	// sessionState stores session state when the session be paused.
+	sessionState     atomic.Pointer[SessionState]
 	backendTLS       *tls.Config
 	handshakeHandler HandshakeHandler
 	ctxmap           struct {
@@ -163,7 +174,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		cmdProcessor:     NewCmdProcessor(logger.Named("cp")),
 		handshakeHandler: handshakeHandler,
 		authenticator:    NewAuthenticator(config),
-		// There are 2 types of signals, which may be sent concurrently.
+		// There are 3 types of signals, which may be sent concurrently.
 		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),
 		quitSource:     SrcNone,
@@ -337,6 +348,13 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	if mgr.closeStatus.Load() >= statusClosing {
 		return
 	}
+	if mgr.backendIO.Load() == nil {
+		err = mgr.resume(ctx)
+		if err != nil {
+			mgr.logger.Error("resume failed", zap.Error(err))
+			return
+		}
+	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	backendIO := mgr.backendIO.Load()
@@ -458,6 +476,8 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 					mgr.tryGracefulClose(ctx)
 				case signalTypeRedirect:
 					mgr.tryRedirect(ctx)
+				case signalTypePause:
+					mgr.tryPause(ctx)
 				}
 			}()
 		case rs := <-mgr.redirectResCh:
@@ -507,7 +527,13 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		rs.err = ErrTargetUnhealthy
 		return
 	}
+
 	backendIO := mgr.backendIO.Load()
+	if backendIO == nil {
+		mgr.logger.Info("session paused, skip redirect")
+		return
+	}
+
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
 		// If the backend connection is closed, also close the client connection.
@@ -581,6 +607,9 @@ func (mgr *BackendConnManager) Redirect(backendInst router.BackendInst) bool {
 	if mgr.closeStatus.Load() >= statusNotifyClose {
 		return false
 	}
+	if mgr.backendIO.Load() == nil {
+		return false
+	}
 	mgr.redirectInfo.Store(&backendInst)
 	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
 	mgr.signalReceived <- signalTypeRedirect
@@ -640,18 +669,28 @@ func (mgr *BackendConnManager) checkBackendActive() {
 		return
 	}
 	backendIO := mgr.backendIO.Load()
-	if !backendIO.IsPeerActive() {
+	if backendIO == nil {
+		if mgr.lastPauseTime != 0 && monotime.Since(mgr.lastPauseTime) < mgr.config.PausedConnTimeout {
+			return
+		}
+		mgr.logger.Info("paused conn timeout, close client connection", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()))
+		mgr.closeClientConn()
+	} else if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection",
 			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()),
 			zap.Bool("backend_healthy", mgr.curBackend.Healthy()))
-		mgr.quitSource = SrcBackendNetwork
-		if err := mgr.clientIO.GracefulClose(); err != nil {
-			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
-		}
-		mgr.closeStatus.CompareAndSwap(statusActive, statusClosing)
+		mgr.closeClientConn()
 	} else {
 		mgr.lastActiveTime = now
 	}
+}
+
+func (mgr *BackendConnManager) closeClientConn() {
+	mgr.quitSource = SrcBackendNetwork
+	if err := mgr.clientIO.GracefulClose(); err != nil {
+		mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+	}
+	mgr.closeStatus.CompareAndSwap(statusActive, statusClosing)
 }
 
 func (mgr *BackendConnManager) ClientAddr() string {
@@ -735,10 +774,8 @@ func (mgr *BackendConnManager) Close() error {
 			mgr.notifyRedirectResult(context.Background(), <-mgr.redirectResCh)
 		}
 		// Just notify it with the current address.
-		if len(addr) > 0 {
-			if err := eventReceiver.OnConnClosed(addr, mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_addr", addr), zap.NamedError("notify_err", err))
-			}
+		if err := eventReceiver.OnConnClosed(addr, mgr); err != nil {
+			mgr.logger.Error("close connection error", zap.String("backend_addr", addr), zap.NamedError("notify_err", err))
 		}
 	}
 	mgr.closeStatus.Store(statusClosed)
@@ -797,4 +834,110 @@ func (mgr *BackendConnManager) ConnInfo() []zap.Field {
 	mgr.processLock.Unlock()
 	fields = append(fields, zap.String("backend_addr", mgr.ServerAddr()))
 	return fields
+}
+
+// Pause implements RedirectableConn.Pause interface. It notifies manager to pause.
+func (mgr *BackendConnManager) Pause() bool {
+	if mgr.closeStatus.Load() >= statusNotifyClose {
+		return false
+	}
+
+	if mgr.backendIO.Load() == nil {
+		return false
+	}
+
+	mgr.signalReceived <- signalTypePause
+	return true
+}
+
+// tryPause read sessionStates from backend and store the states.
+func (mgr *BackendConnManager) tryPause(ctx context.Context) {
+	backendIO := mgr.backendIO.Load()
+	if backendIO == nil {
+		err := errors.New("backend is nil")
+		mgr.logger.Error("failed to get backend when pause", zap.Error(err))
+		return
+	}
+	addr := mgr.ServerAddr()
+	sessionStates, sessionToken, err := mgr.querySessionStates(backendIO)
+	if err != nil {
+		mgr.logger.Error("query session failed when pause", zap.Error(err))
+		mgr.notifyPauseResult(addr, err)
+		return
+	}
+	if err = mgr.updateAuthInfoFromSessionStates(hack.Slice(sessionStates)); err != nil {
+		mgr.logger.Error("update auth info failed when pause", zap.Error(err))
+		mgr.notifyPauseResult(addr, err)
+		return
+	}
+	mgr.updateTraffic(backendIO)
+	mgr.sessionState.Store(&SessionState{
+		sessionStates: sessionStates,
+		sessionToken:  sessionToken,
+	})
+	mgr.backendIO.Store(nil)
+	mgr.lastPauseTime = monotime.Now()
+	mgr.notifyPauseResult(addr, nil)
+	if ignoredErr := backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+		mgr.logger.Error("close paused backend connection failed", zap.Error(ignoredErr))
+	}
+}
+
+// notify pause result to eventReceiver.
+func (mgr *BackendConnManager) notifyPauseResult(addr string, pauseErr error) {
+	eventReceiver := mgr.getEventReceiver()
+	if eventReceiver == nil {
+		return
+	}
+	if pauseErr != nil {
+		err := eventReceiver.OnPauseFail(addr, mgr)
+		mgr.logger.Warn("pause connection failed", zap.String("addr", addr),
+			zap.NamedError("pause_err", pauseErr), zap.NamedError("notify_err", err))
+	} else {
+		err := eventReceiver.OnPauseSucceed(addr, mgr)
+		mgr.logger.Debug("pause connection succeeds", zap.String("from", addr),
+			zap.NamedError("notify_err", err))
+	}
+}
+
+// resume will reconnect to a new backend when the connection is paused.
+// Then restore the saved session to the backend.
+func (mgr *BackendConnManager) resume(ctx context.Context) error {
+	token := new(SessionToken)
+	state := mgr.sessionState.Load()
+	if state == nil {
+		err := errors.New("session state is nil")
+		return err
+	}
+	err := json.Unmarshal([]byte(state.sessionToken), token)
+	if err != nil {
+		return err
+	}
+
+	mgr.logger.Info("start to resume session")
+	clientResp := pnet.HandshakeResp{User: token.Username}
+	newBackendIO, err := mgr.getBackendIO(ctx, mgr, &clientResp)
+	if err != nil {
+		return err
+	}
+	if err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, state.sessionToken); err == nil {
+		err = mgr.initSessionStates(newBackendIO, state.sessionStates)
+	} else {
+		mgr.handshakeHandler.OnHandshake(mgr, newBackendIO.RemoteAddr().String(), err, Error2Source(err))
+	}
+	if err != nil {
+		if ignoredErr := newBackendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
+			mgr.logger.Error("close new backend connection failed", zap.Error(ignoredErr))
+		}
+		// backendIO has been set in getBackendIO, if second handshake failed, set it to nil.
+		mgr.backendIO.Store(nil)
+		return err
+	}
+	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = 0, 0, 0, 0
+	mgr.updateTraffic(newBackendIO)
+	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
+	mgr.lastPauseTime = 0
+	mgr.sessionState.Store(nil)
+
+	return nil
 }

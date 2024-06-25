@@ -23,8 +23,10 @@ import (
 )
 
 const (
-	eventSucceed = iota
-	eventFail
+	eventRedirectSucceed = iota
+	eventRedirectFail
+	eventPauseSucceed
+	eventPauseFail
 	eventClose
 )
 
@@ -47,7 +49,7 @@ func (mer *mockEventReceiver) OnRedirectSucceed(from, to string, conn router.Red
 	mer.eventCh <- event{
 		from:      from,
 		to:        to,
-		eventName: eventSucceed,
+		eventName: eventRedirectSucceed,
 	}
 	return nil
 }
@@ -56,7 +58,23 @@ func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.Redire
 	mer.eventCh <- event{
 		from:      from,
 		to:        to,
-		eventName: eventFail,
+		eventName: eventRedirectFail,
+	}
+	return nil
+}
+
+func (mer *mockEventReceiver) OnPauseSucceed(addr string, conn router.RedirectableConn) error {
+	mer.eventCh <- event{
+		from:      addr,
+		eventName: eventPauseSucceed,
+	}
+	return nil
+}
+
+func (mer *mockEventReceiver) OnPauseFail(addr string, conn router.RedirectableConn) error {
+	mer.eventCh <- event{
+		from:      addr,
+		eventName: eventPauseFail,
 	}
 	return nil
 }
@@ -175,7 +193,7 @@ func (ts *backendMgrTester) redirectSucceed4Backend(packetIO *pnet.PacketIO) err
 func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ *pnet.PacketIO) error {
 	backend1 := ts.mp.backendIO.Load()
 	ts.mp.Redirect(newMockBackendInst(ts))
-	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
+	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventRedirectSucceed)
 	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
 	require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
 	return nil
@@ -224,7 +242,7 @@ func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.Pac
 	backend1 := ts.mp.backendIO.Load()
 	err := ts.forwardCmd4Proxy(clientIO, backendIO)
 	require.NoError(ts.t, err)
-	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
+	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventRedirectSucceed)
 	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
 	return nil
 }
@@ -232,7 +250,7 @@ func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.Pac
 func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketIO) error {
 	backend1 := ts.mp.backendIO.Load()
 	ts.mp.Redirect(newMockBackendInst(ts))
-	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
+	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventRedirectFail)
 	require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
 	return nil
 }
@@ -397,7 +415,7 @@ func TestRedirectInTxn(t *testing.T) {
 				backend1 := ts.mp.backendIO.Load()
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(t, err)
-				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventFail)
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventRedirectFail)
 				require.Equal(t, backend1, ts.mp.backendIO.Load())
 				require.Equal(t, SrcNone, ts.mp.QuitSource())
 				return nil
@@ -591,7 +609,7 @@ func TestCloseWhileRedirect(t *testing.T) {
 				ts.mp.wg.Wait()
 				// Redirect() should not panic after Close().
 				ts.mp.Redirect(newMockBackendInst(ts))
-				eventReceiver.checkEvent(t, eventSucceed)
+				eventReceiver.checkEvent(t, eventRedirectSucceed)
 				wg.Wait()
 				eventReceiver.checkEvent(t, eventClose)
 				return nil
@@ -1134,7 +1152,7 @@ func TestBackendStatusChange(t *testing.T) {
 				backend1 := ts.mp.backendIO.Load()
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(ts.t, err)
-				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventRedirectFail)
 				require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
 				require.Eventually(ts.t, func() bool {
 					return strings.Contains(ts.mp.text.String(), ErrTargetUnhealthy.Error())
@@ -1357,11 +1375,103 @@ func TestProcessSignalsPanic(t *testing.T) {
 				}
 				ts.mp.Redirect(newMockBackendInst(ts))
 				// Panic won't set error so it's still treated as success. It's fine because it will close anyway.
-				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventSucceed)
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventRedirectSucceed)
 				// Do not wait for eventClose because `clean` will wait for it.
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
+// Test a session can pause normally and can be resumed by client query
+func TestNormalPause(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// pause
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				// pause connection
+				ts.mp.Pause()
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventPauseSucceed)
+				// backendIO will be nil
+				require.Nil(t, ts.mp.backendIO.Load())
+				require.NotNil(t, ts.mp.sessionState.Load())
+				return nil
+			},
+			backend: func(packetIO *pnet.PacketIO) error {
+				// respond to `SHOW SESSION STATES`
+				ts.mb.respondType = responseTypeResultSet
+				err := ts.mb.respond(packetIO)
+				require.NoError(ts.t, err)
+				return nil
+			},
+		},
+		// backend quit
+		{
+			backend: func(packetIO *pnet.PacketIO) error {
+				return packetIO.Close()
+			},
+		},
+		// client query again, connect to new backend and resume session
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComQuery
+				return ts.mc.request(packetIO)
+			},
+			proxy: ts.forwardCmd4Proxy,
+			backend: func(packetIO *pnet.PacketIO) error {
+				// handle handshack
+				err := ts.handshake4Backend(ts.tc.backendIO)
+				require.NoError(ts.t, err)
+				// respond to `SET SESSION STATES`
+				err = ts.respondWithNoTxn4Backend(ts.tc.backendIO)
+				require.NoError(ts.t, err)
+				// respond to client query
+				err = ts.respondWithNoTxn4Backend(ts.tc.backendIO)
+				require.NoError(ts.t, err)
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+// Test that paused session can be closed normally.
+func TestPausedSessionClose(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// pause
+		{
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				// pause connection
+				ts.mp.Pause()
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventPauseSucceed)
+				// backendIO will be nil
+				require.Nil(t, ts.mp.backendIO.Load())
+				require.NotNil(t, ts.mp.sessionState.Load())
+				return nil
+			},
+			backend: func(packetIO *pnet.PacketIO) error {
+				// respond to `SHOW SESSION STATES`
+				ts.mb.respondType = responseTypeResultSet
+				err := ts.mb.respond(packetIO)
+				require.NoError(ts.t, err)
+				return nil
+			},
 		},
 	}
 	ts.runTests(runners)

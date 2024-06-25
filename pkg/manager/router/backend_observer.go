@@ -139,9 +139,13 @@ func (bo *BackendObserver) Refresh() {
 }
 
 func (bo *BackendObserver) observe(ctx context.Context) {
+	// refresh means the fetcher request is triggerd by calling Refresh() actively.
+	// It typically indicates their are no available backends.
+	refresh := false
 	for ctx.Err() == nil {
 		startTime := monotime.Now()
-		backendInfo, err := bo.fetcher.GetBackendList(ctx)
+		backendInfo, err := bo.fetcher.GetBackendList(ctx, refresh)
+		refresh = false
 		if err != nil {
 			bo.logger.Error("fetching backends encounters error", zap.Error(err))
 			bo.eventReceiver.OnBackendChanged(nil, err)
@@ -160,6 +164,7 @@ func (bo *BackendObserver) observe(ctx context.Context) {
 			select {
 			case <-time.After(wait):
 			case <-bo.refreshChan:
+				refresh = true
 			case <-ctx.Done():
 				return
 			}

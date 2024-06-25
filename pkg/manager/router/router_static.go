@@ -70,6 +70,14 @@ func (r *StaticRouter) OnRedirectFail(from, to string, conn RedirectableConn) er
 	return nil
 }
 
+func (r *StaticRouter) OnPauseSucceed(addr string, conn RedirectableConn) error {
+	return nil
+}
+
+func (r *StaticRouter) OnPauseFail(addr string, conn RedirectableConn) error {
+	return nil
+}
+
 func (r *StaticRouter) OnConnClosed(addr string, conn RedirectableConn) error {
 	r.cnt--
 	return nil

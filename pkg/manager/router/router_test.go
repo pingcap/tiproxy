@@ -29,6 +29,7 @@ type mockRedirectableConn struct {
 	from     BackendInst
 	to       BackendInst
 	receiver ConnEventReceiver
+	pausing  bool
 }
 
 func newMockRedirectableConn(t *testing.T, id uint64) *mockRedirectableConn {
@@ -105,6 +106,26 @@ func (conn *mockRedirectableConn) redirectFail() {
 	conn.Unlock()
 }
 
+func (conn *mockRedirectableConn) Pause() bool {
+	conn.Lock()
+	defer conn.Unlock()
+	conn.pausing = true
+	return true
+}
+
+func (conn *mockRedirectableConn) isPausing() bool {
+	conn.Lock()
+	defer conn.Unlock()
+	return conn.pausing
+}
+
+func (conn *mockRedirectableConn) pauseSucceed() {
+	conn.Lock()
+	conn.from = nil
+	conn.pausing = false
+	conn.Unlock()
+}
+
 type routerTester struct {
 	t         *testing.T
 	router    *ScoreBasedRouter
@@ -113,9 +134,9 @@ type routerTester struct {
 	backendID int
 }
 
-func newRouterTester(t *testing.T) *routerTester {
+func newRouterTester(t *testing.T, cfgFns ...RouterConfigFunc) *routerTester {
 	lg, _ := logger.CreateLoggerForTest(t)
-	router := NewScoreBasedRouter(lg)
+	router := NewScoreBasedRouter(lg, cfgFns...)
 	t.Cleanup(router.Close)
 	return &routerTester{
 		t:      t,
@@ -303,6 +324,40 @@ func (tester *routerTester) checkRedirectingNum(num int) {
 		}
 	}
 	require.Equal(tester.t, num, redirectingNum)
+}
+
+func (tester *routerTester) checkPausingNum(num int) {
+	pausingNum := 0
+	for _, conn := range tester.conns {
+		if conn.isPausing() {
+			pausingNum++
+		}
+	}
+	require.Equal(tester.t, num, pausingNum)
+}
+
+func (tester *routerTester) pauseFinish(num int, succeed bool) {
+	i := 0
+	for _, conn := range tester.conns {
+		if !conn.isPausing() {
+			continue
+		}
+
+		if succeed {
+			err := tester.router.OnPauseSucceed(conn.from.Addr(), conn)
+			require.NoError(tester.t, err)
+			conn.pauseSucceed()
+		} else {
+			err := tester.router.OnPauseFail(conn.from.Addr(), conn)
+			require.NoError(tester.t, err)
+		}
+
+		i++
+		if i >= num {
+			break
+		}
+	}
+	tester.checkBackendOrder()
 }
 
 func (tester *routerTester) checkBackendNum(num int) {
@@ -651,7 +706,7 @@ func TestConcurrency(t *testing.T) {
 			}
 			idx := rand.Intn(3)
 			addr := strconv.Itoa(idx)
-			backends, err := fetcher.GetBackendList(context.Background())
+			backends, err := fetcher.GetBackendList(context.Background(), false)
 			require.NoError(t, err)
 			if _, ok := backends[addr]; ok {
 				fetcher.removeBackend(addr)
@@ -894,4 +949,26 @@ func TestCloseRedirectingConns(t *testing.T) {
 	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
 	require.Equal(t, 0, tester.getBackendByIndex(0).connList.Len())
 	require.Equal(t, 0, tester.getBackendByIndex(1).connList.Len())
+}
+
+func TestConnPauseResume(t *testing.T) {
+	tester := newRouterTester(t, WithPauseEnabled())
+	tester.addBackends(1)
+	tester.addConnections(5)
+	tester.killBackends(1)
+	tester.checkPausingNum(5)
+	tester.pauseFinish(2, true)
+	tester.checkPausingNum(3)
+	tester.pauseFinish(3, true)
+	tester.checkPausingNum(0)
+	require.Equal(t, 5, tester.router.pausedConnList.Len())
+
+	// resume session by route to new backend
+	tester.addBackends(1)
+	conn1 := tester.conns[1]
+	tester.simpleRoute(conn1)
+	require.Equal(t, 4, tester.router.pausedConnList.Len())
+	conn2 := tester.conns[2]
+	tester.simpleRoute(conn2)
+	require.Equal(t, 3, tester.router.pausedConnList.Len())
 }
