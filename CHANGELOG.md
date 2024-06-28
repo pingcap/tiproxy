@@ -1,5 +1,25 @@
 # Change Log
 
+## [v1.1.0] 2024.6.28
+
+### Features
+
+- Support multi-factor-based balance [#465](https://github.com/pingcap/tiproxy/issues/465)
+
+### Improvements
+
+- Add configuration `proxy.advertise-addr` [#495](https://github.com/pingcap/tiproxy/pull/495)
+- Add command line argument `--advertise-addr` [#497](https://github.com/pingcap/tiproxy/pull/497)
+- Speed up health check by checking in parallel [#498](https://github.com/pingcap/tiproxy/pull/498)
+- Make sure the Welcome TiProxy info is always printed [#507](https://github.com/pingcap/tiproxy/pull/507)
+- Do not reject new connections during `graceful-wait-before-shutdown` [#525](https://github.com/pingcap/tiproxy/pull/525)
+- Add configuration `labels` [#536](https://github.com/pingcap/tiproxy/pull/536)
+- Set the Y axis of some metrics to `logBase=2` [#561](https://github.com/pingcap/tiproxy/pull/561)
+
+### Compatibility Breakers
+
+- Deprecate command line arguments `log_level` and `log_encoder` [#504](https://github.com/pingcap/tiproxy/pull/504)
+
 ## [v1.0.0] 2024.3.25
 
 ### Improvements
