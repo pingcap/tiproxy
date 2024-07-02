@@ -48,7 +48,10 @@ func (bh *BackendHealth) Equals(health BackendHealth) bool {
 }
 
 func (bh *BackendHealth) String() string {
-	str := getHealthLabel(bh.Healthy)
+	str := "down"
+	if bh.Healthy {
+		str = "healthy"
+	}
 	if bh.PingErr != nil {
 		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
 	}

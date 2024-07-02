@@ -8,8 +8,8 @@ package metrics
 
 import (
 	"context"
+	"reflect"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/systimemon"
@@ -46,12 +46,10 @@ func NewMetricsManager() *MetricsManager {
 	return &MetricsManager{}
 }
 
-var registerOnce = &sync.Once{}
-
-// Init registers metrics and pushes metrics to prometheus.
+// Init registers metrics and sets up a monitor.
 func (mm *MetricsManager) Init(ctx context.Context, logger *zap.Logger) {
 	mm.logger = logger
-	registerOnce.Do(registerProxyMetrics)
+	mm.registerProxyMetrics()
 	ctx, mm.cancel = context.WithCancel(ctx)
 	mm.setupMonitor(ctx)
 }
@@ -85,34 +83,62 @@ func (mm *MetricsManager) setupMonitor(ctx context.Context) {
 }
 
 // registerProxyMetrics registers metrics.
-func registerProxyMetrics() {
+func (mm *MetricsManager) registerProxyMetrics() {
 	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
 	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
+	for _, c := range colls {
+		prometheus.MustRegister(c)
+	}
+}
 
-	prometheus.MustRegister(ConnGauge)
-	prometheus.MustRegister(CreateConnCounter)
-	prometheus.MustRegister(DisConnCounter)
-	prometheus.MustRegister(MaxProcsGauge)
-	prometheus.MustRegister(ServerEventCounter)
-	prometheus.MustRegister(ServerErrCounter)
-	prometheus.MustRegister(TimeJumpBackCounter)
-	prometheus.MustRegister(KeepAliveCounter)
-	prometheus.MustRegister(QueryTotalCounter)
-	prometheus.MustRegister(QueryDurationHistogram)
-	prometheus.MustRegister(HandshakeDurationHistogram)
-	prometheus.MustRegister(BackendStatusGauge)
-	prometheus.MustRegister(GetBackendHistogram)
-	prometheus.MustRegister(GetBackendCounter)
-	prometheus.MustRegister(PingBackendGauge)
-	prometheus.MustRegister(BackendConnGauge)
-	prometheus.MustRegister(HealthCheckCycleGauge)
-	prometheus.MustRegister(MigrateCounter)
-	prometheus.MustRegister(MigrateDurationHistogram)
-	prometheus.MustRegister(InboundBytesCounter)
-	prometheus.MustRegister(InboundPacketsCounter)
-	prometheus.MustRegister(OutboundBytesCounter)
-	prometheus.MustRegister(OutboundPacketsCounter)
-	prometheus.MustRegister(CrossLocationBytesCounter)
+var colls []prometheus.Collector
+
+func init() {
+	colls = []prometheus.Collector{
+		ConnGauge,
+		CreateConnCounter,
+		DisConnCounter,
+		MaxProcsGauge,
+		ServerEventCounter,
+		ServerErrCounter,
+		TimeJumpBackCounter,
+		KeepAliveCounter,
+		QueryTotalCounter,
+		QueryDurationHistogram,
+		HandshakeDurationHistogram,
+		BackendStatusGauge,
+		GetBackendHistogram,
+		GetBackendCounter,
+		PingBackendGauge,
+		BackendConnGauge,
+		HealthCheckCycleGauge,
+		MigrateCounter,
+		MigrateDurationHistogram,
+		InboundBytesCounter,
+		InboundPacketsCounter,
+		OutboundBytesCounter,
+		OutboundPacketsCounter,
+		CrossLocationBytesCounter,
+	}
+}
+
+func DelBackend(addr string) {
+	for _, name := range []string{LblBackend, LblFrom, LblTo} {
+		labels := prometheus.Labels{
+			name: addr,
+		}
+		delLabelValues(labels)
+	}
+}
+
+func delLabelValues(labels prometheus.Labels) {
+	for _, c := range colls {
+		field := reflect.Indirect(reflect.ValueOf(c)).FieldByName("MetricVec")
+		if field.IsValid() {
+			vec := field.Interface().(*prometheus.MetricVec)
+			vec.DeletePartialMatch(labels)
+		}
+	}
 }
 
 // ReadCounter reads the value from the counter. It is only used for testing.

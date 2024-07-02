@@ -6,8 +6,7 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 const (
-	LblRes    = "res"
-	LblStatus = "status"
+	LblRes = "res"
 )
 
 var (
@@ -17,7 +16,7 @@ var (
 			Subsystem: LabelBackend,
 			Name:      "b_status",
 			Help:      "Gauge of backend status.",
-		}, []string{LblBackend, LblStatus})
+		}, []string{LblBackend})
 
 	GetBackendHistogram = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
