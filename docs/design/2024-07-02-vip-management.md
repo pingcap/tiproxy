@@ -66,11 +66,7 @@ ip addr add 192.168.148.100/32 dev eth0
 arping -q -c 2 -U -I eth0 192.168.148.100
 ```
 
-The user that runs TiProxy must have the privilege to run `ip` and `arping`.
-
-VIP is used in MySQL HA clusters such as MMM and MHA. It's a common solution.
-
-The VIP should be reserved in the network segment and it only works in the same network segment.
+The user that runs TiProxy must have the privilege to run `ip` and `arping`. This solution is used in MySQL HA clusters such as MMM and MHA. The limitation is that the VIP should be reserved in the network segment and it only works in the same network segment.
 
 ## Configuration
 
@@ -78,8 +74,8 @@ All TiProxy instances have the same configuration:
 
 ```yaml
 [ha]
-  vip=192.168.148.100
-  interface=eth0
+  vip="192.168.148.100"
+  interface="eth0"
 ```
 
 `vip` declares the VIP and `interface` declares the network interface (a.k.a. network card name) that the VIP is bound to. If any of them is not configured, the instance won't preempt VIP.
