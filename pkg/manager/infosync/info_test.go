@@ -356,8 +356,8 @@ func (ts *etcdTestSuite) createEtcdServer(addr string) {
 	require.NoError(ts.t, err)
 	cfg := embed.NewConfig()
 	cfg.Dir = ts.t.TempDir()
-	cfg.LCUrls = []url.URL{*serverURL}
-	cfg.LPUrls = []url.URL{*serverURL}
+	cfg.ListenClientUrls = []url.URL{*serverURL}
+	cfg.ListenPeerUrls = []url.URL{*serverURL}
 	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(ts.lg)
 	cfg.LogLevel = "fatal"
 	// Reuse port so that it can reboot with the same port immediately.
