@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	tidbinfo "github.com/pingcap/tidb/domain/infosync"
+	tidbinfo "github.com/pingcap/tidb/pkg/domain/infosync"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
@@ -44,7 +44,7 @@ const (
 // InfoSyncer syncs TiProxy topology to ETCD and queries TiDB topology from ETCD.
 // It writes 2 items to ETCD: `/topology/tiproxy/.../info` and `/topology/tiproxy/.../ttl`.
 // They are erased after TiProxy is down.
-// The code is modified from github.com/pingcap/tidb/domain/infosync/info.go.
+// The code is modified from github.com/pingcap/tidb/pkg/domain/infosync/info.go.
 type InfoSyncer struct {
 	syncConfig      syncConfig
 	lg              *zap.Logger

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	tidbinfo "github.com/pingcap/tidb/domain/infosync"
+	tidbinfo "github.com/pingcap/tidb/pkg/domain/infosync"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/sys"

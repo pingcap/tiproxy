@@ -19,7 +19,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tidb/parser"
+	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -325,7 +325,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 			cmd, data := pnet.Command(request[0]), request[1:]
 			var query string
 			if cmd == pnet.ComQuery {
-				query = parser.Normalize(pnet.ParseQueryPacket(data))
+				query = parser.Normalize(pnet.ParseQueryPacket(data), "ON")
 				if len(query) > 256 {
 					query = query[:256]
 				}
