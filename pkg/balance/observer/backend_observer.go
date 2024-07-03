@@ -20,6 +20,8 @@ const (
 	// If the pool is full, it will still create new goroutines, but not return to the pool after use.
 	goPoolSize = 100
 	goMaxIdle  = time.Minute
+	// The backend metric is retained for 2 hours after it's down.
+	backendMetricRetention = 2 * time.Hour
 )
 
 var _ BackendObserver = (*DefaultBackendObserver)(nil)
@@ -37,6 +39,7 @@ type DefaultBackendObserver struct {
 	sync.Mutex
 	subscribers       map[string]chan HealthResult
 	curBackends       map[string]*BackendHealth
+	downBackends      map[string]time.Time
 	wg                waitgroup.WaitGroup
 	refreshChan       chan struct{}
 	fetcher           BackendFetcher
@@ -61,6 +64,7 @@ func NewDefaultBackendObserver(logger *zap.Logger, config *config.HealthCheck, b
 		fetcher:           backendFetcher,
 		subscribers:       make(map[string]chan HealthResult),
 		curBackends:       make(map[string]*BackendHealth),
+		downBackends:      make(map[string]time.Time),
 		cfgGetter:         cfgGetter,
 	}
 	return bo
@@ -97,6 +101,7 @@ func (bo *DefaultBackendObserver) observe(ctx context.Context) {
 			result.backends = bo.checkHealth(ctx, backendInfo)
 		}
 		bo.updateHealthResult(result)
+		bo.purgeBackendMetrics()
 		bo.notifySubscribers(ctx, result)
 
 		cost := monotime.Since(startTime)
@@ -147,6 +152,22 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 	return curBackendHealth
 }
 
+// If a backend has been down for more than backendMetricRetention, remove it from the metrics.
+// For auto-scaling case, the metrics will occupy too much volume after weeks.
+func (bo *DefaultBackendObserver) purgeBackendMetrics() {
+	if len(bo.downBackends) == 0 {
+		return
+	}
+	now := time.Now()
+	for addr, ts := range bo.downBackends {
+		if ts.Add(backendMetricRetention).Before(now) {
+			bo.logger.Info("backend is down for too long, purging backend metrics", zap.String("backend", addr))
+			metrics.DelBackend(addr)
+			delete(bo.downBackends, addr)
+		}
+	}
+}
+
 func (bo *DefaultBackendObserver) Subscribe(name string) <-chan HealthResult {
 	ch := make(chan HealthResult, 1)
 	bo.Lock()
@@ -179,7 +200,8 @@ func (bo *DefaultBackendObserver) updateHealthResult(result HealthResult) {
 			}
 			bo.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev", prev), zap.String("cur", newHealth.String()))
-			updateBackendStatusMetrics(addr, false, true)
+			updateBackendStatusMetrics(addr, true)
+			delete(bo.downBackends, addr)
 		}
 	}
 	for addr, oldHealth := range bo.curBackends {
@@ -193,7 +215,8 @@ func (bo *DefaultBackendObserver) updateHealthResult(result HealthResult) {
 			}
 			bo.logger.Info("update backend", zap.String("backend_addr", addr),
 				zap.String("prev", oldHealth.String()), zap.String("cur", cur))
-			updateBackendStatusMetrics(addr, true, false)
+			updateBackendStatusMetrics(addr, false)
+			bo.downBackends[addr] = time.Now()
 		}
 	}
 	bo.curBackends = result.backends
