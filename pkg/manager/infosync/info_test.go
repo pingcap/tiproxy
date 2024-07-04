@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	tidbinfo "github.com/pingcap/tidb/domain/infosync"
+	tidbinfo "github.com/pingcap/tidb/pkg/domain/infosync"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/sys"
@@ -356,8 +356,8 @@ func (ts *etcdTestSuite) createEtcdServer(addr string) {
 	require.NoError(ts.t, err)
 	cfg := embed.NewConfig()
 	cfg.Dir = ts.t.TempDir()
-	cfg.LCUrls = []url.URL{*serverURL}
-	cfg.LPUrls = []url.URL{*serverURL}
+	cfg.ListenClientUrls = []url.URL{*serverURL}
+	cfg.ListenPeerUrls = []url.URL{*serverURL}
 	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(ts.lg)
 	cfg.LogLevel = "fatal"
 	// Reuse port so that it can reboot with the same port immediately.

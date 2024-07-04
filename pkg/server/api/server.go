@@ -75,14 +75,14 @@ func NewServer(cfg config.API, lg *zap.Logger,
 		lg:        lg,
 		isClosing: isClosing,
 		grpc: grpc.NewServer(
-			grpc_middleware.WithUnaryServerChain(
+			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 				grpc_ctxtags.UnaryServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),
 				grpc_zap.UnaryServerInterceptor(lg.Named("grpcu"), grpcOpts...),
-			),
-			grpc_middleware.WithStreamServerChain(
+			)),
+			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 				grpc_ctxtags.StreamServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),
 				grpc_zap.StreamServerInterceptor(lg.Named("grpcs"), grpcOpts...),
-			),
+			)),
 		),
 		mgr: managers{cfgmgr, nsmgr, crtmgr},
 	}

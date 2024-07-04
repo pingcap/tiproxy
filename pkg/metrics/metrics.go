@@ -8,6 +8,7 @@ package metrics
 
 import (
 	"context"
+	"regexp"
 	"runtime"
 	"sync"
 	"time"
@@ -87,7 +88,7 @@ func (mm *MetricsManager) setupMonitor(ctx context.Context) {
 // registerProxyMetrics registers metrics.
 func registerProxyMetrics() {
 	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
-	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
+	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.GoRuntimeMetricsRule{Matcher: regexp.MustCompile("/.*")})))
 
 	prometheus.MustRegister(ConnGauge)
 	prometheus.MustRegister(CreateConnCounter)
