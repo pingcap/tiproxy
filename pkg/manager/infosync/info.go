@@ -175,7 +175,7 @@ func (is *InfoSyncer) initTopologySession(ctx context.Context) error {
 		topologySession, err := concurrency.NewSession(is.etcdCli, concurrency.WithTTL(is.syncConfig.sessionTTL), concurrency.WithContext(ctx))
 		if err == nil {
 			is.topologySession = topologySession
-			is.lg.Info("topology session is initialized", zap.Error(err))
+			is.lg.Info("topology session is initialized")
 		}
 		return err
 	}, ctx, is.syncConfig.putRetryIntvl, retry.InfiniteCnt,
