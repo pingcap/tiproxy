@@ -4,13 +4,17 @@
 package infosync
 
 import (
+	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -49,4 +53,29 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMa
 		},
 	})
 	return etcdClient, errors.Wrapf(err, "init etcd client failed")
+}
+
+// CreateEtcdServer creates an etcd server and is only used for testing.
+func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
+	serverURL, err := url.Parse(fmt.Sprintf("http://%s", addr))
+	if err != nil {
+		return nil, err
+	}
+	cfg := embed.NewConfig()
+	cfg.Dir = dir
+	cfg.LCUrls = []url.URL{*serverURL}
+	cfg.LPUrls = []url.URL{*serverURL}
+	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(lg)
+	cfg.LogLevel = "fatal"
+	// Reuse port so that it can reboot with the same port immediately.
+	cfg.SocketOpts = transport.SocketOpts{
+		ReuseAddress: true,
+		ReusePort:    true,
+	}
+	etcd, err := embed.StartEtcd(cfg)
+	if err != nil {
+		return nil, err
+	}
+	<-etcd.Server.ReadyNotify()
+	return etcd, err
 }

@@ -6,9 +6,7 @@ package infosync
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
-	"net/url"
 	"path"
 	"strings"
 	"testing"
@@ -20,7 +18,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
@@ -389,29 +386,8 @@ func (ts *etcdTestSuite) setPromInfo(info *PrometheusInfo) {
 }
 
 func (ts *etcdTestSuite) createEtcdServer(addr string) {
-	serverURL, err := url.Parse(fmt.Sprintf("http://%s", addr))
+	etcd, err := CreateEtcdServer(addr, ts.t.TempDir(), ts.lg)
 	require.NoError(ts.t, err)
-	cfg := embed.NewConfig()
-	cfg.Dir = ts.t.TempDir()
-	cfg.LCUrls = []url.URL{*serverURL}
-	cfg.LPUrls = []url.URL{*serverURL}
-	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(ts.lg)
-	cfg.LogLevel = "fatal"
-	// Reuse port so that it can reboot with the same port immediately.
-	cfg.SocketOpts = transport.SocketOpts{
-		ReuseAddress: true,
-		ReusePort:    true,
-	}
-	var etcd *embed.Etcd
-	require.Eventually(ts.t, func() bool {
-		var err error
-		etcd, err = embed.StartEtcd(cfg)
-		if err != nil {
-			ts.t.Logf("start etcd failed, error: %s", err.Error())
-		}
-		return err == nil
-	}, 10*time.Second, 10*time.Millisecond)
-	<-etcd.Server.ReadyNotify()
 	ts.server = etcd
 }
 
