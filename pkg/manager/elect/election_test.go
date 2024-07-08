@@ -64,18 +64,26 @@ func TestEtcdServerDown(t *testing.T) {
 	elec1.Start(context.Background())
 	ts.expectEvent("1", eventTypeElected)
 
-	// server is down and the owner retires
+	// server is down
 	addr := ts.shutdownServer()
 	_, err := elec1.GetOwnerID(context.Background())
 	require.Error(t, err)
+	ts.startServer(addr)
+	// the previous owner only retires when the new one is elected
+	ts.expectEvent("1", eventTypeRetired, eventTypeElected)
+	ownerID := ts.getOwnerID()
+	require.Equal(t, "1", ownerID)
 
-	// start another member, it should not panic
+	// server is down and start another member
+	addr = ts.shutdownServer()
+	_, err = elec1.GetOwnerID(context.Background())
+	require.Error(t, err)
 	elec2 := ts.newElection("2")
 	elec2.Start(context.Background())
 
 	// start the server again and the elections recover
 	ts.startServer(addr)
-	ownerID := ts.getOwnerID()
+	ownerID = ts.getOwnerID()
 	ts.expectEvent("1", eventTypeRetired)
 	ts.expectEvent(ownerID, eventTypeElected)
 }

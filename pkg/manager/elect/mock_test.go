@@ -41,12 +41,14 @@ func (mo *mockMember) OnRetired() {
 	mo.ch <- eventTypeRetired
 }
 
-func (mo *mockMember) expectEvent(t *testing.T, expected int) {
-	select {
-	case <-time.After(3 * time.Second):
-		t.Fatal("timeout")
-	case event := <-mo.ch:
-		require.Equal(t, expected, event)
+func (mo *mockMember) expectEvent(t *testing.T, expected ...int) {
+	for _, exp := range expected {
+		select {
+		case <-time.After(3 * time.Second):
+			t.Fatal("timeout")
+		case event := <-mo.ch:
+			require.Equal(t, exp, event)
+		}
 	}
 }
 
@@ -147,9 +149,9 @@ func (ts *etcdTestSuite) getOwnerID() string {
 	return ownerID
 }
 
-func (ts *etcdTestSuite) expectEvent(id string, event int) {
+func (ts *etcdTestSuite) expectEvent(id string, event ...int) {
 	elec := ts.getElection(id)
-	elec.member.(*mockMember).expectEvent(ts.t, event)
+	elec.member.(*mockMember).expectEvent(ts.t, event...)
 }
 
 func (ts *etcdTestSuite) hang(id string, hang bool) {
