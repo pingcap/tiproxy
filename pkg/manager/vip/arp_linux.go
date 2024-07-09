@@ -131,9 +131,7 @@ func sendARP(iface *net.Interface, m *arpMessage) error {
 	if m.opcode == opARPReply {
 		target = m.targetHardwareAddress
 	}
-	for i := 0; i < len(target); i++ {
-		ll.Addr[i] = target[i]
-	}
+	copy(ll.Addr[:], target)
 
 	b, err := m.bytes()
 	if err != nil {
