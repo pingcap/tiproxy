@@ -145,6 +145,7 @@ func (ts *etcdTestSuite) getOwnerID() string {
 		} else {
 			require.Equal(ts.t, ownerID, id)
 		}
+		require.Equal(ts.t, elec.id == ownerID, elec.IsOwner())
 	}
 	return ownerID
 }
