@@ -6,6 +6,7 @@ package vip
 import (
 	"runtime"
 
+	"github.com/j-keck/arping"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/vishvananda/netlink"
 )
@@ -75,5 +76,5 @@ func (no *networkOperation) DeleteIP() error {
 }
 
 func (no *networkOperation) SendARP() error {
-	return arpSendGratuitous(no.link.Attrs().Name, no.address.IP)
+	return arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
 }

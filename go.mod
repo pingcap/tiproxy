@@ -11,6 +11,7 @@ require (
 	github.com/go-mysql-org/go-mysql v1.6.0
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
+	github.com/j-keck/arping v1.0.3
 	github.com/klauspost/compress v1.16.6
 	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c
 	github.com/pingcap/sysutil v1.0.0
