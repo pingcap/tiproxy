@@ -31,7 +31,7 @@ func TestAddDelIP(t *testing.T) {
 		{
 			virtualIP: "127.0.0.2/24",
 			link:      "unknown",
-			addErr:    "Link not found",
+			initErr:   "Link not found",
 		},
 	}
 
