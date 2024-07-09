@@ -50,6 +50,6 @@ func TestAddDelIP(t *testing.T) {
 			require.NoError(t, err, "case %d", i)
 		}
 		err = operation.DeleteIP()
-		require.Error(t, err, "case %d", i)
+		require.NoError(t, err, "case %d", i)
 	}
 }
