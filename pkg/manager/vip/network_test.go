@@ -19,6 +19,7 @@ func TestAddDelIP(t *testing.T) {
 		initErr   string
 		addErr    string
 		delErr    string
+		sendErr   string
 	}{
 		{
 			virtualIP: "127.0.0.2/24",
@@ -57,6 +58,15 @@ func TestAddDelIP(t *testing.T) {
 		} else {
 			require.NoError(t, err, "case %d", i)
 		}
+
+		err = operation.SendARP()
+		if test.sendErr != "" {
+			require.Error(t, err, "case %d", i)
+			require.Contains(t, err.Error(), test.sendErr, "case %d", i)
+		} else {
+			require.NoError(t, err, "case %d", i)
+		}
+
 		if err := operation.DeleteIP(); test.delErr != "" {
 			require.Error(t, err, "case %d", i)
 			require.Contains(t, err.Error(), test.delErr, "case %d", i)
