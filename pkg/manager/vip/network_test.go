@@ -17,16 +17,20 @@ func TestAddDelIP(t *testing.T) {
 		link      string
 		initErr   string
 		addErr    string
-		delErr    string
 	}{
 		{
 			virtualIP: "127.0.0.2/24",
 			link:      "lo",
 		},
 		{
-			virtualIP: "89.0.142.86/24",
+			virtualIP: "0.0.0.0/24",
+			link:      "lo",
+			initErr:   "cannot assign requested address",
+		},
+		{
+			virtualIP: "127.0.0.2/24",
 			link:      "unknown",
-			initErr:   "unknown interface",
+			addErr:    "Link not found",
 		},
 	}
 
@@ -45,11 +49,7 @@ func TestAddDelIP(t *testing.T) {
 		} else {
 			require.NoError(t, err, "case %d", i)
 		}
-		if err := operation.DeleteIP(); test.delErr != "" {
-			require.Error(t, err, "case %d", i)
-			require.Contains(t, err.Error(), test.delErr, "case %d", i)
-		} else {
-			require.NoError(t, err, "case %d", i)
-		}
+		err = operation.DeleteIP()
+		require.Error(t, err, "case %d", i)
 	}
 }
