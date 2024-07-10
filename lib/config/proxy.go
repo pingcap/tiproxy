@@ -27,6 +27,7 @@ type Config struct {
 	Log      Log               `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
 	Balance  Balance           `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
 	Labels   map[string]string `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty"`
+	HA       HA                `yaml:"ha,omitempty" toml:"ha,omitempty" json:"ha,omitempty"`
 }
 
 type KeepAlive struct {
@@ -114,6 +115,11 @@ type Security struct {
 	ClusterTLS        TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
 	SQLTLS            TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
 	RequireBackendTLS bool      `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
+}
+
+type HA struct {
+	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty"`
+	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {

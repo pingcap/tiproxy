@@ -46,6 +46,15 @@ type electionConfig struct {
 	sessionTTL int
 }
 
+func DefaultElectionConfig(sessionTTL int) electionConfig {
+	return electionConfig{
+		timeout:    2 * time.Second,
+		retryIntvl: 500 * time.Millisecond,
+		retryCnt:   3,
+		sessionTTL: sessionTTL,
+	}
+}
+
 var _ Election = (*election)(nil)
 
 // election is used for electing owner.
@@ -106,7 +115,11 @@ func (m *election) initSession(ctx context.Context) (*concurrency.Session, error
 }
 
 func (m *election) IsOwner() bool {
-	return m.elec.Load() != nil
+	ownerID, err := m.GetOwnerID(context.Background())
+	if err != nil {
+		return false
+	}
+	return ownerID == m.id
 }
 
 func (m *election) campaignLoop(ctx context.Context) {
