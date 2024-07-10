@@ -18,7 +18,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/retry"
 	"github.com/pingcap/tiproxy/lib/util/sys"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
-	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	"github.com/siddontang/go/hack"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -108,7 +107,7 @@ type PrometheusInfo struct {
 	Port       int    `json:"port"`
 }
 
-func NewInfoSyncer(lg *zap.Logger) *InfoSyncer {
+func NewInfoSyncer(lg *zap.Logger, etcdCli *clientv3.Client) *InfoSyncer {
 	return &InfoSyncer{
 		lg: lg,
 		syncConfig: syncConfig{
@@ -121,16 +120,11 @@ func NewInfoSyncer(lg *zap.Logger) *InfoSyncer {
 			getPromRetryCnt:   getPromRetryCnt,
 			getPromRetryIntvl: getPromRetryIntvl,
 		},
+		etcdCli: etcdCli,
 	}
 }
 
-func (is *InfoSyncer) Init(ctx context.Context, cfg *config.Config, certMgr *cert.CertManager) error {
-	etcdCli, err := InitEtcdClient(is.lg, cfg, certMgr)
-	if err != nil {
-		return err
-	}
-	is.etcdCli = etcdCli
-
+func (is *InfoSyncer) Init(ctx context.Context, cfg *config.Config) error {
 	topologyInfo, err := is.getTopologyInfo(cfg)
 	if err != nil {
 		is.lg.Error("get topology failed", zap.Error(err))
@@ -338,14 +332,5 @@ func (is *InfoSyncer) Close() error {
 		is.cancelFunc()
 	}
 	is.wg.Wait()
-	errs := make([]error, 0)
-	if err := is.removeTopology(context.Background()); err != nil {
-		errs = append(errs, err)
-	}
-	if is.etcdCli != nil {
-		if err := is.etcdCli.Close(); err != nil {
-			errs = append(errs, errors.WithStack(err))
-		}
-	}
-	return errors.Collect(errors.New("closing InfoSyncer"), errs...)
+	return is.removeTopology(context.Background())
 }

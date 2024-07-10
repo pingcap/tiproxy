@@ -1,7 +1,7 @@
 // Copyright 2023 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package infosync
+package etcd
 
 import (
 	"fmt"
@@ -78,4 +78,16 @@ func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
 	}
 	<-etcd.Server.ReadyNotify()
 	return etcd, err
+}
+
+func ConfigForEtcdTest(endpoint string) *config.Config {
+	return &config.Config{
+		Proxy: config.ProxyServer{
+			Addr:    "0.0.0.0:6000",
+			PDAddrs: endpoint,
+		},
+		API: config.API{
+			Addr: "0.0.0.0:3080",
+		},
+	}
 }

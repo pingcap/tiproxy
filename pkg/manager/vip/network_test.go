@@ -6,6 +6,7 @@
 package vip
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,6 +14,10 @@ import (
 )
 
 func TestAddDelIP(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skipf("unsupported on %s", runtime.GOOS)
+	}
+
 	tests := []struct {
 		virtualIP string
 		link      string

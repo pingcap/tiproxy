@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/sys"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -276,12 +277,16 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 
 	ts.startServer("0.0.0.0:0")
 	endpoint := ts.server.Clients[0].Addr().String()
-	cfg := newConfig(endpoint)
+	cfg := etcd.ConfigForEtcdTest(endpoint)
 
 	certMgr := cert.NewCertManager()
 	err := certMgr.Init(cfg, lg, nil)
 	require.NoError(t, err)
-	is := NewInfoSyncer(lg)
+	ts.client, err = etcd.InitEtcdClient(ts.lg, cfg, certMgr)
+	require.NoError(t, err)
+	ts.kv = clientv3.NewKV(ts.client)
+
+	is := NewInfoSyncer(lg, ts.client)
 	is.syncConfig = syncConfig{
 		sessionTTL:        1,
 		refreshIntvl:      50 * time.Millisecond,
@@ -293,14 +298,10 @@ func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
 		getPromRetryCnt:   2,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	err = is.Init(ctx, cfg, certMgr)
+	err = is.Init(ctx, cfg)
 	require.NoError(t, err)
 	ts.is = is
 	ts.cancel = cancel
-
-	ts.client, err = InitEtcdClient(ts.lg, cfg, certMgr)
-	require.NoError(t, err)
-	ts.kv = clientv3.NewKV(ts.client)
 	return ts
 }
 
@@ -386,19 +387,7 @@ func (ts *etcdTestSuite) setPromInfo(info *PrometheusInfo) {
 }
 
 func (ts *etcdTestSuite) createEtcdServer(addr string) {
-	etcd, err := CreateEtcdServer(addr, ts.t.TempDir(), ts.lg)
+	etcd, err := etcd.CreateEtcdServer(addr, ts.t.TempDir(), ts.lg)
 	require.NoError(ts.t, err)
 	ts.server = etcd
-}
-
-func newConfig(endpoint string) *config.Config {
-	return &config.Config{
-		Proxy: config.ProxyServer{
-			Addr:    "0.0.0.0:6000",
-			PDAddrs: endpoint,
-		},
-		API: config.API{
-			Addr: "0.0.0.0:3080",
-		},
-	}
 }
