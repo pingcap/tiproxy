@@ -8,6 +8,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -83,6 +84,7 @@ func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error
 }
 
 func (vm *vipManager) OnElected() {
+	metrics.VIPGauge.Set(1)
 	hasIP, err := vm.operation.HasIP()
 	if err != nil {
 		vm.lg.Error("checking addresses failed", zap.Error(err))
@@ -104,6 +106,7 @@ func (vm *vipManager) OnElected() {
 }
 
 func (vm *vipManager) OnRetired() {
+	metrics.VIPGauge.Set(0)
 	hasIP, err := vm.operation.HasIP()
 	if err != nil {
 		vm.lg.Error("checking addresses failed", zap.Error(err))

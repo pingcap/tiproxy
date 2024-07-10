@@ -209,6 +209,20 @@ local uptimeP = graphPanel.new(
   )
 );
 
+local vipP = graphPanel.new(
+  title='VIP Owner',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='1 indicates the VIP owner.',
+  format='short',
+)
+.addTarget(
+  prometheus.target(
+    'tiproxy_server_vip{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}',
+    legendFormat='{{instance}}',
+  )
+);
+
 // Query Summary
 local queryRow = row.new(collapse=true, title='Query Summary');
 local durationP = graphPanel.new(
@@ -565,6 +579,7 @@ newDash
   .addPanel(createConnP, gridPos=leftPanelPos)
   .addPanel(disconnP, gridPos=rightPanelPos)
   .addPanel(goroutineP, gridPos=leftPanelPos)
+  .addPanel(vipP, gridPos=rightPanelPos)
   ,
   gridPos=rowPos
 )

@@ -99,6 +99,7 @@ func init() {
 		CreateConnCounter,
 		DisConnCounter,
 		MaxProcsGauge,
+		VIPGauge,
 		ServerEventCounter,
 		ServerErrCounter,
 		TimeJumpBackCounter,
