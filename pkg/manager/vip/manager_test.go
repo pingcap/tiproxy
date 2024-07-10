@@ -57,6 +57,7 @@ func TestVIPCfgError(t *testing.T) {
 			require.NoError(t, err, "case %d", i)
 		}
 		require.Nil(t, vm)
+		vm.Close()
 	}
 }
 
@@ -140,5 +141,5 @@ func TestNetworkOperation(t *testing.T) {
 		logIdx = len(text.String())
 	}
 	cancel()
-	vm.election.Close()
+	vm.Close()
 }
