@@ -76,8 +76,8 @@ func NewElection(lg *zap.Logger, etcdCli *clientv3.Client, cfg electionConfig, i
 	lg = lg.With(zap.String("key", key), zap.String("id", id))
 	return &election{
 		lg:      lg,
-		cfg:     cfg,
 		etcdCli: etcdCli,
+		cfg:     cfg,
 		id:      id,
 		key:     key,
 		member:  member,
