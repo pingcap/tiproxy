@@ -8,10 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
-	"github.com/pingcap/tiproxy/pkg/manager/infosync"
+	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -95,13 +94,13 @@ func newEtcdTestSuite(t *testing.T, elecCfg electionConfig, key string) *etcdTes
 
 	ts.startServer("0.0.0.0:0")
 	endpoint := ts.server.Clients[0].Addr().String()
-	cfg := newConfig(endpoint)
+	cfg := etcd.ConfigForEtcdTest(endpoint)
 
 	certMgr := cert.NewCertManager()
 	err := certMgr.Init(cfg, lg, nil)
 	require.NoError(t, err)
 
-	ts.client, err = infosync.InitEtcdClient(ts.lg, cfg, certMgr)
+	ts.client, err = etcd.InitEtcdClient(ts.lg, cfg, certMgr)
 	require.NoError(t, err)
 	ts.kv = clientv3.NewKV(ts.client)
 	return ts
@@ -175,7 +174,7 @@ func (ts *etcdTestSuite) close() {
 }
 
 func (ts *etcdTestSuite) startServer(addr string) {
-	etcd, err := infosync.CreateEtcdServer(addr, ts.t.TempDir(), ts.lg)
+	etcd, err := etcd.CreateEtcdServer(addr, ts.t.TempDir(), ts.lg)
 	require.NoError(ts.t, err)
 	ts.server = etcd
 }
@@ -186,18 +185,6 @@ func (ts *etcdTestSuite) shutdownServer() string {
 	ts.server.Close()
 	ts.server = nil
 	return addr
-}
-
-func newConfig(endpoint string) *config.Config {
-	return &config.Config{
-		Proxy: config.ProxyServer{
-			Addr:    "0.0.0.0:6000",
-			PDAddrs: endpoint,
-		},
-		API: config.API{
-			Addr: "0.0.0.0:3080",
-		},
-	}
 }
 
 func electionConfigForTest(ttl int) electionConfig {
