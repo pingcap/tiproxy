@@ -20,11 +20,13 @@ const (
 )
 
 type VIPManager interface {
-	Start(context.Context)
+	Start(context.Context, *clientv3.Client) error
 	OnElected()
 	OnRetired()
 	Close()
 }
+
+var _ VIPManager = (*vipManager)(nil)
 
 type vipManager struct {
 	operation NetworkOperation
