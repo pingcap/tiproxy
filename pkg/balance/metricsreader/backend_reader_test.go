@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -77,6 +78,7 @@ func TestGetBackendAddrs(t *testing.T) {
 			require.Error(t, err, "case %d", i)
 		} else {
 			require.NoError(t, err, "case %d", i)
+			slices.Sort(addrs)
 			require.Equal(t, test.expected, addrs, "case %d", i)
 		}
 	}
