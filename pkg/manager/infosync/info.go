@@ -16,7 +16,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
-	"github.com/pingcap/tiproxy/lib/util/sys"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	"github.com/siddontang/go/hack"
@@ -90,14 +89,6 @@ type TiDBTopologyInfo struct {
 	DeployPath     string            `json:"deploy_path"`
 	StartTimestamp int64             `json:"start_timestamp"`
 	Labels         map[string]string `json:"labels"`
-}
-
-// TiDBInfo is the info of TiDB.
-type TiDBInfo struct {
-	// TopologyInfo is parsed from the /info path.
-	*TiDBTopologyInfo
-	// TTL is parsed from the /ttl path.
-	TTL string
 }
 
 // PrometheusInfo is the info of prometheus.
@@ -184,26 +175,9 @@ func (is *InfoSyncer) getTopologyInfo(cfg *config.Config) (*TopologyInfo, error)
 		s = ""
 	}
 	dir := path.Dir(s)
-	addrs := strings.Split(cfg.Proxy.Addr, ",")
-	ip, port, err := net.SplitHostPort(addrs[0])
+	ip, port, statusPort, err := cfg.GetIPPort()
 	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	_, statusPort, err := net.SplitHostPort(cfg.API.Addr)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	// AdvertiseAddr may be a DNS in k8s and certificate SAN typically contains DNS but not IP.
-	if len(cfg.Proxy.AdvertiseAddr) > 0 {
-		ip = cfg.Proxy.AdvertiseAddr
-	} else {
-		// reporting a non unicast IP makes no sense, try to find one
-		// loopback/linklocal-unicast are not global unicast IP, but are valid local unicast IP
-		if pip := net.ParseIP(ip); ip == "" || pip.Equal(net.IPv4bcast) || pip.IsUnspecified() || pip.IsMulticast() {
-			if v := sys.GetGlobalUnicastIP(); v != "" {
-				ip = v
-			}
-		}
+		return nil, err
 	}
 	return &TopologyInfo{
 		Version:        versioninfo.TiProxyVersion,
@@ -263,43 +237,37 @@ func (is *InfoSyncer) removeTopology(ctx context.Context) error {
 	return errors.WithStack(err)
 }
 
-func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBInfo, error) {
+func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBTopologyInfo, error) {
 	// etcdCli.Get will retry infinitely internally.
 	res, err := is.etcdCli.Get(ctx, tidbTopologyInformationPath, clientv3.WithPrefix())
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	infos := make(map[string]*TiDBInfo, len(res.Kvs)/2)
+	infos := make(map[string]*TiDBTopologyInfo, len(res.Kvs)/2)
+	ttls := make(map[string]struct{}, len(res.Kvs)/2)
 	for _, kv := range res.Kvs {
-		var ttl, addr string
-		var topology *TiDBTopologyInfo
 		key := hack.String(kv.Key)
 		switch {
 		case strings.HasSuffix(key, ttlSuffix):
-			addr = key[len(tidbTopologyInformationPath)+1 : len(key)-len(ttlSuffix)-1]
-			ttl = hack.String(kv.Value)
+			addr := key[len(tidbTopologyInformationPath)+1 : len(key)-len(ttlSuffix)-1]
+			ttls[addr] = struct{}{}
 		case strings.HasSuffix(key, infoSuffix):
-			addr = key[len(tidbTopologyInformationPath)+1 : len(key)-len(infoSuffix)-1]
+			var topology *TiDBTopologyInfo
+			addr := key[len(tidbTopologyInformationPath)+1 : len(key)-len(infoSuffix)-1]
 			if err = json.Unmarshal(kv.Value, &topology); err != nil {
 				is.lg.Error("unmarshal topology info failed", zap.String("key", key),
 					zap.String("value", hack.String(kv.Value)), zap.Error(err))
-				continue
+			} else {
+				infos[addr] = topology
 			}
-		default:
-			continue
 		}
+	}
 
-		info, ok := infos[addr]
-		if !ok {
-			info = &TiDBInfo{}
-			infos[addr] = info
-		}
-
-		if len(ttl) > 0 {
-			info.TTL = hack.String(kv.Value)
-		} else {
-			info.TiDBTopologyInfo = topology
+	for addr := range infos {
+		// If ttl is empty, maybe the backend is down.
+		if _, ok := ttls[addr]; !ok {
+			delete(infos, addr)
 		}
 	}
 	return infos, nil

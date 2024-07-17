@@ -5,6 +5,7 @@ package vip
 
 import (
 	"context"
+	"net"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
@@ -15,7 +16,7 @@ import (
 
 const (
 	// vipKey is the key in etcd for VIP election.
-	vipKey = "vip"
+	vipKey = "/tiproxy/vip/owner"
 	// sessionTTL is the session's TTL in seconds for VIP election.
 	sessionTTL = 5
 )
@@ -58,19 +59,16 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 	return vm, nil
 }
 
-func getID(cfg *config.Config) (string, error) {
-	return cfg.HA.VirtualIP, nil
-}
-
 func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error {
 	cfg := vm.cfgGetter.GetConfig()
-	addr, err := getID(cfg)
+	ip, port, _, err := cfg.GetIPPort()
 	if err != nil {
 		return err
 	}
 
+	id := net.JoinHostPort(ip, port)
 	electionCfg := elect.DefaultElectionConfig(sessionTTL)
-	election := elect.NewElection(vm.lg, etcdCli, electionCfg, addr, vipKey, vm)
+	election := elect.NewElection(vm.lg, etcdCli, electionCfg, id, vipKey, vm)
 	vm.election = election
 	// Check the ownership at startup just in case the node is just down and restarted.
 	// Before it was down, it may be either the owner or not.
