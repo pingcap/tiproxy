@@ -12,6 +12,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 )
 
@@ -19,6 +20,7 @@ const (
 	LabelNameInstance = "instance"
 )
 
+// QueryExpr is used for querying Prometheus.
 type QueryExpr struct {
 	PromQL   string
 	Range    time.Duration
@@ -30,6 +32,23 @@ func (qe QueryExpr) PromRange(curTime time.Time) promv1.Range {
 		return promv1.Range{}
 	}
 	return promv1.Range{Start: curTime.Add(-qe.Range), End: curTime, Step: 15 * time.Second}
+}
+
+// QueryRule is used for processing the result from backend HTTP metrics API.
+// It's too complicated for the BackendReader to parse PromQL, so let the caller to define the process function.
+type QueryRule struct {
+	// Names are the metric names that to be extracted from backend metrics.
+	Names []string
+	// Retention is the retention time of the metrics. Older metrics are expired.
+	Retention time.Duration
+	// Metric2Value defines the process from backend metrics (at a timepoint) to a float value.
+	// E.g. division or aggregation.
+	Metric2Value func(mfs map[string]*dto.MetricFamily) model.SampleValue
+	// Range2Value defines the process from a time range of values to a float value.
+	// E.g. irate[30s] or increase[1m].
+	Range2Value func(pairs []model.SamplePair) model.SampleValue
+	// ResultType indicates returning a vector or matrix as the final result.
+	ResultType model.ValueType
 }
 
 type QueryResult struct {

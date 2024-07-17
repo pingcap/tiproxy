@@ -23,7 +23,7 @@ type BackendFetcher interface {
 
 // TopologyFetcher is an interface to fetch the tidb topology from ETCD.
 type TopologyFetcher interface {
-	GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBInfo, error)
+	GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error)
 }
 
 // PDFetcher fetches backend list from PD.
@@ -46,14 +46,6 @@ func (pf *PDFetcher) GetBackendList(ctx context.Context) (map[string]*BackendInf
 	backends := pf.fetchBackendList(ctx)
 	infos := make(map[string]*BackendInfo, len(backends))
 	for addr, backend := range backends {
-		// If ttl is empty, maybe the backend is down.
-		if len(backend.TTL) == 0 {
-			continue
-		}
-		// If topology is empty, maybe the backend is not ready yet.
-		if backend.TiDBTopologyInfo == nil {
-			continue
-		}
 		infos[addr] = &BackendInfo{
 			Labels:     backend.Labels,
 			IP:         backend.IP,
@@ -63,8 +55,8 @@ func (pf *PDFetcher) GetBackendList(ctx context.Context) (map[string]*BackendInf
 	return infos, nil
 }
 
-func (pf *PDFetcher) fetchBackendList(ctx context.Context) map[string]*infosync.TiDBInfo {
-	var backends map[string]*infosync.TiDBInfo
+func (pf *PDFetcher) fetchBackendList(ctx context.Context) map[string]*infosync.TiDBTopologyInfo {
+	var backends map[string]*infosync.TiDBTopologyInfo
 	// The jobs of PDFetcher all rely on the topology, so we retry infinitely.
 	err := retry.RetryNotify(func() error {
 		var err error

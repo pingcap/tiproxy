@@ -17,7 +17,7 @@ import (
 
 type mockTpFetcher struct {
 	t     *testing.T
-	infos map[string]*infosync.TiDBInfo
+	infos map[string]*infosync.TiDBTopologyInfo
 	err   error
 }
 
@@ -27,7 +27,7 @@ func newMockTpFetcher(t *testing.T) *mockTpFetcher {
 	}
 }
 
-func (ft *mockTpFetcher) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBInfo, error) {
+func (ft *mockTpFetcher) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error) {
 	return ft.infos, ft.err
 }
 

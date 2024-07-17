@@ -14,7 +14,7 @@ import (
 
 func TestPDFetcher(t *testing.T) {
 	tests := []struct {
-		infos map[string]*infosync.TiDBInfo
+		infos map[string]*infosync.TiDBTopologyInfo
 		ctx   context.Context
 		check func(map[string]*BackendInfo)
 	}{
@@ -24,37 +24,11 @@ func TestPDFetcher(t *testing.T) {
 			},
 		},
 		{
-			infos: map[string]*infosync.TiDBInfo{
+			infos: map[string]*infosync.TiDBTopologyInfo{
 				"1.1.1.1:4000": {
-					TTL: "123456789",
-				},
-			},
-			check: func(m map[string]*BackendInfo) {
-				require.Empty(t, m)
-			},
-		},
-		{
-			infos: map[string]*infosync.TiDBInfo{
-				"1.1.1.1:4000": {
-					TiDBTopologyInfo: &infosync.TiDBTopologyInfo{
-						IP:         "1.1.1.1",
-						StatusPort: 10080,
-					},
-				},
-			},
-			check: func(m map[string]*BackendInfo) {
-				require.Empty(t, m)
-			},
-		},
-		{
-			infos: map[string]*infosync.TiDBInfo{
-				"1.1.1.1:4000": {
-					TTL: "123456789",
-					TiDBTopologyInfo: &infosync.TiDBTopologyInfo{
-						Labels:     map[string]string{"k1": "v1"},
-						IP:         "1.1.1.1",
-						StatusPort: 10080,
-					},
+					Labels:     map[string]string{"k1": "v1"},
+					IP:         "1.1.1.1",
+					StatusPort: 10080,
 				},
 			},
 			check: func(m map[string]*BackendInfo) {
@@ -66,20 +40,14 @@ func TestPDFetcher(t *testing.T) {
 			},
 		},
 		{
-			infos: map[string]*infosync.TiDBInfo{
+			infos: map[string]*infosync.TiDBTopologyInfo{
 				"1.1.1.1:4000": {
-					TTL: "123456789",
-					TiDBTopologyInfo: &infosync.TiDBTopologyInfo{
-						IP:         "1.1.1.1",
-						StatusPort: 10080,
-					},
+					IP:         "1.1.1.1",
+					StatusPort: 10080,
 				},
 				"2.2.2.2:4000": {
-					TTL: "123456789",
-					TiDBTopologyInfo: &infosync.TiDBTopologyInfo{
-						IP:         "2.2.2.2",
-						StatusPort: 10080,
-					},
+					IP:         "2.2.2.2",
+					StatusPort: 10080,
 				},
 			},
 			check: func(m map[string]*BackendInfo) {

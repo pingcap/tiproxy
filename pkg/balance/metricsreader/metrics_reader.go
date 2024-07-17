@@ -34,6 +34,11 @@ type PromInfoFetcher interface {
 	GetPromInfo(ctx context.Context) (*infosync.PrometheusInfo, error)
 }
 
+// TopologyFetcher is an interface to fetch the tidb topology from ETCD.
+type TopologyFetcher interface {
+	GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error)
+}
+
 type MetricsReader interface {
 	Start(ctx context.Context)
 	AddQueryExpr(queryExpr QueryExpr) uint64

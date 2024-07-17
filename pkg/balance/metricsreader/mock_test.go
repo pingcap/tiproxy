@@ -15,6 +15,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/testkit"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,6 +35,24 @@ func newMockPromFetcher(port int) *mockPromFetcher {
 				Port: port,
 			}, nil
 		},
+	}
+}
+
+var _ TopologyFetcher = (*mockBackendFetcher)(nil)
+
+type mockBackendFetcher struct {
+	infos map[string]*infosync.TiDBTopologyInfo
+	err   error
+}
+
+func (mbf *mockBackendFetcher) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error) {
+	return mbf.infos, mbf.err
+}
+
+func newMockBackendFetcher(infos map[string]*infosync.TiDBTopologyInfo, err error) *mockBackendFetcher {
+	return &mockBackendFetcher{
+		infos: infos,
+		err:   err,
 	}
 }
 
@@ -121,4 +140,12 @@ func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
 
 func (mb *mockBackend) Local() bool {
 	return true
+}
+
+func mockMfs() map[string]*dto.MetricFamily {
+	floats := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	return map[string]*dto.MetricFamily{
+		"name1": {Metric: []*dto.Metric{{Gauge: &dto.Gauge{Value: &floats[0]}}}},
+		"name2": {Metric: []*dto.Metric{{Gauge: &dto.Gauge{Value: &floats[1]}}}},
+	}
 }
