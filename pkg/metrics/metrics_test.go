@@ -6,7 +6,6 @@ package metrics
 import (
 	"context"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 
@@ -80,9 +79,7 @@ func TestDelLabelValues(t *testing.T) {
 				}
 			}
 		}
-		sort.Slice(addrs, func(i, j int) bool {
-			return addrs[i] < addrs[j]
-		})
+		slices.Sort(addrs)
 		return addrs
 	}
 	for i, test := range tests {

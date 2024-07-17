@@ -6,11 +6,13 @@ package factor
 import (
 	"math"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
 )
@@ -297,5 +299,40 @@ func TestMemoryBalanceCount(t *testing.T) {
 		}
 		count := fs.BalanceCount(backends[0], backends[1])
 		require.Equal(t, test.count, count, "test idx: %d", i)
+	}
+}
+
+func TestMemoryQueryRule(t *testing.T) {
+	tests := []struct {
+		text       string
+		curValue   model.SampleValue
+		finalValue model.SampleValue
+	}{
+		{
+			text: `process_resident_memory_bytes 4e+08
+tidb_server_memory_quota_bytes 8e+08
+`,
+			curValue:   0.5,
+			finalValue: 0.5,
+		},
+		{
+			text: `process_resident_memory_bytes 6e+08
+tidb_server_memory_quota_bytes 8e+08
+`,
+			curValue:   0.75,
+			finalValue: 0.75,
+		},
+	}
+
+	historyPair := make([]model.SamplePair, 0)
+	for i, test := range tests {
+		var parser expfmt.TextParser
+		mfs, err := parser.TextToMetricFamilies(strings.NewReader(test.text))
+		require.NoError(t, err, "case %d", i)
+		value := memoryQueryRule.Metric2Value(mfs)
+		require.Equal(t, test.curValue, value, "case %d", i)
+		historyPair = append(historyPair, model.SamplePair{Value: value})
+		value = memoryQueryRule.Range2Value(historyPair)
+		require.Equal(t, test.finalValue, value, "case %d", i)
 	}
 }

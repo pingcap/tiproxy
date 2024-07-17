@@ -6,10 +6,12 @@ package factor
 import (
 	"math"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
 )
@@ -280,5 +282,62 @@ func TestHealthBalanceCount(t *testing.T) {
 		}
 		count := fh.BalanceCount(backends[0], backends[1])
 		require.Equal(t, test.count, count, "test idx: %d", i)
+	}
+}
+
+func TestHealthQueryRule(t *testing.T) {
+	tests := []struct {
+		text       string
+		curValue   []model.SampleValue
+		finalValue []model.SampleValue
+	}{
+		{
+			text: `tidb_tikvclient_backoff_seconds_count{type=""} 0
+tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 0
+tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 0
+tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 10
+tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 0
+`,
+			curValue:   []model.SampleValue{0, 10},
+			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
+		},
+		{
+			text: `tidb_tikvclient_backoff_seconds_count{type=""} 10
+tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 10
+tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 10
+tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 110
+tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 100
+`,
+			curValue:   []model.SampleValue{10, 210},
+			finalValue: []model.SampleValue{10, 200},
+		},
+		{
+			text: `tidb_tikvclient_backoff_seconds_count{type=""} 10
+tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 10
+tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 10
+tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 110
+tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 100
+`,
+			curValue:   []model.SampleValue{10, 210},
+			finalValue: []model.SampleValue{10, 200},
+		},
+	}
+
+	historyPair := make([][]model.SamplePair, len(errDefinitions))
+	for i, test := range tests {
+		var parser expfmt.TextParser
+		mfs, err := parser.TextToMetricFamilies(strings.NewReader(test.text))
+		require.NoError(t, err, "case %d", i)
+		for j, ed := range errDefinitions {
+			value := ed.queryRule.Metric2Value(mfs)
+			require.Equal(t, test.curValue[j], value, "case %d %d", i, j)
+			historyPair[j] = append(historyPair[j], model.SamplePair{Value: value})
+			value = ed.queryRule.Range2Value(historyPair[j])
+			if math.IsNaN(float64(test.finalValue[j])) {
+				require.True(t, math.IsNaN(float64(value)), "case %d %d", i, j)
+			} else {
+				require.Equal(t, test.finalValue[j], value, "case %d %d", i, j)
+			}
+		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 )
 
@@ -31,6 +32,25 @@ var (
 		PromQL:   `process_resident_memory_bytes{%s="tidb"}/tidb_server_memory_quota_bytes`,
 		HasLabel: true,
 		Range:    1 * time.Minute,
+	}
+	memoryQueryRule = metricsreader.QueryRule{
+		Names:     []string{"process_resident_memory_bytes", "tidb_server_memory_quota_bytes"},
+		Retention: 1 * time.Minute,
+		Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+			memoryUsage := mfs["process_resident_memory_bytes"].Metric[0].Untyped
+			memoryQuota := mfs["tidb_server_memory_quota_bytes"].Metric[0].Untyped
+			if memoryUsage == nil || memoryQuota == nil {
+				return model.SampleValue(math.NaN())
+			}
+			return model.SampleValue(*memoryUsage.Value / *memoryQuota.Value)
+		},
+		Range2Value: func(pairs []model.SamplePair) model.SampleValue {
+			if len(pairs) < 1 {
+				return model.SampleValue(math.NaN())
+			}
+			return pairs[len(pairs)-1].Value
+		},
+		ResultType: model.ValMatrix,
 	}
 )
 

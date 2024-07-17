@@ -6,11 +6,13 @@ package factor
 import (
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
 )
@@ -294,5 +296,55 @@ func TestCPUResultNotUpdated(t *testing.T) {
 		}
 		updateScore(fc, backends)
 		require.EqualValues(t, test.expectedScore, backends[0].score(), "test index %d", i)
+	}
+}
+
+func TestCPUQueryRule(t *testing.T) {
+	tests := []struct {
+		text       string
+		timestamp  model.Time
+		curValue   model.SampleValue
+		finalValue model.SampleValue
+	}{
+		{
+			text: `process_cpu_seconds_total 10
+tidb_server_maxprocs 2
+`,
+			timestamp:  model.Time(0),
+			curValue:   5,
+			finalValue: model.SampleValue(math.NaN()),
+		},
+		{
+			text: `process_cpu_seconds_total 10
+tidb_server_maxprocs 2
+`,
+			timestamp:  model.Time(1000),
+			curValue:   5,
+			finalValue: 0,
+		},
+		{
+			text: `process_cpu_seconds_total 12
+tidb_server_maxprocs 2
+`,
+			timestamp:  model.Time(2000),
+			curValue:   6,
+			finalValue: 1,
+		},
+	}
+
+	historyPair := make([]model.SamplePair, 0)
+	for i, test := range tests {
+		var parser expfmt.TextParser
+		mfs, err := parser.TextToMetricFamilies(strings.NewReader(test.text))
+		require.NoError(t, err, "case %d", i)
+		value := cpuQueryRule.Metric2Value(mfs)
+		require.Equal(t, test.curValue, value, "case %d", i)
+		historyPair = append(historyPair, model.SamplePair{Timestamp: test.timestamp, Value: value})
+		value = cpuQueryRule.Range2Value(historyPair)
+		if math.IsNaN(float64(test.finalValue)) {
+			require.True(t, math.IsNaN(float64(value)), "case %d", i)
+		} else {
+			require.Equal(t, test.finalValue, value, "case %d", i)
+		}
 	}
 }
