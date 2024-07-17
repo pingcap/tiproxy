@@ -74,7 +74,7 @@ var (
 					for _, m := range mt {
 						for _, label := range m.Label {
 							if *label.Name == "type" {
-								if *label.Value == "pdRPC" {
+								if *label.Value == "pdRPC" && m.Untyped != nil {
 									total += int(*m.Untyped.Value)
 								}
 								break
@@ -108,7 +108,7 @@ var (
 					for _, m := range mt {
 						for _, label := range m.Label {
 							if *label.Name == "type" {
-								if *label.Value == "regionMiss" || *label.Value == "tikvRPC" {
+								if (*label.Value == "regionMiss" || *label.Value == "tikvRPC") && m.Untyped != nil {
 									total += int(*m.Untyped.Value)
 								}
 								break
