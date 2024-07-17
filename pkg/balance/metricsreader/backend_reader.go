@@ -424,7 +424,8 @@ func filterMetrics(all string, names []string) string {
 			all = all[idx+1:]
 		}
 		for i := range names {
-			// strings.Contains() includes the metric description in the result but it's slower.
+			// strings.Contains() includes the metric type in the result but it's slower.
+			// Note that the result is always in `Metric.Untyped` because the metric type is ignored.
 			if strings.HasPrefix(line, names[i]) {
 				buffer.WriteString(line)
 				break

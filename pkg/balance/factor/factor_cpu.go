@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 )
 
@@ -33,6 +34,31 @@ var (
 		PromQL:   `irate(process_cpu_seconds_total{%s="tidb"}[30s])/tidb_server_maxprocs`,
 		HasLabel: true,
 		Range:    1 * time.Minute,
+	}
+	cpuQueryRule = metricsreader.QueryRule{
+		Names:     []string{"process_cpu_seconds_total", "tidb_server_maxprocs"},
+		Retention: 1 * time.Minute,
+		Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+			cpuTotal := mfs["process_cpu_seconds_total"].Metric[0].Untyped
+			maxProcs := mfs["tidb_server_maxprocs"].Metric[0].Untyped
+			if cpuTotal == nil || maxProcs == nil {
+				return model.SampleValue(math.NaN())
+			}
+			return model.SampleValue(*cpuTotal.Value / *maxProcs.Value)
+		},
+		Range2Value: func(pairs []model.SamplePair) model.SampleValue {
+			if len(pairs) < 2 {
+				return model.SampleValue(math.NaN())
+			}
+			pair1 := pairs[len(pairs)-2]
+			pair2 := pairs[len(pairs)-1]
+			timeDiff := float64(pair2.Timestamp-pair1.Timestamp) / 1000.0
+			if timeDiff < 1e-4 {
+				return model.SampleValue(math.NaN())
+			}
+			return (pair2.Value - pair1.Value) / model.SampleValue(timeDiff)
+		},
+		ResultType: model.ValMatrix,
 	}
 )
 

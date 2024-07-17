@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 )
 
@@ -31,6 +32,7 @@ const (
 )
 
 type errDefinition struct {
+	queryRule        metricsreader.QueryRule
 	promQL           string
 	failThreshold    int
 	recoverThreshold int
@@ -63,6 +65,32 @@ var (
 			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[2m])) by (instance)`,
 			failThreshold:    50,
 			recoverThreshold: 10,
+			queryRule: metricsreader.QueryRule{
+				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
+				Retention: 2 * time.Minute,
+				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+					mt := mfs["tidb_tikvclient_backoff_seconds_count"].Metric
+					total := 0
+					for _, m := range mt {
+						for _, label := range m.Label {
+							if *label.Name == "type" {
+								if *label.Value == "pdRPC" {
+									total += int(*m.Untyped.Value)
+								}
+								break
+							}
+						}
+					}
+					return model.SampleValue(total)
+				},
+				Range2Value: func(pairs []model.SamplePair) model.SampleValue {
+					if len(pairs) < 2 {
+						return model.SampleValue(math.NaN())
+					}
+					return pairs[len(pairs)-1].Value - pairs[0].Value
+				},
+				ResultType: model.ValVector,
+			},
 		},
 		{
 			// may be caused by disconnection to TiKV
@@ -71,6 +99,32 @@ var (
 			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type=~"regionMiss|tikvRPC"}[2m])) by (instance)`,
 			failThreshold:    1000,
 			recoverThreshold: 100,
+			queryRule: metricsreader.QueryRule{
+				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
+				Retention: 2 * time.Minute,
+				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+					mt := mfs["tidb_tikvclient_backoff_seconds_count"].Metric
+					total := 0
+					for _, m := range mt {
+						for _, label := range m.Label {
+							if *label.Name == "type" {
+								if *label.Value == "regionMiss" || *label.Value == "tikvRPC" {
+									total += int(*m.Untyped.Value)
+								}
+								break
+							}
+						}
+					}
+					return model.SampleValue(total)
+				},
+				Range2Value: func(pairs []model.SamplePair) model.SampleValue {
+					if len(pairs) < 2 {
+						return model.SampleValue(math.NaN())
+					}
+					return pairs[len(pairs)-1].Value - pairs[0].Value
+				},
+				ResultType: model.ValVector,
+			},
 		},
 	}
 )
