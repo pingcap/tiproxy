@@ -36,7 +36,7 @@ func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, meth
 		Addr: "0.0.0.0:0",
 	}, lg, func() bool {
 		return *closing
-	}, mgrns.NewNamespaceManager(), cfgmgr, crtmgr, nil, ready)
+	}, mgrns.NewNamespaceManager(), cfgmgr, crtmgr, &mockBackendReader{}, nil, ready)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, srv.Close())

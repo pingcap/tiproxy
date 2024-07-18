@@ -12,6 +12,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
@@ -40,6 +41,7 @@ type Server struct {
 	certManager      *cert.CertManager
 	vipManager       vip.VIPManager
 	infoSyncer       *infosync.InfoSyncer
+	metricsReader    metricsreader.MetricsReader
 	// etcd client
 	etcdCli *clientv3.Client
 	// HTTP client
@@ -119,6 +121,13 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		}
 	}
 
+	// setup metrics reader
+	{
+		healthCheckCfg := config.NewDefaultHealthCheckConfig()
+		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), srv.infoSyncer, healthCheckCfg)
+		srv.metricsReader.Start(context.Background())
+	}
+
 	// setup namespace manager
 	{
 		nscs, nerr := srv.configManager.ListAllNamespace(ctx)
@@ -141,7 +150,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			nscs = append(nscs, nsc)
 		}
 
-		err = srv.namespaceManager.Init(lg.Named("nsmgr"), nscs, srv.infoSyncer, srv.infoSyncer, srv.httpCli, srv.configManager)
+		err = srv.namespaceManager.Init(lg.Named("nsmgr"), nscs, srv.infoSyncer, srv.infoSyncer, srv.httpCli, srv.configManager, srv.metricsReader)
 		if err != nil {
 			return
 		}
@@ -164,7 +173,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	}
 
 	// setup http & grpc
-	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.proxy.IsClosing, srv.namespaceManager, srv.configManager, srv.certManager, handler, ready); err != nil {
+	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.proxy.IsClosing, srv.namespaceManager, srv.configManager, srv.certManager, nil, handler, ready); err != nil {
 		return
 	}
 
@@ -214,6 +223,9 @@ func (s *Server) Close() error {
 	}
 	if s.namespaceManager != nil {
 		errs = append(errs, s.namespaceManager.Close())
+	}
+	if s.metricsReader != nil {
+		s.metricsReader.Close()
 	}
 	if s.infoSyncer != nil {
 		errs = append(errs, s.infoSyncer.Close())

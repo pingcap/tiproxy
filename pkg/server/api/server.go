@@ -46,6 +46,7 @@ type managers struct {
 	cfg *mgrcfg.ConfigManager
 	ns  *mgrns.NamespaceManager
 	crt *mgrcrt.CertManager
+	br  BackendReader
 }
 
 type Server struct {
@@ -62,7 +63,7 @@ type Server struct {
 func NewServer(cfg config.API, lg *zap.Logger,
 	isClosing func() bool,
 	nsmgr *mgrns.NamespaceManager, cfgmgr *mgrcfg.ConfigManager,
-	crtmgr *mgrcrt.CertManager, handler HTTPHandler,
+	crtmgr *mgrcrt.CertManager, br BackendReader, handler HTTPHandler,
 	ready *atomic.Bool) (*Server, error) {
 	grpcOpts := []grpc_zap.Option{
 		grpc_zap.WithLevels(func(code codes.Code) zapcore.Level {
@@ -84,7 +85,7 @@ func NewServer(cfg config.API, lg *zap.Logger,
 				grpc_zap.StreamServerInterceptor(lg.Named("grpcs"), grpcOpts...),
 			),
 		),
-		mgr: managers{cfgmgr, nsmgr, crtmgr},
+		mgr: managers{cfgmgr, nsmgr, crtmgr, br},
 	}
 
 	var err error
@@ -213,6 +214,7 @@ func (h *Server) registerAPI(g *gin.RouterGroup, cfg config.API, nsmgr *mgrns.Na
 
 	h.registerMetrics(g.Group("metrics"))
 	h.registerDebug(g.Group("debug"))
+	h.registerBackend(g.Group("backend"))
 }
 
 func (h *Server) Close() error {

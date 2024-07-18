@@ -93,18 +93,16 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 }
 
 func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
-	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager) error {
+	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
+	metricsReader metricsreader.MetricsReader) error {
 	mgr.Lock()
 	mgr.tpFetcher = tpFetcher
 	mgr.promFetcher = promFetcher
 	mgr.httpCli = httpCli
 	mgr.logger = logger
-	healthCheckCfg := config.NewDefaultHealthCheckConfig()
-	mgr.metricsReader = metricsreader.NewDefaultMetricsReader(logger.Named("mr"), mgr.promFetcher, healthCheckCfg)
 	mgr.cfgMgr = cfgMgr
+	mgr.metricsReader = metricsReader
 	mgr.Unlock()
-
-	mgr.metricsReader.Start(context.Background())
 	return mgr.CommitNamespaces(nscs, nil)
 }
 
