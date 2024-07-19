@@ -5,8 +5,7 @@ package metricsreader
 
 import (
 	"context"
-	"fmt"
-	"io"
+	"encoding/json"
 	"math"
 	"net"
 	"net/http"
@@ -20,10 +19,9 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
-	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util/httputil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -39,37 +37,43 @@ const (
 	sessionTTL = 30
 	// backendMetricPath is the path of backend HTTP API to read metrics.
 	backendMetricPath = "/metrics"
-	goPoolSize        = 100
-	goMaxIdle         = time.Minute
+	// ownerMetricPath is the path of reading backend metrics from the backend reader owner.
+	ownerMetricPath = "/api/backend/metrics"
+	goPoolSize      = 100
+	goMaxIdle       = time.Minute
 )
 
 type backendHistory struct {
-	step1History []model.SamplePair
-	step2History []model.SamplePair
+	Step1History []model.SamplePair
+	Step2History []model.SamplePair
 }
 
 type BackendReader struct {
 	sync.Mutex
-	queryRules   map[uint64]QueryRule
-	queryResults map[uint64]QueryResult
-	// rule id: {backend name: backendHistory}
-	history        map[uint64]map[string]backendHistory
-	election       elect.Election
-	cfgGetter      config.ConfigGetter
-	backendFetcher TopologyFetcher
-	httpCli        *http.Client
-	lg             *zap.Logger
-	cfg            *config.HealthCheck
-	wgp            *waitgroup.WaitGroupPool
-	isOwner        atomic.Bool
+	queryRules   map[string]QueryRule
+	queryResults map[string]QueryResult
+	// the owner generates the history from querying backends and other members query the history from the owner
+	// rule key: {backend name: backendHistory}
+	history map[string]map[string]backendHistory
+	// the owner marshalles history to share it to other members
+	// cache the marshalled history to avoid duplicated marshalling
+	marshalledHistory []byte
+	election          elect.Election
+	cfgGetter         config.ConfigGetter
+	backendFetcher    TopologyFetcher
+	httpCli           *http.Client
+	lg                *zap.Logger
+	cfg               *config.HealthCheck
+	wgp               *waitgroup.WaitGroupPool
+	isOwner           atomic.Bool
 }
 
 func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *http.Client, backendFetcher TopologyFetcher,
 	cfg *config.HealthCheck) *BackendReader {
 	return &BackendReader{
-		queryRules:     make(map[uint64]QueryRule),
-		queryResults:   make(map[uint64]QueryResult),
-		history:        make(map[uint64]map[string]backendHistory),
+		queryRules:     make(map[string]QueryRule),
+		queryResults:   make(map[string]QueryResult),
+		history:        make(map[string]map[string]backendHistory),
 		lg:             lg,
 		cfgGetter:      cfgGetter,
 		backendFetcher: backendFetcher,
@@ -103,26 +107,26 @@ func (br *BackendReader) OnRetired() {
 	br.isOwner.Store(false)
 }
 
-func (br *BackendReader) AddQueryRule(id uint64, rule QueryRule) {
+func (br *BackendReader) AddQueryRule(key string, rule QueryRule) {
 	br.Lock()
 	defer br.Unlock()
-	br.queryRules[id] = rule
+	br.queryRules[key] = rule
 }
 
-func (br *BackendReader) RemoveQueryRule(id uint64) {
+func (br *BackendReader) RemoveQueryRule(key string) {
 	br.Lock()
 	defer br.Unlock()
-	delete(br.queryRules, id)
+	delete(br.queryRules, key)
 }
 
-func (br *BackendReader) GetQueryResult(id uint64) QueryResult {
+func (br *BackendReader) GetQueryResult(key string) QueryResult {
 	br.Lock()
 	defer br.Unlock()
 	// Return an empty QueryResult if it's not found.
-	return br.queryResults[id]
+	return br.queryResults[key]
 }
 
-func (br *BackendReader) ReadMetrics(ctx context.Context) (map[uint64]QueryResult, error) {
+func (br *BackendReader) ReadMetrics(ctx context.Context) (map[string]QueryResult, error) {
 	if br.isOwner.Load() {
 		if err := br.readFromBackends(ctx); err != nil {
 			return nil, err
@@ -137,7 +141,6 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) (map[uint64]QueryResul
 			return nil, err
 		}
 	}
-	br.purgeHistory()
 	return br.queryResults, nil
 }
 
@@ -177,6 +180,11 @@ func (br *BackendReader) readFromBackends(ctx context.Context) error {
 		}(addr)
 	}
 	br.wgp.Wait()
+
+	br.purgeHistory()
+	br.Lock()
+	br.marshalledHistory = nil
+	br.Unlock()
 	return nil
 }
 
@@ -195,55 +203,20 @@ func (br *BackendReader) collectAllNames() []string {
 }
 
 func (br *BackendReader) readBackendMetric(ctx context.Context, addr string) ([]byte, error) {
-	schema := "http"
-	if v, ok := br.httpCli.Transport.(*http.Transport); ok && v != nil && v.TLSClientConfig != nil {
-		schema = "https"
-	}
 	httpCli := *br.httpCli
 	httpCli.Timeout = br.cfg.DialTimeout
-	url := fmt.Sprintf("%s://%s%s", schema, addr, backendMetricPath)
-	var body []byte
-	err := br.connectWithRetry(ctx, func() error {
-		resp, err := httpCli.Get(url)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if ignoredErr := resp.Body.Close(); ignoredErr != nil {
-				br.lg.Warn("close http response failed", zap.String("url", url), zap.Error(ignoredErr))
-			}
-		}()
-
-		if resp.StatusCode != http.StatusOK {
-			return backoff.Permanent(errors.Errorf("http status %d", resp.StatusCode))
-		}
-		body, err = io.ReadAll(resp.Body)
-		if err != nil {
-			br.lg.Error("read response body failed", zap.String("url", url), zap.Error(err))
-		}
-		return err
-	})
-	return body, err
-}
-
-func (br *BackendReader) connectWithRetry(ctx context.Context, connect func() error) error {
-	err := backoff.Retry(func() error {
-		err := connect()
-		if !pnet.IsRetryableError(err) {
-			return backoff.Permanent(err)
-		}
-		return err
-	}, backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx))
-	return err
+	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
+	return httputil.Get(httpCli, addr, backendMetricPath, b)
 }
 
 // groupMetricsByRule gets the result for each rule of one backend.
-func (br *BackendReader) groupMetricsByRule(mfs map[string]*dto.MetricFamily, backend string) map[uint64]model.Value {
+func (br *BackendReader) groupMetricsByRule(mfs map[string]*dto.MetricFamily, backend string) map[string]model.Value {
 	now := model.TimeFromUnixNano(time.Now().UnixNano())
 	br.Lock()
 	defer br.Unlock()
-	results := make(map[uint64]model.Value, len(br.queryRules))
-	for id, rule := range br.queryRules {
+	// rule key: backend value
+	results := make(map[string]model.Value, len(br.queryRules))
+	for ruleKey, rule := range br.queryRules {
 		// If the metric doesn't exist, skip it.
 		metricExists := true
 		for _, name := range rule.Names {
@@ -263,21 +236,21 @@ func (br *BackendReader) groupMetricsByRule(mfs map[string]*dto.MetricFamily, ba
 			continue
 		}
 		pair := model.SamplePair{Timestamp: now, Value: sampleValue}
-		ruleHistory, ok := br.history[id]
+		ruleHistory, ok := br.history[ruleKey]
 		if !ok {
 			ruleHistory = make(map[string]backendHistory)
-			br.history[id] = ruleHistory
+			br.history[ruleKey] = ruleHistory
 		}
 		beHistory := ruleHistory[backend]
-		beHistory.step1History = append(beHistory.step1History, pair)
+		beHistory.Step1History = append(beHistory.Step1History, pair)
 
 		// step 2: get the latest pair by the history and add it to step2History
 		// E.g. calculate irate(process_cpu_seconds_total/tidb_server_maxprocs[30s])
-		sampleValue = rule.Range2Value(beHistory.step1History)
+		sampleValue = rule.Range2Value(beHistory.Step1History)
 		if math.IsNaN(float64(sampleValue)) {
 			continue
 		}
-		beHistory.step2History = append(beHistory.step2History, model.SamplePair{Timestamp: now, Value: sampleValue})
+		beHistory.Step2History = append(beHistory.Step2History, model.SamplePair{Timestamp: now, Value: sampleValue})
 		ruleHistory[backend] = beHistory
 
 		// step 3: return the result
@@ -286,13 +259,13 @@ func (br *BackendReader) groupMetricsByRule(mfs map[string]*dto.MetricFamily, ba
 		switch rule.ResultType {
 		case model.ValVector:
 			// vector indicates returning the latest pair
-			results[id] = model.Vector{{Value: sampleValue, Timestamp: now, Metric: labels}}
+			results[ruleKey] = model.Vector{{Value: sampleValue, Timestamp: now, Metric: labels}}
 		case model.ValMatrix:
 			// matrix indicates returning the history
 			// copy a slice to avoid data race
-			pairs := make([]model.SamplePair, len(beHistory.step2History))
-			copy(pairs, beHistory.step2History)
-			results[id] = model.Matrix{{Values: pairs, Metric: labels}}
+			pairs := make([]model.SamplePair, len(beHistory.Step2History))
+			copy(pairs, beHistory.Step2History)
+			results[ruleKey] = model.Matrix{{Values: pairs, Metric: labels}}
 		default:
 			br.lg.Error("unsupported value type", zap.String("value type", rule.ResultType.String()))
 		}
@@ -301,14 +274,14 @@ func (br *BackendReader) groupMetricsByRule(mfs map[string]*dto.MetricFamily, ba
 }
 
 // mergeQueryResult merges the result of one backend into the final result.
-func (br *BackendReader) mergeQueryResult(backendValues map[uint64]model.Value, backend string) {
+func (br *BackendReader) mergeQueryResult(backendValues map[string]model.Value, backend string) {
 	br.Lock()
 	defer br.Unlock()
-	for id, value := range backendValues {
-		result := br.queryResults[id]
+	for ruleKey, value := range backendValues {
+		result := br.queryResults[ruleKey]
 		if result.Value == nil || reflect.ValueOf(result.Value).IsNil() {
 			result.Value = value
-			br.queryResults[id] = result
+			br.queryResults[ruleKey] = result
 			continue
 		}
 		switch result.Value.Type() {
@@ -341,7 +314,7 @@ func (br *BackendReader) mergeQueryResult(backendValues map[uint64]model.Value, 
 		default:
 			br.lg.Error("unsupported value type", zap.Stringer("value type", result.Value.Type()))
 		}
-		br.queryResults[id] = result
+		br.queryResults[ruleKey] = result
 	}
 }
 
@@ -358,10 +331,10 @@ func (br *BackendReader) purgeHistory() {
 			continue
 		}
 		for backend, backendHistory := range ruleHistory {
-			backendHistory.step1History = purgeHistory(backendHistory.step1History, rule.Retention, now)
-			backendHistory.step2History = purgeHistory(backendHistory.step2History, rule.Retention, now)
+			backendHistory.Step1History = purgeHistory(backendHistory.Step1History, rule.Retention, now)
+			backendHistory.Step2History = purgeHistory(backendHistory.Step2History, rule.Retention, now)
 			// the history is expired, maybe the backend is down
-			if len(backendHistory.step1History) == 0 && len(backendHistory.step2History) == 0 {
+			if len(backendHistory.Step1History) == 0 && len(backendHistory.Step2History) == 0 {
 				delete(ruleHistory, backend)
 			} else {
 				ruleHistory[backend] = backendHistory
@@ -370,7 +343,40 @@ func (br *BackendReader) purgeHistory() {
 	}
 }
 
+func (br *BackendReader) GetBackendMetrics() ([]byte, error) {
+	br.Lock()
+	defer br.Unlock()
+	if br.marshalledHistory != nil {
+		return br.marshalledHistory, nil
+	}
+	marshalled, err := json.Marshal(br.history)
+	if err != nil {
+		return nil, err
+	}
+	br.marshalledHistory = marshalled
+	return marshalled, nil
+}
+
+// readFromOwner queries metric history from the owner.
+// If every member queries directly from backends, the backends may suffer from too much pressure.
 func (br *BackendReader) readFromOwner(ctx context.Context, addr string) error {
+	httpCli := *br.httpCli
+	httpCli.Timeout = br.cfg.DialTimeout
+	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
+	resp, err := httputil.Get(*br.httpCli, addr, ownerMetricPath, b)
+	if err != nil {
+		return err
+	}
+
+	var newHistory map[string]map[string]backendHistory
+	if err := json.Unmarshal(resp, &newHistory); err != nil {
+		return err
+	}
+	// If this instance becomes the owner in the next round, it can reuse the history.
+	br.Lock()
+	br.history = newHistory
+	br.marshalledHistory = nil
+	br.Unlock()
 	return nil
 }
 
