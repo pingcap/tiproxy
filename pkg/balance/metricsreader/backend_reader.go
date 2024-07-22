@@ -62,13 +62,14 @@ type BackendReader struct {
 	cfgGetter         config.ConfigGetter
 	backendFetcher    TopologyFetcher
 	httpCli           *http.Client
+	httpSchema        string
 	lg                *zap.Logger
 	cfg               *config.HealthCheck
 	wgp               *waitgroup.WaitGroupPool
 	isOwner           atomic.Bool
 }
 
-func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *http.Client, backendFetcher TopologyFetcher,
+func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *http.Client, httpSchema string, backendFetcher TopologyFetcher,
 	cfg *config.HealthCheck) *BackendReader {
 	return &BackendReader{
 		queryRules:     make(map[string]QueryRule),
@@ -80,6 +81,7 @@ func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *ht
 		cfg:            cfg,
 		wgp:            waitgroup.NewWaitGroupPool(goPoolSize, goMaxIdle),
 		httpCli:        httpCli,
+		httpSchema:     httpSchema,
 	}
 }
 
@@ -206,7 +208,7 @@ func (br *BackendReader) readBackendMetric(ctx context.Context, addr string) ([]
 	httpCli := *br.httpCli
 	httpCli.Timeout = br.cfg.DialTimeout
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	return httputil.Get(httpCli, addr, backendMetricPath, b)
+	return httputil.Get(httpCli, br.httpSchema, addr, backendMetricPath, b)
 }
 
 // groupMetricsByRule gets the result for each rule of one backend.
@@ -363,7 +365,7 @@ func (br *BackendReader) readFromOwner(ctx context.Context, addr string) error {
 	httpCli := *br.httpCli
 	httpCli.Timeout = br.cfg.DialTimeout
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	resp, err := httputil.Get(*br.httpCli, addr, ownerMetricPath, b)
+	resp, err := httputil.Get(*br.httpCli, br.httpSchema, addr, ownerMetricPath, b)
 	if err != nil {
 		return err
 	}

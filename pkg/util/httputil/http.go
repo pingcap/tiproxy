@@ -13,11 +13,7 @@ import (
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
-func Get(httpCli http.Client, addr, path string, b backoff.BackOff) ([]byte, error) {
-	schema := "http"
-	if v, ok := httpCli.Transport.(*http.Transport); ok && v != nil && v.TLSClientConfig != nil {
-		schema = "https"
-	}
+func Get(httpCli http.Client, schema, addr, path string, b backoff.BackOff) ([]byte, error) {
 	url := fmt.Sprintf("%s://%s%s", schema, addr, path)
 	var body []byte
 	err := ConnectWithRetry(func() error {

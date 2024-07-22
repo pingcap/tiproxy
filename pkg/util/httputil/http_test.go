@@ -31,26 +31,33 @@ func TestHTTPGet(t *testing.T) {
 
 	httpCli := *http.DefaultClient
 	httpCli.Timeout = time.Second
+	httpSchema := "http"
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Millisecond), uint64(2)), context.Background())
 
-	resp, err := Get(httpCli, statusAddr, "", b)
+	resp, err := Get(httpCli, httpSchema, statusAddr, "", b)
 	require.NoError(t, err)
 	require.Equal(t, "hello", string(resp))
 
 	httpHandler.setHTTPResp(false)
-	_, err = Get(httpCli, statusAddr, "", b)
+	_, err = Get(httpCli, httpSchema, statusAddr, "", b)
+	require.Error(t, err)
+
+	_, err = Get(httpCli, "https", statusAddr, "", b)
+	require.Error(t, err)
+
+	_, err = Get(httpCli, "", statusAddr, "", b)
 	require.Error(t, err)
 
 	httpCli.Timeout = time.Millisecond
 	httpHandler.setHTTPWait(100 * time.Millisecond)
-	_, err = Get(httpCli, statusAddr, "", b)
+	_, err = Get(httpCli, httpSchema, statusAddr, "", b)
 	require.Error(t, err)
 
 	err = statusServer.Close()
 	require.NoError(t, err)
 	wg.Wait()
 
-	_, err = Get(httpCli, statusAddr, "", b)
+	_, err = Get(httpCli, httpSchema, statusAddr, "", b)
 	require.Error(t, err)
 }
 
