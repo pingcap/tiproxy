@@ -43,7 +43,6 @@ func Get(httpCli Client, addr, path string, b backoff.BackOff) ([]byte, error) {
 		schema = "https"
 		httpCli.cli.Transport = &http.Transport{TLSClientConfig: tlsConfig}
 	}
-
 	url := fmt.Sprintf("%s://%s%s", schema, addr, path)
 	var body []byte
 	err := ConnectWithRetry(func() error {
