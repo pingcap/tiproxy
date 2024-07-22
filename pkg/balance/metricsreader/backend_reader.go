@@ -68,7 +68,7 @@ type BackendReader struct {
 	isOwner           atomic.Bool
 }
 
-func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *httputil.Client, httpSchema string, backendFetcher TopologyFetcher,
+func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *httputil.Client, backendFetcher TopologyFetcher,
 	cfg *config.HealthCheck) *BackendReader {
 	return &BackendReader{
 		queryRules:     make(map[string]QueryRule),
@@ -80,7 +80,6 @@ func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *ht
 		cfg:            cfg,
 		wgp:            waitgroup.NewWaitGroupPool(goPoolSize, goMaxIdle),
 		httpCli:        httpCli,
-		httpSchema:     httpSchema,
 	}
 }
 
