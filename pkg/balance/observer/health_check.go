@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -36,25 +35,19 @@ type backendHttpStatusRespBody struct {
 }
 
 type DefaultHealthCheck struct {
-	cfg        *config.HealthCheck
-	logger     *zap.Logger
-	httpCli    *http.Client
-	httpSchema string
+	cfg     *config.HealthCheck
+	logger  *zap.Logger
+	httpCli *httputil.Client
 }
 
-func NewDefaultHealthCheck(httpCli *http.Client, cfg *config.HealthCheck, logger *zap.Logger) *DefaultHealthCheck {
+func NewDefaultHealthCheck(httpCli *httputil.Client, cfg *config.HealthCheck, logger *zap.Logger) *DefaultHealthCheck {
 	if httpCli == nil {
-		httpCli = http.DefaultClient
-	}
-	httpSchema := "http"
-	if v, ok := httpCli.Transport.(*http.Transport); ok && v != nil && v.TLSClientConfig != nil {
-		httpSchema = "https"
+		httpCli = &httputil.Client{}
 	}
 	return &DefaultHealthCheck{
-		httpCli:    httpCli,
-		httpSchema: httpSchema,
-		cfg:        cfg,
-		logger:     logger,
+		httpCli: httpCli,
+		cfg:     cfg,
+		logger:  logger,
 	}
 }
 
@@ -113,10 +106,10 @@ func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *Backen
 	}
 
 	httpCli := *dhc.httpCli
-	httpCli.Timeout = dhc.cfg.DialTimeout
+	httpCli.SetTimeout(dhc.cfg.DialTimeout)
 	addr := net.JoinHostPort(info.IP, strconv.Itoa(int(info.StatusPort)))
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
-	resp, err := httputil.Get(httpCli, dhc.httpSchema, addr, statusPathSuffix, b)
+	resp, err := httputil.Get(httpCli, addr, statusPathSuffix, b)
 	if err == nil {
 		var respBody backendHttpStatusRespBody
 		err = json.Unmarshal(resp, &respBody)

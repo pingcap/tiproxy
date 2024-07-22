@@ -4,20 +4,50 @@
 package httputil
 
 import (
+	"crypto/tls"
 	"fmt"
+	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
-func Get(httpCli http.Client, schema, addr, path string, b backoff.BackOff) ([]byte, error) {
+type Client struct {
+	cli          *http.Client
+	getTLSConfig func() *tls.Config
+}
+
+func NewHTTPClient(certManager *cert.CertManager) *Client {
+	if certManager == nil {
+		certManager = cert.NewCertManager()
+	}
+	return &Client{
+		cli: http.DefaultClient,
+		getTLSConfig: func() *tls.Config {
+			return certManager.ClusterTLS()
+		},
+	}
+}
+
+func (c *Client) SetTimeout(t time.Duration) {
+	c.cli.Timeout = t
+}
+
+func Get(httpCli Client, addr, path string, b backoff.BackOff) ([]byte, error) {
+	schema := "http"
+	if tlsConfig := httpCli.getTLSConfig(); tlsConfig != nil {
+		schema = "https"
+		httpCli.cli.Transport = &http.Transport{TLSClientConfig: tlsConfig}
+	}
+
 	url := fmt.Sprintf("%s://%s%s", schema, addr, path)
 	var body []byte
 	err := ConnectWithRetry(func() error {
-		resp, err := httpCli.Get(url)
+		resp, err := httpCli.cli.Get(url)
 		if err != nil {
 			return err
 		}

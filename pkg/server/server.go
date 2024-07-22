@@ -5,7 +5,7 @@ package server
 
 import (
 	"context"
-	"net/http"
+	"github.com/pingcap/tiproxy/pkg/util/httputil"
 	"reflect"
 	"runtime"
 
@@ -45,7 +45,7 @@ type Server struct {
 	// etcd client
 	etcdCli *clientv3.Client
 	// HTTP client
-	httpCli *http.Client
+	httpCli *httputil.Client
 	// HTTP server
 	apiServer *api.Server
 	// L7 proxy
@@ -106,11 +106,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// general cluster HTTP client
 	{
-		srv.httpCli = &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: srv.certManager.ClusterTLS(),
-			},
-		}
+		srv.httpCli = httputil.NewHTTPClient(srv.certManager)
 	}
 
 	// setup info syncer

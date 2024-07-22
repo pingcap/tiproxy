@@ -6,6 +6,7 @@ package metricsreader
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/tiproxy/pkg/util/httputil"
 	"math"
 	"math/rand"
 	"net"
@@ -180,7 +181,8 @@ func TestReadBackendMetric(t *testing.T) {
 	port := httpHandler.Start()
 	t.Cleanup(httpHandler.Close)
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	br := NewBackendReader(lg, nil, http.DefaultClient, "", nil, cfg)
+	cli := httputil.NewHTTPClient(nil)
+	br := NewBackendReader(lg, nil, cli, "", nil, cfg)
 	for i, test := range tests {
 		statusCode := http.StatusOK
 		if test.hasErr {
@@ -614,7 +616,8 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	})
 
 	fetcher := newMockBackendFetcher(infos, nil)
-	br := NewBackendReader(lg, nil, http.DefaultClient, "", fetcher, cfg)
+	cli := httputil.NewHTTPClient(nil)
+	br := NewBackendReader(lg, nil, cli, "", fetcher, cfg)
 	// create 3 rules
 	addRule := func(id int) {
 		rule := QueryRule{
@@ -759,7 +762,8 @@ func TestReadFromOwner(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()
-	br := NewBackendReader(lg, nil, http.DefaultClient, "", nil, cfg)
+	cli := httputil.NewHTTPClient(nil)
+	br := NewBackendReader(lg, nil, cli, "", nil, cfg)
 	httpHandler := newMockHttpHandler(t)
 	port := httpHandler.Start()
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))

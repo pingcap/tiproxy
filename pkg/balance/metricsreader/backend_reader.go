@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"math"
 	"net"
-	"net/http"
 	"reflect"
 	"slices"
 	"strconv"
@@ -61,7 +60,7 @@ type BackendReader struct {
 	election          elect.Election
 	cfgGetter         config.ConfigGetter
 	backendFetcher    TopologyFetcher
-	httpCli           *http.Client
+	httpCli           *httputil.Client
 	httpSchema        string
 	lg                *zap.Logger
 	cfg               *config.HealthCheck
@@ -69,7 +68,7 @@ type BackendReader struct {
 	isOwner           atomic.Bool
 }
 
-func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *http.Client, httpSchema string, backendFetcher TopologyFetcher,
+func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *httputil.Client, httpSchema string, backendFetcher TopologyFetcher,
 	cfg *config.HealthCheck) *BackendReader {
 	return &BackendReader{
 		queryRules:     make(map[string]QueryRule),
@@ -206,9 +205,9 @@ func (br *BackendReader) collectAllNames() []string {
 
 func (br *BackendReader) readBackendMetric(ctx context.Context, addr string) ([]byte, error) {
 	httpCli := *br.httpCli
-	httpCli.Timeout = br.cfg.DialTimeout
+	httpCli.SetTimeout(br.cfg.DialTimeout)
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	return httputil.Get(httpCli, br.httpSchema, addr, backendMetricPath, b)
+	return httputil.Get(httpCli, addr, backendMetricPath, b)
 }
 
 // groupMetricsByRule gets the result for each rule of one backend.
@@ -363,9 +362,9 @@ func (br *BackendReader) GetBackendMetrics() ([]byte, error) {
 // If every member queries directly from backends, the backends may suffer from too much pressure.
 func (br *BackendReader) readFromOwner(ctx context.Context, addr string) error {
 	httpCli := *br.httpCli
-	httpCli.Timeout = br.cfg.DialTimeout
+	httpCli.SetTimeout(br.cfg.DialTimeout)
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	resp, err := httputil.Get(*br.httpCli, br.httpSchema, addr, ownerMetricPath, b)
+	resp, err := httputil.Get(*br.httpCli, addr, ownerMetricPath, b)
 	if err != nil {
 		return err
 	}

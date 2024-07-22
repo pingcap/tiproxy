@@ -9,7 +9,7 @@ package namespace
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"github.com/pingcap/tiproxy/pkg/util/httputil"
 	"reflect"
 	"sync"
 
@@ -28,7 +28,7 @@ type NamespaceManager struct {
 	tpFetcher     observer.TopologyFetcher
 	promFetcher   metricsreader.PromInfoFetcher
 	metricsReader metricsreader.MetricsReader
-	httpCli       *http.Client
+	httpCli       *httputil.Client
 	logger        *zap.Logger
 	cfgMgr        *mconfig.ConfigManager
 }
@@ -93,7 +93,7 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 }
 
 func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
-	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
+	promFetcher metricsreader.PromInfoFetcher, httpCli *httputil.Client, cfgMgr *mconfig.ConfigManager,
 	metricsReader metricsreader.MetricsReader) error {
 	mgr.Lock()
 	mgr.tpFetcher = tpFetcher
