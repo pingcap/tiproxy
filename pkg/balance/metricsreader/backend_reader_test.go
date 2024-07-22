@@ -65,7 +65,7 @@ func TestGetBackendAddrs(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	fetcher := newMockBackendFetcher(nil, nil)
-	br := NewBackendReader(lg, nil, nil, fetcher, nil)
+	br := NewBackendReader(lg, nil, nil, "", fetcher, nil)
 	for i, test := range tests {
 		fetcher.infos = test.backends
 		if test.hasErr {
@@ -180,7 +180,7 @@ func TestReadBackendMetric(t *testing.T) {
 	port := httpHandler.Start()
 	t.Cleanup(httpHandler.Close)
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	br := NewBackendReader(lg, nil, http.DefaultClient, nil, cfg)
+	br := NewBackendReader(lg, nil, http.DefaultClient, "", nil, cfg)
 	for i, test := range tests {
 		statusCode := http.StatusOK
 		if test.hasErr {
@@ -238,7 +238,7 @@ func TestOneRuleOneHistory(t *testing.T) {
 	mfs := mockMfs()
 	lg, _ := logger.CreateLoggerForTest(t)
 	for i, test := range tests {
-		br := NewBackendReader(lg, nil, nil, nil, nil)
+		br := NewBackendReader(lg, nil, nil, "", nil, nil)
 		br.queryRules = map[string]QueryRule{
 			"key": {
 				Names: test.names,
@@ -306,7 +306,7 @@ func TestOneRuleMultiHistory(t *testing.T) {
 
 	mfs := mockMfs()
 	lg, _ := logger.CreateLoggerForTest(t)
-	br := NewBackendReader(lg, nil, nil, nil, nil)
+	br := NewBackendReader(lg, nil, nil, "", nil, nil)
 	var lastTs model.Time
 	var length int
 	for i, test := range tests {
@@ -389,7 +389,7 @@ func TestMultiRules(t *testing.T) {
 
 	mfs := mockMfs()
 	lg, _ := logger.CreateLoggerForTest(t)
-	br := NewBackendReader(lg, nil, nil, nil, nil)
+	br := NewBackendReader(lg, nil, nil, "", nil, nil)
 	for i, test := range tests {
 		if test.hasRule1 {
 			br.queryRules["key1"] = rule1
@@ -490,7 +490,7 @@ func TestMergeQueryResult(t *testing.T) {
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
-	br := NewBackendReader(lg, nil, nil, nil, nil)
+	br := NewBackendReader(lg, nil, nil, "", nil, nil)
 	for i, test := range tests {
 		br.mergeQueryResult(test.backendValues, test.backend)
 		for id, expectedValue := range test.queryResult {
@@ -566,7 +566,7 @@ func TestPurgeHistory(t *testing.T) {
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
-	br := NewBackendReader(lg, nil, nil, nil, nil)
+	br := NewBackendReader(lg, nil, nil, "", nil, nil)
 	for i, test := range tests {
 		br.AddQueryRule(strconv.Itoa(i), QueryRule{
 			Retention: time.Minute,
@@ -614,7 +614,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	})
 
 	fetcher := newMockBackendFetcher(infos, nil)
-	br := NewBackendReader(lg, nil, http.DefaultClient, fetcher, cfg)
+	br := NewBackendReader(lg, nil, http.DefaultClient, "", fetcher, cfg)
 	// create 3 rules
 	addRule := func(id int) {
 		rule := QueryRule{
@@ -759,7 +759,7 @@ func TestReadFromOwner(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()
-	br := NewBackendReader(lg, nil, http.DefaultClient, nil, cfg)
+	br := NewBackendReader(lg, nil, http.DefaultClient, "", nil, cfg)
 	httpHandler := newMockHttpHandler(t)
 	port := httpHandler.Start()
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
