@@ -21,7 +21,7 @@ type Client struct {
 }
 
 func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
-	// Since TLS config will hot reload, TLSClientConfig need update by `getTLSConfig()`
+	// Since TLS config will hot reload, `TLSClientConfig` need update by `getTLSConfig()`
 	// to obtain the latest TLS config.
 	return &Client{
 		cli: &http.Client{
