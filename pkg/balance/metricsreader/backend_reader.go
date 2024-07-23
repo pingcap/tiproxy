@@ -9,6 +9,10 @@ import (
 	"fmt"
 	"math"
 	"net"
+<<<<<<< HEAD
+=======
+	"reflect"
+>>>>>>> 22e2d512 (balance, httputil: fix the http schema used when sending a `GET` request to server (#603))
 	"slices"
 	"strconv"
 	"strings"
@@ -20,10 +24,14 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
+<<<<<<< HEAD
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
+=======
+	"github.com/pingcap/tiproxy/pkg/util/http"
+>>>>>>> 22e2d512 (balance, httputil: fix the http schema used when sending a `GET` request to server (#603))
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -464,9 +472,15 @@ func (br *BackendReader) GetBackendMetrics() []byte {
 
 // readFromOwner queries metric history from the owner.
 // If every member queries directly from backends, the backends may suffer from too much pressure.
+<<<<<<< HEAD
 func (br *BackendReader) readFromOwner(ctx context.Context, ownerAddr string) error {
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
 	resp, err := br.httpCli.Get(ownerAddr, ownerMetricPath, b, br.cfg.DialTimeout)
+=======
+func (br *BackendReader) readFromOwner(ctx context.Context, addr string) error {
+	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
+	resp, err := br.httpCli.Get(addr, ownerMetricPath, b, br.cfg.DialTimeout)
+>>>>>>> 22e2d512 (balance, httputil: fix the http schema used when sending a `GET` request to server (#603))
 	if err != nil {
 		return err
 	}

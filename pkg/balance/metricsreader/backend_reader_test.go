@@ -6,7 +6,10 @@ package metricsreader
 import (
 	"context"
 	"crypto/tls"
+<<<<<<< HEAD
 	"encoding/json"
+=======
+>>>>>>> 22e2d512 (balance, httputil: fix the http schema used when sending a `GET` request to server (#603))
 	"fmt"
 	"math"
 	"math/rand"
@@ -234,7 +237,11 @@ func TestReadBackendMetric(t *testing.T) {
 	t.Cleanup(httpHandler.Close)
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
+<<<<<<< HEAD
 	br := NewBackendReader(lg, nil, cli, nil, nil, cfg)
+=======
+	br := NewBackendReader(lg, nil, cli, nil, cfg)
+>>>>>>> 22e2d512 (balance, httputil: fix the http schema used when sending a `GET` request to server (#603))
 	for i, test := range tests {
 		statusCode := http.StatusOK
 		if test.hasErr {
@@ -860,7 +867,11 @@ func TestQueryBackendConcurrently(t *testing.T) {
 
 	fetcher := newMockBackendFetcher(infos, nil)
 	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
+<<<<<<< HEAD
 	br := NewBackendReader(lg, nil, cli, nil, fetcher, cfg)
+=======
+	br := NewBackendReader(lg, nil, cli, fetcher, cfg)
+>>>>>>> 22e2d512 (balance, httputil: fix the http schema used when sending a `GET` request to server (#603))
 	// create 3 rules
 	addRule := func(id int) {
 		rule := QueryRule{
@@ -1068,8 +1079,12 @@ func TestReadFromOwner(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()
 	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
+<<<<<<< HEAD
 	ownerBr := NewBackendReader(lg, nil, nil, nil, nil, cfg)
 	memberBr := NewBackendReader(lg, nil, cli, nil, nil, cfg)
+=======
+	br := NewBackendReader(lg, nil, cli, nil, cfg)
+>>>>>>> 22e2d512 (balance, httputil: fix the http schema used when sending a `GET` request to server (#603))
 	httpHandler := newMockHttpHandler(t)
 	port := httpHandler.Start()
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
