@@ -5,7 +5,6 @@ package server
 
 import (
 	"context"
-	http "github.com/pingcap/tiproxy/pkg/util/httputil"
 	"reflect"
 	"runtime"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sctx"
 	"github.com/pingcap/tiproxy/pkg/server/api"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
+	http "github.com/pingcap/tiproxy/pkg/util/httputil"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"

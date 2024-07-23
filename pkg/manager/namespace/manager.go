@@ -9,7 +9,6 @@ package namespace
 import (
 	"context"
 	"fmt"
-	http "github.com/pingcap/tiproxy/pkg/util/httputil"
 	"reflect"
 	"sync"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	mconfig "github.com/pingcap/tiproxy/pkg/manager/config"
+	http "github.com/pingcap/tiproxy/pkg/util/httputil"
 	"go.uber.org/zap"
 )
 
