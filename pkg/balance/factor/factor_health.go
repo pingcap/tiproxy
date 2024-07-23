@@ -34,6 +34,7 @@ const (
 type errDefinition struct {
 	queryRule        metricsreader.QueryRule
 	promQL           string
+	key              string
 	failThreshold    int
 	recoverThreshold int
 }
@@ -65,6 +66,7 @@ var (
 			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[2m])) by (instance)`,
 			failThreshold:    50,
 			recoverThreshold: 10,
+			key:              "health_pd",
 			queryRule: metricsreader.QueryRule{
 				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
 				Retention: 2 * time.Minute,
@@ -87,7 +89,12 @@ var (
 					if len(pairs) < 2 {
 						return model.SampleValue(math.NaN())
 					}
-					return pairs[len(pairs)-1].Value - pairs[0].Value
+					diff := pairs[len(pairs)-1].Value - pairs[0].Value
+					// Maybe the backend just rebooted.
+					if diff < 0 {
+						return model.SampleValue(math.NaN())
+					}
+					return diff
 				},
 				ResultType: model.ValVector,
 			},
@@ -99,6 +106,7 @@ var (
 			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type=~"regionMiss|tikvRPC"}[2m])) by (instance)`,
 			failThreshold:    1000,
 			recoverThreshold: 100,
+			key:              "health_tikv",
 			queryRule: metricsreader.QueryRule{
 				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
 				Retention: 2 * time.Minute,
@@ -121,7 +129,12 @@ var (
 					if len(pairs) < 2 {
 						return model.SampleValue(math.NaN())
 					}
-					return pairs[len(pairs)-1].Value - pairs[0].Value
+					diff := pairs[len(pairs)-1].Value - pairs[0].Value
+					// Maybe the backend just rebooted.
+					if diff < 0 {
+						return model.SampleValue(math.NaN())
+					}
+					return diff
 				},
 				ResultType: model.ValVector,
 			},
@@ -141,8 +154,9 @@ type healthBackendSnapshot struct {
 
 type errIndicator struct {
 	queryExpr        metricsreader.QueryExpr
+	queryRule        metricsreader.QueryRule
 	queryResult      metricsreader.QueryResult
-	queryID          uint64
+	key              string
 	failThreshold    int
 	recoverThreshold int
 }
@@ -170,10 +184,12 @@ func initErrIndicator(mr metricsreader.MetricsReader) []errIndicator {
 			queryExpr: metricsreader.QueryExpr{
 				PromQL: def.promQL,
 			},
+			queryRule:        def.queryRule,
+			key:              def.key,
 			failThreshold:    def.failThreshold,
 			recoverThreshold: def.recoverThreshold,
 		}
-		indicator.queryID = mr.AddQueryExpr(indicator.queryExpr)
+		mr.AddQueryExpr(indicator.key, indicator.queryExpr, indicator.queryRule)
 		indicators = append(indicators, indicator)
 	}
 	return indicators
@@ -189,8 +205,8 @@ func (fh *FactorHealth) UpdateScore(backends []scoredBackend) {
 	}
 	needUpdateSnapshot, latestTime := false, monotime.Time(0)
 	for i := 0; i < len(fh.indicators); i++ {
-		qr := fh.mr.GetQueryResult(fh.indicators[i].queryID)
-		if qr.Err != nil || qr.Empty() {
+		qr := fh.mr.GetQueryResult(fh.indicators[i].key)
+		if qr.Empty() {
 			continue
 		}
 		if fh.indicators[i].queryResult.UpdateTime != qr.UpdateTime {
@@ -313,6 +329,6 @@ func (fh *FactorHealth) SetConfig(cfg *config.Config) {
 
 func (fh *FactorHealth) Close() {
 	for _, indicator := range fh.indicators {
-		fh.mr.RemoveQueryExpr(indicator.queryID)
+		fh.mr.RemoveQueryExpr(indicator.key)
 	}
 }

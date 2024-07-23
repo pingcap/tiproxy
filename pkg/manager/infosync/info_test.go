@@ -217,7 +217,7 @@ func TestGetPromInfo(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
 	info, err := ts.is.GetPromInfo(context.Background())
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrNoProm)
 	require.Nil(t, info)
 
 	pInfo := &PrometheusInfo{

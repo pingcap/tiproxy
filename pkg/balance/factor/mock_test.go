@@ -14,6 +14,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/prometheus/common/model"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 var _ policy.BackendCtx = (*mockBackend)(nil)
@@ -93,36 +94,26 @@ func (mf *mockFactor) Close() {
 var _ metricsreader.MetricsReader = (*mockMetricsReader)(nil)
 
 type mockMetricsReader struct {
-	queryID uint64
-	qrs     map[uint64]metricsreader.QueryResult
+	qrs map[string]metricsreader.QueryResult
 }
 
 func newMockMetricsReader() *mockMetricsReader {
 	return &mockMetricsReader{
-		qrs: make(map[uint64]metricsreader.QueryResult),
+		qrs: make(map[string]metricsreader.QueryResult),
 	}
 }
 
-func (mmr *mockMetricsReader) Start(ctx context.Context) {
+func (mmr *mockMetricsReader) Start(ctx context.Context, etcdCli *clientv3.Client) {
 }
 
-func (mmr *mockMetricsReader) AddQueryExpr(queryExpr metricsreader.QueryExpr) uint64 {
-	mmr.queryID++
-	return mmr.queryID
+func (mmr *mockMetricsReader) AddQueryExpr(key string, queryExpr metricsreader.QueryExpr, queryRule metricsreader.QueryRule) {
 }
 
-func (mmr *mockMetricsReader) RemoveQueryExpr(id uint64) {
+func (mmr *mockMetricsReader) RemoveQueryExpr(key string) {
 }
 
-func (mmr *mockMetricsReader) GetQueryResult(id uint64) metricsreader.QueryResult {
-	return mmr.qrs[id]
-}
-
-func (mmr *mockMetricsReader) Subscribe(receiverName string) <-chan struct{} {
-	return nil
-}
-
-func (mmr *mockMetricsReader) Unsubscribe(receiverName string) {
+func (mmr *mockMetricsReader) GetQueryResult(key string) metricsreader.QueryResult {
+	return mmr.qrs[key]
 }
 
 func (mmr *mockMetricsReader) Close() {

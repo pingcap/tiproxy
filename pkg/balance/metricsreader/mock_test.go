@@ -10,9 +10,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
+	"github.com/pingcap/tiproxy/pkg/manager/elect"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/testkit"
 	dto "github.com/prometheus/client_model/go"
@@ -148,4 +150,43 @@ func mockMfs() map[string]*dto.MetricFamily {
 		"name1": {Metric: []*dto.Metric{{Gauge: &dto.Gauge{Value: &floats[0]}}}},
 		"name2": {Metric: []*dto.Metric{{Gauge: &dto.Gauge{Value: &floats[1]}}}},
 	}
+}
+
+var _ elect.Election = (*mockElection)(nil)
+
+type mockElection struct {
+	owner   atomic.Pointer[string]
+	isOwner atomic.Bool
+}
+
+func newMockElection() *mockElection {
+	return &mockElection{}
+}
+
+func (m *mockElection) Start(context.Context) {
+}
+
+func (m *mockElection) Close() {
+}
+
+func (m *mockElection) GetOwnerID(ctx context.Context) (string, error) {
+	return *m.owner.Load(), nil
+}
+
+func (m *mockElection) IsOwner() bool {
+	return m.isOwner.Load()
+}
+
+type mockConfigGetter struct {
+	cfg *config.Config
+}
+
+func newMockConfigGetter(cfg *config.Config) *mockConfigGetter {
+	return &mockConfigGetter{
+		cfg: cfg,
+	}
+}
+
+func (cfgGetter *mockConfigGetter) GetConfig() *config.Config {
+	return cfgGetter.cfg
 }

@@ -53,7 +53,6 @@ type QueryRule struct {
 
 type QueryResult struct {
 	Value      model.Value
-	Err        error
 	UpdateTime monotime.Time
 }
 

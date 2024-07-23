@@ -83,8 +83,8 @@ func TestCPUBalanceOnce(t *testing.T) {
 			values = append(values, createSampleStream(test.cpus[j], j, model.Now()))
 		}
 		mmr := &mockMetricsReader{
-			qrs: map[uint64]metricsreader.QueryResult{
-				1: {
+			qrs: map[string]metricsreader.QueryResult{
+				"cpu": {
 					UpdateTime: monotime.Now(),
 					Value:      model.Matrix(values),
 				},
@@ -197,7 +197,7 @@ func TestCPUBalanceContinuously(t *testing.T) {
 			values = append(values, createSampleStream(test.cpus[j], j, curTime))
 		}
 		curTime = curTime.Add(time.Millisecond)
-		mmr.qrs[1] = metricsreader.QueryResult{
+		mmr.qrs["cpu"] = metricsreader.QueryResult{
 			UpdateTime: monotime.Now(),
 			Value:      model.Matrix(values),
 		}
@@ -251,7 +251,7 @@ func TestNoCPUMetric(t *testing.T) {
 			ss := createSampleStream(test.cpus[j], j, model.Time(test.updateTime/monotime.Time(time.Millisecond)))
 			values = append(values, ss)
 		}
-		mmr.qrs[1] = metricsreader.QueryResult{
+		mmr.qrs["cpu"] = metricsreader.QueryResult{
 			UpdateTime: test.updateTime,
 			Value:      model.Matrix(values),
 		}
@@ -290,7 +290,7 @@ func TestCPUResultNotUpdated(t *testing.T) {
 	for i, test := range tests {
 		array := []float64{test.cpu}
 		values := []*model.SampleStream{createSampleStream(array, 0, test.updateTime), createSampleStream(array, 1, test.updateTime)}
-		mmr.qrs[1] = metricsreader.QueryResult{
+		mmr.qrs["cpu"] = metricsreader.QueryResult{
 			UpdateTime: monotime.Now(),
 			Value:      model.Matrix(values),
 		}
@@ -329,6 +329,14 @@ tidb_server_maxprocs 2
 			timestamp:  model.Time(2000),
 			curValue:   6,
 			finalValue: 1,
+		},
+		{
+			text: `process_cpu_seconds_total 2
+tidb_server_maxprocs 2
+`,
+			timestamp:  model.Time(3000),
+			curValue:   1,
+			finalValue: model.SampleValue(math.NaN()),
 		},
 	}
 

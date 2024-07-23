@@ -100,7 +100,6 @@ type FactorMemory struct {
 	// The updated time of the metric that we've read last time.
 	lastMetricTime monotime.Time
 	mr             metricsreader.MetricsReader
-	queryID        uint64
 	bitNum         int
 }
 
@@ -112,12 +111,13 @@ func NewFactorMemory(mr metricsreader.MetricsReader) *FactorMemory {
 		}
 		levels = levels >> 1
 	}
-	return &FactorMemory{
+	fm := &FactorMemory{
 		mr:       mr,
-		queryID:  mr.AddQueryExpr(memQueryExpr),
 		bitNum:   bitNum,
 		snapshot: make(map[string]memBackendSnapshot),
 	}
+	mr.AddQueryExpr(fm.Name(), memQueryExpr, memoryQueryRule)
+	return fm
 }
 
 func (fm *FactorMemory) Name() string {
@@ -128,8 +128,8 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 	if len(backends) <= 1 {
 		return
 	}
-	qr := fm.mr.GetQueryResult(fm.queryID)
-	if qr.Err != nil || qr.Empty() {
+	qr := fm.mr.GetQueryResult(fm.Name())
+	if qr.Empty() {
 		return
 	}
 
@@ -270,5 +270,5 @@ func (fm *FactorMemory) SetConfig(cfg *config.Config) {
 }
 
 func (fm *FactorMemory) Close() {
-	fm.mr.RemoveQueryExpr(fm.queryID)
+	fm.mr.RemoveQueryExpr(fm.Name())
 }

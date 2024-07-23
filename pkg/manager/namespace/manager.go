@@ -146,6 +146,5 @@ func (mgr *NamespaceManager) Close() error {
 		ns.Close()
 	}
 	mgr.RUnlock()
-	mgr.metricsReader.Close()
 	return nil
 }
