@@ -18,7 +18,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	mconfig "github.com/pingcap/tiproxy/pkg/manager/config"
-	http "github.com/pingcap/tiproxy/pkg/util/httputil"
+	"github.com/pingcap/tiproxy/pkg/util/http"
 	"go.uber.org/zap"
 )
 

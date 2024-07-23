@@ -15,7 +15,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	http "github.com/pingcap/tiproxy/pkg/util/httputil"
+	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )

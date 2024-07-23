@@ -20,7 +20,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
-	http "github.com/pingcap/tiproxy/pkg/util/httputil"
+	"github.com/pingcap/tiproxy/pkg/util/http"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"

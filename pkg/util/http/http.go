@@ -1,7 +1,7 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package httputil
+package http
 
 import (
 	"crypto/tls"
