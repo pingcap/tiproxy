@@ -29,17 +29,17 @@ func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
 	}
 }
 
-func (c *Client) Get(addr, path string, b backoff.BackOff, timeout time.Duration) ([]byte, error) {
-	httpCli := NewHTTPClient(c.getTLSConfig)
-	httpCli.cli.Timeout = timeout
+func (client *Client) Get(addr, path string, b backoff.BackOff, timeout time.Duration) ([]byte, error) {
+	cli := *client.cli
+	cli.Timeout = timeout
 	schema := "http"
-	if tlsConfig := httpCli.getTLSConfig(); tlsConfig != nil {
+	if tlsConfig := client.getTLSConfig(); tlsConfig != nil {
 		schema = "https"
 	}
 	url := fmt.Sprintf("%s://%s%s", schema, addr, path)
 	var body []byte
 	err := ConnectWithRetry(func() error {
-		resp, err := httpCli.cli.Get(url)
+		resp, err := cli.Get(url)
 		if err != nil {
 			return err
 		}
