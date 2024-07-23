@@ -5,6 +5,7 @@ package observer
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net"
 	"strconv"
@@ -42,7 +43,7 @@ type DefaultHealthCheck struct {
 
 func NewDefaultHealthCheck(httpCli *http.Client, cfg *config.HealthCheck, logger *zap.Logger) *DefaultHealthCheck {
 	if httpCli == nil {
-		httpCli = &http.Client{}
+		httpCli = http.NewHTTPClient(func() *tls.Config { return nil })
 	}
 	return &DefaultHealthCheck{
 		httpCli: httpCli,

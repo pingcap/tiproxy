@@ -6,7 +6,6 @@ package metricsreader
 import (
 	"context"
 	"encoding/json"
-	http "github.com/pingcap/tiproxy/pkg/util/httputil"
 	"math"
 	"net"
 	"reflect"
@@ -21,6 +20,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
+	http "github.com/pingcap/tiproxy/pkg/util/httputil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
