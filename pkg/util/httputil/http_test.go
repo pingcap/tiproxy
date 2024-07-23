@@ -42,12 +42,6 @@ func TestHTTPGet(t *testing.T) {
 	_, err = Get(*httpCli, statusAddr, "", b)
 	require.Error(t, err)
 
-	_, err = Get(*httpCli, statusAddr, "", b)
-	require.Error(t, err)
-
-	_, err = Get(*httpCli, statusAddr, "", b)
-	require.Error(t, err)
-
 	httpCli.SetTimeout(time.Millisecond)
 	httpHandler.setHTTPWait(100 * time.Millisecond)
 	_, err = Get(*httpCli, statusAddr, "", b)
