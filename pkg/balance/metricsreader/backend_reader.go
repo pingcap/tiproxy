@@ -136,7 +136,6 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 	} else {
 		owner, err := br.election.GetOwnerID(ctx)
 		if err != nil {
-			br.lg.Error("get owner failed, won't read metrics", zap.Error(err))
 			return err
 		}
 		if err = br.readFromOwner(ctx, owner); err != nil {

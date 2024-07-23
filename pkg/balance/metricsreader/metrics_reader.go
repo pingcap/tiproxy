@@ -102,7 +102,7 @@ func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) {
 		dmr.setSource(sourceBackend, promErr)
 		return
 	}
-	dmr.lg.Info("read metrics failed", zap.NamedError("prometheus", promErr), zap.NamedError("backends", backendErr))
+	dmr.lg.Warn("read metrics failed", zap.NamedError("prometheus", promErr), zap.NamedError("backends", backendErr))
 }
 
 func (dmr *DefaultMetricsReader) setSource(source int32, err error) {

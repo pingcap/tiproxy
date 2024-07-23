@@ -85,6 +85,10 @@ func NewElection(lg *zap.Logger, etcdCli *clientv3.Client, cfg electionConfig, i
 }
 
 func (m *election) Start(ctx context.Context) {
+	// No PD.
+	if m.etcdCli == nil {
+		return
+	}
 	clientCtx, cancelFunc := context.WithCancel(ctx)
 	m.cancel = cancelFunc
 	// Don't recover because we don't know what will happen after recovery.
@@ -196,6 +200,9 @@ func (m *election) revokeLease(leaseID clientv3.LeaseID) {
 
 // GetOwnerID is similar to concurrency.Election.Leader() but it doesn't need an concurrency.Election.
 func (m *election) GetOwnerID(ctx context.Context) (string, error) {
+	if m.etcdCli == nil {
+		return "", concurrency.ErrElectionNoLeader
+	}
 	var resp *clientv3.GetResponse
 	err := retry.Retry(func() error {
 		childCtx, cancel := context.WithTimeout(ctx, m.cfg.timeout)
@@ -246,6 +253,8 @@ func (m *election) watchOwner(ctx context.Context, session *concurrency.Session,
 // Close is called before the instance is going to shutdown.
 // It should hand over the owner to someone else.
 func (m *election) Close() {
-	m.cancel()
+	if m.cancel != nil {
+		m.cancel()
+	}
 	m.wg.Wait()
 }
