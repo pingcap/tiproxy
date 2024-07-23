@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
 	"github.com/pingcap/tiproxy/pkg/util/http"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -292,10 +293,12 @@ func (br *BackendReader) history2Value(backend string) map[string]model.Value {
 
 // mergeQueryResult merges the result of one backend into the final result.
 func (br *BackendReader) mergeQueryResult(backendValues map[string]model.Value, backend string) {
+	now := monotime.Now()
 	br.Lock()
 	defer br.Unlock()
 	for ruleKey, value := range backendValues {
 		result := br.queryResults[ruleKey]
+		result.UpdateTime = now
 		if result.Value == nil || reflect.ValueOf(result.Value).IsNil() {
 			result.Value = value
 			br.queryResults[ruleKey] = result

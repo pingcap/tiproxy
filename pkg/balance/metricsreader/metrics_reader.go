@@ -33,7 +33,7 @@ type TopologyFetcher interface {
 }
 
 type MetricsReader interface {
-	Start(ctx context.Context, etcdCli *clientv3.Client)
+	Start(ctx context.Context, etcdCli *clientv3.Client) error
 	AddQueryExpr(key string, queryExpr QueryExpr, queryRule QueryRule)
 	RemoveQueryExpr(key string)
 	GetQueryResult(key string) QueryResult
@@ -62,8 +62,10 @@ func NewDefaultMetricsReader(lg *zap.Logger, promFetcher PromInfoFetcher, backen
 	}
 }
 
-func (dmr *DefaultMetricsReader) Start(ctx context.Context, etcdCli *clientv3.Client) {
-	dmr.backendReader.Start(ctx, etcdCli)
+func (dmr *DefaultMetricsReader) Start(ctx context.Context, etcdCli *clientv3.Client) error {
+	if err := dmr.backendReader.Start(ctx, etcdCli); err != nil {
+		return err
+	}
 	childCtx, cancel := context.WithCancel(ctx)
 	dmr.cancel = cancel
 	dmr.wg.RunWithRecover(func() {
@@ -78,6 +80,7 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context, etcdCli *clientv3.Cl
 			}
 		}
 	}, nil, dmr.lg)
+	return nil
 }
 
 // readMetrics reads from Prometheus first. If it fails, fall back to read backends.

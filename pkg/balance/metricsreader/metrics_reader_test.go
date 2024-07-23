@@ -13,6 +13,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	httputil "github.com/pingcap/tiproxy/pkg/util/http"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,7 @@ func TestFallback(t *testing.T) {
 	t.Cleanup(promHttpHandler.Close)
 	promFetcher := newMockPromFetcher(port)
 	f := func(reqBody string) string {
-		return `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"cpu"},"value":[1712738879.406,"100.0"]}]}}`
+		return `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"__name__":"cpu"},"value":[1000,"100.0"]}]}}`
 	}
 	promHttpHandler.getRespBody.Store(&f)
 
@@ -65,10 +66,14 @@ func TestFallback(t *testing.T) {
 	mr.backendReader.OnElected()
 
 	// read from prom
+	ts := monotime.Now()
 	mr.readMetrics(context.Background())
 	qr := mr.GetQueryResult("rule_id1")
 	require.False(t, qr.Empty())
 	require.Equal(t, model.SampleValue(100.0), qr.Value.(model.Vector)[0].Value)
+	require.Equal(t, model.Time(1000000), qr.Value.(model.Vector)[0].Timestamp)
+	require.GreaterOrEqual(t, qr.UpdateTime, ts)
+	ts = qr.UpdateTime
 
 	// read from backend
 	promHttpHandler.statusCode.Store(http.StatusInternalServerError)
@@ -76,4 +81,5 @@ func TestFallback(t *testing.T) {
 	qr = mr.GetQueryResult("rule_id1")
 	require.False(t, qr.Empty())
 	require.Equal(t, model.SampleValue(80.0), qr.Value.(model.Vector)[0].Value)
+	require.GreaterOrEqual(t, qr.UpdateTime, ts)
 }

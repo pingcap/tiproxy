@@ -103,7 +103,8 @@ func newMockMetricsReader() *mockMetricsReader {
 	}
 }
 
-func (mmr *mockMetricsReader) Start(ctx context.Context, etcdCli *clientv3.Client) {
+func (mmr *mockMetricsReader) Start(ctx context.Context, etcdCli *clientv3.Client) error {
+	return nil
 }
 
 func (mmr *mockMetricsReader) AddQueryExpr(key string, queryExpr metricsreader.QueryExpr, queryRule metricsreader.QueryRule) {

@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	httputil "github.com/pingcap/tiproxy/pkg/util/http"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -860,6 +861,7 @@ func TestElection(t *testing.T) {
 	t.Cleanup(br.Close)
 
 	// test not owner
+	ts := monotime.Now()
 	election.owner.Store(&addr)
 	election.isOwner.Store(false)
 	br.OnRetired()
@@ -868,6 +870,8 @@ func TestElection(t *testing.T) {
 	qr := br.GetQueryResult("rule_id1")
 	require.False(t, qr.Empty())
 	require.Equal(t, model.SampleValue(100.0), qr.Value.(model.Vector)[0].Value)
+	require.GreaterOrEqual(t, qr.UpdateTime, ts)
+	ts = qr.UpdateTime
 
 	// test owner
 	election.isOwner.Store(true)
@@ -877,6 +881,7 @@ func TestElection(t *testing.T) {
 	qr = br.GetQueryResult("rule_id1")
 	require.False(t, qr.Empty())
 	require.Equal(t, model.SampleValue(80.0), qr.Value.(model.Vector)[0].Value)
+	require.GreaterOrEqual(t, qr.UpdateTime, ts)
 }
 
 func setupTypicalBackendListener(t *testing.T, respBody string) (backendPort int, infos map[string]*infosync.TiDBTopologyInfo) {
