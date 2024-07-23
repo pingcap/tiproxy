@@ -5,9 +5,9 @@ package observer
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -15,7 +15,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/pingcap/tiproxy/pkg/util/httputil"
+	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
@@ -39,20 +39,14 @@ type DefaultHealthCheck struct {
 	cfg     *config.HealthCheck
 	logger  *zap.Logger
 	httpCli *http.Client
-	httpTLS bool
 }
 
 func NewDefaultHealthCheck(httpCli *http.Client, cfg *config.HealthCheck, logger *zap.Logger) *DefaultHealthCheck {
 	if httpCli == nil {
-		httpCli = http.DefaultClient
-	}
-	httpTLS := false
-	if v, ok := httpCli.Transport.(*http.Transport); ok && v != nil && v.TLSClientConfig != nil {
-		httpTLS = true
+		httpCli = http.NewHTTPClient(func() *tls.Config { return nil })
 	}
 	return &DefaultHealthCheck{
 		httpCli: httpCli,
-		httpTLS: httpTLS,
 		cfg:     cfg,
 		logger:  logger,
 	}
@@ -77,7 +71,7 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh *BackendHealth) {
 	// Also dial the SQL port just in case that the SQL port hangs.
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
-	err := httputil.ConnectWithRetry(func() error {
+	err := http.ConnectWithRetry(func() error {
 		startTime := monotime.Now()
 		conn, err := net.DialTimeout("tcp", addr, dhc.cfg.DialTimeout)
 		setPingBackendMetrics(addr, startTime)
@@ -112,11 +106,9 @@ func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *Backen
 		return
 	}
 
-	httpCli := *dhc.httpCli
-	httpCli.Timeout = dhc.cfg.DialTimeout
 	addr := net.JoinHostPort(info.IP, strconv.Itoa(int(info.StatusPort)))
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
-	resp, err := httputil.Get(httpCli, addr, statusPathSuffix, b)
+	resp, err := dhc.httpCli.Get(addr, statusPathSuffix, b, dhc.cfg.DialTimeout)
 	if err == nil {
 		var respBody backendHttpStatusRespBody
 		err = json.Unmarshal(resp, &respBody)

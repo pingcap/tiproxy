@@ -5,6 +5,7 @@ package metricsreader
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"math"
 	"math/rand"
@@ -20,6 +21,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
+	httputil "github.com/pingcap/tiproxy/pkg/util/http"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -180,7 +182,8 @@ func TestReadBackendMetric(t *testing.T) {
 	port := httpHandler.Start()
 	t.Cleanup(httpHandler.Close)
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	br := NewBackendReader(lg, nil, http.DefaultClient, nil, cfg)
+	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
+	br := NewBackendReader(lg, nil, cli, nil, cfg)
 	for i, test := range tests {
 		statusCode := http.StatusOK
 		if test.hasErr {
@@ -614,7 +617,8 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	})
 
 	fetcher := newMockBackendFetcher(infos, nil)
-	br := NewBackendReader(lg, nil, http.DefaultClient, fetcher, cfg)
+	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
+	br := NewBackendReader(lg, nil, cli, fetcher, cfg)
 	// create 3 rules
 	addRule := func(id int) {
 		rule := QueryRule{
@@ -759,7 +763,8 @@ func TestReadFromOwner(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()
-	br := NewBackendReader(lg, nil, http.DefaultClient, nil, cfg)
+	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
+	br := NewBackendReader(lg, nil, cli, nil, cfg)
 	httpHandler := newMockHttpHandler(t)
 	port := httpHandler.Start()
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))

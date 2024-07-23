@@ -5,7 +5,6 @@ package server
 
 import (
 	"context"
-	"net/http"
 	"reflect"
 	"runtime"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sctx"
 	"github.com/pingcap/tiproxy/pkg/server/api"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
+	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
@@ -106,11 +106,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// general cluster HTTP client
 	{
-		srv.httpCli = &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: srv.certManager.ClusterTLS(),
-			},
-		}
+		srv.httpCli = http.NewHTTPClient(srv.certManager.ClusterTLS)
 	}
 
 	// setup info syncer

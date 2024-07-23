@@ -1,27 +1,45 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package httputil
+package http
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
-func Get(httpCli http.Client, addr, path string, b backoff.BackOff) ([]byte, error) {
+type Client struct {
+	cli          *http.Client
+	getTLSConfig func() *tls.Config
+}
+
+func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
+	return &Client{
+		cli: &http.Client{
+			Transport: &http.Transport{TLSClientConfig: getTLSConfig()},
+		},
+		getTLSConfig: getTLSConfig,
+	}
+}
+
+func (client *Client) Get(addr, path string, b backoff.BackOff, timeout time.Duration) ([]byte, error) {
+	cli := *client.cli
+	cli.Timeout = timeout
 	schema := "http"
-	if v, ok := httpCli.Transport.(*http.Transport); ok && v != nil && v.TLSClientConfig != nil {
+	if tlsConfig := client.getTLSConfig(); tlsConfig != nil {
 		schema = "https"
 	}
 	url := fmt.Sprintf("%s://%s%s", schema, addr, path)
 	var body []byte
 	err := ConnectWithRetry(func() error {
-		resp, err := httpCli.Get(url)
+		resp, err := cli.Get(url)
 		if err != nil {
 			return err
 		}

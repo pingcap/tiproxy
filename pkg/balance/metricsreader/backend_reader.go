@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"math"
 	"net"
-	"net/http"
 	"reflect"
 	"slices"
 	"strconv"
@@ -21,7 +20,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
-	"github.com/pingcap/tiproxy/pkg/util/httputil"
+	"github.com/pingcap/tiproxy/pkg/util/http"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -203,10 +202,8 @@ func (br *BackendReader) collectAllNames() []string {
 }
 
 func (br *BackendReader) readBackendMetric(ctx context.Context, addr string) ([]byte, error) {
-	httpCli := *br.httpCli
-	httpCli.Timeout = br.cfg.DialTimeout
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	return httputil.Get(httpCli, addr, backendMetricPath, b)
+	return br.httpCli.Get(addr, backendMetricPath, b, br.cfg.DialTimeout)
 }
 
 // groupMetricsByRule gets the result for each rule of one backend.
@@ -360,10 +357,8 @@ func (br *BackendReader) GetBackendMetrics() ([]byte, error) {
 // readFromOwner queries metric history from the owner.
 // If every member queries directly from backends, the backends may suffer from too much pressure.
 func (br *BackendReader) readFromOwner(ctx context.Context, addr string) error {
-	httpCli := *br.httpCli
-	httpCli.Timeout = br.cfg.DialTimeout
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	resp, err := httputil.Get(*br.httpCli, addr, ownerMetricPath, b)
+	resp, err := br.httpCli.Get(addr, ownerMetricPath, b, br.cfg.DialTimeout)
 	if err != nil {
 		return err
 	}

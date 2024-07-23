@@ -1,10 +1,11 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package httputil
+package http
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"testing"
 	"time"
@@ -28,29 +29,26 @@ func TestHTTPGet(t *testing.T) {
 	wg.Run(func() {
 		_ = statusServer.Serve(statusListener)
 	})
-
-	httpCli := *http.DefaultClient
-	httpCli.Timeout = time.Second
+	httpCli := NewHTTPClient(func() *tls.Config { return nil })
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Millisecond), uint64(2)), context.Background())
 
-	resp, err := Get(httpCli, statusAddr, "", b)
+	resp, err := httpCli.Get(statusAddr, "", b, time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "hello", string(resp))
 
 	httpHandler.setHTTPResp(false)
-	_, err = Get(httpCli, statusAddr, "", b)
+	_, err = httpCli.Get(statusAddr, "", b, time.Second)
 	require.Error(t, err)
 
-	httpCli.Timeout = time.Millisecond
 	httpHandler.setHTTPWait(100 * time.Millisecond)
-	_, err = Get(httpCli, statusAddr, "", b)
+	_, err = httpCli.Get(statusAddr, "", b, time.Millisecond)
 	require.Error(t, err)
 
 	err = statusServer.Close()
 	require.NoError(t, err)
 	wg.Wait()
 
-	_, err = Get(httpCli, statusAddr, "", b)
+	_, err = httpCli.Get(statusAddr, "", b, time.Millisecond)
 	require.Error(t, err)
 }
 
