@@ -6,6 +6,7 @@ package metricsreader
 import (
 	"context"
 	"encoding/json"
+	http "github.com/pingcap/tiproxy/pkg/util/httputil"
 	"math"
 	"net"
 	"reflect"
@@ -20,7 +21,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
-	"github.com/pingcap/tiproxy/pkg/util/httputil"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -60,14 +60,14 @@ type BackendReader struct {
 	election          elect.Election
 	cfgGetter         config.ConfigGetter
 	backendFetcher    TopologyFetcher
-	httpCli           *httputil.Client
+	httpCli           *http.Client
 	lg                *zap.Logger
 	cfg               *config.HealthCheck
 	wgp               *waitgroup.WaitGroupPool
 	isOwner           atomic.Bool
 }
 
-func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *httputil.Client, backendFetcher TopologyFetcher,
+func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *http.Client, backendFetcher TopologyFetcher,
 	cfg *config.HealthCheck) *BackendReader {
 	return &BackendReader{
 		queryRules:     make(map[string]QueryRule),
@@ -202,10 +202,8 @@ func (br *BackendReader) collectAllNames() []string {
 }
 
 func (br *BackendReader) readBackendMetric(ctx context.Context, addr string) ([]byte, error) {
-	httpCli := *br.httpCli
-	httpCli.SetTimeout(br.cfg.DialTimeout)
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	return httputil.Get(httpCli, addr, backendMetricPath, b)
+	return http.Get(*br.httpCli, addr, backendMetricPath, b, br.cfg.DialTimeout)
 }
 
 // groupMetricsByRule gets the result for each rule of one backend.
@@ -359,10 +357,8 @@ func (br *BackendReader) GetBackendMetrics() ([]byte, error) {
 // readFromOwner queries metric history from the owner.
 // If every member queries directly from backends, the backends may suffer from too much pressure.
 func (br *BackendReader) readFromOwner(ctx context.Context, addr string) error {
-	httpCli := *br.httpCli
-	httpCli.SetTimeout(br.cfg.DialTimeout)
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	resp, err := httputil.Get(*br.httpCli, addr, ownerMetricPath, b)
+	resp, err := http.Get(*br.httpCli, addr, ownerMetricPath, b, br.cfg.DialTimeout)
 	if err != nil {
 		return err
 	}

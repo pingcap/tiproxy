@@ -22,20 +22,19 @@ type Client struct {
 
 func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
 	return &Client{
-		cli:          http.DefaultClient,
+		cli: &http.Client{
+			Transport: &http.Transport{TLSClientConfig: getTLSConfig()},
+		},
 		getTLSConfig: getTLSConfig,
 	}
 }
 
-func (c *Client) SetTimeout(t time.Duration) {
-	c.cli.Timeout = t
-}
-
-func Get(httpCli Client, addr, path string, b backoff.BackOff) ([]byte, error) {
+func Get(c Client, addr, path string, b backoff.BackOff, timeout time.Duration) ([]byte, error) {
+	httpCli := NewHTTPClient(c.getTLSConfig)
+	httpCli.cli.Timeout = timeout
 	schema := "http"
 	if tlsConfig := httpCli.getTLSConfig(); tlsConfig != nil {
 		schema = "https"
-		httpCli.cli.Transport = &http.Transport{TLSClientConfig: tlsConfig}
 	}
 	url := fmt.Sprintf("%s://%s%s", schema, addr, path)
 	var body []byte

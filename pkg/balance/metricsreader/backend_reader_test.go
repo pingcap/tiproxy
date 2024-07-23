@@ -5,8 +5,8 @@ package metricsreader
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
-	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/util/httputil"
 	"math"
 	"math/rand"
@@ -182,8 +182,7 @@ func TestReadBackendMetric(t *testing.T) {
 	port := httpHandler.Start()
 	t.Cleanup(httpHandler.Close)
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	certManager := cert.NewCertManager()
-	cli := httputil.NewHTTPClient(certManager.ClusterTLS)
+	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
 	br := NewBackendReader(lg, nil, cli, nil, cfg)
 	for i, test := range tests {
 		statusCode := http.StatusOK
@@ -618,8 +617,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	})
 
 	fetcher := newMockBackendFetcher(infos, nil)
-	certManager := cert.NewCertManager()
-	cli := httputil.NewHTTPClient(certManager.ClusterTLS)
+	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
 	br := NewBackendReader(lg, nil, cli, fetcher, cfg)
 	// create 3 rules
 	addRule := func(id int) {
@@ -765,8 +763,7 @@ func TestReadFromOwner(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()
-	certManager := cert.NewCertManager()
-	cli := httputil.NewHTTPClient(certManager.ClusterTLS)
+	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
 	br := NewBackendReader(lg, nil, cli, nil, cfg)
 	httpHandler := newMockHttpHandler(t)
 	port := httpHandler.Start()
