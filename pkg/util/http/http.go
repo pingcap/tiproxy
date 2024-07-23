@@ -29,7 +29,7 @@ func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
 	}
 }
 
-func Get(c Client, addr, path string, b backoff.BackOff, timeout time.Duration) ([]byte, error) {
+func (c *Client) Get(addr, path string, b backoff.BackOff, timeout time.Duration) ([]byte, error) {
 	httpCli := NewHTTPClient(c.getTLSConfig)
 	httpCli.cli.Timeout = timeout
 	schema := "http"

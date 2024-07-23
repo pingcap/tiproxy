@@ -108,7 +108,7 @@ func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *Backen
 
 	addr := net.JoinHostPort(info.IP, strconv.Itoa(int(info.StatusPort)))
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
-	resp, err := http.Get(*dhc.httpCli, addr, statusPathSuffix, b, dhc.cfg.DialTimeout)
+	resp, err := dhc.httpCli.Get(addr, statusPathSuffix, b, dhc.cfg.DialTimeout)
 	if err == nil {
 		var respBody backendHttpStatusRespBody
 		err = json.Unmarshal(resp, &respBody)

@@ -32,23 +32,23 @@ func TestHTTPGet(t *testing.T) {
 	httpCli := NewHTTPClient(func() *tls.Config { return nil })
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Millisecond), uint64(2)), context.Background())
 
-	resp, err := Get(*httpCli, statusAddr, "", b, time.Second)
+	resp, err := httpCli.Get(statusAddr, "", b, time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "hello", string(resp))
 
 	httpHandler.setHTTPResp(false)
-	_, err = Get(*httpCli, statusAddr, "", b, time.Second)
+	_, err = httpCli.Get(statusAddr, "", b, time.Second)
 	require.Error(t, err)
 
 	httpHandler.setHTTPWait(100 * time.Millisecond)
-	_, err = Get(*httpCli, statusAddr, "", b, time.Millisecond)
+	_, err = httpCli.Get(statusAddr, "", b, time.Millisecond)
 	require.Error(t, err)
 
 	err = statusServer.Close()
 	require.NoError(t, err)
 	wg.Wait()
 
-	_, err = Get(*httpCli, statusAddr, "", b, time.Millisecond)
+	_, err = httpCli.Get(statusAddr, "", b, time.Millisecond)
 	require.Error(t, err)
 }
 

@@ -203,7 +203,7 @@ func (br *BackendReader) collectAllNames() []string {
 
 func (br *BackendReader) readBackendMetric(ctx context.Context, addr string) ([]byte, error) {
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	return http.Get(*br.httpCli, addr, backendMetricPath, b, br.cfg.DialTimeout)
+	return br.httpCli.Get(addr, backendMetricPath, b, br.cfg.DialTimeout)
 }
 
 // groupMetricsByRule gets the result for each rule of one backend.
@@ -358,7 +358,7 @@ func (br *BackendReader) GetBackendMetrics() ([]byte, error) {
 // If every member queries directly from backends, the backends may suffer from too much pressure.
 func (br *BackendReader) readFromOwner(ctx context.Context, addr string) error {
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	resp, err := http.Get(*br.httpCli, addr, ownerMetricPath, b, br.cfg.DialTimeout)
+	resp, err := br.httpCli.Get(addr, ownerMetricPath, b, br.cfg.DialTimeout)
 	if err != nil {
 		return err
 	}
