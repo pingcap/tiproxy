@@ -61,7 +61,6 @@ type BackendReader struct {
 	cfgGetter         config.ConfigGetter
 	backendFetcher    TopologyFetcher
 	httpCli           *httputil.Client
-	httpSchema        string
 	lg                *zap.Logger
 	cfg               *config.HealthCheck
 	wgp               *waitgroup.WaitGroupPool
