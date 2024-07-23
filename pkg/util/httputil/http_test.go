@@ -5,6 +5,7 @@ package httputil
 
 import (
 	"context"
+	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"net/http"
 	"testing"
 	"time"
@@ -28,8 +29,8 @@ func TestHTTPGet(t *testing.T) {
 	wg.Run(func() {
 		_ = statusServer.Serve(statusListener)
 	})
-
-	httpCli := NewHTTPClient(nil)
+	certManager := cert.NewCertManager()
+	httpCli := NewHTTPClient(certManager.ClusterTLS)
 	httpCli.SetTimeout(time.Second)
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Millisecond), uint64(2)), context.Background())
 

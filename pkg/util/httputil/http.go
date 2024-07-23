@@ -6,7 +6,6 @@ package httputil
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"io"
 	"net/http"
 	"time"
@@ -21,15 +20,10 @@ type Client struct {
 	getTLSConfig func() *tls.Config
 }
 
-func NewHTTPClient(certManager *cert.CertManager) *Client {
-	if certManager == nil {
-		certManager = cert.NewCertManager()
-	}
+func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
 	return &Client{
-		cli: http.DefaultClient,
-		getTLSConfig: func() *tls.Config {
-			return certManager.ClusterTLS()
-		},
+		cli:          http.DefaultClient,
+		getTLSConfig: getTLSConfig,
 	}
 }
 

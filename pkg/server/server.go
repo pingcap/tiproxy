@@ -106,7 +106,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// general cluster HTTP client
 	{
-		srv.httpCli = httputil.NewHTTPClient(srv.certManager)
+		srv.httpCli = httputil.NewHTTPClient(srv.certManager.ClusterTLS)
 	}
 
 	// setup info syncer
