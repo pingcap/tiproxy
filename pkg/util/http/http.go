@@ -21,6 +21,8 @@ type Client struct {
 }
 
 func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
+	// Since TLS config will hot reload, `TLSClientConfig` need update by `getTLSConfig()`
+	// to obtain the latest TLS config.
 	return &Client{
 		cli: &http.Client{
 			Transport: &http.Transport{TLSClientConfig: getTLSConfig()},
@@ -30,9 +32,14 @@ func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
 }
 
 func (client *Client) Get(addr, path string, b backoff.BackOff, timeout time.Duration) ([]byte, error) {
+	// http cli is shared in the server, copy cli is to avoid concurrently setting http request timeout
 	cli := *client.cli
 	cli.Timeout = timeout
 	schema := "http"
+	// If the `http.Client.Transport.TLSClientConfig` is nil, it will be set to not nil when first time
+	// calling `http.Client.Get()`. So the url schema decided by `client.getTLSConfig()`, which indicate
+	// TiProxy server contain TLS config or not.
+	// See https://github.com/pingcap/tiproxy/issues/602
 	if tlsConfig := client.getTLSConfig(); tlsConfig != nil {
 		schema = "https"
 	}
