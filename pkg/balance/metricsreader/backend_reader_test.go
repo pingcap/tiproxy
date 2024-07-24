@@ -6,6 +6,7 @@ package metricsreader
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -22,6 +23,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	httputil "github.com/pingcap/tiproxy/pkg/util/http"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -204,7 +206,7 @@ func TestReadBackendMetric(t *testing.T) {
 	}
 }
 
-// test groupMetricsByRule
+// test metric2History and history2Value
 func TestOneRuleOneHistory(t *testing.T) {
 	tests := []struct {
 		names      []string
@@ -255,7 +257,8 @@ func TestOneRuleOneHistory(t *testing.T) {
 			},
 		}
 
-		res := br.groupMetricsByRule(mfs, "backend")
+		br.metric2History(mfs, "backend")
+		res := br.history2Value("backend")
 		value := res["key"]
 		switch test.returnType {
 		case model.ValVector:
@@ -279,7 +282,7 @@ func TestOneRuleOneHistory(t *testing.T) {
 	}
 }
 
-// test groupMetricsByRule
+// test metric2History and history2Value
 func TestOneRuleMultiHistory(t *testing.T) {
 	tests := []struct {
 		step1Value model.SampleValue
@@ -326,10 +329,10 @@ func TestOneRuleMultiHistory(t *testing.T) {
 			},
 		}
 
-		res := br.groupMetricsByRule(mfs, "backend")
+		br.metric2History(mfs, "backend")
+		res := br.history2Value("backend")
 		value := res["key"]
 		if math.IsNaN(float64(test.step2Value)) {
-			require.Nil(t, value, "case %d", i)
 			continue
 		}
 		length++
@@ -345,7 +348,7 @@ func TestOneRuleMultiHistory(t *testing.T) {
 	}
 }
 
-// test groupMetricsByRule
+// test metric2History and history2Value
 func TestMultiRules(t *testing.T) {
 	returnedValues := []model.SampleValue{model.SampleValue(1), model.SampleValue(2)}
 	rule1 := QueryRule{
@@ -406,7 +409,8 @@ func TestMultiRules(t *testing.T) {
 		} else {
 			delete(br.queryRules, "key2")
 		}
-		res := br.groupMetricsByRule(mfs, "backend")
+		br.metric2History(mfs, "backend")
+		res := br.history2Value("backend")
 		require.Len(t, res, len(br.queryRules), "case %d", i)
 
 		if test.hasRule1 {
@@ -798,4 +802,102 @@ func TestReadFromOwner(t *testing.T) {
 		require.NoError(t, err, "case %d", i)
 		require.Equal(t, data, data2, "case %d", i)
 	}
+}
+
+func TestElection(t *testing.T) {
+	// setup backend
+	backendPort, infos := setupTypicalBackendListener(t, "cpu 80.0\n")
+
+	// setup history
+	now := model.Time(time.Now().UnixMilli())
+	backendKey := net.JoinHostPort("127.0.0.1", strconv.Itoa(backendPort))
+	history := map[string]map[string]backendHistory{
+		"rule_id1": {
+			backendKey: {
+				Step1History: []model.SamplePair{
+					{Timestamp: now, Value: 100.0},
+				},
+				Step2History: []model.SamplePair{
+					{Timestamp: now, Value: 100.0},
+				},
+			},
+		},
+	}
+	hitoryText, err := json.Marshal(history)
+	require.NoError(t, err)
+
+	// setup rule
+	rule := QueryRule{
+		Names:     []string{"cpu"},
+		Retention: time.Minute,
+		Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+			return model.SampleValue(*mfs["cpu"].Metric[0].Untyped.Value)
+		},
+		Range2Value: func(pairs []model.SamplePair) model.SampleValue {
+			return pairs[len(pairs)-1].Value
+		},
+		ResultType: model.ValVector,
+	}
+
+	// setup owner listener
+	ownerHttpHandler := newMockHttpHandler(t)
+	ownerPort := ownerHttpHandler.Start()
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(ownerPort))
+	ownerFunc := func(_ string) string {
+		return string(hitoryText)
+	}
+	ownerHttpHandler.getRespBody.Store(&ownerFunc)
+	t.Cleanup(ownerHttpHandler.Close)
+
+	// setup backend reader
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newHealthCheckConfigForTest()
+	fetcher := newMockBackendFetcher(infos, nil)
+	httpCli := httputil.NewHTTPClient(func() *tls.Config { return nil })
+	br := NewBackendReader(lg, nil, httpCli, fetcher, cfg)
+	election := newMockElection()
+	br.election = election
+	br.AddQueryRule("rule_id1", rule)
+	t.Cleanup(br.Close)
+
+	// test not owner
+	ts := monotime.Now()
+	election.owner.Store(&addr)
+	election.isOwner.Store(false)
+	br.OnRetired()
+	err = br.ReadMetrics(context.Background())
+	require.NoError(t, err)
+	qr := br.GetQueryResult("rule_id1")
+	require.False(t, qr.Empty())
+	require.Equal(t, model.SampleValue(100.0), qr.Value.(model.Vector)[0].Value)
+	require.GreaterOrEqual(t, qr.UpdateTime, ts)
+	ts = qr.UpdateTime
+
+	// test owner
+	election.isOwner.Store(true)
+	br.OnElected()
+	err = br.ReadMetrics(context.Background())
+	require.NoError(t, err)
+	qr = br.GetQueryResult("rule_id1")
+	require.False(t, qr.Empty())
+	require.Equal(t, model.SampleValue(80.0), qr.Value.(model.Vector)[0].Value)
+	require.GreaterOrEqual(t, qr.UpdateTime, ts)
+}
+
+func setupTypicalBackendListener(t *testing.T, respBody string) (backendPort int, infos map[string]*infosync.TiDBTopologyInfo) {
+	// setup backend listener
+	backendHttpHandler := newMockHttpHandler(t)
+	backendFunc := func(reqBody string) string {
+		return respBody
+	}
+	backendHttpHandler.getRespBody.Store(&backendFunc)
+	backendPort = backendHttpHandler.Start()
+	infos = map[string]*infosync.TiDBTopologyInfo{
+		"127.0.0.1:4000": {
+			IP:         "127.0.0.1",
+			StatusPort: uint(backendPort),
+		},
+	}
+	t.Cleanup(backendHttpHandler.Close)
+	return
 }

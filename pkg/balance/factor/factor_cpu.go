@@ -56,6 +56,10 @@ var (
 			if timeDiff < 1e-4 {
 				return model.SampleValue(math.NaN())
 			}
+			// Maybe the backend just rebooted.
+			if pair1.Value > pair2.Value {
+				return model.SampleValue(math.NaN())
+			}
 			return (pair2.Value - pair1.Value) / model.SampleValue(timeDiff)
 		},
 		ResultType: model.ValMatrix,
@@ -80,17 +84,17 @@ type FactorCPU struct {
 	// The estimated average CPU usage used by one connection.
 	usagePerConn float64
 	mr           metricsreader.MetricsReader
-	queryID      uint64
 	bitNum       int
 }
 
 func NewFactorCPU(mr metricsreader.MetricsReader) *FactorCPU {
-	return &FactorCPU{
+	fc := &FactorCPU{
 		mr:       mr,
-		queryID:  mr.AddQueryExpr(cpuQueryExpr),
 		bitNum:   5,
 		snapshot: make(map[string]cpuBackendSnapshot),
 	}
+	mr.AddQueryExpr(fc.Name(), cpuQueryExpr, cpuQueryRule)
+	return fc
 }
 
 func (fc *FactorCPU) Name() string {
@@ -101,8 +105,8 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 	if len(backends) <= 1 {
 		return
 	}
-	qr := fc.mr.GetQueryResult(fc.queryID)
-	if qr.Err != nil || qr.Empty() {
+	qr := fc.mr.GetQueryResult(fc.Name())
+	if qr.Empty() {
 		return
 	}
 
@@ -250,5 +254,5 @@ func (fc *FactorCPU) SetConfig(cfg *config.Config) {
 }
 
 func (fc *FactorCPU) Close() {
-	fc.mr.RemoveQueryExpr(fc.queryID)
+	fc.mr.RemoveQueryExpr(fc.Name())
 }

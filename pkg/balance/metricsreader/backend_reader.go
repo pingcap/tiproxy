@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
 	"github.com/pingcap/tiproxy/pkg/util/http"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -49,7 +50,9 @@ type backendHistory struct {
 
 type BackendReader struct {
 	sync.Mutex
-	queryRules   map[string]QueryRule
+	// rule key: QueryRule
+	queryRules map[string]QueryRule
+	// rule key: QueryResult
 	queryResults map[string]QueryResult
 	// the owner generates the history from querying backends and other members query the history from the owner
 	// rule key: {backend name: backendHistory}
@@ -125,22 +128,21 @@ func (br *BackendReader) GetQueryResult(key string) QueryResult {
 	return br.queryResults[key]
 }
 
-func (br *BackendReader) ReadMetrics(ctx context.Context) (map[string]QueryResult, error) {
+func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 	if br.isOwner.Load() {
 		if err := br.readFromBackends(ctx); err != nil {
-			return nil, err
+			return err
 		}
 	} else {
 		owner, err := br.election.GetOwnerID(ctx)
 		if err != nil {
-			br.lg.Error("get owner failed, won't read metrics", zap.Error(err))
-			return nil, err
+			return err
 		}
 		if err = br.readFromOwner(ctx, owner); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return br.queryResults, nil
+	return nil
 }
 
 func (br *BackendReader) readFromBackends(ctx context.Context) error {
@@ -173,7 +175,8 @@ func (br *BackendReader) readFromBackends(ctx context.Context) error {
 					br.lg.Error("parse metrics failed", zap.String("addr", addr), zap.Error(err))
 					return
 				}
-				result := br.groupMetricsByRule(mf, addr)
+				br.metric2History(mf, addr)
+				result := br.history2Value(addr)
 				br.mergeQueryResult(result, addr)
 			}, nil, br.lg)
 		}(addr)
@@ -206,13 +209,12 @@ func (br *BackendReader) readBackendMetric(ctx context.Context, addr string) ([]
 	return br.httpCli.Get(addr, backendMetricPath, b, br.cfg.DialTimeout)
 }
 
-// groupMetricsByRule gets the result for each rule of one backend.
-func (br *BackendReader) groupMetricsByRule(mfs map[string]*dto.MetricFamily, backend string) map[string]model.Value {
+// metric2History appends the metrics to history for each rule of one backend.
+func (br *BackendReader) metric2History(mfs map[string]*dto.MetricFamily, backend string) {
 	now := model.TimeFromUnixNano(time.Now().UnixNano())
 	br.Lock()
 	defer br.Unlock()
-	// rule key: backend value
-	results := make(map[string]model.Value, len(br.queryRules))
+
 	for ruleKey, rule := range br.queryRules {
 		// If the metric doesn't exist, skip it.
 		metricExists := true
@@ -249,14 +251,32 @@ func (br *BackendReader) groupMetricsByRule(mfs map[string]*dto.MetricFamily, ba
 		}
 		beHistory.Step2History = append(beHistory.Step2History, model.SamplePair{Timestamp: now, Value: sampleValue})
 		ruleHistory[backend] = beHistory
+	}
+}
 
-		// step 3: return the result
-		// E.g. return the metrics for 1 minute as a matrix
-		labels := map[model.LabelName]model.LabelValue{LabelNameInstance: model.LabelValue(backend)}
+// history2Value converts the history to results for all rules of one backend.
+// E.g. return the metrics for 1 minute as a matrix
+func (br *BackendReader) history2Value(backend string) map[string]model.Value {
+	results := make(map[string]model.Value, len(br.queryRules))
+	labels := map[model.LabelName]model.LabelValue{LabelNameInstance: model.LabelValue(backend)}
+	br.Lock()
+	defer br.Unlock()
+
+	for ruleKey, rule := range br.queryRules {
+		ruleHistory := br.history[ruleKey]
+		if len(ruleHistory) == 0 {
+			continue
+		}
+		beHistory := ruleHistory[backend]
+		if len(beHistory.Step2History) == 0 {
+			continue
+		}
+
 		switch rule.ResultType {
 		case model.ValVector:
 			// vector indicates returning the latest pair
-			results[ruleKey] = model.Vector{{Value: sampleValue, Timestamp: now, Metric: labels}}
+			lastPair := beHistory.Step2History[len(beHistory.Step2History)-1]
+			results[ruleKey] = model.Vector{{Value: lastPair.Value, Timestamp: lastPair.Timestamp, Metric: labels}}
 		case model.ValMatrix:
 			// matrix indicates returning the history
 			// copy a slice to avoid data race
@@ -272,10 +292,12 @@ func (br *BackendReader) groupMetricsByRule(mfs map[string]*dto.MetricFamily, ba
 
 // mergeQueryResult merges the result of one backend into the final result.
 func (br *BackendReader) mergeQueryResult(backendValues map[string]model.Value, backend string) {
+	now := monotime.Now()
 	br.Lock()
 	defer br.Unlock()
 	for ruleKey, value := range backendValues {
 		result := br.queryResults[ruleKey]
+		result.UpdateTime = now
 		if result.Value == nil || reflect.ValueOf(result.Value).IsNil() {
 			result.Value = value
 			br.queryResults[ruleKey] = result
@@ -372,6 +394,18 @@ func (br *BackendReader) readFromOwner(ctx context.Context, addr string) error {
 	br.history = newHistory
 	br.marshalledHistory = nil
 	br.Unlock()
+
+	backends := make(map[string]struct{})
+	for _, ruleHistory := range newHistory {
+		for backend := range ruleHistory {
+			backends[backend] = struct{}{}
+		}
+	}
+
+	for backend := range backends {
+		result := br.history2Value(backend)
+		br.mergeQueryResult(result, backend)
+	}
 	return nil
 }
 

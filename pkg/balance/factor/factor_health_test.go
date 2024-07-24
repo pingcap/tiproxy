@@ -64,12 +64,12 @@ func TestHealthScore(t *testing.T) {
 		values2 = append(values2, createSample(float64(test.errCounts[1]), i))
 	}
 	mmr := &mockMetricsReader{
-		qrs: map[uint64]metricsreader.QueryResult{
-			1: {
+		qrs: map[string]metricsreader.QueryResult{
+			"health_pd": {
 				UpdateTime: monotime.Now(),
 				Value:      model.Vector(values1),
 			},
-			2: {
+			"health_tikv": {
 				UpdateTime: monotime.Now(),
 				Value:      model.Vector(values2),
 			},
@@ -140,12 +140,12 @@ func TestHealthBalance(t *testing.T) {
 			values2 = append(values2, createSample(test.errCounts[j][1], j))
 		}
 		mmr := &mockMetricsReader{
-			qrs: map[uint64]metricsreader.QueryResult{
-				1: {
+			qrs: map[string]metricsreader.QueryResult{
+				"health_pd": {
 					UpdateTime: monotime.Now(),
 					Value:      model.Vector(values1),
 				},
-				2: {
+				"health_tikv": {
 					UpdateTime: monotime.Now(),
 					Value:      model.Vector(values2),
 				},
@@ -207,12 +207,12 @@ func TestNoHealthMetrics(t *testing.T) {
 		if len(values2) > 0 {
 			v2 = model.Vector(values2)
 		}
-		mmr.qrs = map[uint64]metricsreader.QueryResult{
-			1: {
+		mmr.qrs = map[string]metricsreader.QueryResult{
+			"health_pd": {
 				UpdateTime: test.updateTime,
 				Value:      v1,
 			},
-			2: {
+			"health_tikv": {
 				UpdateTime: test.updateTime,
 				Value:      v2,
 			},
@@ -255,7 +255,7 @@ func TestHealthBalanceCount(t *testing.T) {
 	backends = append(backends, createBackend(1, 0, 0))
 	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
 	mmr := &mockMetricsReader{
-		qrs: map[uint64]metricsreader.QueryResult{},
+		qrs: map[string]metricsreader.QueryResult{},
 	}
 	fh := NewFactorHealth(mmr)
 	updateMmr := func(healthy bool) {
@@ -267,11 +267,11 @@ func TestHealthBalanceCount(t *testing.T) {
 			createSample(number, 0),
 			createSample(0, 1),
 		}
-		mmr.qrs[1] = metricsreader.QueryResult{
+		mmr.qrs["health_pd"] = metricsreader.QueryResult{
 			UpdateTime: monotime.Now(),
 			Value:      model.Vector(values),
 		}
-		mmr.qrs[2] = mmr.qrs[1]
+		mmr.qrs["health_tikv"] = mmr.qrs["health_pd"]
 	}
 	for i, test := range tests {
 		updateMmr(test.healthy)
@@ -294,32 +294,42 @@ func TestHealthQueryRule(t *testing.T) {
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 0
 tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 0
-tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 0
+tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 10
 tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 10
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 0
 `,
-			curValue:   []model.SampleValue{0, 10},
+			curValue:   []model.SampleValue{10, 10},
 			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
 		},
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 10
 tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 10
-tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 10
+tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 20
 tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 110
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 100
 `,
-			curValue:   []model.SampleValue{10, 210},
+			curValue:   []model.SampleValue{20, 210},
 			finalValue: []model.SampleValue{10, 200},
 		},
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 10
 tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 10
-tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 10
+tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 20
 tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 110
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 100
 `,
-			curValue:   []model.SampleValue{10, 210},
+			curValue:   []model.SampleValue{20, 210},
 			finalValue: []model.SampleValue{10, 200},
+		},
+		{
+			text: `tidb_tikvclient_backoff_seconds_count{type=""} 0
+tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 0
+tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 0
+tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 5
+tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 0
+`,
+			curValue:   []model.SampleValue{0, 5},
+			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
 		},
 	}
 

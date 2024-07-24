@@ -95,8 +95,8 @@ func TestMemoryScore(t *testing.T) {
 		values = append(values, createSampleStream(test.memory, i, model.Now()))
 	}
 	mmr := &mockMetricsReader{
-		qrs: map[uint64]metricsreader.QueryResult{
-			1: {
+		qrs: map[string]metricsreader.QueryResult{
+			"memory": {
 				UpdateTime: monotime.Now(),
 				Value:      model.Matrix(values),
 			},
@@ -160,8 +160,8 @@ func TestMemoryBalance(t *testing.T) {
 			values = append(values, createSampleStream(test.memory[j], j, model.Now()))
 		}
 		mmr := &mockMetricsReader{
-			qrs: map[uint64]metricsreader.QueryResult{
-				1: {
+			qrs: map[string]metricsreader.QueryResult{
+				"memory": {
 					UpdateTime: monotime.Now(),
 					Value:      model.Matrix(values),
 				},
@@ -214,7 +214,7 @@ func TestNoMemMetrics(t *testing.T) {
 			ss.Values[0].Timestamp = model.Time(test.updateTime / monotime.Time(time.Millisecond))
 			values = append(values, ss)
 		}
-		mmr.qrs[1] = metricsreader.QueryResult{
+		mmr.qrs["memory"] = metricsreader.QueryResult{
 			UpdateTime: test.updateTime,
 			Value:      model.Matrix(values),
 		}
@@ -262,7 +262,7 @@ func TestMemoryBalanceCount(t *testing.T) {
 	}
 
 	mmr := &mockMetricsReader{
-		qrs: map[uint64]metricsreader.QueryResult{},
+		qrs: map[string]metricsreader.QueryResult{},
 	}
 	ts := model.Now().Add(-100 * time.Millisecond)
 	updateMmr := func(riskLevel int) {
@@ -280,7 +280,7 @@ func TestMemoryBalanceCount(t *testing.T) {
 			createSampleStream(usage, 0, ts),
 			createSampleStream([]float64{0, 0}, 1, ts),
 		}
-		mmr.qrs[1] = metricsreader.QueryResult{
+		mmr.qrs["memory"] = metricsreader.QueryResult{
 			UpdateTime: monotime.Now(),
 			Value:      model.Matrix(values),
 		}

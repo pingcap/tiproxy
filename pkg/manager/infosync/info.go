@@ -45,6 +45,10 @@ const (
 	infoSuffix = "info"
 )
 
+var (
+	ErrNoProm = errors.New("no prometheus info")
+)
+
 // InfoSyncer syncs TiProxy topology to ETCD and queries TiDB topology from ETCD.
 // It writes 2 items to ETCD: `/topology/tiproxy/.../info` and `/topology/tiproxy/.../ttl`.
 // They are erased after TiProxy is down.
@@ -286,7 +290,7 @@ func (is *InfoSyncer) GetPromInfo(ctx context.Context) (*PrometheusInfo, error) 
 		return nil, err
 	}
 	if len(res.Kvs) == 0 {
-		return nil, nil
+		return nil, ErrNoProm
 	}
 	var info PrometheusInfo
 	if err = json.Unmarshal(res.Kvs[0].Value, &info); err != nil {

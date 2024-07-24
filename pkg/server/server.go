@@ -120,8 +120,10 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	// setup metrics reader
 	{
 		healthCheckCfg := config.NewDefaultHealthCheckConfig()
-		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), srv.infoSyncer, healthCheckCfg)
-		srv.metricsReader.Start(context.Background())
+		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), srv.infoSyncer, srv.infoSyncer, srv.httpCli, healthCheckCfg, srv.configManager)
+		if err = srv.metricsReader.Start(context.Background(), srv.etcdCli); err != nil {
+			return
+		}
 	}
 
 	// setup namespace manager
