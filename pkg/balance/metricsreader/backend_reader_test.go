@@ -1051,7 +1051,8 @@ func TestReadFromOwner(t *testing.T) {
 	for i, test := range tests {
 		// marshal
 		br.history = test.history
-		br.marshalHistory(test.backends)
+		err := br.marshalHistory(test.backends)
+		require.NoError(t, err, "case %d", i)
 		data := br.GetBackendMetrics()
 
 		f := func(_ string) string {
@@ -1061,7 +1062,7 @@ func TestReadFromOwner(t *testing.T) {
 
 		// unmarshal
 		br.history = make(map[string]map[string]backendHistory)
-		err := br.readFromOwner(context.Background(), addr)
+		err = br.readFromOwner(context.Background(), addr)
 		require.NoError(t, err, "case %d", i)
 		require.Equal(t, test.expected, br.history, "case %d", i)
 
