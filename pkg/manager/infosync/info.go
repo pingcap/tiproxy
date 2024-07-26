@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	"github.com/siddontang/go/hack"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -278,22 +279,16 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBTopo
 }
 
 func (is *InfoSyncer) GetPromInfo(ctx context.Context) (*PrometheusInfo, error) {
-	var res *clientv3.GetResponse
-	err := retry.Retry(func() error {
-		childCtx, cancel := context.WithTimeout(ctx, is.syncConfig.getPromTimeout)
-		var err error
-		res, err = is.etcdCli.Get(childCtx, promTopologyPath, clientv3.WithPrefix())
-		cancel()
-		return errors.WithStack(err)
-	}, ctx, is.syncConfig.getPromRetryIntvl, is.syncConfig.getPromRetryCnt)
+	opts := []clientv3.OpOption{clientv3.WithPrefix()}
+	kvs, err := etcd.GetKVs(ctx, is.etcdCli, promTopologyPath, opts, is.syncConfig.getPromTimeout, is.syncConfig.getPromRetryIntvl, is.syncConfig.getPromRetryCnt)
 	if err != nil {
 		return nil, err
 	}
-	if len(res.Kvs) == 0 {
+	if len(kvs) == 0 {
 		return nil, ErrNoProm
 	}
 	var info PrometheusInfo
-	if err = json.Unmarshal(res.Kvs[0].Value, &info); err != nil {
+	if err = json.Unmarshal(kvs[0].Value, &info); err != nil {
 		return nil, errors.WithStack(err)
 	}
 	return &info, nil

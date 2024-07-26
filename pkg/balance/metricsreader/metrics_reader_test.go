@@ -49,21 +49,22 @@ func TestFallback(t *testing.T) {
 		ResultType: model.ValVector,
 	}
 
+	// setup etcd
+	suite := newEtcdTestSuite(t)
+	t.Cleanup(suite.close)
+
 	// setup metrics reader
 	lg, _ := logger.CreateLoggerForTest(t)
-	cfg := newHealthCheckConfigForTest()
-	cfgGetter := newMockConfigGetter(&config.Config{})
+	healthCfg := newHealthCheckConfigForTest()
+	cfg := config.NewConfig()
+	cfgGetter := newMockConfigGetter(cfg)
 	backendFetcher := newMockBackendFetcher(infos, nil)
 	httpCli := httputil.NewHTTPClient(func() *tls.Config { return nil })
-	mr := NewDefaultMetricsReader(lg, promFetcher, backendFetcher, httpCli, cfg, cfgGetter)
+	mr := NewDefaultMetricsReader(lg, promFetcher, backendFetcher, httpCli, suite.client, healthCfg, cfgGetter)
+	err := mr.backendReader.Start(context.Background())
+	require.NoError(t, err)
 	mr.AddQueryExpr("rule_id1", expr, rule)
 	t.Cleanup(mr.Close)
-
-	// setup backend reader
-	election := newMockElection()
-	mr.backendReader.election = election
-	election.isOwner.Store(true)
-	mr.backendReader.OnElected()
 
 	// read from prom
 	ts := monotime.Now()

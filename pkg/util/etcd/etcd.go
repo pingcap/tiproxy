@@ -4,6 +4,7 @@
 package etcd
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/retry"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
@@ -53,6 +56,21 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMa
 		},
 	})
 	return etcdClient, errors.Wrapf(err, "init etcd client failed")
+}
+
+func GetKVs(ctx context.Context, etcdCli *clientv3.Client, key string, opts []clientv3.OpOption, timeout, retryIntvl time.Duration, retryCnt uint64) ([]*mvccpb.KeyValue, error) {
+	var resp *clientv3.GetResponse
+	err := retry.Retry(func() error {
+		childCtx, cancel := context.WithTimeout(ctx, timeout)
+		var err error
+		resp, err = etcdCli.Get(childCtx, key, opts...)
+		cancel()
+		return errors.WithStack(err)
+	}, ctx, retryIntvl, retryCnt)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Kvs, nil
 }
 
 // CreateEtcdServer creates an etcd server and is only used for testing.

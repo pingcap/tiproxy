@@ -11,14 +11,20 @@ import (
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
-	"github.com/pingcap/tiproxy/pkg/manager/elect"
+	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/testkit"
+	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
 )
 
 type mockPromFetcher struct {
@@ -152,31 +158,6 @@ func mockMfs() map[string]*dto.MetricFamily {
 	}
 }
 
-var _ elect.Election = (*mockElection)(nil)
-
-type mockElection struct {
-	owner   atomic.Pointer[string]
-	isOwner atomic.Bool
-}
-
-func newMockElection() *mockElection {
-	return &mockElection{}
-}
-
-func (m *mockElection) Start(context.Context) {
-}
-
-func (m *mockElection) Close() {
-}
-
-func (m *mockElection) GetOwnerID(ctx context.Context) (string, error) {
-	return *m.owner.Load(), nil
-}
-
-func (m *mockElection) IsOwner() bool {
-	return m.isOwner.Load()
-}
-
 type mockConfigGetter struct {
 	cfg *config.Config
 }
@@ -189,4 +170,64 @@ func newMockConfigGetter(cfg *config.Config) *mockConfigGetter {
 
 func (cfgGetter *mockConfigGetter) GetConfig() *config.Config {
 	return cfgGetter.cfg
+}
+
+type etcdTestSuite struct {
+	t      *testing.T
+	lg     *zap.Logger
+	server *embed.Etcd
+	client *clientv3.Client
+}
+
+func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
+	lg, _ := logger.CreateLoggerForTest(t)
+	ts := &etcdTestSuite{
+		t:  t,
+		lg: lg,
+	}
+
+	ts.startServer("0.0.0.0:0")
+	endpoint := ts.server.Clients[0].Addr().String()
+	cfg := etcd.ConfigForEtcdTest(endpoint)
+
+	certMgr := cert.NewCertManager()
+	err := certMgr.Init(cfg, lg, nil)
+	require.NoError(t, err)
+
+	ts.client, err = etcd.InitEtcdClient(ts.lg, cfg, certMgr)
+	require.NoError(t, err)
+	return ts
+}
+
+func (ts *etcdTestSuite) close() {
+	if ts.client != nil {
+		require.NoError(ts.t, ts.client.Close())
+		ts.client = nil
+	}
+	if ts.server != nil {
+		ts.server.Close()
+		ts.server = nil
+	}
+}
+
+func (ts *etcdTestSuite) startServer(addr string) {
+	etcd, err := etcd.CreateEtcdServer(addr, ts.t.TempDir(), ts.lg)
+	require.NoError(ts.t, err)
+	ts.server = etcd
+}
+
+func (ts *etcdTestSuite) putKV(key, value string) {
+	_, err := ts.client.Put(context.Background(), key, value)
+	require.NoError(ts.t, err)
+}
+
+func (ts *etcdTestSuite) getKV(key string) []*mvccpb.KeyValue {
+	resp, err := ts.client.Get(context.Background(), key, clientv3.WithPrefix())
+	require.NoError(ts.t, err)
+	return resp.Kvs
+}
+
+func (ts *etcdTestSuite) delKV(key string) {
+	_, err := ts.client.Delete(context.Background(), key, clientv3.WithPrefix())
+	require.NoError(ts.t, err)
 }

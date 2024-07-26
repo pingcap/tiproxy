@@ -13,7 +13,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/sys"
 )
 
 var (
@@ -224,8 +223,17 @@ func (cfg *Config) GetIPPort() (ip, port, statusPort string, err error) {
 		// reporting a non unicast IP makes no sense, try to find one
 		// loopback/linklocal-unicast are not global unicast IP, but are valid local unicast IP
 		if pip := net.ParseIP(ip); ip == "" || pip.Equal(net.IPv4bcast) || pip.IsUnspecified() || pip.IsMulticast() {
-			if v := sys.GetGlobalUnicastIP(); v != "" {
-				ip = v
+			if addrs, err := net.InterfaceAddrs(); err == nil {
+				for _, address := range addrs {
+					if ipnet, ok := address.(*net.IPNet); ok && ipnet.IP.IsGlobalUnicast() {
+						ipStr := ipnet.IP.String()
+						// filter virtual IP
+						if !strings.HasPrefix(cfg.HA.VirtualIP, ipStr) {
+							ip = ipStr
+							break
+						}
+					}
+				}
 			}
 		}
 	}

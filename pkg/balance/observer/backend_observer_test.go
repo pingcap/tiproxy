@@ -175,23 +175,23 @@ func TestLocal(t *testing.T) {
 			local:         true,
 		},
 		{
-			selfLabels:    map[string]string{locationLabelName: "b"},
+			selfLabels:    map[string]string{config.LocationLabelName: "b"},
 			backendLabels: map[string]string{"a": "b"},
 			local:         false,
 		},
 		{
-			selfLabels:    map[string]string{locationLabelName: "b"},
-			backendLabels: map[string]string{locationLabelName: "c"},
+			selfLabels:    map[string]string{config.LocationLabelName: "b"},
+			backendLabels: map[string]string{config.LocationLabelName: "c"},
 			local:         false,
 		},
 		{
-			selfLabels:    map[string]string{locationLabelName: "b"},
-			backendLabels: map[string]string{locationLabelName: "c", "a": "c"},
+			selfLabels:    map[string]string{config.LocationLabelName: "b"},
+			backendLabels: map[string]string{config.LocationLabelName: "c", "a": "c"},
 			local:         false,
 		},
 		{
-			selfLabels:    map[string]string{locationLabelName: "b"},
-			backendLabels: map[string]string{locationLabelName: "b", "a": "c"},
+			selfLabels:    map[string]string{config.LocationLabelName: "b"},
+			backendLabels: map[string]string{config.LocationLabelName: "b", "a": "c"},
 			local:         true,
 		},
 	}
