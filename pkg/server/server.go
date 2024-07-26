@@ -120,8 +120,8 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	// setup metrics reader
 	{
 		healthCheckCfg := config.NewDefaultHealthCheckConfig()
-		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), srv.infoSyncer, srv.infoSyncer, srv.httpCli, healthCheckCfg, srv.configManager)
-		if err = srv.metricsReader.Start(context.Background(), srv.etcdCli); err != nil {
+		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), srv.infoSyncer, srv.infoSyncer, srv.httpCli, srv.etcdCli, healthCheckCfg, srv.configManager)
+		if err = srv.metricsReader.Start(context.Background()); err != nil {
 			return
 		}
 	}
@@ -171,7 +171,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	}
 
 	// setup http & grpc
-	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.proxy.IsClosing, srv.namespaceManager, srv.configManager, srv.certManager, nil, handler, ready); err != nil {
+	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.proxy.IsClosing, srv.namespaceManager, srv.configManager, srv.certManager, srv.metricsReader, handler, ready); err != nil {
 		return
 	}
 

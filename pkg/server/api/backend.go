@@ -11,15 +11,11 @@ import (
 )
 
 type BackendReader interface {
-	GetBackendMetrics() ([]byte, error)
+	GetBackendMetrics() []byte
 }
 
 func (h *Server) BackendMetrics(c *gin.Context) {
-	metrics, err := h.mgr.br.GetBackendMetrics()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, err)
-		return
-	}
+	metrics := h.mgr.br.GetBackendMetrics()
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(http.StatusOK)
 	if _, err := c.Writer.Write(metrics); err != nil {

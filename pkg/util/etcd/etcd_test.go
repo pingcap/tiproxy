@@ -6,6 +6,7 @@ package etcd
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
@@ -27,9 +28,9 @@ func TestEtcdClient(t *testing.T) {
 
 	_, err = client.Put(context.Background(), "key", "value")
 	require.NoError(t, err)
-	resp, err := client.Get(context.Background(), "key")
+	kvs, err := GetKVs(context.Background(), client, "key", nil, 3*time.Second, 10*time.Millisecond, 3)
 	require.NoError(t, err)
-	require.Equal(t, "value", string(resp.Kvs[0].Value))
+	require.Equal(t, "value", string(kvs[0].Value))
 
 	require.NoError(t, client.Close())
 	server.Close()

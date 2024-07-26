@@ -33,10 +33,11 @@ type TopologyFetcher interface {
 }
 
 type MetricsReader interface {
-	Start(ctx context.Context, etcdCli *clientv3.Client) error
+	Start(ctx context.Context) error
 	AddQueryExpr(key string, queryExpr QueryExpr, queryRule QueryRule)
 	RemoveQueryExpr(key string)
 	GetQueryResult(key string) QueryResult
+	GetBackendMetrics() []byte
 	Close()
 }
 
@@ -53,17 +54,17 @@ type DefaultMetricsReader struct {
 }
 
 func NewDefaultMetricsReader(lg *zap.Logger, promFetcher PromInfoFetcher, backendFetcher TopologyFetcher, httpCli *http.Client,
-	cfg *config.HealthCheck, cfgGetter config.ConfigGetter) *DefaultMetricsReader {
+	etcdCli *clientv3.Client, cfg *config.HealthCheck, cfgGetter config.ConfigGetter) *DefaultMetricsReader {
 	return &DefaultMetricsReader{
 		lg:            lg,
 		cfg:           cfg,
 		promReader:    NewPromReader(lg.Named("prom_reader"), promFetcher, cfg),
-		backendReader: NewBackendReader(lg.Named("backend_reader"), cfgGetter, httpCli, backendFetcher, cfg),
+		backendReader: NewBackendReader(lg.Named("backend_reader"), cfgGetter, httpCli, etcdCli, backendFetcher, cfg),
 	}
 }
 
-func (dmr *DefaultMetricsReader) Start(ctx context.Context, etcdCli *clientv3.Client) error {
-	if err := dmr.backendReader.Start(ctx, etcdCli); err != nil {
+func (dmr *DefaultMetricsReader) Start(ctx context.Context) error {
+	if err := dmr.backendReader.Start(ctx); err != nil {
 		return err
 	}
 	childCtx, cancel := context.WithCancel(ctx)
@@ -138,6 +139,10 @@ func (dmr *DefaultMetricsReader) GetQueryResult(key string) QueryResult {
 	default:
 		return QueryResult{}
 	}
+}
+
+func (dmr *DefaultMetricsReader) GetBackendMetrics() []byte {
+	return dmr.backendReader.GetBackendMetrics()
 }
 
 func (dmr *DefaultMetricsReader) Close() {

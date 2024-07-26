@@ -73,7 +73,7 @@ func (mo *mockMember) hang(hang bool) {
 }
 
 type etcdTestSuite struct {
-	elecCfg electionConfig
+	elecCfg ElectionConfig
 	key     string
 	elecs   []*election
 	t       *testing.T
@@ -83,7 +83,7 @@ type etcdTestSuite struct {
 	kv      clientv3.KV
 }
 
-func newEtcdTestSuite(t *testing.T, elecCfg electionConfig, key string) *etcdTestSuite {
+func newEtcdTestSuite(t *testing.T, elecCfg ElectionConfig, key string) *etcdTestSuite {
 	lg, _ := logger.CreateLoggerForTest(t)
 	ts := &etcdTestSuite{
 		t:       t,
@@ -107,11 +107,11 @@ func newEtcdTestSuite(t *testing.T, elecCfg electionConfig, key string) *etcdTes
 }
 
 func (ts *etcdTestSuite) newElection(id string) *election {
-	cfg := electionConfig{
-		sessionTTL: 1,
-		timeout:    100 * time.Millisecond,
-		retryIntvl: 10 * time.Millisecond,
-		retryCnt:   2,
+	cfg := ElectionConfig{
+		SessionTTL: 1,
+		Timeout:    100 * time.Millisecond,
+		RetryIntvl: 10 * time.Millisecond,
+		RetryCnt:   2,
 	}
 	member := newMockMember()
 	elec := NewElection(ts.lg, ts.client, cfg, id, ts.key, member)
@@ -187,11 +187,11 @@ func (ts *etcdTestSuite) shutdownServer() string {
 	return addr
 }
 
-func electionConfigForTest(ttl int) electionConfig {
-	return electionConfig{
-		sessionTTL: ttl,
-		timeout:    100 * time.Millisecond,
-		retryIntvl: 10 * time.Millisecond,
-		retryCnt:   2,
+func electionConfigForTest(ttl int) ElectionConfig {
+	return ElectionConfig{
+		SessionTTL: ttl,
+		Timeout:    100 * time.Millisecond,
+		RetryIntvl: 10 * time.Millisecond,
+		RetryCnt:   2,
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/util/etcd"
+	"github.com/siddontang/go/hack"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -31,6 +33,8 @@ type Member interface {
 type Election interface {
 	// Start starts compaining the owner.
 	Start(context.Context)
+	// ID returns the member ID.
+	ID() string
 	// IsOwner returns whether the member is the owner.
 	IsOwner() bool
 	// GetOwnerID gets the owner ID.
@@ -39,19 +43,19 @@ type Election interface {
 	Close()
 }
 
-type electionConfig struct {
-	timeout    time.Duration
-	retryIntvl time.Duration
-	retryCnt   uint64
-	sessionTTL int
+type ElectionConfig struct {
+	Timeout    time.Duration
+	RetryIntvl time.Duration
+	RetryCnt   uint64
+	SessionTTL int
 }
 
-func DefaultElectionConfig(sessionTTL int) electionConfig {
-	return electionConfig{
-		timeout:    2 * time.Second,
-		retryIntvl: 500 * time.Millisecond,
-		retryCnt:   3,
-		sessionTTL: sessionTTL,
+func DefaultElectionConfig(sessionTTL int) ElectionConfig {
+	return ElectionConfig{
+		Timeout:    2 * time.Second,
+		RetryIntvl: 500 * time.Millisecond,
+		RetryCnt:   3,
+		SessionTTL: sessionTTL,
 	}
 }
 
@@ -59,7 +63,7 @@ var _ Election = (*election)(nil)
 
 // election is used for electing owner.
 type election struct {
-	cfg electionConfig
+	cfg ElectionConfig
 	// id is typically the instance address
 	id      string
 	key     string
@@ -72,7 +76,7 @@ type election struct {
 }
 
 // NewElection creates an Election.
-func NewElection(lg *zap.Logger, etcdCli *clientv3.Client, cfg electionConfig, id, key string, member Member) *election {
+func NewElection(lg *zap.Logger, etcdCli *clientv3.Client, cfg ElectionConfig, id, key string, member Member) *election {
 	lg = lg.With(zap.String("key", key), zap.String("id", id))
 	return &election{
 		lg:      lg,
@@ -97,6 +101,10 @@ func (m *election) Start(ctx context.Context) {
 	})
 }
 
+func (m *election) ID() string {
+	return m.id
+}
+
 func (m *election) initSession(ctx context.Context) (*concurrency.Session, error) {
 	var session *concurrency.Session
 	// If the network breaks for sometime, the session will fail but it still needs to compaign after recovery.
@@ -104,9 +112,9 @@ func (m *election) initSession(ctx context.Context) (*concurrency.Session, error
 	err := retry.RetryNotify(func() error {
 		var err error
 		// Do not use context.WithTimeout, otherwise the session will be cancelled after timeout, even if it is created successfully.
-		session, err = concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.sessionTTL), concurrency.WithContext(ctx))
+		session, err = concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
 		return err
-	}, ctx, m.cfg.retryIntvl, retry.InfiniteCnt,
+	}, ctx, m.cfg.RetryIntvl, retry.InfiniteCnt,
 		func(err error, duration time.Duration) {
 			m.lg.Warn("failed to init election session, retrying", zap.Error(err))
 		}, logInterval)
@@ -191,7 +199,7 @@ func (m *election) onRetired() {
 func (m *election) revokeLease(leaseID clientv3.LeaseID) {
 	// If revoke takes longer than the ttl, lease is expired anyway.
 	// Don't use the context of the caller because it may be already done.
-	cancelCtx, cancel := context.WithTimeout(context.Background(), time.Duration(m.cfg.sessionTTL)*time.Second)
+	cancelCtx, cancel := context.WithTimeout(context.Background(), time.Duration(m.cfg.SessionTTL)*time.Second)
 	if _, err := m.etcdCli.Revoke(cancelCtx, leaseID); err != nil {
 		m.lg.Warn("revoke session failed", zap.Error(errors.WithStack(err)))
 	}
@@ -203,23 +211,14 @@ func (m *election) GetOwnerID(ctx context.Context) (string, error) {
 	if m.etcdCli == nil {
 		return "", concurrency.ErrElectionNoLeader
 	}
-	var resp *clientv3.GetResponse
-	err := retry.Retry(func() error {
-		childCtx, cancel := context.WithTimeout(ctx, m.cfg.timeout)
-		var err error
-		resp, err = m.etcdCli.Get(childCtx, m.key, clientv3.WithFirstCreate()...)
-		cancel()
-		return errors.WithStack(err)
-	}, ctx, m.cfg.retryIntvl, m.cfg.retryCnt)
-
+	kvs, err := etcd.GetKVs(ctx, m.etcdCli, m.key, clientv3.WithFirstCreate(), m.cfg.Timeout, m.cfg.RetryIntvl, m.cfg.RetryCnt)
 	if err != nil {
-		m.lg.Error("failed to get owner info, quit", zap.Error(err))
 		return "", err
 	}
-	if len(resp.Kvs) == 0 {
+	if len(kvs) == 0 {
 		return "", concurrency.ErrElectionNoLeader
 	}
-	return string(resp.Kvs[0].Value), nil
+	return hack.String(kvs[0].Value), nil
 }
 
 func (m *election) watchOwner(ctx context.Context, session *concurrency.Session, key string) {

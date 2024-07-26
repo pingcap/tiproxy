@@ -49,6 +49,10 @@ func newMockElection(ch chan int, member elect.Member) *mockElection {
 	}
 }
 
+func (m *mockElection) ID() string {
+	return ""
+}
+
 func (me *mockElection) GetOwnerID(ctx context.Context) (string, error) {
 	return "", nil
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/prometheus/common/model"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 var _ policy.BackendCtx = (*mockBackend)(nil)
@@ -103,7 +102,7 @@ func newMockMetricsReader() *mockMetricsReader {
 	}
 }
 
-func (mmr *mockMetricsReader) Start(ctx context.Context, etcdCli *clientv3.Client) error {
+func (mmr *mockMetricsReader) Start(ctx context.Context) error {
 	return nil
 }
 
@@ -115,6 +114,10 @@ func (mmr *mockMetricsReader) RemoveQueryExpr(key string) {
 
 func (mmr *mockMetricsReader) GetQueryResult(key string) metricsreader.QueryResult {
 	return mmr.qrs[key]
+}
+
+func (mmr *mockMetricsReader) GetBackendMetrics() []byte {
+	return nil
 }
 
 func (mmr *mockMetricsReader) Close() {
