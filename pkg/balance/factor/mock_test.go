@@ -150,6 +150,14 @@ func createSampleStream(values []float64, backendIdx int, curTime model.Time) *m
 	return &model.SampleStream{Metric: labelSet, Values: pairs}
 }
 
+func createPairs(values []float64, ts []model.Time) []model.SamplePair {
+	pairs := make([]model.SamplePair, 0, len(values))
+	for i, value := range values {
+		pairs = append(pairs, model.SamplePair{Timestamp: ts[i], Value: model.SampleValue(value)})
+	}
+	return pairs
+}
+
 func createSample(value float64, backendIdx int) *model.Sample {
 	host := strconv.Itoa(backendIdx)
 	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(host + ":10080")}
