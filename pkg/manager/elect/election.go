@@ -5,12 +5,14 @@ package elect
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/siddontang/go/hack"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -21,7 +23,9 @@ import (
 )
 
 const (
-	logInterval = 10
+	logInterval    = 10
+	ownerKeyPrefix = "/tiproxy/"
+	ownerKeySuffix = "/owner"
 )
 
 type Member interface {
@@ -65,26 +69,29 @@ var _ Election = (*election)(nil)
 type election struct {
 	cfg ElectionConfig
 	// id is typically the instance address
-	id      string
-	key     string
-	lg      *zap.Logger
-	etcdCli *clientv3.Client
-	elec    atomic.Pointer[concurrency.Election]
-	wg      waitgroup.WaitGroup
-	cancel  context.CancelFunc
-	member  Member
+	id  string
+	key string
+	// trimedKey is shown as a label in grafana
+	trimedKey string
+	lg        *zap.Logger
+	etcdCli   *clientv3.Client
+	elec      atomic.Pointer[concurrency.Election]
+	wg        waitgroup.WaitGroup
+	cancel    context.CancelFunc
+	member    Member
 }
 
 // NewElection creates an Election.
 func NewElection(lg *zap.Logger, etcdCli *clientv3.Client, cfg ElectionConfig, id, key string, member Member) *election {
 	lg = lg.With(zap.String("key", key), zap.String("id", id))
 	return &election{
-		lg:      lg,
-		etcdCli: etcdCli,
-		cfg:     cfg,
-		id:      id,
-		key:     key,
-		member:  member,
+		lg:        lg,
+		etcdCli:   etcdCli,
+		cfg:       cfg,
+		id:        id,
+		key:       key,
+		trimedKey: strings.TrimSuffix(strings.TrimPrefix(key, ownerKeyPrefix), ownerKeySuffix),
+		member:    member,
 	}
 }
 
@@ -186,12 +193,15 @@ func (m *election) campaignLoop(ctx context.Context) {
 func (m *election) onElected(elec *concurrency.Election) {
 	m.member.OnElected()
 	m.elec.Store(elec)
+	metrics.OwnerGauge.WithLabelValues(m.trimedKey).Set(1)
 	m.lg.Info("elected as the owner")
 }
 
 func (m *election) onRetired() {
 	m.member.OnRetired()
 	m.elec.Store(nil)
+	// Delete the metric so that it doesn't show on Grafana.
+	metrics.OwnerGauge.MetricVec.DeletePartialMatch(map[string]string{metrics.LblType: m.trimedKey})
 	m.lg.Info("the owner retires")
 }
 

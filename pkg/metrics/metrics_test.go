@@ -11,7 +11,6 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -64,16 +63,11 @@ func TestDelLabelValues(t *testing.T) {
 	}
 
 	getAddrs := func(coll prometheus.Collector) []string {
-		ch := make(chan prometheus.Metric)
-		go func() {
-			coll.Collect(ch)
-			close(ch)
-		}()
+		results, err := Collect(coll)
+		require.NoError(t, err)
 		addrs := make([]string, 0, 3)
-		for m := range ch {
-			var metric dto.Metric
-			require.NoError(t, m.Write(&metric))
-			for _, l := range metric.Label {
+		for _, m := range results {
+			for _, l := range m.Label {
 				if strings.HasPrefix(*l.Value, "addr") && !slices.Contains(addrs, *l.Value) {
 					addrs = append(addrs, *l.Value)
 				}

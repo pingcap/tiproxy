@@ -209,17 +209,17 @@ local uptimeP = graphPanel.new(
   )
 );
 
-local vipP = graphPanel.new(
-  title='VIP Owner',
+local ownerP = graphPanel.new(
+  title='Owner',
   datasource=myDS,
   legend_rightSide=true,
-  description='1 indicates the VIP owner.',
+  description='The TiProxy owner of each job type.',
   format='short',
 )
 .addTarget(
   prometheus.target(
-    'tiproxy_server_vip{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}',
-    legendFormat='{{instance}}',
+    'tiproxy_server_owner{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}',
+    legendFormat='{{instance}} - {{type}}',
   )
 );
 
@@ -579,7 +579,7 @@ newDash
   .addPanel(createConnP, gridPos=leftPanelPos)
   .addPanel(disconnP, gridPos=rightPanelPos)
   .addPanel(goroutineP, gridPos=leftPanelPos)
-  .addPanel(vipP, gridPos=rightPanelPos)
+  .addPanel(ownerP, gridPos=rightPanelPos)
   ,
   gridPos=rowPos
 )

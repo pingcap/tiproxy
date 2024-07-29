@@ -11,7 +11,6 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
-	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/stretchr/testify/require"
 )
 
@@ -139,14 +138,6 @@ func TestNetworkOperation(t *testing.T) {
 			return strings.Contains(text.String()[logIdx:], test.expectedLog)
 		}, 3*time.Second, 10*time.Millisecond, "case %d", i)
 		logIdx = len(text.String())
-
-		expectedVIPGauge := 0
-		if test.eventType == eventTypeElected {
-			expectedVIPGauge = 1
-		}
-		vipGauge, err := metrics.ReadGauge(metrics.VIPGauge)
-		require.NoError(t, err)
-		require.EqualValues(t, expectedVIPGauge, vipGauge, "case %d", i)
 	}
 	cancel()
 	vm.Close()
