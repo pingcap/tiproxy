@@ -36,9 +36,9 @@ import (
 
 const (
 	// readerOwnerKeyPrefix is the key prefix in etcd for backend reader owner election.
-	// For global owner, the key is "/tiproxy/metricreader/owner".
-	// For zonal owner, the key is "/tiproxy/metricreader/{zone}/owner".
-	readerOwnerKeyPrefix = "/tiproxy/metricreader"
+	// For global owner, the key is "/tiproxy/metric_reader/owner".
+	// For zonal owner, the key is "/tiproxy/metric_reader/{zone}/owner".
+	readerOwnerKeyPrefix = "/tiproxy/metric_reader"
 	readerOwnerKeySuffix = "owner"
 	// sessionTTL is the session's TTL in seconds for backend reader owner election.
 	sessionTTL = 30
@@ -225,9 +225,9 @@ func (br *BackendReader) queryAllOwners(ctx context.Context) (zones, owners []st
 
 		var zone string
 		if strings.HasPrefix(key, readerOwnerKeySuffix) {
-			// global owner key, such as "/tiproxy/metricreader/owner/leaseID"
+			// global owner key, such as "/tiproxy/metric_reader/owner/leaseID"
 		} else if endIdx := strings.Index(key, "/"); endIdx > 0 && strings.HasPrefix(key[endIdx+1:], readerOwnerKeySuffix) {
-			// zonal owner key, such as "/tiproxy/metricreader/east/owner/leaseID"
+			// zonal owner key, such as "/tiproxy/metric_reader/east/owner/leaseID"
 			zone = key[:endIdx]
 		} else {
 			continue
