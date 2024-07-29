@@ -99,7 +99,7 @@ func init() {
 		CreateConnCounter,
 		DisConnCounter,
 		MaxProcsGauge,
-		VIPGauge,
+		OwnerGauge,
 		ServerEventCounter,
 		ServerErrCounter,
 		TimeJumpBackCounter,
@@ -158,4 +158,21 @@ func ReadGauge(gauge prometheus.Gauge) (float64, error) {
 		return 0, err
 	}
 	return metric.Gauge.GetValue(), nil
+}
+
+func Collect(coll prometheus.Collector) ([]dto.Metric, error) {
+	results := make([]dto.Metric, 0)
+	ch := make(chan prometheus.Metric)
+	go func() {
+		coll.Collect(ch)
+		close(ch)
+	}()
+	for m := range ch {
+		var metric dto.Metric
+		if err := m.Write(&metric); err != nil {
+			return nil, err
+		}
+		results = append(results, metric)
+	}
+	return results, nil
 }

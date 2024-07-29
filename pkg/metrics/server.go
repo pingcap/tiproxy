@@ -42,13 +42,13 @@ var (
 			Help:      "Number of disconnections.",
 		}, []string{LblType})
 
-	VIPGauge = prometheus.NewGauge(
+	OwnerGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: ModuleProxy,
 			Subsystem: LabelServer,
-			Name:      "vip",
-			Help:      "VIP owner.",
-		})
+			Name:      "owner",
+			Help:      "The TiProxy owner of each job type.",
+		}, []string{LblType})
 
 	MaxProcsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{

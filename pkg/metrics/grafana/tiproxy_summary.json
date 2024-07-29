@@ -667,7 +667,7 @@
                "dashLength": 10,
                "dashes": false,
                "datasource": "${DS_TEST-CLUSTER}",
-               "description": "1 indicates the VIP owner.",
+               "description": "The TiProxy owner of each job type.",
                "fill": 1,
                "fillGradient": 0,
                "gridPos": {
@@ -704,17 +704,17 @@
                "steppedLine": false,
                "targets": [
                   {
-                     "expr": "tiproxy_server_vip{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}",
+                     "expr": "tiproxy_server_owner{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}",
                      "format": "time_series",
                      "intervalFactor": 2,
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "{{instance}} - {{type}}",
                      "refId": "A"
                   }
                ],
                "thresholds": [ ],
                "timeFrom": null,
                "timeShift": null,
-               "title": "VIP Owner",
+               "title": "Owner",
                "tooltip": {
                   "shared": true,
                   "sort": 0,
