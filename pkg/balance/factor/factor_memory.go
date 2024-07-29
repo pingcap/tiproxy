@@ -204,9 +204,14 @@ func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToO
 			latestUsage = value
 			latestTime = usageHistory[i].Timestamp
 		} else {
-			diff := latestUsage - value
-			if diff > 0.0001 {
-				timeToOOM = time.Duration(float64(latestTime-usageHistory[i].Timestamp)*(oomMemoryUsage-latestUsage)/diff) * time.Millisecond
+			timeDiff := latestTime.Sub(usageHistory[i].Timestamp)
+			if timeDiff < 10*time.Second {
+				// Skip this one is the interval is too short.
+				continue
+			}
+			usageDiff := latestUsage - value
+			if usageDiff > 1e-4 {
+				timeToOOM = timeDiff * time.Duration((oomMemoryUsage-latestUsage)/usageDiff)
 			}
 			break
 		}

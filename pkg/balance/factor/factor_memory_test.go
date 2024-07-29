@@ -109,6 +109,53 @@ func TestMemoryScore(t *testing.T) {
 	}
 }
 
+func TestMemoryUsage(t *testing.T) {
+	tests := []struct {
+		memory    []float64
+		ts        []model.Time
+		lastUsage float64
+		timeToOOM time.Duration
+	}{
+		{
+			memory:    []float64{0.2, 0.3},
+			ts:        []model.Time{model.Time(15000), model.Time(30000)},
+			lastUsage: 0.3,
+			timeToOOM: 90 * time.Second,
+		},
+		{
+			memory:    []float64{0.2, 0.3, 0.3},
+			ts:        []model.Time{model.Time(15000), model.Time(30000), model.Time(31000)},
+			lastUsage: 0.3,
+			timeToOOM: 96 * time.Second,
+		},
+		{
+			memory:    []float64{0.3, 0.3},
+			ts:        []model.Time{model.Time(30000), model.Time(31000)},
+			lastUsage: 0.3,
+			timeToOOM: time.Duration(math.MaxInt),
+		},
+		{
+			memory:    []float64{0.3, 0.3},
+			ts:        []model.Time{model.Time(30000), model.Time(45000)},
+			lastUsage: 0.3,
+			timeToOOM: time.Duration(math.MaxInt),
+		},
+		{
+			memory:    []float64{0.3, 0.2},
+			ts:        []model.Time{model.Time(30000), model.Time(45000)},
+			lastUsage: 0.2,
+			timeToOOM: time.Duration(math.MaxInt),
+		},
+	}
+
+	for i, test := range tests {
+		pairs := createPairs(test.memory, test.ts)
+		latestUsage, timeToOOM := calcMemUsage(pairs)
+		require.Equal(t, test.lastUsage, latestUsage, "test index %d", i)
+		require.Equal(t, test.timeToOOM, timeToOOM, "test index %d", i)
+	}
+}
+
 func TestMemoryBalance(t *testing.T) {
 	tests := []struct {
 		memory   [][]float64

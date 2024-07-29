@@ -338,6 +338,14 @@ tidb_server_maxprocs 2
 			curValue:   1,
 			finalValue: model.SampleValue(math.NaN()),
 		},
+		{
+			text: `process_cpu_seconds_total 3
+tidb_server_maxprocs 2
+`,
+			timestamp:  model.Time(3500),
+			curValue:   1.5,
+			finalValue: model.SampleValue(math.NaN()),
+		},
 	}
 
 	historyPair := make([]model.SamplePair, 0)
