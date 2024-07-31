@@ -87,7 +87,7 @@ func (vm *vipManager) OnElected() {
 		return
 	}
 	if hasIP {
-		vm.lg.Info("already has VIP, do nothing")
+		vm.lg.Debug("already has VIP, do nothing")
 		return
 	}
 	if err := vm.operation.AddIP(); err != nil {
@@ -108,7 +108,7 @@ func (vm *vipManager) OnRetired() {
 		return
 	}
 	if !hasIP {
-		vm.lg.Info("does not have VIP, do nothing")
+		vm.lg.Debug("does not have VIP, do nothing")
 		return
 	}
 	if err := vm.operation.DeleteIP(); err != nil {

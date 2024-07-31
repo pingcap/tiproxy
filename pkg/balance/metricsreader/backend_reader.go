@@ -362,10 +362,9 @@ func (br *BackendReader) metric2History(mfs map[string]*dto.MetricFamily, backen
 		// step 2: get the latest pair by the history and add it to step2History
 		// E.g. calculate irate(process_cpu_seconds_total/tidb_server_maxprocs[30s])
 		sampleValue = rule.Range2Value(beHistory.Step1History)
-		if math.IsNaN(float64(sampleValue)) {
-			continue
+		if !math.IsNaN(float64(sampleValue)) {
+			beHistory.Step2History = append(beHistory.Step2History, model.SamplePair{Timestamp: now, Value: sampleValue})
 		}
-		beHistory.Step2History = append(beHistory.Step2History, model.SamplePair{Timestamp: now, Value: sampleValue})
 		ruleHistory[backend] = beHistory
 	}
 }
