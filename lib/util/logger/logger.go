@@ -38,6 +38,6 @@ func CreateLoggerForTest(t *testing.T) (*zap.Logger, fmt.Stringer) {
 	return zap.New(zapcore.NewCore(
 		zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig()),
 		zapcore.AddSync(log),
-		zap.InfoLevel,
+		zap.DebugLevel,
 	)).Named(t.Name()), log
 }
