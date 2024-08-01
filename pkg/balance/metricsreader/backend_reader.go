@@ -283,13 +283,13 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 				}
 				resp, err := br.readBackendMetric(ctx, addr)
 				if err != nil {
-					br.lg.Error("read metrics from backend failed", zap.String("addr", addr), zap.Error(err))
+					br.lg.Debug("read metrics from backend failed", zap.String("addr", addr), zap.Error(err))
 					return
 				}
 				text := filterMetrics(hack.String(resp), allNames)
 				mf, err := parseMetrics(text)
 				if err != nil {
-					br.lg.Error("parse metrics failed", zap.String("addr", addr), zap.Error(err))
+					br.lg.Warn("parse metrics failed", zap.String("addr", addr), zap.Error(err))
 					return
 				}
 				br.metric2History(mf, addr)
