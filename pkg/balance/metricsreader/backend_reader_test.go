@@ -363,7 +363,7 @@ func TestOneRuleMultiHistory(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	br := NewBackendReader(lg, nil, nil, nil, nil, nil)
 	var lastTs model.Time
-	var length int
+	var step1Len, step2Len int
 	for i, test := range tests {
 		br.queryRules = map[string]QueryRule{
 			"key": {
@@ -379,17 +379,30 @@ func TestOneRuleMultiHistory(t *testing.T) {
 		}
 
 		br.metric2History(mfs, "backend")
+		history := br.history["key"]
+		if !math.IsNaN(float64(test.step1Value)) {
+			step1Len++
+		}
+		if step1Len > 0 {
+			require.Equal(t, step1Len, len(history["backend"].Step1History), "case %d", i)
+		}
+		if !math.IsNaN(float64(test.step2Value)) {
+			step2Len++
+		}
+		if step2Len > 0 {
+			require.Equal(t, step2Len, len(history["backend"].Step2History), "case %d", i)
+		}
+
 		res := br.history2Value("backend")
 		value := res["key"]
 		if math.IsNaN(float64(test.step2Value)) {
 			continue
 		}
-		length++
 		require.Equal(t, model.ValMatrix, value.Type(), "case %d", i)
 		matrix := value.(model.Matrix)
 		require.Len(t, matrix, 1, "case %d", i)
 		require.Equal(t, model.LabelValue("backend"), matrix[0].Metric[LabelNameInstance], "case %d", i)
-		require.Len(t, matrix[0].Values, length, "case %d", i)
+		require.Len(t, matrix[0].Values, step2Len, "case %d", i)
 		pair := matrix[0].Values[len(matrix[0].Values)-1]
 		require.Equal(t, test.step2Value, pair.Value, "case %d", i)
 		require.GreaterOrEqual(t, pair.Timestamp, lastTs, "case %d", i)

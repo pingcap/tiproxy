@@ -43,12 +43,12 @@ func (no *networkOperation) initAddr(addressStr, linkStr string) error {
 	}
 	address, err := netlink.ParseAddr(addressStr)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.Wrapf(errors.WithStack(err), "failed to parse address '%s'", addressStr)
 	}
 	no.address = address
 	link, err := netlink.LinkByName(linkStr)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.Wrapf(errors.WithStack(err), "failed to find network interface '%s'", linkStr)
 	}
 	no.link = link
 	return nil
