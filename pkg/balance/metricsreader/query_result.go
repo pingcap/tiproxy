@@ -5,6 +5,7 @@ package metricsreader
 
 import (
 	"net"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -57,7 +58,7 @@ type QueryResult struct {
 }
 
 func (qr QueryResult) Empty() bool {
-	if qr.Value == nil {
+	if qr.Value == nil || reflect.ValueOf(qr.Value).IsNil() {
 		return true
 	}
 	switch qr.Value.Type() {
@@ -77,7 +78,7 @@ func (qr QueryResult) Empty() bool {
 
 // GetSamplePair4Backend returns metric of a backend from a matrix.
 func (qr QueryResult) GetSamplePair4Backend(backend policy.BackendCtx) []model.SamplePair {
-	if qr.Value == nil {
+	if qr.Value == nil || reflect.ValueOf(qr.Value).IsNil() {
 		return nil
 	}
 	if qr.Value.Type() != model.ValMatrix {
@@ -97,7 +98,7 @@ func (qr QueryResult) GetSamplePair4Backend(backend policy.BackendCtx) []model.S
 
 // GetSample4Backend returns metric of a backend from a vector.
 func (qr QueryResult) GetSample4Backend(backend policy.BackendCtx) *model.Sample {
-	if qr.Value == nil {
+	if qr.Value == nil || reflect.ValueOf(qr.Value).IsNil() {
 		return nil
 	}
 	if qr.Value.Type() != model.ValVector {
