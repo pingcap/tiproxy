@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -255,13 +256,13 @@ func TestReadBackendMetric(t *testing.T) {
 	}
 }
 
-// test metric2History and history2Value
+// test metric2History
 func TestOneRuleOneHistory(t *testing.T) {
 	tests := []struct {
 		names      []string
 		step1Value model.SampleValue
 		step2Value model.SampleValue
-		returnType model.ValueType
+		history    backendHistory
 	}{
 		{
 			names: []string{"name1", "name2", "name3"},
@@ -274,18 +275,18 @@ func TestOneRuleOneHistory(t *testing.T) {
 			names:      []string{"name1", "name2"},
 			step1Value: model.SampleValue(1),
 			step2Value: model.SampleValue(math.NaN()),
+			history: backendHistory{
+				Step1History: []model.SamplePair{{Value: 1}},
+			},
 		},
 		{
 			names:      []string{"name1", "name2"},
 			step1Value: model.SampleValue(1),
 			step2Value: model.SampleValue(2),
-			returnType: model.ValMatrix,
-		},
-		{
-			names:      []string{"name1", "name2"},
-			step1Value: model.SampleValue(1),
-			step2Value: model.SampleValue(2),
-			returnType: model.ValVector,
+			history: backendHistory{
+				Step1History: []model.SamplePair{{Value: 1}},
+				Step2History: []model.SamplePair{{Value: 2}},
+			},
 		},
 	}
 
@@ -302,68 +303,75 @@ func TestOneRuleOneHistory(t *testing.T) {
 				Range2Value: func(pairs []model.SamplePair) model.SampleValue {
 					return test.step2Value
 				},
-				ResultType: test.returnType,
 			},
 		}
 
 		br.metric2History(mfs, "backend")
-		res := br.history2Value("backend")
-		value := res["key"]
-		switch test.returnType {
-		case model.ValVector:
-			require.Equal(t, test.returnType, value.Type(), "case %d", i)
-			require.Len(t, value.(model.Vector), 1, "case %d", i)
-			sample := value.(model.Vector)[0]
-			require.Equal(t, model.LabelValue("backend"), sample.Metric[LabelNameInstance], "case %d", i)
-			require.Equal(t, test.step2Value, sample.Value, "case %d", i)
-			require.Greater(t, sample.Timestamp, int64(0), "case %d", i)
-		case model.ValMatrix:
-			require.Equal(t, test.returnType, value.Type(), "case %d", i)
-			require.Len(t, value.(model.Matrix), 1, "case %d", i)
-			require.Equal(t, model.LabelValue("backend"), value.(model.Matrix)[0].Metric[LabelNameInstance], "case %d", i)
-			require.Len(t, value.(model.Matrix)[0].Values, 1, "case %d", i)
-			pair := value.(model.Matrix)[0].Values[0]
-			require.Equal(t, test.step2Value, pair.Value, "case %d", i)
-			require.Greater(t, pair.Timestamp, int64(0), "case %d", i)
-		default:
-			require.Nil(t, value, "case %d", i)
+		beHistory := br.history["key"]["backend"]
+		require.Equal(t, len(test.history.Step1History), len(beHistory.Step1History), "case %d", i)
+		for j := range test.history.Step1History {
+			require.Equal(t, test.history.Step1History[j].Value, beHistory.Step1History[j].Value, "case %d", i)
+			require.Greater(t, beHistory.Step1History[j].Timestamp, model.Time(0), "case %d", i)
+		}
+		require.Equal(t, len(test.history.Step2History), len(beHistory.Step2History))
+		for j := range test.history.Step2History {
+			require.Equal(t, test.history.Step2History[j].Value, beHistory.Step2History[j].Value, "case %d", i)
+			require.Greater(t, beHistory.Step2History[j].Timestamp, model.Time(0), "case %d", i)
 		}
 	}
 }
 
-// test metric2History and history2Value
+// test metric2History
 func TestOneRuleMultiHistory(t *testing.T) {
 	tests := []struct {
 		step1Value model.SampleValue
 		step2Value model.SampleValue
+		history    backendHistory
 	}{
 		{
 			step1Value: model.SampleValue(1),
 			step2Value: model.SampleValue(math.NaN()),
+			history: backendHistory{
+				Step1History: []model.SamplePair{{Value: 1}},
+			},
 		},
 		{
 			step1Value: model.SampleValue(1),
 			step2Value: model.SampleValue(2),
+			history: backendHistory{
+				Step1History: []model.SamplePair{{Value: 1}, {Value: 1}},
+				Step2History: []model.SamplePair{{Value: 2}},
+			},
 		},
 		{
 			step1Value: model.SampleValue(1),
 			step2Value: model.SampleValue(math.NaN()),
+			history: backendHistory{
+				Step1History: []model.SamplePair{{Value: 1}, {Value: 1}, {Value: 1}},
+				Step2History: []model.SamplePair{{Value: 2}},
+			},
 		},
 		{
 			step1Value: model.SampleValue(2),
 			step2Value: model.SampleValue(3),
+			history: backendHistory{
+				Step1History: []model.SamplePair{{Value: 1}, {Value: 1}, {Value: 1}, {Value: 2}},
+				Step2History: []model.SamplePair{{Value: 2}, {Value: 3}},
+			},
 		},
 		{
 			step1Value: model.SampleValue(3),
 			step2Value: model.SampleValue(4),
+			history: backendHistory{
+				Step1History: []model.SamplePair{{Value: 1}, {Value: 1}, {Value: 1}, {Value: 2}, {Value: 3}},
+				Step2History: []model.SamplePair{{Value: 2}, {Value: 3}, {Value: 4}},
+			},
 		},
 	}
 
 	mfs := mockMfs()
 	lg, _ := logger.CreateLoggerForTest(t)
 	br := NewBackendReader(lg, nil, nil, nil, nil, nil)
-	var lastTs model.Time
-	var step1Len, step2Len int
 	for i, test := range tests {
 		br.queryRules = map[string]QueryRule{
 			"key": {
@@ -374,43 +382,29 @@ func TestOneRuleMultiHistory(t *testing.T) {
 				Range2Value: func(pairs []model.SamplePair) model.SampleValue {
 					return test.step2Value
 				},
-				ResultType: model.ValMatrix,
 			},
 		}
 
 		br.metric2History(mfs, "backend")
-		history := br.history["key"]
-		if !math.IsNaN(float64(test.step1Value)) {
-			step1Len++
+		beHistory := br.history["key"]["backend"]
+		require.Equal(t, len(test.history.Step1History), len(beHistory.Step1History), "case %d", i)
+		var lastTs model.Time
+		for j := range test.history.Step1History {
+			require.Equal(t, test.history.Step1History[j].Value, beHistory.Step1History[j].Value, "case %d", i)
+			require.GreaterOrEqual(t, beHistory.Step1History[j].Timestamp, lastTs, "case %d", i)
+			lastTs = beHistory.Step1History[j].Timestamp
 		}
-		if step1Len > 0 {
-			require.Equal(t, step1Len, len(history["backend"].Step1History), "case %d", i)
+		lastTs = model.Time(0)
+		require.Equal(t, len(test.history.Step2History), len(beHistory.Step2History))
+		for j := range test.history.Step2History {
+			require.Equal(t, test.history.Step2History[j].Value, beHistory.Step2History[j].Value, "case %d", i)
+			require.GreaterOrEqual(t, beHistory.Step2History[j].Timestamp, lastTs, "case %d", i)
+			lastTs = beHistory.Step2History[j].Timestamp
 		}
-		if !math.IsNaN(float64(test.step2Value)) {
-			step2Len++
-		}
-		if step2Len > 0 {
-			require.Equal(t, step2Len, len(history["backend"].Step2History), "case %d", i)
-		}
-
-		res := br.history2Value("backend")
-		value := res["key"]
-		if math.IsNaN(float64(test.step2Value)) {
-			continue
-		}
-		require.Equal(t, model.ValMatrix, value.Type(), "case %d", i)
-		matrix := value.(model.Matrix)
-		require.Len(t, matrix, 1, "case %d", i)
-		require.Equal(t, model.LabelValue("backend"), matrix[0].Metric[LabelNameInstance], "case %d", i)
-		require.Len(t, matrix[0].Values, step2Len, "case %d", i)
-		pair := matrix[0].Values[len(matrix[0].Values)-1]
-		require.Equal(t, test.step2Value, pair.Value, "case %d", i)
-		require.GreaterOrEqual(t, pair.Timestamp, lastTs, "case %d", i)
-		lastTs = pair.Timestamp
 	}
 }
 
-// test metric2History and history2Value
+// test metric2History
 func TestMultiRules(t *testing.T) {
 	returnedValues := []model.SampleValue{model.SampleValue(1), model.SampleValue(2)}
 	rule1 := QueryRule{
@@ -421,7 +415,6 @@ func TestMultiRules(t *testing.T) {
 		Range2Value: func(pairs []model.SamplePair) model.SampleValue {
 			return returnedValues[0]
 		},
-		ResultType: model.ValMatrix,
 	}
 	rule2 := QueryRule{
 		Names: []string{"name2"},
@@ -431,7 +424,6 @@ func TestMultiRules(t *testing.T) {
 		Range2Value: func(pairs []model.SamplePair) model.SampleValue {
 			return returnedValues[1]
 		},
-		ResultType: model.ValVector,
 	}
 	tests := []struct {
 		hasRule1   bool
@@ -460,100 +452,115 @@ func TestMultiRules(t *testing.T) {
 	br := NewBackendReader(lg, nil, nil, nil, nil, nil)
 	for i, test := range tests {
 		if test.hasRule1 {
-			br.queryRules["key1"] = rule1
+			br.AddQueryRule("key1", rule1)
 			returnedValues[0] = test.rule1Value
 		} else {
-			delete(br.queryRules, "key1")
+			br.RemoveQueryRule("key1")
 		}
 		if test.hasRule2 {
-			br.queryRules["key2"] = rule2
+			br.AddQueryRule("key2", rule2)
 			returnedValues[1] = test.rule2Value
 		} else {
-			delete(br.queryRules, "key2")
+			br.RemoveQueryRule("key2")
 		}
 		br.metric2History(mfs, "backend")
-		res := br.history2Value("backend")
-		require.Len(t, res, len(br.queryRules), "case %d", i)
 
 		if test.hasRule1 {
-			value := res["key1"]
-			require.Equal(t, rule1.ResultType, value.Type(), "case %d", i)
-			matrix := value.(model.Matrix)
-			require.Len(t, matrix, 1, "case %d", i)
-			require.Equal(t, model.LabelValue("backend"), matrix[0].Metric[LabelNameInstance], "case %d", i)
-			pair := matrix[0].Values[len(matrix[0].Values)-1]
-			require.Equal(t, test.rule1Value, pair.Value, "case %d", i)
-			require.Greater(t, pair.Timestamp, int64(0), "case %d", i)
+			res := br.history["key1"]["backend"]
+			require.Equal(t, model.SampleValue(test.rule1Value), res.Step2History[len(res.Step2History)-1].Value, "case %d", i)
+			require.Greater(t, res.Step2History[len(res.Step2History)-1].Timestamp, model.Time(0), "case %d", i)
 		}
 		if test.hasRule2 {
-			value := res["key2"]
-			require.Equal(t, rule2.ResultType, value.Type(), "case %d", i)
-			require.Len(t, value.(model.Vector), 1, "case %d", i)
-			sample := value.(model.Vector)[0]
-			require.Equal(t, model.LabelValue("backend"), sample.Metric[LabelNameInstance], "case %d", i)
-			require.Equal(t, test.rule2Value, sample.Value, "case %d", i)
-			require.Greater(t, sample.Timestamp, int64(0), "case %d", i)
+			res := br.history["key2"]["backend"]
+			require.Equal(t, model.SampleValue(test.rule2Value), res.Step2History[len(res.Step2History)-1].Value, "case %d", i)
+			require.Greater(t, res.Step2History[len(res.Step2History)-1].Timestamp, model.Time(0), "case %d", i)
 		}
 	}
 }
 
-// test mergeQueryResult
-func TestMergeQueryResult(t *testing.T) {
+// test history2QueryResult
+func TestHistory2QueryResult(t *testing.T) {
 	tests := []struct {
-		backend       string
-		backendValues map[string]model.Value
-		queryResult   map[string]model.Value
+		history     map[string]map[string]backendHistory
+		queryRules  map[string]QueryRule
+		queryResult map[string]model.Value
 	}{
 		{
-			backend: "backend1",
-			backendValues: map[string]model.Value{
+			history: map[string]map[string]backendHistory{
+				"key1": {
+					"backend1": {
+						Step2History: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}},
+					},
+				},
+				"key2": {
+					"backend1": {
+						Step2History: []model.SamplePair{{Value: model.SampleValue(3), Timestamp: 1}},
+					},
+				},
+			},
+			queryRules: map[string]QueryRule{
+				"key1": {ResultType: model.ValVector},
+				"key2": {ResultType: model.ValVector},
+			},
+			queryResult: map[string]model.Value{
+				"key1": model.Vector{{Value: model.SampleValue(2), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1"}}},
+				"key2": model.Vector{{Value: model.SampleValue(3), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1"}}},
+			},
+		},
+		{
+			history: map[string]map[string]backendHistory{
+				"key1": {
+					"backend1": {
+						Step2History: []model.SamplePair{{Value: model.SampleValue(1), Timestamp: 1}, {Value: model.SampleValue(2), Timestamp: 2}},
+					},
+				},
+				"key2": {
+					"backend1": {
+						Step2History: []model.SamplePair{{Value: model.SampleValue(3), Timestamp: 1}, {Value: model.SampleValue(4), Timestamp: 2}},
+					},
+					"backend2": {
+						Step2History: []model.SamplePair{{Value: model.SampleValue(5), Timestamp: 1}, {Value: model.SampleValue(6), Timestamp: 2}},
+					},
+				},
+			},
+			queryRules: map[string]QueryRule{
+				"key1": {ResultType: model.ValVector},
+				"key2": {ResultType: model.ValVector},
+			},
+			queryResult: map[string]model.Value{
+				"key1": model.Vector{{Value: model.SampleValue(2), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend1"}}},
+				"key2": model.Vector{
+					{Value: model.SampleValue(4), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend1"}},
+					{Value: model.SampleValue(6), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend2"}},
+				},
+			},
+		},
+		{
+			history: map[string]map[string]backendHistory{
+				"key1": {
+					"backend1": {
+						Step2History: []model.SamplePair{{Value: model.SampleValue(1), Timestamp: 1}},
+					},
+				},
+				"key2": {
+					"backend1": {
+						Step2History: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}},
+					},
+					"backend2": {
+						Step2History: []model.SamplePair{{Value: model.SampleValue(3), Timestamp: 1}, {Value: model.SampleValue(4), Timestamp: 2}},
+					},
+				},
+			},
+			queryRules: map[string]QueryRule{
+				"key1": {ResultType: model.ValVector},
+				"key2": {ResultType: model.ValMatrix},
+			},
+			queryResult: map[string]model.Value{
 				"key1": model.Vector{{Value: model.SampleValue(1), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-				"key2": model.Matrix{{Values: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}}, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-			},
-			queryResult: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(1), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-				"key2": model.Matrix{{Values: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}}, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-			},
-		},
-		{
-			backend: "backend2",
-			backendValues: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(3), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend2"}}},
-				"key2": model.Matrix{{Values: []model.SamplePair{{Value: model.SampleValue(4), Timestamp: 1}}, Metric: model.Metric{LabelNameInstance: "backend2"}}},
-			},
-			queryResult: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(3), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend2"}}},
-				"key2": model.Matrix{{Values: []model.SamplePair{{Value: model.SampleValue(4), Timestamp: 1}}, Metric: model.Metric{LabelNameInstance: "backend2"}}},
-			},
-		},
-		{
-			backend: "backend1",
-			backendValues: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(5), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-				"key2": model.Matrix{{Values: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}, {Value: model.SampleValue(6), Timestamp: 2}}, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-			},
-			queryResult: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(5), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-				"key2": model.Matrix{{Values: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}, {Value: model.SampleValue(6), Timestamp: 2}}, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-			},
-		},
-		{
-			backend: "backend3",
-			backendValues: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(7), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend3"}}},
-			},
-			queryResult: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(7), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend3"}}},
-			},
-		},
-		{
-			backend: "backend3",
-			backendValues: map[string]model.Value{
-				"key2": model.Matrix{{Values: []model.SamplePair{{Value: model.SampleValue(8), Timestamp: 2}}, Metric: model.Metric{LabelNameInstance: "backend3"}}},
-			},
-			queryResult: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(7), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend3"}}},
-				"key2": model.Matrix{{Values: []model.SamplePair{{Value: model.SampleValue(8), Timestamp: 2}}, Metric: model.Metric{LabelNameInstance: "backend3"}}},
+				"key2": model.Matrix{
+					{Values: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}}, Metric: model.Metric{LabelNameInstance: "backend1"}},
+					{Values: []model.SamplePair{{Value: model.SampleValue(3), Timestamp: 1}, {Value: model.SampleValue(4), Timestamp: 2}}, Metric: model.Metric{LabelNameInstance: "backend2"}},
+				},
 			},
 		},
 	}
@@ -561,30 +568,26 @@ func TestMergeQueryResult(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	br := NewBackendReader(lg, nil, nil, nil, nil, nil)
 	for i, test := range tests {
-		br.mergeQueryResult(test.backendValues, test.backend)
-		for id, expectedValue := range test.queryResult {
-			qr := br.GetQueryResult(id)
-			require.NotNil(t, qr.Value, "case %d", i)
+		br.history = test.history
+		br.queryRules = test.queryRules
+		br.history2QueryResult()
+		require.Len(t, br.queryResults, len(test.queryResult), "case %d", i)
+		for ruleKey, expectedValue := range test.queryResult {
+			qr := br.GetQueryResult(ruleKey)
+			require.Greater(t, qr.UpdateTime, monotime.Time(0), "case %d", i)
+			require.NotEmpty(t, qr.Value, "case %d", i)
 			require.Equal(t, expectedValue.Type(), qr.Value.Type(), "case %d", i)
 			switch expectedValue.Type() {
 			case model.ValVector:
-				var sample *model.Sample
-				for _, v := range qr.Value.(model.Vector) {
-					if v.Metric[LabelNameInstance] == model.LabelValue(test.backend) {
-						require.Nil(t, sample, "case %d", i)
-						sample = v
-					}
-				}
-				require.Equal(t, expectedValue.(model.Vector)[0], sample, "case %d", i)
+				sort.Slice(qr.Value.(model.Vector), func(x, y int) bool {
+					return qr.Value.(model.Vector)[x].Metric[LabelNameInstance] < qr.Value.(model.Vector)[y].Metric[LabelNameInstance]
+				})
+				require.Equal(t, expectedValue.(model.Vector), qr.Value.(model.Vector), "case %d", i)
 			case model.ValMatrix:
-				var sample *model.SampleStream
-				for _, v := range qr.Value.(model.Matrix) {
-					if v.Metric[LabelNameInstance] == model.LabelValue(test.backend) {
-						require.Nil(t, sample, "case %d", i)
-						sample = v
-					}
-				}
-				require.Equal(t, expectedValue.(model.Matrix)[0], sample, "case %d", i)
+				sort.Slice(qr.Value.(model.Matrix), func(x, y int) bool {
+					return qr.Value.(model.Matrix)[x].Metric[LabelNameInstance] < qr.Value.(model.Matrix)[y].Metric[LabelNameInstance]
+				})
+				require.Equal(t, expectedValue.(model.Matrix), qr.Value.(model.Matrix), "case %d", i)
 			}
 		}
 	}
@@ -923,15 +926,23 @@ func TestQueryBackendConcurrently(t *testing.T) {
 			case <-time.After(1 * time.Millisecond):
 				for i := 0; i < initialRules; i++ {
 					qr := br.GetQueryResult(strconv.Itoa(i))
+					require.Greater(t, qr.UpdateTime, monotime.Time(0))
 					require.NotNil(t, qr.Value)
+					// read the values to ensure that they are not updated after the query results are returned
 					if i%2 == 0 {
 						require.Equal(t, model.ValVector, qr.Value.Type())
 						require.Len(t, qr.Value.(model.Vector), initialBackends)
+						for j := 0; j < initialBackends; j++ {
+							require.NotEmpty(t, qr.Value.(model.Vector)[j].Value)
+						}
 					} else {
 						require.Equal(t, model.ValMatrix, qr.Value.Type())
 						require.Len(t, qr.Value.(model.Matrix), initialBackends)
 						for j := 0; j < initialBackends; j++ {
 							require.NotEmpty(t, qr.Value.(model.Matrix)[j].Values)
+							for k := 0; k < len(qr.Value.(model.Matrix)[j].Values); k++ {
+								require.NotEmpty(t, qr.Value.(model.Matrix)[j].Values[k].Value)
+							}
 						}
 					}
 				}
@@ -1055,7 +1066,8 @@ func TestReadFromOwner(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newHealthCheckConfigForTest()
 	cli := httputil.NewHTTPClient(func() *tls.Config { return nil })
-	br := NewBackendReader(lg, nil, cli, nil, nil, cfg)
+	ownerBr := NewBackendReader(lg, nil, nil, nil, nil, cfg)
+	memberBr := NewBackendReader(lg, nil, cli, nil, nil, cfg)
 	httpHandler := newMockHttpHandler(t)
 	port := httpHandler.Start()
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
@@ -1063,10 +1075,10 @@ func TestReadFromOwner(t *testing.T) {
 
 	for i, test := range tests {
 		// marshal
-		br.history = test.history
-		err := br.marshalHistory(test.backends)
+		ownerBr.history = test.history
+		err := ownerBr.marshalHistory(test.backends)
 		require.NoError(t, err, "case %d", i)
-		data := br.GetBackendMetrics()
+		data := ownerBr.GetBackendMetrics()
 
 		f := func(_ string) string {
 			return string(data)
@@ -1074,13 +1086,13 @@ func TestReadFromOwner(t *testing.T) {
 		httpHandler.getRespBody.Store(&f)
 
 		// unmarshal
-		br.history = make(map[string]map[string]backendHistory)
-		err = br.readFromOwner(context.Background(), addr)
+		memberBr.history = make(map[string]map[string]backendHistory)
+		err = memberBr.readFromOwner(context.Background(), addr)
 		require.NoError(t, err, "case %d", i)
-		require.Equal(t, test.expected, br.history, "case %d", i)
+		require.Equal(t, test.expected, memberBr.history, "case %d", i)
 
 		// marshal again
-		data2 := br.GetBackendMetrics()
+		data2 := ownerBr.GetBackendMetrics()
 		require.Equal(t, data, data2, "case %d", i)
 	}
 }

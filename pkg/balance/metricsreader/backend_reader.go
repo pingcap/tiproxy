@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -293,13 +292,12 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 					return
 				}
 				br.metric2History(mf, addr)
-				result := br.history2Value(addr)
-				br.mergeQueryResult(result, addr)
 			}, nil, br.lg)
 		}(addr)
 	}
 	br.wgp.Wait()
 
+	br.history2QueryResult()
 	if err := br.marshalHistory(addrs); err != nil {
 		br.lg.Error("marshal backend history failed", zap.Any("addrs", addrs), zap.Error(err))
 	}
@@ -369,87 +367,58 @@ func (br *BackendReader) metric2History(mfs map[string]*dto.MetricFamily, backen
 	}
 }
 
-// history2Value converts the history to results for all rules of one backend.
-// E.g. return the metrics for 1 minute as a matrix
-func (br *BackendReader) history2Value(backend string) map[string]model.Value {
-	results := make(map[string]model.Value, len(br.queryRules))
-	labels := map[model.LabelName]model.LabelValue{LabelNameInstance: model.LabelValue(backend)}
+// history2QueryResult generates new query results from the history.
+func (br *BackendReader) history2QueryResult() {
+	now := monotime.Now()
 	br.Lock()
 	defer br.Unlock()
 
+	queryResults := make(map[string]QueryResult, len(br.queryRules))
 	for ruleKey, rule := range br.queryRules {
 		ruleHistory := br.history[ruleKey]
 		if len(ruleHistory) == 0 {
 			continue
 		}
-		beHistory := ruleHistory[backend]
-		if len(beHistory.Step2History) == 0 {
-			continue
-		}
 
+		var value model.Value
 		switch rule.ResultType {
 		case model.ValVector:
-			// vector indicates returning the latest pair
-			lastPair := beHistory.Step2History[len(beHistory.Step2History)-1]
-			results[ruleKey] = model.Vector{{Value: lastPair.Value, Timestamp: lastPair.Timestamp, Metric: labels}}
+			results := make([]*model.Sample, 0, len(ruleHistory))
+			for backend, beHistory := range ruleHistory {
+				if len(beHistory.Step2History) == 0 {
+					continue
+				}
+				labels := map[model.LabelName]model.LabelValue{LabelNameInstance: model.LabelValue(backend)}
+				// vector indicates returning the latest pair
+				lastPair := beHistory.Step2History[len(beHistory.Step2History)-1]
+				results = append(results, &model.Sample{Value: lastPair.Value, Timestamp: lastPair.Timestamp, Metric: labels})
+			}
+			value = model.Vector(results)
 		case model.ValMatrix:
-			// matrix indicates returning the history
-			// copy a slice to avoid data race
-			pairs := make([]model.SamplePair, len(beHistory.Step2History))
-			copy(pairs, beHistory.Step2History)
-			results[ruleKey] = model.Matrix{{Values: pairs, Metric: labels}}
+			results := make([]*model.SampleStream, 0, len(ruleHistory))
+			for backend, beHistory := range ruleHistory {
+				if len(beHistory.Step2History) == 0 {
+					continue
+				}
+				labels := map[model.LabelName]model.LabelValue{LabelNameInstance: model.LabelValue(backend)}
+				// matrix indicates returning the history
+				// copy a slice to avoid data race
+				pairs := make([]model.SamplePair, len(beHistory.Step2History))
+				copy(pairs, beHistory.Step2History)
+				results = append(results, &model.SampleStream{Values: pairs, Metric: labels})
+			}
+			value = model.Matrix(results)
 		default:
 			br.lg.Error("unsupported value type", zap.String("value type", rule.ResultType.String()))
 		}
-	}
-	return results
-}
 
-// mergeQueryResult merges the result of one backend into the final result.
-func (br *BackendReader) mergeQueryResult(backendValues map[string]model.Value, backend string) {
-	now := monotime.Now()
-	br.Lock()
-	defer br.Unlock()
-	for ruleKey, value := range backendValues {
-		result := br.queryResults[ruleKey]
-		result.UpdateTime = now
-		if result.Value == nil || reflect.ValueOf(result.Value).IsNil() {
-			result.Value = value
-			br.queryResults[ruleKey] = result
-			continue
+		queryResults[ruleKey] = QueryResult{
+			Value:      value,
+			UpdateTime: now,
 		}
-		switch result.Value.Type() {
-		case model.ValVector:
-			idx := -1
-			for i, v := range result.Value.(model.Vector) {
-				if v.Metric[LabelNameInstance] == model.LabelValue(backend) {
-					idx = i
-					break
-				}
-			}
-			if idx >= 0 {
-				result.Value.(model.Vector)[idx] = value.(model.Vector)[0]
-			} else {
-				result.Value = append(result.Value.(model.Vector), value.(model.Vector)[0])
-			}
-		case model.ValMatrix:
-			idx := -1
-			for i, v := range result.Value.(model.Matrix) {
-				if v.Metric[LabelNameInstance] == model.LabelValue(backend) {
-					idx = i
-					break
-				}
-			}
-			if idx >= 0 {
-				result.Value.(model.Matrix)[idx] = value.(model.Matrix)[0]
-			} else {
-				result.Value = append(result.Value.(model.Matrix), value.(model.Matrix)[0])
-			}
-		default:
-			br.lg.Error("unsupported value type", zap.Stringer("value type", result.Value.Type()))
-		}
-		br.queryResults[ruleKey] = result
 	}
+
+	br.queryResults = queryResults
 }
 
 // purgeHistory purges the expired or useless history values, otherwise the memory grows infinitely.
@@ -499,21 +468,12 @@ func (br *BackendReader) readFromOwner(ctx context.Context, ownerAddr string) er
 	if err := json.Unmarshal(resp, &newHistory); err != nil {
 		return err
 	}
-	backends := make(map[string]struct{})
-	for _, ruleHistory := range newHistory {
-		for backend := range ruleHistory {
-			backends[backend] = struct{}{}
-		}
-	}
 
 	// If this instance becomes the owner in the next round, it can reuse the history.
 	br.mergeHistory(newHistory)
 
-	// Update query result for the updated backends.
-	for backend := range backends {
-		result := br.history2Value(backend)
-		br.mergeQueryResult(result, backend)
-	}
+	// Generate query result for all backends.
+	br.history2QueryResult()
 	return nil
 }
 
@@ -544,6 +504,8 @@ func (br *BackendReader) mergeHistory(newHistory map[string]map[string]backendHi
 			ruleHistory[backend] = backendHistory
 		}
 	}
+	// avoid that the stale history is returned to other members when it just becomes the owner
+	br.marshalledHistory = nil
 }
 
 // marshalHistory marshals the backends that are read by this owner. The marshaled data will be returned to other members.
