@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -85,7 +84,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 		mmr := &mockMetricsReader{
 			qrs: map[string]metricsreader.QueryResult{
 				"cpu": {
-					UpdateTime: monotime.Now(),
+					UpdateTime: time.Now(),
 					Value:      model.Matrix(values),
 				},
 			},
@@ -198,7 +197,7 @@ func TestCPUBalanceContinuously(t *testing.T) {
 		}
 		curTime = curTime.Add(time.Millisecond)
 		mmr.qrs["cpu"] = metricsreader.QueryResult{
-			UpdateTime: monotime.Now(),
+			UpdateTime: time.Now(),
 			Value:      model.Matrix(values),
 		}
 		// Rebalance until it stops. The final scores should be newConnScores.
@@ -228,18 +227,18 @@ func TestCPUBalanceContinuously(t *testing.T) {
 func TestNoCPUMetric(t *testing.T) {
 	tests := []struct {
 		cpus       [][]float64
-		updateTime monotime.Time
+		updateTime time.Time
 	}{
 		{
 			cpus: nil,
 		},
 		{
 			cpus:       [][]float64{{1.0}, {0.0}},
-			updateTime: monotime.Now().Add(-cpuMetricExpDuration * 2),
+			updateTime: time.Now().Add(-cpuMetricExpDuration * 2),
 		},
 		{
 			cpus:       [][]float64{{math.NaN()}, {math.NaN()}},
-			updateTime: monotime.Now(),
+			updateTime: time.Now(),
 		},
 	}
 	mmr := newMockMetricsReader()
@@ -248,7 +247,7 @@ func TestNoCPUMetric(t *testing.T) {
 	for i, test := range tests {
 		values := make([]*model.SampleStream, 0, len(test.cpus))
 		for j := 0; j < len(test.cpus); j++ {
-			ss := createSampleStream(test.cpus[j], j, model.Time(test.updateTime/monotime.Time(time.Millisecond)))
+			ss := createSampleStream(test.cpus[j], j, model.TimeFromUnixNano(test.updateTime.UnixNano()))
 			values = append(values, ss)
 		}
 		mmr.qrs["cpu"] = metricsreader.QueryResult{
@@ -291,7 +290,7 @@ func TestCPUResultNotUpdated(t *testing.T) {
 		array := []float64{test.cpu}
 		values := []*model.SampleStream{createSampleStream(array, 0, test.updateTime), createSampleStream(array, 1, test.updateTime)}
 		mmr.qrs["cpu"] = metricsreader.QueryResult{
-			UpdateTime: monotime.Now(),
+			UpdateTime: time.Now(),
 			Value:      model.Matrix(values),
 		}
 		updateScore(fc, backends)

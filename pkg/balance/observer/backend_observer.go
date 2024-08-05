@@ -11,7 +11,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
 
@@ -91,7 +90,7 @@ func (bo *DefaultBackendObserver) Refresh() {
 
 func (bo *DefaultBackendObserver) observe(ctx context.Context) {
 	for ctx.Err() == nil {
-		startTime := monotime.Now()
+		startTime := time.Now()
 		backendInfo, err := bo.fetcher.GetBackendList(ctx)
 		var result HealthResult
 		if err != nil {
@@ -104,7 +103,7 @@ func (bo *DefaultBackendObserver) observe(ctx context.Context) {
 		bo.purgeBackendMetrics()
 		bo.notifySubscribers(ctx, result)
 
-		cost := monotime.Since(startTime)
+		cost := time.Since(startTime)
 		metrics.HealthCheckCycleGauge.Set(cost.Seconds())
 		wait := bo.healthCheckConfig.Interval - cost
 		if wait > 0 {

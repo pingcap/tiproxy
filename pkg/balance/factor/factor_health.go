@@ -9,7 +9,6 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 )
@@ -146,7 +145,7 @@ var _ Factor = (*FactorHealth)(nil)
 
 // The snapshot of backend statistics when the metric was updated.
 type healthBackendSnapshot struct {
-	updatedTime monotime.Time
+	updatedTime time.Time
 	valueRange  valueRange
 	// Record the balance count when the backend becomes unhealthy so that it won't be smaller in the next rounds.
 	balanceCount float64
@@ -203,7 +202,7 @@ func (fh *FactorHealth) UpdateScore(backends []scoredBackend) {
 	if len(backends) <= 1 {
 		return
 	}
-	needUpdateSnapshot, latestTime := false, monotime.Time(0)
+	needUpdateSnapshot, latestTime := false, time.Time{}
 	for i := 0; i < len(fh.indicators); i++ {
 		qr := fh.mr.GetQueryResult(fh.indicators[i].key)
 		if qr.Empty() {
@@ -213,11 +212,11 @@ func (fh *FactorHealth) UpdateScore(backends []scoredBackend) {
 			fh.indicators[i].queryResult = qr
 			needUpdateSnapshot = true
 		}
-		if qr.UpdateTime > latestTime {
+		if qr.UpdateTime.After(latestTime) {
 			latestTime = qr.UpdateTime
 		}
 	}
-	if monotime.Since(latestTime) > errMetricExpDuration {
+	if time.Since(latestTime) > errMetricExpDuration {
 		// The metrics have not been updated for a long time (maybe Prometheus is unavailable).
 		return
 	}
@@ -234,14 +233,14 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 	snapshots := make(map[string]healthBackendSnapshot, len(fh.snapshot))
 	for _, backend := range backends {
 		// Get the current value range.
-		updatedTime, valueRange := monotime.Time(0), valueRangeNormal
+		updatedTime, valueRange := time.Time{}, valueRangeNormal
 		for i := 0; i < len(fh.indicators); i++ {
 			ts := fh.indicators[i].queryResult.UpdateTime
-			if monotime.Since(ts) > errMetricExpDuration {
+			if time.Since(ts) > errMetricExpDuration {
 				// The metrics have not been updated for a long time (maybe Prometheus is unavailable).
 				continue
 			}
-			if ts > updatedTime {
+			if ts.After(updatedTime) {
 				updatedTime = ts
 			}
 			sample := fh.indicators[i].queryResult.GetSample4Backend(backend)
@@ -253,8 +252,8 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 		// If the metric is unavailable, try to reuse the latest one.
 		addr := backend.Addr()
 		snapshot, existSnapshot := fh.snapshot[addr]
-		if updatedTime == monotime.Time(0) {
-			if existSnapshot && monotime.Since(snapshot.updatedTime) < errMetricExpDuration {
+		if updatedTime.IsZero() {
+			if existSnapshot && time.Since(snapshot.updatedTime) < errMetricExpDuration {
 				snapshots[addr] = snapshot
 			}
 			continue

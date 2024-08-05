@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -66,11 +66,11 @@ func TestHealthScore(t *testing.T) {
 	mmr := &mockMetricsReader{
 		qrs: map[string]metricsreader.QueryResult{
 			"health_pd": {
-				UpdateTime: monotime.Now(),
+				UpdateTime: time.Now(),
 				Value:      model.Vector(values1),
 			},
 			"health_tikv": {
-				UpdateTime: monotime.Now(),
+				UpdateTime: time.Now(),
 				Value:      model.Vector(values2),
 			},
 		},
@@ -142,11 +142,11 @@ func TestHealthBalance(t *testing.T) {
 		mmr := &mockMetricsReader{
 			qrs: map[string]metricsreader.QueryResult{
 				"health_pd": {
-					UpdateTime: monotime.Now(),
+					UpdateTime: time.Now(),
 					Value:      model.Vector(values1),
 				},
 				"health_tikv": {
-					UpdateTime: monotime.Now(),
+					UpdateTime: time.Now(),
 					Value:      model.Vector(values2),
 				},
 			},
@@ -170,18 +170,18 @@ func TestHealthBalance(t *testing.T) {
 func TestNoHealthMetrics(t *testing.T) {
 	tests := []struct {
 		errCounts  [][]float64
-		updateTime monotime.Time
+		updateTime time.Time
 	}{
 		{
 			errCounts: [][]float64{nil, nil},
 		},
 		{
 			errCounts:  [][]float64{{1, 1}, {0, 0}},
-			updateTime: monotime.Now().Sub(errMetricExpDuration * 2),
+			updateTime: time.Now().Add(-errMetricExpDuration * 2),
 		},
 		{
 			errCounts:  [][]float64{{math.NaN(), math.NaN()}, {math.NaN(), math.NaN()}},
-			updateTime: monotime.Now(),
+			updateTime: time.Now(),
 		},
 	}
 
@@ -268,7 +268,7 @@ func TestHealthBalanceCount(t *testing.T) {
 			createSample(0, 1),
 		}
 		mmr.qrs["health_pd"] = metricsreader.QueryResult{
-			UpdateTime: monotime.Now(),
+			UpdateTime: time.Now(),
 			Value:      model.Vector(values),
 		}
 		mmr.qrs["health_tikv"] = mmr.qrs["health_pd"]

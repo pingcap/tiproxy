@@ -9,7 +9,6 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 )
@@ -84,7 +83,7 @@ type FactorCPU struct {
 	// The snapshot of backend statistics when the matrix was updated.
 	snapshot map[string]cpuBackendSnapshot
 	// The updated time of the metric that we've read last time.
-	lastMetricTime monotime.Time
+	lastMetricTime time.Time
 	// The estimated average CPU usage used by one connection.
 	usagePerConn float64
 	mr           metricsreader.MetricsReader
@@ -120,7 +119,7 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 		fc.updateSnapshot(qr, backends)
 		fc.updateCpuPerConn()
 	}
-	if monotime.Since(fc.lastMetricTime) > cpuMetricExpDuration {
+	if time.Since(fc.lastMetricTime) > cpuMetricExpDuration {
 		// The metrics have not been updated for a long time (maybe Prometheus is unavailable).
 		return
 	}

@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -369,7 +368,7 @@ func (br *BackendReader) metric2History(mfs map[string]*dto.MetricFamily, backen
 
 // history2QueryResult generates new query results from the history.
 func (br *BackendReader) history2QueryResult() {
-	now := monotime.Now()
+	now := time.Now()
 	br.Lock()
 	defer br.Unlock()
 

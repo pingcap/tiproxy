@@ -17,7 +17,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/client_golang/api"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"go.uber.org/zap"
@@ -66,7 +65,7 @@ func (pr *PromReader) ReadMetrics(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		qr.UpdateTime = monotime.Now()
+		qr.UpdateTime = time.Now()
 		results[id] = qr
 	}
 	pr.Lock()

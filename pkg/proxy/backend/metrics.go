@@ -9,7 +9,6 @@ import (
 
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -42,7 +41,7 @@ func newCmdMetricsCache() cmdMetricsCache {
 
 var cache = newCmdMetricsCache()
 
-func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
+func addCmdMetrics(cmd pnet.Command, addr string, startTime time.Time) {
 	cache.Lock()
 	defer cache.Unlock()
 	backendMetrics := ensureBackendMetrics(addr)
@@ -53,7 +52,7 @@ func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 		mc.observer = metrics.QueryDurationHistogram.WithLabelValues(addr, label)
 	}
 	mc.counter.Inc()
-	cost := monotime.Since(startTime)
+	cost := time.Since(startTime)
 	mc.observer.Observe(cost.Seconds())
 }
 

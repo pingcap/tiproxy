@@ -4,8 +4,9 @@
 package router
 
 import (
+	"time"
+
 	"github.com/pingcap/tiproxy/pkg/metrics"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
 
 func setBackendConnMetrics(addr string, conns int) {
@@ -24,11 +25,11 @@ func succeedToLabel(succeed bool) string {
 	return "fail"
 }
 
-func addMigrateMetrics(from, to, reason string, succeed bool, startTime monotime.Time) {
+func addMigrateMetrics(from, to, reason string, succeed bool, startTime time.Time) {
 	resLabel := succeedToLabel(succeed)
 	metrics.MigrateCounter.WithLabelValues(from, to, reason, resLabel).Inc()
 
-	cost := monotime.Since(startTime)
+	cost := time.Since(startTime)
 	metrics.MigrateDurationHistogram.WithLabelValues(from, to, resLabel).Observe(cost.Seconds())
 }
 

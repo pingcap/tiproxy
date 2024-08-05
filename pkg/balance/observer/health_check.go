@@ -16,7 +16,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/util/http"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
 
@@ -72,7 +71,7 @@ func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh
 	// Also dial the SQL port just in case that the SQL port hangs.
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
 	err := http.ConnectWithRetry(func() error {
-		startTime := monotime.Now()
+		startTime := time.Now()
 		conn, err := net.DialTimeout("tcp", addr, dhc.cfg.DialTimeout)
 		setPingBackendMetrics(addr, startTime)
 		if err != nil {

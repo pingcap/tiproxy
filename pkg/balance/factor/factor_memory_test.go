@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -97,7 +96,7 @@ func TestMemoryScore(t *testing.T) {
 	mmr := &mockMetricsReader{
 		qrs: map[string]metricsreader.QueryResult{
 			"memory": {
-				UpdateTime: monotime.Now(),
+				UpdateTime: time.Now(),
 				Value:      model.Matrix(values),
 			},
 		},
@@ -209,7 +208,7 @@ func TestMemoryBalance(t *testing.T) {
 		mmr := &mockMetricsReader{
 			qrs: map[string]metricsreader.QueryResult{
 				"memory": {
-					UpdateTime: monotime.Now(),
+					UpdateTime: time.Now(),
 					Value:      model.Matrix(values),
 				},
 			},
@@ -233,18 +232,18 @@ func TestMemoryBalance(t *testing.T) {
 func TestNoMemMetrics(t *testing.T) {
 	tests := []struct {
 		mem        [][]float64
-		updateTime monotime.Time
+		updateTime time.Time
 	}{
 		{
 			mem: nil,
 		},
 		{
 			mem:        [][]float64{{1.0}, {0.0}},
-			updateTime: monotime.Now().Sub(memMetricExpDuration * 2),
+			updateTime: time.Now().Add(-memMetricExpDuration * 2),
 		},
 		{
 			mem:        [][]float64{{math.NaN()}, {math.NaN()}},
-			updateTime: monotime.Now(),
+			updateTime: time.Now(),
 		},
 	}
 
@@ -258,7 +257,7 @@ func TestNoMemMetrics(t *testing.T) {
 		values := make([]*model.SampleStream, 0, len(test.mem))
 		for j := 0; j < len(test.mem); j++ {
 			ss := createSampleStream(test.mem[j], j, model.Now())
-			ss.Values[0].Timestamp = model.Time(test.updateTime / monotime.Time(time.Millisecond))
+			ss.Values[0].Timestamp = model.TimeFromUnixNano(test.updateTime.UnixNano())
 			values = append(values, ss)
 		}
 		mmr.qrs["memory"] = metricsreader.QueryResult{
@@ -328,7 +327,7 @@ func TestMemoryBalanceCount(t *testing.T) {
 			createSampleStream([]float64{0, 0}, 1, ts),
 		}
 		mmr.qrs["memory"] = metricsreader.QueryResult{
-			UpdateTime: monotime.Now(),
+			UpdateTime: time.Now(),
 			Value:      model.Matrix(values),
 		}
 	}

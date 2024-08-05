@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
@@ -54,7 +53,7 @@ type QueryRule struct {
 
 type QueryResult struct {
 	Value      model.Value
-	UpdateTime monotime.Time
+	UpdateTime time.Time
 }
 
 func (qr QueryResult) Empty() bool {
