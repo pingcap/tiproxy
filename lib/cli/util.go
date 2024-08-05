@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -39,8 +38,8 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 
 	var rete string
 	var res *http.Response
-	for _, i := range rand.Perm(len(bctx.CUrls)) {
-		req.URL.Host = bctx.CUrls[i]
+	for _, url := range bctx.CUrls {
+		req.URL.Host = url
 
 		res, err = bctx.Client.Do(req)
 		if err != nil {

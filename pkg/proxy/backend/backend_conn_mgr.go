@@ -15,7 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-mysql-org/go-mysql/mysql"
@@ -123,7 +122,7 @@ type BackendConnManager struct {
 	signalReceived chan signalType
 	authenticator  *Authenticator
 	cmdProcessor   *CmdProcessor
-	eventReceiver  unsafe.Pointer
+	eventReceiver  atomic.Pointer[router.ConnEventReceiver]
 	config         *BCConfig
 	logger         *zap.Logger
 	curBackend     router.BackendInst
@@ -406,11 +405,11 @@ func (mgr *BackendConnManager) updateTraffic(backendIO *pnet.PacketIO) {
 // SetEventReceiver implements RedirectableConn.SetEventReceiver interface.
 // The receiver sends redirection signals and watches redirecting events.
 func (mgr *BackendConnManager) SetEventReceiver(receiver router.ConnEventReceiver) {
-	atomic.StorePointer(&mgr.eventReceiver, unsafe.Pointer(&receiver))
+	mgr.eventReceiver.Store(&receiver)
 }
 
 func (mgr *BackendConnManager) getEventReceiver() router.ConnEventReceiver {
-	eventReceiver := (*router.ConnEventReceiver)(atomic.LoadPointer(&mgr.eventReceiver))
+	eventReceiver := mgr.eventReceiver.Load()
 	if eventReceiver == nil {
 		return nil
 	}
