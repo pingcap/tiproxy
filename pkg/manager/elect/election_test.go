@@ -56,6 +56,11 @@ func TestElectOwner(t *testing.T) {
 		_, err := elec.GetOwnerID(context.Background())
 		require.Error(t, err)
 	}
+	// double closing elections is allowed
+	{
+		elec := ts.getElection("3")
+		elec.Close()
+	}
 }
 
 func TestEtcdServerDown(t *testing.T) {

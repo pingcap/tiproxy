@@ -39,7 +39,7 @@ const (
 	readerOwnerKeyPrefix = "/tiproxy/metric_reader"
 	readerOwnerKeySuffix = "owner"
 	// sessionTTL is the session's TTL in seconds for backend reader owner election.
-	sessionTTL = 30
+	sessionTTL = 15
 	// backendMetricPath is the path of backend HTTP API to read metrics.
 	backendMetricPath = "/metrics"
 	// ownerMetricPath is the path of reading backend metrics from the backend reader owner.
