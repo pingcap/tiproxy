@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	httputil "github.com/pingcap/tiproxy/pkg/util/http"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -574,7 +573,7 @@ func TestHistory2QueryResult(t *testing.T) {
 		require.Len(t, br.queryResults, len(test.queryResult), "case %d", i)
 		for ruleKey, expectedValue := range test.queryResult {
 			qr := br.GetQueryResult(ruleKey)
-			require.Greater(t, qr.UpdateTime, monotime.Time(0), "case %d", i)
+			require.False(t, qr.UpdateTime.IsZero(), "case %d", i)
 			require.NotEmpty(t, qr.Value, "case %d", i)
 			require.Equal(t, expectedValue.Type(), qr.Value.Type(), "case %d", i)
 			switch expectedValue.Type() {
@@ -926,7 +925,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 			case <-time.After(1 * time.Millisecond):
 				for i := 0; i < initialRules; i++ {
 					qr := br.GetQueryResult(strconv.Itoa(i))
-					require.Greater(t, qr.UpdateTime, monotime.Time(0))
+					require.False(t, qr.UpdateTime.IsZero())
 					require.NotNil(t, qr.Value)
 					// read the values to ensure that they are not updated after the query results are returned
 					if i%2 == 0 {
@@ -1274,7 +1273,7 @@ func TestElection(t *testing.T) {
 	t.Cleanup(br.Close)
 
 	// test not owner
-	ts := monotime.Now()
+	ts := time.Now()
 	err = br.ReadMetrics(context.Background())
 	require.NoError(t, err)
 	qr := br.GetQueryResult("rule_id1")

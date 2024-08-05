@@ -35,7 +35,6 @@ const SupportedServerCapabilities = pnet.ClientLongPassword | pnet.ClientFoundRo
 
 // Authenticator handshakes with the client and the backend.
 type Authenticator struct {
-	salt              [20]byte
 	dbname            string // default database name
 	user              string
 	attrs             map[string]string
@@ -51,7 +50,6 @@ func NewAuthenticator(config *BCConfig) *Authenticator {
 		proxyProtocol:     config.ProxyProtocol,
 		requireBackendTLS: config.RequireBackendTLS,
 	}
-	GenerateSalt(&auth.salt)
 	return auth
 }
 
@@ -97,8 +95,13 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 		proxyCapability ^= pnet.ClientSSL
 	}
 
+	var salt [20]byte
+	if err := GenerateSalt(&salt); err != nil {
+		return err
+	}
+
 	cid, _ := cctx.Value(ConnContextKeyConnID).(uint64)
-	if err := clientIO.WriteInitialHandshake(proxyCapability, auth.salt, pnet.AuthNativePassword, handshakeHandler.GetServerVersion(), cid); err != nil {
+	if err := clientIO.WriteInitialHandshake(proxyCapability, salt, pnet.AuthNativePassword, handshakeHandler.GetServerVersion(), cid); err != nil {
 		return err
 	}
 	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()

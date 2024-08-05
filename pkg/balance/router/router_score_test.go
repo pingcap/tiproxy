@@ -19,7 +19,6 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/metrics"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
 )
@@ -174,7 +173,7 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 
 func (tester *routerTester) rebalance(num int) {
 	for i := 0; i < num; i++ {
-		tester.router.lastRedirectTime = monotime.Time(0)
+		tester.router.lastRedirectTime = time.Time{}
 		tester.router.rebalance(context.Background())
 	}
 }
@@ -901,11 +900,11 @@ func TestControlSpeed(t *testing.T) {
 		bp.backendsToBalance = func(bc []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
 			return tester.getBackendByIndex(0), tester.getBackendByIndex(1), test.balanceCount, "conn", nil
 		}
-		tester.router.lastRedirectTime = monotime.Time(0)
+		tester.router.lastRedirectTime = time.Time{}
 		require.Equal(t, total, tester.getBackendByIndex(0).connScore)
 		for j := 0; j < test.rounds; j++ {
 			tester.router.rebalance(context.Background())
-			tester.router.lastRedirectTime -= monotime.Time(test.interval)
+			tester.router.lastRedirectTime = tester.router.lastRedirectTime.Add(-test.interval)
 		}
 		redirectingNum := total - tester.getBackendByIndex(0).connScore
 		// Define a bound because the test may be slow.

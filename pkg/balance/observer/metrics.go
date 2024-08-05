@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/pkg/metrics"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
 
 func updateBackendStatusMetrics(addr string, healthy bool) {
@@ -30,8 +29,8 @@ func checkBackendStatusMetrics(addr string, healthy bool) bool {
 	return int(val) == expected
 }
 
-func setPingBackendMetrics(addr string, startTime monotime.Time) {
-	cost := monotime.Since(startTime)
+func setPingBackendMetrics(addr string, startTime time.Time) {
+	cost := time.Since(startTime)
 	metrics.PingBackendGauge.WithLabelValues(addr).Set(cost.Seconds())
 }
 

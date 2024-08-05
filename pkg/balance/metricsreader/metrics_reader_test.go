@@ -13,7 +13,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	httputil "github.com/pingcap/tiproxy/pkg/util/http"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
@@ -67,7 +66,7 @@ func TestFallback(t *testing.T) {
 	t.Cleanup(mr.Close)
 
 	// read from prom
-	ts := monotime.Now()
+	ts := time.Now()
 	mr.readMetrics(context.Background())
 	qr := mr.GetQueryResult("rule_id1")
 	require.False(t, qr.Empty())

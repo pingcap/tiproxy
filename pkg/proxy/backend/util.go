@@ -3,18 +3,35 @@
 
 package backend
 
-import _ "unsafe"
+import (
+	"crypto/rand"
 
-//go:linkname Uint32N runtime.fastrandn
-func Uint32N(a uint64) uint64
+	"github.com/pingcap/tiproxy/lib/util/errors"
+)
 
 // Buf generates a random string using ASCII characters but avoid separator character.
 // Ref https://github.com/mysql/mysql-server/blob/5.7/mysys_ssl/crypt_genhash_impl.cc#L435.
-func GenerateSalt(buf *[20]byte) {
+func GenerateSalt(buf *[20]byte) error {
+	n, err := rand.Read(buf[:])
+	if err != nil {
+		return errors.Wrapf(errors.WithStack(err), "failed to generate salt")
+	}
+	if n < len(buf) {
+		return errors.Errorf("failed to generate salt, len %d", n)
+	}
 	for i := range buf {
-		buf[i] = byte(Uint32N(127))
-		for buf[i] == 0 || buf[i] == byte('$') {
-			buf[i] = byte(Uint32N(127))
+		buf[i] &= 0x7f
+		if buf[i] == 0 || buf[i] == '$' {
+			buf[i] += 1
 		}
 	}
+	return nil
+	// for i := range buf {
+	// 	b := big.NewInt(int64(127))
+	// 	n, err := rand.Int(rand.Reader, b)
+	// 	for err != nil || n.Uint64() == 0 || n.Uint64() == uint64('$') {
+	// 		n, err = rand.Int(rand.Reader, b)
+	// 	}
+	// 	buf[i] = byte(n.Uint64())
+	// }
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 )
@@ -98,7 +97,7 @@ type FactorMemory struct {
 	// The snapshot of backend statistics when the matrix was updated.
 	snapshot map[string]memBackendSnapshot
 	// The updated time of the metric that we've read last time.
-	lastMetricTime monotime.Time
+	lastMetricTime time.Time
 	mr             metricsreader.MetricsReader
 	bitNum         int
 }
@@ -138,7 +137,7 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 		fm.lastMetricTime = qr.UpdateTime
 		fm.updateSnapshot(qr, backends)
 	}
-	if monotime.Since(fm.lastMetricTime) > memMetricExpDuration {
+	if time.Since(fm.lastMetricTime) > memMetricExpDuration {
 		// The metrics have not been updated for a long time (maybe Prometheus is unavailable).
 		return
 	}

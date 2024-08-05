@@ -6,17 +6,17 @@ package backend
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 func BenchmarkAddCmdMetrics(b *testing.B) {
 	cmd := pnet.ComQuery
 	addr := "127.0.0.1:4000"
-	startTime := monotime.Now()
+	startTime := time.Now()
 	for i := 0; i < b.N; i++ {
 		addCmdMetrics(cmd, addr, startTime)
 	}

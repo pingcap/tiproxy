@@ -10,7 +10,6 @@ import (
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 )
 
 var (
@@ -168,6 +167,6 @@ type connWrapper struct {
 	// Reference to the target backend if it's redirecting, otherwise nil.
 	redirectingBackend *backendWrapper
 	// Last redirect start time of this connection.
-	lastRedirect monotime.Time
+	lastRedirect time.Time
 	phase        connPhase
 }

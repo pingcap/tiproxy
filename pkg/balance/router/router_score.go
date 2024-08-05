@@ -16,7 +16,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
-	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +42,7 @@ type ScoreBasedRouter struct {
 	// Only store the version of a random backend, so the client may see a wrong version when backends are upgrading.
 	serverVersion string
 	// To limit the speed of redirection.
-	lastRedirectTime monotime.Time
+	lastRedirectTime time.Time
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
@@ -328,7 +327,7 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	fromBackend, toBackend := busiestBackend.(*backendWrapper), idlestBackend.(*backendWrapper)
 
 	// Control the speed of migration.
-	curTime := monotime.Now()
+	curTime := time.Now()
 	migrationInterval := time.Duration(float64(time.Second) / balanceCount)
 	count := 0
 	if migrationInterval < rebalanceInterval*2 {
@@ -336,7 +335,7 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 		count = int((rebalanceInterval-1)/migrationInterval) + 1
 	} else {
 		// If we need to wait for multiple rounds to migrate a connection, calculate the interval for each connection.
-		if curTime-router.lastRedirectTime >= monotime.Time(migrationInterval) {
+		if curTime.Sub(router.lastRedirectTime) >= migrationInterval {
 			count = 1
 		} else {
 			return
@@ -369,7 +368,7 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 }
 
 func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toBackend *backendWrapper,
-	reason string, logFields []zap.Field, curTime monotime.Time) {
+	reason string, logFields []zap.Field, curTime time.Time) {
 	fields := []zap.Field{
 		zap.Uint64("connID", conn.ConnectionID()),
 		zap.String("from", fromBackend.addr),
