@@ -209,14 +209,14 @@ func (s *Server) Close() error {
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventClose).Inc()
 
 	errs := make([]error, 0, 4)
-	// Resign the VIP owner before graceful shutdown so that clients connect to other nodes.
+	// Resign the VIP owner before graceful wait so that clients connect to other nodes.
 	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
 		s.vipManager.Resign()
 	}
 	if s.proxy != nil {
 		errs = append(errs, s.proxy.Close())
 	}
-	// Delete VIP after graceful shutdown.
+	// Delete VIP after graceful wait.
 	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
 		s.vipManager.Close()
 	}

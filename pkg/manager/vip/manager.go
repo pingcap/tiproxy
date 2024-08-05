@@ -133,7 +133,7 @@ func (vm *vipManager) delVIP() {
 }
 
 // Resign stops compaign but does not delete the VIP.
-// It's called before graceful shutdown to avoid that the VIP is deleted before another member adds VIP.
+// It's called before graceful wait to avoid that the VIP is deleted before another member adds VIP.
 func (vm *vipManager) Resign() {
 	vm.delOnRetire.Store(false)
 	if vm.election != nil {
@@ -143,7 +143,7 @@ func (vm *vipManager) Resign() {
 }
 
 // Close stops compaign and deletes the VIP.
-// It's called after graceful shutdown to ensure the VIP is finally deleted.
+// It's called after graceful wait to ensure the VIP is finally deleted.
 func (vm *vipManager) Close() {
 	vm.Resign()
 	vm.delVIP()
