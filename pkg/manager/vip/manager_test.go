@@ -142,3 +142,44 @@ func TestNetworkOperation(t *testing.T) {
 	cancel()
 	vm.Close()
 }
+
+func TestResign(t *testing.T) {
+	tests := []struct {
+		hasIP       bool
+		expectedLog string
+	}{
+		{
+			hasIP:       false,
+			expectedLog: "do nothing",
+		},
+		{
+			hasIP:       true,
+			expectedLog: "deleting VIP success",
+		},
+	}
+
+	for i, test := range tests {
+		lg, text := logger.CreateLoggerForTest(t)
+		operation := newMockNetworkOperation()
+		vm := &vipManager{
+			lg:        lg,
+			cfgGetter: newMockConfigGetter(config.HA{VirtualIP: "10.10.10.10/24", Interface: "eth0"}),
+			operation: operation,
+		}
+		operation.hasIP.Store(test.hasIP)
+
+		// resign doesn't delete vip
+		vm.Resign()
+		if test.hasIP {
+			vm.OnRetired()
+		}
+		time.Sleep(100 * time.Millisecond)
+		require.False(t, strings.Contains(text.String(), test.expectedLog), "case %d", i)
+
+		// close deletes vip
+		vm.Close()
+		require.Eventually(t, func() bool {
+			return strings.Contains(text.String(), test.expectedLog)
+		}, 3*time.Second, 10*time.Millisecond, "case %d", i)
+	}
+}

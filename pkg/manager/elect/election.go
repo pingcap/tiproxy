@@ -264,6 +264,7 @@ func (m *election) watchOwner(ctx context.Context, session *concurrency.Session,
 func (m *election) Close() {
 	if m.cancel != nil {
 		m.cancel()
+		m.cancel = nil
 	}
 	m.wg.Wait()
 }

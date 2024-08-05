@@ -209,12 +209,16 @@ func (s *Server) Close() error {
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventClose).Inc()
 
 	errs := make([]error, 0, 4)
-	// Remove the VIP before closing the SQL server so that clients connect to other nodes.
+	// Resign the VIP owner before graceful shutdown so that clients connect to other nodes.
 	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
-		s.vipManager.Close()
+		s.vipManager.Resign()
 	}
 	if s.proxy != nil {
 		errs = append(errs, s.proxy.Close())
+	}
+	// Delete VIP after graceful shutdown.
+	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
+		s.vipManager.Close()
 	}
 	if s.apiServer != nil {
 		errs = append(errs, s.apiServer.Close())
