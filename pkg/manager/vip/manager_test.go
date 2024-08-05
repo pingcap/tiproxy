@@ -123,6 +123,7 @@ func TestNetworkOperation(t *testing.T) {
 		cfgGetter: newMockConfigGetter(config.HA{VirtualIP: "10.10.10.10/24", Interface: "eth0"}),
 		operation: operation,
 	}
+	vm.delOnRetire.Store(true)
 	vm.election = newMockElection(ch, vm)
 	childCtx, cancel := context.WithCancel(context.Background())
 	vm.election.Start(childCtx)
@@ -166,6 +167,7 @@ func TestResign(t *testing.T) {
 			cfgGetter: newMockConfigGetter(config.HA{VirtualIP: "10.10.10.10/24", Interface: "eth0"}),
 			operation: operation,
 		}
+		vm.delOnRetire.Store(true)
 		operation.hasIP.Store(test.hasIP)
 
 		// resign doesn't delete vip
