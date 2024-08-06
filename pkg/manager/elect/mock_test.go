@@ -51,6 +51,15 @@ func (mo *mockMember) expectEvent(t *testing.T, expected ...int) {
 	}
 }
 
+func (mo *mockMember) expectNoEvent(t *testing.T) {
+	select {
+	case <-time.After(100 * time.Millisecond):
+		return
+	case event := <-mo.ch:
+		require.Fail(t, "unexpected event", event)
+	}
+}
+
 func (mo *mockMember) hang(hang bool) {
 	contn := true
 	for contn {
@@ -144,7 +153,6 @@ func (ts *etcdTestSuite) getOwnerID() string {
 		} else {
 			require.Equal(ts.t, ownerID, id)
 		}
-		require.Equal(ts.t, elec.id == ownerID, elec.IsOwner())
 	}
 	return ownerID
 }
@@ -152,6 +160,11 @@ func (ts *etcdTestSuite) getOwnerID() string {
 func (ts *etcdTestSuite) expectEvent(id string, event ...int) {
 	elec := ts.getElection(id)
 	elec.member.(*mockMember).expectEvent(ts.t, event...)
+}
+
+func (ts *etcdTestSuite) expectNoEvent(id string) {
+	elec := ts.getElection(id)
+	elec.member.(*mockMember).expectNoEvent(ts.t)
 }
 
 func (ts *etcdTestSuite) hang(id string, hang bool) {

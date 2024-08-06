@@ -75,6 +75,8 @@ func TestEtcdServerDown(t *testing.T) {
 	addr := ts.shutdownServer()
 	_, err := elec1.GetOwnerID(context.Background())
 	require.Error(t, err)
+	// the owner should not retire before the server is up again
+	ts.expectNoEvent("1")
 	ts.startServer(addr)
 	// the previous owner only retires when the new one is elected
 	ts.expectEvent("1", eventTypeRetired, eventTypeElected)
@@ -133,15 +135,15 @@ func TestOwnerMetric(t *testing.T) {
 	}
 
 	elec1 := NewElection(lg, nil, electionConfigForTest(1), "1", ownerKeyPrefix+"key"+ownerKeySuffix, newMockMember())
-	elec1.onElected(nil)
+	elec1.onElected()
 	checkMetric("key", true)
 
 	elec2 := NewElection(lg, nil, electionConfigForTest(1), "1", "key2/1", newMockMember())
-	elec2.onElected(nil)
+	elec2.onElected()
 	checkMetric("key2/1", true)
 
 	elec3 := NewElection(lg, nil, electionConfigForTest(1), "1", ownerKeyPrefix+"key3/1", newMockMember())
-	elec3.onElected(nil)
+	elec3.onElected()
 	checkMetric("key3/1", true)
 
 	elec1.onRetired()

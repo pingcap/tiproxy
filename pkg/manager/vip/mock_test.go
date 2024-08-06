@@ -57,10 +57,6 @@ func (me *mockElection) GetOwnerID(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-func (me *mockElection) IsOwner() bool {
-	return true
-}
-
 func (me *mockElection) Start(ctx context.Context) {
 	me.wg.Run(func() {
 		for {
