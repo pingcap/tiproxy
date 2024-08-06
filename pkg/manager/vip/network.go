@@ -87,5 +87,9 @@ func (no *networkOperation) DeleteIP() error {
 }
 
 func (no *networkOperation) SendARP() error {
-	return arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
+	err := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
+	if err != nil && errors.Is(err, syscall.EPERM) {
+		err = exec.Command("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.String()).Run()
+	}
+	return errors.WithStack(err)
 }
