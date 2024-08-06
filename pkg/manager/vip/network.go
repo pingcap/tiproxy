@@ -4,7 +4,9 @@
 package vip
 
 import (
+	"os/exec"
 	"runtime"
+	"strings"
 
 	"github.com/j-keck/arping"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -68,11 +70,20 @@ func (no *networkOperation) HasIP() (bool, error) {
 }
 
 func (no *networkOperation) AddIP() error {
-	return netlink.AddrAdd(no.link, no.address)
+	err := netlink.AddrAdd(no.link, no.address)
+	// If TiProxy is deployed by TiUP, the user that runs TiProxy only has the sudo permission.
+	if err != nil && strings.Contains(err.Error(), "Operation not permitted") {
+		err = exec.Command("sudo", "ip", "addr", "add", no.address.String(), "dev", no.link.Attrs().Name).Run()
+	}
+	return errors.WithStack(err)
 }
 
 func (no *networkOperation) DeleteIP() error {
-	return netlink.AddrDel(no.link, no.address)
+	err := netlink.AddrDel(no.link, no.address)
+	if err != nil && strings.Contains(err.Error(), "Operation not permitted") {
+		err = exec.Command("sudo", "ip", "addr", "del", no.address.String(), "dev", no.link.Attrs().Name).Run()
+	}
+	return errors.WithStack(err)
 }
 
 func (no *networkOperation) SendARP() error {
