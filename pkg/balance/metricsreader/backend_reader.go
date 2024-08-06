@@ -119,9 +119,8 @@ func (br *BackendReader) initElection(ctx context.Context, cfg *config.Config) e
 	} else {
 		key = fmt.Sprintf("%s/%s", readerOwnerKeyPrefix, readerOwnerKeySuffix)
 	}
-	election := elect.NewElection(br.lg, br.etcdCli, br.electionCfg, id, key, br)
-	br.election = election
-	election.Start(ctx)
+	br.election = elect.NewElection(br.lg.Named("elect"), br.etcdCli, br.electionCfg, id, key, br)
+	br.election.Start(ctx)
 	return nil
 }
 

@@ -71,15 +71,7 @@ func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error
 
 	id := net.JoinHostPort(ip, port)
 	electionCfg := elect.DefaultElectionConfig(sessionTTL)
-	election := elect.NewElection(vm.lg, etcdCli, electionCfg, id, vipKey, vm)
-	vm.election = election
-	// Check the ownership at startup just in case the node is just down and restarted.
-	// Before it was down, it may be either the owner or not.
-	if election.IsOwner() {
-		vm.OnElected()
-	} else {
-		vm.OnRetired()
-	}
+	vm.election = elect.NewElection(vm.lg.Named("elect"), etcdCli, electionCfg, id, vipKey, vm)
 	vm.election.Start(ctx)
 	return nil
 }

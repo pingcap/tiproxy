@@ -6,7 +6,6 @@ package elect
 import (
 	"context"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -39,8 +38,6 @@ type Election interface {
 	Start(context.Context)
 	// ID returns the member ID.
 	ID() string
-	// IsOwner returns whether the member is the owner.
-	IsOwner() bool
 	// GetOwnerID gets the owner ID.
 	GetOwnerID(ctx context.Context) (string, error)
 	// Close stops compaining the owner.
@@ -75,7 +72,6 @@ type election struct {
 	trimedKey string
 	lg        *zap.Logger
 	etcdCli   *clientv3.Client
-	elec      atomic.Pointer[concurrency.Election]
 	wg        waitgroup.WaitGroup
 	cancel    context.CancelFunc
 	member    Member
@@ -133,19 +129,17 @@ func (m *election) initSession(ctx context.Context) (*concurrency.Session, error
 	return session, err
 }
 
-func (m *election) IsOwner() bool {
-	ownerID, err := m.GetOwnerID(context.Background())
-	if err != nil {
-		return false
-	}
-	return ownerID == m.id
-}
-
 func (m *election) campaignLoop(ctx context.Context) {
 	session, err := m.initSession(ctx)
 	if err != nil {
 		return
 	}
+	isOwner := false
+	defer func() {
+		if isOwner {
+			m.onRetired()
+		}
+	}()
 	for {
 		select {
 		case <-session.Done():
@@ -172,34 +166,44 @@ func (m *election) campaignLoop(ctx context.Context) {
 			continue
 		}
 
+		// Retire after the etcd server can be connected so that there will always be an owner.
+		// It's allowed if multiple members act as the owner but it's not allowed if no member acts as the owner.
+		// E.g. at least one member needs to bind the VIP.
+		if isOwner {
+			m.onRetired()
+			isOwner = false
+		}
+
 		elec := concurrency.NewElection(session, m.key)
 		if err = elec.Campaign(ctx, m.id); err != nil {
 			m.lg.Info("failed to campaign", zap.Error(err))
 			continue
 		}
 
-		ownerID, err := m.GetOwnerID(ctx)
-		if err != nil || ownerID != m.id {
+		kv, err := m.getOwnerInfo(ctx)
+		if err != nil {
+			m.lg.Warn("failed to get owner info", zap.Error(err))
+			continue
+		}
+		if hack.String(kv.Value) != m.id {
+			m.lg.Warn("owner id mismatches", zap.String("owner", hack.String(kv.Value)))
 			continue
 		}
 
-		m.onElected(elec)
-		// NOTICE: watchOwner won't revoke the lease.
-		m.watchOwner(ctx, session, ownerID)
-		m.onRetired()
+		m.onElected()
+		isOwner = true
+		m.watchOwner(ctx, session, hack.String(kv.Key))
 	}
 }
 
-func (m *election) onElected(elec *concurrency.Election) {
+func (m *election) onElected() {
 	m.member.OnElected()
-	m.elec.Store(elec)
 	metrics.OwnerGauge.WithLabelValues(m.trimedKey).Set(1)
 	m.lg.Info("elected as the owner")
 }
 
 func (m *election) onRetired() {
 	m.member.OnRetired()
-	m.elec.Store(nil)
 	// Delete the metric so that it doesn't show on Grafana.
 	metrics.OwnerGauge.MetricVec.DeletePartialMatch(map[string]string{metrics.LblType: m.trimedKey})
 	m.lg.Info("the owner retires")
@@ -218,17 +222,25 @@ func (m *election) revokeLease(leaseID clientv3.LeaseID) {
 
 // GetOwnerID is similar to concurrency.Election.Leader() but it doesn't need an concurrency.Election.
 func (m *election) GetOwnerID(ctx context.Context) (string, error) {
-	if m.etcdCli == nil {
-		return "", concurrency.ErrElectionNoLeader
-	}
-	kvs, err := etcd.GetKVs(ctx, m.etcdCli, m.key, clientv3.WithFirstCreate(), m.cfg.Timeout, m.cfg.RetryIntvl, m.cfg.RetryCnt)
+	kv, err := m.getOwnerInfo(ctx)
 	if err != nil {
 		return "", err
 	}
-	if len(kvs) == 0 {
-		return "", concurrency.ErrElectionNoLeader
+	return hack.String(kv.Value), nil
+}
+
+func (m *election) getOwnerInfo(ctx context.Context) (*mvccpb.KeyValue, error) {
+	if m.etcdCli == nil {
+		return nil, concurrency.ErrElectionNoLeader
 	}
-	return hack.String(kvs[0].Value), nil
+	kvs, err := etcd.GetKVs(ctx, m.etcdCli, m.key, clientv3.WithFirstCreate(), m.cfg.Timeout, m.cfg.RetryIntvl, m.cfg.RetryCnt)
+	if err != nil {
+		return nil, err
+	}
+	if len(kvs) == 0 {
+		return nil, concurrency.ErrElectionNoLeader
+	}
+	return kvs[0], nil
 }
 
 func (m *election) watchOwner(ctx context.Context, session *concurrency.Session, key string) {
