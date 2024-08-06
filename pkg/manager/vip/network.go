@@ -4,12 +4,12 @@
 package vip
 
 import (
-	"os/exec"
 	"runtime"
 	"syscall"
 
 	"github.com/j-keck/arping"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/util/cmd"
 	"github.com/vishvananda/netlink"
 )
 
@@ -73,7 +73,7 @@ func (no *networkOperation) AddIP() error {
 	err := netlink.AddrAdd(no.link, no.address)
 	// If TiProxy is deployed by TiUP, the user that runs TiProxy only has the sudo permission.
 	if err != nil && errors.Is(err, syscall.EPERM) {
-		err = exec.Command("sudo", "ip", "addr", "add", no.address.String(), "dev", no.link.Attrs().Name).Run()
+		err = cmd.ExecCmd("sudo", "ip", "addr", "add", no.address.String(), "dev", no.link.Attrs().Name)
 	}
 	return errors.WithStack(err)
 }
@@ -81,7 +81,7 @@ func (no *networkOperation) AddIP() error {
 func (no *networkOperation) DeleteIP() error {
 	err := netlink.AddrDel(no.link, no.address)
 	if err != nil && errors.Is(err, syscall.EPERM) {
-		err = exec.Command("sudo", "ip", "addr", "del", no.address.String(), "dev", no.link.Attrs().Name).Run()
+		err = cmd.ExecCmd("sudo", "ip", "addr", "del", no.address.String(), "dev", no.link.Attrs().Name)
 	}
 	return errors.WithStack(err)
 }
@@ -89,7 +89,7 @@ func (no *networkOperation) DeleteIP() error {
 func (no *networkOperation) SendARP() error {
 	err := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
 	if err != nil && errors.Is(err, syscall.EPERM) {
-		err = exec.Command("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String()).Run()
+		err = cmd.ExecCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
 	}
 	return errors.WithStack(err)
 }
