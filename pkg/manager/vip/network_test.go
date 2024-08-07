@@ -42,6 +42,10 @@ func TestAddDelIP(t *testing.T) {
 		},
 	}
 
+	isOtherErr := func(err error) bool {
+		return strings.Contains(err.Error(), "command not found") || strings.Contains(err.Error(), "not in the sudoers file")
+	}
+
 	for i, test := range tests {
 		operation, err := NewNetworkOperation(test.virtualIP, test.link)
 		if test.initErr != "" {
@@ -54,7 +58,7 @@ func TestAddDelIP(t *testing.T) {
 
 		err = operation.AddIP()
 		// Maybe the command is not installed.
-		if err != nil && strings.Contains(err.Error(), "command not found") {
+		if err != nil && isOtherErr(err) {
 			continue
 		}
 		if test.addErr != "" {
@@ -65,7 +69,7 @@ func TestAddDelIP(t *testing.T) {
 		}
 
 		err = operation.SendARP()
-		if err == nil || !strings.Contains(err.Error(), "command not found") {
+		if err == nil || !isOtherErr(err) {
 			if test.sendErr != "" {
 				require.Error(t, err, "case %d", i)
 				require.Contains(t, err.Error(), test.sendErr, "case %d", i)
