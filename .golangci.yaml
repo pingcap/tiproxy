@@ -26,6 +26,10 @@ issues:
       linters:
         - gosec
       text: "G101:"
+    - path: pkg/util/cmd/cmd.go
+      linters:
+        - gosec
+      text: "G204:"
 
 linters:
   enable:

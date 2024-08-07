@@ -53,8 +53,8 @@ func TestAddDelIP(t *testing.T) {
 		require.NotNil(t, operation, "case %d", i)
 
 		err = operation.AddIP()
-		// Maybe the privilege is not granted.
-		if err != nil && strings.Contains(err.Error(), "operation not permitted") {
+		// Maybe the command is not installed.
+		if err != nil && strings.Contains(err.Error(), "command not found") {
 			continue
 		}
 		if test.addErr != "" {
@@ -65,11 +65,13 @@ func TestAddDelIP(t *testing.T) {
 		}
 
 		err = operation.SendARP()
-		if test.sendErr != "" {
-			require.Error(t, err, "case %d", i)
-			require.Contains(t, err.Error(), test.sendErr, "case %d", i)
-		} else {
-			require.NoError(t, err, "case %d", i)
+		if err == nil || !strings.Contains(err.Error(), "command not found") {
+			if test.sendErr != "" {
+				require.Error(t, err, "case %d", i)
+				require.Contains(t, err.Error(), test.sendErr, "case %d", i)
+			} else {
+				require.NoError(t, err, "case %d", i)
+			}
 		}
 
 		if err := operation.DeleteIP(); test.delErr != "" {
