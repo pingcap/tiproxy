@@ -5,9 +5,11 @@ package vip
 
 import (
 	"runtime"
+	"syscall"
 
 	"github.com/j-keck/arping"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/util/cmd"
 	"github.com/vishvananda/netlink"
 )
 
@@ -68,13 +70,26 @@ func (no *networkOperation) HasIP() (bool, error) {
 }
 
 func (no *networkOperation) AddIP() error {
-	return netlink.AddrAdd(no.link, no.address)
+	err := netlink.AddrAdd(no.link, no.address)
+	// If TiProxy is deployed by TiUP, the user that runs TiProxy only has the sudo permission.
+	if err != nil && errors.Is(err, syscall.EPERM) {
+		err = cmd.ExecCmd("sudo", "ip", "addr", "add", no.address.String(), "dev", no.link.Attrs().Name)
+	}
+	return errors.WithStack(err)
 }
 
 func (no *networkOperation) DeleteIP() error {
-	return netlink.AddrDel(no.link, no.address)
+	err := netlink.AddrDel(no.link, no.address)
+	if err != nil && errors.Is(err, syscall.EPERM) {
+		err = cmd.ExecCmd("sudo", "ip", "addr", "del", no.address.String(), "dev", no.link.Attrs().Name)
+	}
+	return errors.WithStack(err)
 }
 
 func (no *networkOperation) SendARP() error {
-	return arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
+	err := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
+	if err != nil && errors.Is(err, syscall.EPERM) {
+		err = cmd.ExecCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
+	}
+	return errors.WithStack(err)
 }
