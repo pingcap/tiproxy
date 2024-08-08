@@ -52,7 +52,7 @@ func TestVIPCfgError(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	for i, test := range tests {
-		cfgGetter := newMockConfigGetter(test.cfg)
+		cfgGetter := newMockConfigGetter(&config.Config{HA: test.cfg})
 		vm, err := NewVIPManager(lg, cfgGetter)
 		if test.hasErr {
 			require.Error(t, err, "case %d", i)
@@ -123,7 +123,7 @@ func TestNetworkOperation(t *testing.T) {
 	operation := newMockNetworkOperation()
 	vm := &vipManager{
 		lg:        lg,
-		cfgGetter: newMockConfigGetter(config.HA{VirtualIP: "10.10.10.10/24", Interface: "eth0"}),
+		cfgGetter: newMockConfigGetter(&config.Config{HA: config.HA{VirtualIP: "10.10.10.10/24", Interface: "eth0"}}),
 		operation: operation,
 	}
 	vm.election = newMockElection(ch, vm)
@@ -148,7 +148,11 @@ func TestNetworkOperation(t *testing.T) {
 
 func TestStartAndClose(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	vm, err := NewVIPManager(lg, newMockConfigGetter(config.HA{VirtualIP: "127.0.0.2/24", Interface: "lo"}))
+	vm, err := NewVIPManager(lg, newMockConfigGetter(&config.Config{
+		Proxy: config.ProxyServer{Addr: "0.0.0.0:6000"},
+		API:   config.API{Addr: "0.0.0.0:3080"},
+		HA:    config.HA{VirtualIP: "127.0.0.2/24", Interface: "lo"},
+	}))
 	if runtime.GOOS != "linux" {
 		require.Error(t, err)
 	} else {
