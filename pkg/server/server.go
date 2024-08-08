@@ -219,9 +219,7 @@ func (s *Server) preClose() {
 	}
 	// Gracefully drain clients.
 	if s.proxy != nil {
-		var wg waitgroup.WaitGroup
-		wg.RunWithRecover(s.proxy.PreClose, nil, nil)
-		wg.Wait()
+		s.proxy.PreClose()
 	}
 }
 

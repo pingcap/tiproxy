@@ -551,7 +551,6 @@ func (br *BackendReader) getBackendAddrs(ctx context.Context, excludeZones []str
 func (br *BackendReader) PreClose() {
 	if br.election != nil {
 		br.election.Close()
-		br.election = nil
 	}
 	// pretend to be not owner
 	br.isOwner.Store(false)
@@ -560,7 +559,6 @@ func (br *BackendReader) PreClose() {
 func (br *BackendReader) Close() {
 	if br.election != nil {
 		br.election.Close()
-		br.election = nil
 	}
 }
 

@@ -127,7 +127,6 @@ func (vm *vipManager) delVIP() {
 func (vm *vipManager) PreClose() {
 	if vm.election != nil {
 		vm.election.Close()
-		vm.election = nil
 	}
 }
 
@@ -136,7 +135,6 @@ func (vm *vipManager) PreClose() {
 func (vm *vipManager) Close() {
 	if vm.election != nil {
 		vm.election.Close()
-		vm.election = nil
 	}
 	vm.delVIP()
 }
