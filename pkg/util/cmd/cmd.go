@@ -4,7 +4,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os/exec"
 	"strings"
 
@@ -22,7 +21,7 @@ func ExecCmd(cmd string, args ...string) error {
 		if !isValidArg(arg) {
 			return errors.Errorf("invalid argument: %s", arg)
 		}
-		cmds = append(cmds, escapeArg(arg))
+		cmds = append(cmds, arg)
 	}
 	output, err := exec.Command(cmds[0], cmds[1:]...).CombinedOutput()
 	if err != nil {
@@ -39,8 +38,4 @@ func isValidArg(arg string) bool {
 		}
 	}
 	return true
-}
-
-func escapeArg(arg string) string {
-	return fmt.Sprintf("'%s'", strings.ReplaceAll(arg, "'", "'\\''"))
 }
