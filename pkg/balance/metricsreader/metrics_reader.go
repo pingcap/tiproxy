@@ -38,6 +38,7 @@ type MetricsReader interface {
 	RemoveQueryExpr(key string)
 	GetQueryResult(key string) QueryResult
 	GetBackendMetrics() []byte
+	PreClose()
 	Close()
 }
 
@@ -143,6 +144,12 @@ func (dmr *DefaultMetricsReader) GetQueryResult(key string) QueryResult {
 
 func (dmr *DefaultMetricsReader) GetBackendMetrics() []byte {
 	return dmr.backendReader.GetBackendMetrics()
+}
+
+func (dmr *DefaultMetricsReader) PreClose() {
+	if dmr.backendReader != nil {
+		dmr.backendReader.PreClose()
+	}
 }
 
 func (dmr *DefaultMetricsReader) Close() {

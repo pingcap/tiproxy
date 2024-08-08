@@ -82,4 +82,6 @@ func TestFallback(t *testing.T) {
 	require.False(t, qr.Empty())
 	require.Equal(t, model.SampleValue(80.0), qr.Value.(model.Vector)[0].Value)
 	require.GreaterOrEqual(t, qr.UpdateTime, ts)
+
+	mr.PreClose()
 }

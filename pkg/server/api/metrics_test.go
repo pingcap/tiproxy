@@ -11,7 +11,7 @@ import (
 )
 
 func TestMetrics(t *testing.T) {
-	_, doHTTP := createServer(t, nil)
+	_, doHTTP := createServer(t)
 
 	doHTTP(t, http.MethodGet, "/api/metrics", nil, nil, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)

@@ -13,7 +13,7 @@ import (
 
 func (h *Server) DebugHealth(c *gin.Context) {
 	status := http.StatusOK
-	if h.isClosing() {
+	if h.isClosing.Load() {
 		status = http.StatusBadGateway
 	}
 	c.JSON(status, config.HealthInfo{

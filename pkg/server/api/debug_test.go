@@ -11,17 +11,7 @@ import (
 )
 
 func TestDebug(t *testing.T) {
-	closing := true
-	_, doHTTP := createServer(t, &closing)
-
-	doHTTP(t, http.MethodGet, "/api/debug/health", nil, nil, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusBadGateway, r.StatusCode)
-	})
-
-	closing = false
-	doHTTP(t, http.MethodGet, "/api/debug/health", nil, nil, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusOK, r.StatusCode)
-	})
+	server, doHTTP := createServer(t)
 
 	doHTTP(t, http.MethodPost, "/api/debug/redirect", nil, nil, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
@@ -32,5 +22,14 @@ func TestDebug(t *testing.T) {
 
 	doHTTP(t, http.MethodGet, "/api/debug/pprof", nil, nil, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+
+	doHTTP(t, http.MethodGet, "/api/debug/health", nil, nil, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+
+	server.PreClose()
+	doHTTP(t, http.MethodGet, "/api/debug/health", nil, nil, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadGateway, r.StatusCode)
 	})
 }

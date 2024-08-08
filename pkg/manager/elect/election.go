@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/retry"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
@@ -22,7 +21,6 @@ import (
 )
 
 const (
-	logInterval    = 10
 	ownerKeyPrefix = "/tiproxy/"
 	ownerKeySuffix = "/owner"
 )
@@ -40,23 +38,27 @@ type Election interface {
 	ID() string
 	// GetOwnerID gets the owner ID.
 	GetOwnerID(ctx context.Context) (string, error)
-	// Close stops compaining the owner.
+	// Close resigns and but doesn't retire.
 	Close()
 }
 
 type ElectionConfig struct {
-	Timeout    time.Duration
-	RetryIntvl time.Duration
-	RetryCnt   uint64
-	SessionTTL int
+	Timeout          time.Duration
+	RetryIntvl       time.Duration
+	QueryIntvl       time.Duration
+	WaitBeforeRetire time.Duration
+	RetryCnt         uint64
+	SessionTTL       int
 }
 
 func DefaultElectionConfig(sessionTTL int) ElectionConfig {
 	return ElectionConfig{
-		Timeout:    2 * time.Second,
-		RetryIntvl: 500 * time.Millisecond,
-		RetryCnt:   3,
-		SessionTTL: sessionTTL,
+		Timeout:          2 * time.Second,
+		RetryIntvl:       500 * time.Millisecond,
+		QueryIntvl:       1 * time.Second,
+		WaitBeforeRetire: 3 * time.Second,
+		RetryCnt:         3,
+		SessionTTL:       sessionTTL,
 	}
 }
 
@@ -75,6 +77,7 @@ type election struct {
 	wg        waitgroup.WaitGroup
 	cancel    context.CancelFunc
 	member    Member
+	isOwner   bool
 }
 
 // NewElection creates an Election.
@@ -108,45 +111,20 @@ func (m *election) ID() string {
 	return m.id
 }
 
-func (m *election) initSession(ctx context.Context) (*concurrency.Session, error) {
-	var session *concurrency.Session
-	// If the network breaks for sometime, the session will fail but it still needs to compaign after recovery.
-	// So retry it infinitely.
-	err := retry.RetryNotify(func() error {
-		var err error
-		// Do not use context.WithTimeout, otherwise the session will be cancelled after timeout, even if it is created successfully.
-		session, err = concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
-		return err
-	}, ctx, m.cfg.RetryIntvl, retry.InfiniteCnt,
-		func(err error, duration time.Duration) {
-			m.lg.Warn("failed to init election session, retrying", zap.Error(err))
-		}, logInterval)
-	if err == nil {
-		m.lg.Info("election session is initialized")
-	} else {
-		m.lg.Error("failed to init election session, quit", zap.Error(err))
-	}
-	return session, err
-}
-
 func (m *election) campaignLoop(ctx context.Context) {
-	session, err := m.initSession(ctx)
+	session, err := concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
 	if err != nil {
+		m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
 		return
 	}
-	isOwner := false
-	defer func() {
-		if isOwner {
-			m.onRetired()
-		}
-	}()
 	for {
 		select {
 		case <-session.Done():
 			m.lg.Info("etcd session is done, creates a new one")
 			leaseID := session.Lease()
-			if session, err = m.initSession(ctx); err != nil {
-				m.lg.Error("new session failed, break campaign loop", zap.Error(err))
+			session, err = concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
+			if err != nil {
+				m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
 				m.revokeLease(leaseID)
 				return
 			}
@@ -166,17 +144,21 @@ func (m *election) campaignLoop(ctx context.Context) {
 			continue
 		}
 
-		// Retire after the etcd server can be connected so that there will always be an owner.
-		// It's allowed if multiple members act as the owner but it's not allowed if no member acts as the owner.
-		// E.g. at least one member needs to bind the VIP.
-		if isOwner {
-			m.onRetired()
-			isOwner = false
+		var wg waitgroup.WaitGroup
+		childCtx, cancel := context.WithCancel(ctx)
+		if m.isOwner {
+			// Check if another member becomes the new owner during campaign.
+			wg.RunWithRecover(func() {
+				m.waitRetire(childCtx)
+			}, nil, m.lg)
 		}
 
 		elec := concurrency.NewElection(session, m.key)
-		if err = elec.Campaign(ctx, m.id); err != nil {
-			m.lg.Info("failed to campaign", zap.Error(err))
+		err = elec.Campaign(ctx, m.id)
+		cancel()
+		wg.Wait()
+		if err != nil {
+			m.lg.Info("failed to campaign", zap.Error(errors.WithStack(err)))
 			continue
 		}
 
@@ -186,27 +168,58 @@ func (m *election) campaignLoop(ctx context.Context) {
 			continue
 		}
 		if hack.String(kv.Value) != m.id {
-			m.lg.Warn("owner id mismatches", zap.String("owner", hack.String(kv.Value)))
+			// Campaign may finish without errors when the session is done.
+			m.lg.Info("owner id mismatches", zap.String("owner", hack.String(kv.Value)))
+			if m.isOwner {
+				m.onRetired()
+			}
 			continue
 		}
 
-		m.onElected()
-		isOwner = true
+		if !m.isOwner {
+			m.onElected()
+		}
 		m.watchOwner(ctx, session, hack.String(kv.Key))
 	}
 }
 
 func (m *election) onElected() {
-	m.member.OnElected()
-	metrics.OwnerGauge.WithLabelValues(m.trimedKey).Set(1)
 	m.lg.Info("elected as the owner")
+	m.member.OnElected()
+	m.isOwner = true
+	metrics.OwnerGauge.WithLabelValues(m.trimedKey).Set(1)
 }
 
 func (m *election) onRetired() {
+	m.lg.Info("the owner retires")
 	m.member.OnRetired()
+	m.isOwner = false
 	// Delete the metric so that it doesn't show on Grafana.
 	metrics.OwnerGauge.MetricVec.DeletePartialMatch(map[string]string{metrics.LblType: m.trimedKey})
-	m.lg.Info("the owner retires")
+}
+
+// waitRetire retires after another member becomes the owner so that there will always be an owner.
+// It's allowed if multiple members act as the owner for some time but it's not allowed if no member acts as the owner.
+// E.g. at least one member needs to bind the VIP even if the etcd server leader is down.
+func (m *election) waitRetire(ctx context.Context) {
+	ticker := time.NewTicker(m.cfg.QueryIntvl)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		select {
+		case <-ticker.C:
+			id, err := m.GetOwnerID(ctx)
+			if err != nil {
+				continue
+			}
+			// Another member becomes the owner, retire.
+			if id != m.id {
+				m.onRetired()
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // revokeLease revokes the session lease so that other members can compaign immediately.
@@ -271,8 +284,8 @@ func (m *election) watchOwner(ctx context.Context, session *concurrency.Session,
 	}
 }
 
-// Close is called before the instance is going to shutdown.
-// It should hand over the owner to someone else.
+// Close is typically called before graceful shutdown. It resigns but doesn't retire or wait for the new owner.
+// The caller has to decide if it should retire after graceful wait.
 func (m *election) Close() {
 	if m.cancel != nil {
 		m.cancel()

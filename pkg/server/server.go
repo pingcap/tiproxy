@@ -58,7 +58,6 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		metricsManager:   metrics.NewMetricsManager(),
 		namespaceManager: mgrns.NewNamespaceManager(),
 		certManager:      cert.NewCertManager(),
-		wg:               waitgroup.WaitGroup{},
 	}
 
 	handler := sctx.Handler
@@ -166,12 +165,12 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		if err != nil {
 			return
 		}
-
 		srv.proxy.Run(ctx, srv.configManager.WatchConfig())
 	}
 
 	// setup http & grpc
-	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.proxy.IsClosing, srv.namespaceManager, srv.configManager, srv.certManager, srv.metricsReader, handler, ready); err != nil {
+	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.namespaceManager, srv.configManager, srv.certManager,
+		srv.metricsReader, handler, ready); err != nil {
 		return
 	}
 
@@ -205,20 +204,37 @@ func printInfo(lg *zap.Logger) {
 	lg.Info("Welcome to TiProxy.", fields...)
 }
 
+func (s *Server) preClose() {
+	// Resign the VIP owner before closing the SQL server so that clients connect to other nodes.
+	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
+		s.vipManager.PreClose()
+	}
+	// Make the API server return unhealth.
+	if s.apiServer != nil {
+		s.apiServer.PreClose()
+	}
+	// Resign the metric reader owner to make other members campaign ASAP.
+	if s.metricsReader != nil && !reflect.ValueOf(s.metricsReader).IsNil() {
+		s.metricsReader.PreClose()
+	}
+	// Gracefully drain clients.
+	if s.proxy != nil {
+		var wg waitgroup.WaitGroup
+		wg.RunWithRecover(s.proxy.PreClose, nil, nil)
+		wg.Wait()
+	}
+}
+
 func (s *Server) Close() error {
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventClose).Inc()
+	s.preClose()
 
 	errs := make([]error, 0, 4)
-	// Resign the VIP owner before graceful wait so that clients connect to other nodes.
 	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
-		s.vipManager.Resign()
+		s.vipManager.Close()
 	}
 	if s.proxy != nil {
 		errs = append(errs, s.proxy.Close())
-	}
-	// Delete VIP after graceful wait.
-	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
-		s.vipManager.Close()
 	}
 	if s.apiServer != nil {
 		errs = append(errs, s.apiServer.Close())
@@ -226,7 +242,7 @@ func (s *Server) Close() error {
 	if s.namespaceManager != nil {
 		errs = append(errs, s.namespaceManager.Close())
 	}
-	if s.metricsReader != nil {
+	if s.metricsReader != nil && !reflect.ValueOf(s.metricsReader).IsNil() {
 		s.metricsReader.Close()
 	}
 	if s.infoSyncer != nil {
