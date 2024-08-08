@@ -289,7 +289,8 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 					br.lg.Warn("parse metrics failed", zap.String("addr", addr), zap.Error(err))
 					return
 				}
-				br.metric2History(mf, addr)
+				labelName := getLabel4Addr(addr)
+				br.metric2History(mf, labelName)
 			}, nil, br.lg)
 		}(addr)
 	}
@@ -508,15 +509,20 @@ func (br *BackendReader) mergeHistory(newHistory map[string]map[string]backendHi
 
 // marshalHistory marshals the backends that are read by this owner. The marshaled data will be returned to other members.
 func (br *BackendReader) marshalHistory(backends []string) error {
+	backendLabels := make([]string, 0, len(backends))
+	for _, backend := range backends {
+		backendLabels = append(backendLabels, getLabel4Addr(backend))
+	}
+
 	br.Lock()
 	defer br.Unlock()
 
 	filteredHistory := make(map[string]map[string]backendHistory, len(br.queryRules))
 	for ruleKey, ruleHistory := range br.history {
-		filteredRuleHistory := make(map[string]backendHistory, len(backends))
+		filteredRuleHistory := make(map[string]backendHistory, len(backendLabels))
 		filteredHistory[ruleKey] = filteredRuleHistory
 		for backend, backendHistory := range ruleHistory {
-			if slices.Contains(backends, backend) {
+			if slices.Contains(backendLabels, backend) {
 				filteredRuleHistory[backend] = backendHistory
 			}
 		}
