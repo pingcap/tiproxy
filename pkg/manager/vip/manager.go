@@ -60,6 +60,9 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 }
 
 func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error {
+	// This node may have bound the VIP before last failure.
+	vm.delVIP()
+
 	cfg := vm.cfgGetter.GetConfig()
 	ip, port, _, err := cfg.GetIPPort()
 	if err != nil {

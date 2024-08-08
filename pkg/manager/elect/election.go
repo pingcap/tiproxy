@@ -178,6 +178,9 @@ func (m *election) campaignLoop(ctx context.Context) {
 
 		if !m.isOwner {
 			m.onElected()
+		} else {
+			// It was the owner before the etcd failure and now is still the owner.
+			m.lg.Info("still the owner")
 		}
 		m.watchOwner(ctx, session, hack.String(kv.Key))
 	}
