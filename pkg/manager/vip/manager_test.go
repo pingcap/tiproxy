@@ -5,12 +5,15 @@ package vip
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +52,7 @@ func TestVIPCfgError(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	for i, test := range tests {
-		cfgGetter := newMockConfigGetter(test.cfg)
+		cfgGetter := newMockConfigGetter(&config.Config{HA: test.cfg})
 		vm, err := NewVIPManager(lg, cfgGetter)
 		if test.hasErr {
 			require.Error(t, err, "case %d", i)
@@ -120,10 +123,9 @@ func TestNetworkOperation(t *testing.T) {
 	operation := newMockNetworkOperation()
 	vm := &vipManager{
 		lg:        lg,
-		cfgGetter: newMockConfigGetter(config.HA{VirtualIP: "10.10.10.10/24", Interface: "eth0"}),
+		cfgGetter: newMockConfigGetter(&config.Config{HA: config.HA{VirtualIP: "10.10.10.10/24", Interface: "eth0"}}),
 		operation: operation,
 	}
-	vm.delOnRetire.Store(true)
 	vm.election = newMockElection(ch, vm)
 	childCtx, cancel := context.WithCancel(context.Background())
 	vm.election.Start(childCtx)
@@ -144,44 +146,34 @@ func TestNetworkOperation(t *testing.T) {
 	vm.Close()
 }
 
-func TestResign(t *testing.T) {
-	tests := []struct {
-		hasIP       bool
-		expectedLog string
-	}{
-		{
-			hasIP:       false,
-			expectedLog: "do nothing",
-		},
-		{
-			hasIP:       true,
-			expectedLog: "deleting VIP success",
-		},
-	}
-
-	for i, test := range tests {
-		lg, text := logger.CreateLoggerForTest(t)
-		operation := newMockNetworkOperation()
-		vm := &vipManager{
-			lg:        lg,
-			cfgGetter: newMockConfigGetter(config.HA{VirtualIP: "10.10.10.10/24", Interface: "eth0"}),
-			operation: operation,
+func TestStartAndClose(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	vm, err := NewVIPManager(lg, newMockConfigGetter(&config.Config{
+		Proxy: config.ProxyServer{Addr: "0.0.0.0:6000"},
+		API:   config.API{Addr: "0.0.0.0:3080"},
+		HA:    config.HA{VirtualIP: "127.0.0.2/24", Interface: "lo"},
+	}))
+	if runtime.GOOS != "linux" {
+		require.Error(t, err)
+	} else {
+		// Maybe interface doesn't exist or lack of permission.
+		if err != nil {
+			return
 		}
-		vm.delOnRetire.Store(true)
-		operation.hasIP.Store(test.hasIP)
+		server, err := etcd.CreateEtcdServer("0.0.0.0:0", t.TempDir(), lg)
+		require.NoError(t, err)
+		endpoint := server.Clients[0].Addr().String()
+		cfg := etcd.ConfigForEtcdTest(endpoint)
 
-		// resign doesn't delete vip
-		vm.Resign()
-		if test.hasIP {
-			vm.OnRetired()
-		}
-		time.Sleep(100 * time.Millisecond)
-		require.False(t, strings.Contains(text.String(), test.expectedLog), "case %d", i)
+		certMgr := cert.NewCertManager()
+		err = certMgr.Init(cfg, lg, nil)
+		require.NoError(t, err)
+		client, err := etcd.InitEtcdClient(lg, cfg, certMgr)
+		require.NoError(t, err)
 
-		// close deletes vip
+		err = vm.Start(context.Background(), client)
+		require.NoError(t, err)
+		vm.PreClose()
 		vm.Close()
-		require.Eventually(t, func() bool {
-			return strings.Contains(text.String(), test.expectedLog)
-		}, 3*time.Second, 10*time.Millisecond, "case %d", i)
 	}
 }

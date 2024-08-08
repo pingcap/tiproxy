@@ -31,7 +31,7 @@ func TestBackendMetrics(t *testing.T) {
 		},
 	}
 
-	server, doHTTP := createServer(t, nil)
+	server, doHTTP := createServer(t)
 	mbr := server.mgr.br.(*mockBackendReader)
 	for _, tt := range tests {
 		mbr.data.Store(string(tt.data))

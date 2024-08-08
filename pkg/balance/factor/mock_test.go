@@ -120,6 +120,9 @@ func (mmr *mockMetricsReader) GetBackendMetrics() []byte {
 	return nil
 }
 
+func (mmr *mockMetricsReader) PreClose() {
+}
+
 func (mmr *mockMetricsReader) Close() {
 }
 

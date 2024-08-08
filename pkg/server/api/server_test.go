@@ -21,22 +21,16 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, method string, path string, rd io.Reader, header map[string]string, f func(*testing.T, *http.Response))) {
+func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path string, rd io.Reader, header map[string]string, f func(*testing.T, *http.Response))) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	ready := atomic.NewBool(true)
 	cfgmgr := mgrcfg.NewConfigManager()
-	if closing == nil {
-		g := false
-		closing = &g
-	}
 	require.NoError(t, cfgmgr.Init(context.Background(), lg, "", nil))
 	crtmgr := mgrcrt.NewCertManager()
 	require.NoError(t, crtmgr.Init(cfgmgr.GetConfig(), lg, cfgmgr.WatchConfig()))
 	srv, err := NewServer(config.API{
 		Addr: "0.0.0.0:0",
-	}, lg, func() bool {
-		return *closing
-	}, mgrns.NewNamespaceManager(), cfgmgr, crtmgr, &mockBackendReader{}, nil, ready)
+	}, lg, mgrns.NewNamespaceManager(), cfgmgr, crtmgr, &mockBackendReader{}, nil, ready)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, srv.Close())
@@ -60,7 +54,7 @@ func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, meth
 }
 
 func TestGrpc(t *testing.T) {
-	srv, _ := createServer(t, nil)
+	srv, _ := createServer(t)
 	addr := srv.listener.Addr().String()
 	cc, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
