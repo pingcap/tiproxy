@@ -17,7 +17,7 @@ import (
 )
 
 func TestConfig(t *testing.T) {
-	_, doHTTP := createServer(t, nil)
+	_, doHTTP := createServer(t)
 
 	doHTTP(t, http.MethodGet, "/api/admin/config", nil, nil, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
@@ -65,7 +65,7 @@ func TestConfig(t *testing.T) {
 }
 
 func TestAcceptType(t *testing.T) {
-	_, doHTTP := createServer(t, nil)
+	_, doHTTP := createServer(t)
 	checkRespContentType := func(expectedType string, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 		data, err := io.ReadAll(r.Body)

@@ -19,9 +19,9 @@ type mockConfigGetter struct {
 	cfg *config.Config
 }
 
-func newMockConfigGetter(cfg config.HA) *mockConfigGetter {
+func newMockConfigGetter(cfg *config.Config) *mockConfigGetter {
 	return &mockConfigGetter{
-		cfg: &config.Config{HA: cfg},
+		cfg: cfg,
 	}
 }
 

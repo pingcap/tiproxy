@@ -92,12 +92,12 @@ type etcdTestSuite struct {
 	kv      clientv3.KV
 }
 
-func newEtcdTestSuite(t *testing.T, elecCfg ElectionConfig, key string) *etcdTestSuite {
+func newEtcdTestSuite(t *testing.T, key string) *etcdTestSuite {
 	lg, _ := logger.CreateLoggerForTest(t)
 	ts := &etcdTestSuite{
 		t:       t,
 		lg:      lg,
-		elecCfg: elecCfg,
+		elecCfg: electionConfigForTest(1),
 		key:     key,
 	}
 
@@ -116,14 +116,8 @@ func newEtcdTestSuite(t *testing.T, elecCfg ElectionConfig, key string) *etcdTes
 }
 
 func (ts *etcdTestSuite) newElection(id string) *election {
-	cfg := ElectionConfig{
-		SessionTTL: 1,
-		Timeout:    100 * time.Millisecond,
-		RetryIntvl: 10 * time.Millisecond,
-		RetryCnt:   2,
-	}
 	member := newMockMember()
-	elec := NewElection(ts.lg, ts.client, cfg, id, ts.key, member)
+	elec := NewElection(ts.lg, ts.client, ts.elecCfg, id, ts.key, member)
 	ts.elecs = append(ts.elecs, elec)
 	return elec
 }
@@ -202,9 +196,11 @@ func (ts *etcdTestSuite) shutdownServer() string {
 
 func electionConfigForTest(ttl int) ElectionConfig {
 	return ElectionConfig{
-		SessionTTL: ttl,
-		Timeout:    100 * time.Millisecond,
-		RetryIntvl: 10 * time.Millisecond,
-		RetryCnt:   2,
+		SessionTTL:       ttl,
+		Timeout:          100 * time.Millisecond,
+		RetryIntvl:       10 * time.Millisecond,
+		QueryIntvl:       10 * time.Millisecond,
+		WaitBeforeRetire: 3 * time.Second,
+		RetryCnt:         2,
 	}
 }

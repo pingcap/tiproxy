@@ -13,7 +13,7 @@ import (
 )
 
 func TestNamespace(t *testing.T) {
-	_, doHTTP := createServer(t, nil)
+	_, doHTTP := createServer(t)
 
 	// test list
 	doHTTP(t, http.MethodGet, "/api/admin/namespace", nil, nil, func(t *testing.T, r *http.Response) {

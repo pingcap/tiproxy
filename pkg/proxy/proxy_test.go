@@ -35,6 +35,7 @@ func TestCreateConn(t *testing.T) {
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 	defer func() {
+		server.PreClose()
 		require.NoError(t, server.Close())
 	}()
 
@@ -82,8 +83,8 @@ func TestGracefulCloseConn(t *testing.T) {
 	require.NoError(t, err)
 	finish := make(chan struct{})
 	go func() {
-		err = server.Close()
-		require.NoError(t, err)
+		server.PreClose()
+		require.NoError(t, server.Close())
 		finish <- struct{}{}
 	}()
 	select {
@@ -112,8 +113,9 @@ func TestGracefulCloseConn(t *testing.T) {
 	require.NoError(t, err)
 	clientConn := createClientConn()
 	go func() {
-		require.NoError(t, server.Close())
+		server.PreClose()
 		finish <- struct{}{}
+		require.NoError(t, server.Close())
 	}()
 	select {
 	case <-time.After(300 * time.Millisecond):
@@ -137,6 +139,7 @@ func TestGracefulCloseConn(t *testing.T) {
 	require.NoError(t, err)
 	createClientConn()
 	go func() {
+		server.PreClose()
 		require.NoError(t, server.Close())
 		finish <- struct{}{}
 	}()
@@ -166,13 +169,14 @@ func TestGracefulShutDown(t *testing.T) {
 
 	var wg waitgroup.WaitGroup
 	wg.Run(func() {
-		// Wait until the server begins to shut down.
-		require.Eventually(t, server.IsClosing, 500*time.Millisecond, 10*time.Millisecond)
 		// The listener should be open and handshake should proceed.
 		_, port, err := net.SplitHostPort(server.listeners[0].Addr().String())
 		require.NoError(t, err)
 		mdb, err := sql.Open("mysql", fmt.Sprintf("root@tcp(localhost:%s)/test", port))
 		require.NoError(t, err)
+		require.Eventually(t, func() bool {
+			return mdb.Ping() != nil
+		}, 3*time.Second, 10*time.Millisecond)
 		require.ErrorContains(t, mdb.Ping(), "no router")
 		// The listener should be closed after GracefulWaitBeforeShutdown.
 		require.Eventually(t, func() bool {
@@ -183,6 +187,7 @@ func TestGracefulShutDown(t *testing.T) {
 			return err != nil
 		}, 3*time.Second, 100*time.Millisecond)
 	})
+	server.PreClose()
 	require.NoError(t, server.Close())
 	wg.Wait()
 }
@@ -207,6 +212,7 @@ func TestMultiAddr(t *testing.T) {
 		require.NoError(t, conn.Close())
 	}
 
+	server.PreClose()
 	require.NoError(t, server.Close())
 	certManager.Close()
 }
@@ -241,6 +247,7 @@ func TestWatchCfg(t *testing.T) {
 			server.mu.proxyProtocol == (cfg.Proxy.ProxyProtocol != "") &&
 			server.mu.gracefulWait == cfg.Proxy.GracefulWaitBeforeShutdown
 	}, 3*time.Second, 10*time.Millisecond)
+	server.PreClose()
 	require.NoError(t, server.Close())
 }
 
@@ -272,6 +279,7 @@ func TestRecoverPanic(t *testing.T) {
 	// The second connection gets a server error, which means the server is still running.
 	require.ErrorContains(t, mdb.Ping(), "no router")
 	require.NoError(t, mdb.Close())
+	server.PreClose()
 	require.NoError(t, server.Close())
 	certManager.Close()
 }

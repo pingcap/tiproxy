@@ -6,7 +6,6 @@ package vip
 import (
 	"context"
 	"net"
-	"sync/atomic"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
@@ -25,18 +24,17 @@ const (
 
 type VIPManager interface {
 	Start(context.Context, *clientv3.Client) error
-	Resign()
+	PreClose()
 	Close()
 }
 
 var _ VIPManager = (*vipManager)(nil)
 
 type vipManager struct {
-	operation   NetworkOperation
-	cfgGetter   config.ConfigGetter
-	election    elect.Election
-	delOnRetire atomic.Bool
-	lg          *zap.Logger
+	operation NetworkOperation
+	cfgGetter config.ConfigGetter
+	election  elect.Election
+	lg        *zap.Logger
 }
 
 func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, error) {
@@ -58,11 +56,13 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 		return nil, err
 	}
 	vm.operation = operation
-	vm.delOnRetire.Store(true)
 	return vm, nil
 }
 
 func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error {
+	// This node may have bound the VIP before last failure.
+	vm.delVIP()
+
 	cfg := vm.cfgGetter.GetConfig()
 	ip, port, _, err := cfg.GetIPPort()
 	if err != nil {
@@ -81,9 +81,7 @@ func (vm *vipManager) OnElected() {
 }
 
 func (vm *vipManager) OnRetired() {
-	if vm.delOnRetire.Load() {
-		vm.delVIP()
-	}
+	vm.delVIP()
 }
 
 func (vm *vipManager) addVIP() {
@@ -124,19 +122,19 @@ func (vm *vipManager) delVIP() {
 	vm.lg.Info("deleting VIP success")
 }
 
-// Resign stops compaign but does not delete the VIP.
-// It's called before graceful wait to avoid that the VIP is deleted before another member adds VIP.
-func (vm *vipManager) Resign() {
-	vm.delOnRetire.Store(false)
+// PreClose resigns the owner but doesn't delete the VIP.
+// It makes use of the graceful-wait time to wait for the new owner to shorten the failover time.
+func (vm *vipManager) PreClose() {
 	if vm.election != nil {
 		vm.election.Close()
-		vm.election = nil
 	}
 }
 
-// Close stops compaign and deletes the VIP.
-// It's called after graceful wait to ensure the VIP is finally deleted.
+// Close resigns the owner and deletes the VIP if it was the owner.
+// The new owner may not be elected but we won't wait anymore.
 func (vm *vipManager) Close() {
-	vm.Resign()
+	if vm.election != nil {
+		vm.election.Close()
+	}
 	vm.delVIP()
 }

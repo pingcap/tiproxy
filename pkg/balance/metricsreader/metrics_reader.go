@@ -38,6 +38,7 @@ type MetricsReader interface {
 	RemoveQueryExpr(key string)
 	GetQueryResult(key string) QueryResult
 	GetBackendMetrics() []byte
+	PreClose()
 	Close()
 }
 
@@ -145,9 +146,21 @@ func (dmr *DefaultMetricsReader) GetBackendMetrics() []byte {
 	return dmr.backendReader.GetBackendMetrics()
 }
 
+func (dmr *DefaultMetricsReader) PreClose() {
+	// No need to update results in the graceful shutdown.
+	// Stop the loop before pre-closing the backend reader to avoid data race.
+	if dmr.cancel != nil {
+		dmr.cancel()
+		dmr.cancel = nil
+	}
+	dmr.wg.Wait()
+	dmr.backendReader.PreClose()
+}
+
 func (dmr *DefaultMetricsReader) Close() {
 	if dmr.cancel != nil {
 		dmr.cancel()
+		dmr.cancel = nil
 	}
 	dmr.wg.Wait()
 	dmr.backendReader.Close()
