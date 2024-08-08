@@ -272,8 +272,12 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 		return nil
 	}
 
+	backendLabels := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
-		func(addr string) {
+		backendLabels = append(backendLabels, getLabel4Addr(addr))
+	}
+	for i := range addrs {
+		func(addr, label string) {
 			br.wgp.RunWithRecover(func() {
 				if ctx.Err() != nil {
 					return
@@ -289,16 +293,15 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 					br.lg.Warn("parse metrics failed", zap.String("addr", addr), zap.Error(err))
 					return
 				}
-				labelName := getLabel4Addr(addr)
-				br.metric2History(mf, labelName)
+				br.metric2History(mf, label)
 			}, nil, br.lg)
-		}(addr)
+		}(addrs[i], backendLabels[i])
 	}
 	br.wgp.Wait()
 
 	br.history2QueryResult()
-	if err := br.marshalHistory(addrs); err != nil {
-		br.lg.Error("marshal backend history failed", zap.Any("addrs", addrs), zap.Error(err))
+	if err := br.marshalHistory(backendLabels); err != nil {
+		br.lg.Error("marshal backend history failed", zap.Any("addrs", backendLabels), zap.Error(err))
 	}
 	return nil
 }
@@ -509,20 +512,15 @@ func (br *BackendReader) mergeHistory(newHistory map[string]map[string]backendHi
 
 // marshalHistory marshals the backends that are read by this owner. The marshaled data will be returned to other members.
 func (br *BackendReader) marshalHistory(backends []string) error {
-	backendLabels := make([]string, 0, len(backends))
-	for _, backend := range backends {
-		backendLabels = append(backendLabels, getLabel4Addr(backend))
-	}
-
 	br.Lock()
 	defer br.Unlock()
 
 	filteredHistory := make(map[string]map[string]backendHistory, len(br.queryRules))
 	for ruleKey, ruleHistory := range br.history {
-		filteredRuleHistory := make(map[string]backendHistory, len(backendLabels))
+		filteredRuleHistory := make(map[string]backendHistory, len(backends))
 		filteredHistory[ruleKey] = filteredRuleHistory
 		for backend, backendHistory := range ruleHistory {
-			if slices.Contains(backendLabels, backend) {
+			if slices.Contains(backends, backend) {
 				filteredRuleHistory[backend] = backendHistory
 			}
 		}
