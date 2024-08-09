@@ -172,6 +172,7 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 		if owner == br.election.ID() {
 			continue
 		}
+		br.lg.Info("read metrics from owner", zap.String("owner", owner))
 		if err = br.readFromOwner(ctx, owner); err != nil {
 			errs = append(errs, err)
 		}
@@ -276,6 +277,7 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 	for _, addr := range addrs {
 		backendLabels = append(backendLabels, getLabel4Addr(addr))
 	}
+	br.lg.Info("read metrics from backends", zap.Strings("addrs", backendLabels))
 	for i := range addrs {
 		func(addr, label string) {
 			br.wgp.RunWithRecover(func() {
@@ -425,6 +427,7 @@ func (br *BackendReader) history2QueryResult() {
 
 // purgeHistory purges the expired or useless history values, otherwise the memory grows infinitely.
 func (br *BackendReader) purgeHistory() {
+	br.lg.Info("purging metrics history")
 	now := time.Now()
 	br.Lock()
 	defer br.Unlock()
@@ -436,8 +439,11 @@ func (br *BackendReader) purgeHistory() {
 			continue
 		}
 		for backend, backendHistory := range ruleHistory {
+			beforeLen1, beforeLen2 := len(backendHistory.Step1History), len(backendHistory.Step2History)
 			backendHistory.Step1History = purgeHistory(backendHistory.Step1History, rule.Retention, now)
 			backendHistory.Step2History = purgeHistory(backendHistory.Step2History, rule.Retention, now)
+			afterLen1, afterLen2 := len(backendHistory.Step1History), len(backendHistory.Step2History)
+			br.lg.Info("purged", zap.Int("before1", beforeLen1), zap.Int("after1", afterLen1), zap.Int("before2", beforeLen2), zap.Int("after2", afterLen2), zap.String("backend", backend))
 			// the history is expired, maybe the backend is down
 			if len(backendHistory.Step1History) == 0 && len(backendHistory.Step2History) == 0 {
 				delete(ruleHistory, backend)
