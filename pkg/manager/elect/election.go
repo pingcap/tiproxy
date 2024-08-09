@@ -287,6 +287,7 @@ func (m *election) watchOwner(ctx context.Context, session *concurrency.Session,
 	}
 }
 
+// Close resigns and retires.
 func (m *election) Close() {
 	if m.cancel != nil {
 		m.cancel()
