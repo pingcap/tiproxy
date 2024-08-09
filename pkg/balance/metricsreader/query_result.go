@@ -125,3 +125,13 @@ func getLabel4Backend(backend policy.BackendCtx) string {
 	backendInfo := backend.GetBackendInfo()
 	return net.JoinHostPort(backendInfo.IP, strconv.Itoa(int(backendInfo.StatusPort)))
 }
+
+// addr is the address of the backend status port.
+func getLabel4Addr(addr string) string {
+	if strings.Contains(addr, ".svc:") {
+		// In operator deployment, the label value of `instance` is the pod name.
+		return addr[:strings.Index(addr, ".")]
+	}
+	// In tiup deployment, the label value of `instance` is hostname:statusPort.
+	return addr
+}

@@ -174,3 +174,23 @@ func TestVectorMatchLabel(t *testing.T) {
 		require.Equal(t, test.expectedSample.Value, sample.Value, "test index %d", i)
 	}
 }
+
+func TestAddrMatchLabel(t *testing.T) {
+	tests := []struct {
+		addr  string
+		label string
+	}{
+		{
+			addr:  "10.10.11.1:3080",
+			label: "10.10.11.1:3080",
+		},
+		{
+			addr:  "tc-tidb-0.tc-tidb-peer.ns.svc:3080",
+			label: "tc-tidb-0",
+		},
+	}
+
+	for i, test := range tests {
+		require.Equal(t, test.label, getLabel4Addr(test.addr), "test index %d", i)
+	}
+}
