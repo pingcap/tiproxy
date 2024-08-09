@@ -6,6 +6,7 @@ package vip
 import (
 	"context"
 	"net"
+	"sync/atomic"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
@@ -31,10 +32,11 @@ type VIPManager interface {
 var _ VIPManager = (*vipManager)(nil)
 
 type vipManager struct {
-	operation NetworkOperation
-	cfgGetter config.ConfigGetter
-	election  elect.Election
-	lg        *zap.Logger
+	operation   NetworkOperation
+	cfgGetter   config.ConfigGetter
+	election    elect.Election
+	lg          *zap.Logger
+	delOnRetire atomic.Bool
 }
 
 func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, error) {
@@ -62,6 +64,7 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error {
 	// This node may have bound the VIP before last failure.
 	vm.delVIP()
+	vm.delOnRetire.Store(true)
 
 	cfg := vm.cfgGetter.GetConfig()
 	ip, port, _, err := cfg.GetIPPort()
@@ -81,7 +84,9 @@ func (vm *vipManager) OnElected() {
 }
 
 func (vm *vipManager) OnRetired() {
-	vm.delVIP()
+	if vm.delOnRetire.Load() {
+		vm.delVIP()
+	}
 }
 
 func (vm *vipManager) addVIP() {
@@ -125,6 +130,7 @@ func (vm *vipManager) delVIP() {
 // PreClose resigns the owner but doesn't delete the VIP.
 // It makes use of the graceful-wait time to wait for the new owner to shorten the failover time.
 func (vm *vipManager) PreClose() {
+	vm.delOnRetire.Store(false)
 	if vm.election != nil {
 		vm.election.Close()
 	}

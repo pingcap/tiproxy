@@ -33,7 +33,7 @@ func TestElectOwner(t *testing.T) {
 		ownerID := ts.getOwnerID()
 		elec := ts.getElection(ownerID)
 		elec.Close()
-		ts.expectNoEvent(ownerID)
+		ts.expectEvent(ownerID, eventTypeRetired)
 		ownerID2 := ts.getOwnerID()
 		require.NotEqual(t, ownerID, ownerID2)
 		ts.expectEvent(ownerID2, eventTypeElected)
@@ -51,11 +51,10 @@ func TestElectOwner(t *testing.T) {
 	{
 		elec := ts.getElection("3")
 		elec.Close()
-		ts.expectNoEvent("3")
 		ownerID := ts.getOwnerID()
 		elec = ts.getElection(ownerID)
 		elec.Close()
-		ts.expectNoEvent(ownerID)
+		ts.expectEvent(ownerID, eventTypeRetired)
 		_, err := elec.GetOwnerID(context.Background())
 		require.Error(t, err)
 	}
@@ -159,4 +158,7 @@ func TestOwnerMetric(t *testing.T) {
 	checkMetric("key", false)
 	checkMetric("key2/1", true)
 	checkMetric("key3/1", true)
+
+	elec3.Close()
+	checkMetric("key3/1", false)
 }

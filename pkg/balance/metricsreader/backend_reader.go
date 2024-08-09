@@ -556,8 +556,6 @@ func (br *BackendReader) PreClose() {
 	if br.election != nil {
 		br.election.Close()
 	}
-	// pretend to be not owner
-	br.isOwner.Store(false)
 }
 
 func (br *BackendReader) Close() {
