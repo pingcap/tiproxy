@@ -157,6 +157,7 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 	zone := cfg.GetLocation()
 	if zone != br.lastZone {
 		br.election.Close()
+		br.isOwner.Store(false)
 		if err := br.initElection(ctx, cfg); err != nil {
 			return err
 		}
@@ -556,8 +557,6 @@ func (br *BackendReader) PreClose() {
 	if br.election != nil {
 		br.election.Close()
 	}
-	// pretend to be not owner
-	br.isOwner.Store(false)
 }
 
 func (br *BackendReader) Close() {

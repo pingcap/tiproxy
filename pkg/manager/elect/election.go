@@ -287,12 +287,13 @@ func (m *election) watchOwner(ctx context.Context, session *concurrency.Session,
 	}
 }
 
-// Close is typically called before graceful shutdown. It resigns but doesn't retire or wait for the new owner.
-// The caller has to decide if it should retire after graceful wait.
 func (m *election) Close() {
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
 	}
 	m.wg.Wait()
+	if m.isOwner {
+		m.onRetired()
+	}
 }
