@@ -890,12 +890,12 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	childCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	// fill the initial query result to ensure the result is always non-empty
-	err := br.readFromBackends(childCtx, nil)
+	_, err := br.readFromBackends(childCtx, nil)
 	require.NoError(t, err)
 	br.history2QueryResult()
 	wg.Run(func() {
 		for childCtx.Err() == nil {
-			err := br.readFromBackends(childCtx, nil)
+			_, err := br.readFromBackends(childCtx, nil)
 			require.NoError(t, err)
 			br.purgeHistory()
 		}

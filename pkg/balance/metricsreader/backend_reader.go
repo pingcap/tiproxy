@@ -49,7 +49,7 @@ const (
 )
 
 var (
-	errReadFromOwner = errors.New("read metrics from owner failed")
+	errReadMetrics = errors.New("read backend metrics failed")
 )
 
 type backendHistory struct {
@@ -171,16 +171,18 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 	// If self is a owner, read the backends that are not read by any other owners.
 	// Reading from backends before reading from other owners to avoid growing the history infinitely,
 	// see https://github.com/pingcap/tiproxy/issues/638.
+	var errs []error
+	var backendLabels []string
 	if br.isOwner.Load() {
 		if idx := slices.Index(zones, zone); idx >= 0 {
 			zones = slices.Delete(zones, idx, idx+1)
 		}
-		if err := br.readFromBackends(ctx, zones); err != nil {
-			return err
+		backendLabels, err = br.readFromBackends(ctx, zones)
+		if err != nil {
+			errs = append(errs, err)
 		}
 	}
 
-	var errs []error
 	for _, owner := range owners {
 		if owner == br.election.ID() {
 			continue
@@ -193,10 +195,14 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 
 	// Purge expired history.
 	br.purgeHistory()
+	// Marshal backend history for other members to query.
+	if err := br.marshalHistory(backendLabels); err != nil {
+		br.lg.Error("marshal backend history failed", zap.Any("addrs", backendLabels), zap.Error(err))
+	}
 	// Generate query result for all backends.
 	br.history2QueryResult()
 	if len(errs) > 0 {
-		return errors.Collect(errReadFromOwner, errs...)
+		return errors.Collect(errReadMetrics, errs...)
 	}
 	return nil
 }
@@ -265,17 +271,17 @@ func (br *BackendReader) queryAllOwners(ctx context.Context) (zones, owners []st
 // 1. In k8s, the zone is not set at startup and then is set by HTTP API, so there may temporarily exist both global and zonal owners.
 // 2. Some backends may not be in the same zone with any owner. E.g. there are only 2 TiProxy in a 3-AZ cluster.
 // In any way, the owner queries the backends that are not queried by other owners.
-func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []string) error {
+func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []string) ([]string, error) {
 	addrs, err := br.getBackendAddrs(ctx, excludeZones)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(addrs) == 0 {
-		return nil
+		return nil, nil
 	}
 	allNames := br.collectAllNames()
 	if len(allNames) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	backendLabels := make([]string, 0, len(addrs))
@@ -305,11 +311,7 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 		}(addrs[i], backendLabels[i])
 	}
 	br.wgp.Wait()
-
-	if err := br.marshalHistory(backendLabels); err != nil {
-		br.lg.Error("marshal backend history failed", zap.Any("addrs", backendLabels), zap.Error(err))
-	}
-	return nil
+	return backendLabels, nil
 }
 
 func (br *BackendReader) collectAllNames() []string {
@@ -431,7 +433,6 @@ func (br *BackendReader) history2QueryResult() {
 
 // purgeHistory purges the expired or useless history values, otherwise the memory grows infinitely.
 func (br *BackendReader) purgeHistory() {
-	br.lg.Info("purging metrics history")
 	now := time.Now()
 	br.Lock()
 	defer br.Unlock()
@@ -515,14 +516,17 @@ func (br *BackendReader) mergeHistory(newHistory map[string]map[string]backendHi
 			ruleHistory[backend] = backendHistory
 		}
 	}
-	// avoid that the stale history is returned to other members when it just becomes the owner
-	br.marshalledHistory = nil
 }
 
 // marshalHistory marshals the backends that are read by this owner. The marshaled data will be returned to other members.
 func (br *BackendReader) marshalHistory(backends []string) error {
 	br.Lock()
 	defer br.Unlock()
+
+	if len(backends) == 0 {
+		br.marshalledHistory = nil
+		return nil
+	}
 
 	filteredHistory := make(map[string]map[string]backendHistory, len(br.queryRules))
 	for ruleKey, ruleHistory := range br.history {
