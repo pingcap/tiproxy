@@ -892,6 +892,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	// fill the initial query result to ensure the result is always non-empty
 	err := br.readFromBackends(childCtx, nil)
 	require.NoError(t, err)
+	br.history2QueryResult()
 	wg.Run(func() {
 		for childCtx.Err() == nil {
 			err := br.readFromBackends(childCtx, nil)
@@ -951,7 +952,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 		}
 	})
 
-	// start a goroutine to marshal history
+	// start a goroutine to query marshalled history
 	wg.Run(func() {
 		for childCtx.Err() == nil {
 			select {

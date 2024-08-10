@@ -167,6 +167,19 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	// If self is a owner, read the backends that are not read by any other owners.
+	// Reading from backends before reading from other owners to avoid growing the history infinitely,
+	// see https://github.com/pingcap/tiproxy/issues/638.
+	if br.isOwner.Load() {
+		if idx := slices.Index(zones, zone); idx >= 0 {
+			zones = slices.Delete(zones, idx, idx+1)
+		}
+		if err := br.readFromBackends(ctx, zones); err != nil {
+			return err
+		}
+	}
+
 	var errs []error
 	for _, owner := range owners {
 		if owner == br.election.ID() {
@@ -178,18 +191,10 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 		}
 	}
 
-	// If self is a owner, read the backends that are not read by any other owners.
-	if br.isOwner.Load() {
-		if idx := slices.Index(zones, zone); idx >= 0 {
-			zones = slices.Delete(zones, idx, idx+1)
-		}
-		if err := br.readFromBackends(ctx, zones); err != nil {
-			return err
-		}
-	}
-
 	// Purge expired history.
 	br.purgeHistory()
+	// Generate query result for all backends.
+	br.history2QueryResult()
 	if len(errs) > 0 {
 		return errors.Collect(errReadFromOwner, errs...)
 	}
@@ -301,7 +306,6 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 	}
 	br.wgp.Wait()
 
-	br.history2QueryResult()
 	if err := br.marshalHistory(backendLabels); err != nil {
 		br.lg.Error("marshal backend history failed", zap.Any("addrs", backendLabels), zap.Error(err))
 	}
@@ -439,11 +443,13 @@ func (br *BackendReader) purgeHistory() {
 			continue
 		}
 		for backend, backendHistory := range ruleHistory {
-			beforeLen1, beforeLen2 := len(backendHistory.Step1History), len(backendHistory.Step2History)
+			beforeLen := len(backendHistory.Step1History)
 			backendHistory.Step1History = purgeHistory(backendHistory.Step1History, rule.Retention, now)
 			backendHistory.Step2History = purgeHistory(backendHistory.Step2History, rule.Retention, now)
-			afterLen1, afterLen2 := len(backendHistory.Step1History), len(backendHistory.Step2History)
-			br.lg.Info("purged", zap.Int("before1", beforeLen1), zap.Int("after1", afterLen1), zap.Int("before2", beforeLen2), zap.Int("after2", afterLen2), zap.String("backend", backend))
+			afterLen := len(backendHistory.Step1History)
+			if id == "cpu" && backend == "tc-tidb-1" && len(backendHistory.Step1History) > 0 {
+				br.lg.Info("purged", zap.Int("before", beforeLen), zap.Int("after", afterLen), zap.String("backend", backend), zap.Int64("retention", rule.Retention.Milliseconds()), zap.Int64("now", now.UnixMilli()), zap.Int64("ts", backendHistory.Step1History[0].Timestamp.Time().UnixMilli()))
+			}
 			// the history is expired, maybe the backend is down
 			if len(backendHistory.Step1History) == 0 && len(backendHistory.Step2History) == 0 {
 				delete(ruleHistory, backend)
@@ -479,9 +485,6 @@ func (br *BackendReader) readFromOwner(ctx context.Context, ownerAddr string) er
 
 	// If this instance becomes the owner in the next round, it can reuse the history.
 	br.mergeHistory(newHistory)
-
-	// Generate query result for all backends.
-	br.history2QueryResult()
 	return nil
 }
 
