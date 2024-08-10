@@ -187,7 +187,6 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 		if owner == br.election.ID() {
 			continue
 		}
-		br.lg.Info("read metrics from owner", zap.String("owner", owner))
 		if err = br.readFromOwner(ctx, owner); err != nil {
 			errs = append(errs, err)
 		}
@@ -288,7 +287,6 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 	for _, addr := range addrs {
 		backendLabels = append(backendLabels, getLabel4Addr(addr))
 	}
-	br.lg.Info("read metrics from backends", zap.Strings("addrs", backendLabels))
 	for i := range addrs {
 		func(addr, label string) {
 			br.wgp.RunWithRecover(func() {
@@ -444,13 +442,8 @@ func (br *BackendReader) purgeHistory() {
 			continue
 		}
 		for backend, backendHistory := range ruleHistory {
-			beforeLen := len(backendHistory.Step1History)
 			backendHistory.Step1History = purgeHistory(backendHistory.Step1History, rule.Retention, now)
 			backendHistory.Step2History = purgeHistory(backendHistory.Step2History, rule.Retention, now)
-			afterLen := len(backendHistory.Step1History)
-			if id == "cpu" && backend == "tc-tidb-1" && len(backendHistory.Step1History) > 0 {
-				br.lg.Info("purged", zap.Int("before", beforeLen), zap.Int("after", afterLen), zap.String("backend", backend), zap.Int64("retention", rule.Retention.Milliseconds()), zap.Int64("now", now.UnixMilli()), zap.Int64("ts", backendHistory.Step1History[0].Timestamp.Time().UnixMilli()))
-			}
 			// the history is expired, maybe the backend is down
 			if len(backendHistory.Step1History) == 0 && len(backendHistory.Step2History) == 0 {
 				delete(ruleHistory, backend)
