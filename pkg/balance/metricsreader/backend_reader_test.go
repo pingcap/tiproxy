@@ -886,17 +886,19 @@ func TestQueryBackendConcurrently(t *testing.T) {
 		addRule(i)
 	}
 
-	// start a goroutine to query metrics
+	// start a goroutine to query metrics from backends
 	var wg waitgroup.WaitGroup
 	childCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	// fill the initial query result to ensure the result is always non-empty
-	_, err := br.readFromBackends(childCtx, nil)
+	backends, err := br.readFromBackends(childCtx, nil)
 	require.NoError(t, err)
+	require.Len(t, backends, initialBackends)
 	br.history2QueryResult()
 	wg.Run(func() {
 		for childCtx.Err() == nil {
-			_, err := br.readFromBackends(childCtx, nil)
+			backends, err := br.readFromBackends(childCtx, nil)
 			require.NoError(t, err)
+			require.Len(t, backends, initialBackends)
 			br.purgeHistory()
 		}
 	})
@@ -1224,7 +1226,7 @@ func TestElection(t *testing.T) {
 			},
 		},
 	}
-	hitoryText, err := json.Marshal(history)
+	historyText, err := json.Marshal(history)
 	require.NoError(t, err)
 
 	// setup rule
@@ -1245,7 +1247,7 @@ func TestElection(t *testing.T) {
 	ownerPort := ownerHttpHandler.Start()
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(ownerPort))
 	ownerFunc := func(_ string) string {
-		return string(hitoryText)
+		return string(historyText)
 	}
 	ownerHttpHandler.getRespBody.Store(&ownerFunc)
 	t.Cleanup(ownerHttpHandler.Close)
@@ -1277,11 +1279,20 @@ func TestElection(t *testing.T) {
 	ts := time.Now()
 	err = br.ReadMetrics(context.Background())
 	require.NoError(t, err)
+	// check that the query result is updated
 	qr := br.GetQueryResult("rule_id1")
 	require.False(t, qr.Empty())
 	require.Equal(t, model.SampleValue(100.0), qr.Value.(model.Vector)[0].Value)
 	require.GreaterOrEqual(t, qr.UpdateTime, ts)
 	ts = qr.UpdateTime
+	// check that the marshalled history is empty
+	var unmarshalled map[string]map[string]backendHistory
+	marshalledHistory := br.GetBackendMetrics()
+	if len(marshalledHistory) > 0 {
+		err = json.Unmarshal(marshalledHistory, &unmarshalled)
+		require.NoError(t, err)
+		require.Len(t, unmarshalled, 0)
+	}
 
 	// test owner
 	suite.delKV(ownerKey)
@@ -1291,10 +1302,16 @@ func TestElection(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 	err = br.ReadMetrics(context.Background())
 	require.NoError(t, err)
+	// check that the query result is updated
 	qr = br.GetQueryResult("rule_id1")
 	require.False(t, qr.Empty())
 	require.Equal(t, model.SampleValue(80.0), qr.Value.(model.Vector)[0].Value)
 	require.GreaterOrEqual(t, qr.UpdateTime, ts)
+	// check that the marshalled history is updated
+	marshalledHistory = br.GetBackendMetrics()
+	err = json.Unmarshal(marshalledHistory, &unmarshalled)
+	require.NoError(t, err)
+	require.Equal(t, br.history, unmarshalled)
 }
 
 func setupTypicalBackendListener(t *testing.T, respBody string) (backendPort int, infos map[string]*infosync.TiDBTopologyInfo) {

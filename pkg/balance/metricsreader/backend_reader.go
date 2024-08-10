@@ -85,17 +85,18 @@ type BackendReader struct {
 func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *http.Client, etcdCli *clientv3.Client,
 	backendFetcher TopologyFetcher, cfg *config.HealthCheck) *BackendReader {
 	return &BackendReader{
-		queryRules:     make(map[string]QueryRule),
-		queryResults:   make(map[string]QueryResult),
-		history:        make(map[string]map[string]backendHistory),
-		lg:             lg,
-		cfgGetter:      cfgGetter,
-		backendFetcher: backendFetcher,
-		cfg:            cfg,
-		wgp:            waitgroup.NewWaitGroupPool(goPoolSize, goMaxIdle),
-		electionCfg:    elect.DefaultElectionConfig(sessionTTL),
-		etcdCli:        etcdCli,
-		httpCli:        httpCli,
+		queryRules:        make(map[string]QueryRule),
+		queryResults:      make(map[string]QueryResult),
+		history:           make(map[string]map[string]backendHistory),
+		lg:                lg,
+		cfgGetter:         cfgGetter,
+		backendFetcher:    backendFetcher,
+		cfg:               cfg,
+		wgp:               waitgroup.NewWaitGroupPool(goPoolSize, goMaxIdle),
+		electionCfg:       elect.DefaultElectionConfig(sessionTTL),
+		etcdCli:           etcdCli,
+		httpCli:           httpCli,
+		marshalledHistory: []byte{},
 	}
 }
 
@@ -169,8 +170,6 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 	}
 
 	// If self is a owner, read the backends that are not read by any other owners.
-	// Reading from backends before reading from other owners to avoid growing the history infinitely,
-	// see https://github.com/pingcap/tiproxy/issues/638.
 	var errs []error
 	var backendLabels []string
 	if br.isOwner.Load() {
@@ -516,18 +515,15 @@ func (br *BackendReader) marshalHistory(backends []string) error {
 	br.Lock()
 	defer br.Unlock()
 
-	if len(backends) == 0 {
-		br.marshalledHistory = nil
-		return nil
-	}
-
 	filteredHistory := make(map[string]map[string]backendHistory, len(br.queryRules))
-	for ruleKey, ruleHistory := range br.history {
-		filteredRuleHistory := make(map[string]backendHistory, len(backends))
-		filteredHistory[ruleKey] = filteredRuleHistory
-		for backend, backendHistory := range ruleHistory {
-			if slices.Contains(backends, backend) {
-				filteredRuleHistory[backend] = backendHistory
+	if len(backends) > 0 {
+		for ruleKey, ruleHistory := range br.history {
+			filteredRuleHistory := make(map[string]backendHistory, len(backends))
+			filteredHistory[ruleKey] = filteredRuleHistory
+			for backend, backendHistory := range ruleHistory {
+				if slices.Contains(backends, backend) {
+					filteredRuleHistory[backend] = backendHistory
+				}
 			}
 		}
 	}
