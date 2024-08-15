@@ -1,5 +1,20 @@
 # Change Log
 
+## [v1.2.0] 2024.8.15
+
+### Features
+
+- Support virtual IP management [#583](https://github.com/pingcap/tiproxy/issues/583)
+
+### Improvements
+
+- Read metrics from backends for load balance when Prometheus is unavailable [#465](https://github.com/pingcap/tiproxy/issues/465)
+
+### Bug Fixes
+
+- Fix the bug that backend metrics are not cleared after backends are down [#585](https://github.com/pingcap/tiproxy/pull/585)
+- Fix vulnerability issues scanned by third-party tools [#623](https://github.com/pingcap/tiproxy/pull/623)
+
 ## [v1.1.0] 2024.6.28
 
 ### Features
