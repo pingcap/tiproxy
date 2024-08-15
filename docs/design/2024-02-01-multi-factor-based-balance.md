@@ -112,17 +112,23 @@ Connection counts only work when all the above factors are balanced. Imagine the
 ### Factor Collection
 
 In terms of memory usage, CPU usage, and health-related metrics, there are 2 ways to collect the metrics:
-- TiProxy collects them through the HTTP API `/metrics` of TiDB. This is expensive because each time TiDB returns 800KB of data and TiProxy needs to parse it. It's more and more expensive when the cluster grows big.
-- TiProxy reads from Prometheus. The refresh interval of Prometheus is 15 seconds, which may be a little long. Besides, some self-hosted clusters may not have Prometheus deployed.
+- TiProxy collects them through the TiDB HTTP API `/metrics`. This is expensive when the cluster is big because TiDB returns around 1MB of data to each TiProxy and each TiProxy parses the data of all TiDB.
+- TiProxy reads from Prometheus. The refresh interval of Prometheus is 15 seconds, which may be a little long. More importantly, TiProxy can not read from Prometheus on the Cloud because Prometheus is deployed in another VPC.
 
-We choose the second one because it's simpler and more scalable.
+We decide to choose both. TiProxy reads from Prometheus when Prometheus is available and reads from TiDB when it's not. This takes both performance and availability into account.
+
+As for the performance when the cluster is big, we use a centralized topology. The TiProxy leader reads from TiDB, and other TiProxy members read from the leader. Although the pressure of the TiProxy leader is not relieved, the performance of TiDB is nearly unaffected.
+
+In a big cluster on the cloud, cross-AZ traffic also matters. A zonal leader is elected in each zone. The zonal leaders read TiDB in the same zone and each TiProxy reads from all the zonal leaders. The aggregated data from the leaders is trivial, so the cross-AZ traffic is not much.
+
+<img src="./imgs/balance-factor-collection.png" alt="read metrics from backends" width="600">
 
 ### Avoid Thrash
 
 A big challenge of multi-factor balance is to avoid thrash. A thrash means connections keep migrating back and forth between 2 TiDB instances. The thrash may be caused by one factor or multiple factors.
 
 Assuming the CPU usage of TiDB A and B are 50% and 55% respectively. If the 2 instances are considered imbalanced, connections may be migrated from B to A. However, the CPU usage of A may be higher in the next round because:
-- The CPU usage jitters. The CPU usage can be smoothed using the PromQL expression `rate`.
+- The CPU usage jitters. The CPU usage can be smoothed using the EWMA algorithm.
 - After some connections are migrated, the load of A becomes higher. We can increase the threshold of imbalance. For example, only rebalances when the CPU usage difference is over 20%. Rebalancing should be more sensitive in a high load, so the threshold should be self-adaptive.
 - The collected CPU usage delays when migration is ongoing. TiProxy should migrate slowly when it's not urgent so that TiProxy has more accurate CPU usage as its feedback.
 
