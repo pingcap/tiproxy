@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
@@ -149,10 +150,11 @@ type BackendConnManager struct {
 	}
 	connectionID uint64
 	quitSource   ErrorSource
+	cpt          capture.Capture
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler, connectionID uint64, config *BCConfig) *BackendConnManager {
+func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler, cpt capture.Capture, connectionID uint64, config *BCConfig) *BackendConnManager {
 	config.check()
 	mgr := &BackendConnManager{
 		logger:           logger,
@@ -165,6 +167,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),
 		quitSource:     SrcNone,
+		cpt:            cpt,
 	}
 	mgr.ctxmap.m = make(map[any]any)
 	mgr.SetValue(ConnContextKeyConnID, connectionID)
@@ -303,6 +306,9 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 // If it finds that the session is ready for redirection, it migrates the session.
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
 	startTime := time.Now()
+	if mgr.cpt != nil {
+		mgr.cpt.Capture(request, startTime, mgr.connectionID)
+	}
 	mgr.processLock.Lock()
 	defer func() {
 		mgr.setQuitSourceByErr(err)

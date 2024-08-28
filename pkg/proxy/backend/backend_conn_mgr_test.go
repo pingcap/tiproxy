@@ -887,7 +887,7 @@ func TestGetBackendIO(t *testing.T) {
 		},
 	}
 	lg, _ := logger.CreateLoggerForTest(t)
-	mgr := NewBackendConnManager(lg, handler, 0, &BCConfig{ConnectTimeout: time.Second})
+	mgr := NewBackendConnManager(lg, handler, &mockCapture{}, 0, &BCConfig{ConnectTimeout: time.Second})
 	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
 		wg.Run(func() {
@@ -1391,6 +1391,43 @@ func TestProcessSignalsPanic(t *testing.T) {
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestCapture(t *testing.T) {
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.connectionID = 100
+	})
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		{
+			client: func(packetIO *pnet.PacketIO) error {
+				ts.mc.sql = "select 1"
+				return ts.mc.request(packetIO)
+			},
+			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				now := time.Now()
+				err := ts.forwardCmd4Proxy(clientIO, backendIO)
+				cpt := ts.mp.cpt.(*mockCapture)
+				packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
+				require.Equal(t, packet, cpt.packet)
+				require.GreaterOrEqual(t, cpt.startTime, now)
+				require.EqualValues(t, 100, cpt.connID)
+				return err
+			},
+			backend: func(packetIO *pnet.PacketIO) error {
+				ts.mb.respondType = responseTypeResultSet
+				ts.mb.columns = 1
+				ts.mb.rows = 1
+				return ts.mb.respond(packetIO)
+			},
 		},
 	}
 	ts.runTests(runners)
