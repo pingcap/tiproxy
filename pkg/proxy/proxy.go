@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"go.uber.org/zap"
 )
 
@@ -43,6 +44,7 @@ type SQLServer struct {
 	logger     *zap.Logger
 	certMgr    *cert.CertManager
 	hsHandler  backend.HandshakeHandler
+	cpt        capture.Capture
 	wg         waitgroup.WaitGroup
 	cancelFunc context.CancelFunc
 
@@ -56,6 +58,7 @@ func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMana
 		logger:    logger,
 		certMgr:   certMgr,
 		hsHandler: hsHandler,
+		cpt:       capture.NewCapture(logger.Named("capture")),
 		mu: serverState{
 			connID:  0,
 			clients: make(map[uint64]*client.ClientConnection),
@@ -152,7 +155,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
 			zap.String("addr", addr))
 		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),
-			s.hsHandler, connID, addr, &backend.BCConfig{
+			s.hsHandler, s.cpt, connID, addr, &backend.BCConfig{
 				ProxyProtocol:      s.mu.proxyProtocol,
 				RequireBackendTLS:  s.mu.requireBackendTLS,
 				HealthyKeepAlive:   s.mu.healthyKeepAlive,

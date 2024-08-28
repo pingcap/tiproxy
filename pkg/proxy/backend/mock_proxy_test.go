@@ -8,10 +8,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"go.uber.org/zap"
 )
 
@@ -54,7 +56,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 		proxyConfig:        cfg,
 		logger:             lg.Named("mockProxy"),
 		text:               text,
-		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.connectionID, cfg.bcConfig),
+		BackendConnManager: NewBackendConnManager(lg, cfg.handler, &mockCapture{}, cfg.connectionID, cfg.bcConfig),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
@@ -95,4 +97,25 @@ func (mp *mockProxy) directQuery(_, backendIO *pnet.PacketIO) error {
 	rs, _, err := mp.cmdProcessor.query(backendIO, mockCmdStr)
 	mp.rs = rs
 	return err
+}
+
+var _ capture.Capture = (*mockCapture)(nil)
+
+type mockCapture struct {
+	packet    []byte
+	startTime time.Time
+	connID    uint64
+}
+
+func (mc *mockCapture) Start(cfg capture.CaptureConfig) error {
+	return nil
+}
+
+func (mc *mockCapture) Stop() {
+}
+
+func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64) {
+	mc.packet = packet
+	mc.startTime = startTime
+	mc.connID = connID
 }
