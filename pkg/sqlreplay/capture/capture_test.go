@@ -9,6 +9,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStartAndStop(t *testing.T) {
@@ -16,7 +17,8 @@ func TestStartAndStop(t *testing.T) {
 	cpt := NewCapture(lg)
 	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
 	cpt.Capture(packet, time.Now(), 100)
-	cpt.Start(CaptureConfig{outputDir: "./", duration: 10 * time.Second})
+	err := cpt.Start(CaptureConfig{outputDir: "./", duration: 10 * time.Second})
+	require.NoError(t, err)
 	cpt.Capture(packet, time.Now(), 100)
 	cpt.Stop()
 	cpt.Capture(packet, time.Now(), 100)
