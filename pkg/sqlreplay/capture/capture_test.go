@@ -86,12 +86,20 @@ func TestFileRotation(t *testing.T) {
 	// files are rotated and compressed
 	require.Eventually(t, func() bool {
 		files := listFiles(t, tmpDir)
-		require.Equal(t, 2, len(files))
+		count := 0
+		compressed := false
 		for _, f := range files {
+			if strings.HasPrefix(f, "traffic") {
+				count++
+			}
 			if strings.HasSuffix(f, ".gz") {
-				return true
+				compressed = true
 			}
 		}
+		if count == 2 && compressed {
+			return true
+		}
+		t.Logf("traffic files: %v", files)
 		return false
 	}, 5*time.Second, 10*time.Millisecond)
 }
