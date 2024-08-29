@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/cmd"
+	lg "github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -18,7 +18,7 @@ import (
 type LoggerManager struct {
 	// The logger used by LoggerManager itself to log.
 	logger *zap.Logger
-	syncer *cmd.AtomicWriteSyncer
+	syncer *lg.AtomicWriteSyncer
 	level  zap.AtomicLevel
 	cancel context.CancelFunc
 	wg     waitgroup.WaitGroup
@@ -31,7 +31,7 @@ func NewLoggerManager(cfg *config.Log) (*LoggerManager, *zap.Logger, error) {
 	if cfg == nil {
 		cfg = &config.NewConfig().Log
 	}
-	mainLogger, syncer, level, err := cmd.BuildLogger(cfg)
+	mainLogger, syncer, level, err := lg.BuildLogger(cfg)
 	if err != nil {
 		return nil, nil, err
 	}
