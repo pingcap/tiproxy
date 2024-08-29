@@ -30,7 +30,7 @@ func TestStartAndStop(t *testing.T) {
 	cpt.Capture(packet, time.Now(), 100)
 	cfg := CaptureConfig{Filename: fileName, Duration: 10 * time.Second}
 
-	// start capture and the traffic should be outputed
+	// start capture and the traffic should be outputted
 	require.NoError(t, cpt.Start(cfg))
 	cpt.Capture(packet, time.Now(), 100)
 	cpt.Stop(nil)
@@ -40,7 +40,7 @@ func TestStartAndStop(t *testing.T) {
 	data := readFile(t, fileName)
 	require.Contains(t, string(data), "select 1")
 
-	// stop capture and traffic should not be outputed
+	// stop capture and traffic should not be outputted
 	cpt.Capture(packet, time.Now(), 100)
 	cpt.wg.Wait()
 	require.Equal(t, fileSize, getFileSize(t, fileName))
