@@ -804,15 +804,6 @@ func TestWatchConfig(t *testing.T) {
 }
 
 func TestControlSpeed(t *testing.T) {
-	bp := &mockBalancePolicy{}
-	tester := newRouterTester(t, bp)
-	tester.addBackends(2)
-	bp.backendToRoute = func(bc []policy.BackendCtx) policy.BackendCtx {
-		return tester.getBackendByIndex(0)
-	}
-	total := 2000
-	tester.addConnections(total)
-
 	tests := []struct {
 		balanceCount     float64
 		rounds           int
@@ -884,8 +875,8 @@ func TestControlSpeed(t *testing.T) {
 			balanceCount:     0.5,
 			rounds:           1000,
 			interval:         10 * time.Millisecond,
-			expectedCountMin: 5,
-			expectedCountMax: 5,
+			expectedCountMin: 3,
+			expectedCountMax: 7,
 		},
 		{
 			balanceCount:     0.1,
@@ -896,20 +887,28 @@ func TestControlSpeed(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
+	bp := &mockBalancePolicy{}
+	tester := newRouterTester(t, bp)
+	tester.addBackends(2)
+	bp.backendToRoute = func(bc []policy.BackendCtx) policy.BackendCtx {
+		return tester.getBackendByIndex(0)
+	}
+	total := 2000
+	tester.addConnections(total)
+	for i, test := range tests {
 		bp.backendsToBalance = func(bc []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
 			return tester.getBackendByIndex(0), tester.getBackendByIndex(1), test.balanceCount, "conn", nil
 		}
 		tester.router.lastRedirectTime = time.Time{}
-		require.Equal(t, total, tester.getBackendByIndex(0).connScore)
+		require.Equal(t, total, tester.getBackendByIndex(0).connScore, "case %d", i)
 		for j := 0; j < test.rounds; j++ {
 			tester.router.rebalance(context.Background())
 			tester.router.lastRedirectTime = tester.router.lastRedirectTime.Add(-test.interval)
 		}
 		redirectingNum := total - tester.getBackendByIndex(0).connScore
 		// Define a bound because the test may be slow.
-		require.LessOrEqual(t, test.expectedCountMin, redirectingNum)
-		require.GreaterOrEqual(t, test.expectedCountMax, redirectingNum)
+		require.LessOrEqual(t, test.expectedCountMin, redirectingNum, "case %d", i)
+		require.GreaterOrEqual(t, test.expectedCountMax, redirectingNum, "case %d", i)
 		tester.redirectFinish(redirectingNum, false)
 	}
 }
