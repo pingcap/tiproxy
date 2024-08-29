@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/cmd"
+	lg "github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/security"
 	"github.com/spf13/cobra"
 )
@@ -36,7 +36,7 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 	keyPath := rootCmd.PersistentFlags().String("key", "", "key for server-side client authentication")
 	rootCmd.PersistentFlags().Bool("indent", true, "whether indent the returned json")
 	rootCmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
-		logger, _, _, err := cmd.BuildLogger(&config.Log{
+		logger, _, _, err := lg.BuildLogger(&config.Log{
 			Encoder: *logEncoder,
 			LogOnline: config.LogOnline{
 				Level: *logLevel,

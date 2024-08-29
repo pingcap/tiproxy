@@ -78,31 +78,31 @@ func (c *Command) Validate() error {
 func (c *Command) Encode(writer *bytes.Buffer) error {
 	var err error
 	if err = writeString(keyStartTs, c.StartTs.Format(time.RFC3339Nano), writer); err != nil {
-		return nil
+		return err
 	}
 	if err = writeString(keyConnID, strconv.FormatUint(c.ConnID, 10), writer); err != nil {
-		return nil
+		return err
 	}
 	if c.Type != pnet.ComQuery {
 		if err = writeByte(keyType, c.Type.Byte(), writer); err != nil {
-			return nil
+			return err
 		}
 	}
 	if !c.Succeess {
 		if err = writeString(keySuccess, "false", writer); err != nil {
-			return nil
+			return err
 		}
 	}
 	if err = writeString(keyPayloadLen, strconv.Itoa(len(c.Payload)), writer); err != nil {
-		return nil
+		return err
 	}
 	// Unlike TiDB slow log, the payload is binary because StmtExecute can't be transformed to a SQL.
 	if len(c.Payload) > 0 {
 		if _, err = writer.Write(c.Payload); err != nil {
-			return err
+			return errors.WithStack(err)
 		}
 		if _, err = writer.WriteRune('\n'); err != nil {
-			return err
+			return errors.WithStack(err)
 		}
 	}
 	return nil
@@ -115,7 +115,7 @@ func (c *Command) Decode(reader LineReader) error {
 	for {
 		line, err := reader.ReadLine()
 		if err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		if !strings.HasPrefix(hack.String(line), commonKeyPrefix) {
 			return errors.Errorf("line doesn't start with '%s': %s", commonKeyPrefix, line)
@@ -165,7 +165,7 @@ func (c *Command) Decode(reader LineReader) error {
 				}
 				// skip '\n'
 				if _, err = reader.Read(1); err != nil {
-					return errors.WithStack(err)
+					return err
 				}
 			}
 			if err = c.Validate(); err != nil {
@@ -179,13 +179,13 @@ func (c *Command) Decode(reader LineReader) error {
 func writeString(key, value string, writer *bytes.Buffer) error {
 	var err error
 	if _, err = writer.WriteString(key); err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 	if _, err = writer.WriteString(value); err != nil {
-		return err
+		return errors.WithStack(err)
 	}
-	if _, err = writer.WriteRune('\n'); err != nil {
-		return err
+	if err = writer.WriteByte(byte('\n')); err != nil {
+		return errors.WithStack(err)
 	}
 	return nil
 }
@@ -193,13 +193,13 @@ func writeString(key, value string, writer *bytes.Buffer) error {
 func writeByte(key string, value byte, writer *bytes.Buffer) error {
 	var err error
 	if _, err = writer.WriteString(key); err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 	if err = writer.WriteByte(value); err != nil {
-		return err
+		return errors.WithStack(err)
 	}
-	if _, err = writer.WriteRune('\n'); err != nil {
-		return err
+	if err = writer.WriteByte(byte('\n')); err != nil {
+		return errors.WithStack(err)
 	}
 	return nil
 }

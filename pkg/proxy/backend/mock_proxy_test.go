@@ -111,11 +111,14 @@ func (mc *mockCapture) Start(cfg capture.CaptureConfig) error {
 	return nil
 }
 
-func (mc *mockCapture) Stop() {
+func (mc *mockCapture) Stop(err error) {
 }
 
 func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64) {
 	mc.packet = packet
 	mc.startTime = startTime
 	mc.connID = connID
+}
+
+func (mc *mockCapture) Close() {
 }
