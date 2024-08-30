@@ -44,7 +44,7 @@ func testTCPConn(t *testing.T, a func(*testing.T, *packetIO), b func(*testing.T,
 		}, loop)
 }
 
-func TestpacketIO(t *testing.T) {
+func TestPacketIO(t *testing.T) {
 	expectMsg := []byte("test")
 	pktLengths := []int{0, MaxPayloadLen + 212, MaxPayloadLen, MaxPayloadLen * 2}
 	testPipeConn(t,
@@ -150,7 +150,7 @@ func TestTLS(t *testing.T) {
 	)
 }
 
-func TestpacketIOClose(t *testing.T) {
+func TestPacketIOClose(t *testing.T) {
 	testTCPConn(t,
 		func(t *testing.T, cli *packetIO) {
 			require.NoError(t, cli.Close())

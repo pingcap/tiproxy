@@ -101,8 +101,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	}
 
 	cid, _ := cctx.Value(ConnContextKeyConnID).(uint64)
-	data := pnet.MakeInitialHandshake(proxyCapability, salt, pnet.AuthNativePassword, handshakeHandler.GetServerVersion(), cid)
-	if err := clientIO.WritePacket(data, true); err != nil {
+	if err := clientIO.WritePacket(pnet.MakeInitialHandshake(proxyCapability, salt, pnet.AuthNativePassword, handshakeHandler.GetServerVersion(), cid), true); err != nil {
 		return err
 	}
 	pkt, err := clientIO.ReadPacket()
@@ -129,8 +128,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	}
 	if commonCaps := frontendCapability & requiredFrontendCaps; commonCaps != requiredFrontendCaps {
 		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredFrontendCaps))
-		data = pnet.MakeErrPacket(mysql.NewDefaultError(mysql.ER_NOT_SUPPORTED_AUTH_MODE))
-		if writeErr := clientIO.WritePacket(data, true); writeErr != nil {
+		if writeErr := clientIO.WritePacket(pnet.MakeErrPacket(mysql.NewDefaultError(mysql.ER_NOT_SUPPORTED_AUTH_MODE)), true); writeErr != nil {
 			return writeErr
 		}
 		return errors.Wrapf(ErrClientCap, "require %s from frontend", requiredFrontendCaps&^commonCaps)

@@ -200,7 +200,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 		// For some errors, convert them to MySQL errors and send them to the client.
 		if clientErr := ErrToClient(err); clientErr != nil {
 			if writeErr := clientIO.WritePacket(pnet.MakeUserError(clientErr), true); writeErr != nil {
-				mgr.logger.Error("writing error to client failed", zap.NamedError("mysql_err", clientErr), zap.NamedError("write_err", writeErr))
+				mgr.logger.Warn("writing error to client failed", zap.NamedError("mysql_err", clientErr), zap.NamedError("write_err", writeErr))
 			}
 		}
 		mgr.quitSource = src
