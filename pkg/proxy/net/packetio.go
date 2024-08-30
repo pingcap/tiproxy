@@ -189,8 +189,43 @@ func ReadFull(prw packetReadWriter, b []byte) error {
 	return nil
 }
 
+type PacketIO interface {
+	ApplyOpts(opts ...PacketIOption)
+	LocalAddr() net.Addr
+	RemoteAddr() net.Addr
+	ResetSequence()
+	GetSequence() uint8
+	ReadPacket() (data []byte, err error)
+	WritePacket(data []byte, flush bool) (err error)
+	ForwardUntil(dest PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
+		process func(response []byte) error) error
+	InBytes() uint64
+	OutBytes() uint64
+	InPackets() uint64
+	OutPackets() uint64
+	Flush() error
+	IsPeerActive() bool
+	SetKeepalive(cfg config.KeepAlive) error
+	LastKeepAlive() config.KeepAlive
+	GracefulClose() error
+	Close() error
+
+	// proxy protocol
+	EnableProxyClient(proxy *proxyprotocol.Proxy)
+	EnableProxyServer()
+	Proxy() *proxyprotocol.Proxy
+
+	// tls
+	ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error)
+	ClientTLSHandshake(tlsConfig *tls.Config) error
+	TLSConnectionState() tls.ConnectionState
+
+	// compression
+	SetCompressionAlgorithm(algorithm CompressAlgorithm, zstdLevel int) error
+}
+
 // PacketIO is a helper to read and write sql and proxy protocol.
-type PacketIO struct {
+type packetIO struct {
 	lastKeepAlive config.KeepAlive
 	rawConn       net.Conn
 	readWriter    packetReadWriter
@@ -203,8 +238,8 @@ type PacketIO struct {
 	outPackets    uint64
 }
 
-func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *PacketIO {
-	p := &PacketIO{
+func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *packetIO {
+	p := &packetIO{
 		rawConn:    conn,
 		logger:     lg,
 		readWriter: newBasicReadWriter(conn, bufferSize),
@@ -213,37 +248,37 @@ func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIO
 	return p
 }
 
-func (p *PacketIO) ApplyOpts(opts ...PacketIOption) {
+func (p *packetIO) ApplyOpts(opts ...PacketIOption) {
 	for _, opt := range opts {
 		opt(p)
 	}
 }
 
-func (p *PacketIO) wrapErr(err error) error {
+func (p *packetIO) wrapErr(err error) error {
 	return errors.Wrap(p.wrap, err)
 }
 
-func (p *PacketIO) LocalAddr() net.Addr {
+func (p *packetIO) LocalAddr() net.Addr {
 	return p.readWriter.LocalAddr()
 }
 
-func (p *PacketIO) RemoteAddr() net.Addr {
+func (p *packetIO) RemoteAddr() net.Addr {
 	if p.remoteAddr != nil {
 		return p.remoteAddr
 	}
 	return p.readWriter.RemoteAddr()
 }
 
-func (p *PacketIO) ResetSequence() {
+func (p *packetIO) ResetSequence() {
 	p.readWriter.ResetSequence()
 }
 
 // GetSequence is used in tests to assert that the sequences on the client and server are equal.
-func (p *PacketIO) GetSequence() uint8 {
+func (p *packetIO) GetSequence() uint8 {
 	return p.readWriter.Sequence()
 }
 
-func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
+func (p *packetIO) readOnePacket() ([]byte, bool, error) {
 	if err := ReadFull(p.readWriter, p.header[:]); err != nil {
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
@@ -263,7 +298,7 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 }
 
 // ReadPacket reads data and removes the header
-func (p *PacketIO) ReadPacket() (data []byte, err error) {
+func (p *packetIO) ReadPacket() (data []byte, err error) {
 	p.readWriter.BeginRW(rwRead)
 	for more := true; more; {
 		var buf []byte
@@ -281,7 +316,7 @@ func (p *PacketIO) ReadPacket() (data []byte, err error) {
 	return data, nil
 }
 
-func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
+func (p *packetIO) writeOnePacket(data []byte) (int, bool, error) {
 	more := false
 	length := len(data)
 	if length >= MaxPayloadLen {
@@ -311,7 +346,7 @@ func (p *PacketIO) writeOnePacket(data []byte) (int, bool, error) {
 }
 
 // WritePacket writes data without a header
-func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
+func (p *packetIO) WritePacket(data []byte, flush bool) (err error) {
 	p.readWriter.BeginRW(rwWrite)
 	for more := true; more; {
 		var n int
@@ -328,9 +363,10 @@ func (p *PacketIO) WritePacket(data []byte, flush bool) (err error) {
 	return nil
 }
 
-func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
+func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
 	process func(response []byte) error) error {
 	p.readWriter.BeginRW(rwRead)
+	dest := destIO.(*packetIO)
 	dest.readWriter.BeginRW(rwWrite)
 	p.limitReader.R = p.readWriter
 	for {
@@ -387,34 +423,34 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 	}
 }
 
-func (p *PacketIO) InBytes() uint64 {
+func (p *packetIO) InBytes() uint64 {
 	return p.readWriter.InBytes()
 }
 
-func (p *PacketIO) OutBytes() uint64 {
+func (p *packetIO) OutBytes() uint64 {
 	return p.readWriter.OutBytes()
 }
 
-func (p *PacketIO) InPackets() uint64 {
+func (p *packetIO) InPackets() uint64 {
 	return p.inPackets
 }
 
-func (p *PacketIO) OutPackets() uint64 {
+func (p *packetIO) OutPackets() uint64 {
 	return p.outPackets
 }
 
-func (p *PacketIO) Flush() error {
+func (p *packetIO) Flush() error {
 	if err := p.readWriter.Flush(); err != nil {
 		return p.wrapErr(errors.Wrap(ErrFlushConn, errors.WithStack(err)))
 	}
 	return nil
 }
 
-func (p *PacketIO) IsPeerActive() bool {
+func (p *packetIO) IsPeerActive() bool {
 	return p.readWriter.IsPeerActive()
 }
 
-func (p *PacketIO) SetKeepalive(cfg config.KeepAlive) error {
+func (p *packetIO) SetKeepalive(cfg config.KeepAlive) error {
 	if cfg == p.lastKeepAlive {
 		return nil
 	}
@@ -423,18 +459,18 @@ func (p *PacketIO) SetKeepalive(cfg config.KeepAlive) error {
 }
 
 // LastKeepAlive is used for test.
-func (p *PacketIO) LastKeepAlive() config.KeepAlive {
+func (p *packetIO) LastKeepAlive() config.KeepAlive {
 	return p.lastKeepAlive
 }
 
-func (p *PacketIO) GracefulClose() error {
+func (p *packetIO) GracefulClose() error {
 	if err := p.readWriter.SetDeadline(time.Now()); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
 	return nil
 }
 
-func (p *PacketIO) Close() error {
+func (p *packetIO) Close() error {
 	var errs []error
 	/*
 		TODO: flush when we want to smoothly exit

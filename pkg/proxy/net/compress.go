@@ -40,7 +40,7 @@ const (
 	zlibCompressionLevel = 6
 )
 
-func (p *PacketIO) SetCompressionAlgorithm(algorithm CompressAlgorithm, zstdLevel int) error {
+func (p *packetIO) SetCompressionAlgorithm(algorithm CompressAlgorithm, zstdLevel int) error {
 	switch algorithm {
 	case CompressionZlib, CompressionZstd:
 		p.readWriter = newCompressedReadWriter(p.readWriter, algorithm, zstdLevel, p.logger)

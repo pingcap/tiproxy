@@ -155,8 +155,8 @@ func (ts *testSuite) changeUser(username, db string) {
 	ts.mp.authenticator.changeUser(req)
 }
 
-func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendRunner func(*pnet.PacketIO) error,
-	proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) {
+func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendRunner func(pnet.PacketIO) error,
+	proxyRunner func(pnet.PacketIO, pnet.PacketIO) error) {
 	ts.mc.err, ts.mb.err, ts.mp.err = ts.tc.run(t, clientRunner, backendRunner, proxyRunner)
 	if c == nil {
 		require.NoError(t, ts.mc.err)

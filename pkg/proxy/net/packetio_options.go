@@ -9,14 +9,14 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 )
 
-type PacketIOption = func(*PacketIO)
+type PacketIOption = func(*packetIO)
 
-func WithProxy(pi *PacketIO) {
+func WithProxy(pi *packetIO) {
 	pi.EnableProxyServer()
 }
 
-func WithWrapError(err error) func(pi *PacketIO) {
-	return func(pi *PacketIO) {
+func WithWrapError(err error) func(pi *packetIO) {
+	return func(pi *packetIO) {
 		pi.wrap = err
 	}
 }
@@ -37,8 +37,8 @@ func (o *originAddr) String() string {
 	return o.addr
 }
 
-func WithRemoteAddr(readdr string, addr net.Addr) func(pi *PacketIO) {
-	return func(pi *PacketIO) {
+func WithRemoteAddr(readdr string, addr net.Addr) func(pi *packetIO) {
+	return func(pi *packetIO) {
 		pi.remoteAddr = &originAddr{Addr: addr, addr: readdr}
 	}
 }

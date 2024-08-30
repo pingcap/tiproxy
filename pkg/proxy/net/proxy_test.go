@@ -17,7 +17,7 @@ import (
 func TestProxyParse(t *testing.T) {
 	tcpaddr, p := mockProxy(t)
 	testPipeConn(t,
-		func(t *testing.T, cli *PacketIO) {
+		func(t *testing.T, cli *packetIO) {
 			b, err := p.ToBytes()
 			require.NoError(t, err)
 			_, err = io.Copy(cli.readWriter, bytes.NewReader(b))
@@ -25,7 +25,7 @@ func TestProxyParse(t *testing.T) {
 			err = cli.WritePacket([]byte("hello"), true)
 			require.NoError(t, err)
 		},
-		func(t *testing.T, srv *PacketIO) {
+		func(t *testing.T, srv *packetIO) {
 			srv.ApplyOpts(WithProxy)
 			b, err := srv.ReadPacket()
 			require.NoError(t, err)

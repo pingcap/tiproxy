@@ -62,9 +62,9 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 	return mp
 }
 
-func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
+func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO pnet.PacketIO) error {
 	if err := mp.authenticator.handshakeFirstTime(context.Background(), mp.logger, mp, clientIO, mp.handshakeHandler,
-		func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+		func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
 			return backendIO, nil
 		}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
 		return err
@@ -73,11 +73,11 @@ func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) e
 	return nil
 }
 
-func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO *pnet.PacketIO) error {
+func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO pnet.PacketIO) error {
 	return mp.authenticator.handshakeSecondTime(mp.logger, clientIO, backendIO, mp.backendTLSConfig, mp.sessionToken)
 }
 
-func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {
+func (mp *mockProxy) processCmd(clientIO, backendIO pnet.PacketIO) error {
 	clientIO.ResetSequence()
 	request, err := clientIO.ReadPacket()
 	if err != nil {
@@ -93,7 +93,7 @@ func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {
 	return err
 }
 
-func (mp *mockProxy) directQuery(_, backendIO *pnet.PacketIO) error {
+func (mp *mockProxy) directQuery(_, backendIO pnet.PacketIO) error {
 	rs, _, err := mp.cmdProcessor.query(backendIO, mockCmdStr)
 	mp.rs = rs
 	return err

@@ -61,7 +61,7 @@ func newMockBackend(cfg *backendConfig) *mockBackend {
 	}
 }
 
-func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) authenticate(packetIO pnet.PacketIO) error {
 	if mb.abnormalExit {
 		return packetIO.Close()
 	}
@@ -70,14 +70,14 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	}
 	var err error
 	// write initial handshake
-	if err = packetIO.WriteInitialHandshake(mb.capability, mb.salt, mb.authPlugin, pnet.ServerVersion, 100); err != nil {
+	if err = packetIO.WritePacket(pnet.MakeInitialHandshake(mb.capability, mb.salt, mb.authPlugin, pnet.ServerVersion, 100), true); err != nil {
 		return err
 	}
 	// read the response
 	var clientPkt []byte
 	// Unlike TiProxy, TiDB always sends an error to the client even if EOF.
 	if clientPkt, err = packetIO.ReadPacket(); err != nil {
-		return packetIO.WriteErrPacket(mysql.NewError(mysql.ER_UNKNOWN_ERROR, err.Error()))
+		return packetIO.WritePacket(pnet.MakeErrPacket(mysql.NewError(mysql.ER_UNKNOWN_ERROR, err.Error())), true)
 	}
 	// upgrade to TLS
 	capability := binary.LittleEndian.Uint16(clientPkt[:2])
@@ -105,10 +105,10 @@ func (mb *mockBackend) authenticate(packetIO *pnet.PacketIO) error {
 	return mb.verifyPassword(packetIO, resp)
 }
 
-func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.HandshakeResp) error {
+func (mb *mockBackend) verifyPassword(packetIO pnet.PacketIO, resp *pnet.HandshakeResp) error {
 	if resp.AuthPlugin != pnet.AuthTiDBSessionToken {
 		var err error
-		if err = packetIO.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
+		if err = packetIO.WritePacket(pnet.MakeSwitchRequest(mb.authPlugin, mb.salt), true); err != nil {
 			return err
 		}
 		if mb.authData, err = packetIO.ReadPacket(); err != nil {
@@ -116,7 +116,7 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.Handsh
 		}
 		switch mb.authPlugin {
 		case pnet.AuthCachingSha2Password:
-			if err = packetIO.WriteShaCommand(); err != nil {
+			if err = packetIO.WritePacket(pnet.MakeShaCommand(), true); err != nil {
 				return err
 			}
 			if mb.authData, err = packetIO.ReadPacket(); err != nil {
@@ -125,14 +125,14 @@ func (mb *mockBackend) verifyPassword(packetIO *pnet.PacketIO, resp *pnet.Handsh
 		}
 	}
 	if mb.authSucceed {
-		if err := packetIO.WriteOKPacket(mb.status, pnet.OKHeader); err != nil {
+		if err := packetIO.WritePacket(pnet.MakeOKPacket(mb.status, pnet.OKHeader), true); err != nil {
 			return err
 		}
 		if err := setCompress(packetIO, mb.capability, mb.zstdLevel); err != nil {
 			return err
 		}
 	} else {
-		if err := packetIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_ACCESS_DENIED_ERROR)); err != nil {
+		if err := packetIO.WritePacket(pnet.MakeErrPacket(mysql.NewDefaultError(mysql.ER_ACCESS_DENIED_ERROR)), true); err != nil {
 			return err
 		}
 	}
@@ -155,7 +155,7 @@ func (mb *mockBackend) changeUser(pkt []byte) error {
 	return nil
 }
 
-func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respond(packetIO pnet.PacketIO) error {
 	if mb.abnormalExit {
 		return packetIO.Close()
 	}
@@ -167,7 +167,7 @@ func (mb *mockBackend) respond(packetIO *pnet.PacketIO) error {
 	return nil
 }
 
-func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respondOnce(packetIO pnet.PacketIO) error {
 	packetIO.ResetSequence()
 	pkt, err := packetIO.ReadPacket()
 	if err != nil {
@@ -182,7 +182,7 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeOK:
 		return mb.respondOK(packetIO)
 	case responseTypeErr:
-		return packetIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR))
+		return packetIO.WritePacket(pnet.MakeErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR)), true)
 	case responseTypeResultSet:
 		if pnet.Command(pkt[0]) == pnet.ComQuery && string(pkt[1:]) == sqlQueryState {
 			return mb.respondSessionStates(packetIO)
@@ -195,15 +195,15 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeString:
 		return packetIO.WritePacket([]byte(mockCmdStr), true)
 	case responseTypeEOF:
-		return packetIO.WriteEOFPacket(mb.status)
+		return packetIO.WritePacket(pnet.MakeEOFPacket(mb.status), true)
 	case responseTypeSwitchRequest:
-		if err := packetIO.WriteSwitchRequest(mb.authPlugin, mb.salt); err != nil {
+		if err := packetIO.WritePacket(pnet.MakeSwitchRequest(mb.authPlugin, mb.salt), true); err != nil {
 			return err
 		}
 		if _, err := packetIO.ReadPacket(); err != nil {
 			return err
 		}
-		return packetIO.WriteOKPacket(mb.status, pnet.OKHeader)
+		return packetIO.WritePacket(pnet.MakeOKPacket(mb.status, pnet.OKHeader), true)
 	case responseTypePrepareOK:
 		return mb.respondPrepare(packetIO)
 	case responseTypeRow:
@@ -211,10 +211,10 @@ func (mb *mockBackend) respondOnce(packetIO *pnet.PacketIO) error {
 	case responseTypeNone:
 		return nil
 	}
-	return packetIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR))
+	return packetIO.WritePacket(pnet.MakeErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR)), true)
 }
 
-func (mb *mockBackend) respondOK(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respondOK(packetIO pnet.PacketIO) error {
 	for i := 0; i < mb.stmtNum; i++ {
 		status := mb.status
 		if i < mb.stmtNum-1 {
@@ -222,7 +222,7 @@ func (mb *mockBackend) respondOK(packetIO *pnet.PacketIO) error {
 		} else {
 			status &= ^mysql.SERVER_MORE_RESULTS_EXISTS
 		}
-		if err := packetIO.WriteOKPacket(status, pnet.OKHeader); err != nil {
+		if err := packetIO.WritePacket(pnet.MakeOKPacket(status, pnet.OKHeader), true); err != nil {
 			return err
 		}
 	}
@@ -230,7 +230,7 @@ func (mb *mockBackend) respondOK(packetIO *pnet.PacketIO) error {
 }
 
 // respond to FieldList
-func (mb *mockBackend) respondColumns(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respondColumns(packetIO pnet.PacketIO) error {
 	for i := 0; i < mb.columns; i++ {
 		if err := packetIO.WritePacket(mockCmdBytes, false); err != nil {
 			return err
@@ -239,15 +239,15 @@ func (mb *mockBackend) respondColumns(packetIO *pnet.PacketIO) error {
 	return mb.writeResultEndPacket(packetIO, mb.status)
 }
 
-func (mb *mockBackend) writeResultEndPacket(packetIO *pnet.PacketIO, status uint16) error {
+func (mb *mockBackend) writeResultEndPacket(packetIO pnet.PacketIO, status uint16) error {
 	if mb.capability&pnet.ClientDeprecateEOF > 0 {
-		return packetIO.WriteOKPacket(status, pnet.EOFHeader)
+		return packetIO.WritePacket(pnet.MakeOKPacket(status, pnet.EOFHeader), true)
 	}
-	return packetIO.WriteEOFPacket(status)
+	return packetIO.WritePacket(pnet.MakeEOFPacket(status), true)
 }
 
 // respond to Fetch
-func (mb *mockBackend) respondRows(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respondRows(packetIO pnet.PacketIO) error {
 	for i := 0; i < mb.rows; i++ {
 		if err := packetIO.WritePacket(mockCmdBytes, false); err != nil {
 			return err
@@ -257,7 +257,7 @@ func (mb *mockBackend) respondRows(packetIO *pnet.PacketIO) error {
 }
 
 // respond to Query
-func (mb *mockBackend) respondResultSet(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respondResultSet(packetIO pnet.PacketIO) error {
 	names := make([]string, 0, mb.columns)
 	values := make([][]any, 0, mb.rows)
 	for i := 0; i < mb.columns; i++ {
@@ -273,7 +273,7 @@ func (mb *mockBackend) respondResultSet(packetIO *pnet.PacketIO) error {
 	return mb.writeResultSet(packetIO, names, values)
 }
 
-func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, values [][]any) error {
+func (mb *mockBackend) writeResultSet(packetIO pnet.PacketIO, names []string, values [][]any) error {
 	rs, err := mysql.BuildSimpleTextResultset(names, values)
 	if err != nil {
 		return err
@@ -303,7 +303,7 @@ func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, v
 
 		if status&mysql.SERVER_STATUS_CURSOR_EXISTS == 0 {
 			if mb.capability&pnet.ClientDeprecateEOF == 0 {
-				if err := packetIO.WriteEOFPacket(status); err != nil {
+				if err := packetIO.WritePacket(pnet.MakeEOFPacket(status), true); err != nil {
 					return err
 				}
 			}
@@ -325,7 +325,7 @@ func (mb *mockBackend) writeResultSet(packetIO *pnet.PacketIO, names []string, v
 }
 
 // respond to LoadInFile
-func (mb *mockBackend) respondLoadFile(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respondLoadFile(packetIO pnet.PacketIO) error {
 	for i := 0; i < mb.stmtNum; i++ {
 		status := mb.status
 		if i < mb.stmtNum-1 {
@@ -350,7 +350,7 @@ func (mb *mockBackend) respondLoadFile(packetIO *pnet.PacketIO) error {
 				break
 			}
 		}
-		if err := packetIO.WriteOKPacket(status, pnet.OKHeader); err != nil {
+		if err := packetIO.WritePacket(pnet.MakeOKPacket(status, pnet.OKHeader), true); err != nil {
 			return err
 		}
 	}
@@ -358,7 +358,7 @@ func (mb *mockBackend) respondLoadFile(packetIO *pnet.PacketIO) error {
 }
 
 // respond to Prepare
-func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respondPrepare(packetIO pnet.PacketIO) error {
 	data := []byte{pnet.OKHeader.Byte()}
 	data = pnet.DumpUint32(data, uint32(mockCmdInt))
 	data = pnet.DumpUint16(data, uint16(mb.columns))
@@ -375,7 +375,7 @@ func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
 			}
 		}
 		if mb.capability&pnet.ClientDeprecateEOF == 0 {
-			if err := packetIO.WriteEOFPacket(mb.status); err != nil {
+			if err := packetIO.WritePacket(pnet.MakeEOFPacket(mb.status), true); err != nil {
 				return err
 			}
 		}
@@ -387,7 +387,7 @@ func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
 			}
 		}
 		if mb.capability&pnet.ClientDeprecateEOF == 0 {
-			if err := packetIO.WriteEOFPacket(mb.status); err != nil {
+			if err := packetIO.WritePacket(pnet.MakeEOFPacket(mb.status), true); err != nil {
 				return err
 			}
 		}
@@ -395,7 +395,7 @@ func (mb *mockBackend) respondPrepare(packetIO *pnet.PacketIO) error {
 	return packetIO.Flush()
 }
 
-func (mb *mockBackend) respondSessionStates(packetIO *pnet.PacketIO) error {
+func (mb *mockBackend) respondSessionStates(packetIO pnet.PacketIO) error {
 	names := []string{sessionStatesCol, sessionTokenCol}
 	values := [][]any{
 		{

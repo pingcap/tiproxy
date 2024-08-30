@@ -27,6 +27,108 @@ var (
 	Status        = ServerStatusAutocommit
 )
 
+// WriteInitialHandshake writes an initial handshake as a server.
+// It's used for tenant-aware routing and testing.
+func MakeInitialHandshake(capability Capability, salt [20]byte, authPlugin string, serverVersion string, connID uint64) []byte {
+	saltLen := len(salt)
+	data := make([]byte, 0, 128)
+
+	// min version 10
+	data = append(data, 10)
+	// server version[NUL]
+	data = append(data, serverVersion...)
+	data = append(data, 0)
+	// connection id
+	data = append(data, byte(connID), byte(connID>>8), byte(connID>>16), byte(connID>>24))
+	// auth-plugin-data-part-1
+	data = append(data, salt[0:8]...)
+	// filler [00]
+	data = append(data, 0)
+	// capability flag lower 2 bytes, using default capability here
+	data = append(data, byte(capability), byte(capability>>8))
+	// charset
+	data = append(data, Collation)
+	// status
+	data = DumpUint16(data, Status)
+	// capability flag upper 2 bytes, using default capability here
+	data = append(data, byte(capability>>16), byte(capability>>24))
+	// length of auth-plugin-data
+	data = append(data, byte(saltLen+1))
+	// reserved 10 [00]
+	data = append(data, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	// auth-plugin-data-part-2
+	data = append(data, salt[8:saltLen]...)
+	data = append(data, 0)
+	// auth-plugin name
+	data = append(data, []byte(authPlugin)...)
+	data = append(data, 0)
+	return data
+}
+
+// WriteSwitchRequest writes a switch request to the client. It's only for testing.
+func MakeSwitchRequest(authPlugin string, salt [20]byte) []byte {
+	length := 1 + len(authPlugin) + 1 + len(salt) + 1
+	data := make([]byte, 0, length)
+	// check https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_auth_switch_request.html
+	data = append(data, byte(AuthSwitchHeader))
+	data = append(data, authPlugin...)
+	data = append(data, 0x00)
+	data = append(data, salt[:]...)
+	data = append(data, 0x00)
+	return data
+}
+
+func MakeShaCommand() []byte {
+	return []byte{ShaCommand, FastAuthFail}
+}
+
+func ParseSSLRequestOrHandshakeResp(pkt []byte) bool {
+	capability := Capability(binary.LittleEndian.Uint32(pkt[:4]))
+	return capability&ClientSSL != 0
+}
+
+// WriteErrPacket writes an Error packet.
+func MakeErrPacket(merr *gomysql.MyError) []byte {
+	data := make([]byte, 0, 9+len(merr.Message))
+	data = append(data, ErrHeader.Byte())
+	data = append(data, byte(merr.Code), byte(merr.Code>>8))
+	// ClientProtocol41 is always enabled.
+	data = append(data, '#')
+	data = append(data, merr.State...)
+	data = append(data, merr.Message...)
+	return data
+}
+
+// WriteOKPacket writes an OK packet. It's only for testing.
+func MakeOKPacket(status uint16, header Header) []byte {
+	data := make([]byte, 0, 7)
+	data = append(data, header.Byte())
+	data = append(data, 0, 0)
+	// ClientProtocol41 is always enabled.
+	data = DumpUint16(data, status)
+	data = append(data, 0, 0)
+	return data
+}
+
+// WriteEOFPacket writes an EOF packet. It's only for testing.
+func MakeEOFPacket(status uint16) []byte {
+	data := make([]byte, 0, 5)
+	data = append(data, EOFHeader.Byte())
+	data = append(data, 0, 0)
+	// ClientProtocol41 is always enabled.
+	data = DumpUint16(data, status)
+	return data
+}
+
+// WriteUserError writes an unknown error to the client.
+func MakeUserError(err error) []byte {
+	if err == nil {
+		return nil
+	}
+	myErr := gomysql.NewError(gomysql.ER_UNKNOWN_ERROR, err.Error())
+	return MakeErrPacket(myErr)
+}
+
 // ParseInitialHandshake parses the initial handshake received from the server.
 func ParseInitialHandshake(data []byte) (Capability, uint64, string) {
 	// skip min version
