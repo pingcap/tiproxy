@@ -20,10 +20,10 @@ type tcpConnSuite struct {
 	proxyListener    net.Listener
 	backendTLSConfig *tls.Config
 	clientTLSConfig  *tls.Config
-	backendIO        *pnet.PacketIO
-	proxyBIO         *pnet.PacketIO
-	proxyCIO         *pnet.PacketIO
-	clientIO         *pnet.PacketIO
+	backendIO        pnet.PacketIO
+	proxyBIO         pnet.PacketIO
+	proxyCIO         pnet.PacketIO
+	clientIO         pnet.PacketIO
 }
 
 func newTCPConnSuite(t *testing.T) *tcpConnSuite {
@@ -102,7 +102,7 @@ func (tc *tcpConnSuite) reconnectBackend(t *testing.T) {
 	wg.Wait()
 }
 
-func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(*pnet.PacketIO) error, proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) (cerr, berr, perr error) {
+func (tc *tcpConnSuite) run(t *testing.T, clientRunner, backendRunner func(pnet.PacketIO) error, proxyRunner func(pnet.PacketIO, pnet.PacketIO) error) (cerr, berr, perr error) {
 	var wg waitgroup.WaitGroup
 	if clientRunner != nil {
 		wg.Run(func() {

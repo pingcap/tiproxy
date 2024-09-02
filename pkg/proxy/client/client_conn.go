@@ -18,9 +18,9 @@ import (
 
 type ClientConnection struct {
 	logger            *zap.Logger
-	frontendTLSConfig *tls.Config    // the TLS config to connect to clients.
-	backendTLSConfig  *tls.Config    // the TLS config to connect to TiDB server.
-	pkt               *pnet.PacketIO // a helper to read and write data in packet format.
+	frontendTLSConfig *tls.Config   // the TLS config to connect to clients.
+	backendTLSConfig  *tls.Config   // the TLS config to connect to TiDB server.
+	pkt               pnet.PacketIO // a helper to read and write data in packet format.
 	connMgr           *backend.BackendConnManager
 }
 

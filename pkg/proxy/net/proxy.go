@@ -12,16 +12,16 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 )
 
-func (p *PacketIO) EnableProxyClient(proxy *proxyprotocol.Proxy) {
+func (p *packetIO) EnableProxyClient(proxy *proxyprotocol.Proxy) {
 	p.readWriter = newProxyClient(p.readWriter, proxy)
 }
 
-func (p *PacketIO) EnableProxyServer() {
+func (p *packetIO) EnableProxyServer() {
 	p.readWriter = newProxyServer(p.readWriter)
 }
 
 // Proxy returned parsed proxy header from clients if any.
-func (p *PacketIO) Proxy() *proxyprotocol.Proxy {
+func (p *packetIO) Proxy() *proxyprotocol.Proxy {
 	return p.readWriter.Proxy()
 }
 

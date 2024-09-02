@@ -53,7 +53,7 @@ func NewAuthenticator(config *BCConfig) *Authenticator {
 	return auth
 }
 
-func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO *pnet.PacketIO) error {
+func (auth *Authenticator) writeProxyProtocol(clientIO, backendIO pnet.PacketIO) error {
 	if auth.proxyProtocol {
 		proxy := clientIO.Proxy()
 		if proxy == nil {
@@ -84,9 +84,9 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 	return nil
 }
 
-type backendIOGetter func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
+type backendIOGetter func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error)
 
-func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.Logger, cctx ConnContext, clientIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
+func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.Logger, cctx ConnContext, clientIO pnet.PacketIO, handshakeHandler HandshakeHandler,
 	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
 
@@ -101,19 +101,20 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	}
 
 	cid, _ := cctx.Value(ConnContextKeyConnID).(uint64)
-	if err := clientIO.WriteInitialHandshake(proxyCapability, salt, pnet.AuthNativePassword, handshakeHandler.GetServerVersion(), cid); err != nil {
+	if err := clientIO.WritePacket(pnet.MakeInitialHandshake(proxyCapability, salt, pnet.AuthNativePassword, handshakeHandler.GetServerVersion(), cid), true); err != nil {
 		return err
 	}
-	pkt, isSSL, err := clientIO.ReadSSLRequestOrHandshakeResp()
+	pkt, err := clientIO.ReadPacket()
 	if err != nil {
 		return err
 	}
+	isSSL := pnet.ParseSSLRequestOrHandshakeResp(pkt)
 	frontendCapability := pnet.Capability(binary.LittleEndian.Uint32(pkt))
 	if isSSL {
 		if _, err = clientIO.ServerTLSHandshake(frontendTLSConfig); err != nil {
 			return errors.Wrap(ErrClientHandshake, err)
 		}
-		pkt, _, err = clientIO.ReadSSLRequestOrHandshakeResp()
+		pkt, err = clientIO.ReadPacket()
 		if err != nil {
 			return err
 		}
@@ -127,7 +128,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	}
 	if commonCaps := frontendCapability & requiredFrontendCaps; commonCaps != requiredFrontendCaps {
 		logger.Error("require frontend capabilities", zap.Stringer("common", commonCaps), zap.Stringer("required", requiredFrontendCaps))
-		if writeErr := clientIO.WriteErrPacket(mysql.NewDefaultError(mysql.ER_NOT_SUPPORTED_AUTH_MODE)); writeErr != nil {
+		if writeErr := clientIO.WritePacket(pnet.MakeErrPacket(mysql.NewDefaultError(mysql.ER_NOT_SUPPORTED_AUTH_MODE)), true); writeErr != nil {
 			return writeErr
 		}
 		return errors.Wrapf(ErrClientCap, "require %s from frontend", requiredFrontendCaps&^commonCaps)
@@ -266,7 +267,7 @@ loop:
 	}
 }
 
-func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
+func forwardMsg(srcIO, destIO pnet.PacketIO) (data []byte, err error) {
 	data, err = srcIO.ReadPacket()
 	if err != nil {
 		return
@@ -275,7 +276,7 @@ func forwardMsg(srcIO, destIO *pnet.PacketIO) (data []byte, err error) {
 	return
 }
 
-func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, backendIO *pnet.PacketIO, backendTLSConfig *tls.Config, sessionToken string) error {
+func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, backendIO pnet.PacketIO, backendTLSConfig *tls.Config, sessionToken string) error {
 	if len(sessionToken) == 0 {
 		return errors.Wrapf(ErrBackendHandshake, "session token is empty")
 	}
@@ -309,7 +310,7 @@ func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, bac
 	return errors.Wrap(ErrBackendHandshake, err)
 }
 
-func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serverPkt []byte, capability pnet.Capability, err error) {
+func (auth *Authenticator) readInitialHandshake(backendIO pnet.PacketIO) (serverPkt []byte, capability pnet.Capability, err error) {
 	if serverPkt, err = backendIO.ReadPacket(); err != nil {
 		err = errors.Wrap(ErrBackendHandshake, err)
 		return
@@ -323,7 +324,7 @@ func (auth *Authenticator) readInitialHandshake(backendIO *pnet.PacketIO) (serve
 }
 
 func (auth *Authenticator) writeAuthHandshake(
-	backendIO *pnet.PacketIO,
+	backendIO pnet.PacketIO,
 	backendTLSConfig *tls.Config,
 	backendCapability pnet.Capability,
 	authPlugin string,
@@ -388,7 +389,7 @@ func (auth *Authenticator) writeAuthHandshake(
 	return nil
 }
 
-func (auth *Authenticator) handleSecondAuthResult(backendIO *pnet.PacketIO) error {
+func (auth *Authenticator) handleSecondAuthResult(backendIO pnet.PacketIO) error {
 	data, err := backendIO.ReadPacket()
 	if err != nil {
 		return err
@@ -423,7 +424,7 @@ func (auth *Authenticator) ConnInfo() []zap.Field {
 	return fields
 }
 
-func setCompress(packetIO *pnet.PacketIO, capability pnet.Capability, zstdLevel int) error {
+func setCompress(packetIO pnet.PacketIO, capability pnet.Capability, zstdLevel int) error {
 	algorithm := pnet.CompressionNone
 	if capability&pnet.ClientCompress > 0 {
 		algorithm = pnet.CompressionZlib

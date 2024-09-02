@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+func testPipeConn(t *testing.T, a func(*testing.T, *packetIO), b func(*testing.T, *packetIO), loop int) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestPipeConn(t,
 		func(t *testing.T, c net.Conn) {
@@ -29,7 +29,7 @@ func testPipeConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T
 		}, loop)
 }
 
-func testTCPConn(t *testing.T, a func(*testing.T, *PacketIO), b func(*testing.T, *PacketIO), loop int) {
+func testTCPConn(t *testing.T, a func(*testing.T, *packetIO), b func(*testing.T, *packetIO), loop int) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestTCPConn(t,
 		func(t *testing.T, c net.Conn) {
@@ -48,7 +48,7 @@ func TestPacketIO(t *testing.T) {
 	expectMsg := []byte("test")
 	pktLengths := []int{0, MaxPayloadLen + 212, MaxPayloadLen, MaxPayloadLen * 2}
 	testPipeConn(t,
-		func(t *testing.T, cli *PacketIO) {
+		func(t *testing.T, cli *packetIO) {
 			var err error
 
 			// send anything
@@ -75,7 +75,7 @@ func TestPacketIO(t *testing.T) {
 			err = cli.WritePacket(hdr[:], true)
 			require.NoError(t, err)
 		},
-		func(t *testing.T, srv *PacketIO) {
+		func(t *testing.T, srv *packetIO) {
 			var salt [20]byte
 			var msg []byte
 			var err error
@@ -95,13 +95,15 @@ func TestPacketIO(t *testing.T) {
 			}
 
 			// send handshake
-			require.NoError(t, srv.WriteInitialHandshake(0, salt, AuthNativePassword, ServerVersion, 100))
+			require.NoError(t, srv.WritePacket(MakeInitialHandshake(0, salt, AuthNativePassword, ServerVersion, 100), true))
 			// expect correct and wrong capability flags
-			_, isSSL, err := srv.ReadSSLRequestOrHandshakeResp()
+			pkt, err := srv.ReadPacket()
 			require.NoError(t, err)
+			isSSL := ParseSSLRequestOrHandshakeResp(pkt)
 			require.True(t, isSSL)
-			_, isSSL, err = srv.ReadSSLRequestOrHandshakeResp()
+			pkt, err = srv.ReadPacket()
 			require.NoError(t, err)
+			isSSL = ParseSSLRequestOrHandshakeResp(pkt)
 			require.False(t, isSSL)
 		},
 		1,
@@ -113,7 +115,7 @@ func TestTLS(t *testing.T) {
 	require.NoError(t, err)
 	message := []byte("hello world")
 	testTCPConn(t,
-		func(t *testing.T, cli *PacketIO) {
+		func(t *testing.T, cli *packetIO) {
 			data, err := cli.ReadPacket()
 			require.NoError(t, err)
 			require.Equal(t, message, data)
@@ -128,7 +130,7 @@ func TestTLS(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, message, data)
 		},
-		func(t *testing.T, srv *PacketIO) {
+		func(t *testing.T, srv *packetIO) {
 			err = srv.WritePacket(message, true)
 			require.NoError(t, err)
 			data, err := srv.ReadPacket()
@@ -150,14 +152,14 @@ func TestTLS(t *testing.T) {
 
 func TestPacketIOClose(t *testing.T) {
 	testTCPConn(t,
-		func(t *testing.T, cli *PacketIO) {
+		func(t *testing.T, cli *packetIO) {
 			require.NoError(t, cli.Close())
 			require.NoError(t, cli.Close())
 			require.NoError(t, cli.GracefulClose())
 			require.NotEqual(t, cli.LocalAddr(), "")
 			require.NotEqual(t, cli.RemoteAddr(), "")
 		},
-		func(t *testing.T, srv *PacketIO) {
+		func(t *testing.T, srv *packetIO) {
 			require.NoError(t, srv.GracefulClose())
 			require.NoError(t, srv.Close())
 			require.NoError(t, srv.Close())
@@ -173,7 +175,7 @@ func TestPeerActive(t *testing.T) {
 	require.NoError(t, err)
 	ch := make(chan struct{})
 	testTCPConn(t,
-		func(t *testing.T, cli *PacketIO) {
+		func(t *testing.T, cli *packetIO) {
 			// It's active at the beginning.
 			require.True(t, cli.IsPeerActive())
 			ch <- struct{}{} // let srv write packet
@@ -202,7 +204,7 @@ func TestPeerActive(t *testing.T) {
 			ch <- struct{}{}
 			require.False(t, cli.IsPeerActive())
 		},
-		func(t *testing.T, srv *PacketIO) {
+		func(t *testing.T, srv *packetIO) {
 			<-ch
 			err := srv.WritePacket([]byte("123"), true)
 			require.NoError(t, err)
@@ -235,7 +237,7 @@ func TestKeepAlive(t *testing.T) {
 	backendUnhealthy.Cnt = 1
 	backendUnhealthy.Intvl = time.Second
 	testTCPConn(t,
-		func(t *testing.T, cli *PacketIO) {
+		func(t *testing.T, cli *packetIO) {
 			require.NoError(t, cli.SetKeepalive(frontend))
 			require.NoError(t, cli.ClientTLSHandshake(ctls))
 			time.Sleep(3 * time.Second)
@@ -243,7 +245,7 @@ func TestKeepAlive(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, cli.WritePacket([]byte{0, 1, 2}, true))
 		},
-		func(t *testing.T, srv *PacketIO) {
+		func(t *testing.T, srv *packetIO) {
 			require.NoError(t, srv.SetKeepalive(backendHealthy))
 			_, err = srv.ServerTLSHandshake(stls)
 			require.NoError(t, err)
@@ -259,7 +261,7 @@ func TestKeepAlive(t *testing.T) {
 
 func TestPredefinedPacket(t *testing.T) {
 	testTCPConn(t,
-		func(t *testing.T, cli *PacketIO) {
+		func(t *testing.T, cli *packetIO) {
 			data, err := cli.ReadPacket()
 			require.NoError(t, err)
 			merr := ParseErrorPacket(data)
@@ -277,10 +279,10 @@ func TestPredefinedPacket(t *testing.T) {
 			status := ParseOKPacket(data)
 			require.Equal(t, uint16(100), status)
 		},
-		func(t *testing.T, srv *PacketIO) {
-			require.NoError(t, srv.WriteErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR)))
-			require.NoError(t, srv.WriteErrPacket(mysql.NewError(mysql.ER_UNKNOWN_ERROR, "test error")))
-			require.NoError(t, srv.WriteOKPacket(100, OKHeader))
+		func(t *testing.T, srv *packetIO) {
+			require.NoError(t, srv.WritePacket(MakeErrPacket(mysql.NewDefaultError(mysql.ER_UNKNOWN_ERROR)), true))
+			require.NoError(t, srv.WritePacket(MakeErrPacket(mysql.NewError(mysql.ER_UNKNOWN_ERROR, "test error")), true))
+			require.NoError(t, srv.WritePacket(MakeOKPacket(100, OKHeader), true))
 		},
 		1,
 	)
@@ -292,7 +294,7 @@ func TestProxyTLSCompress(t *testing.T) {
 	require.NoError(t, err)
 	addr, p := mockProxy(t)
 	ch := make(chan []byte)
-	write := func(p *PacketIO, data []byte) {
+	write := func(p *packetIO, data []byte) {
 		outBytes := p.OutBytes()
 		require.NoError(t, p.WritePacket(data, true))
 		ch <- data
@@ -300,7 +302,7 @@ func TestProxyTLSCompress(t *testing.T) {
 		require.True(t, p.IsPeerActive())
 		require.NotEmpty(t, p.RemoteAddr().String())
 	}
-	read := func(p *PacketIO) {
+	read := func(p *packetIO) {
 		inBytes := p.InBytes()
 		data := <-ch
 		pkt, err := p.ReadPacket()
@@ -313,7 +315,7 @@ func TestProxyTLSCompress(t *testing.T) {
 	for _, enableCompress := range []bool{true, false} {
 		for _, enableTLS := range []bool{true, false} {
 			for _, enableProxy := range []bool{true, false} {
-				testTCPConn(t, func(t *testing.T, cli *PacketIO) {
+				testTCPConn(t, func(t *testing.T, cli *packetIO) {
 					if enableProxy {
 						cli.EnableProxyClient(p)
 					}
@@ -331,7 +333,7 @@ func TestProxyTLSCompress(t *testing.T) {
 					read(cli)
 					// make sure the peer won't quit in advance
 					ch <- nil
-				}, func(t *testing.T, srv *PacketIO) {
+				}, func(t *testing.T, srv *packetIO) {
 					if enableProxy {
 						srv.EnableProxyServer()
 					}
@@ -363,16 +365,16 @@ func TestProxyTLSCompress(t *testing.T) {
 
 // Test the sequence is correct with the compression protocol.
 func TestPacketSequence(t *testing.T) {
-	write := func(p *PacketIO, flush bool) {
+	write := func(p *packetIO, flush bool) {
 		require.NoError(t, p.WritePacket([]byte{0}, flush))
 	}
-	read := func(p *PacketIO) {
+	read := func(p *packetIO) {
 		_, err := p.ReadPacket()
 		require.NoError(t, err)
 	}
 	loops := 1024
 	testTCPConn(t,
-		func(t *testing.T, cli *PacketIO) {
+		func(t *testing.T, cli *packetIO) {
 			require.NoError(t, cli.SetCompressionAlgorithm(CompressionZlib, 0))
 			read(cli)
 			// uncompressed sequence = compressed sequence
@@ -391,7 +393,7 @@ func TestPacketSequence(t *testing.T) {
 			cli.ResetSequence()
 			write(cli, true)
 		},
-		func(t *testing.T, srv *PacketIO) {
+		func(t *testing.T, srv *packetIO) {
 			require.NoError(t, srv.SetCompressionAlgorithm(CompressionZlib, 0))
 			write(srv, true)
 			// uncompressed sequence = compressed sequence
@@ -417,9 +419,9 @@ func TestForwardUntil(t *testing.T) {
 	stls, ctls, err := security.CreateTLSConfigForTest()
 	require.NoError(t, err)
 	_, p := mockProxy(t)
-	srvCh := make(chan *PacketIO)
+	srvCh := make(chan *packetIO)
 	exitCh := make(chan struct{})
-	prepareClient := func(enableProxy, enableTLS, enableCompress bool, cli *PacketIO) {
+	prepareClient := func(enableProxy, enableTLS, enableCompress bool, cli *packetIO) {
 		if enableProxy {
 			cli.EnableProxyClient(p)
 		}
@@ -432,7 +434,7 @@ func TestForwardUntil(t *testing.T) {
 			require.NoError(t, cli.SetCompressionAlgorithm(CompressionZlib, 0))
 		}
 	}
-	prepareServer := func(enableProxy, enableTLS, enableCompress bool, srv *PacketIO) {
+	prepareServer := func(enableProxy, enableTLS, enableCompress bool, srv *packetIO) {
 		if enableProxy {
 			srv.EnableProxyServer()
 		}
@@ -457,13 +459,13 @@ func TestForwardUntil(t *testing.T) {
 				// server2 writes to client2
 				wg.Run(func() {
 					testTCPConn(t,
-						func(t *testing.T, cli *PacketIO) {
+						func(t *testing.T, cli *packetIO) {
 							prepareClient(enableProxy, enableTLS, enableCompress, cli)
 							for i := 0; i <= loops; i++ {
 								require.NoError(t, cli.WritePacket([]byte{byte(i)}, true))
 							}
 						},
-						func(t *testing.T, srv1 *PacketIO) {
+						func(t *testing.T, srv1 *packetIO) {
 							prepareServer(enableProxy, enableTLS, enableCompress, srv1)
 							srv2 := <-srvCh
 							err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
@@ -480,7 +482,7 @@ func TestForwardUntil(t *testing.T) {
 				})
 				wg.Run(func() {
 					testTCPConn(t,
-						func(t *testing.T, cli *PacketIO) {
+						func(t *testing.T, cli *packetIO) {
 							prepareClient(enableProxy, enableTLS, enableCompress, cli)
 							for i := 0; i < loops; i++ {
 								data, err := cli.ReadPacket()
@@ -488,7 +490,7 @@ func TestForwardUntil(t *testing.T) {
 								require.Equal(t, []byte{byte(i)}, data)
 							}
 						},
-						func(t *testing.T, srv2 *PacketIO) {
+						func(t *testing.T, srv2 *packetIO) {
 							prepareServer(enableProxy, enableTLS, enableCompress, srv2)
 							srvCh <- srv2
 							<-exitCh
@@ -503,20 +505,20 @@ func TestForwardUntil(t *testing.T) {
 }
 
 func TestForwardUntilLongData(t *testing.T) {
-	srvCh := make(chan *PacketIO)
+	srvCh := make(chan *packetIO)
 	exitCh := make(chan struct{})
 	var wg waitgroup.WaitGroup
 	sizes := []int{DefaultConnBufferSize, DefaultConnBufferSize * 2, MaxPayloadLen - 1, MaxPayloadLen, MaxPayloadLen + 1, MaxPayloadLen*2 - 1, MaxPayloadLen * 2}
 	wg.Run(func() {
 		testTCPConn(t,
-			func(t *testing.T, cli *PacketIO) {
+			func(t *testing.T, cli *packetIO) {
 				for i, size := range sizes {
 					data := make([]byte, size)
 					data[0] = byte(i)
 					require.NoError(t, cli.WritePacket(data, true))
 				}
 			},
-			func(t *testing.T, srv1 *PacketIO) {
+			func(t *testing.T, srv1 *packetIO) {
 				srv2 := <-srvCh
 				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
 					return firstByte >= byte(len(sizes)-1), true
@@ -538,7 +540,7 @@ func TestForwardUntilLongData(t *testing.T) {
 	})
 	wg.Run(func() {
 		testTCPConn(t,
-			func(t *testing.T, cli *PacketIO) {
+			func(t *testing.T, cli *packetIO) {
 				for i, size := range sizes {
 					data, err := cli.ReadPacket()
 					require.NoError(t, err)
@@ -546,7 +548,7 @@ func TestForwardUntilLongData(t *testing.T) {
 					require.Len(t, data, size)
 				}
 			},
-			func(t *testing.T, srv2 *PacketIO) {
+			func(t *testing.T, srv2 *packetIO) {
 				srvCh <- srv2
 				<-exitCh
 			},
@@ -606,7 +608,7 @@ func BenchmarkReadPacket(b *testing.B) {
 
 func BenchmarkForwardWithReadWrite(b *testing.B) {
 	loops := 100
-	runForwardBenchmark(b, func(packetIO1, packetIO2 *PacketIO) {
+	runForwardBenchmark(b, func(packetIO1, packetIO2 *packetIO) {
 		for j := 0; j < loops; j++ {
 			data, err := packetIO1.ReadPacket()
 			if err != nil {
@@ -621,7 +623,7 @@ func BenchmarkForwardWithReadWrite(b *testing.B) {
 
 func BenchmarkForwardUntil(b *testing.B) {
 	loops := 100
-	runForwardBenchmark(b, func(packetIO1, packetIO2 *PacketIO) {
+	runForwardBenchmark(b, func(packetIO1, packetIO2 *packetIO) {
 		j := 0
 		err := packetIO1.ForwardUntil(packetIO2, func(firstByte byte, firstPktLen int) (bool, bool) {
 			j++
@@ -639,7 +641,7 @@ func BenchmarkForwardUntil(b *testing.B) {
 	})
 }
 
-func runForwardBenchmark(b *testing.B, f func(packetIO1, packetIO2 *PacketIO)) {
+func runForwardBenchmark(b *testing.B, f func(packetIO1, packetIO2 *packetIO)) {
 	b.ReportAllocs()
 	cli1, srv1 := net.Pipe()
 	cli2, srv2 := net.Pipe()
