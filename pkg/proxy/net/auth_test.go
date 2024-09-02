@@ -1,7 +1,7 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package backend
+package net
 
 import (
 	"testing"
@@ -23,5 +23,19 @@ func TestGenerateSalt(t *testing.T) {
 		for j := i + 1; j < len(buffers); j++ {
 			require.NotEqual(t, buffers[i], buffers[j])
 		}
+	}
+}
+
+func TestGenerateAuthResp(t *testing.T) {
+	plugins := []string{
+		AuthNativePassword,
+		AuthCachingSha2Password,
+	}
+	for _, plugin := range plugins {
+		var salt [20]byte
+		require.NoError(t, GenerateSalt(&salt))
+		resp, err := GenerateAuthResp("test", plugin, salt[:])
+		require.NoError(t, err)
+		require.NotEmpty(t, resp)
 	}
 }

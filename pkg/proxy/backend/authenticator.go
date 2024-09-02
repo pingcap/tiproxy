@@ -96,7 +96,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	}
 
 	var salt [20]byte
-	if err := GenerateSalt(&salt); err != nil {
+	if err := pnet.GenerateSalt(&salt); err != nil {
 		return err
 	}
 
@@ -276,6 +276,60 @@ func forwardMsg(srcIO, destIO pnet.PacketIO) (data []byte, err error) {
 	return
 }
 
+// handshake with backend directly without the clientIO
+func (auth *Authenticator) handshakeWithBackend(ctx context.Context, logger *zap.Logger, cctx ConnContext, handshakeHandler HandshakeHandler,
+	username, password string, getBackendIO backendIOGetter, backendTLSConfig *tls.Config) error {
+	backendIO, err := getBackendIO(ctx, cctx, &pnet.HandshakeResp{User: username})
+	if err != nil {
+		return err
+	}
+	pkt, err := backendIO.ReadPacket()
+	if err != nil {
+		return err
+	}
+	initialHandshake := pnet.ParseInitialHandshake(pkt)
+	authData, err := pnet.GenerateAuthResp(password, initialHandshake.AuthPlugin, initialHandshake.Salt[:])
+	if err != nil {
+		return err
+	}
+	auth.user = username
+	auth.capability = handshakeHandler.GetCapability()
+	auth.collation = pnet.Collation
+	if err = auth.writeAuthHandshake(backendIO, backendTLSConfig, initialHandshake.Capability, initialHandshake.AuthPlugin, authData, 0); err != nil {
+		return err
+	}
+	for {
+		if pkt, err = backendIO.ReadPacket(); err != nil {
+			return err
+		}
+		switch pkt[0] {
+		case pnet.OKHeader.Byte():
+			return nil
+		case pnet.AuthSwitchHeader.Byte():
+			idx := bytes.IndexByte(pkt[1:], 0)
+			authPlugin := string(pkt[1 : idx+1])
+			salt := pkt[idx+2 : len(pkt)-1]
+			if len(salt) != 20 {
+				return mysql.ErrMalformPacket
+			}
+			if authData, err = pnet.GenerateAuthResp(password, authPlugin, salt); err != nil {
+				return err
+			}
+			if err = backendIO.WritePacket(authData, true); err != nil {
+				return err
+			}
+		case pnet.ShaCommand:
+			if err = backendIO.WritePacket(authData, true); err != nil {
+				return err
+			}
+		case pnet.ErrHeader.Byte():
+			return pnet.ParseErrorPacket(pkt)
+		default:
+			return mysql.ErrMalformPacket
+		}
+	}
+}
+
 func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, backendIO pnet.PacketIO, backendTLSConfig *tls.Config, sessionToken string) error {
 	if len(sessionToken) == 0 {
 		return errors.Wrapf(ErrBackendHandshake, "session token is empty")
@@ -319,7 +373,8 @@ func (auth *Authenticator) readInitialHandshake(backendIO pnet.PacketIO) (server
 		err = errors.Wrap(ErrBackendHandshake, pnet.ParseErrorPacket(serverPkt))
 		return
 	}
-	capability, _, _ = pnet.ParseInitialHandshake(serverPkt)
+	initialHandshake := pnet.ParseInitialHandshake(serverPkt)
+	capability = initialHandshake.Capability
 	return
 }
 

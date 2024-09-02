@@ -209,6 +209,13 @@ func (ts *testSuite) authenticateSecondTime(t *testing.T, c checker) {
 	}
 }
 
+func (ts *testSuite) authenticateWithBackend(t *testing.T, c checker) {
+	ts.runAndCheck(t, c, nil, ts.mb.authenticate, ts.mp.authenticateWithBackend)
+	if c == nil {
+		require.Equal(t, ts.mp.username, ts.mb.username)
+	}
+}
+
 // Test forwarding commands between the client and the server.
 // It verifies that it won't hang or report errors, and all the packets are forwarded.
 func (ts *testSuite) executeCmd(t *testing.T, c checker) {
