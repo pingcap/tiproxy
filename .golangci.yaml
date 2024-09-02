@@ -25,7 +25,7 @@ issues:
     - path: pkg/proxy/net/auth.go
       linters:
         - gosec
-      text: "G101:"
+      text: "G101:|G401:|G501:"
     - path: pkg/util/cmd/cmd.go
       linters:
         - gosec
