@@ -22,6 +22,8 @@ type proxyConfig struct {
 	backendTLSConfig  *tls.Config
 	handler           *CustomHandshakeHandler
 	bcConfig          *BCConfig
+	username          string
+	password          string
 	sessionToken      string
 	capability        pnet.Capability
 	waitRedirect      bool
@@ -75,6 +77,17 @@ func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO pnet.PacketIO) er
 
 func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO pnet.PacketIO) error {
 	return mp.authenticator.handshakeSecondTime(mp.logger, clientIO, backendIO, mp.backendTLSConfig, mp.sessionToken)
+}
+
+func (mp *mockProxy) authenticateWithBackend(_, backendIO pnet.PacketIO) error {
+	if err := mp.authenticator.handshakeWithBackend(context.Background(), mp.logger, mp, mp.handshakeHandler,
+		mp.username, mp.password, func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
+			return backendIO, nil
+		}, mp.backendTLSConfig); err != nil {
+		return err
+	}
+	mp.cmdProcessor.capability = mp.authenticator.capability
+	return nil
 }
 
 func (mp *mockProxy) processCmd(clientIO, backendIO pnet.PacketIO) error {

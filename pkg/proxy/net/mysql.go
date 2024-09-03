@@ -27,44 +27,6 @@ var (
 	Status        = ServerStatusAutocommit
 )
 
-// WriteInitialHandshake writes an initial handshake as a server.
-// It's used for tenant-aware routing and testing.
-func MakeInitialHandshake(capability Capability, salt [20]byte, authPlugin string, serverVersion string, connID uint64) []byte {
-	saltLen := len(salt)
-	data := make([]byte, 0, 128)
-
-	// min version 10
-	data = append(data, 10)
-	// server version[NUL]
-	data = append(data, serverVersion...)
-	data = append(data, 0)
-	// connection id
-	data = append(data, byte(connID), byte(connID>>8), byte(connID>>16), byte(connID>>24))
-	// auth-plugin-data-part-1
-	data = append(data, salt[0:8]...)
-	// filler [00]
-	data = append(data, 0)
-	// capability flag lower 2 bytes, using default capability here
-	data = append(data, byte(capability), byte(capability>>8))
-	// charset
-	data = append(data, Collation)
-	// status
-	data = DumpUint16(data, Status)
-	// capability flag upper 2 bytes, using default capability here
-	data = append(data, byte(capability>>16), byte(capability>>24))
-	// length of auth-plugin-data
-	data = append(data, byte(saltLen+1))
-	// reserved 10 [00]
-	data = append(data, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-	// auth-plugin-data-part-2
-	data = append(data, salt[8:saltLen]...)
-	data = append(data, 0)
-	// auth-plugin name
-	data = append(data, []byte(authPlugin)...)
-	data = append(data, 0)
-	return data
-}
-
 // WriteSwitchRequest writes a switch request to the client. It's only for testing.
 func MakeSwitchRequest(authPlugin string, salt [20]byte) []byte {
 	length := 1 + len(authPlugin) + 1 + len(salt) + 1
@@ -129,16 +91,63 @@ func MakeUserError(err error) []byte {
 	return MakeErrPacket(myErr)
 }
 
-// ParseInitialHandshake parses the initial handshake received from the server.
-func ParseInitialHandshake(data []byte) (Capability, uint64, string) {
-	// skip min version
-	serverVersion := string(data[1 : 1+bytes.IndexByte(data[1:], 0)])
-	pos := 1 + len(serverVersion) + 1
-	connid := binary.LittleEndian.Uint32(data[pos : pos+4])
-	// skip salt first part
-	// skip filter
-	pos += 4 + 8 + 1
+type InitialHandshake struct {
+	Salt          [20]byte
+	ServerVersion string
+	AuthPlugin    string
+	ConnID        uint64
+	Capability    Capability
+}
 
+// MakeInitialHandshake creates an initial handshake as a server.
+// It's used for tenant-aware routing and testing.
+func MakeInitialHandshake(capability Capability, salt [20]byte, authPlugin string, serverVersion string, connID uint64) []byte {
+	saltLen := len(salt)
+	data := make([]byte, 0, 128)
+
+	// min version 10
+	data = append(data, 10)
+	// server version[NUL]
+	data = append(data, serverVersion...)
+	data = append(data, 0)
+	// connection id
+	data = append(data, byte(connID), byte(connID>>8), byte(connID>>16), byte(connID>>24))
+	// auth-plugin-data-part-1
+	data = append(data, salt[0:8]...)
+	// filler [00]
+	data = append(data, 0)
+	// capability flag lower 2 bytes, using default capability here
+	data = append(data, byte(capability), byte(capability>>8))
+	// charset
+	data = append(data, Collation)
+	// status
+	data = DumpUint16(data, Status)
+	// capability flag upper 2 bytes, using default capability here
+	data = append(data, byte(capability>>16), byte(capability>>24))
+	// length of auth-plugin-data
+	data = append(data, byte(saltLen+1))
+	// reserved 10 [00]
+	data = append(data, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	// auth-plugin-data-part-2
+	data = append(data, salt[8:saltLen]...)
+	data = append(data, 0)
+	// auth-plugin name
+	data = append(data, []byte(authPlugin)...)
+	data = append(data, 0)
+	return data
+}
+
+// ParseInitialHandshake parses the initial handshake received from the server.
+func ParseInitialHandshake(data []byte) *InitialHandshake {
+	hs := &InitialHandshake{}
+	// skip min version
+	hs.ServerVersion = string(data[1 : 1+bytes.IndexByte(data[1:], 0)])
+	pos := 1 + len(hs.ServerVersion) + 1
+	hs.ConnID = uint64(binary.LittleEndian.Uint32(data[pos : pos+4]))
+	pos += 4
+	copy(hs.Salt[:], data[pos:pos+8])
+	// skip filter
+	pos += 8 + 1
 	// capability lower 2 bytes
 	capability := uint32(binary.LittleEndian.Uint16(data[pos : pos+2]))
 	pos += 2
@@ -148,13 +157,15 @@ func ParseInitialHandshake(data []byte) (Capability, uint64, string) {
 		pos += 1 + 2
 		// capability flags (upper 2 bytes)
 		capability = uint32(binary.LittleEndian.Uint16(data[pos:pos+2]))<<16 | capability
-
 		// skip auth data len or [00]
 		// skip reserved (all [00])
-		// skip salt second part
-		// skip auth plugin
+		pos += 2 + 1 + 10
+		copy(hs.Salt[8:], data[pos:])
+		pos += 13
+		hs.AuthPlugin = string(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
 	}
-	return Capability(capability), uint64(connid), serverVersion
+	hs.Capability = Capability(capability)
+	return hs
 }
 
 // HandshakeResp indicates the response read from the client.

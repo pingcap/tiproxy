@@ -153,7 +153,7 @@ func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 
 // Define some common runners here to reduce code redundancy.
 func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO pnet.PacketIO) error {
-	err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+	err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, ts.mp.username, ts.mp.password)
 	require.NoError(ts.t, err)
 	mer := newMockEventReceiver()
 	ts.mp.SetEventReceiver(mer)
@@ -437,7 +437,7 @@ func TestConnectFail(t *testing.T) {
 		{
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				return ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				return ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 			},
 			backend: func(_ pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()
@@ -757,7 +757,7 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 		// connect fails
 		{
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 				require.Error(ts.t, err)
 				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
 				return nil
@@ -812,7 +812,7 @@ func TestHandlerReturnError(t *testing.T) {
 				return nil
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 				require.Error(t, err)
 				require.Equal(t, test.quitSource, ts.mp.QuitSource())
 				return nil
@@ -1169,7 +1169,7 @@ func TestCloseWhileConnect(t *testing.T) {
 				go func() {
 					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
 				}()
-				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 				if err == nil {
 					mer := newMockEventReceiver()
 					ts.mp.SetEventReceiver(mer)
@@ -1428,6 +1428,21 @@ func TestCapture(t *testing.T) {
 				ts.mb.rows = 1
 				return ts.mb.respond(packetIO)
 			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestConnectWithBackend(t *testing.T) {
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.username = "u1"
+		config.proxyConfig.password = "fake_password"
+	})
+	runners := []runner{
+		{
+			client:  nil,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
 		},
 	}
 	ts.runTests(runners)

@@ -181,7 +181,7 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 }
 
 // Connect connects to the first backend and then start watching redirection signals.
-func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password string) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
@@ -193,7 +193,14 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 		return errors.New("graceful shutdown before connecting")
 	}
 	startTime := time.Now()
-	err := mgr.authenticator.handshakeFirstTime(ctx, mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
+	var err error
+	if len(username) == 0 {
+		// real client
+		err = mgr.authenticator.handshakeFirstTime(ctx, mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
+	} else {
+		// fake client, used for replaying traffic
+		err = mgr.authenticator.handshakeWithBackend(ctx, mgr.logger.Named("authenticator"), mgr, mgr.handshakeHandler, username, password, mgr.getBackendIO, backendTLSConfig)
+	}
 	if err != nil {
 		src := Error2Source(err)
 		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err, src)

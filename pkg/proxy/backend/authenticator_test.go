@@ -225,6 +225,47 @@ func TestSecondHandshake(t *testing.T) {
 	}
 }
 
+func TestHandshakeWithBackend(t *testing.T) {
+	tests := []struct {
+		cfg    cfgOverrider
+		errMsg string
+	}{
+		{},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.authSucceed = false
+			},
+			errMsg: "Access denied",
+		},
+		{
+			cfg: func(cfg *testConfig) {
+				cfg.backendConfig.authPlugin = pnet.AuthNativePassword
+			},
+		},
+	}
+
+	tc := newTCPConnSuite(t)
+	cfg := func(cfg *testConfig) {
+		cfg.proxyConfig.username = "u1"
+		cfg.proxyConfig.password = "fake_password"
+	}
+	for i, test := range tests {
+		cfgs := []cfgOverrider{cfg}
+		if test.cfg != nil {
+			cfgs = append(cfgs, test.cfg)
+		}
+		ts, clean := newTestSuite(t, tc, cfgs...)
+		ts.authenticateWithBackend(t, nil)
+		if test.errMsg != "" {
+			require.Error(t, ts.mp.err, "case %d", i)
+			require.Contains(t, ts.mp.err.Error(), test.errMsg, "case %d", i)
+		} else {
+			require.NoError(t, ts.mp.err, "case %d", i)
+		}
+		clean()
+	}
+}
+
 func TestCustomAuth(t *testing.T) {
 	tc := newTCPConnSuite(t)
 	reUser := "rewritten_user"

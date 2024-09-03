@@ -69,10 +69,10 @@ func (mc *mockClient) authenticate(packetIO pnet.PacketIO) error {
 	if err != nil {
 		return err
 	}
-	serverCap, connid, serverVersion := pnet.ParseInitialHandshake(pkt)
-	mc.capability = mc.capability & serverCap
-	mc.serverVersion = serverVersion
-	mc.connid = connid
+	initialHandshake := pnet.ParseInitialHandshake(pkt)
+	mc.capability = mc.capability & initialHandshake.Capability
+	mc.serverVersion = initialHandshake.ServerVersion
+	mc.connid = initialHandshake.ConnID
 
 	resp := &pnet.HandshakeResp{
 		User:       mc.username,
