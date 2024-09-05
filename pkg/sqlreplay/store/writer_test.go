@@ -4,8 +4,6 @@
 package store
 
 import (
-	"bufio"
-	"compress/gzip"
 	"os"
 	"strings"
 	"testing"
@@ -46,31 +44,6 @@ func TestFileRotation(t *testing.T) {
 		t.Logf("traffic files: %v", files)
 		return false
 	}, 5*time.Second, 10*time.Millisecond)
-}
-
-func readFile(t *testing.T, fileName string) []byte {
-	file, err := os.Open(fileName)
-	require.NoError(t, err)
-
-	var reader *bufio.Reader
-	if strings.HasSuffix(fileName, ".gz") {
-		gr, err := gzip.NewReader(file)
-		require.NoError(t, err)
-		reader = bufio.NewReader(gr)
-	} else {
-		reader = bufio.NewReader(file)
-	}
-
-	p := make([]byte, 1024)
-	n, err := reader.Read(p)
-	require.NoError(t, err)
-	return p[:n]
-}
-
-func getFileSize(t *testing.T, fileName string) int64 {
-	file, err := os.Stat(fileName)
-	require.NoError(t, err)
-	return file.Size()
 }
 
 func listFiles(t *testing.T, dir string) []string {
