@@ -13,8 +13,8 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"go.uber.org/zap"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
@@ -22,7 +22,6 @@ const (
 	flushThreshold     = bufferCap * 3 / 4 // 12MB
 	maxBuffers         = 10
 	maxPendingCommands = 1 << 14 // 16K
-	fileSize           = 300     // 300MB
 )
 
 type Capture interface {
@@ -38,23 +37,28 @@ type Capture interface {
 }
 
 type CaptureConfig struct {
-	Filename           string
+	Output             string
 	Duration           time.Duration
 	bufferCap          int
 	flushThreshold     int
 	maxBuffers         int
 	maxPendingCommands int
-	fileSize           int
 }
 
 func checkCaptureConfig(cfg *CaptureConfig) error {
-	if cfg.Filename == "" {
-		return errors.New("filename is required")
+	if cfg.Output == "" {
+		return errors.New("output is required")
 	}
-	if st, err := os.Stat(cfg.Filename); err == nil {
-		if st.IsDir() {
-			return errors.New("can't use directory as log file name")
+	st, err := os.Stat(cfg.Output)
+	if err == nil {
+		if !st.IsDir() {
+			return errors.New("output should be a directory")
 		}
+	} else if os.IsNotExist(err) {
+		err = os.MkdirAll(cfg.Output, 0755)
+	}
+	if err != nil {
+		return err
 	}
 	if cfg.Duration == 0 {
 		return errors.New("duration is required")
@@ -71,9 +75,6 @@ func checkCaptureConfig(cfg *CaptureConfig) error {
 	if cfg.maxPendingCommands == 0 {
 		cfg.maxPendingCommands = maxPendingCommands
 	}
-	if cfg.fileSize == 0 {
-		cfg.fileSize = fileSize
-	}
 	return nil
 }
 
@@ -87,8 +88,8 @@ type capture struct {
 	cmdCh     chan *cmd.Command
 	err       error
 	startTime time.Time
+	cmdLogger store.Writer
 	lg        *zap.Logger
-	cmdLogger *lumberjack.Logger
 }
 
 func NewCapture(lg *zap.Logger) *capture {
@@ -109,7 +110,10 @@ func (c *capture) Start(cfg CaptureConfig) error {
 	}
 
 	c.stopNoLock(nil)
-	c.cmdLogger = buildCmdLogger(cfg)
+	// It may be set in tests.
+	if c.cmdLogger == nil {
+		c.cmdLogger = store.NewWriter(store.WriterCfg{Dir: cfg.Output})
+	}
 	c.cfg = cfg
 	c.startTime = time.Now()
 	c.err = nil
@@ -161,7 +165,7 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	// Flush all buffers even if the context is timeout.
 	for buf := range bufCh {
 		// TODO: each write size should be less than MaxSize.
-		if _, err := c.cmdLogger.Write(buf.Bytes()); err != nil {
+		if err := c.cmdLogger.Write(buf.Bytes()); err != nil {
 			c.Stop(errors.Wrapf(err, "failed to flush traffic to disk"))
 			return
 		}
@@ -216,13 +220,8 @@ func (c *capture) Stop(err error) {
 func (c *capture) Close() {
 	c.Stop(errors.New("shutting down"))
 	c.wg.Wait()
-}
-
-func buildCmdLogger(cfg CaptureConfig) *lumberjack.Logger {
-	return &lumberjack.Logger{
-		Filename:  cfg.Filename,
-		MaxSize:   cfg.fileSize,
-		LocalTime: true,
-		Compress:  true,
+	if err := c.cmdLogger.Close(); err != nil {
+		c.lg.Warn("failed to close command logger", zap.Error(err))
 	}
+	c.cmdLogger = nil
 }
