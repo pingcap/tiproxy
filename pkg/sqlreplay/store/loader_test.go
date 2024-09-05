@@ -123,8 +123,9 @@ func TestIterateFiles(t *testing.T) {
 			require.NoError(t, err, "case %d", i)
 			if strings.HasSuffix(name, ".gz") {
 				w := gzip.NewWriter(f)
-				w.Write([]byte{})
-				w.Close()
+				_, err := w.Write([]byte{})
+				require.NoError(t, err)
+				require.NoError(t, w.Close())
 			}
 			require.NoError(t, f.Close())
 		}

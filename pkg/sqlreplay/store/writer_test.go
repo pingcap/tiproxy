@@ -49,7 +49,7 @@ func TestFileRotation(t *testing.T) {
 func listFiles(t *testing.T, dir string) []string {
 	files, err := os.ReadDir(dir)
 	require.NoError(t, err)
-	var names []string
+	names := make([]string, 0, len(files))
 	for _, f := range files {
 		names = append(names, f.Name())
 	}

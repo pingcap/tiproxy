@@ -209,6 +209,10 @@ func (c *capture) stopNoLock(err error) {
 	}
 	c.startTime = time.Time{}
 	close(c.cmdCh)
+	if err := c.cmdLogger.Close(); err != nil {
+		c.lg.Warn("failed to close command logger", zap.Error(err))
+	}
+	c.cmdLogger = nil
 }
 
 func (c *capture) Stop(err error) {
@@ -220,8 +224,4 @@ func (c *capture) Stop(err error) {
 func (c *capture) Close() {
 	c.Stop(errors.New("shutting down"))
 	c.wg.Wait()
-	if err := c.cmdLogger.Close(); err != nil {
-		c.lg.Warn("failed to close command logger", zap.Error(err))
-	}
-	c.cmdLogger = nil
 }
