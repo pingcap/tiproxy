@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -25,8 +26,8 @@ const (
 )
 
 type LineReader interface {
-	ReadLine() ([]byte, error)
-	Read(n int) ([]byte, error)
+	ReadLine() ([]byte, string, int, error)
+	Read(n int) ([]byte, string, int, error)
 }
 
 type Command struct {
@@ -62,7 +63,7 @@ func (c *Command) Equal(that *Command) bool {
 		bytes.Equal(c.Payload, that.Payload)
 }
 
-func (c *Command) Validate() error {
+func (c *Command) Validate(filename string, lineIdx int) error {
 	if c.StartTs.IsZero() {
 		return errors.Errorf("no start time")
 	}
@@ -101,7 +102,7 @@ func (c *Command) Encode(writer *bytes.Buffer) error {
 		if _, err = writer.Write(c.Payload); err != nil {
 			return errors.WithStack(err)
 		}
-		if _, err = writer.WriteRune('\n'); err != nil {
+		if err = writer.WriteByte('\n'); err != nil {
 			return errors.WithStack(err)
 		}
 	}
@@ -109,66 +110,68 @@ func (c *Command) Encode(writer *bytes.Buffer) error {
 }
 
 func (c *Command) Decode(reader LineReader) error {
-	var payloadLen int
 	c.Succeess = true
 	c.Type = pnet.ComQuery
 	for {
-		line, err := reader.ReadLine()
+		line, filename, lineIdx, err := reader.ReadLine()
 		if err != nil {
 			return err
 		}
 		if !strings.HasPrefix(hack.String(line), commonKeyPrefix) {
-			return errors.Errorf("line doesn't start with '%s': %s", commonKeyPrefix, line)
+			return errors.Errorf("%s:%d: line doesn't start with '%s': %s", filename, lineIdx, commonKeyPrefix, line)
 		}
 		idx := strings.Index(hack.String(line), commonKeySuffix)
 		if idx < 0 {
-			return errors.Errorf("'%s' is not found in line: %s", commonKeySuffix, line)
+			return errors.Errorf("%s:%d: '%s' is not found in line: %s", filename, lineIdx, commonKeySuffix, line)
 		}
 		idx += len(commonKeySuffix)
 		key := hack.String(line[:idx])
 		value := hack.String(line[idx:])
 		if len(value) == 0 {
-			return errors.Errorf("value is empty in line: %s", line)
+			return errors.Errorf("%s:%d: value is empty in line: %s", filename, lineIdx, line)
 		}
 		switch key {
 		case keyStartTs:
 			if !c.StartTs.IsZero() {
-				return errors.Errorf("redundant Time: %s, Time was %v", line, c.StartTs)
+				return errors.Errorf("%s:%d: redundant Time: %s, Time was %v", filename, lineIdx, line, c.StartTs)
 			}
 			c.StartTs, err = time.Parse(time.RFC3339Nano, value)
 			if err != nil {
-				return errors.Errorf("parsing Time failed: %s", line)
+				return errors.Errorf("%s:%d: parsing Time failed: %s", filename, lineIdx, line)
 			}
 		case keyConnID:
 			if c.ConnID > 0 {
-				return errors.Errorf("redundant Conn_ID: %s, Conn_ID was %d", line, c.ConnID)
+				return errors.Errorf("%s:%d: redundant Conn_ID: %s, Conn_ID was %d", filename, lineIdx, line, c.ConnID)
 			}
 			c.ConnID, err = strconv.ParseUint(value, 10, 64)
 			if err != nil {
-				return errors.Errorf("parsing Conn_ID failed: %s", line)
+				return errors.Errorf("%s:%d: parsing Conn_ID failed: %s", filename, lineIdx, line)
 			}
 		case keyType:
 			if c.Type != pnet.ComQuery {
-				return errors.Errorf("redundant Cmd_type: %s, Cmd_type was %v", line, c.Type)
+				return errors.Errorf("%s:%d: redundant Cmd_type: %s, Cmd_type was %v", filename, lineIdx, line, c.Type)
 			}
 			c.Type = pnet.Command(value[0])
 		case keySuccess:
 			c.Succeess = value == "true"
 		case keyPayloadLen:
-			payloadLen, err = strconv.Atoi(value)
-			if err != nil {
+			var payloadLen int
+			if payloadLen, err = strconv.Atoi(value); err != nil {
 				return errors.Errorf("parsing Payload_len failed: %s", line)
 			}
 			if payloadLen > 0 {
-				if c.Payload, err = reader.Read(payloadLen); err != nil {
-					return errors.WithStack(err)
+				if c.Payload, filename, lineIdx, err = reader.Read(payloadLen); err != nil {
+					return errors.Errorf("%s:%d: reading Payload failed: %s", filename, lineIdx, err.Error())
 				}
 				// skip '\n'
-				if _, err = reader.Read(1); err != nil {
+				if _, filename, lineIdx, err = reader.Read(1); err != nil {
+					if !errors.Is(err, io.EOF) {
+						return errors.Errorf("%s:%d: skipping new line failed: %s", filename, lineIdx, err.Error())
+					}
 					return err
 				}
 			}
-			if err = c.Validate(); err != nil {
+			if err = c.Validate(filename, lineIdx); err != nil {
 				return err
 			}
 			return nil
@@ -184,7 +187,7 @@ func writeString(key, value string, writer *bytes.Buffer) error {
 	if _, err = writer.WriteString(value); err != nil {
 		return errors.WithStack(err)
 	}
-	if err = writer.WriteByte(byte('\n')); err != nil {
+	if err = writer.WriteByte('\n'); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil
@@ -198,7 +201,7 @@ func writeByte(key string, value byte, writer *bytes.Buffer) error {
 	if err = writer.WriteByte(value); err != nil {
 		return errors.WithStack(err)
 	}
-	if err = writer.WriteByte(byte('\n')); err != nil {
+	if err = writer.WriteByte('\n'); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil

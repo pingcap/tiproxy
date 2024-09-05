@@ -13,25 +13,25 @@ type mockReader struct {
 	curIdx int
 }
 
-func (mr *mockReader) ReadLine() ([]byte, error) {
+func (mr *mockReader) ReadLine() ([]byte, string, int, error) {
 	if mr.curIdx >= len(mr.data) {
-		return nil, io.EOF
+		return nil, "", 0, io.EOF
 	}
 	idx := slices.Index(mr.data[mr.curIdx:], byte('\n'))
 	if idx == -1 {
-		return nil, io.EOF
+		return nil, "", 0, io.EOF
 	}
 	idx += mr.curIdx
 	line := mr.data[mr.curIdx:idx]
 	mr.curIdx = idx + 1
-	return line, nil
+	return line, "", 0, nil
 }
 
-func (mr *mockReader) Read(n int) ([]byte, error) {
+func (mr *mockReader) Read(n int) ([]byte, string, int, error) {
 	if mr.curIdx+n > len(mr.data) {
-		return nil, io.EOF
+		return nil, "", 0, io.EOF
 	}
 	line := mr.data[mr.curIdx : mr.curIdx+n]
 	mr.curIdx += n
-	return line, nil
+	return line, "", 0, nil
 }
