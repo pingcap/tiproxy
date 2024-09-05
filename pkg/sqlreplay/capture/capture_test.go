@@ -20,15 +20,15 @@ import (
 func TestStartAndStop(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cpt := NewCapture(lg)
-	writer := newMockWriter(store.WriterCfg{})
-	cpt.cmdLogger = writer
 	defer cpt.Close()
 
 	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
 	cpt.Capture(packet, time.Now(), 100)
+	writer := newMockWriter(store.WriterCfg{})
 	cfg := CaptureConfig{
-		Output:   t.TempDir(),
-		Duration: 10 * time.Second,
+		Output:    t.TempDir(),
+		Duration:  10 * time.Second,
+		cmdLogger: writer,
 	}
 
 	// start capture and the traffic should be outputted
@@ -62,15 +62,15 @@ func TestStartAndStop(t *testing.T) {
 func TestConcurrency(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cpt := NewCapture(lg)
-	writer := newMockWriter(store.WriterCfg{})
-	cpt.cmdLogger = writer
 	defer cpt.Close()
 
+	writer := newMockWriter(store.WriterCfg{})
 	cfg := CaptureConfig{
 		Output:         t.TempDir(),
 		Duration:       10 * time.Second,
 		bufferCap:      12 * 1024,
 		flushThreshold: 8 * 1024,
+		cmdLogger:      writer,
 	}
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -39,6 +39,7 @@ type Capture interface {
 type CaptureConfig struct {
 	Output             string
 	Duration           time.Duration
+	cmdLogger          store.Writer
 	bufferCap          int
 	flushThreshold     int
 	maxBuffers         int
@@ -88,7 +89,6 @@ type capture struct {
 	cmdCh     chan *cmd.Command
 	err       error
 	startTime time.Time
-	cmdLogger store.Writer
 	lg        *zap.Logger
 }
 
@@ -110,10 +110,6 @@ func (c *capture) Start(cfg CaptureConfig) error {
 	}
 
 	c.stopNoLock(nil)
-	// It may be set in tests.
-	if c.cmdLogger == nil {
-		c.cmdLogger = store.NewWriter(store.WriterCfg{Dir: cfg.Output})
-	}
 	c.cfg = cfg
 	c.startTime = time.Now()
 	c.err = nil
@@ -162,13 +158,21 @@ func (c *capture) collectCmds(bufCh chan<- *bytes.Buffer) {
 }
 
 func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
+	// cfg.cmdLogger is set in tests
+	cmdLogger := c.cfg.cmdLogger
+	if cmdLogger == nil {
+		cmdLogger = store.NewWriter(store.WriterCfg{Dir: c.cfg.Output})
+	}
 	// Flush all buffers even if the context is timeout.
 	for buf := range bufCh {
 		// TODO: each write size should be less than MaxSize.
-		if err := c.cmdLogger.Write(buf.Bytes()); err != nil {
+		if err := cmdLogger.Write(buf.Bytes()); err != nil {
 			c.Stop(errors.Wrapf(err, "failed to flush traffic to disk"))
-			return
+			break
 		}
+	}
+	if err := cmdLogger.Close(); err != nil {
+		c.lg.Warn("failed to close command logger", zap.Error(err))
 	}
 }
 
@@ -209,10 +213,6 @@ func (c *capture) stopNoLock(err error) {
 	}
 	c.startTime = time.Time{}
 	close(c.cmdCh)
-	if err := c.cmdLogger.Close(); err != nil {
-		c.lg.Warn("failed to close command logger", zap.Error(err))
-	}
-	c.cmdLogger = nil
 }
 
 func (c *capture) Stop(err error) {
