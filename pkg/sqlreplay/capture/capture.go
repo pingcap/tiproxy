@@ -12,6 +12,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"go.uber.org/zap"
@@ -46,7 +47,7 @@ type CaptureConfig struct {
 	maxPendingCommands int
 }
 
-func checkCaptureConfig(cfg *CaptureConfig) error {
+func (cfg *CaptureConfig) Validate() error {
 	if cfg.Output == "" {
 		return errors.New("output is required")
 	}
@@ -99,7 +100,7 @@ func NewCapture(lg *zap.Logger) *capture {
 }
 
 func (c *capture) Start(cfg CaptureConfig) error {
-	if err := checkCaptureConfig(&cfg); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 
@@ -186,6 +187,10 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64) {
 
 	command := cmd.NewCommand(packet, startTime, connID)
 	if command == nil {
+		return
+	}
+	// COM_CHANGE_USER sends auth data, so ignore it.
+	if command.Type == pnet.ComChangeUser {
 		return
 	}
 	// TODO: handle QUIT

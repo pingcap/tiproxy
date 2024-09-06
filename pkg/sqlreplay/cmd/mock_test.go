@@ -27,11 +27,15 @@ func (mr *mockReader) ReadLine() ([]byte, string, int, error) {
 	return line, "", 0, nil
 }
 
-func (mr *mockReader) Read(n int) ([]byte, string, int, error) {
+func (mr *mockReader) Read(data []byte) (string, int, error) {
+	n := len(data)
 	if mr.curIdx+n > len(mr.data) {
-		return nil, "", 0, io.EOF
+		return "", 0, io.EOF
 	}
-	line := mr.data[mr.curIdx : mr.curIdx+n]
+	copy(data, mr.data[mr.curIdx:mr.curIdx+n])
 	mr.curIdx += n
-	return line, "", 0, nil
+	return "", 0, nil
+}
+
+func (mr *mockReader) Close() {
 }

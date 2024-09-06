@@ -6,10 +6,25 @@ package replay
 import (
 	"context"
 	"crypto/tls"
+	"io"
+	"os"
+	"reflect"
+	"sync"
+	"time"
 
+	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"go.uber.org/zap"
+)
+
+const (
+	maxPendingExceptions = 1024 // pending exceptions for all connections
+	minSpeed             = 0.1
+	maxSpeed             = 10.0
 )
 
 type Replay interface {
@@ -22,86 +37,205 @@ type Replay interface {
 }
 
 type ReplayConfig struct {
-	Filename string
-	Username string
-	Password string
+	Input              string
+	Username           string
+	Password           string
+	Speed              float64
+	reader             cmd.LineReader
+	maxPendingCommands int
 }
 
-type connWrapper struct {
-	cmdCh       chan *cmd.Command
-	exceptionCh chan Exception
-	conn        Conn
+func (cfg *ReplayConfig) Validate() error {
+	if cfg.Input == "" {
+		return errors.New("input is required")
+	}
+	st, err := os.Stat(cfg.Input)
+	if err == nil {
+		if !st.IsDir() {
+			return errors.New("output should be a directory")
+		}
+	} else {
+		return errors.WithStack(err)
+	}
+	if cfg.Username == "" {
+		return errors.New("username is required")
+	}
+	if cfg.maxPendingCommands == 0 {
+		cfg.maxPendingCommands = maxPendingCommands
+	}
+	if cfg.Speed == 0 {
+		cfg.Speed = 1
+	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
+		return errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
+	}
+	return nil
 }
 
-type connCreator func(connID uint64, cmdCh chan *cmd.Command, exceptionCh chan Exception) Conn
+type connCreator func(connID uint64, exceptionCh chan Exception, closeCh chan uint64) Conn
 
 type replay struct {
+	sync.Mutex
 	cfg         ReplayConfig
-	conns       map[uint64]*connWrapper
+	conns       map[uint64]Conn
+	exceptionCh chan Exception
+	closeCh     chan uint64
+	wg          waitgroup.WaitGroup
+	cancel      context.CancelFunc
 	connCreator connCreator
+	err         error
 	lg          *zap.Logger
+	connCount   int
 }
 
 func NewReplay(lg *zap.Logger, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) *replay {
 	r := &replay{
-		conns: make(map[uint64]*connWrapper),
+		conns: make(map[uint64]Conn),
 		lg:    lg,
 	}
-	r.connCreator = func(connID uint64, cmdCh chan *cmd.Command, exceptionCh chan Exception) Conn {
-		lg = r.lg.With(zap.Uint64("connID", connID))
-		return newConn(lg, r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, connID, bcConfig, cmdCh, exceptionCh)
+	r.connCreator = func(connID uint64, exceptionCh chan Exception, closeCh chan uint64) Conn {
+		return newConn(lg, r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, connID, bcConfig, exceptionCh, closeCh)
 	}
 	return r
 }
 
 func (r *replay) Start(cfg ReplayConfig) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	r.Lock()
+	defer r.Unlock()
+	r.cfg = cfg
+	childCtx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	r.exceptionCh = make(chan Exception, maxPendingExceptions)
+	r.closeCh = make(chan uint64, maxPendingExceptions)
+	r.wg.RunWithRecover(func() {
+		r.readCommands(childCtx)
+	}, nil, r.lg)
+	r.wg.RunWithRecover(func() {
+		r.readExceptions(childCtx)
+	}, nil, r.lg)
 	return nil
 }
 
-func (r *replay) executeCmd(ctx context.Context, command *cmd.Command) {
-	wrapper, ok := r.conns[command.ConnID]
-	if !ok {
-		cmdCh, exceptionCh := make(chan *cmd.Command, 1), make(chan Exception, 3)
-		wrapper = &connWrapper{
-			conn:        r.connCreator(command.ConnID, cmdCh, exceptionCh),
-			cmdCh:       cmdCh,
-			exceptionCh: exceptionCh,
+func (r *replay) readCommands(ctx context.Context) {
+	// cfg.reader is set in tests
+	reader := r.cfg.reader
+	if reader == nil {
+		reader = store.NewLoader(r.lg.Named("loader"), store.LoaderCfg{
+			Dir: r.cfg.Input,
+		})
+	}
+	var captureStartTs, replayStartTs time.Time
+	for ctx.Err() == nil {
+		command := &cmd.Command{}
+		if err := command.Decode(reader); err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			r.Stop(err)
+			break
 		}
-		r.conns[command.ConnID] = wrapper
-		wrapper.conn.Run(ctx)
+		// Replayer always uses the same username. It has no passwords for other users.
+		// TODO: clear the session states.
+		if command.Type == pnet.ComChangeUser {
+			continue
+		}
+		if captureStartTs.IsZero() {
+			// first command
+			captureStartTs = command.StartTs
+			replayStartTs = time.Now()
+		} else {
+			expectedInterval := command.StartTs.Sub(replayStartTs)
+			if r.cfg.Speed != 1 {
+				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
+			}
+			curInterval := time.Since(replayStartTs)
+			if curInterval+time.Microsecond < expectedInterval {
+				select {
+				case <-ctx.Done():
+				case <-time.After(expectedInterval - curInterval):
+				}
+			}
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		r.executeCmd(ctx, command)
 	}
-	if wrapper == nil {
-		return
-	}
+	reader.Close()
+}
 
-	// drain exceptions
-	drained := false
-	for !drained {
+func (r *replay) executeCmd(ctx context.Context, command *cmd.Command) {
+	r.Lock()
+	defer r.Unlock()
+
+	conn, ok := r.conns[command.ConnID]
+	if !ok {
+		conn = r.connCreator(command.ConnID, r.exceptionCh, r.closeCh)
+		r.conns[command.ConnID] = conn
+		r.connCount++
+		r.wg.RunWithRecover(func() {
+			conn.Run(ctx)
+		}, nil, r.lg)
+	}
+	if conn != nil && !reflect.ValueOf(conn).IsNil() {
+		conn.ExecuteCmd(command)
+	}
+}
+
+func (r *replay) readExceptions(ctx context.Context) {
+	// Drain all the events even if the context is canceled.
+	// Otherwise, the connections may block at writing to channels.
+	for {
+		if ctx.Err() != nil {
+			r.Lock()
+			connCount := r.connCount
+			r.Unlock()
+			if connCount <= 0 {
+				return
+			}
+		}
 		select {
-		case <-ctx.Done():
-			return
-		case e := <-wrapper.exceptionCh:
-			if e.Critical() {
-				// Keep the disconnected connections in the map to reject subsequent commands with the same connID,
-				// but release memory as much as possible.
-				wrapper.conn.Close()
-				r.conns[command.ConnID] = nil
+		case c, ok := <-r.closeCh:
+			if !ok {
+				return
+			}
+			// Keep the disconnected connections in the map to reject subsequent commands with the same connID,
+			// but release memory as much as possible.
+			r.Lock()
+			if conn, ok := r.conns[c]; ok && conn != nil && !reflect.ValueOf(conn).IsNil() {
+				r.conns[c] = nil
+				r.connCount--
+			}
+			r.Unlock()
+		case e, ok := <-r.exceptionCh:
+			if !ok {
 				return
 			}
 			// TODO: report the exception
-		default:
-			drained = true
+			r.lg.Info("exception", zap.String("err", e.String()))
+		case <-time.After(100 * time.Millisecond):
+			// If context is canceled now but no connection exists, it will block forever.
+			// Check the context and connCount again.
 		}
-	}
-
-	select {
-	case wrapper.cmdCh <- command:
-	default: // avoid block due to bug
 	}
 }
 
 func (r *replay) Stop(err error) {
+	r.Lock()
+	defer r.Unlock()
+	if r.err == nil {
+		r.err = err
+	}
+	if r.cancel != nil {
+		r.cancel()
+		r.cancel = nil
+	}
 }
 
 func (r *replay) Close() {
+	r.Stop(errors.New("shutting down"))
+	r.wg.Wait()
 }

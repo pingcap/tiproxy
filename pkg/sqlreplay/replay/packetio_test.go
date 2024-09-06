@@ -10,22 +10,14 @@ import (
 )
 
 func TestPacketIO(t *testing.T) {
-	cli2SrvCh, srv2CliCh := make(chan []byte, 1), make(chan []byte, 1)
-	pkt := newPacketIO(cli2SrvCh, srv2CliCh)
+	pkt := newPacketIO()
 	defer pkt.Close()
 	// test read
-	cli2SrvCh <- []byte("hello")
-	data, err := pkt.ReadPacket()
-	require.NoError(t, err)
-	require.Equal(t, []byte("hello"), data)
+	_, err := pkt.ReadPacket()
+	require.Error(t, err)
 	// test write
-	require.NoError(t, pkt.WritePacket([]byte("wor"), false))
-	require.NoError(t, pkt.WritePacket([]byte("ld"), true))
-	data = <-srv2CliCh
-	require.Equal(t, []byte("world"), data)
+	require.NoError(t, pkt.WritePacket([]byte("hello"), true))
+	require.NoError(t, pkt.WritePacket([]byte("world"), false))
 	// test flush
-	require.NoError(t, pkt.WritePacket([]byte("hi"), false))
 	require.NoError(t, pkt.Flush())
-	data = <-srv2CliCh
-	require.Equal(t, []byte("hi"), data)
 }

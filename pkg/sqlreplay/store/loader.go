@@ -30,6 +30,7 @@ type loader struct {
 	curFileName string
 	curFileTs   int64
 	curLineIdx  int
+	curFile     *os.File
 	reader      *bufio.Reader
 	lg          *zap.Logger
 }
@@ -41,25 +42,24 @@ func NewLoader(lg *zap.Logger, cfg LoaderCfg) *loader {
 	}
 }
 
-func (l *loader) Read(n int) ([]byte, string, int, error) {
+func (l *loader) Read(data []byte) (string, int, error) {
 	if l.reader == nil {
 		if err := l.nextReader(); err != nil {
-			return nil, l.curFileName, l.curLineIdx, err
+			return l.curFileName, l.curLineIdx, err
 		}
 	}
 
-	data := make([]byte, n)
-	for readLen := 0; readLen < n; {
+	for readLen := 0; readLen < len(data); {
 		m, err := l.reader.Read(data[readLen:])
 		if err != nil {
 			if err == io.EOF {
 				readLen += m
 				if err = l.nextReader(); err != nil {
-					return nil, l.curFileName, l.curLineIdx, err
+					return l.curFileName, l.curLineIdx, err
 				}
 				continue
 			}
-			return nil, l.curFileName, l.curLineIdx, errors.WithStack(err)
+			return l.curFileName, l.curLineIdx, errors.WithStack(err)
 		}
 		readLen += m
 	}
@@ -69,7 +69,7 @@ func (l *loader) Read(n int) ([]byte, string, int, error) {
 			l.curLineIdx++
 		}
 	}
-	return data, l.curFileName, curLineIdx, nil
+	return l.curFileName, curLineIdx, nil
 }
 
 func (l *loader) ReadLine() ([]byte, string, int, error) {
@@ -148,6 +148,12 @@ func (l *loader) nextReader() error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	if l.curFile != nil {
+		if err := l.curFile.Close(); err != nil {
+			l.lg.Warn("failed to close file", zap.String("filename", l.curFile.Name()), zap.Error(err))
+		}
+	}
+	l.curFile = r
 	l.curFileTs = minFileTs
 	l.curFileName = minFileName
 	l.curLineIdx = 1
@@ -160,6 +166,15 @@ func (l *loader) nextReader() error {
 	}
 	l.reader = bufio.NewReader(r)
 	return nil
+}
+
+func (l *loader) Close() {
+	if l.curFile != nil {
+		if err := l.curFile.Close(); err != nil {
+			l.lg.Warn("failed to close file", zap.String("filename", l.curFile.Name()), zap.Error(err))
+		}
+		l.curFile = nil
+	}
 }
 
 // Parse the file name to get the file time.

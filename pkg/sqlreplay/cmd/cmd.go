@@ -27,10 +27,12 @@ const (
 
 type LineReader interface {
 	ReadLine() ([]byte, string, int, error)
-	Read(n int) ([]byte, string, int, error)
+	Read([]byte) (string, int, error)
+	Close()
 }
 
 type Command struct {
+	// Payload starts with command type so that replay can reuse this byte array.
 	Payload  []byte
 	StartTs  time.Time
 	ConnID   uint64
@@ -44,7 +46,7 @@ func NewCommand(packet []byte, startTs time.Time, connID uint64) *Command {
 	}
 	// TODO: handle load infile specially
 	return &Command{
-		Payload:  packet[1:],
+		Payload:  packet,
 		StartTs:  startTs,
 		ConnID:   connID,
 		Type:     pnet.Command(packet[0]),
@@ -70,8 +72,8 @@ func (c *Command) Validate(filename string, lineIdx int) error {
 	if c.ConnID == 0 {
 		return errors.Errorf("no connection id")
 	}
-	if c.Type == pnet.ComQuery && len(c.Payload) == 0 {
-		return errors.Errorf("no query")
+	if len(c.Payload) == 0 {
+		return errors.Errorf("no payload")
 	}
 	return nil
 }
@@ -94,17 +96,18 @@ func (c *Command) Encode(writer *bytes.Buffer) error {
 			return err
 		}
 	}
-	if err = writeString(keyPayloadLen, strconv.Itoa(len(c.Payload)), writer); err != nil {
+	// `Payload_len` doesn't include the command type.
+	if err = writeString(keyPayloadLen, strconv.Itoa(len(c.Payload[1:])), writer); err != nil {
 		return err
 	}
 	// Unlike TiDB slow log, the payload is binary because StmtExecute can't be transformed to a SQL.
-	if len(c.Payload) > 0 {
-		if _, err = writer.Write(c.Payload); err != nil {
+	if len(c.Payload) > 1 {
+		if _, err = writer.Write(c.Payload[1:]); err != nil {
 			return errors.WithStack(err)
 		}
-		if err = writer.WriteByte('\n'); err != nil {
-			return errors.WithStack(err)
-		}
+	}
+	if err = writer.WriteByte('\n'); err != nil {
+		return errors.WithStack(err)
 	}
 	return nil
 }
@@ -159,17 +162,23 @@ func (c *Command) Decode(reader LineReader) error {
 			if payloadLen, err = strconv.Atoi(value); err != nil {
 				return errors.Errorf("parsing Payload_len failed: %s", line)
 			}
+			c.Payload = make([]byte, payloadLen+1)
+			c.Payload[0] = c.Type.Byte()
 			if payloadLen > 0 {
-				if c.Payload, filename, lineIdx, err = reader.Read(payloadLen); err != nil {
+				if filename, lineIdx, err = reader.Read(c.Payload[1:]); err != nil {
 					return errors.Errorf("%s:%d: reading Payload failed: %s", filename, lineIdx, err.Error())
 				}
-				// skip '\n'
-				if _, filename, lineIdx, err = reader.Read(1); err != nil {
-					if !errors.Is(err, io.EOF) {
-						return errors.Errorf("%s:%d: skipping new line failed: %s", filename, lineIdx, err.Error())
-					}
-					return err
+			}
+			// skip '\n'
+			var data [1]byte
+			if filename, lineIdx, err = reader.Read(data[:]); err != nil {
+				if !errors.Is(err, io.EOF) {
+					return errors.Errorf("%s:%d: skipping new line failed: %s", filename, lineIdx, err.Error())
 				}
+				return err
+			}
+			if data[0] != '\n' {
+				return errors.Errorf("%s:%d: expected new line, but got: %s", filename, lineIdx, line)
 			}
 			if err = c.Validate(filename, lineIdx); err != nil {
 				return err

@@ -126,7 +126,17 @@ func TestCaptureCfgError(t *testing.T) {
 	}
 
 	for i, cfg := range cfgs {
-		err := checkCaptureConfig(&cfg)
+		err := cfg.Validate()
 		require.Error(t, err, "case %d", i)
 	}
+
+	cfg := CaptureConfig{
+		Output:   dir,
+		Duration: 10 * time.Second,
+	}
+	require.NoError(t, cfg.Validate())
+	require.Equal(t, bufferCap, cfg.bufferCap)
+	require.Equal(t, flushThreshold, cfg.flushThreshold)
+	require.Equal(t, maxBuffers, cfg.maxBuffers)
+	require.Equal(t, maxPendingCommands, cfg.maxPendingCommands)
 }

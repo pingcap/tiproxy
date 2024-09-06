@@ -7,15 +7,20 @@ import (
 	"context"
 	"crypto/tls"
 
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"go.uber.org/zap"
 )
 
+const (
+	maxPendingCommands = 100 // pending commands for each connection
+)
+
 type BackendConn interface {
 	Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password string) error
+	ExecuteCmd(ctx context.Context, request []byte) (err error)
 	Close() error
 }
 
@@ -23,75 +28,80 @@ var _ BackendConn = (*backend.BackendConnManager)(nil)
 
 type Conn interface {
 	Run(ctx context.Context)
-	Close()
+	ExecuteCmd(command *cmd.Command)
 }
 
 var _ Conn = (*conn)(nil)
 
 type conn struct {
-	username string
-	password string
-	wg       waitgroup.WaitGroup
-	cancel   context.CancelFunc
-	// cli2SrvCh: packets sent from client to server.
-	// The channel is closed when the peer is closed.
-	cli2SrvCh chan []byte
-	// srv2CliCh: packets sent from server to client.
-	srv2CliCh        chan []byte
-	cmdCh            <-chan *cmd.Command
+	username         string
+	password         string
+	cmdCh            chan *cmd.Command
 	exceptionCh      chan<- Exception
+	closeCh          chan<- uint64
 	pkt              pnet.PacketIO
 	lg               *zap.Logger
 	backendTLSConfig *tls.Config
 	backendConn      BackendConn
+	connID           uint64
 }
 
 func newConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, connID uint64,
-	bcConfig *backend.BCConfig, cmdCh <-chan *cmd.Command, exceptionCh chan<- Exception) *conn {
-	cli2SrvCh, srv2CliCh := make(chan []byte, 1), make(chan []byte, 1)
+	bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64) *conn {
 	return &conn{
 		username:         username,
 		password:         password,
-		lg:               lg,
+		lg:               lg.With(zap.Uint64("connID", connID)),
+		connID:           connID,
 		backendTLSConfig: backendTLSConfig,
-		pkt:              newPacketIO(cli2SrvCh, srv2CliCh),
-		cli2SrvCh:        cli2SrvCh,
-		srv2CliCh:        srv2CliCh,
-		cmdCh:            cmdCh,
+		pkt:              newPacketIO(),
+		cmdCh:            make(chan *cmd.Command, maxPendingCommands),
 		exceptionCh:      exceptionCh,
+		closeCh:          closeCh,
 		backendConn:      backend.NewBackendConnManager(lg.Named("be"), hsHandler, nil, connID, bcConfig),
 	}
 }
 
 func (c *conn) Run(ctx context.Context) {
-	childCtx, cancel := context.WithCancel(ctx)
-	c.wg.RunWithRecover(func() {
+	defer c.close()
+	if err := c.backendConn.Connect(ctx, c.pkt, nil, c.backendTLSConfig, c.username, c.password); err != nil {
+		c.exceptionCh <- otherException{err: err, connID: c.connID}
+		return
+	}
+	for {
 		select {
-		case <-childCtx.Done():
+		case <-ctx.Done():
 			return
 		case command := <-c.cmdCh:
-			c.executeCmd(childCtx, command)
+			if err := c.backendConn.ExecuteCmd(ctx, command.Payload); err != nil {
+				c.exceptionCh <- failException{err: err, command: command}
+				if pnet.IsDisconnectError(err) {
+					return
+				}
+			}
 		}
-	}, nil, c.lg)
-	c.wg.RunWithRecover(func() {
-		if err := c.backendConn.Connect(childCtx, c.pkt, nil, c.backendTLSConfig, c.username, c.password); err != nil {
-			c.exceptionCh <- otherException{err: err}
-		}
-	}, nil, c.lg)
-	c.cancel = cancel
-}
-
-func (c *conn) executeCmd(ctx context.Context, command *cmd.Command) {
-}
-
-func (c *conn) Close() {
-	if c.cancel != nil {
-		c.cancel()
-		c.cancel = nil
 	}
-	c.wg.Wait()
+}
+
+// ExecuteCmd executes a command asynchronously.
+func (c *conn) ExecuteCmd(command *cmd.Command) {
+	select {
+	case c.cmdCh <- command:
+	default:
+		// Discard this command to avoid block due to a bug.
+		// If the discarded command is a COMMIT, let the next COMMIT finish the transaction.
+		select {
+		case c.exceptionCh <- otherException{err: errors.New("too many pending commands, discard command"), connID: c.connID}:
+		default:
+			c.lg.Warn("too many pending errors, discard error")
+		}
+	}
+}
+
+func (c *conn) close() {
 	if err := c.backendConn.Close(); err != nil {
 		c.lg.Warn("failed to close backend connection", zap.Error(err))
 	}
 	_ = c.pkt.Close()
+	c.closeCh <- c.connID
 }
