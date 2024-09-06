@@ -121,7 +121,7 @@ func newMockNormalLoader() *mockNormalLoader {
 }
 
 func (m *mockNormalLoader) writeCommand(cmd *cmd.Command) {
-	cmd.Encode(&m.buf)
+	_ = cmd.Encode(&m.buf)
 }
 
 func (m *mockNormalLoader) Read(data []byte) (string, int, error) {

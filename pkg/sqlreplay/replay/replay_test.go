@@ -28,11 +28,11 @@ func TestManageConns(t *testing.T) {
 		}
 	}
 	loader := newMockChLoader()
-	replay.Start(ReplayConfig{
+	require.NoError(t, replay.Start(ReplayConfig{
 		Input:    t.TempDir(),
 		Username: "u1",
 		reader:   loader,
-	})
+	}))
 
 	command := newMockCommand(1)
 	loader.writeCommand(command)
@@ -99,10 +99,10 @@ func TestReadExceptions(t *testing.T) {
 	defer replay.Close()
 
 	dir := t.TempDir()
-	replay.Start(ReplayConfig{
+	require.NoError(t, replay.Start(ReplayConfig{
 		Input:    dir,
 		Username: "u1",
-	})
+	}))
 	replay.exceptionCh <- otherException{err: errors.New("mock error"), connID: 1}
 	require.Eventually(t, func() bool {
 		return strings.Contains(text.String(), "mock error")
@@ -133,12 +133,12 @@ func TestReplaySpeed(t *testing.T) {
 			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
 			loader.writeCommand(command)
 		}
-		replay.Start(ReplayConfig{
+		require.NoError(t, replay.Start(ReplayConfig{
 			Input:    t.TempDir(),
 			Username: "u1",
 			reader:   loader,
 			Speed:    speed,
-		})
+		}))
 
 		var firstTime, lastTime time.Time
 		for i := 0; i < 10; i++ {
@@ -150,7 +150,7 @@ func TestReplaySpeed(t *testing.T) {
 				now = time.Now()
 				interval := now.Sub(lastTime)
 				lastTime = now
-				require.Greater(t, interval, time.Duration(float64(10*time.Millisecond)/speed)/2, "speed: %f", speed)
+				require.Greater(t, interval, time.Duration(float64(10*time.Millisecond)/speed)/2, "speed: %f, i: %d", speed, i)
 			}
 		}
 		totalTime := lastTime.Sub(firstTime)
