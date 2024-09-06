@@ -4,11 +4,11 @@
 package replay
 
 import (
-	"bytes"
 	"crypto/tls"
 	"net"
 
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 )
@@ -16,46 +16,32 @@ import (
 var _ pnet.PacketIO = (*packetIO)(nil)
 
 type packetIO struct {
-	cli2SrvCh  <-chan []byte
-	srv2CliCh  chan<- []byte
-	srv2CliBuf bytes.Buffer
 }
 
-func newPacketIO(cli2SrvCh <-chan []byte, srv2CliCh chan<- []byte) *packetIO {
-	return &packetIO{
-		cli2SrvCh: cli2SrvCh,
-		srv2CliCh: srv2CliCh,
-	}
+func newPacketIO() *packetIO {
+	return &packetIO{}
 }
 
 // ReadPacket implements net.PacketIO.
 func (p *packetIO) ReadPacket() (data []byte, err error) {
-	data = <-p.cli2SrvCh
-	return data, nil
+	// TODO: support LOAD DATA INFILE
+	return nil, errors.New("command not supported")
 }
 
 // WritePacket implements net.PacketIO.
 func (p *packetIO) WritePacket(data []byte, flush bool) (err error) {
-	if _, err := p.srv2CliBuf.Write(data); err != nil {
-		return err
-	}
-	if flush {
-		return p.Flush()
-	}
 	return nil
 }
 
 // Flush implements net.PacketIO.
 func (p *packetIO) Flush() error {
-	p.srv2CliCh <- p.srv2CliBuf.Bytes()
-	p.srv2CliBuf.Reset()
 	return nil
 }
 
 // ForwardUntil implements net.PacketIO.
 // ForwardUntil won't be called on the client side, so no need to implement it.
 func (p *packetIO) ForwardUntil(dest pnet.PacketIO, isEnd func(firstByte byte, firstPktLen int) (end bool, needData bool), process func(response []byte) error) error {
-	panic("unimplemented")
+	return errors.New("command not supported")
 }
 
 // ClientTLSHandshake implements net.PacketIO.

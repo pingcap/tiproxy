@@ -329,14 +329,15 @@ func TestRead(t *testing.T) {
 		}
 
 		l := NewLoader(lg, cfg)
+		data := make([]byte, 5)
 		for j := 0; j < len(test.str); j++ {
-			data, filename, idx, err := l.Read(5)
+			filename, idx, err := l.Read(data)
 			require.NoError(t, err)
 			require.Equal(t, test.str[j], string(data), "case %d", i)
 			require.Equal(t, fileNames[test.fileIdx[j]], filename, "case %d", i)
 			require.Equal(t, test.lineIdx[j], idx, "case %d", i)
 		}
-		_, _, _, err := l.Read(5)
+		_, _, err := l.Read(data)
 		require.True(t, errors.Is(err, io.EOF))
 	}
 }
