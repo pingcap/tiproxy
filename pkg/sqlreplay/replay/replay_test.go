@@ -6,27 +6,28 @@ package replay
 import (
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/stretchr/testify/require"
 )
 
 func TestManageConns(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	replay := NewReplay(lg, nil, nil, nil)
+	replay := NewReplay(lg, nil, nil, &backend.BCConfig{})
 	defer replay.Close()
-	replay.connCreator = func(connID uint64, exceptionCh chan Exception, closeCh chan uint64) Conn {
+	replay.connCreator = func(connID uint64) conn.Conn {
 		return &mockConn{
-			exceptionCh: exceptionCh,
-			closeCh:     closeCh,
 			connID:      connID,
+			exceptionCh: replay.exceptionCh,
+			closeCh:     replay.closeCh,
 		}
 	}
+	replay.report = newMockReport(replay.exceptionCh)
 	loader := newMockChLoader()
 	require.NoError(t, replay.Start(ReplayConfig{
 		Input:    t.TempDir(),
@@ -93,39 +94,24 @@ func TestValidateCfg(t *testing.T) {
 	}
 }
 
-func TestReadExceptions(t *testing.T) {
-	lg, text := logger.CreateLoggerForTest(t)
-	replay := NewReplay(lg, nil, nil, nil)
-	defer replay.Close()
-
-	dir := t.TempDir()
-	require.NoError(t, replay.Start(ReplayConfig{
-		Input:    dir,
-		Username: "u1",
-	}))
-	replay.exceptionCh <- otherException{err: errors.New("mock error"), connID: 1}
-	require.Eventually(t, func() bool {
-		return strings.Contains(text.String(), "mock error")
-	}, 3*time.Second, 10*time.Millisecond)
-}
-
 func TestReplaySpeed(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	speeds := []float64{10, 1, 0.1}
 
 	var lastTotalTime time.Duration
 	for _, speed := range speeds {
-		replay := NewReplay(lg, nil, nil, nil)
+		replay := NewReplay(lg, nil, nil, &backend.BCConfig{})
 		cmdCh := make(chan *cmd.Command, 10)
-		replay.connCreator = func(connID uint64, exceptionCh chan Exception, closeCh chan uint64) Conn {
+		replay.connCreator = func(connID uint64) conn.Conn {
 			return &mockConn{
-				exceptionCh: exceptionCh,
-				closeCh:     closeCh,
 				connID:      connID,
 				cmdCh:       cmdCh,
+				exceptionCh: replay.exceptionCh,
+				closeCh:     replay.closeCh,
 			}
 		}
 
+		replay.report = newMockReport(replay.exceptionCh)
 		loader := newMockNormalLoader()
 		now := time.Now()
 		for i := 0; i < 10; i++ {

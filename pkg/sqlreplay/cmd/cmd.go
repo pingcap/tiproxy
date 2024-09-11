@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
@@ -33,6 +34,7 @@ type LineReader interface {
 
 type Command struct {
 	// Payload starts with command type so that replay can reuse this byte array.
+	digest   string
 	Payload  []byte
 	StartTs  time.Time
 	ConnID   uint64
@@ -186,6 +188,28 @@ func (c *Command) Decode(reader LineReader) error {
 			return nil
 		}
 	}
+}
+
+func (c *Command) Digest() string {
+	if c.digest == "" {
+		// TODO: ComStmtExecute
+		switch c.Type {
+		case pnet.ComQuery, pnet.ComStmtPrepare:
+			stmt := hack.String(c.Payload[1:])
+			_, digest := parser.NormalizeDigest(stmt)
+			c.digest = digest.String()
+		}
+	}
+	return c.digest
+}
+
+func (c *Command) QueryText() string {
+	// TODO: ComStmtExecute
+	switch c.Type {
+	case pnet.ComQuery, pnet.ComStmtPrepare:
+		return hack.String(c.Payload[1:])
+	}
+	return ""
 }
 
 func writeString(key, value string, writer *bytes.Buffer) error {

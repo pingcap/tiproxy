@@ -1,9 +1,10 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package replay
+package conn
 
 import (
+	"bytes"
 	"crypto/tls"
 	"net"
 
@@ -16,6 +17,7 @@ import (
 var _ pnet.PacketIO = (*packetIO)(nil)
 
 type packetIO struct {
+	resp bytes.Buffer
 }
 
 func newPacketIO() *packetIO {
@@ -30,12 +32,23 @@ func (p *packetIO) ReadPacket() (data []byte, err error) {
 
 // WritePacket implements net.PacketIO.
 func (p *packetIO) WritePacket(data []byte, flush bool) (err error) {
+	if _, err := p.resp.Write(data); err != nil {
+		return err
+	}
 	return nil
 }
 
 // Flush implements net.PacketIO.
 func (p *packetIO) Flush() error {
 	return nil
+}
+
+func (p *packetIO) Reset() {
+	p.resp.Reset()
+}
+
+func (p *packetIO) GetResp() []byte {
+	return p.resp.Bytes()
 }
 
 // ForwardUntil implements net.PacketIO.

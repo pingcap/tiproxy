@@ -16,6 +16,7 @@ func TestWrap(t *testing.T) {
 	e := serr.Wrap(e1, e2)
 	require.ErrorIsf(t, e, e1, "equal to the external error")
 	require.ErrorAsf(t, e, &e2, "unwrapping to the internal error")
+	require.Equal(t, e1, serr.Unwrap(e), "unwrapping to the internal error")
 
 	require.Equal(t, e2, serr.Wrap(nil, e2), "wrap with nil got the original")
 	require.Nil(t, serr.Wrap(e2, nil), "wrap nil got nil")

@@ -18,10 +18,7 @@ import (
 func (cp *CmdProcessor) query(packetIO pnet.PacketIO, sql string) (result *mysql.Resultset, response []byte, err error) {
 	// send request
 	packetIO.ResetSequence()
-	data := hack.Slice(sql)
-	request := make([]byte, 0, 1+len(data))
-	request = append(request, pnet.ComQuery.Byte())
-	request = append(request, data...)
+	request := pnet.MakeQueryPacket(sql)
 	if err = packetIO.WritePacket(request, true); err != nil {
 		return
 	}

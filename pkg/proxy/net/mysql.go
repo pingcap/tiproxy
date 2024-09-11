@@ -6,6 +6,7 @@ package net
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"net"
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
@@ -573,4 +574,85 @@ func ParseQueryPacket(data []byte) string {
 		data = data[:len(data)-1]
 	}
 	return hack.String(data)
+}
+
+func MakeQueryPacket(stmt string) []byte {
+	request := make([]byte, len(stmt)+1)
+	request[0] = ComQuery.Byte()
+	copy(request[1:], hack.Slice(stmt))
+	return request
+}
+
+func MakePrepareStmtPacket(stmt string) []byte {
+	request := make([]byte, len(stmt)+1)
+	request[0] = ComStmtPrepare.Byte()
+	copy(request[1:], hack.Slice(stmt))
+	return request
+}
+
+func MakeExecuteStmtPacket(stmtID uint32, args []any) ([]byte, error) {
+	paramNum := len(args)
+	paramTypes := make([]byte, paramNum*2)
+	paramValues := make([][]byte, paramNum)
+	nullBitmap := make([]byte, (paramNum+7)>>3)
+	dataLen := 1 + 4 + 1 + 4 + len(nullBitmap) + 1 + len(paramTypes)
+	var newParamBoundFlag byte = 0
+
+	for i := range args {
+		if args[i] == nil {
+			nullBitmap[i/8] |= 1 << (uint(i) % 8)
+			paramTypes[i<<1] = fieldTypeNULL
+			continue
+		}
+
+		newParamBoundFlag = 1
+		switch v := args[i].(type) {
+		case int64:
+			paramTypes[i<<1] = fieldTypeLongLong
+			paramValues[i] = Uint64ToBytes(uint64(v))
+		case uint64:
+			paramTypes[i<<1] = fieldTypeLongLong
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = Uint64ToBytes(v)
+		case float64:
+			paramTypes[i<<1] = fieldTypeDouble
+			paramValues[i] = Uint64ToBytes(math.Float64bits(v))
+		case string:
+			paramTypes[i<<1] = fieldTypeString
+			paramValues[i] = DumpLengthEncodedString(nil, hack.Slice(v))
+		default:
+			// we don't need other types currently
+			return nil, errors.WithStack(errors.Errorf("unsupported type %T", v))
+		}
+
+		dataLen += len(paramValues[i])
+	}
+
+	request := make([]byte, dataLen)
+	pos := 0
+	request[pos] = ComStmtExecute.Byte()
+	pos += 1
+	binary.LittleEndian.PutUint32(request[pos:], uint32(stmtID))
+	pos += 4
+	// cursor flag
+	pos += 1
+	// iteration count
+	request[pos] = 1
+	pos += 4
+
+	if paramNum > 0 {
+		copy(request[pos:], nullBitmap)
+		pos += len(nullBitmap)
+		request[pos] = newParamBoundFlag
+		pos++
+		if newParamBoundFlag == 1 {
+			copy(request[pos:], paramTypes)
+			pos += len(paramTypes)
+		}
+		for _, v := range paramValues {
+			copy(request[pos:], v)
+			pos += len(v)
+		}
+	}
+	return request, nil
 }

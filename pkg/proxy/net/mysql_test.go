@@ -110,3 +110,18 @@ func TestCheckSqlPort(t *testing.T) {
 			require.NoError(t, conn.WritePacket(data))
 		}, 1)
 }
+
+func TestPrepareStmts(t *testing.T) {
+	args := []any{
+		"hello",
+		uint64(1),
+		int64(1),
+		float64(1),
+	}
+
+	b := MakePrepareStmtPacket("select ?")
+	require.Len(t, b, len("select ?")+1)
+
+	_, err := MakeExecuteStmtPacket(1, args)
+	require.NoError(t, err)
+}
