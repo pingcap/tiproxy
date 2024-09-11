@@ -18,7 +18,7 @@ func TestBackendConn(t *testing.T) {
 	backendConn := NewBackendConn(lg, 1, nil, &backend.BCConfig{}, nil, "u1", "")
 	backendConnMgr := &mockBackendConnMgr{}
 	backendConn.backendConnMgr = backendConnMgr
-	backendConn.Connect(context.Background())
+	require.NoError(t, backendConn.Connect(context.Background()))
 	require.NoError(t, backendConn.ExecuteCmd(context.Background(), []byte{pnet.ComQuit.Byte()}))
 	require.NoError(t, backendConn.Query(context.Background(), "select 1"))
 	require.NoError(t, backendConnMgr.clientIO.WritePacket([]byte{pnet.OKHeader.Byte(), 1, 0, 0, 0}, true))

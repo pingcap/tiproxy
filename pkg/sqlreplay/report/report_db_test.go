@@ -68,7 +68,7 @@ func TestInsertExceptions(t *testing.T) {
 				},
 			},
 			stmtID: []uint32{2},
-			args:   [][]any{{"mock error", "mock error: wrap", nil, uint64(1), uint64(1)}},
+			args:   [][]any{{"mock error", "wrap: mock error", nil, uint64(1), uint64(1)}},
 		},
 		{
 			tp: conn.Other,
