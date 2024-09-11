@@ -133,5 +133,9 @@ func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64
 	mc.connID = connID
 }
 
+func (mc *mockCapture) Progress() (float64, error) {
+	return 0, nil
+}
+
 func (mc *mockCapture) Close() {
 }
