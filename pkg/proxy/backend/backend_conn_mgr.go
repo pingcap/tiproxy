@@ -249,7 +249,7 @@ func (mgr *BackendConnManager) newExponentialBackOff() *backoff.ExponentialBackO
 func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
-		return nil, errors.Wrap(ErrProxyErr, err)
+		return nil, errors.Wrap(err, ErrProxyErr)
 	}
 	// Reasons to wait:
 	// - The TiDB instances may not be initialized yet
@@ -267,7 +267,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			if backend, err = selector.Next(); err == router.ErrNoBackend {
 				return nil, ErrProxyNoBackend
 			} else if err != nil {
-				return nil, backoff.Permanent(errors.Wrap(ErrProxyErr, err))
+				return nil, backoff.Permanent(errors.Wrap(err, ErrProxyErr))
 			}
 
 			var cn net.Conn
@@ -275,7 +275,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
 			selector.Finish(mgr, err == nil)
 			if err != nil {
-				return nil, errors.Wrap(ErrBackendHandshake, errors.Wrapf(err, "dial backend %s error", addr))
+				return nil, errors.Wrap(errors.Wrapf(err, "dial backend %s error", addr), ErrBackendHandshake)
 			}
 
 			// NOTE: should use DNS name as much as possible

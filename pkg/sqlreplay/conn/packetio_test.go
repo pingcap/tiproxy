@@ -1,7 +1,7 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-package replay
+package conn
 
 import (
 	"testing"
@@ -17,7 +17,11 @@ func TestPacketIO(t *testing.T) {
 	require.Error(t, err)
 	// test write
 	require.NoError(t, pkt.WritePacket([]byte("hello"), true))
+	require.Equal(t, "hello", string(pkt.GetResp()))
+	pkt.Reset()
+	require.Equal(t, "", string(pkt.GetResp()))
 	require.NoError(t, pkt.WritePacket([]byte("world"), false))
+	require.Equal(t, "world", string(pkt.GetResp()))
 	// test flush
 	require.NoError(t, pkt.Flush())
 }

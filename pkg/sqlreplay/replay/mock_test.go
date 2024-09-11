@@ -6,43 +6,20 @@ package replay
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
-	"sync/atomic"
 	"time"
 
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 )
 
-var _ BackendConn = (*mockBackendConn)(nil)
-
-type mockBackendConn struct {
-	cmds    atomic.Int32
-	connErr error
-	execErr error
-	close   atomic.Bool
-}
-
-func (c *mockBackendConn) Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password string) error {
-	return c.connErr
-}
-
-func (c *mockBackendConn) ExecuteCmd(ctx context.Context, request []byte) (err error) {
-	c.cmds.Add(1)
-	return c.execErr
-}
-
-func (c *mockBackendConn) Close() error {
-	c.close.Store(true)
-	return nil
-}
-
-var _ Conn = (*mockConn)(nil)
+var _ conn.Conn = (*mockConn)(nil)
 
 type mockConn struct {
-	exceptionCh chan Exception
+	exceptionCh chan conn.Exception
 	closeCh     chan uint64
 	cmdCh       chan *cmd.Command
 	connID      uint64
@@ -147,4 +124,26 @@ func newMockCommand(connID uint64) *cmd.Command {
 		Type:    pnet.ComQuery,
 		Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...),
 	}
+}
+
+var _ report.Report = (*mockReport)(nil)
+
+type mockReport struct {
+	exceptionCh chan conn.Exception
+}
+
+func newMockReport(exceptionCh chan conn.Exception) *mockReport {
+	return &mockReport{
+		exceptionCh: exceptionCh,
+	}
+}
+
+func (mr *mockReport) Start(ctx context.Context, cfg report.ReportConfig) error {
+	return nil
+}
+
+func (mr *mockReport) Stop(err error) {
+}
+
+func (mr *mockReport) Close() {
 }

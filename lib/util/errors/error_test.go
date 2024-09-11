@@ -36,5 +36,5 @@ func TestWarning(t *testing.T) {
 	warning := &serr.Warning{Err: serr.Wrapf(serr.New("internal err"), "msg")}
 	var w *serr.Warning
 	require.True(t, serr.As(warning, &w))
-	require.Equal(t, "internal err: msg", warning.Error())
+	require.Equal(t, "msg: internal err", warning.Error())
 }

@@ -17,6 +17,8 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"go.uber.org/zap"
 )
@@ -37,12 +39,11 @@ type Replay interface {
 }
 
 type ReplayConfig struct {
-	Input              string
-	Username           string
-	Password           string
-	Speed              float64
-	reader             cmd.LineReader
-	maxPendingCommands int
+	Input    string
+	Username string
+	Password string
+	Speed    float64
+	reader   cmd.LineReader
 }
 
 func (cfg *ReplayConfig) Validate() error {
@@ -60,9 +61,6 @@ func (cfg *ReplayConfig) Validate() error {
 	if cfg.Username == "" {
 		return errors.New("username is required")
 	}
-	if cfg.maxPendingCommands == 0 {
-		cfg.maxPendingCommands = maxPendingCommands
-	}
 	if cfg.Speed == 0 {
 		cfg.Speed = 1
 	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
@@ -71,30 +69,37 @@ func (cfg *ReplayConfig) Validate() error {
 	return nil
 }
 
-type connCreator func(connID uint64, exceptionCh chan Exception, closeCh chan uint64) Conn
-
 type replay struct {
 	sync.Mutex
-	cfg         ReplayConfig
-	conns       map[uint64]Conn
-	exceptionCh chan Exception
-	closeCh     chan uint64
-	wg          waitgroup.WaitGroup
-	cancel      context.CancelFunc
-	connCreator connCreator
-	err         error
-	lg          *zap.Logger
-	connCount   int
+	cfg              ReplayConfig
+	conns            map[uint64]conn.Conn
+	exceptionCh      chan conn.Exception
+	closeCh          chan uint64
+	wg               waitgroup.WaitGroup
+	cancel           context.CancelFunc
+	connCreator      conn.ConnCreator
+	report           report.Report
+	err              error
+	backendTLSConfig *tls.Config
+	lg               *zap.Logger
+	connCount        int
 }
 
 func NewReplay(lg *zap.Logger, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) *replay {
 	r := &replay{
-		conns: make(map[uint64]Conn),
-		lg:    lg,
+		conns:       make(map[uint64]conn.Conn),
+		lg:          lg,
+		exceptionCh: make(chan conn.Exception, maxPendingExceptions),
+		closeCh:     make(chan uint64, maxPendingExceptions),
 	}
-	r.connCreator = func(connID uint64, exceptionCh chan Exception, closeCh chan uint64) Conn {
-		return newConn(lg, r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, connID, bcConfig, exceptionCh, closeCh)
+	r.connCreator = func(connID uint64) conn.Conn {
+		return conn.NewConn(lg, r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, connID, bcConfig, r.exceptionCh, r.closeCh)
 	}
+	backendConnCreator := func() conn.BackendConn {
+		// TODO: allocate connection ID.
+		return conn.NewBackendConn(lg.Named("be"), 1, hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
+	}
+	r.report = report.NewReport(lg.Named("report"), r.exceptionCh, backendConnCreator)
 	return r
 }
 
@@ -108,13 +113,16 @@ func (r *replay) Start(cfg ReplayConfig) error {
 	r.cfg = cfg
 	childCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
-	r.exceptionCh = make(chan Exception, maxPendingExceptions)
-	r.closeCh = make(chan uint64, maxPendingExceptions)
+	if err := r.report.Start(childCtx, report.ReportConfig{
+		TlsConfig: r.backendTLSConfig,
+	}); err != nil {
+		return err
+	}
 	r.wg.RunWithRecover(func() {
 		r.readCommands(childCtx)
 	}, nil, r.lg)
 	r.wg.RunWithRecover(func() {
-		r.readExceptions(childCtx)
+		r.readCloseCh(childCtx)
 	}, nil, r.lg)
 	return nil
 }
@@ -173,7 +181,7 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command) {
 
 	conn, ok := r.conns[command.ConnID]
 	if !ok {
-		conn = r.connCreator(command.ConnID, r.exceptionCh, r.closeCh)
+		conn = r.connCreator(command.ConnID)
 		r.conns[command.ConnID] = conn
 		r.connCount++
 		r.wg.RunWithRecover(func() {
@@ -185,8 +193,8 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command) {
 	}
 }
 
-func (r *replay) readExceptions(ctx context.Context) {
-	// Drain all the events even if the context is canceled.
+func (r *replay) readCloseCh(ctx context.Context) {
+	// Drain all close events even if the context is canceled.
 	// Otherwise, the connections may block at writing to channels.
 	for {
 		if ctx.Err() != nil {
@@ -210,12 +218,6 @@ func (r *replay) readExceptions(ctx context.Context) {
 				r.connCount--
 			}
 			r.Unlock()
-		case e, ok := <-r.exceptionCh:
-			if !ok {
-				return
-			}
-			// TODO: report the exception
-			r.lg.Info("exception", zap.String("err", e.String()))
 		case <-time.After(100 * time.Millisecond):
 			// If context is canceled now but no connection exists, it will block forever.
 			// Check the context and connCount again.

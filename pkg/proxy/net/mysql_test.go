@@ -69,8 +69,8 @@ func TestLogAttrs(t *testing.T) {
 
 func TestMySQLError(t *testing.T) {
 	myerr := &mysql.MyError{}
-	require.True(t, IsMySQLError(errors.Wrap(ErrHandshakeTLS, myerr)))
-	require.False(t, IsMySQLError(errors.Wrap(myerr, ErrHandshakeTLS)))
+	require.True(t, IsMySQLError(errors.Wrap(myerr, ErrHandshakeTLS)))
+	require.False(t, IsMySQLError(errors.Wrap(ErrHandshakeTLS, myerr)))
 	require.False(t, IsMySQLError(ErrHandshakeTLS))
 	require.True(t, errors.Is(errors.Wrap(ErrHandshakeTLS, myerr), ErrHandshakeTLS))
 	require.True(t, errors.Is(errors.Wrap(myerr, ErrHandshakeTLS), ErrHandshakeTLS))
@@ -109,4 +109,19 @@ func TestCheckSqlPort(t *testing.T) {
 			conn := packet.NewConn(c)
 			require.NoError(t, conn.WritePacket(data))
 		}, 1)
+}
+
+func TestPrepareStmts(t *testing.T) {
+	args := []any{
+		"hello",
+		uint64(1),
+		int64(1),
+		float64(1),
+	}
+
+	b := MakePrepareStmtPacket("select ?")
+	require.Len(t, b, len("select ?")+1)
+
+	_, err := MakeExecuteStmtPacket(1, args)
+	require.NoError(t, err)
 }

@@ -255,7 +255,7 @@ func (p *packetIO) ApplyOpts(opts ...PacketIOption) {
 }
 
 func (p *packetIO) wrapErr(err error) error {
-	return errors.Wrap(p.wrap, err)
+	return errors.Wrap(err, p.wrap)
 }
 
 func (p *packetIO) LocalAddr() net.Addr {
@@ -280,7 +280,7 @@ func (p *packetIO) GetSequence() uint8 {
 
 func (p *packetIO) readOnePacket() ([]byte, bool, error) {
 	if err := ReadFull(p.readWriter, p.header[:]); err != nil {
-		return nil, false, errors.Wrap(ErrReadConn, err)
+		return nil, false, errors.Wrap(err, ErrReadConn)
 	}
 	sequence, pktSequence := p.header[3], p.readWriter.Sequence()
 	if sequence != pktSequence {
@@ -291,7 +291,7 @@ func (p *packetIO) readOnePacket() ([]byte, bool, error) {
 	length := int(p.header[0]) | int(p.header[1])<<8 | int(p.header[2])<<16
 	data := make([]byte, length)
 	if err := ReadFull(p.readWriter, data); err != nil {
-		return nil, false, errors.Wrap(ErrReadConn, err)
+		return nil, false, errors.Wrap(err, ErrReadConn)
 	}
 	p.inPackets++
 	return data, length == MaxPayloadLen, nil
@@ -334,11 +334,11 @@ func (p *packetIO) writeOnePacket(data []byte) (int, bool, error) {
 	p.readWriter.SetSequence(sequence + 1)
 
 	if _, err := p.readWriter.Write(p.header[:]); err != nil {
-		return 0, more, errors.Wrap(ErrWriteConn, err)
+		return 0, more, errors.Wrap(err, ErrWriteConn)
 	}
 
 	if _, err := p.readWriter.Write(data[:length]); err != nil {
-		return 0, more, errors.Wrap(ErrWriteConn, err)
+		return 0, more, errors.Wrap(err, ErrWriteConn)
 	}
 
 	p.outPackets++
@@ -372,7 +372,7 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 	for {
 		header, err := p.readWriter.Peek(5)
 		if err != nil {
-			return p.wrapErr(errors.Wrap(ErrReadConn, err))
+			return p.wrapErr(errors.Wrap(err, ErrReadConn))
 		}
 		length := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
 		end, needData := isEnd(header[4], length)
@@ -382,10 +382,10 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 			// TODO: allocate a buffer from pool and return the buffer after `process`.
 			data, err = p.ReadPacket()
 			if err != nil {
-				return p.wrapErr(errors.Wrap(ErrReadConn, err))
+				return p.wrapErr(errors.Wrap(err, ErrReadConn))
 			}
 			if err := dest.WritePacket(data, false); err != nil {
-				return p.wrapErr(errors.Wrap(ErrWriteConn, err))
+				return p.wrapErr(errors.Wrap(err, ErrWriteConn))
 			}
 		} else {
 			for {
@@ -398,7 +398,7 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 				dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
 				p.limitReader.N = int64(length + 4)
 				if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
-					return p.wrapErr(errors.Wrap(ErrRelayConn, err))
+					return p.wrapErr(errors.Wrap(err, ErrRelayConn))
 				}
 				p.inPackets++
 				dest.outPackets++
@@ -407,7 +407,7 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 					break
 				}
 				if header, err = p.readWriter.Peek(4); err != nil {
-					return p.wrapErr(errors.Wrap(ErrReadConn, errors.WithStack(err)))
+					return p.wrapErr(errors.Wrap(errors.WithStack(err), ErrReadConn))
 				}
 				length = int(header[0]) | int(header[1])<<8 | int(header[2])<<16
 			}
@@ -441,7 +441,7 @@ func (p *packetIO) OutPackets() uint64 {
 
 func (p *packetIO) Flush() error {
 	if err := p.readWriter.Flush(); err != nil {
-		return p.wrapErr(errors.Wrap(ErrFlushConn, errors.WithStack(err)))
+		return p.wrapErr(errors.Wrap(errors.WithStack(err), ErrFlushConn))
 	}
 	return nil
 }

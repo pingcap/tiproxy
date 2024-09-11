@@ -123,3 +123,15 @@ select 1
 		require.Error(t, cmd.Decode(&mr), test)
 	}
 }
+
+func TestDigest(t *testing.T) {
+	cmd1 := NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), time.Now(), 100)
+	require.NotEmpty(t, cmd1.Digest())
+	require.Equal(t, "select 1", cmd1.QueryText())
+
+	cmd2 := NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte("select 2")...), time.Now(), 100)
+	require.Equal(t, cmd1.Digest(), cmd2.Digest())
+
+	cmd3 := NewCommand(append([]byte{pnet.ComFieldList.Byte()}, []byte("xxx")...), time.Now(), 100)
+	require.Empty(t, cmd3.Digest())
+}
