@@ -61,7 +61,7 @@ lint: golangci-lint tidy header
 	$(GOBIN)/golangci-lint run -c .golangci.yaml
 
 gocovmerge:
-	GOBIN=$(GOBIN) go install github.com/wadey/gocovmerge@master
+	GOBIN=$(GOBIN) go install github.com/djshow832/gocovmerge@master
 
 tidy:
 	cd lib && go mod tidy
