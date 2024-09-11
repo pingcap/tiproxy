@@ -31,9 +31,11 @@ const (
 
 type Replay interface {
 	// Start starts the replay
-	Start(cfg ReplayConfig) error
+	Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error
 	// Stop stops the replay
 	Stop(err error)
+	// Progress returns the progress of the replay job
+	Progress() (float64, error)
 	// Close closes the replay
 	Close()
 }
@@ -43,7 +45,10 @@ type ReplayConfig struct {
 	Username string
 	Password string
 	Speed    float64
-	reader   cmd.LineReader
+	// the following fields are for testing
+	reader      cmd.LineReader
+	report      report.Report
+	connCreator conn.ConnCreator
 }
 
 func (cfg *ReplayConfig) Validate() error {
@@ -85,25 +90,13 @@ type replay struct {
 	connCount        int
 }
 
-func NewReplay(lg *zap.Logger, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) *replay {
-	r := &replay{
-		conns:       make(map[uint64]conn.Conn),
-		lg:          lg,
-		exceptionCh: make(chan conn.Exception, maxPendingExceptions),
-		closeCh:     make(chan uint64, maxPendingExceptions),
+func NewReplay(lg *zap.Logger) *replay {
+	return &replay{
+		lg: lg,
 	}
-	r.connCreator = func(connID uint64) conn.Conn {
-		return conn.NewConn(lg, r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, connID, bcConfig, r.exceptionCh, r.closeCh)
-	}
-	backendConnCreator := func() conn.BackendConn {
-		// TODO: allocate connection ID.
-		return conn.NewBackendConn(lg.Named("be"), 1, hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
-	}
-	r.report = report.NewReport(lg.Named("report"), r.exceptionCh, backendConnCreator)
-	return r
 }
 
-func (r *replay) Start(cfg ReplayConfig) error {
+func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -111,6 +104,24 @@ func (r *replay) Start(cfg ReplayConfig) error {
 	r.Lock()
 	defer r.Unlock()
 	r.cfg = cfg
+	r.conns = make(map[uint64]conn.Conn)
+	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
+	r.closeCh = make(chan uint64, maxPendingExceptions)
+	r.connCreator = cfg.connCreator
+	if r.connCreator == nil {
+		r.connCreator = func(connID uint64) conn.Conn {
+			return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, connID, bcConfig, r.exceptionCh, r.closeCh)
+		}
+	}
+	r.report = cfg.report
+	if r.report == nil {
+		backendConnCreator := func() conn.BackendConn {
+			// TODO: allocate connection ID.
+			return conn.NewBackendConn(r.lg.Named("be"), 1, hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
+		}
+		r.report = report.NewReport(r.lg.Named("report"), r.exceptionCh, backendConnCreator)
+	}
+
 	childCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 	if err := r.report.Start(childCtx, report.ReportConfig{
@@ -223,6 +234,10 @@ func (r *replay) readCloseCh(ctx context.Context) {
 			// Check the context and connCount again.
 		}
 	}
+}
+
+func (r *replay) Progress() (float64, error) {
+	return 0, r.err
 }
 
 func (r *replay) Stop(err error) {

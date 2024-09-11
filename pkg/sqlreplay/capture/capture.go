@@ -33,6 +33,8 @@ type Capture interface {
 	Stop(err error)
 	// Capture captures traffic
 	Capture(packet []byte, startTime time.Time, connID uint64)
+	// Progress returns the progress of the capture job
+	Progress() (float64, error)
 	// Close closes the capture
 	Close()
 }
@@ -200,6 +202,15 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64) {
 		// Don't wait, otherwise the QPS may be affected.
 		c.stopNoLock(errors.New("encoding traffic is too slow, buffer is full"))
 	}
+}
+
+func (c *capture) Progress() (float64, error) {
+	c.Lock()
+	defer c.Unlock()
+	if c.startTime.IsZero() || c.cfg.Duration == 0 {
+		return 0, c.err
+	}
+	return float64(time.Since(c.startTime)) / float64(c.cfg.Duration), c.err
 }
 
 // stopNoLock must be called after holding a lock.

@@ -18,22 +18,24 @@ import (
 
 func TestManageConns(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	replay := NewReplay(lg, nil, nil, &backend.BCConfig{})
+	replay := NewReplay(lg)
 	defer replay.Close()
-	replay.connCreator = func(connID uint64) conn.Conn {
-		return &mockConn{
-			connID:      connID,
-			exceptionCh: replay.exceptionCh,
-			closeCh:     replay.closeCh,
-		}
-	}
-	replay.report = newMockReport(replay.exceptionCh)
+
 	loader := newMockChLoader()
-	require.NoError(t, replay.Start(ReplayConfig{
+	cfg := ReplayConfig{
 		Input:    t.TempDir(),
 		Username: "u1",
 		reader:   loader,
-	}))
+		connCreator: func(connID uint64) conn.Conn {
+			return &mockConn{
+				connID:      connID,
+				exceptionCh: replay.exceptionCh,
+				closeCh:     replay.closeCh,
+			}
+		},
+		report: newMockReport(replay.exceptionCh),
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
 	command := newMockCommand(1)
 	loader.writeCommand(command)
@@ -99,32 +101,34 @@ func TestReplaySpeed(t *testing.T) {
 	speeds := []float64{10, 1, 0.1}
 
 	var lastTotalTime time.Duration
+	replay := NewReplay(lg)
+	defer replay.Close()
 	for _, speed := range speeds {
-		replay := NewReplay(lg, nil, nil, &backend.BCConfig{})
 		cmdCh := make(chan *cmd.Command, 10)
-		replay.connCreator = func(connID uint64) conn.Conn {
-			return &mockConn{
-				connID:      connID,
-				cmdCh:       cmdCh,
-				exceptionCh: replay.exceptionCh,
-				closeCh:     replay.closeCh,
-			}
+		loader := newMockNormalLoader()
+		cfg := ReplayConfig{
+			Input:    t.TempDir(),
+			Username: "u1",
+			Speed:    speed,
+			reader:   loader,
+			report:   newMockReport(replay.exceptionCh),
+			connCreator: func(connID uint64) conn.Conn {
+				return &mockConn{
+					connID:      connID,
+					cmdCh:       cmdCh,
+					exceptionCh: replay.exceptionCh,
+					closeCh:     replay.closeCh,
+				}
+			},
 		}
 
-		replay.report = newMockReport(replay.exceptionCh)
-		loader := newMockNormalLoader()
 		now := time.Now()
 		for i := 0; i < 10; i++ {
 			command := newMockCommand(1)
 			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
 			loader.writeCommand(command)
 		}
-		require.NoError(t, replay.Start(ReplayConfig{
-			Input:    t.TempDir(),
-			Username: "u1",
-			reader:   loader,
-			Speed:    speed,
-		}))
+		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
 		var firstTime, lastTime time.Time
 		for i := 0; i < 10; i++ {
@@ -137,12 +141,15 @@ func TestReplaySpeed(t *testing.T) {
 				interval := now.Sub(lastTime)
 				lastTime = now
 				t.Logf("speed: %f, i: %d, interval: %s", speed, i, interval)
+				// CI is too unstable, comment this.
 				// require.Greater(t, interval, time.Duration(float64(10*time.Millisecond)/speed)/2, "speed: %f, i: %d", speed, i)
 			}
 		}
 		totalTime := lastTime.Sub(firstTime)
 		require.Greater(t, totalTime, lastTotalTime, "speed: %f", speed)
 		lastTotalTime = totalTime
-		replay.Close()
+
+		replay.Stop(nil)
+		loader.Close()
 	}
 }
