@@ -69,8 +69,8 @@ func TestLogAttrs(t *testing.T) {
 
 func TestMySQLError(t *testing.T) {
 	myerr := &mysql.MyError{}
-	require.True(t, IsMySQLError(errors.Wrap(ErrHandshakeTLS, myerr)))
-	require.False(t, IsMySQLError(errors.Wrap(myerr, ErrHandshakeTLS)))
+	require.True(t, IsMySQLError(errors.Wrap(myerr, ErrHandshakeTLS)))
+	require.False(t, IsMySQLError(errors.Wrap(ErrHandshakeTLS, myerr)))
 	require.False(t, IsMySQLError(ErrHandshakeTLS))
 	require.True(t, errors.Is(errors.Wrap(ErrHandshakeTLS, myerr), ErrHandshakeTLS))
 	require.True(t, errors.Is(errors.Wrap(myerr, ErrHandshakeTLS), ErrHandshakeTLS))

@@ -156,7 +156,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 		return err
 	}
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
-		return errors.Wrap(ErrProxyErr, err)
+		return errors.Wrap(err, ErrProxyErr)
 	}
 	auth.user = clientResp.User
 	auth.dbname = clientResp.DB
@@ -247,10 +247,10 @@ loop:
 		switch serverPkt[0] {
 		case pnet.OKHeader.Byte():
 			if err := setCompress(clientIO, auth.capability, auth.zstdLevel); err != nil {
-				return errors.Wrap(ErrClientHandshake, err)
+				return errors.Wrap(err, ErrClientHandshake)
 			}
 			if err := setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel); err != nil {
-				return errors.Wrap(ErrBackendHandshake, err)
+				return errors.Wrap(err, ErrBackendHandshake)
 			}
 			return nil
 		default: // mysql.AuthSwitchRequest, ShaCommand
@@ -358,19 +358,19 @@ func (auth *Authenticator) handshakeSecondTime(logger *zap.Logger, clientIO, bac
 
 	if err = auth.handleSecondAuthResult(backendIO); err == nil {
 		if err = setCompress(backendIO, auth.capability&backendCapability, auth.zstdLevel); err != nil {
-			return errors.Wrap(ErrBackendHandshake, err)
+			return errors.Wrap(err, ErrBackendHandshake)
 		}
 	}
-	return errors.Wrap(ErrBackendHandshake, err)
+	return errors.Wrap(err, ErrBackendHandshake)
 }
 
 func (auth *Authenticator) readInitialHandshake(backendIO pnet.PacketIO) (serverPkt []byte, capability pnet.Capability, err error) {
 	if serverPkt, err = backendIO.ReadPacket(); err != nil {
-		err = errors.Wrap(ErrBackendHandshake, err)
+		err = errors.Wrap(err, ErrBackendHandshake)
 		return
 	}
 	if pnet.IsErrorPacket(serverPkt[0]) {
-		err = errors.Wrap(ErrBackendHandshake, pnet.ParseErrorPacket(serverPkt))
+		err = errors.Wrap(pnet.ParseErrorPacket(serverPkt), ErrBackendHandshake)
 		return
 	}
 	initialHandshake := pnet.ParseInitialHandshake(serverPkt)
@@ -418,7 +418,7 @@ func (auth *Authenticator) writeAuthHandshake(
 		pkt = pnet.MakeHandshakeResponse(resp)
 		// write SSL Packet
 		if err := backendIO.WritePacket(pkt[:32], true); err != nil {
-			return errors.Wrap(ErrBackendHandshake, err)
+			return errors.Wrap(err, ErrBackendHandshake)
 		}
 		// Send TLS / SSL request packet. The server must have supported TLS.
 		tcfg := backendTLSConfig.Clone()
@@ -430,7 +430,7 @@ func (auth *Authenticator) writeAuthHandshake(
 		if err := backendIO.ClientTLSHandshake(tcfg); err != nil {
 			// tiproxy pp enabled, tidb pp disabled, tls enabled => tls handshake encounters unrecognized packet
 			// tiproxy pp disabled, tidb pp enabled, tls enabled => tls handshake encounters unrecognized packet
-			return errors.Wrap(ErrBackendPPV2, err)
+			return errors.Wrap(err, ErrBackendPPV2)
 		}
 	} else {
 		resp.Capability &= ^pnet.ClientSSL
@@ -439,7 +439,7 @@ func (auth *Authenticator) writeAuthHandshake(
 
 	// write handshake resp
 	if err := backendIO.WritePacket(pkt, true); err != nil {
-		return errors.Wrap(ErrBackendHandshake, err)
+		return errors.Wrap(err, ErrBackendHandshake)
 	}
 	return nil
 }
@@ -498,7 +498,7 @@ func handleHandshakeError(pktIdx int, packetErr *mysql.MyError) error {
 		if packetErr.Code == mysql.ER_NET_PACKETS_OUT_OF_ORDER ||
 			// tidb ERROR 8052: invalid sequence, received 10 while expecting 1 (proxy ppv2 = true, db ppv2  = false)
 			packetErr.Code == ER_INVALID_SEQUENCE {
-			return errors.Wrap(ErrBackendPPV2, packetErr)
+			return errors.Wrap(packetErr, ErrBackendPPV2)
 		}
 		// tidb ERROR 1105: invalid PROXY Protocol Header (proxy ppv2 = false,  db ppv2  = true, db ppv2 fallback = false)
 		// 1105 is UNKNOWN_ERR, so we judge the error by messages
@@ -506,5 +506,5 @@ func handleHandshakeError(pktIdx int, packetErr *mysql.MyError) error {
 			return ErrBackendPPV2
 		}
 	}
-	return errors.Wrap(ErrClientAuthFail, packetErr)
+	return errors.Wrap(packetErr, ErrClientAuthFail)
 }

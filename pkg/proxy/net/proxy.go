@@ -66,12 +66,12 @@ func (prw *proxyReadWriter) readProxy() error {
 		// If it doesn't, reading data of len(MagicV2) may block forever.
 		header, err := prw.packetReadWriter.Peek(4)
 		if err != nil {
-			return errors.Wrap(ErrReadConn, err)
+			return errors.Wrap(err, ErrReadConn)
 		}
 		if bytes.Equal(header[:], proxyprotocol.MagicV2[:4]) {
 			proxyHeader, err := prw.parseProxyV2()
 			if err != nil {
-				return errors.Wrap(ErrReadConn, err)
+				return errors.Wrap(err, ErrReadConn)
 			}
 			if proxyHeader != nil {
 				prw.proxy = proxyHeader
@@ -103,10 +103,10 @@ func (prw *proxyReadWriter) writeProxy() error {
 	}
 	buf, err := prw.proxy.ToBytes()
 	if err != nil {
-		return errors.Wrap(ErrWriteConn, err)
+		return errors.Wrap(err, ErrWriteConn)
 	}
 	if _, err := prw.packetReadWriter.Write(buf); err != nil {
-		return errors.Wrap(ErrWriteConn, err)
+		return errors.Wrap(err, ErrWriteConn)
 	}
 	// according to the spec, we better flush to avoid server hanging
 	if err := prw.packetReadWriter.Flush(); err != nil {
@@ -126,7 +126,7 @@ func (prw *proxyReadWriter) DirectWrite(p []byte) (n int, err error) {
 func (prw *proxyReadWriter) parseProxyV2() (*proxyprotocol.Proxy, error) {
 	rem, err := prw.packetReadWriter.Peek(len(proxyprotocol.MagicV2))
 	if err != nil {
-		return nil, errors.WithStack(errors.Wrap(ErrReadConn, err))
+		return nil, errors.WithStack(errors.Wrap(err, ErrReadConn))
 	}
 	if !bytes.Equal(rem, proxyprotocol.MagicV2) {
 		return nil, nil
@@ -135,7 +135,7 @@ func (prw *proxyReadWriter) parseProxyV2() (*proxyprotocol.Proxy, error) {
 	// yes, it is proxyV2
 	_, err = prw.packetReadWriter.Discard(len(proxyprotocol.MagicV2))
 	if err != nil {
-		return nil, errors.WithStack(errors.Wrap(ErrReadConn, err))
+		return nil, errors.WithStack(errors.Wrap(err, ErrReadConn))
 	}
 
 	m, _, err := proxyprotocol.ParseProxyV2(prw.packetReadWriter)

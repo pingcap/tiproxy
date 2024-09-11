@@ -21,12 +21,12 @@ func SetKeepalive(conn net.Conn, cfg config.KeepAlive) error {
 	}
 
 	if err := tcpcn.SetKeepAlive(cfg.Enabled); err != nil {
-		return errors.Wrap(ErrKeepAlive, err)
+		return errors.Wrap(err, ErrKeepAlive)
 	}
 
 	syscn, err := tcpcn.SyscallConn()
 	if err != nil {
-		return errors.Wrap(ErrKeepAlive, err)
+		return errors.Wrap(err, ErrKeepAlive)
 	}
 
 	var kerr, terr error
