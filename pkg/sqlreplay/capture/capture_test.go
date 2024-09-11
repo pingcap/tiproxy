@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -34,7 +35,11 @@ func TestStartAndStop(t *testing.T) {
 	// start capture and the traffic should be outputted
 	require.NoError(t, cpt.Start(cfg))
 	cpt.Capture(packet, time.Now(), 100)
-	cpt.Stop(nil)
+	_, err := cpt.Progress()
+	require.NoError(t, err)
+	cpt.Stop(errors.Errorf("mock error"))
+	_, err = cpt.Progress()
+	require.ErrorContains(t, err, "mock error")
 	cpt.wg.Wait()
 	data := writer.getData()
 	require.Greater(t, len(data), 0)
