@@ -27,7 +27,8 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 
 	ctx := &Context{}
 
-	curls := rootCmd.PersistentFlags().StringArray("curls", []string{"localhost:3080"}, "API gateway addresses")
+	host := rootCmd.PersistentFlags().String("host", "localhost", "API gateway host")
+	port := rootCmd.PersistentFlags().Int("port", 3080, "API gateway port")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "warn", "log level")
 	insecure := rootCmd.PersistentFlags().BoolP("insecure", "k", false, "enable TLS without CA, useful for testing, or for expired certs")
@@ -76,7 +77,8 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 				ExpectContinueTimeout: 1 * time.Second,
 			},
 		}
-		ctx.CUrls = *curls
+		ctx.Host = *host
+		ctx.Port = *port
 		ctx.SSL = tlsConfig != nil
 		return nil
 	}
