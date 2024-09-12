@@ -19,44 +19,44 @@ import (
 func TestConfig(t *testing.T) {
 	_, doHTTP := createServer(t)
 
-	doHTTP(t, http.MethodGet, "/api/admin/config", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/config", httpOpts{}, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Contains(t, string(all), "addr = '0.0.0.0:6000'")
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodGet, "/api/admin/config?format=json", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/config?format=json", httpOpts{}, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Contains(t, string(all), `"addr":"0.0.0.0:6000"`)
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 
-	doHTTP(t, http.MethodPut, "/api/admin/config", strings.NewReader("security.require-backend-tls = true"), nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader("security.require-backend-tls = true")}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 	sum := ""
 	sumreg := regexp.MustCompile(`{"config_checksum":(.+)}`)
-	doHTTP(t, http.MethodGet, "/api/debug/health", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		sum = string(sumreg.Find(all))
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodPut, "/api/admin/config", strings.NewReader("proxy.require-back = false"), nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader("proxy.require-back = false")}, func(t *testing.T, r *http.Response) {
 		// no error
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodGet, "/api/debug/health", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Equal(t, sum, string(sumreg.Find(all)))
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodPut, "/api/admin/config", strings.NewReader("security.require-backend-tls = false"), nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader("security.require-backend-tls = false")}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodGet, "/api/debug/health", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.NotEqual(t, sum, string(sumreg.Find(all)))
@@ -80,19 +80,19 @@ func TestAcceptType(t *testing.T) {
 			require.NoError(t, toml.Unmarshal(data, &cfg))
 		}
 	}
-	doHTTP(t, http.MethodGet, "/api/admin/config", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/config", httpOpts{}, func(t *testing.T, r *http.Response) {
 		checkRespContentType("toml", r)
 	})
-	doHTTP(t, http.MethodGet, "/api/admin/config", nil, map[string]string{"Accept": "application/json"}, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/config", httpOpts{header: map[string]string{"Accept": "application/json"}}, func(t *testing.T, r *http.Response) {
 		checkRespContentType("json", r)
 	})
-	doHTTP(t, http.MethodGet, "/api/admin/config", nil, map[string]string{"Accept": "application/toml"}, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/config", httpOpts{header: map[string]string{"Accept": "application/toml"}}, func(t *testing.T, r *http.Response) {
 		checkRespContentType("toml", r)
 	})
-	doHTTP(t, http.MethodGet, "/api/admin/config?format=json", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/config?format=json", httpOpts{}, func(t *testing.T, r *http.Response) {
 		checkRespContentType("json", r)
 	})
-	doHTTP(t, http.MethodGet, "/api/admin/config?format=JSON", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/config?format=JSON", httpOpts{}, func(t *testing.T, r *http.Response) {
 		checkRespContentType("json", r)
 	})
 }

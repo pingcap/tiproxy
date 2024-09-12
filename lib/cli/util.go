@@ -9,6 +9,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
@@ -64,4 +66,12 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 	default:
 		return "", errors.Errorf("%s: %s", res.Status, string(resb))
 	}
+}
+
+func GetFormReader(m map[string]string) io.Reader {
+	form := url.Values{}
+	for key, value := range m {
+		form.Add(key, value)
+	}
+	return strings.NewReader(form.Encode())
 }

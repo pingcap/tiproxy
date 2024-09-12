@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -315,7 +316,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 // If it finds that the session is ready for redirection, it migrates the session.
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
 	startTime := time.Now()
-	if mgr.cpt != nil {
+	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
 		mgr.cpt.Capture(request, startTime, mgr.connectionID)
 	}
 	mgr.processLock.Lock()

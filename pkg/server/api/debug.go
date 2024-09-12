@@ -17,12 +17,12 @@ func (h *Server) DebugHealth(c *gin.Context) {
 		status = http.StatusBadGateway
 	}
 	c.JSON(status, config.HealthInfo{
-		ConfigChecksum: h.mgr.cfg.GetConfigChecksum(),
+		ConfigChecksum: h.mgr.CfgMgr.GetConfigChecksum(),
 	})
 }
 
 func (h *Server) DebugRedirect(c *gin.Context) {
-	errs := h.mgr.ns.RedirectConnections()
+	errs := h.mgr.NsMgr.RedirectConnections()
 	if len(errs) != 0 {
 		for _, err := range errs {
 			c.Errors = append(c.Errors, &gin.Error{
