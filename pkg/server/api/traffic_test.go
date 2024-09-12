@@ -20,7 +20,19 @@ func TestTraffic(t *testing.T) {
 	server, doHTTP := createServer(t)
 	mgr := server.mgr.ReplayJobMgr.(*mockReplayJobManager)
 
-	doHTTP(t, http.MethodPost, "/api/traffic/capture?duration=1h&output=/tmp", httpOpts{}, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPost, "/api/traffic/capture", httpOpts{
+		form:   map[string]string{"output": "/tmp", "duration": "10"},
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadRequest, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "time: missing unit in duration \"10\"", string(all))
+	})
+	doHTTP(t, http.MethodPost, "/api/traffic/capture", httpOpts{
+		form:   map[string]string{"output": "/tmp", "duration": "1h"},
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -28,7 +40,10 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, "capture", mgr.curJob)
 		require.Equal(t, capture.CaptureConfig{Duration: time.Hour, Output: "/tmp"}, mgr.captureCfg)
 	})
-	doHTTP(t, http.MethodPost, "/api/traffic/replay?input=/tmp", httpOpts{}, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
+		form:   map[string]string{"input": "/tmp"},
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -41,13 +56,25 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, "stopped", string(all))
 		require.Equal(t, "", mgr.curJob)
 	})
-	doHTTP(t, http.MethodPost, "/api/traffic/replay?input=/tmp&speed=2.0", httpOpts{form: map[string]string{"username": "u1"}, header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"}}, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
+		form:   map[string]string{"input": "/tmp", "speed": "abc"},
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadRequest, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "strconv.ParseFloat: parsing \"abc\": invalid syntax", string(all))
+	})
+	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
+		form:   map[string]string{"input": "/tmp", "speed": "2.0", "username": "u1", "password": "p1"},
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Equal(t, "replay started", string(all))
 		require.Equal(t, "replay", mgr.curJob)
-		require.Equal(t, replay.ReplayConfig{Input: "/tmp", Username: "u1", Speed: 2.0}, mgr.replayCfg)
+		require.Equal(t, replay.ReplayConfig{Input: "/tmp", Username: "u1", Password: "p1", Speed: 2.0}, mgr.replayCfg)
 	})
 	doHTTP(t, http.MethodGet, "/api/traffic/show", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)

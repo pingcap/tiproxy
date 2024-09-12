@@ -22,8 +22,8 @@ func (h *Server) registerTraffic(group *gin.RouterGroup) {
 
 func (h *Server) TrafficCapture(c *gin.Context) {
 	cfg := capture.CaptureConfig{}
-	cfg.Output = c.Query("output")
-	if durationStr := c.Query("duration"); durationStr != "" {
+	cfg.Output = c.PostForm("output")
+	if durationStr := c.PostForm("duration"); durationStr != "" {
 		duration, err := time.ParseDuration(durationStr)
 		if err != nil {
 			c.String(http.StatusBadRequest, err.Error())
@@ -41,8 +41,8 @@ func (h *Server) TrafficCapture(c *gin.Context) {
 
 func (h *Server) TrafficReplay(c *gin.Context) {
 	cfg := replay.ReplayConfig{}
-	cfg.Input = c.Query("input")
-	if speedStr := c.Query("speed"); speedStr != "" {
+	cfg.Input = c.PostForm("input")
+	if speedStr := c.PostForm("speed"); speedStr != "" {
 		speed, err := strconv.ParseFloat(speedStr, 64)
 		if err != nil {
 			c.String(http.StatusBadRequest, err.Error())
