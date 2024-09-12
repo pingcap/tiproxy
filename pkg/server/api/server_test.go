@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -21,7 +23,13 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path string, rd io.Reader, header map[string]string, f func(*testing.T, *http.Response))) {
+type httpOpts struct {
+	reader io.Reader
+	header map[string]string
+	form   map[string]string
+}
+
+func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path string, opts httpOpts, f func(*testing.T, *http.Response))) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	ready := atomic.NewBool(true)
 	cfgmgr := mgrcfg.NewConfigManager()
@@ -30,20 +38,33 @@ func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path
 	require.NoError(t, crtmgr.Init(cfgmgr.GetConfig(), lg, cfgmgr.WatchConfig()))
 	srv, err := NewServer(config.API{
 		Addr: "0.0.0.0:0",
-	}, lg, mgrns.NewNamespaceManager(), cfgmgr, crtmgr, &mockBackendReader{}, nil, ready)
+	}, lg, Managers{
+		CfgMgr:        cfgmgr,
+		NsMgr:         mgrns.NewNamespaceManager(),
+		CertMgr:       crtmgr,
+		BackendReader: &mockBackendReader{},
+		ReplayJobMgr:  &mockReplayJobManager{},
+	}, nil, ready)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, srv.Close())
 	})
 
 	addr := fmt.Sprintf("http://%s", srv.listener.Addr().String())
-	return srv, func(t *testing.T, method, pa string, rd io.Reader, header map[string]string, f func(*testing.T, *http.Response)) {
+	return srv, func(t *testing.T, method, pa string, opts httpOpts, f func(*testing.T, *http.Response)) {
 		if pa[0] != '/' {
 			pa = "/" + pa
 		}
-		req, err := http.NewRequest(method, fmt.Sprintf("%s%s", addr, pa), rd)
+		if len(opts.form) > 0 {
+			form := url.Values{}
+			for key, value := range opts.form {
+				form.Add(key, value)
+			}
+			opts.reader = strings.NewReader(form.Encode())
+		}
+		req, err := http.NewRequest(method, fmt.Sprintf("%s%s", addr, pa), opts.reader)
 		require.NoError(t, err)
-		for key, value := range header {
+		for key, value := range opts.header {
 			req.Header.Set(key, value)
 		}
 		resp, err := http.DefaultClient.Do(req)

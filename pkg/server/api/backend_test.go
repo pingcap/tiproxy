@@ -32,10 +32,10 @@ func TestBackendMetrics(t *testing.T) {
 	}
 
 	server, doHTTP := createServer(t)
-	mbr := server.mgr.br.(*mockBackendReader)
+	mbr := server.mgr.BackendReader.(*mockBackendReader)
 	for _, tt := range tests {
 		mbr.data.Store(string(tt.data))
-		doHTTP(t, http.MethodGet, "/api/backend/metrics", nil, nil, func(t *testing.T, r *http.Response) {
+		doHTTP(t, http.MethodGet, "/api/backend/metrics", httpOpts{}, func(t *testing.T, r *http.Response) {
 			all, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 			require.Equal(t, tt.expect, all)
