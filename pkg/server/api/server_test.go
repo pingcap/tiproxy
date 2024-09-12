@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -26,7 +24,6 @@ import (
 type httpOpts struct {
 	reader io.Reader
 	header map[string]string
-	form   map[string]string
 }
 
 func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path string, opts httpOpts, f func(*testing.T, *http.Response))) {
@@ -54,13 +51,6 @@ func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path
 	return srv, func(t *testing.T, method, pa string, opts httpOpts, f func(*testing.T, *http.Response)) {
 		if pa[0] != '/' {
 			pa = "/" + pa
-		}
-		if len(opts.form) > 0 {
-			form := url.Values{}
-			for key, value := range opts.form {
-				form.Add(key, value)
-			}
-			opts.reader = strings.NewReader(form.Encode())
 		}
 		req, err := http.NewRequest(method, fmt.Sprintf("%s%s", addr, pa), opts.reader)
 		require.NoError(t, err)

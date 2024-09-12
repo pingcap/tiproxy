@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/cli"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
@@ -21,7 +22,7 @@ func TestTraffic(t *testing.T) {
 	mgr := server.mgr.ReplayJobMgr.(*mockReplayJobManager)
 
 	doHTTP(t, http.MethodPost, "/api/traffic/capture", httpOpts{
-		form:   map[string]string{"output": "/tmp", "duration": "10"},
+		reader: cli.GetFormReader(map[string]string{"output": "/tmp", "duration": "10"}),
 		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusBadRequest, r.StatusCode)
@@ -30,7 +31,7 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, "time: missing unit in duration \"10\"", string(all))
 	})
 	doHTTP(t, http.MethodPost, "/api/traffic/capture", httpOpts{
-		form:   map[string]string{"output": "/tmp", "duration": "1h"},
+		reader: cli.GetFormReader(map[string]string{"output": "/tmp", "duration": "1h"}),
 		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
@@ -41,7 +42,7 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, capture.CaptureConfig{Duration: time.Hour, Output: "/tmp"}, mgr.captureCfg)
 	})
 	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
-		form:   map[string]string{"input": "/tmp"},
+		reader: cli.GetFormReader(map[string]string{"input": "/tmp"}),
 		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
@@ -57,7 +58,7 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, "", mgr.curJob)
 	})
 	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
-		form:   map[string]string{"input": "/tmp", "speed": "abc"},
+		reader: cli.GetFormReader(map[string]string{"input": "/tmp", "speed": "abc"}),
 		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusBadRequest, r.StatusCode)
@@ -66,7 +67,7 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, "strconv.ParseFloat: parsing \"abc\": invalid syntax", string(all))
 	})
 	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
-		form:   map[string]string{"input": "/tmp", "speed": "2.0", "username": "u1", "password": "p1"},
+		reader: cli.GetFormReader(map[string]string{"input": "/tmp", "speed": "2.0", "username": "u1", "password": "p1"}),
 		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
