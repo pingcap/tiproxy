@@ -258,7 +258,7 @@ func TestRecoverPanic(t *testing.T) {
 	require.NoError(t, err)
 	server, err := NewSQLServer(lg, &config.Config{}, certManager, nil, &mockHsHandler{
 		handshakeResp: func(ctx backend.ConnContext, _ *pnet.HandshakeResp) error {
-			if ctx.Value(backend.ConnContextKeyConnID).(uint64) == 0 {
+			if ctx.Value(backend.ConnContextKeyConnID).(uint64) == 1 {
 				panic("HandleHandshakeResp panic")
 			}
 			return nil

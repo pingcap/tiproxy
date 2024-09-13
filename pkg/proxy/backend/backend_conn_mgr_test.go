@@ -199,6 +199,9 @@ func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO pnet.PacketIO) 
 	prevCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+	if pnet.IsMySQLError(rsErr) {
+		rsErr = nil
+	}
 	curCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	require.Equal(ts.t, prevCounter+1, curCounter)
@@ -569,6 +572,41 @@ func TestSpecialCmds(t *testing.T) {
 				gotCap := ts.mb.capability &^ pnet.ClientPluginAuthLenencClientData
 				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
 				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+// Test that ExecuteCmd may return a mysql error, which is required by traffic replay.
+func TestReturnMySQLError(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// mysql error
+		{
+			client: func(packetIO pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComQuery
+				ts.mc.sql = "select $$"
+				return ts.mc.request(packetIO)
+			},
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				clientIO.ResetSequence()
+				request, err := clientIO.ReadPacket()
+				require.NoError(ts.t, err)
+				rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+				require.True(ts.t, pnet.IsMySQLError(rsErr))
+				require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
+				return nil
+			},
+			backend: func(packetIO pnet.PacketIO) error {
+				ts.mb.respondType = responseTypeErr
+				return ts.mb.respond(packetIO)
 			},
 		},
 	}

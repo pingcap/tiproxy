@@ -86,13 +86,17 @@ var _ Capture = (*capture)(nil)
 
 type capture struct {
 	sync.Mutex
-	cfg       CaptureConfig
-	wg        waitgroup.WaitGroup
-	cancel    context.CancelFunc
-	cmdCh     chan *cmd.Command
-	err       error
-	startTime time.Time
-	lg        *zap.Logger
+	cfg          CaptureConfig
+	wg           waitgroup.WaitGroup
+	cancel       context.CancelFunc
+	cmdCh        chan *cmd.Command
+	err          error
+	startTime    time.Time
+	endTime      time.Time
+	progress     float64
+	capturedCmds uint64
+	filteredCmds uint64
+	lg           *zap.Logger
 }
 
 func NewCapture(lg *zap.Logger) *capture {
@@ -115,6 +119,10 @@ func (c *capture) Start(cfg CaptureConfig) error {
 	c.stopNoLock(nil)
 	c.cfg = cfg
 	c.startTime = time.Now()
+	c.endTime = time.Time{}
+	c.progress = 0
+	c.capturedCmds = 0
+	c.filteredCmds = 0
 	c.err = nil
 	childCtx, cancel := context.WithTimeout(context.Background(), c.cfg.Duration)
 	c.cancel = cancel
@@ -143,6 +151,7 @@ func (c *capture) collectCmds(bufCh chan<- *bytes.Buffer) {
 			c.Stop(errors.Wrapf(err, "failed to encode command"))
 			return
 		}
+		c.capturedCmds++
 		if buf.Len() > c.cfg.flushThreshold {
 			select {
 			case bufCh <- buf:
@@ -208,7 +217,7 @@ func (c *capture) Progress() (float64, error) {
 	c.Lock()
 	defer c.Unlock()
 	if c.startTime.IsZero() || c.cfg.Duration == 0 {
-		return 0, c.err
+		return c.progress, c.err
 	}
 	return float64(time.Since(c.startTime)) / float64(c.cfg.Duration), c.err
 }
@@ -219,16 +228,33 @@ func (c *capture) stopNoLock(err error) {
 	if c.startTime.IsZero() {
 		return
 	}
-	if err != nil {
-		c.lg.Error("stop capture", zap.Error(err))
-	}
-	c.err = err
 	if c.cancel != nil {
 		c.cancel()
 		c.cancel = nil
 	}
-	c.startTime = time.Time{}
 	close(c.cmdCh)
+
+	c.endTime = time.Now()
+	fields := []zap.Field{
+		zap.Time("start_time", c.startTime),
+		zap.Time("end_time", c.endTime),
+		zap.Uint64("captured_cmds", c.capturedCmds),
+	}
+	if err != nil {
+		if c.cfg.Duration > 0 {
+			c.progress = float64(c.endTime.Sub(c.startTime)) / float64(c.cfg.Duration)
+			if c.progress > 1 {
+				c.progress = 1
+			}
+		}
+		c.err = err
+		fields = append(fields, zap.Error(err))
+		c.lg.Error("capture failed", fields...)
+	} else {
+		c.progress = 1
+		c.lg.Info("capture finished", fields...)
+	}
+	c.startTime = time.Time{}
 }
 
 func (c *capture) Stop(err error) {

@@ -366,25 +366,28 @@ func (p *packetIO) WritePacket(data []byte, flush bool) (err error) {
 func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
 	process func(response []byte) error) error {
 	p.readWriter.BeginRW(rwRead)
-	dest := destIO.(*packetIO)
-	dest.readWriter.BeginRW(rwWrite)
+	dest, _ := destIO.(*packetIO)
+	// destIO is not packetIO in traffic replay.
+	if dest != nil {
+		dest.readWriter.BeginRW(rwWrite)
+	}
 	p.limitReader.R = p.readWriter
 	for {
 		header, err := p.readWriter.Peek(5)
 		if err != nil {
-			return p.wrapErr(errors.Wrap(err, ErrReadConn))
+			return p.wrapErr(errors.Wrap(errors.WithStack(err), ErrReadConn))
 		}
 		length := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
 		end, needData := isEnd(header[4], length)
 		var data []byte
 		// Just call ReadFrom if the caller doesn't need the data, even if it's the last packet.
-		if end && needData {
+		if (end && needData) || dest == nil {
 			// TODO: allocate a buffer from pool and return the buffer after `process`.
 			data, err = p.ReadPacket()
 			if err != nil {
 				return p.wrapErr(errors.Wrap(err, ErrReadConn))
 			}
-			if err := dest.WritePacket(data, false); err != nil {
+			if err := destIO.WritePacket(data, false); err != nil {
 				return p.wrapErr(errors.Wrap(err, ErrWriteConn))
 			}
 		} else {

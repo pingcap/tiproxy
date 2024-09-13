@@ -75,7 +75,7 @@ func (cc *ClientConnection) processMsg(ctx context.Context) error {
 			return err
 		}
 		err = cc.connMgr.ExecuteCmd(ctx, clientPkt)
-		if err != nil {
+		if err != nil && !pnet.IsMySQLError(err) {
 			return err
 		}
 		if pnet.Command(clientPkt[0]) == pnet.ComQuit {

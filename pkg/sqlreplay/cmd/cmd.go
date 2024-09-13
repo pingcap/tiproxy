@@ -69,13 +69,13 @@ func (c *Command) Equal(that *Command) bool {
 
 func (c *Command) Validate(filename string, lineIdx int) error {
 	if c.StartTs.IsZero() {
-		return errors.Errorf("no start time")
+		return errors.Errorf("%s, line %d: no start time", filename, lineIdx)
 	}
 	if c.ConnID == 0 {
-		return errors.Errorf("no connection id")
+		return errors.Errorf("%s, line %d: no connection id", filename, lineIdx)
 	}
 	if len(c.Payload) == 0 {
-		return errors.Errorf("no payload")
+		return errors.Errorf("%s, line %d: no payload", filename, lineIdx)
 	}
 	return nil
 }
@@ -123,38 +123,38 @@ func (c *Command) Decode(reader LineReader) error {
 			return err
 		}
 		if !strings.HasPrefix(hack.String(line), commonKeyPrefix) {
-			return errors.Errorf("%s:%d: line doesn't start with '%s': %s", filename, lineIdx, commonKeyPrefix, line)
+			return errors.Errorf("%s, line %d: line doesn't start with '%s': %s", filename, lineIdx, commonKeyPrefix, line)
 		}
 		idx := strings.Index(hack.String(line), commonKeySuffix)
 		if idx < 0 {
-			return errors.Errorf("%s:%d: '%s' is not found in line: %s", filename, lineIdx, commonKeySuffix, line)
+			return errors.Errorf("%s, line %d: '%s' is not found in line: %s", filename, lineIdx, commonKeySuffix, line)
 		}
 		idx += len(commonKeySuffix)
 		key := hack.String(line[:idx])
 		value := hack.String(line[idx:])
 		if len(value) == 0 {
-			return errors.Errorf("%s:%d: value is empty in line: %s", filename, lineIdx, line)
+			return errors.Errorf("%s, line %d: value is empty in line: %s", filename, lineIdx, line)
 		}
 		switch key {
 		case keyStartTs:
 			if !c.StartTs.IsZero() {
-				return errors.Errorf("%s:%d: redundant Time: %s, Time was %v", filename, lineIdx, line, c.StartTs)
+				return errors.Errorf("%s, line %d: redundant Time: %s, Time was %v", filename, lineIdx, line, c.StartTs)
 			}
 			c.StartTs, err = time.Parse(time.RFC3339Nano, value)
 			if err != nil {
-				return errors.Errorf("%s:%d: parsing Time failed: %s", filename, lineIdx, line)
+				return errors.Errorf("%s, line %d: parsing Time failed: %s", filename, lineIdx, line)
 			}
 		case keyConnID:
 			if c.ConnID > 0 {
-				return errors.Errorf("%s:%d: redundant Conn_ID: %s, Conn_ID was %d", filename, lineIdx, line, c.ConnID)
+				return errors.Errorf("%s, line %d: redundant Conn_ID: %s, Conn_ID was %d", filename, lineIdx, line, c.ConnID)
 			}
 			c.ConnID, err = strconv.ParseUint(value, 10, 64)
 			if err != nil {
-				return errors.Errorf("%s:%d: parsing Conn_ID failed: %s", filename, lineIdx, line)
+				return errors.Errorf("%s, line %d: parsing Conn_ID failed: %s", filename, lineIdx, line)
 			}
 		case keyType:
 			if c.Type != pnet.ComQuery {
-				return errors.Errorf("%s:%d: redundant Cmd_type: %s, Cmd_type was %v", filename, lineIdx, line, c.Type)
+				return errors.Errorf("%s, line %d: redundant Cmd_type: %s, Cmd_type was %v", filename, lineIdx, line, c.Type)
 			}
 			c.Type = pnet.Command(value[0])
 		case keySuccess:
@@ -168,19 +168,19 @@ func (c *Command) Decode(reader LineReader) error {
 			c.Payload[0] = c.Type.Byte()
 			if payloadLen > 0 {
 				if filename, lineIdx, err = reader.Read(c.Payload[1:]); err != nil {
-					return errors.Errorf("%s:%d: reading Payload failed: %s", filename, lineIdx, err.Error())
+					return errors.Errorf("%s, line %d: reading Payload failed: %s", filename, lineIdx, err.Error())
 				}
 			}
 			// skip '\n'
 			var data [1]byte
 			if filename, lineIdx, err = reader.Read(data[:]); err != nil {
 				if !errors.Is(err, io.EOF) {
-					return errors.Errorf("%s:%d: skipping new line failed: %s", filename, lineIdx, err.Error())
+					return errors.Errorf("%s, line %d: skipping new line failed: %s", filename, lineIdx, err.Error())
 				}
 				return err
 			}
 			if data[0] != '\n' {
-				return errors.Errorf("%s:%d: expected new line, but got: %s", filename, lineIdx, line)
+				return errors.Errorf("%s, line %d: expected new line, but got: %s", filename, lineIdx, line)
 			}
 			if err = c.Validate(filename, lineIdx); err != nil {
 				return err

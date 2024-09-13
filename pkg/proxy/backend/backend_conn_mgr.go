@@ -321,7 +321,9 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	}
 	mgr.processLock.Lock()
 	defer func() {
-		mgr.setQuitSourceByErr(err)
+		if err != nil && !pnet.IsMySQLError(err) {
+			mgr.setQuitSourceByErr(err)
+		}
 		mgr.handshakeHandler.OnTraffic(mgr)
 		now := time.Now()
 		if err != nil && errors.Is(err, ErrBackendConn) {
@@ -403,12 +405,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false)
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
 		mgr.updateTraffic(backendIO)
-		if err != nil && !pnet.IsMySQLError(err) {
-			return
-		}
 	}
-	// Ignore MySQL errors, only return unexpected errors.
-	err = nil
 	return
 }
 
