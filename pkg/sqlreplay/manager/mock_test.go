@@ -24,6 +24,8 @@ func (mockCertMgr) SQLTLS() *tls.Config {
 var _ capture.Capture = (*mockCapture)(nil)
 
 type mockCapture struct {
+	progress float64
+	err      error
 }
 
 func (m *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64) {
@@ -33,31 +35,39 @@ func (m *mockCapture) Close() {
 }
 
 func (m *mockCapture) Progress() (float64, error) {
-	return 0, nil
+	return m.progress, m.err
 }
 
 func (m *mockCapture) Stop(err error) {
+	m.err = err
 }
 
-func (mockCapture) Start(capture.CaptureConfig) error {
+func (m *mockCapture) Start(capture.CaptureConfig) error {
+	m.progress = 0
+	m.err = nil
 	return nil
 }
 
 var _ replay.Replay = (*mockReplay)(nil)
 
 type mockReplay struct {
+	progress float64
+	err      error
 }
 
 func (m *mockReplay) Close() {
 }
 
 func (m *mockReplay) Progress() (float64, error) {
-	return 0, nil
+	return m.progress, m.err
 }
 
 func (m *mockReplay) Start(cfg replay.ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
+	m.progress = 0
+	m.err = nil
 	return nil
 }
 
 func (m *mockReplay) Stop(err error) {
+	m.err = err
 }

@@ -11,16 +11,15 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestStartAndStop(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
-	cpt := NewCapture(lg)
+	cpt := NewCapture(zap.NewNop())
 	defer cpt.Close()
 
 	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
@@ -35,15 +34,12 @@ func TestStartAndStop(t *testing.T) {
 	// start capture and the traffic should be outputted
 	require.NoError(t, cpt.Start(cfg))
 	cpt.Capture(packet, time.Now(), 100)
-	_, err := cpt.Progress()
-	require.NoError(t, err)
 	cpt.Stop(errors.Errorf("mock error"))
-	_, err = cpt.Progress()
-	require.ErrorContains(t, err, "mock error")
 	cpt.wg.Wait()
 	data := writer.getData()
 	require.Greater(t, len(data), 0)
 	require.Contains(t, string(data), "select 1")
+	require.Equal(t, uint64(1), cpt.capturedCmds)
 
 	// stop capture and traffic should not be outputted
 	cpt.Capture(packet, time.Now(), 100)
@@ -65,8 +61,7 @@ func TestStartAndStop(t *testing.T) {
 }
 
 func TestConcurrency(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
-	cpt := NewCapture(lg)
+	cpt := NewCapture(zap.NewNop())
 	defer cpt.Close()
 
 	writer := newMockWriter(store.WriterCfg{})
@@ -144,4 +139,39 @@ func TestCaptureCfgError(t *testing.T) {
 	require.Equal(t, flushThreshold, cfg.flushThreshold)
 	require.Equal(t, maxBuffers, cfg.maxBuffers)
 	require.Equal(t, maxPendingCommands, cfg.maxPendingCommands)
+}
+
+func TestProgress(t *testing.T) {
+	cpt := NewCapture(zap.NewNop())
+	defer cpt.Close()
+
+	writer := newMockWriter(store.WriterCfg{})
+	cfg := CaptureConfig{
+		Output:    t.TempDir(),
+		Duration:  10 * time.Second,
+		cmdLogger: writer,
+	}
+	setStartTime := func(t time.Time) {
+		cpt.Lock()
+		cpt.startTime = t
+		cpt.Unlock()
+	}
+
+	now := time.Now()
+	require.NoError(t, cpt.Start(cfg))
+	progress, err := cpt.Progress()
+	require.NoError(t, err)
+	require.Less(t, progress, 0.3)
+
+	setStartTime(now.Add(-5 * time.Second))
+	progress, err = cpt.Progress()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, progress, 0.5)
+
+	cpt.Stop(errors.Errorf("mock error"))
+	cpt.wg.Wait()
+	progress, err = cpt.Progress()
+	require.ErrorContains(t, err, "mock error")
+	require.GreaterOrEqual(t, progress, 0.5)
+	require.Less(t, progress, 1.0)
 }

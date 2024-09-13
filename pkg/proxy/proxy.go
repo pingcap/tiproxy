@@ -150,8 +150,8 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 			return false, nil, 0, nil
 		}
 
-		connID := s.mu.connID
 		s.mu.connID++
+		connID := s.mu.connID
 		logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
 			zap.String("addr", addr))
 		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),

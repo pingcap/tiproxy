@@ -85,6 +85,11 @@ type replay struct {
 	connCreator      conn.ConnCreator
 	report           report.Report
 	err              error
+	startTime        time.Time
+	endTime          time.Time
+	progress         float64
+	replayedCmds     uint64
+	filteredCmds     uint64
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
 	connCount        int
@@ -103,10 +108,14 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 
 	r.Lock()
 	defer r.Unlock()
+	r.startTime = time.Now()
+	r.endTime = time.Time{}
+	r.progress = 0
 	r.cfg = cfg
 	r.conns = make(map[uint64]conn.Conn)
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeCh = make(chan uint64, maxPendingExceptions)
+	hsHandler = NewHandshakeHandler(hsHandler)
 	r.connCreator = cfg.connCreator
 	if r.connCreator == nil {
 		r.connCreator = func(connID uint64) conn.Conn {
@@ -146,6 +155,8 @@ func (r *replay) readCommands(ctx context.Context) {
 			Dir: r.cfg.Input,
 		})
 	}
+	defer reader.Close()
+
 	var captureStartTs, replayStartTs time.Time
 	for ctx.Err() == nil {
 		command := &cmd.Command{}
@@ -159,6 +170,7 @@ func (r *replay) readCommands(ctx context.Context) {
 		// Replayer always uses the same username. It has no passwords for other users.
 		// TODO: clear the session states.
 		if command.Type == pnet.ComChangeUser {
+			r.filteredCmds++
 			continue
 		}
 		if captureStartTs.IsZero() {
@@ -166,7 +178,7 @@ func (r *replay) readCommands(ctx context.Context) {
 			captureStartTs = command.StartTs
 			replayStartTs = time.Now()
 		} else {
-			expectedInterval := command.StartTs.Sub(replayStartTs)
+			expectedInterval := command.StartTs.Sub(captureStartTs)
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
@@ -181,9 +193,9 @@ func (r *replay) readCommands(ctx context.Context) {
 		if ctx.Err() != nil {
 			break
 		}
+		r.replayedCmds++
 		r.executeCmd(ctx, command)
 	}
-	reader.Close()
 }
 
 func (r *replay) executeCmd(ctx context.Context, command *cmd.Command) {
@@ -237,19 +249,39 @@ func (r *replay) readCloseCh(ctx context.Context) {
 }
 
 func (r *replay) Progress() (float64, error) {
-	return 0, r.err
+	r.Lock()
+	defer r.Unlock()
+	return r.progress, r.err
 }
 
 func (r *replay) Stop(err error) {
 	r.Lock()
 	defer r.Unlock()
-	if r.err == nil {
-		r.err = err
+	// already stopped
+	if r.startTime.IsZero() {
+		return
 	}
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
 	}
+
+	r.endTime = time.Now()
+	fields := []zap.Field{
+		zap.Time("start_time", r.startTime),
+		zap.Time("end_time", r.endTime),
+		zap.Uint64("replayed_cmds", r.replayedCmds),
+	}
+	// TODO: update progress when err is not nil
+	if err != nil {
+		r.err = err
+		fields = append(fields, zap.Error(err))
+		r.lg.Error("replay failed", fields...)
+	} else {
+		r.progress = 1
+		r.lg.Info("replay finished", fields...)
+	}
+	r.startTime = time.Time{}
 }
 
 func (r *replay) Close() {

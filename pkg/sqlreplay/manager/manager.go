@@ -53,9 +53,9 @@ func NewJobManager(lg *zap.Logger, cfg *config.Config, certMgr CertManager, hsHa
 	}
 }
 
-func (jm *jobManager) runningJob() Job {
+func (jm *jobManager) updateProgress() {
 	if len(jm.jobHistory) == 0 {
-		return nil
+		return
 	}
 	job := jm.jobHistory[len(jm.jobHistory)-1]
 	if job.IsRunning() {
@@ -67,9 +67,17 @@ func (jm *jobManager) runningJob() Job {
 			progress, err := jm.replay.Progress()
 			job.SetProgress(progress, err)
 		}
-		if job.IsRunning() {
-			return job
-		}
+	}
+}
+
+func (jm *jobManager) runningJob() Job {
+	if len(jm.jobHistory) == 0 {
+		return nil
+	}
+	jm.updateProgress()
+	job := jm.jobHistory[len(jm.jobHistory)-1]
+	if job.IsRunning() {
+		return job
 	}
 	return nil
 }
@@ -79,29 +87,25 @@ func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
 	if running != nil {
 		return errors.Errorf("a job is running: %s", running.String())
 	}
+	if err := jm.capture.Start(cfg); err != nil {
+		jm.lg.Warn("start capture failed", zap.Error(err))
+		return errors.Wrapf(err, "start capture failed")
+	}
 	newJob := &captureJob{
 		job: job{
 			StartTime: time.Now(),
 			Duration:  cfg.Duration,
 		},
 	}
-	err := jm.capture.Start(cfg)
-	if err != nil {
-		newJob.SetProgress(0, err)
-	}
+	jm.lg.Info("start capture", zap.String("job", newJob.String()))
 	jm.jobHistory = append(jm.jobHistory, newJob)
-	return errors.Wrapf(err, "start capture failed")
+	return nil
 }
 
 func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 	running := jm.runningJob()
 	if running != nil {
 		return errors.Errorf("a job is running: %s", running.String())
-	}
-	newJob := &replayJob{
-		job: job{
-			StartTime: time.Now(),
-		},
 	}
 	// TODO: support update configs online
 	err := jm.replay.Start(cfg, jm.certManager.SQLTLS(), jm.hsHandler, &backend.BCConfig{
@@ -112,10 +116,17 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 		ConnBufferSize:     jm.cfg.Proxy.ConnBufferSize,
 	})
 	if err != nil {
-		newJob.SetProgress(0, err)
+		jm.lg.Warn("start replay failed", zap.Error(err))
+		return errors.Wrapf(err, "start replay failed")
 	}
+	newJob := &replayJob{
+		job: job{
+			StartTime: time.Now(),
+		},
+	}
+	jm.lg.Info("start replay", zap.String("job", newJob.String()))
 	jm.jobHistory = append(jm.jobHistory, newJob)
-	return errors.Wrapf(err, "start replay failed")
+	return nil
 }
 
 func (jm *jobManager) GetCapture() capture.Capture {
@@ -123,6 +134,7 @@ func (jm *jobManager) GetCapture() capture.Capture {
 }
 
 func (jm *jobManager) Jobs() string {
+	jm.updateProgress()
 	b, err := json.Marshal(jm.jobHistory)
 	if err != nil {
 		return err.Error()
@@ -141,7 +153,7 @@ func (jm *jobManager) Stop() string {
 	case Replay:
 		jm.replay.Stop(errors.Errorf("manually stopped"))
 	}
-	job.SetProgress(0, errors.Errorf("manually stopped"))
+	jm.updateProgress()
 	return "stopped: " + job.String()
 }
 

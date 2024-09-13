@@ -22,7 +22,7 @@ const (
 	values(?, ?, ?, ?, ?, ?, ?, ?) on duplicate key update count = count + ?`
 
 	createOtherTable = `create table tiproxy_traffic_replay.other_errors(
-    err_type text primary key,
+    err_type varchar(256) primary key,
     sample_err_msg text,
     sample_replay_time timestamp,
     count bigint)`

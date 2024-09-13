@@ -25,14 +25,16 @@ type Job interface {
 }
 
 type job struct {
+	Status    string
 	StartTime time.Time
 	Duration  time.Duration
 	Progress  float64
-	Error     error
+	// TODO: error can not be marshaled.
+	Error error
 }
 
 func (job *job) IsRunning() bool {
-	return job.Error == nil
+	return job.Error == nil && job.Progress < 1
 }
 
 // TODO: refine the output

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/stretchr/testify/require"
@@ -16,8 +17,8 @@ import (
 func TestStartAndStop(t *testing.T) {
 	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, nil)
 	defer mgr.Close()
-	mgr.capture = &mockCapture{}
-	mgr.replay = &mockReplay{}
+	cpt, rep := &mockCapture{}, &mockReplay{}
+	mgr.capture, mgr.replay = cpt, rep
 
 	require.Contains(t, mgr.Stop(), "no job running")
 	require.NotNil(t, mgr.GetCapture())
@@ -38,4 +39,17 @@ func TestStartAndStop(t *testing.T) {
 	require.Contains(t, mgr.Stop(), "stopped")
 	require.Contains(t, mgr.Stop(), "no job running")
 	require.Len(t, mgr.jobHistory, 2)
+
+	// Test that Jobs() also update progress.
+	require.NoError(t, mgr.StartReplay(replay.ReplayConfig{}))
+	rep.progress = 1.0
+	mgr.Jobs()
+	job := mgr.jobHistory[len(mgr.jobHistory)-1]
+	require.Equal(t, 1.0, job.(*replayJob).Progress)
+	require.NoError(t, mgr.StartCapture(capture.CaptureConfig{}))
+	cpt.err = errors.Errorf("mock error")
+	mgr.Jobs()
+	job = mgr.jobHistory[len(mgr.jobHistory)-1]
+	require.NotNil(t, job)
+	require.ErrorContains(t, job.(*captureJob).Error, "mock error")
 }
