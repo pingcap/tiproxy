@@ -86,5 +86,6 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 	rootCmd.AddCommand(GetNamespaceCmd(ctx))
 	rootCmd.AddCommand(GetConfigCmd(ctx))
 	rootCmd.AddCommand(GetHealthCmd(ctx))
+	rootCmd.AddCommand(GetTrafficCmd(ctx))
 	return rootCmd
 }

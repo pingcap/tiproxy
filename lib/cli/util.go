@@ -40,6 +40,9 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 		return "", err
 	}
 
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	req.URL.Host = net.JoinHostPort(bctx.Host, fmt.Sprintf("%d", bctx.Port))
 	res, err := bctx.Client.Do(req)
 	if err != nil {
