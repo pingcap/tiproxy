@@ -27,7 +27,7 @@ func (m *Meta) Write(path string) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if err = os.WriteFile(filePath, b, 0666); err != nil {
+	if err = os.WriteFile(filePath, b, 0600); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil

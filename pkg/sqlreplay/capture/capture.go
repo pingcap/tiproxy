@@ -28,7 +28,7 @@ const (
 const (
 	statusIdle = iota
 	statusRunning
-	// capture is stopped but data is writting
+	// capture is stopped but data is writing
 	statusStopping
 )
 
