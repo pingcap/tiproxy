@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestManageConns(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
-	replay := NewReplay(lg)
+	replay := NewReplay(zap.NewNop())
 	defer replay.Close()
 
 	loader := newMockChLoader()
@@ -97,11 +97,9 @@ func TestValidateCfg(t *testing.T) {
 }
 
 func TestReplaySpeed(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
 	speeds := []float64{10, 1, 0.1}
-
 	var lastTotalTime time.Duration
-	replay := NewReplay(lg)
+	replay := NewReplay(zap.NewNop())
 	defer replay.Close()
 	for _, speed := range speeds {
 		cmdCh := make(chan *cmd.Command, 10)
@@ -151,5 +149,48 @@ func TestReplaySpeed(t *testing.T) {
 
 		replay.Stop(nil)
 		loader.Close()
+	}
+}
+
+func TestProgress(t *testing.T) {
+	dir := t.TempDir()
+	meta := &store.Meta{
+		Duration: 10 * time.Second,
+		Cmds:     10,
+	}
+	require.NoError(t, meta.Write(dir))
+	loader := newMockNormalLoader()
+	now := time.Now()
+	for i := 0; i < 10; i++ {
+		command := newMockCommand(1)
+		command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
+		loader.writeCommand(command)
+	}
+	defer loader.Close()
+
+	cmdCh := make(chan *cmd.Command, 10)
+	replay := NewReplay(zap.NewNop())
+	defer replay.Close()
+	cfg := ReplayConfig{
+		Input:    dir,
+		Username: "u1",
+		reader:   loader,
+		report:   newMockReport(replay.exceptionCh),
+		connCreator: func(connID uint64) conn.Conn {
+			return &mockConn{
+				connID:      connID,
+				cmdCh:       cmdCh,
+				exceptionCh: replay.exceptionCh,
+				closeCh:     replay.closeCh,
+			}
+		},
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	for i := 0; i < 10; i++ {
+		<-cmdCh
+		progress, err := replay.Progress()
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, progress, float64(i)/10)
+		require.LessOrEqual(t, progress, float64(i+2)/10)
 	}
 }

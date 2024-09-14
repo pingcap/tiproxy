@@ -25,6 +25,13 @@ const (
 	maxPendingCommands = 1 << 14 // 16K
 )
 
+const (
+	statusIdle = iota
+	statusRunning
+	// capture is stopped but data is writting
+	statusStopping
+)
+
 type Capture interface {
 	// Start starts the capture
 	Start(cfg CaptureConfig) error
@@ -96,6 +103,7 @@ type capture struct {
 	progress     float64
 	capturedCmds uint64
 	filteredCmds uint64
+	status       int
 	lg           *zap.Logger
 }
 
@@ -112,33 +120,63 @@ func (c *capture) Start(cfg CaptureConfig) error {
 
 	c.Lock()
 	defer c.Unlock()
-	if !c.startTime.IsZero() {
+	if c.status != statusIdle {
 		return errors.Errorf("traffic capture is running, start time: %s", c.startTime.String())
 	}
-
-	c.stopNoLock(nil)
 	c.cfg = cfg
 	c.startTime = time.Now()
 	c.endTime = time.Time{}
 	c.progress = 0
 	c.capturedCmds = 0
 	c.filteredCmds = 0
+	c.status = statusRunning
 	c.err = nil
 	childCtx, cancel := context.WithTimeout(context.Background(), c.cfg.Duration)
 	c.cancel = cancel
 	bufCh := make(chan *bytes.Buffer, cfg.maxBuffers)
 	c.cmdCh = make(chan *cmd.Command, cfg.maxPendingCommands)
 	c.wg.RunWithRecover(func() {
-		<-childCtx.Done()
-		c.Stop(nil)
-	}, nil, c.lg)
-	c.wg.RunWithRecover(func() {
-		c.collectCmds(bufCh)
-	}, nil, c.lg)
-	c.wg.RunWithRecover(func() {
-		c.flushBuffer(bufCh)
+		c.run(childCtx, bufCh)
 	}, nil, c.lg)
 	return nil
+}
+
+func (c *capture) run(ctx context.Context, bufCh chan *bytes.Buffer) {
+	var wg waitgroup.WaitGroup
+	wg.RunWithRecover(func() {
+		c.collectCmds(bufCh)
+	}, nil, c.lg)
+	wg.RunWithRecover(func() {
+		c.flushBuffer(bufCh)
+	}, nil, c.lg)
+	<-ctx.Done()
+	c.stop(nil)
+	wg.Wait()
+
+	c.Lock()
+	defer c.Unlock()
+	c.status = statusIdle
+	c.endTime = time.Now()
+	duration := c.endTime.Sub(c.startTime)
+	fields := []zap.Field{
+		zap.Time("start_time", c.startTime),
+		zap.Time("end_time", c.endTime),
+		zap.Duration("duration", duration),
+		zap.Uint64("captured_cmds", c.capturedCmds),
+	}
+	if c.err != nil {
+		if c.cfg.Duration > 0 {
+			c.progress = float64(duration) / float64(c.cfg.Duration)
+			if c.progress > 1 {
+				c.progress = 1
+			}
+		}
+		fields = append(fields, zap.Error(c.err))
+		c.lg.Error("capture failed", fields...)
+	} else {
+		c.progress = 1
+		c.lg.Info("capture finished", fields...)
+	}
 }
 
 func (c *capture) collectCmds(bufCh chan<- *bytes.Buffer) {
@@ -148,16 +186,18 @@ func (c *capture) collectCmds(bufCh chan<- *bytes.Buffer) {
 	// Flush all commands even if the context is timeout.
 	for command := range c.cmdCh {
 		if err := command.Encode(buf); err != nil {
-			c.Stop(errors.Wrapf(err, "failed to encode command"))
-			return
+			c.stop(errors.Wrapf(err, "failed to encode command"))
+			continue
 		}
+		c.Lock()
 		c.capturedCmds++
+		c.Unlock()
 		if buf.Len() > c.cfg.flushThreshold {
 			select {
 			case bufCh <- buf:
 			default:
 				// Don't wait, otherwise the QPS may be affected.
-				c.Stop(errors.New("flushing traffic to disk is too slow, buffer is full"))
+				c.stop(errors.New("flushing traffic to disk is too slow, buffer is full"))
 				return
 			}
 			buf = bytes.NewBuffer(make([]byte, 0, c.cfg.bufferCap))
@@ -179,20 +219,26 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	for buf := range bufCh {
 		// TODO: each write size should be less than MaxSize.
 		if err := cmdLogger.Write(buf.Bytes()); err != nil {
-			c.Stop(errors.Wrapf(err, "failed to flush traffic to disk"))
+			c.stop(errors.Wrapf(err, "failed to flush traffic to disk"))
 			break
 		}
 	}
 	if err := cmdLogger.Close(); err != nil {
 		c.lg.Warn("failed to close command logger", zap.Error(err))
 	}
+
+	c.Lock()
+	startTime := c.startTime
+	capturedCmds := c.capturedCmds
+	c.Unlock()
+	// Write meta outside of the lock to avoid affecting QPS.
+	c.writeMeta(time.Since(startTime), capturedCmds)
 }
 
 func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64) {
 	c.Lock()
 	defer c.Unlock()
-	// not capturing
-	if c.startTime.IsZero() {
+	if c.status != statusRunning {
 		return
 	}
 
@@ -213,57 +259,53 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64) {
 	}
 }
 
+func (c *capture) writeMeta(duration time.Duration, cmds uint64) {
+	meta := store.Meta{Duration: duration, Cmds: cmds}
+	if err := meta.Write(c.cfg.Output); err != nil {
+		c.lg.Error("failed to write meta", zap.Error(err))
+	}
+}
+
 func (c *capture) Progress() (float64, error) {
 	c.Lock()
 	defer c.Unlock()
-	if c.startTime.IsZero() || c.cfg.Duration == 0 {
+	if c.status == statusIdle || c.cfg.Duration == 0 {
 		return c.progress, c.err
 	}
-	return float64(time.Since(c.startTime)) / float64(c.cfg.Duration), c.err
+	progress := float64(time.Since(c.startTime)) / float64(c.cfg.Duration)
+	if progress > 1 {
+		progress = 1
+	}
+	return progress, c.err
 }
 
 // stopNoLock must be called after holding a lock.
 func (c *capture) stopNoLock(err error) {
-	// already stopped
-	if c.startTime.IsZero() {
+	if c.status != statusRunning {
 		return
 	}
+	c.status = statusStopping
 	if c.cancel != nil {
 		c.cancel()
 		c.cancel = nil
 	}
 	close(c.cmdCh)
-
-	c.endTime = time.Now()
-	fields := []zap.Field{
-		zap.Time("start_time", c.startTime),
-		zap.Time("end_time", c.endTime),
-		zap.Uint64("captured_cmds", c.capturedCmds),
-	}
-	if err != nil {
-		if c.cfg.Duration > 0 {
-			c.progress = float64(c.endTime.Sub(c.startTime)) / float64(c.cfg.Duration)
-			if c.progress > 1 {
-				c.progress = 1
-			}
-		}
+	if c.err == nil {
 		c.err = err
-		fields = append(fields, zap.Error(err))
-		c.lg.Error("capture failed", fields...)
-	} else {
-		c.progress = 1
-		c.lg.Info("capture finished", fields...)
 	}
-	c.startTime = time.Time{}
+}
+
+func (c *capture) stop(err error) {
+	c.Lock()
+	c.stopNoLock(err)
+	c.Unlock()
 }
 
 func (c *capture) Stop(err error) {
-	c.Lock()
-	defer c.Unlock()
-	c.stopNoLock(err)
+	c.stop(err)
+	c.wg.Wait()
 }
 
 func (c *capture) Close() {
 	c.Stop(errors.New("shutting down"))
-	c.wg.Wait()
 }

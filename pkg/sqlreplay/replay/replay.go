@@ -77,6 +77,7 @@ func (cfg *ReplayConfig) Validate() error {
 type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig
+	meta             store.Meta
 	conns            map[uint64]conn.Conn
 	exceptionCh      chan conn.Exception
 	closeCh          chan uint64
@@ -90,9 +91,9 @@ type replay struct {
 	progress         float64
 	replayedCmds     uint64
 	filteredCmds     uint64
+	connCount        int
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
-	connCount        int
 }
 
 func NewReplay(lg *zap.Logger) *replay {
@@ -108,10 +109,11 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 
 	r.Lock()
 	defer r.Unlock()
+	r.cfg = cfg
+	r.meta = *r.readMeta()
 	r.startTime = time.Now()
 	r.endTime = time.Time{}
 	r.progress = 0
-	r.cfg = cfg
 	r.conns = make(map[uint64]conn.Conn)
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeCh = make(chan uint64, maxPendingExceptions)
@@ -251,7 +253,18 @@ func (r *replay) readCloseCh(ctx context.Context) {
 func (r *replay) Progress() (float64, error) {
 	r.Lock()
 	defer r.Unlock()
+	if r.meta.Cmds > 0 {
+		r.progress = float64(r.replayedCmds+r.filteredCmds) / float64(r.meta.Cmds)
+	}
 	return r.progress, r.err
+}
+
+func (r *replay) readMeta() *store.Meta {
+	m := new(store.Meta)
+	if err := m.Read(r.cfg.Input); err != nil {
+		r.lg.Error("read meta failed", zap.Error(err))
+	}
+	return m
 }
 
 func (r *replay) Stop(err error) {
@@ -272,13 +285,17 @@ func (r *replay) Stop(err error) {
 		zap.Time("end_time", r.endTime),
 		zap.Uint64("replayed_cmds", r.replayedCmds),
 	}
-	// TODO: update progress when err is not nil
 	if err != nil {
 		r.err = err
+		if r.meta.Cmds > 0 {
+			r.progress = float64(r.replayedCmds+r.filteredCmds) / float64(r.meta.Cmds)
+			fields = append(fields, zap.Float64("progress", r.progress))
+		}
 		fields = append(fields, zap.Error(err))
 		r.lg.Error("replay failed", fields...)
 	} else {
 		r.progress = 1
+		fields = append(fields, zap.Float64("progress", r.progress))
 		r.lg.Info("replay finished", fields...)
 	}
 	r.startTime = time.Time{}
