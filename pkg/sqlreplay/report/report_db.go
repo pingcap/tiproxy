@@ -62,7 +62,8 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 }
 
 func (rdb *reportDB) initTables(ctx context.Context) error {
-	for _, stmt := range []string{dropDatabase, createDatabase, createFailTable, createOtherTable} {
+	// Do not truncate database in case that multiple TiProxy instances are running.
+	for _, stmt := range []string{createDatabase, createFailTable, createOtherTable} {
 		if err := rdb.conn.Query(ctx, stmt); err != nil {
 			return errors.Wrapf(err, "initialize report database and tables failed")
 		}

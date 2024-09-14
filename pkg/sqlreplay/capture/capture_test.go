@@ -35,7 +35,6 @@ func TestStartAndStop(t *testing.T) {
 	require.NoError(t, cpt.Start(cfg))
 	cpt.Capture(packet, time.Now(), 100)
 	cpt.Stop(errors.Errorf("mock error"))
-	cpt.wg.Wait()
 	data := writer.getData()
 	require.Greater(t, len(data), 0)
 	require.Contains(t, string(data), "select 1")
@@ -50,7 +49,6 @@ func TestStartAndStop(t *testing.T) {
 	require.NoError(t, cpt.Start(cfg))
 	cpt.Capture(packet, time.Now(), 100)
 	cpt.Stop(nil)
-	cpt.wg.Wait()
 	require.Greater(t, len(writer.getData()), len(data))
 
 	// duplicated start and stop
@@ -168,10 +166,18 @@ func TestProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, progress, 0.5)
 
+	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
+	cpt.Capture(packet, time.Now(), 100)
 	cpt.Stop(errors.Errorf("mock error"))
 	cpt.wg.Wait()
 	progress, err = cpt.Progress()
 	require.ErrorContains(t, err, "mock error")
 	require.GreaterOrEqual(t, progress, 0.5)
 	require.Less(t, progress, 1.0)
+
+	m := store.Meta{}
+	require.NoError(t, m.Read(cfg.Output))
+	require.Equal(t, uint64(1), m.Cmds)
+	require.GreaterOrEqual(t, m.Duration, 5*time.Second)
+	require.Less(t, m.Duration, 10*time.Second)
 }
