@@ -5,8 +5,10 @@ package capture
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +25,7 @@ func TestStartAndStop(t *testing.T) {
 	defer cpt.Close()
 
 	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
-	cpt.Capture(packet, time.Now(), 100)
+	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	writer := newMockWriter(store.WriterCfg{})
 	cfg := CaptureConfig{
 		Output:    t.TempDir(),
@@ -33,7 +35,7 @@ func TestStartAndStop(t *testing.T) {
 
 	// start capture and the traffic should be outputted
 	require.NoError(t, cpt.Start(cfg))
-	cpt.Capture(packet, time.Now(), 100)
+	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	cpt.Stop(errors.Errorf("mock error"))
 	data := writer.getData()
 	require.Greater(t, len(data), 0)
@@ -41,13 +43,13 @@ func TestStartAndStop(t *testing.T) {
 	require.Equal(t, uint64(1), cpt.capturedCmds)
 
 	// stop capture and traffic should not be outputted
-	cpt.Capture(packet, time.Now(), 100)
+	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	cpt.wg.Wait()
 	require.Equal(t, len(data), len(writer.getData()))
 
 	// start capture again
 	require.NoError(t, cpt.Start(cfg))
-	cpt.Capture(packet, time.Now(), 100)
+	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	cpt.Stop(nil)
 	require.Greater(t, len(writer.getData()), len(data))
 
@@ -79,7 +81,18 @@ func TestConcurrency(t *testing.T) {
 			case <-ctx.Done():
 				return
 			case <-time.After(10 * time.Microsecond):
-				cpt.Capture(packet, time.Now(), 100)
+				id := rand.Intn(100) + 1
+				cpt.Capture(packet, time.Now(), uint64(id), mockInitSession)
+			}
+		}
+	})
+	wg.Run(func() {
+		for i := 1; ; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(100 * time.Microsecond):
+				cpt.InitConn(time.Now(), uint64(i), "abc")
 			}
 		}
 	})
@@ -167,7 +180,7 @@ func TestProgress(t *testing.T) {
 	require.GreaterOrEqual(t, progress, 0.5)
 
 	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
-	cpt.Capture(packet, time.Now(), 100)
+	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	cpt.Stop(errors.Errorf("mock error"))
 	cpt.wg.Wait()
 	progress, err = cpt.Progress()
@@ -180,4 +193,38 @@ func TestProgress(t *testing.T) {
 	require.Equal(t, uint64(1), m.Cmds)
 	require.GreaterOrEqual(t, m.Duration, 5*time.Second)
 	require.Less(t, m.Duration, 10*time.Second)
+}
+
+func TestInitConn(t *testing.T) {
+	cpt := NewCapture(zap.NewNop())
+	defer cpt.Close()
+
+	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
+	writer := newMockWriter(store.WriterCfg{})
+	cfg := CaptureConfig{
+		Output:    t.TempDir(),
+		Duration:  10 * time.Second,
+		cmdLogger: writer,
+	}
+
+	// start capture and the traffic should be outputted
+	require.NoError(t, cpt.Start(cfg))
+	cpt.InitConn(time.Now(), 100, "mockDB")
+	cpt.Capture(packet, time.Now(), 100, func() (string, error) {
+		return "init session 100", nil
+	})
+	cpt.Capture(packet, time.Now(), 101, func() (string, error) {
+		return "init session fail 101", errors.New("init session fail 101")
+	})
+	cpt.Capture(packet, time.Now(), 101, func() (string, error) {
+		return "init session 101", nil
+	})
+	cpt.Stop(errors.Errorf("mock error"))
+	data := string(writer.getData())
+	require.Equal(t, 1, strings.Count(data, "mockDB"))
+	require.Equal(t, 0, strings.Count(data, "init session 100"))
+	require.Equal(t, 0, strings.Count(data, "init session fail 101"))
+	require.Equal(t, 1, strings.Count(data, "init session 101"))
+	require.Equal(t, 2, strings.Count(data, "select 1"))
+	require.Equal(t, uint64(4), cpt.capturedCmds)
 }

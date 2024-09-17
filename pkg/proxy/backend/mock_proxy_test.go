@@ -115,6 +115,8 @@ func (mp *mockProxy) directQuery(_, backendIO pnet.PacketIO) error {
 var _ capture.Capture = (*mockCapture)(nil)
 
 type mockCapture struct {
+	db        string
+	initSql   string
 	packet    []byte
 	startTime time.Time
 	connID    uint64
@@ -127,10 +129,17 @@ func (mc *mockCapture) Start(cfg capture.CaptureConfig) error {
 func (mc *mockCapture) Stop(err error) {
 }
 
-func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64) {
+func (mc *mockCapture) InitConn(startTime time.Time, connID uint64, dbname string) {
+	mc.db = dbname
+	mc.startTime = startTime
+	mc.connID = connID
+}
+
+func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error)) {
 	mc.packet = packet
 	mc.startTime = startTime
 	mc.connID = connID
+	mc.initSql, _ = initSession()
 }
 
 func (mc *mockCapture) Progress() (float64, error) {

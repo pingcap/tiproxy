@@ -37,3 +37,7 @@ func (w *mockWriter) getData() []byte {
 func (w *mockWriter) Close() error {
 	return nil
 }
+
+func mockInitSession() (string, error) {
+	return "init session", nil
+}
