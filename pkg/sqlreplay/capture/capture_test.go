@@ -40,7 +40,7 @@ func TestStartAndStop(t *testing.T) {
 	data := writer.getData()
 	require.Greater(t, len(data), 0)
 	require.Contains(t, string(data), "select 1")
-	require.Equal(t, uint64(1), cpt.capturedCmds)
+	require.Equal(t, uint64(2), cpt.capturedCmds)
 
 	// stop capture and traffic should not be outputted
 	cpt.Capture(packet, time.Now(), 100, mockInitSession)
@@ -190,7 +190,7 @@ func TestProgress(t *testing.T) {
 
 	m := store.Meta{}
 	require.NoError(t, m.Read(cfg.Output))
-	require.Equal(t, uint64(1), m.Cmds)
+	require.Equal(t, uint64(2), m.Cmds)
 	require.GreaterOrEqual(t, m.Duration, 5*time.Second)
 	require.Less(t, m.Duration, 10*time.Second)
 }
