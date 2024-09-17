@@ -1438,6 +1438,7 @@ func TestCapture(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
 		config.clientConfig.dbName = "test"
 		config.proxyConfig.connectionID = 100
+		config.proxyConfig.capture = &mockCapture{}
 	})
 	runners := []runner{
 		// 1st handshake

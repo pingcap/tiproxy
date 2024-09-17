@@ -281,10 +281,8 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, ini
 		initPacket = append(initPacket, hack.Slice(sql)...)
 		command := cmd.NewCommand(initPacket, startTime, connID)
 		c.Lock()
-		if c.status == statusRunning {
-			if c.putCommand(command) {
-				c.conns[connID] = struct{}{}
-			}
+		if c.putCommand(command) {
+			c.conns[connID] = struct{}{}
 		}
 		c.Unlock()
 	}
@@ -304,6 +302,9 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, ini
 }
 
 func (c *capture) putCommand(command *cmd.Command) bool {
+	if c.status != statusRunning {
+		return false
+	}
 	select {
 	case c.cmdCh <- command:
 		return true

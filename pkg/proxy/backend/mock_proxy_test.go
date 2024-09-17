@@ -22,6 +22,7 @@ type proxyConfig struct {
 	backendTLSConfig  *tls.Config
 	handler           *CustomHandshakeHandler
 	bcConfig          *BCConfig
+	capture           capture.Capture
 	username          string
 	password          string
 	sessionToken      string
@@ -58,7 +59,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 		proxyConfig:        cfg,
 		logger:             lg.Named("mockProxy"),
 		text:               text,
-		BackendConnManager: NewBackendConnManager(lg, cfg.handler, &mockCapture{}, cfg.connectionID, cfg.bcConfig),
+		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.capture, cfg.connectionID, cfg.bcConfig),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
