@@ -33,6 +33,8 @@ import (
 var (
 	ErrCloseConnMgr    = errors.New("failed to close connection manager")
 	ErrTargetUnhealthy = errors.New("target backend becomes unhealthy")
+	ErrInTxn           = errors.New("connection is in transaction")
+	ErrClosing         = errors.New("connection is closing")
 )
 
 const (
@@ -223,6 +225,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	mgr.cancelFunc = cancelFunc
 	mgr.lastActiveTime = endTime
+	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
+		mgr.cpt.InitConn(endTime, mgr.connectionID, mgr.authenticator.dbname)
+	}
 	mgr.wg.RunWithRecover(func() {
 		mgr.processSignals(childCtx)
 	}, func(_ any) {
@@ -317,7 +322,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
 	startTime := time.Now()
 	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
-		mgr.cpt.Capture(request, startTime, mgr.connectionID)
+		mgr.cpt.Capture(request, startTime, mgr.connectionID, mgr.initForCapture)
 	}
 	mgr.processLock.Lock()
 	defer func() {
@@ -449,6 +454,24 @@ func (mgr *BackendConnManager) querySessionStates(backendIO pnet.PacketIO) (sess
 	}
 	sessionToken, err = result.GetStringByName(0, sessionTokenCol)
 	return
+}
+
+func (mgr *BackendConnManager) initForCapture() (string, error) {
+	mgr.processLock.Lock()
+	defer mgr.processLock.Unlock()
+	if mgr.closeStatus.Load() >= statusClosing {
+		return "", ErrClosing
+	}
+	if !mgr.cmdProcessor.finishedTxn() {
+		return "", ErrInTxn
+	}
+	sessionStates, _, err := mgr.querySessionStates(*mgr.backendIO.Load())
+	if err != nil {
+		return "", err
+	}
+	sessionStates = strings.ReplaceAll(sessionStates, "\\", "\\\\")
+	sessionStates = strings.ReplaceAll(sessionStates, "'", "\\'")
+	return fmt.Sprintf(sqlSetState, sessionStates), nil
 }
 
 // processSignals runs in a goroutine to:

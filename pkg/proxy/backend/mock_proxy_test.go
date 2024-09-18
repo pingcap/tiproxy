@@ -22,6 +22,7 @@ type proxyConfig struct {
 	backendTLSConfig  *tls.Config
 	handler           *CustomHandshakeHandler
 	bcConfig          *BCConfig
+	capture           capture.Capture
 	username          string
 	password          string
 	sessionToken      string
@@ -58,7 +59,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 		proxyConfig:        cfg,
 		logger:             lg.Named("mockProxy"),
 		text:               text,
-		BackendConnManager: NewBackendConnManager(lg, cfg.handler, &mockCapture{}, cfg.connectionID, cfg.bcConfig),
+		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.capture, cfg.connectionID, cfg.bcConfig),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
@@ -115,6 +116,8 @@ func (mp *mockProxy) directQuery(_, backendIO pnet.PacketIO) error {
 var _ capture.Capture = (*mockCapture)(nil)
 
 type mockCapture struct {
+	db        string
+	initSql   string
 	packet    []byte
 	startTime time.Time
 	connID    uint64
@@ -127,10 +130,17 @@ func (mc *mockCapture) Start(cfg capture.CaptureConfig) error {
 func (mc *mockCapture) Stop(err error) {
 }
 
-func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64) {
+func (mc *mockCapture) InitConn(startTime time.Time, connID uint64, dbname string) {
+	mc.db = dbname
+	mc.startTime = startTime
+	mc.connID = connID
+}
+
+func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error)) {
 	mc.packet = packet
 	mc.startTime = startTime
 	mc.connID = connID
+	mc.initSql, _ = initSession()
 }
 
 func (mc *mockCapture) Progress() (float64, error) {

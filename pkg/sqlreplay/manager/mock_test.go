@@ -28,7 +28,10 @@ type mockCapture struct {
 	err      error
 }
 
-func (m *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64) {
+func (m *mockCapture) InitConn(startTime time.Time, connID uint64, db string) {
+}
+
+func (m *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error)) {
 }
 
 func (m *mockCapture) Close() {

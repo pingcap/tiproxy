@@ -15,6 +15,7 @@ import (
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
+	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
 
@@ -38,8 +39,10 @@ type Capture interface {
 	// Stop stops the capture.
 	// err means the error that caused the capture to stop. nil means the capture stopped manually.
 	Stop(err error)
+	// InitConn is called when a new connection is created.
+	InitConn(startTime time.Time, connID uint64, db string)
 	// Capture captures traffic
-	Capture(packet []byte, startTime time.Time, connID uint64)
+	Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error))
 	// Progress returns the progress of the capture job
 	Progress() (float64, error)
 	// Close closes the capture
@@ -94,6 +97,7 @@ var _ Capture = (*capture)(nil)
 type capture struct {
 	sync.Mutex
 	cfg          CaptureConfig
+	conns        map[uint64]struct{}
 	wg           waitgroup.WaitGroup
 	cancel       context.CancelFunc
 	cmdCh        chan *cmd.Command
@@ -131,6 +135,7 @@ func (c *capture) Start(cfg CaptureConfig) error {
 	c.filteredCmds = 0
 	c.status = statusRunning
 	c.err = nil
+	c.conns = make(map[uint64]struct{})
 	childCtx, cancel := context.WithTimeout(context.Background(), c.cfg.Duration)
 	c.cancel = cancel
 	bufCh := make(chan *bytes.Buffer, cfg.maxBuffers)
@@ -235,11 +240,51 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	c.writeMeta(time.Since(startTime), capturedCmds)
 }
 
-func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64) {
+func (c *capture) InitConn(startTime time.Time, connID uint64, db string) {
 	c.Lock()
 	defer c.Unlock()
 	if c.status != statusRunning {
 		return
+	}
+	if db != "" {
+		packet := make([]byte, 0, len(db)+1)
+		packet = append(packet, pnet.ComInitDB.Byte())
+		packet = append(packet, hack.Slice(db)...)
+		command := cmd.NewCommand(packet, startTime, connID)
+		if command == nil {
+			return
+		}
+		c.putCommand(command)
+	}
+	c.conns[connID] = struct{}{}
+}
+
+func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error)) {
+	c.Lock()
+	if c.status != statusRunning {
+		c.Unlock()
+		return
+	}
+	_, inited := c.conns[connID]
+	c.Unlock()
+
+	// If this is the first command for this connection, record a `set session_states` statement.
+	if !inited {
+		// initSession is slow, do not call it in the lock.
+		sql, err := initSession()
+		if err != nil {
+			c.lg.Warn("failed to init session", zap.Error(err))
+			return
+		}
+		initPacket := make([]byte, 0, len(sql)+1)
+		initPacket = append(initPacket, pnet.ComQuery.Byte())
+		initPacket = append(initPacket, hack.Slice(sql)...)
+		command := cmd.NewCommand(initPacket, startTime, connID)
+		c.Lock()
+		if c.putCommand(command) {
+			c.conns[connID] = struct{}{}
+		}
+		c.Unlock()
 	}
 
 	command := cmd.NewCommand(packet, startTime, connID)
@@ -250,12 +295,23 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64) {
 	if command.Type == pnet.ComChangeUser {
 		return
 	}
-	// TODO: handle QUIT
+	// TODO: handle QUIT and delete c.conns[connID]
+	c.Lock()
+	defer c.Unlock()
+	c.putCommand(command)
+}
+
+func (c *capture) putCommand(command *cmd.Command) bool {
+	if c.status != statusRunning {
+		return false
+	}
 	select {
 	case c.cmdCh <- command:
+		return true
 	default:
 		// Don't wait, otherwise the QPS may be affected.
 		c.stopNoLock(errors.New("encoding traffic is too slow, buffer is full"))
+		return false
 	}
 }
 
@@ -293,6 +349,7 @@ func (c *capture) stopNoLock(err error) {
 	if c.err == nil {
 		c.err = err
 	}
+	c.conns = map[uint64]struct{}{}
 }
 
 func (c *capture) stop(err error) {

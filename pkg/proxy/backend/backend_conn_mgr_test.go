@@ -1436,13 +1436,24 @@ func TestProcessSignalsPanic(t *testing.T) {
 
 func TestCapture(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.clientConfig.dbName = "test"
 		config.proxyConfig.connectionID = 100
+		config.proxyConfig.capture = &mockCapture{}
 	})
 	runners := []runner{
 		// 1st handshake
 		{
-			client:  ts.mc.authenticate,
-			proxy:   ts.firstHandshake4Proxy,
+			client: ts.mc.authenticate,
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				now := time.Now()
+				err := ts.firstHandshake4Proxy(clientIO, backendIO)
+				require.NoError(t, err)
+				cpt := ts.mp.cpt.(*mockCapture)
+				require.Equal(t, "test", cpt.db)
+				require.GreaterOrEqual(t, cpt.startTime, now)
+				require.EqualValues(t, 100, cpt.connID)
+				return nil
+			},
 			backend: ts.handshake4Backend,
 		},
 		{
@@ -1458,9 +1469,15 @@ func TestCapture(t *testing.T) {
 				require.Equal(t, packet, cpt.packet)
 				require.GreaterOrEqual(t, cpt.startTime, now)
 				require.EqualValues(t, 100, cpt.connID)
+				require.Contains(t, cpt.initSql, "SET SESSION_STATES")
 				return err
 			},
 			backend: func(packetIO pnet.PacketIO) error {
+				// respond to `SHOW SESSION STATES`
+				ts.mb.respondType = responseTypeResultSet
+				err := ts.mb.respond(packetIO)
+				require.NoError(ts.t, err)
+				// respond to `select 1`
 				ts.mb.respondType = responseTypeResultSet
 				ts.mb.columns = 1
 				ts.mb.rows = 1
