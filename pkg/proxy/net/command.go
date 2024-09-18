@@ -105,3 +105,12 @@ func (f *Command) UnmarshalText(o []byte) error {
 	}
 	return nil
 }
+
+func CommandFromString(str string) Command {
+	for e, c := range commandStrs {
+		if c == str {
+			return Command(e)
+		}
+	}
+	return ComEnd
+}

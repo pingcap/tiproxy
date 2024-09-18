@@ -1484,6 +1484,15 @@ func TestCapture(t *testing.T) {
 				return ts.mb.respond(packetIO)
 			},
 		},
+		{
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				_ = ts.mp.Close()
+				ts.closed = true
+				cpt := ts.mp.cpt.(*mockCapture)
+				require.Equal(t, []byte{pnet.ComQuit.Byte()}, cpt.packet)
+				return nil
+			},
+		},
 	}
 	ts.runTests(runners)
 }

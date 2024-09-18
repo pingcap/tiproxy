@@ -89,7 +89,7 @@ func (c *Command) Encode(writer *bytes.Buffer) error {
 		return err
 	}
 	if c.Type != pnet.ComQuery {
-		if err = writeByte(keyType, c.Type.Byte(), writer); err != nil {
+		if err = writeString(keyType, c.Type.String(), writer); err != nil {
 			return err
 		}
 	}
@@ -156,7 +156,7 @@ func (c *Command) Decode(reader LineReader) error {
 			if c.Type != pnet.ComQuery {
 				return errors.Errorf("%s, line %d: redundant Cmd_type: %s, Cmd_type was %v", filename, lineIdx, line, c.Type)
 			}
-			c.Type = pnet.Command(value[0])
+			c.Type = pnet.CommandFromString(value)
 		case keySuccess:
 			c.Succeess = value == "true"
 		case keyPayloadLen:

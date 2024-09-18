@@ -270,6 +270,10 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, ini
 
 	// If this is the first command for this connection, record a `set session_states` statement.
 	if !inited {
+		// Maybe it's quitting, no need to init session.
+		if initSession == nil || len(packet) == 0 || packet[0] == pnet.ComQuit.Byte() {
+			return
+		}
 		// initSession is slow, do not call it in the lock.
 		sql, err := initSession()
 		if err != nil {
@@ -291,11 +295,6 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, ini
 	if command == nil {
 		return
 	}
-	// COM_CHANGE_USER sends auth data, so ignore it.
-	if command.Type == pnet.ComChangeUser {
-		return
-	}
-	// TODO: handle QUIT and delete c.conns[connID]
 	c.Lock()
 	defer c.Unlock()
 	c.putCommand(command)
@@ -303,6 +302,18 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, ini
 
 func (c *capture) putCommand(command *cmd.Command) bool {
 	if c.status != statusRunning {
+		return false
+	}
+	switch command.Type {
+	case pnet.ComQuit:
+		if _, ok := c.conns[command.ConnID]; ok {
+			delete(c.conns, command.ConnID)
+		} else {
+			// Duplicated quit, ignore it.
+			return false
+		}
+	case pnet.ComChangeUser:
+		// COM_CHANGE_USER sends auth data, so ignore it.
 		return false
 	}
 	select {
