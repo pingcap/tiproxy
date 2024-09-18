@@ -225,17 +225,3 @@ func writeString(key, value string, writer *bytes.Buffer) error {
 	}
 	return nil
 }
-
-func writeByte(key string, value byte, writer *bytes.Buffer) error {
-	var err error
-	if _, err = writer.WriteString(key); err != nil {
-		return errors.WithStack(err)
-	}
-	if err = writer.WriteByte(value); err != nil {
-		return errors.WithStack(err)
-	}
-	if err = writer.WriteByte('\n'); err != nil {
-		return errors.WithStack(err)
-	}
-	return nil
-}

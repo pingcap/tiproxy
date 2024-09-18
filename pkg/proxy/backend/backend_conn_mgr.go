@@ -775,7 +775,7 @@ func (mgr *BackendConnManager) Close() error {
 			}
 		}
 	}
-	// Maybe it's unexpectedly closing without a QUIT command, explictly add one.
+	// Maybe it's unexpectedly closing without a QUIT command, explicitly add one.
 	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
 		mgr.cpt.Capture([]byte{pnet.ComQuit.Byte()}, time.Now(), mgr.connectionID, nil)
 	}
