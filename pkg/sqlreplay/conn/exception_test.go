@@ -13,15 +13,33 @@ import (
 )
 
 func TestFailException(t *testing.T) {
-	commands := []cmd.Command{
-		{ConnID: 1, Type: pnet.ComFieldList},
-		{ConnID: 1, Type: pnet.ComQuery, Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)},
+	tests := []struct {
+		cmd *cmd.Command
+		key string
+	}{
+		{
+			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComFieldList},
+			key: "\x04",
+		},
+		{
+			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComQuery, Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)},
+			key: "\x03e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
+		},
+		{
+			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)},
+			key: "\x16e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
+		},
+		{
+			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte()}, PreparedStmt: "select ?", Params: []any{uint64(100), "abc", nil}},
+			key: "\x17e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
+		},
 	}
-	for i, command := range commands {
-		exception := NewFailException(errors.New("mock error"), &command)
+	for i, test := range tests {
+		exception := NewFailException(errors.New("mock error"), test.cmd)
 		require.Equal(t, Fail, exception.Type(), "case %d", i)
 		require.Equal(t, uint64(1), exception.ConnID(), "case %d", i)
 		require.Equal(t, "mock error", exception.Error(), "case %d", i)
+		require.Equal(t, test.key, exception.Key(), "case %d", i)
 	}
 }
 

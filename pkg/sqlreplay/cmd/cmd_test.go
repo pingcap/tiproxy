@@ -134,4 +134,16 @@ func TestDigest(t *testing.T) {
 
 	cmd3 := NewCommand(append([]byte{pnet.ComFieldList.Byte()}, []byte("xxx")...), time.Now(), 100)
 	require.Empty(t, cmd3.Digest())
+
+	cmd4 := NewCommand(append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...), time.Now(), 100)
+	require.Equal(t, cmd1.Digest(), cmd4.Digest())
+	require.Equal(t, "select ?", cmd4.QueryText())
+
+	data, err := pnet.MakeExecuteStmtRequest(1, []any{1})
+	require.NoError(t, err)
+	cmd5 := NewCommand(data, time.Now(), 100)
+	cmd5.PreparedStmt = "select ?"
+	cmd5.Params = []any{1}
+	require.Equal(t, cmd1.Digest(), cmd5.Digest())
+	require.Equal(t, "select ? params=[1]", cmd5.QueryText())
 }
