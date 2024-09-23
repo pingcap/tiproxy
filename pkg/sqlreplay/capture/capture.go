@@ -313,8 +313,15 @@ func (c *capture) putCommand(command *cmd.Command) bool {
 			return false
 		}
 	case pnet.ComChangeUser:
-		// COM_CHANGE_USER sends auth data, so ignore it.
-		return false
+		// COM_CHANGE_USER sends auth data, change it to COM_RESET_CONNECTION.
+		command.Type = pnet.ComResetConnection
+		command.Payload = []byte{pnet.ComResetConnection.Byte()}
+	case pnet.ComQuery:
+		// Avoid password leakage.
+		if IsSensitiveSQL(hack.String(command.Payload[1:])) {
+			c.filteredCmds++
+			return false
+		}
 	}
 	select {
 	case c.cmdCh <- command:
