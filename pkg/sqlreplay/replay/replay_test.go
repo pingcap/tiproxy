@@ -168,7 +168,7 @@ func TestProgress(t *testing.T) {
 	}
 	defer loader.Close()
 
-	cmdCh := make(chan *cmd.Command, 10)
+	cmdCh := make(chan *cmd.Command)
 	replay := NewReplay(zap.NewNop())
 	defer replay.Close()
 	cfg := ReplayConfig{
