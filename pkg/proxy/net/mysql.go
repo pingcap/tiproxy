@@ -6,6 +6,7 @@ package net
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"math"
 	"net"
 
@@ -583,14 +584,44 @@ func MakeQueryPacket(stmt string) []byte {
 	return request
 }
 
-func MakePrepareStmtPacket(stmt string) []byte {
+func MakePrepareStmtRequest(stmt string) []byte {
 	request := make([]byte, len(stmt)+1)
 	request[0] = ComStmtPrepare.Byte()
 	copy(request[1:], hack.Slice(stmt))
 	return request
 }
 
-func MakeExecuteStmtPacket(stmtID uint32, args []any) ([]byte, error) {
+// MakePrepareStmtResp creates a prepared statement response.
+// The packet is incomplete and it's only used for testing.
+func MakePrepareStmtResp(stmtID uint32, paramNum int) []byte {
+	// header
+	response := make([]byte, 1+4+2+2)
+	pos := 0
+	response[pos] = ComStmtPrepare.Byte()
+	pos += 1
+	binary.LittleEndian.PutUint32(response[pos:], stmtID)
+	pos += 4
+	// column count
+	pos += 2
+	// param count
+	binary.LittleEndian.PutUint16(response[pos:], uint16(paramNum))
+	// ignore rest part
+	return response
+}
+
+func ParsePrepareStmtResp(resp []byte) (stmtID uint32, paramNum int) {
+	// header
+	pos := 1
+	stmtID = binary.LittleEndian.Uint32(resp[pos:])
+	pos += 4
+	// column count
+	pos += 2
+	paramNum = int(binary.LittleEndian.Uint16(resp[pos:]))
+	// ignore rest part
+	return
+}
+
+func MakeExecuteStmtRequest(stmtID uint32, args []any) ([]byte, error) {
 	paramNum := len(args)
 	paramTypes := make([]byte, paramNum*2)
 	paramValues := make([][]byte, paramNum)
@@ -607,21 +638,64 @@ func MakeExecuteStmtPacket(stmtID uint32, args []any) ([]byte, error) {
 
 		newParamBoundFlag = 1
 		switch v := args[i].(type) {
+		case int8:
+			paramTypes[i<<1] = fieldTypeTiny
+			paramValues[i] = []byte{byte(v)}
+		case int16:
+			paramTypes[i<<1] = fieldTypeShort
+			paramValues[i] = Uint16ToBytes(uint16(v))
+		case int32:
+			paramTypes[i<<1] = fieldTypeLong
+			paramValues[i] = Uint32ToBytes(uint32(v))
+		case int:
+			paramTypes[i<<1] = fieldTypeLongLong
+			paramValues[i] = Uint64ToBytes(uint64(v))
 		case int64:
 			paramTypes[i<<1] = fieldTypeLongLong
+			paramValues[i] = Uint64ToBytes(uint64(v))
+		case uint8:
+			paramTypes[i<<1] = fieldTypeTiny
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = []byte{v}
+		case uint16:
+			paramTypes[i<<1] = fieldTypeShort
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = Uint16ToBytes(v)
+		case uint32:
+			paramTypes[i<<1] = fieldTypeLong
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = Uint32ToBytes(v)
+		case uint:
+			paramTypes[i<<1] = fieldTypeLongLong
+			paramTypes[(i<<1)+1] = 0x80
 			paramValues[i] = Uint64ToBytes(uint64(v))
 		case uint64:
 			paramTypes[i<<1] = fieldTypeLongLong
 			paramTypes[(i<<1)+1] = 0x80
 			paramValues[i] = Uint64ToBytes(v)
+		case bool:
+			paramTypes[i<<1] = fieldTypeTiny
+			if v {
+				paramValues[i] = []byte{1}
+			} else {
+				paramValues[i] = []byte{0}
+			}
+		case float32:
+			paramTypes[i<<1] = fieldTypeFloat
+			paramValues[i] = Uint32ToBytes(math.Float32bits(v))
 		case float64:
 			paramTypes[i<<1] = fieldTypeDouble
 			paramValues[i] = Uint64ToBytes(math.Float64bits(v))
 		case string:
 			paramTypes[i<<1] = fieldTypeString
 			paramValues[i] = DumpLengthEncodedString(nil, hack.Slice(v))
+		case []byte:
+			paramTypes[i<<1] = fieldTypeString
+			paramValues[i] = DumpLengthEncodedString(nil, v)
+		case json.RawMessage:
+			paramTypes[i<<1] = fieldTypeString
+			paramValues[i] = DumpLengthEncodedString(nil, v)
 		default:
-			// we don't need other types currently
 			return nil, errors.WithStack(errors.Errorf("unsupported type %T", v))
 		}
 
@@ -655,4 +729,99 @@ func MakeExecuteStmtPacket(stmtID uint32, args []any) ([]byte, error) {
 		}
 	}
 	return request, nil
+}
+
+// ParseExecuteStmtRequest parses ComStmtExecute request.
+// NOTICE: the type of returned args may be wrong because it doesn't have the knowledge of real param types.
+// E.g. []byte is returned as string, and int is returned as int32.
+func ParseExecuteStmtRequest(data []byte, paramNum int) (stmtID uint32, args []any, err error) {
+	if len(data) < 1+4+1+4+1 {
+		return 0, nil, errors.WithStack(gomysql.ErrMalformPacket)
+	}
+
+	pos := 1
+	stmtID = binary.LittleEndian.Uint32(data[pos : pos+4])
+	// cursor flag and iteration count
+	pos += 4 + 1 + 4
+	if len(data) < pos+((paramNum+7)>>3)+1 {
+		return 0, nil, errors.WithStack(gomysql.ErrMalformPacket)
+	}
+	nullBitmap := data[pos : pos+((paramNum+7)>>3)]
+	pos += len(nullBitmap)
+	newParamBoundFlag := data[pos]
+	pos += 1
+	args = make([]any, paramNum)
+	if newParamBoundFlag == 0 {
+		return stmtID, args, nil
+	}
+
+	if len(data) < pos+paramNum*2 {
+		return 0, nil, errors.WithStack(gomysql.ErrMalformPacket)
+	}
+	paramTypes := data[pos : pos+paramNum*2]
+	pos += paramNum * 2
+
+	for i := 0; i < paramNum; i++ {
+		if nullBitmap[i/8]&(1<<(uint(i)%8)) > 0 {
+			args[i] = nil
+			continue
+		}
+		switch paramTypes[i<<1] {
+		case fieldTypeTiny:
+			if paramTypes[(i<<1)+1] == 0x80 {
+				args[i] = uint8(data[pos])
+			} else {
+				args[i] = int8(data[pos])
+			}
+			pos += 1
+		case fieldTypeShort:
+			v := binary.LittleEndian.Uint16(data[pos : pos+2])
+			if paramTypes[(i<<1)+1] == 0x80 {
+				args[i] = v
+			} else {
+				args[i] = int16(v)
+			}
+			pos += 2
+		case fieldTypeLong:
+			v := binary.LittleEndian.Uint32(data[pos : pos+4])
+			if paramTypes[(i<<1)+1] == 0x80 {
+				args[i] = v
+			} else {
+				args[i] = int32(v)
+			}
+			pos += 4
+		case fieldTypeLongLong:
+			v := binary.LittleEndian.Uint64(data[pos : pos+8])
+			if paramTypes[(i<<1)+1] == 0x80 {
+				args[i] = v
+			} else {
+				args[i] = int64(v)
+			}
+			pos += 8
+		case fieldTypeFloat:
+			args[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[pos : pos+4]))
+			pos += 4
+		case fieldTypeDouble:
+			args[i] = math.Float64frombits(binary.LittleEndian.Uint64(data[pos : pos+8]))
+			pos += 8
+		case fieldTypeString:
+			v, _, off, err := ParseLengthEncodedBytes(data[pos:])
+			if err != nil {
+				return 0, nil, errors.Wrapf(err, "parse param %d err", i)
+			}
+			args[i] = hack.String(v)
+			pos += off
+		default:
+			return 0, nil, errors.Errorf("unsupported type %d", paramTypes[i<<1])
+		}
+	}
+
+	return stmtID, args, nil
+}
+
+func MakeCloseStmtRequest(stmtID uint32) []byte {
+	request := make([]byte, 1+4)
+	request[0] = ComStmtClose.Byte()
+	binary.LittleEndian.PutUint32(request[1:], stmtID)
+	return request
 }

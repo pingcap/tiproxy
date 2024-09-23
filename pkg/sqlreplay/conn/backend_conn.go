@@ -7,9 +7,12 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/json"
+	"strings"
 
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
 
@@ -27,14 +30,17 @@ type BackendConn interface {
 	ConnID() uint64
 	ExecuteCmd(ctx context.Context, request []byte) error
 	Query(ctx context.Context, stmt string) error
-	PrepareStmt(ctx context.Context, stmt string) (uint32, error)
+	PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error)
 	ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error
+	GetPreparedStmt(stmtID uint32) (text string, paramNum int)
 	Close()
 }
 
 var _ BackendConn = (*backendConn)(nil)
 
 type backendConn struct {
+	// only stores binary encoded prepared statements
+	preparedStmts    map[uint32]preparedStmt
 	username         string
 	password         string
 	clientIO         *packetIO
@@ -46,6 +52,7 @@ type backendConn struct {
 func NewBackendConn(lg *zap.Logger, connID uint64, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig,
 	backendTLSConfig *tls.Config, username, password string) *backendConn {
 	return &backendConn{
+		preparedStmts:    make(map[uint32]preparedStmt),
 		username:         username,
 		password:         password,
 		clientIO:         newPacketIO(),
@@ -68,11 +75,47 @@ func (bc *backendConn) ConnID() uint64 {
 func (bc *backendConn) ExecuteCmd(ctx context.Context, request []byte) error {
 	err := bc.backendConnMgr.ExecuteCmd(ctx, request)
 	bc.clientIO.Reset()
+	if err == nil {
+		bc.updatePreparedStmts(request, bc.clientIO.GetResp())
+	}
 	return err
 }
 
+func (bc *backendConn) updatePreparedStmts(request, response []byte) {
+	switch request[0] {
+	case pnet.ComStmtPrepare.Byte():
+		stmtID, paramNum := pnet.ParsePrepareStmtResp(response)
+		stmt := hack.String(request[1:])
+		bc.preparedStmts[stmtID] = preparedStmt{text: stmt, paramNum: paramNum}
+	case pnet.ComStmtClose.Byte():
+		stmtID := binary.LittleEndian.Uint32(request[1:5])
+		delete(bc.preparedStmts, stmtID)
+	case pnet.ComChangeUser.Byte(), pnet.ComResetConnection.Byte():
+		for stmtID := range bc.preparedStmts {
+			delete(bc.preparedStmts, stmtID)
+		}
+	case pnet.ComQuery.Byte():
+		if len(request[1:]) > len(setSessionStates) && strings.EqualFold(hack.String(request[1:len(setSessionStates)+1]), setSessionStates) {
+			query := request[len(setSessionStates)+1:]
+			query = hack.Slice(strings.Trim(hack.String(query), "'\" "))
+			var sessionStates sessionStates
+			if err := json.Unmarshal(query, &sessionStates); err != nil {
+				bc.lg.Warn("failed to unmarshal session states", zap.Error(err))
+			}
+			for stmtID, stmt := range sessionStates.PreparedStmts {
+				bc.preparedStmts[stmtID] = preparedStmt{text: stmt.StmtText, paramNum: len(stmt.ParamTypes)}
+			}
+		}
+	}
+}
+
+func (bc *backendConn) GetPreparedStmt(stmtID uint32) (string, int) {
+	ps := bc.preparedStmts[stmtID]
+	return ps.text, ps.paramNum
+}
+
 func (bc *backendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error {
-	request, err := pnet.MakeExecuteStmtPacket(stmtID, args)
+	request, err := pnet.MakeExecuteStmtRequest(stmtID, args)
 	if err != nil {
 		return err
 	}
@@ -82,7 +125,7 @@ func (bc *backendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []an
 }
 
 func (bc *backendConn) PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error) {
-	request := pnet.MakePrepareStmtPacket(stmt)
+	request := pnet.MakePrepareStmtRequest(stmt)
 	err = bc.backendConnMgr.ExecuteCmd(ctx, request)
 	if err == nil {
 		resp := bc.clientIO.GetResp()

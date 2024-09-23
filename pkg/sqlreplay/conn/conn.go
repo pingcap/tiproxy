@@ -6,6 +6,7 @@ package conn
 import (
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
@@ -60,13 +61,33 @@ func (c *conn) Run(ctx context.Context) {
 			return
 		case command := <-c.cmdCh:
 			if err := c.backendConn.ExecuteCmd(ctx, command.Payload); err != nil {
-				c.exceptionCh <- NewFailException(err, command)
+				if c.updateCmdForExecuteStmt(command) {
+					c.exceptionCh <- NewFailException(err, command)
+				}
 				if pnet.IsDisconnectError(err) {
 					return
 				}
 			}
 		}
 	}
+}
+
+func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
+	if command.Type == pnet.ComStmtExecute && len(command.Payload) >= 5 {
+		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
+		text, paramNum := c.backendConn.GetPreparedStmt(stmtID)
+		if len(text) == 0 {
+			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID))
+			return false
+		}
+		_, args, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum)
+		if err != nil {
+			c.lg.Error("parse execute stmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+		}
+		command.PreparedStmt = text
+		command.Params = args
+	}
+	return true
 }
 
 // ExecuteCmd executes a command asynchronously.

@@ -37,10 +37,12 @@ func (m *mockBackendConnMgr) Close() error {
 var _ BackendConn = (*mockBackendConn)(nil)
 
 type mockBackendConn struct {
-	cmds    atomic.Int32
-	connErr error
-	execErr error
-	close   atomic.Bool
+	cmds        atomic.Int32
+	connErr     error
+	execErr     error
+	close       atomic.Bool
+	prepareStmt string
+	paramNum    int
 }
 
 func (c *mockBackendConn) Connect(ctx context.Context) error {
@@ -69,6 +71,10 @@ func (c *mockBackendConn) PrepareStmt(ctx context.Context, stmt string) (uint32,
 func (c *mockBackendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error {
 	c.cmds.Add(1)
 	return c.execErr
+}
+
+func (c *mockBackendConn) GetPreparedStmt(stmtID uint32) (string, int) {
+	return c.prepareStmt, c.paramNum
 }
 
 func (c *mockBackendConn) Close() {

@@ -113,15 +113,32 @@ func TestCheckSqlPort(t *testing.T) {
 
 func TestPrepareStmts(t *testing.T) {
 	args := []any{
+		nil,
 		"hello",
-		uint64(1),
-		int64(1),
-		float64(1),
+		byte(10),
+		int16(-100),
+		int32(-200),
+		int64(-300),
+		uint16(100),
+		uint32(200),
+		uint64(300),
+		float32(1.1),
+		float64(1.2),
+		nil,
 	}
 
-	b := MakePrepareStmtPacket("select ?")
+	b := MakePrepareStmtRequest("select ?")
 	require.Len(t, b, len("select ?")+1)
 
-	_, err := MakeExecuteStmtPacket(1, args)
+	data1, err := MakeExecuteStmtRequest(1, args)
 	require.NoError(t, err)
+
+	stmtID, pArgs, err := ParseExecuteStmtRequest(data1, len(args))
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), stmtID)
+	require.EqualValues(t, args, pArgs)
+
+	data2, err := MakeExecuteStmtRequest(1, pArgs)
+	require.NoError(t, err)
+	require.Equal(t, data1, data2)
 }
