@@ -19,6 +19,8 @@ import (
 
 func TestReadExceptions(t *testing.T) {
 	now := time.Now()
+	failSample := conn.NewFailException(errors.New("another error"), cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()},
+		[]byte("select 1")...), now, 1))
 	tests := []struct {
 		exceptions []conn.Exception
 		finalExps  map[conn.ExceptionType]map[string]*expCollection
@@ -72,7 +74,7 @@ func TestReadExceptions(t *testing.T) {
 		},
 		{
 			exceptions: []conn.Exception{
-				conn.NewFailException(errors.New("another error"), cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), now, 1)),
+				failSample,
 			},
 			finalExps: map[conn.ExceptionType]map[string]*expCollection{
 				conn.Other: {
@@ -87,9 +89,8 @@ func TestReadExceptions(t *testing.T) {
 				},
 				conn.Fail: {
 					"\x03e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471": &expCollection{
-						count: 1,
-						sample: conn.NewFailException(errors.New("another error"), cmd.NewCommand(
-							append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), now, 1)),
+						count:  1,
+						sample: failSample,
 					},
 				},
 			},
