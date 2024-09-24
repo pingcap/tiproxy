@@ -89,8 +89,8 @@ func (rdb *reportDB) InsertExceptions(ctx context.Context, tp conn.ExceptionType
 		case conn.Fail:
 			sample := value.sample.(*conn.FailException)
 			command := sample.Command()
-			// TODO: fill capture and replay time
-			args = []any{command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(), nil, nil, value.count, value.count}
+			args = []any{command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(),
+				command.StartTs.String(), sample.Time().String(), value.count, value.count}
 		case conn.Other:
 			sample := value.sample.(*conn.OtherException)
 			args = []any{sample.Key(), sample.Error(), nil, value.count, value.count}

@@ -5,6 +5,7 @@ package conn
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -40,6 +41,7 @@ func TestFailException(t *testing.T) {
 		require.Equal(t, uint64(1), exception.ConnID(), "case %d", i)
 		require.Equal(t, "mock error", exception.Error(), "case %d", i)
 		require.Equal(t, test.key, exception.Key(), "case %d", i)
+		require.Greater(t, exception.Time(), time.Time{}, "case %d", i)
 	}
 }
 
