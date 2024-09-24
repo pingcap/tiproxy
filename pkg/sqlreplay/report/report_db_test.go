@@ -53,6 +53,8 @@ func TestInitDB(t *testing.T) {
 
 func TestInsertExceptions(t *testing.T) {
 	now := time.Now()
+	failSample := conn.NewFailException(errors.New("mock error"),
+		cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), now, 1))
 	tests := []struct {
 		tp     conn.ExceptionType
 		colls  map[string]*expCollection
@@ -89,13 +91,13 @@ func TestInsertExceptions(t *testing.T) {
 			tp: conn.Fail,
 			colls: map[string]*expCollection{
 				"\x03e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471": {
-					count: 1,
-					sample: conn.NewFailException(errors.New("mock error"), cmd.NewCommand(
-						append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), now, 1)),
+					count:  1,
+					sample: failSample,
 				},
 			},
 			stmtID: []uint32{1},
-			args:   [][]any{{"Query", "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471", "select 1", "mock error", uint64(1), nil, nil, uint64(1), uint64(1)}},
+			args: [][]any{{"Query", "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471", "select 1", "mock error",
+				uint64(1), now.String(), failSample.Time().String(), uint64(1), uint64(1)}},
 		},
 	}
 
