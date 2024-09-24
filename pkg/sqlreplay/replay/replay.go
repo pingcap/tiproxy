@@ -15,7 +15,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
-	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
@@ -168,12 +167,6 @@ func (r *replay) readCommands(ctx context.Context) {
 			}
 			r.Stop(err)
 			break
-		}
-		// Replayer always uses the same username. It has no passwords for other users.
-		// TODO: clear the session states.
-		if command.Type == pnet.ComChangeUser {
-			r.filteredCmds++
-			continue
 		}
 		if captureStartTs.IsZero() {
 			// first command

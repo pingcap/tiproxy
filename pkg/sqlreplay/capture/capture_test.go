@@ -265,3 +265,58 @@ func TestQuit(t *testing.T) {
 	require.Equal(t, 1, strings.Count(data, "# Cmd_type: Quit"))
 	require.Equal(t, uint64(3), cpt.capturedCmds)
 }
+
+func TestFilterCmds(t *testing.T) {
+	tests := []struct {
+		packet  []byte
+		want    string
+		notWant string
+	}{
+		{
+			packet: pnet.MakeChangeUser(&pnet.ChangeUserReq{
+				User: "root",
+				DB:   "test",
+			}, 0),
+			want:    pnet.ComResetConnection.String(),
+			notWant: pnet.ComChangeUser.String(),
+		},
+		{
+			packet:  append([]byte{pnet.ComQuery.Byte()}, []byte("CREATE USER u1 IDENTIFIED BY '123456'")...),
+			notWant: "123456",
+		},
+		{
+			packet: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...),
+			want:   "select 1",
+		},
+	}
+
+	cfg := CaptureConfig{
+		Output:   t.TempDir(),
+		Duration: 10 * time.Second,
+	}
+	for i, test := range tests {
+		cpt := NewCapture(zap.NewNop())
+		writer := newMockWriter(store.WriterCfg{})
+		cfg.cmdLogger = writer
+		require.NoError(t, cpt.Start(cfg))
+		cpt.Capture(test.packet, time.Now(), 100, func() (string, error) {
+			return "init session 100", nil
+		})
+		cpt.Stop(nil)
+
+		data := string(writer.getData())
+		if len(test.want) > 0 {
+			require.Equal(t, 1, strings.Count(data, test.want), "case %d", i)
+			require.Equal(t, uint64(2), cpt.capturedCmds, "case %d", i)
+			require.Equal(t, uint64(0), cpt.filteredCmds, "case %d", i)
+		} else {
+			require.Equal(t, uint64(1), cpt.capturedCmds, "case %d", i)
+			require.Equal(t, uint64(1), cpt.filteredCmds, "case %d", i)
+		}
+		if len(test.notWant) > 0 {
+			require.Equal(t, 0, strings.Count(data, test.notWant), "case %d", i)
+		}
+
+		cpt.Close()
+	}
+}
