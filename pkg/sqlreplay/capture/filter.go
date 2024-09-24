@@ -8,6 +8,7 @@ import (
 )
 
 var sensitiveKeywords = [][]string{
+	// contain passwords
 	{
 		"CREATE", "USER",
 	},
@@ -20,6 +21,7 @@ var sensitiveKeywords = [][]string{
 	{
 		"GRANT",
 	},
+	// contain cloud storage url
 	{
 		"BACKUP",
 	},
@@ -28,6 +30,10 @@ var sensitiveKeywords = [][]string{
 	},
 	{
 		"IMPORT",
+	},
+	// not supported yet
+	{
+		"LOAD", "DATA",
 	},
 }
 
