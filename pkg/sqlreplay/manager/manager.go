@@ -61,11 +61,11 @@ func (jm *jobManager) updateProgress() {
 	if job.IsRunning() {
 		switch job.Type() {
 		case Capture:
-			progress, err := jm.capture.Progress()
-			job.SetProgress(progress, err)
+			progress, endTime, err := jm.capture.Progress()
+			job.SetProgress(progress, endTime, err)
 		case Replay:
-			progress, err := jm.replay.Progress()
-			job.SetProgress(progress, err)
+			progress, endTime, err := jm.replay.Progress()
+			job.SetProgress(progress, endTime, err)
 		}
 	}
 }
@@ -93,9 +93,9 @@ func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
 	}
 	newJob := &captureJob{
 		job: job{
-			StartTime: time.Now(),
-			Duration:  cfg.Duration,
+			startTime: time.Now(),
 		},
+		cfg: cfg,
 	}
 	jm.lg.Info("start capture", zap.String("job", newJob.String()))
 	jm.jobHistory = append(jm.jobHistory, newJob)
@@ -121,8 +121,9 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 	}
 	newJob := &replayJob{
 		job: job{
-			StartTime: time.Now(),
+			startTime: time.Now(),
 		},
+		cfg: cfg,
 	}
 	jm.lg.Info("start replay", zap.String("job", newJob.String()))
 	jm.jobHistory = append(jm.jobHistory, newJob)
@@ -135,7 +136,7 @@ func (jm *jobManager) GetCapture() capture.Capture {
 
 func (jm *jobManager) Jobs() string {
 	jm.updateProgress()
-	b, err := json.Marshal(jm.jobHistory)
+	b, err := json.MarshalIndent(jm.jobHistory, "", "  ")
 	if err != nil {
 		return err.Error()
 	}

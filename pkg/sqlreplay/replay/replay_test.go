@@ -190,7 +190,7 @@ func TestProgress(t *testing.T) {
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 	for i := 0; i < 10; i++ {
 		<-cmdCh
-		progress, err := replay.Progress()
+		progress, _, err := replay.Progress()
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, progress, float64(i)/10)
 		// Maybe unstable due to goroutine schedule.

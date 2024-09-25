@@ -37,8 +37,8 @@ func (m *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64,
 func (m *mockCapture) Close() {
 }
 
-func (m *mockCapture) Progress() (float64, error) {
-	return m.progress, m.err
+func (m *mockCapture) Progress() (float64, time.Time, error) {
+	return m.progress, time.Time{}, m.err
 }
 
 func (m *mockCapture) Stop(err error) {
@@ -61,8 +61,8 @@ type mockReplay struct {
 func (m *mockReplay) Close() {
 }
 
-func (m *mockReplay) Progress() (float64, error) {
-	return m.progress, m.err
+func (m *mockReplay) Progress() (float64, time.Time, error) {
+	return m.progress, time.Time{}, m.err
 }
 
 func (m *mockReplay) Start(cfg replay.ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {

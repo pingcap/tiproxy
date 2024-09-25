@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,8 +22,7 @@ func TestIsRunning(t *testing.T) {
 		{
 			job: &captureJob{
 				job: job{
-					StartTime: time.Now(),
-					Duration:  10 * time.Second,
+					startTime: time.Now(),
 				},
 			},
 			tp:      Capture,
@@ -30,8 +31,7 @@ func TestIsRunning(t *testing.T) {
 		{
 			job: &replayJob{
 				job: job{
-					StartTime: time.Now(),
-					Duration:  10 * time.Second,
+					startTime: time.Now(),
 				},
 			},
 			tp:      Replay,
@@ -40,10 +40,9 @@ func TestIsRunning(t *testing.T) {
 		{
 			job: &captureJob{
 				job: job{
-					StartTime: time.Now().Add(-5 * time.Second),
-					Duration:  10 * time.Second,
-					Progress:  0.5,
-					Error:     errors.New("stopped manually"),
+					startTime: time.Now().Add(-5 * time.Second),
+					progress:  0.5,
+					err:       errors.New("stopped manually"),
 				},
 			},
 			tp:      Capture,
@@ -52,9 +51,8 @@ func TestIsRunning(t *testing.T) {
 		{
 			job: &replayJob{
 				job: job{
-					StartTime: time.Now().Add(-20 * time.Second),
-					Duration:  10 * time.Second,
-					Progress:  1.0,
+					startTime: time.Now().Add(-20 * time.Second),
+					progress:  1.0,
 				},
 			},
 			tp:      Replay,
@@ -93,12 +91,73 @@ func TestSetProgress(t *testing.T) {
 	for i, test := range tests {
 		job := &captureJob{
 			job: job{
-				StartTime: time.Now(),
-				Duration:  10 * time.Second,
+				startTime: time.Now(),
 			},
 		}
-		job.SetProgress(test.progress, test.err)
-		require.Equal(t, test.expectedProgress, job.Progress, "case %d", i)
+		now := time.Now()
+		job.SetProgress(test.progress, now, test.err)
+		require.Equal(t, now, job.endTime, "case %d", i)
+		require.Equal(t, test.expectedProgress, job.progress, "case %d", i)
 		require.Equal(t, test.running, job.IsRunning(), "case %d", i)
+	}
+}
+
+func TestMarshalJob(t *testing.T) {
+	startTime, err := time.Parse("2006-01-02 15:04:05", "2020-01-01 00:00:00")
+	require.NoError(t, err)
+	endTime, err := time.Parse("2006-01-02 15:04:05", "2020-01-01 02:01:01")
+	require.NoError(t, err)
+
+	tests := []struct {
+		job     Job
+		marshal string
+	}{
+		{
+			job: &captureJob{
+				job: job{
+					startTime: startTime,
+					endTime:   endTime,
+					progress:  0.5,
+					err:       errors.New("mock error"),
+				},
+				cfg: capture.CaptureConfig{
+					Output:   "/tmp/traffic",
+					Duration: 2 * time.Hour,
+				},
+			},
+			marshal: `{"type":"capture","status":"canceled","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","duration":"2h0m0s","output":"/tmp/traffic","progress":"50%","error":"mock error"}`,
+		},
+		{
+			job: &replayJob{
+				job: job{
+					startTime: startTime,
+					progress:  0,
+				},
+				cfg: replay.ReplayConfig{
+					Input:    "/tmp/traffic",
+					Username: "root",
+				},
+			},
+			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01 00:00:00 +0000 UTC","input":"/tmp/traffic","username":"root","speed":1,"progress":"0%"}`,
+		},
+		{
+			job: &replayJob{
+				job: job{
+					startTime: startTime,
+					endTime:   endTime,
+					progress:  1,
+				},
+				cfg: replay.ReplayConfig{
+					Input:    "/tmp/traffic",
+					Username: "root",
+					Speed:    0.5,
+				},
+			},
+			marshal: `{"type":"replay","status":"done","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","input":"/tmp/traffic","username":"root","speed":0.5,"progress":"100%"}`,
+		},
+	}
+
+	for i, test := range tests {
+		require.Equal(t, test.marshal, test.job.String(), "case %d", i)
 	}
 }
