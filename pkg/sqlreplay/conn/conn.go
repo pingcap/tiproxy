@@ -35,14 +35,14 @@ type conn struct {
 	closeCh     chan<- uint64
 	lg          *zap.Logger
 	backendConn BackendConn
-	connID      uint64 // frontend connection id
+	connID      uint64 // capture ID, not replay ID
 }
 
 func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
 	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64) *conn {
 	backendConnID := idMgr.NewID()
 	return &conn{
-		lg:          lg.With(zap.Uint64("captureID", connID), zap.Uint64("backendID", backendConnID)),
+		lg:          lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID)),
 		connID:      connID,
 		cmdCh:       make(chan *cmd.Command, maxPendingCommands),
 		exceptionCh: exceptionCh,
