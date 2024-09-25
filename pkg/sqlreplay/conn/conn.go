@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
@@ -37,15 +38,16 @@ type conn struct {
 	connID      uint64 // frontend connection id
 }
 
-func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, connID uint64,
-	bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64) *conn {
+func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
+	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64) *conn {
+	backendConnID := idMgr.NewID()
 	return &conn{
-		lg:          lg.With(zap.Uint64("connID", connID)),
+		lg:          lg.With(zap.Uint64("captureID", connID), zap.Uint64("backendID", backendConnID)),
 		connID:      connID,
 		cmdCh:       make(chan *cmd.Command, maxPendingCommands),
 		exceptionCh: exceptionCh,
 		closeCh:     closeCh,
-		backendConn: NewBackendConn(lg.Named("be"), connID, hsHandler, bcConfig, backendTLSConfig, username, password),
+		backendConn: NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
 	}
 }
 

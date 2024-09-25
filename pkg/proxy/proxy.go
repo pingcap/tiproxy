@@ -14,6 +14,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
@@ -28,7 +29,6 @@ type serverState struct {
 	healthyKeepAlive   config.KeepAlive
 	unhealthyKeepAlive config.KeepAlive
 	clients            map[uint64]*client.ClientConnection
-	connID             uint64
 	maxConnections     uint64
 	connBufferSize     int
 	requireBackendTLS  bool
@@ -43,6 +43,7 @@ type SQLServer struct {
 	addrs      []string
 	logger     *zap.Logger
 	certMgr    *cert.CertManager
+	idMgr      *id.IDManager
 	hsHandler  backend.HandshakeHandler
 	cpt        capture.Capture
 	wg         waitgroup.WaitGroup
@@ -52,15 +53,15 @@ type SQLServer struct {
 }
 
 // NewSQLServer creates a new SQLServer.
-func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, cpt capture.Capture, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
+func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
 	var err error
 	s := &SQLServer{
 		logger:    logger,
 		certMgr:   certMgr,
+		idMgr:     idMgr,
 		hsHandler: hsHandler,
 		cpt:       cpt,
 		mu: serverState{
-			connID:  0,
 			clients: make(map[uint64]*client.ClientConnection),
 		},
 	}
@@ -150,8 +151,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 			return false, nil, 0, nil
 		}
 
-		s.mu.connID++
-		connID := s.mu.connID
+		connID := s.idMgr.NewID()
 		logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
 			zap.String("addr", addr))
 		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),

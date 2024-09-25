@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
@@ -18,7 +19,7 @@ import (
 )
 
 func TestManageConns(t *testing.T) {
-	replay := NewReplay(zap.NewNop())
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
 
 	loader := newMockChLoader()
@@ -99,7 +100,7 @@ func TestValidateCfg(t *testing.T) {
 func TestReplaySpeed(t *testing.T) {
 	speeds := []float64{10, 1, 0.1}
 	var lastTotalTime time.Duration
-	replay := NewReplay(zap.NewNop())
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
 	for _, speed := range speeds {
 		cmdCh := make(chan *cmd.Command, 10)
@@ -171,7 +172,7 @@ func TestProgress(t *testing.T) {
 	// If the channel size is too small, there may be a deadlock.
 	// ExecuteCmd waits for cmdCh <- data in a lock, while Progress() waits for the lock.
 	cmdCh := make(chan *cmd.Command, 10)
-	replay := NewReplay(zap.NewNop())
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
 	cfg := ReplayConfig{
 		Input:    dir,

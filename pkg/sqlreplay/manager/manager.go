@@ -10,6 +10,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
@@ -42,11 +43,11 @@ type jobManager struct {
 	lg          *zap.Logger
 }
 
-func NewJobManager(lg *zap.Logger, cfg *config.Config, certMgr CertManager, hsHandler backend.HandshakeHandler) *jobManager {
+func NewJobManager(lg *zap.Logger, cfg *config.Config, certMgr CertManager, idMgr *id.IDManager, hsHandler backend.HandshakeHandler) *jobManager {
 	return &jobManager{
 		lg:          lg,
 		capture:     capture.NewCapture(lg.Named("capture")),
-		replay:      replay.NewReplay(lg.Named("replay")),
+		replay:      replay.NewReplay(lg.Named("replay"), idMgr),
 		hsHandler:   hsHandler,
 		cfg:         cfg,
 		certManager: certMgr,

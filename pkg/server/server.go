@@ -14,6 +14,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
+	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
@@ -161,16 +162,16 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	} else {
 		hsHandler = backend.NewDefaultHandshakeHandler(srv.namespaceManager)
 	}
+	idMgr := id.NewIDManager()
 
 	// setup capture and replay job manager
 	{
-		srv.replay = mgrrp.NewJobManager(lg.Named("replay"), srv.configManager.GetConfig(), srv.certManager, hsHandler)
+		srv.replay = mgrrp.NewJobManager(lg.Named("replay"), srv.configManager.GetConfig(), srv.certManager, idMgr, hsHandler)
 	}
 
 	// setup proxy server
 	{
-
-		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, srv.replay.GetCapture(), hsHandler)
+		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), hsHandler)
 		if err != nil {
 			return
 		}
