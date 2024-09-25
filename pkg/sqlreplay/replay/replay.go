@@ -34,7 +34,7 @@ type Replay interface {
 	// Stop stops the replay
 	Stop(err error)
 	// Progress returns the progress of the replay job
-	Progress() (float64, error)
+	Progress() (float64, time.Time, error)
 	// Close closes the replay
 	Close()
 }
@@ -243,13 +243,13 @@ func (r *replay) readCloseCh(ctx context.Context) {
 	}
 }
 
-func (r *replay) Progress() (float64, error) {
+func (r *replay) Progress() (float64, time.Time, error) {
 	r.Lock()
 	defer r.Unlock()
 	if r.meta.Cmds > 0 {
 		r.progress = float64(r.replayedCmds+r.filteredCmds) / float64(r.meta.Cmds)
 	}
-	return r.progress, r.err
+	return r.progress, r.endTime, r.err
 }
 
 func (r *replay) readMeta() *store.Meta {

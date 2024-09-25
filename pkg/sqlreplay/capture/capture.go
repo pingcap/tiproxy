@@ -44,7 +44,7 @@ type Capture interface {
 	// Capture captures traffic
 	Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error))
 	// Progress returns the progress of the capture job
-	Progress() (float64, error)
+	Progress() (float64, time.Time, error)
 	// Close closes the capture
 	Close()
 }
@@ -340,17 +340,17 @@ func (c *capture) writeMeta(duration time.Duration, cmds uint64) {
 	}
 }
 
-func (c *capture) Progress() (float64, error) {
+func (c *capture) Progress() (float64, time.Time, error) {
 	c.Lock()
 	defer c.Unlock()
 	if c.status == statusIdle || c.cfg.Duration == 0 {
-		return c.progress, c.err
+		return c.progress, c.endTime, c.err
 	}
 	progress := float64(time.Since(c.startTime)) / float64(c.cfg.Duration)
 	if progress > 1 {
 		progress = 1
 	}
-	return progress, c.err
+	return progress, c.endTime, c.err
 }
 
 // stopNoLock must be called after holding a lock.
