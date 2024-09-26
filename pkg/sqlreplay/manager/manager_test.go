@@ -9,6 +9,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/stretchr/testify/require"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestStartAndStop(t *testing.T) {
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, nil)
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil)
 	defer mgr.Close()
 	cpt, rep := &mockCapture{}, &mockReplay{}
 	mgr.capture, mgr.replay = cpt, rep
@@ -60,7 +61,7 @@ func TestMarshalJobHistory(t *testing.T) {
 	require.NoError(t, err)
 	endTime, err := time.Parse("2006-01-02 15:04:05", "2020-01-01 02:01:01")
 	require.NoError(t, err)
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, nil)
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil)
 	mgr.jobHistory = []Job{
 		&captureJob{
 			job: job{
