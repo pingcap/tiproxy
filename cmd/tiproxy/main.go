@@ -32,7 +32,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&sctx.ConfigFile, "config", "", "proxy config file path")
 	rootCmd.PersistentFlags().StringVar(&deprecatedStr, "log_encoder", "", "deprecated and will be removed")
 	rootCmd.PersistentFlags().StringVar(&deprecatedStr, "log_level", "", "deprecated and will be removed")
-	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Proxy.AdvertiseAddr, "advertise-addr", "", "advertise address")
+	rootCmd.PersistentFlags().StringVar(&sctx.AdvertiseAddr, "advertise-addr", "", "advertise address")
 
 	metrics.MaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 

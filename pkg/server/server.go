@@ -68,13 +68,13 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// set up logger
 	var lg *zap.Logger
-	if srv.loggerManager, lg, err = logger.NewLoggerManager(&sctx.Overlay.Log); err != nil {
+	if srv.loggerManager, lg, err = logger.NewLoggerManager(nil); err != nil {
 		return
 	}
 	srv.loggerManager.Init(srv.configManager.WatchConfig())
 
 	// setup config manager
-	if err = srv.configManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, &sctx.Overlay); err != nil {
+	if err = srv.configManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, sctx.AdvertiseAddr); err != nil {
 		return
 	}
 	cfg := srv.configManager.GetConfig()

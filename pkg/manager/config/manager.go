@@ -34,15 +34,15 @@ type KVValue struct {
 }
 
 type ConfigManager struct {
-	wg     waitgroup.WaitGroup
-	cancel context.CancelFunc
-	logger *zap.Logger
+	wg            waitgroup.WaitGroup
+	cancel        context.CancelFunc
+	logger        *zap.Logger
+	advertiseAddr string
 
 	kv *btree.BTreeG[KVValue]
 
 	checkFileInterval time.Duration
 	fileContent       []byte
-	overlay           []byte
 	sts               struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
@@ -57,25 +57,17 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
-func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, overlay *config.Config) error {
-	var err error
+func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, advertiseAddr string) error {
 	var nctx context.Context
 	nctx, e.cancel = context.WithCancel(ctx)
 
 	e.logger = logger
+	e.advertiseAddr = advertiseAddr
 
 	// for namespace persistence
 	e.kv = btree.NewBTreeG(func(a, b KVValue) bool {
 		return a.Key < b.Key
 	})
-
-	// for config watch
-	if overlay != nil {
-		e.overlay, err = overlay.ToBytes()
-		if err != nil {
-			return err
-		}
-	}
 
 	if configFile != "" {
 		if err := e.reloadConfigFile(configFile); err != nil {

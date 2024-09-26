@@ -52,8 +52,9 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 		return errors.WithStack(err)
 	}
 
-	if err = toml.Unmarshal(e.overlay, base); err != nil {
-		return errors.WithStack(err)
+	// Overwrite the config with command line args.
+	if len(e.advertiseAddr) > 0 {
+		base.Proxy.AdvertiseAddr = e.advertiseAddr
 	}
 
 	if err = base.Check(); err != nil {

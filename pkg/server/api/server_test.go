@@ -30,7 +30,7 @@ func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path
 	lg, _ := logger.CreateLoggerForTest(t)
 	ready := atomic.NewBool(true)
 	cfgmgr := mgrcfg.NewConfigManager()
-	require.NoError(t, cfgmgr.Init(context.Background(), lg, "", nil))
+	require.NoError(t, cfgmgr.Init(context.Background(), lg, "", ""))
 	crtmgr := mgrcrt.NewCertManager()
 	require.NoError(t, crtmgr.Init(cfgmgr.GetConfig(), lg, cfgmgr.WatchConfig()))
 	srv, err := NewServer(config.API{

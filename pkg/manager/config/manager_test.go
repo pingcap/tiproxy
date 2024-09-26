@@ -9,12 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 )
 
-func testConfigManager(t *testing.T, configFile string, overlays ...*config.Config) (*ConfigManager, fmt.Stringer, context.Context) {
+func testConfigManager(t *testing.T, configFile string, advertiseAddr string) (*ConfigManager, fmt.Stringer, context.Context) {
 	logger, text := logger.CreateLoggerForTest(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -24,7 +23,7 @@ func testConfigManager(t *testing.T, configFile string, overlays ...*config.Conf
 
 	cfgmgr := NewConfigManager()
 	cfgmgr.checkFileInterval = 20 * time.Millisecond
-	require.NoError(t, cfgmgr.Init(ctx, logger, configFile, nil))
+	require.NoError(t, cfgmgr.Init(ctx, logger, configFile, advertiseAddr))
 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())

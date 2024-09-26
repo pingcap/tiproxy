@@ -14,7 +14,7 @@ import (
 )
 
 func TestBase(t *testing.T) {
-	cfgmgr, _, ctx := testConfigManager(t, "")
+	cfgmgr, _, ctx := testConfigManager(t, "", "")
 
 	nsNum := 10
 	valNum := 30
@@ -74,7 +74,7 @@ func TestBase(t *testing.T) {
 }
 
 func TestBaseConcurrency(t *testing.T) {
-	cfgmgr, _, ctx := testConfigManager(t, "")
+	cfgmgr, _, ctx := testConfigManager(t, "", "")
 
 	var wg waitgroup.WaitGroup
 	batchNum := 16
