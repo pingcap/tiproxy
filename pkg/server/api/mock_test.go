@@ -23,6 +23,12 @@ type mockNamespaceManager struct {
 	success atomic.Bool
 }
 
+func newMockNamespaceManager() *mockNamespaceManager {
+	mgr := &mockNamespaceManager{}
+	mgr.success.Store(true)
+	return mgr
+}
+
 func (m *mockNamespaceManager) Init(_ *zap.Logger, _ []*config.Namespace, _ observer.TopologyFetcher,
 	_ metricsreader.PromInfoFetcher, _ *http.Client, _ *mconfig.ConfigManager, _ metricsreader.MetricsReader) error {
 	return nil

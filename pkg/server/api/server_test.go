@@ -32,11 +32,12 @@ func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path
 	require.NoError(t, cfgmgr.Init(context.Background(), lg, "", ""))
 	crtmgr := mgrcrt.NewCertManager()
 	require.NoError(t, crtmgr.Init(cfgmgr.GetConfig(), lg, cfgmgr.WatchConfig()))
+	nsMgr := newMockNamespaceManager()
 	srv, err := NewServer(config.API{
 		Addr: "0.0.0.0:0",
 	}, lg, Managers{
 		CfgMgr:        cfgmgr,
-		NsMgr:         &mockNamespaceManager{},
+		NsMgr:         nsMgr,
 		CertMgr:       crtmgr,
 		BackendReader: &mockBackendReader{},
 		ReplayJobMgr:  &mockReplayJobManager{},

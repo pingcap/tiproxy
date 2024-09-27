@@ -13,7 +13,7 @@ import (
 
 func TestReady(t *testing.T) {
 	nsMgr := NewNamespaceManager()
-	nsMgr.Init(zap.NewNop(), nil, nil, nil, nil, nil, nil)
+	require.NoError(t, nsMgr.Init(zap.NewNop(), nil, nil, nil, nil, nil, nil))
 	require.False(t, nsMgr.Ready())
 
 	rt := router.NewStaticRouter([]string{})

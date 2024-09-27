@@ -24,6 +24,7 @@ func TestDebug(t *testing.T) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 
+	server.mgr.NsMgr.(*mockNamespaceManager).success.Store(false)
 	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusBadGateway, r.StatusCode)
 	})
