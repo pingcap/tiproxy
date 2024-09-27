@@ -13,7 +13,7 @@ import (
 )
 
 func TestNamespace(t *testing.T) {
-	_, doHTTP := createServer(t)
+	srv, doHTTP := createServer(t)
 
 	// test list
 	doHTTP(t, http.MethodGet, "/api/admin/namespace", httpOpts{}, func(t *testing.T, r *http.Response) {
@@ -51,7 +51,8 @@ func TestNamespace(t *testing.T) {
 	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit?namespace=xx", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
 	})
+	srv.mgr.NsMgr.(*mockNamespaceManager).success.Store(true)
 	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit", httpOpts{}, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
+		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 }

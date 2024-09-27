@@ -52,10 +52,10 @@ type HandshakeHandler interface {
 }
 
 type DefaultHandshakeHandler struct {
-	nsManager *namespace.NamespaceManager
+	nsManager namespace.NamespaceManager
 }
 
-func NewDefaultHandshakeHandler(nsManager *namespace.NamespaceManager) *DefaultHandshakeHandler {
+func NewDefaultHandshakeHandler(nsManager namespace.NamespaceManager) *DefaultHandshakeHandler {
 	return &DefaultHandshakeHandler{
 		nsManager: nsManager,
 	}

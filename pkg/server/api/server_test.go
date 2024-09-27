@@ -14,7 +14,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	mgrcrt "github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
-	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
@@ -37,7 +36,7 @@ func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path
 		Addr: "0.0.0.0:0",
 	}, lg, Managers{
 		CfgMgr:        cfgmgr,
-		NsMgr:         mgrns.NewNamespaceManager(),
+		NsMgr:         &mockNamespaceManager{},
 		CertMgr:       crtmgr,
 		BackendReader: &mockBackendReader{},
 		ReplayJobMgr:  &mockReplayJobManager{},
