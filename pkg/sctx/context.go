@@ -5,14 +5,13 @@ package sctx
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 )
 
 type Context struct {
-	Overlay    config.Config
-	ConfigFile string
-	Handler    ServerHandler
+	AdvertiseAddr string
+	ConfigFile    string
+	Handler       ServerHandler
 }
 
 type ServerHandler interface {

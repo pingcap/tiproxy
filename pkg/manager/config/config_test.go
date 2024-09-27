@@ -22,9 +22,9 @@ func TestConfigReload(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	cfgmgr1, _, _ := testConfigManager(t, tmpcfg)
+	cfgmgr1, _, _ := testConfigManager(t, tmpcfg, "addr")
 
-	cfgmgr2, _, _ := testConfigManager(t, "")
+	cfgmgr2, _, _ := testConfigManager(t, "", "addr")
 
 	cases := []struct {
 		name      string
@@ -41,7 +41,7 @@ func TestConfigReload(t *testing.T) {
 			},
 			postcfg: `proxy.pd-addrs = ""`,
 			postcheck: func(c *config.Config) bool {
-				return c.Proxy.PDAddrs == ""
+				return c.Proxy.PDAddrs == "" && c.Proxy.AdvertiseAddr == "addr"
 			},
 		},
 		{
@@ -135,7 +135,7 @@ func TestConfigRemove(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	cfgmgr, _, _ := testConfigManager(t, tmpcfg)
+	cfgmgr, _, _ := testConfigManager(t, tmpcfg, "")
 
 	// remove and recreate the file in a very short time
 	require.NoError(t, os.Remove(tmpcfg))
@@ -271,7 +271,7 @@ func TestFilePath(t *testing.T) {
 				require.NoError(t, f.Close())
 			}
 
-			cfgmgr, _, _ = testConfigManager(t, test.filename)
+			cfgmgr, _, _ = testConfigManager(t, test.filename, "")
 			require.Equal(t, pdAddr1, cfgmgr.GetConfig().Proxy.PDAddrs)
 
 			// Test write.
@@ -298,7 +298,7 @@ func TestFilePath(t *testing.T) {
 }
 
 func TestChecksum(t *testing.T) {
-	cfgmgr, _, _ := testConfigManager(t, "")
+	cfgmgr, _, _ := testConfigManager(t, "", "")
 	c1 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
 	c2 := cfgmgr.GetConfigChecksum()
