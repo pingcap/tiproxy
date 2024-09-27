@@ -45,6 +45,10 @@ func (r *StaticRouter) GetBackendSelector() BackendSelector {
 	}
 }
 
+func (r *StaticRouter) HealthyBackendCount() int {
+	return len(r.backends)
+}
+
 func (r *StaticRouter) RefreshBackend() {}
 
 func (r *StaticRouter) RedirectConnections() error {

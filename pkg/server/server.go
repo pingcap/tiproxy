@@ -37,7 +37,7 @@ type Server struct {
 	wg waitgroup.WaitGroup
 	// managers
 	configManager    *mgrcfg.ConfigManager
-	namespaceManager *mgrns.NamespaceManager
+	namespaceManager mgrns.NamespaceManager
 	metricsManager   *metrics.MetricsManager
 	loggerManager    *logger.LoggerManager
 	certManager      *cert.CertManager

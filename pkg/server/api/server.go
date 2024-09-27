@@ -45,7 +45,7 @@ type HTTPHandler interface {
 
 type Managers struct {
 	CfgMgr        *mgrcfg.ConfigManager
-	NsMgr         *mgrns.NamespaceManager
+	NsMgr         mgrns.NamespaceManager
 	CertMgr       *mgrcrt.CertManager
 	BackendReader BackendReader
 	ReplayJobMgr  mgrrp.JobManager

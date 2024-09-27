@@ -29,6 +29,7 @@ type Router interface {
 	ConnEventReceiver
 
 	GetBackendSelector() BackendSelector
+	HealthyBackendCount() int
 	RefreshBackend()
 	RedirectConnections() error
 	ConnCount() int

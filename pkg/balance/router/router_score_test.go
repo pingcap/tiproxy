@@ -322,11 +322,14 @@ func TestNoBackends(t *testing.T) {
 	conn := tester.createConn()
 	backend := tester.simpleRoute(conn)
 	require.True(t, backend == nil || reflect.ValueOf(backend).IsNil())
+	require.Equal(t, 0, tester.router.HealthyBackendCount())
 	tester.addBackends(1)
+	require.Equal(t, 1, tester.router.HealthyBackendCount())
 	tester.addConnections(10)
 	tester.killBackends(1)
 	backend = tester.simpleRoute(conn)
 	require.True(t, backend == nil || reflect.ValueOf(backend).IsNil())
+	require.Equal(t, 0, tester.router.HealthyBackendCount())
 }
 
 // Test that the backends returned by the BackendSelector are complete and different.

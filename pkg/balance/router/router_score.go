@@ -75,6 +75,22 @@ func (router *ScoreBasedRouter) GetBackendSelector() BackendSelector {
 	}
 }
 
+func (router *ScoreBasedRouter) HealthyBackendCount() int {
+	router.Lock()
+	defer router.Unlock()
+	if router.observeError != nil {
+		return 0
+	}
+
+	count := 0
+	for _, backend := range router.backends {
+		if backend.Healthy() {
+			count++
+		}
+	}
+	return count
+}
+
 func (router *ScoreBasedRouter) getConnWrapper(conn RedirectableConn) *glist.Element[*connWrapper] {
 	return conn.Value(_routerKey).(*glist.Element[*connWrapper])
 }
