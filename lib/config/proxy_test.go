@@ -170,3 +170,12 @@ func TestGetIPPort(t *testing.T) {
 		require.Equal(t, cas.port, statusPort)
 	}
 }
+
+func TestCloneConfig(t *testing.T) {
+	cfg := testProxyConfig
+	cfg.Labels = map[string]string{"a": "b"}
+	clone := cfg.Clone()
+	require.Equal(t, cfg, *clone)
+	cfg.Labels["c"] = "d"
+	require.NotContains(t, clone.Labels, "c")
+}

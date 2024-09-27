@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,7 +143,7 @@ func TestConfigRemove(t *testing.T) {
 	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "gg"`), 0644))
 
 	// check that re-watch still works
-	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "gg" }, 3*time.Second, 100*time.Millisecond)
+	require.Eventually(t, func() bool { return cfgmgr.GetConfig() != nil && cfgmgr.GetConfig().Proxy.Addr == "gg" }, 3*time.Second, 100*time.Millisecond)
 
 	// remove again but with a long sleep
 	require.NoError(t, os.Remove(tmpcfg))
@@ -298,13 +299,19 @@ func TestFilePath(t *testing.T) {
 }
 
 func TestChecksum(t *testing.T) {
-	cfgmgr, _, _ := testConfigManager(t, "", "")
+	cfgmgr, text, _ := testConfigManager(t, "", "")
+	require.Equal(t, 1, strings.Count(text.String(), "current config"))
 	c1 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
+	require.Equal(t, 2, strings.Count(text.String(), "current config"))
+	// same config, shouldn't log it again
+	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
+	require.Equal(t, 2, strings.Count(text.String(), "current config"))
 	c2 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "vv"`)))
 	c3 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr="gg"`)))
+	require.Equal(t, 4, strings.Count(text.String(), "current config"))
 	c4 := cfgmgr.GetConfigChecksum()
 	require.Equal(t, c2, c4)
 	require.NotEqual(t, c1, c2)

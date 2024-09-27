@@ -174,10 +174,8 @@ func (h *Server) attachLogger(c *gin.Context) {
 	switch {
 	case len(c.Errors) > 0:
 		h.lg.Warn(path, fields...)
-	case strings.Contains(path, "/debug"), strings.Contains(path, "/metrics"):
-		h.lg.Debug(path, fields...)
 	default:
-		h.lg.Info(path, fields...)
+		h.lg.Debug(path, fields...)
 	}
 }
 
