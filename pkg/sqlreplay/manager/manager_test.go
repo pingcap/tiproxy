@@ -131,3 +131,21 @@ func TestMarshalJobHistory(t *testing.T) {
   }
 ]`, mgr.Jobs())
 }
+
+func TestHistoryLen(t *testing.T) {
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, nil, nil)
+	defer mgr.Close()
+	cpt, rep := &mockCapture{}, &mockReplay{}
+	mgr.capture, mgr.replay = cpt, rep
+	require.Len(t, mgr.jobHistory, 0)
+
+	for i := 0; i < maxJobHistoryCount+1; i++ {
+		require.NoError(t, mgr.StartCapture(capture.CaptureConfig{}))
+		require.Contains(t, mgr.Stop(), "stopped")
+		expectedLen := i + 1
+		if expectedLen > maxJobHistoryCount {
+			expectedLen = maxJobHistoryCount
+		}
+		require.Len(t, mgr.jobHistory, expectedLen)
+	}
+}
