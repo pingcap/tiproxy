@@ -34,12 +34,7 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 // that are specified by users.
 func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	e.sts.Lock()
-	defer func() {
-		if err == nil {
-			e.logger.Info("current config", zap.Any("cfg", e.sts.current))
-		}
-		e.sts.Unlock()
-	}()
+	defer e.sts.Unlock()
 
 	base := e.sts.current
 	if base == nil {
@@ -62,16 +57,22 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	}
 
 	e.sts.current = base
+	originalData := e.sts.data
 	var buf bytes.Buffer
 	if err = toml.NewEncoder(&buf).Encode(base); err != nil {
 		return errors.WithStack(err)
 	}
-	e.sts.checksum = crc32.ChecksumIEEE(buf.Bytes())
+	newData := buf.Bytes()
 
-	for _, list := range e.sts.listeners {
-		list <- base.Clone()
+	// TiDB-Operator may set the same labels by the HTTP API periodically, don't notify the listeners every time.
+	if originalData == nil || !bytes.Equal(originalData, newData) {
+		e.sts.checksum = crc32.ChecksumIEEE(newData)
+		e.sts.data = newData
+		e.logger.Info("current config", zap.Any("cfg", e.sts.current))
+		for _, list := range e.sts.listeners {
+			list <- base.Clone()
+		}
 	}
-
 	return
 }
 

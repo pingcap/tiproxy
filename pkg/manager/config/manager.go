@@ -42,11 +42,12 @@ type ConfigManager struct {
 	kv *btree.BTreeG[KVValue]
 
 	checkFileInterval time.Duration
-	fileContent       []byte
+	fileContent       []byte // used to compare whether the config file has changed
 	sts               struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
 		current   *config.Config
+		data      []byte // used to strictly compare whether the config has changed
 		checksum  uint32 // checksum of the unmarshalled toml
 	}
 }

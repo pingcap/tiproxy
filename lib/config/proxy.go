@@ -5,6 +5,7 @@ package config
 
 import (
 	"bytes"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -168,6 +169,7 @@ func NewConfig() *Config {
 
 func (cfg *Config) Clone() *Config {
 	newCfg := *cfg
+	newCfg.Labels = maps.Clone(cfg.Labels)
 	return &newCfg
 }
 
