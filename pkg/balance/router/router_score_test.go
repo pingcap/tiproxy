@@ -915,3 +915,16 @@ func TestControlSpeed(t *testing.T) {
 		tester.redirectFinish(redirectingNum, false)
 	}
 }
+
+func TestRedirectFail(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(1)
+	tester.addConnections(1)
+	tester.conns[1].closing = true
+	tester.killBackends(1)
+	tester.addBackends(1)
+	tester.rebalance(1)
+	// If the connection refuses to redirect, the connScore should not change.
+	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
+	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
+}
