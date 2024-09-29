@@ -607,9 +607,15 @@ func TestCloseWhileRedirect(t *testing.T) {
 				})
 				// Make sure the process goroutine finishes.
 				ts.mp.wg.Wait()
+<<<<<<< HEAD
 				// Redirect() should not panic after Close().
 				ts.mp.Redirect(newMockBackendInst(ts))
 				eventReceiver.checkEvent(t, eventRedirectSucceed)
+=======
+				// Redirect() should not panic after Close() and it returns false.
+				require.False(t, ts.mp.Redirect(newMockBackendInst(ts)))
+				eventReceiver.checkEvent(t, eventSucceed)
+>>>>>>> 3b60b7ef (router, backend: fix that an unhealthy backend may be never removed (#697))
 				wg.Wait()
 				eventReceiver.checkEvent(t, eventClose)
 				return nil

@@ -500,14 +500,19 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 // tryRedirect tries to migrate the session if the session is redirect-able.
 // NOTE: processLock should be held before calling this function.
 func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
+<<<<<<< HEAD
 	start := time.Now()
 	if mgr.closeStatus.Load() >= statusNotifyClose || ctx.Err() != nil {
 		return
 	}
+=======
+>>>>>>> 3b60b7ef (router, backend: fix that an unhealthy backend may be never removed (#697))
 	backendInst := mgr.redirectInfo.Load()
+	// No redirection signal or redirection is finished.
 	if backendInst == nil {
 		return
 	}
+	// Redirection will be retried after the next command finishes.
 	if !mgr.cmdProcessor.finishedTxn() {
 		return
 	}
@@ -525,6 +530,10 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		rs.duration = time.Since(start)
 		mgr.redirectResCh <- rs
 	}()
+	// Even if the connection is closing, the redirection result must still be sent to recover the connection scores.
+	if mgr.closeStatus.Load() >= statusNotifyClose || ctx.Err() != nil {
+		return
+	}
 	// It may have been too long since the redirection signal was sent, and the target backend may be unhealthy now.
 	if !(*backendInst).Healthy() {
 		rs.err = ErrTargetUnhealthy
