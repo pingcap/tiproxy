@@ -385,21 +385,26 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 
 func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toBackend *backendWrapper,
 	reason string, logFields []zap.Field, curTime time.Time) {
-	fields := []zap.Field{
-		zap.Uint64("connID", conn.ConnectionID()),
-		zap.String("from", fromBackend.addr),
-		zap.String("to", toBackend.addr),
+	// Skip the connection if it's closing.
+	if conn.Redirect(toBackend) {
+		fields := []zap.Field{
+			zap.Uint64("connID", conn.ConnectionID()),
+			zap.String("from", fromBackend.addr),
+			zap.String("to", toBackend.addr),
+		}
+		fields = append(fields, logFields...)
+		router.logger.Debug("begin redirect connection", fields...)
+		fromBackend.connScore--
+		router.removeBackendIfEmpty(fromBackend)
+		toBackend.connScore++
+		conn.phase = phaseRedirectNotify
+		conn.redirectReason = reason
+		conn.redirectingBackend = toBackend
+	} else {
+		// Avoid it to be redirected again immediately.
+		conn.phase = phaseRedirectFail
 	}
-	fields = append(fields, logFields...)
-	router.logger.Debug("begin redirect connection", fields...)
-	fromBackend.connScore--
-	router.removeBackendIfEmpty(fromBackend)
-	toBackend.connScore++
-	conn.phase = phaseRedirectNotify
-	conn.redirectReason = reason
 	conn.lastRedirect = curTime
-	conn.Redirect(toBackend)
-	conn.redirectingBackend = toBackend
 }
 
 func (router *ScoreBasedRouter) removeBackendIfEmpty(backend *backendWrapper) bool {

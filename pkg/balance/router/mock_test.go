@@ -25,6 +25,7 @@ type mockRedirectableConn struct {
 	from     BackendInst
 	to       BackendInst
 	receiver ConnEventReceiver
+	closing  bool
 }
 
 func newMockRedirectableConn(t *testing.T, id uint64) *mockRedirectableConn {
@@ -56,10 +57,13 @@ func (conn *mockRedirectableConn) Value(k any) any {
 
 func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 	conn.Lock()
+	defer conn.Unlock()
+	if conn.closing {
+		return false
+	}
 	require.Nil(conn.t, conn.to)
 	require.True(conn.t, inst.Healthy())
 	conn.to = inst
-	conn.Unlock()
 	return true
 }
 
