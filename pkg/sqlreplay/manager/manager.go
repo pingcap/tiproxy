@@ -18,6 +18,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	maxJobHistoryCount = 10
+)
+
 type CertManager interface {
 	SQLTLS() *tls.Config
 }
@@ -99,7 +103,7 @@ func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
 		cfg: cfg,
 	}
 	jm.lg.Info("start capture", zap.String("job", newJob.String()))
-	jm.jobHistory = append(jm.jobHistory, newJob)
+	jm.addToHistory(newJob)
 	return nil
 }
 
@@ -127,8 +131,17 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 		cfg: cfg,
 	}
 	jm.lg.Info("start replay", zap.String("job", newJob.String()))
-	jm.jobHistory = append(jm.jobHistory, newJob)
+	jm.addToHistory(newJob)
 	return nil
+}
+
+func (jm *jobManager) addToHistory(newJob Job) {
+	if len(jm.jobHistory) >= maxJobHistoryCount {
+		copy(jm.jobHistory, jm.jobHistory[1:])
+		jm.jobHistory[len(jm.jobHistory)-1] = newJob
+	} else {
+		jm.jobHistory = append(jm.jobHistory, newJob)
+	}
 }
 
 func (jm *jobManager) GetCapture() capture.Capture {
