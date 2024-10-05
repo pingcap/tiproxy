@@ -763,7 +763,6 @@ func (mgr *BackendConnManager) Close() error {
 	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
 		addr = (*backendIO).RemoteAddr().String()
 		connErr = (*backendIO).Close()
-		mgr.logger.Info("backendIO is closed")
 	}
 
 	eventReceiver := mgr.getEventReceiver()
