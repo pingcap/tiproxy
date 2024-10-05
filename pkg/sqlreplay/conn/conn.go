@@ -109,7 +109,6 @@ func (c *conn) ExecuteCmd(command *cmd.Command) {
 }
 
 func (c *conn) close() {
-	c.lg.Info("close connection", zap.Uint64("captureID", c.connID))
 	c.backendConn.Close()
 	c.closeCh <- c.connID
 }

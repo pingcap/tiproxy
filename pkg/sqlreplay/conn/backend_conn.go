@@ -146,4 +146,7 @@ func (bc *backendConn) Close() {
 	if err := bc.clientIO.Close(); err != nil {
 		bc.lg.Warn("failed to close client connection", zap.Error(err))
 	}
+	if err := bc.backendConnMgr.Close(); err != nil {
+		bc.lg.Warn("failed to close backend connection", zap.Error(err))
+	}
 }
