@@ -162,11 +162,6 @@ func TestProgress(t *testing.T) {
 	require.NoError(t, meta.Write(dir))
 	loader := newMockNormalLoader()
 	now := time.Now()
-	for i := 0; i < 10; i++ {
-		command := newMockCommand(1)
-		command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
-		loader.writeCommand(command)
-	}
 	defer loader.Close()
 
 	// If the channel size is too small, there may be a deadlock.
@@ -188,13 +183,23 @@ func TestProgress(t *testing.T) {
 			}
 		},
 	}
-	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
-	for i := 0; i < 10; i++ {
-		<-cmdCh
-		progress, _, err := replay.Progress()
-		require.NoError(t, err)
-		require.GreaterOrEqual(t, progress, float64(i)/10)
-		// Maybe unstable due to goroutine schedule.
-		// require.LessOrEqual(t, progress, float64(i+2)/10)
+
+	for i := 0; i < 2; i++ {
+		for j := 0; j < 10; j++ {
+			command := newMockCommand(1)
+			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
+			loader.writeCommand(command)
+		}
+
+		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+		for j := 0; j < 10; j++ {
+			<-cmdCh
+			progress, _, err := replay.Progress()
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, progress, float64(i)/10)
+			require.LessOrEqual(t, progress, 1.0)
+			// Maybe unstable due to goroutine schedule.
+			// require.LessOrEqual(t, progress, float64(i+2)/10)
+		}
 	}
 }
