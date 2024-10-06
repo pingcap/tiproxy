@@ -61,6 +61,7 @@ func (c *conn) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// ctx is canceled when the replay is finished
 			return
 		case command := <-c.cmdCh:
 			if err := c.backendConn.ExecuteCmd(ctx, command.Payload); err != nil {

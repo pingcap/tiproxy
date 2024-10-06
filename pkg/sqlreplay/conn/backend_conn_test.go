@@ -30,6 +30,7 @@ func TestBackendConn(t *testing.T) {
 	require.NoError(t, backendConn.ExecuteStmt(context.Background(), 1, []any{uint64(1), "abc", float64(1.0)}))
 	backendConn.ConnID()
 	backendConn.Close()
+	require.True(t, backendConnMgr.closed)
 }
 
 func TestPreparedStmt(t *testing.T) {
