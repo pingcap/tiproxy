@@ -74,10 +74,10 @@ func (bc *backendConn) ConnID() uint64 {
 
 func (bc *backendConn) ExecuteCmd(ctx context.Context, request []byte) error {
 	err := bc.backendConnMgr.ExecuteCmd(ctx, request)
-	bc.clientIO.Reset()
 	if err == nil {
 		bc.updatePreparedStmts(request, bc.clientIO.GetResp())
 	}
+	bc.clientIO.Reset()
 	return err
 }
 
