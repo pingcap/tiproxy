@@ -72,6 +72,9 @@ func (c *conn) Run(ctx context.Context) {
 					return
 				}
 			}
+			if command.Type == pnet.ComQuit {
+				return
+			}
 		}
 	}
 }
