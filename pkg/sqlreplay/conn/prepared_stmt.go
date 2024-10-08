@@ -4,7 +4,7 @@
 package conn
 
 const (
-	setSessionStates = "set session_states "
+	setSessionStates = "SET SESSION_STATES "
 )
 
 type sessionStates struct {

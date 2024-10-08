@@ -4,6 +4,7 @@
 package conn
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -97,7 +98,10 @@ func (bc *backendConn) updatePreparedStmts(request, response []byte) {
 	case pnet.ComQuery.Byte():
 		if len(request[1:]) > len(setSessionStates) && strings.EqualFold(hack.String(request[1:len(setSessionStates)+1]), setSessionStates) {
 			query := request[len(setSessionStates)+1:]
-			query = hack.Slice(strings.Trim(hack.String(query), "'\" "))
+			query = bytes.TrimSpace(query)
+			query = bytes.Trim(query, "'\"")
+			query = bytes.ReplaceAll(query, []byte("\\\\"), []byte("\\"))
+			query = bytes.ReplaceAll(query, []byte("\\'"), []byte("'"))
 			var sessionStates sessionStates
 			if err := json.Unmarshal(query, &sessionStates); err != nil {
 				bc.lg.Warn("failed to unmarshal session states", zap.Error(err))
