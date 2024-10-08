@@ -35,7 +35,7 @@ func (db *mockReportDB) clear() {
 	db.exceptions = exceptions
 }
 
-func (db *mockReportDB) InsertExceptions(ctx context.Context, tp conn.ExceptionType, m map[string]*expCollection) error {
+func (db *mockReportDB) InsertExceptions(tp conn.ExceptionType, m map[string]*expCollection) error {
 	db.Lock()
 	defer db.Unlock()
 	exps := db.exceptions[tp]

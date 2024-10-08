@@ -111,7 +111,7 @@ func TestInsertExceptions(t *testing.T) {
 		err := db.Init(context.Background())
 		require.NoErrorf(t, err, "case %d", i)
 		cn.clear()
-		err = db.InsertExceptions(context.Background(), test.tp, test.colls)
+		err = db.InsertExceptions(test.tp, test.colls)
 		require.NoErrorf(t, err, "case %d", i)
 		require.Equal(t, test.stmtID, cn.stmtID, "case %d", i)
 		if len(test.args) > 1 {
