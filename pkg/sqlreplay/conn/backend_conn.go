@@ -107,7 +107,7 @@ func (bc *backendConn) updatePreparedStmts(request, response []byte) {
 				bc.lg.Warn("failed to unmarshal session states", zap.Error(err))
 			}
 			for stmtID, stmt := range sessionStates.PreparedStmts {
-				bc.preparedStmts[stmtID] = preparedStmt{text: stmt.StmtText, paramNum: len(stmt.ParamTypes)}
+				bc.preparedStmts[stmtID] = preparedStmt{text: stmt.StmtText, paramNum: len(stmt.ParamTypes) >> 1}
 			}
 		}
 	}
