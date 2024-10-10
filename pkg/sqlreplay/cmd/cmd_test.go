@@ -139,7 +139,7 @@ func TestDigest(t *testing.T) {
 	require.Equal(t, cmd1.Digest(), cmd4.Digest())
 	require.Equal(t, "select ?", cmd4.QueryText())
 
-	data, err := pnet.MakeExecuteStmtRequest(1, []any{1})
+	data, err := pnet.MakeExecuteStmtRequest(1, []any{1}, true)
 	require.NoError(t, err)
 	cmd5 := NewCommand(data, time.Now(), 100)
 	cmd5.PreparedStmt = "select ?"

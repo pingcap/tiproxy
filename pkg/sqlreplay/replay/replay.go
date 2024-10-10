@@ -116,6 +116,9 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.startTime = time.Now()
 	r.endTime = time.Time{}
 	r.progress = 0
+	r.replayedCmds = 0
+	r.filteredCmds = 0
+	r.connCount = 0
 	r.conns = make(map[uint64]conn.Conn)
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeCh = make(chan uint64, maxPendingExceptions)
@@ -229,6 +232,7 @@ func (r *replay) readCloseCh(ctx context.Context) {
 		select {
 		case c, ok := <-r.closeCh:
 			if !ok {
+				// impossible
 				return
 			}
 			// Keep the disconnected connections in the map to reject subsequent commands with the same connID,

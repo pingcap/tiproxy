@@ -16,6 +16,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestParseFileTs(t *testing.T) {
@@ -340,4 +341,43 @@ func TestRead(t *testing.T) {
 		_, _, err := l.Read(data)
 		require.True(t, errors.Is(err, io.EOF))
 	}
+}
+
+func TestReadGZip(t *testing.T) {
+	tmpDir := t.TempDir()
+	writer := NewWriter(WriterCfg{
+		Dir:      tmpDir,
+		FileSize: 1,
+	})
+	defer writer.Close()
+
+	data := make([]byte, 100*1024)
+	for i := 0; i < 11; i++ {
+		require.NoError(t, writer.Write(data))
+	}
+	// files are rotated and compressed at backendground asynchronously
+	require.Eventually(t, func() bool {
+		files := listFiles(t, tmpDir)
+		for _, f := range files {
+			if strings.HasPrefix(f, "traffic") && strings.HasSuffix(f, ".gz") {
+				return true
+			}
+		}
+		t.Logf("traffic files: %v", files)
+		return false
+	}, 5*time.Second, 10*time.Millisecond)
+
+	cfg := LoaderCfg{Dir: tmpDir}
+	l := NewLoader(zap.NewNop(), cfg)
+	for i := 0; i < 11; i++ {
+		data = make([]byte, 100*1024)
+		_, _, err := l.Read(data)
+		require.NoError(t, err)
+		for j := 0; j < 100*1024; j++ {
+			require.Equal(t, byte(0), data[j])
+		}
+	}
+	data = make([]byte, 1)
+	_, _, err := l.Read(data)
+	require.True(t, errors.Is(err, io.EOF))
 }

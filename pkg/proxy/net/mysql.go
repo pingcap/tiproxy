@@ -621,13 +621,20 @@ func ParsePrepareStmtResp(resp []byte) (stmtID uint32, paramNum int) {
 	return
 }
 
-func MakeExecuteStmtRequest(stmtID uint32, args []any) ([]byte, error) {
+func MakeExecuteStmtRequest(stmtID uint32, args []any, newParamBound bool) ([]byte, error) {
 	paramNum := len(args)
 	paramTypes := make([]byte, paramNum*2)
 	paramValues := make([][]byte, paramNum)
 	nullBitmap := make([]byte, (paramNum+7)>>3)
-	dataLen := 1 + 4 + 1 + 4 + len(nullBitmap) + 1 + len(paramTypes)
+	dataLen := 1 + 4 + 1 + 4
+	if paramNum > 0 {
+		dataLen += len(nullBitmap) + 1
+	}
 	var newParamBoundFlag byte = 0
+	if newParamBound {
+		newParamBoundFlag = 1
+		dataLen += len(paramTypes)
+	}
 
 	for i := range args {
 		if args[i] == nil {
@@ -636,7 +643,6 @@ func MakeExecuteStmtRequest(stmtID uint32, args []any) ([]byte, error) {
 			continue
 		}
 
-		newParamBoundFlag = 1
 		switch v := args[i].(type) {
 		case int8:
 			paramTypes[i<<1] = fieldTypeTiny
@@ -719,7 +725,7 @@ func MakeExecuteStmtRequest(stmtID uint32, args []any) ([]byte, error) {
 		pos += len(nullBitmap)
 		request[pos] = newParamBoundFlag
 		pos++
-		if newParamBoundFlag == 1 {
+		if newParamBound {
 			copy(request[pos:], paramTypes)
 			pos += len(paramTypes)
 		}
@@ -734,32 +740,37 @@ func MakeExecuteStmtRequest(stmtID uint32, args []any) ([]byte, error) {
 // ParseExecuteStmtRequest parses ComStmtExecute request.
 // NOTICE: the type of returned args may be wrong because it doesn't have the knowledge of real param types.
 // E.g. []byte is returned as string, and int is returned as int32.
-func ParseExecuteStmtRequest(data []byte, paramNum int) (stmtID uint32, args []any, err error) {
-	if len(data) < 1+4+1+4+1 {
-		return 0, nil, errors.WithStack(gomysql.ErrMalformPacket)
+func ParseExecuteStmtRequest(data []byte, paramNum int, paramTypes []byte) (stmtID uint32, args []any, newParamTypes []byte, err error) {
+	if len(data) < 1+4+1+4 {
+		return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
 	}
 
 	pos := 1
 	stmtID = binary.LittleEndian.Uint32(data[pos : pos+4])
+	// paramNum is contained in the ComStmtPrepare but paramTypes is contained in the first ComStmtExecute (with newParamBoundFlag==1).
+	// If the prepared statement is parsed from the session states, the paramTypes may be empty but the paramNum is not in the session states.
+	// Just return empty args in this case, which is fine currently.
+	if paramNum == 0 {
+		return stmtID, nil, nil, nil
+	}
 	// cursor flag and iteration count
 	pos += 4 + 1 + 4
 	if len(data) < pos+((paramNum+7)>>3)+1 {
-		return 0, nil, errors.WithStack(gomysql.ErrMalformPacket)
+		return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
 	}
 	nullBitmap := data[pos : pos+((paramNum+7)>>3)]
 	pos += len(nullBitmap)
 	newParamBoundFlag := data[pos]
 	pos += 1
 	args = make([]any, paramNum)
-	if newParamBoundFlag == 0 {
-		return stmtID, args, nil
-	}
 
-	if len(data) < pos+paramNum*2 {
-		return 0, nil, errors.WithStack(gomysql.ErrMalformPacket)
+	if newParamBoundFlag > 0 {
+		if len(data) < pos+paramNum<<1 {
+			return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
+		}
+		paramTypes = data[pos : pos+paramNum<<1]
+		pos += paramNum << 1
 	}
-	paramTypes := data[pos : pos+paramNum*2]
-	pos += paramNum * 2
 
 	for i := 0; i < paramNum; i++ {
 		if nullBitmap[i/8]&(1<<(uint(i)%8)) > 0 {
@@ -767,6 +778,8 @@ func ParseExecuteStmtRequest(data []byte, paramNum int) (stmtID uint32, args []a
 			continue
 		}
 		switch paramTypes[i<<1] {
+		case fieldTypeNULL:
+			args[i] = nil
 		case fieldTypeTiny:
 			if paramTypes[(i<<1)+1] == 0x80 {
 				args[i] = uint8(data[pos])
@@ -774,7 +787,7 @@ func ParseExecuteStmtRequest(data []byte, paramNum int) (stmtID uint32, args []a
 				args[i] = int8(data[pos])
 			}
 			pos += 1
-		case fieldTypeShort:
+		case fieldTypeShort, fieldTypeYear:
 			v := binary.LittleEndian.Uint16(data[pos : pos+2])
 			if paramTypes[(i<<1)+1] == 0x80 {
 				args[i] = v
@@ -782,7 +795,7 @@ func ParseExecuteStmtRequest(data []byte, paramNum int) (stmtID uint32, args []a
 				args[i] = int16(v)
 			}
 			pos += 2
-		case fieldTypeLong:
+		case fieldTypeLong, fieldTypeInt24:
 			v := binary.LittleEndian.Uint32(data[pos : pos+4])
 			if paramTypes[(i<<1)+1] == 0x80 {
 				args[i] = v
@@ -804,19 +817,58 @@ func ParseExecuteStmtRequest(data []byte, paramNum int) (stmtID uint32, args []a
 		case fieldTypeDouble:
 			args[i] = math.Float64frombits(binary.LittleEndian.Uint64(data[pos : pos+8]))
 			pos += 8
-		case fieldTypeString:
-			v, _, off, err := ParseLengthEncodedBytes(data[pos:])
-			if err != nil {
-				return 0, nil, errors.Wrapf(err, "parse param %d err", i)
+		case fieldTypeDate, fieldTypeTimestamp, fieldTypeDateTime:
+			length := data[pos]
+			pos++
+			switch length {
+			case 0:
+				args[i] = "0000-00-00 00:00:00"
+			case 4:
+				pos, args[i] = BinaryDate(pos, data)
+			case 7:
+				pos, args[i] = BinaryDateTime(pos, data)
+			case 11:
+				pos, args[i] = BinaryTimestamp(pos, data)
+			case 13:
+				pos, args[i] = BinaryTimestampWithTZ(pos, data)
+			default:
+				return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
 			}
-			args[i] = hack.String(v)
-			pos += off
+		case fieldTypeTime:
+			length := data[pos]
+			pos++
+			switch length {
+			case 0:
+				args[i] = "0"
+			case 8:
+				isNegative := data[pos]
+				pos++
+				pos, args[i] = BinaryDuration(pos, data, isNegative)
+			case 12:
+				isNegative := data[pos]
+				pos++
+				pos, args[i] = BinaryDurationWithMS(pos, data, isNegative)
+			default:
+				return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
+			}
+		case fieldTypeDecimal, fieldTypeNewDecimal, fieldTypeVarChar, fieldTypeString, fieldTypeVarString, fieldTypeBLOB, fieldTypeTinyBLOB,
+			fieldTypeMediumBLOB, fieldTypeLongBLOB, fieldTypeEnum, fieldTypeSet, fieldTypeGeometry, fieldTypeBit, fieldTypeJSON, fieldTypeVector:
+			v, isNull, n, err := ParseLengthEncodedBytes(data[pos:])
+			if err != nil {
+				return 0, nil, nil, errors.Wrapf(err, "parse param err, type: %d, idx: %d, pos: %d", paramTypes[i<<1], i, pos)
+			}
+			if isNull {
+				args[i] = nil
+			} else {
+				args[i] = hack.String(v)
+			}
+			pos += n
 		default:
-			return 0, nil, errors.Errorf("unsupported type %d", paramTypes[i<<1])
+			return 0, nil, nil, errors.Errorf("unsupported type %d", paramTypes[i<<1])
 		}
 	}
 
-	return stmtID, args, nil
+	return stmtID, args, paramTypes, nil
 }
 
 func MakeCloseStmtRequest(stmtID uint32) []byte {

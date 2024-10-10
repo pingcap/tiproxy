@@ -15,6 +15,7 @@ var _ BackendConnManager = (*mockBackendConnMgr)(nil)
 
 type mockBackendConnMgr struct {
 	clientIO net.PacketIO
+	closed   bool
 }
 
 func (m *mockBackendConnMgr) Connect(ctx context.Context, clientIO net.PacketIO, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, username string, password string) error {
@@ -31,6 +32,7 @@ func (m *mockBackendConnMgr) ExecuteCmd(ctx context.Context, request []byte) err
 }
 
 func (m *mockBackendConnMgr) Close() error {
+	m.closed = true
 	return m.clientIO.Close()
 }
 
@@ -73,8 +75,8 @@ func (c *mockBackendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args [
 	return c.execErr
 }
 
-func (c *mockBackendConn) GetPreparedStmt(stmtID uint32) (string, int) {
-	return c.prepareStmt, c.paramNum
+func (c *mockBackendConn) GetPreparedStmt(stmtID uint32) (string, int, []byte) {
+	return c.prepareStmt, c.paramNum, nil
 }
 
 func (c *mockBackendConn) Close() {

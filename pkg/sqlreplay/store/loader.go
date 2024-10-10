@@ -163,8 +163,9 @@ func (l *loader) nextReader() error {
 			return errors.WithStack(err)
 		}
 		l.reader = bufio.NewReader(gr)
+	} else {
+		l.reader = bufio.NewReader(r)
 	}
-	l.reader = bufio.NewReader(r)
 	return nil
 }
 

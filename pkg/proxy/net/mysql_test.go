@@ -126,19 +126,40 @@ func TestPrepareStmts(t *testing.T) {
 		float64(1.2),
 		nil,
 	}
+	expectedTypes := []byte{
+		fieldTypeNULL, 0,
+		fieldTypeString, 0,
+		fieldTypeTiny, 0x80,
+		fieldTypeShort, 0,
+		fieldTypeLong, 0,
+		fieldTypeLongLong, 0,
+		fieldTypeShort, 0x80,
+		fieldTypeLong, 0x80,
+		fieldTypeLongLong, 0x80,
+		fieldTypeFloat, 0,
+		fieldTypeDouble, 0,
+		fieldTypeNULL, 0,
+	}
 
 	b := MakePrepareStmtRequest("select ?")
 	require.Len(t, b, len("select ?")+1)
 
-	data1, err := MakeExecuteStmtRequest(1, args)
+	data1, err := MakeExecuteStmtRequest(1, args, true)
 	require.NoError(t, err)
 
-	stmtID, pArgs, err := ParseExecuteStmtRequest(data1, len(args))
+	stmtID, pArgs, newParamTypes, err := ParseExecuteStmtRequest(data1, len(args), nil)
 	require.NoError(t, err)
 	require.Equal(t, uint32(1), stmtID)
 	require.EqualValues(t, args, pArgs)
+	require.Equal(t, expectedTypes, newParamTypes)
 
-	data2, err := MakeExecuteStmtRequest(1, pArgs)
+	data2, err := MakeExecuteStmtRequest(1, pArgs, false)
 	require.NoError(t, err)
-	require.Equal(t, data1, data2)
+	require.NotEqual(t, data1, data2)
+
+	stmtID, pArgs, newParamTypes, err = ParseExecuteStmtRequest(data1, len(args), newParamTypes)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), stmtID)
+	require.EqualValues(t, args, pArgs)
+	require.Equal(t, expectedTypes, newParamTypes)
 }
