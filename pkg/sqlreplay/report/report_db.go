@@ -102,7 +102,7 @@ func (rdb *reportDB) InsertExceptions(tp conn.ExceptionType, m map[string]*expCo
 		}
 		// retry in case of disconnection
 		ctx := context.Background()
-		return retry.Retry(func() error {
+		err := retry.Retry(func() error {
 			err := rdb.conn.ExecuteStmt(ctx, rdb.stmtIDs[tp], args)
 			if err == nil {
 				return nil
@@ -114,6 +114,9 @@ func (rdb *reportDB) InsertExceptions(tp conn.ExceptionType, m map[string]*expCo
 			}
 			return err
 		}, ctx, 100*time.Millisecond, 3)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

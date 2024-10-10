@@ -65,11 +65,12 @@ func (c *conn) Run(ctx context.Context) {
 			return
 		case command := <-c.cmdCh:
 			if err := c.backendConn.ExecuteCmd(ctx, command.Payload); err != nil {
+				if pnet.IsDisconnectError(err) {
+					c.exceptionCh <- NewOtherException(err, c.connID)
+					return
+				}
 				if c.updateCmdForExecuteStmt(command) {
 					c.exceptionCh <- NewFailException(err, command)
-				}
-				if pnet.IsDisconnectError(err) {
-					return
 				}
 			}
 			if command.Type == pnet.ComQuit {
@@ -82,14 +83,14 @@ func (c *conn) Run(ctx context.Context) {
 func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 	if command.Type == pnet.ComStmtExecute && len(command.Payload) >= 5 {
 		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-		text, paramNum := c.backendConn.GetPreparedStmt(stmtID)
+		text, paramNum, paramTypes := c.backendConn.GetPreparedStmt(stmtID)
 		if len(text) == 0 {
 			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID))
 			return false
 		}
-		_, args, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum)
+		_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum, paramTypes)
 		if err != nil {
-			c.lg.Error("parse execute stmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+			c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
 		}
 		command.PreparedStmt = text
 		command.Params = args

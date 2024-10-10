@@ -75,8 +75,8 @@ func (c *mockBackendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args [
 	return c.execErr
 }
 
-func (c *mockBackendConn) GetPreparedStmt(stmtID uint32) (string, int) {
-	return c.prepareStmt, c.paramNum
+func (c *mockBackendConn) GetPreparedStmt(stmtID uint32) (string, int, []byte) {
+	return c.prepareStmt, c.paramNum, nil
 }
 
 func (c *mockBackendConn) Close() {

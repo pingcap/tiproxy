@@ -31,7 +31,7 @@ func TestConnectError(t *testing.T) {
 		},
 		{
 			execErr: io.EOF,
-			tp:      Fail,
+			tp:      Other,
 		},
 	}
 
@@ -92,7 +92,7 @@ func TestExecuteError(t *testing.T) {
 		},
 		{
 			prepare: func(bc *mockBackendConn) []byte {
-				request, err := pnet.MakeExecuteStmtRequest(1, []any{uint64(100), "abc", nil})
+				request, err := pnet.MakeExecuteStmtRequest(1, []any{uint64(100), "abc", nil}, true)
 				require.NoError(t, err)
 				bc.prepareStmt = "select ?"
 				bc.paramNum = 3

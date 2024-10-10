@@ -19,6 +19,7 @@ type preparedStmtInfo struct {
 
 // Used for parsing prepared stmt.
 type preparedStmt struct {
-	text     string
-	paramNum int
+	text       string
+	paramTypes []byte
+	paramNum   int
 }
