@@ -21,19 +21,21 @@ func TestReadExceptions(t *testing.T) {
 	now := time.Now()
 	failSample := conn.NewFailException(errors.New("another error"), cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()},
 		[]byte("select 1")...), now, 1))
+	otherSample1 := conn.NewOtherException(errors.New("mock error"), 1)
+	otherSample2 := conn.NewOtherException(errors.New("another error"), 1)
 	tests := []struct {
 		exceptions []conn.Exception
 		finalExps  map[conn.ExceptionType]map[string]*expCollection
 	}{
 		{
 			exceptions: []conn.Exception{
-				conn.NewOtherException(errors.New("mock error"), 1),
+				otherSample1,
 			},
 			finalExps: map[conn.ExceptionType]map[string]*expCollection{
 				conn.Other: {
 					"mock error": &expCollection{
 						count:  1,
-						sample: conn.NewOtherException(errors.New("mock error"), 1),
+						sample: otherSample1,
 					},
 				},
 				conn.Fail: {},
@@ -48,7 +50,7 @@ func TestReadExceptions(t *testing.T) {
 				conn.Other: {
 					"mock error": &expCollection{
 						count:  3,
-						sample: conn.NewOtherException(errors.New("mock error"), 1),
+						sample: otherSample1,
 					},
 				},
 				conn.Fail: {},
@@ -56,17 +58,17 @@ func TestReadExceptions(t *testing.T) {
 		},
 		{
 			exceptions: []conn.Exception{
-				conn.NewOtherException(errors.New("another error"), 1),
+				otherSample2,
 			},
 			finalExps: map[conn.ExceptionType]map[string]*expCollection{
 				conn.Other: {
 					"mock error": &expCollection{
 						count:  3,
-						sample: conn.NewOtherException(errors.New("mock error"), 1),
+						sample: otherSample1,
 					},
 					"another error": &expCollection{
 						count:  1,
-						sample: conn.NewOtherException(errors.New("another error"), 1),
+						sample: otherSample2,
 					},
 				},
 				conn.Fail: {},
@@ -80,11 +82,11 @@ func TestReadExceptions(t *testing.T) {
 				conn.Other: {
 					"mock error": &expCollection{
 						count:  3,
-						sample: conn.NewOtherException(errors.New("mock error"), 1),
+						sample: otherSample1,
 					},
 					"another error": &expCollection{
 						count:  1,
-						sample: conn.NewOtherException(errors.New("another error"), 1),
+						sample: otherSample2,
 					},
 				},
 				conn.Fail: {
