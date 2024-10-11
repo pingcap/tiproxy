@@ -8,6 +8,9 @@ linters-settings:
         - io.WriteString
         - (*go.uber.org/zap/buffer.Buffer).WriteString
         - (*go.uber.org/zap/buffer.Buffer).WriteByte
+  gosec:
+    exclude-rules:
+      - id: G115
 
 issues:
   exclude-rules:

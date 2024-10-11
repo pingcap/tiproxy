@@ -127,12 +127,10 @@ func DumpLengthEncodedInt(buffer []byte, n uint64) []byte {
 	case n <= 0xffffff:
 		return append(buffer, 0xfd, byte(n), byte(n>>8), byte(n>>16))
 
-	case n <= 0xffffffffffffffff:
+	default:
 		return append(buffer, 0xfe, byte(n), byte(n>>8), byte(n>>16), byte(n>>24),
 			byte(n>>32), byte(n>>40), byte(n>>48), byte(n>>56))
 	}
-
-	return buffer
 }
 
 // DumpLengthEncodedString dumps string<int>.
