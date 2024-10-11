@@ -96,7 +96,7 @@ func (rdb *reportDB) InsertExceptions(tp conn.ExceptionType, m map[string]*expCo
 				command.StartTs.String(), sample.Time().String(), value.count, value.count}
 		case conn.Other:
 			sample := value.sample.(*conn.OtherException)
-			args = []any{sample.Key(), sample.Error(), nil, value.count, value.count}
+			args = []any{sample.Key(), sample.Error(), sample.Time().String(), value.count, value.count}
 		default:
 			return errors.WithStack(errors.New("unknown exception type"))
 		}

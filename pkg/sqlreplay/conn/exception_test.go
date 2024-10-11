@@ -57,5 +57,6 @@ func TestOtherException(t *testing.T) {
 		require.Equal(t, Other, exception.Type(), "case %d", i)
 		require.Equal(t, uint64(1), exception.ConnID(), "case %d", i)
 		require.Equal(t, "mock error", exception.Key(), "case %d", i)
+		require.Greater(t, exception.Time(), time.Time{}, "case %d", i)
 	}
 }
