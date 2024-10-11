@@ -10,7 +10,7 @@ linters-settings:
         - (*go.uber.org/zap/buffer.Buffer).WriteByte
   gosec:
     exclude-rules:
-      - id: G115
+      - G115
 
 issues:
   exclude-rules:
