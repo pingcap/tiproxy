@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
@@ -102,8 +103,9 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 func (c *conn) ExecuteCmd(command *cmd.Command) {
 	select {
 	case c.cmdCh <- command:
-	default:
-		// Discard this command to avoid block due to a bug.
+	case <-time.After(3 * time.Second):
+		// If the replay is slower, wait until it catches up, otherwise too many transactions are broken.
+		// But if it's blocked due to a bug, discard the command to avoid block the whole replay.
 		// If the discarded command is a COMMIT, let the next COMMIT finish the transaction.
 		select {
 		case c.exceptionCh <- NewOtherException(errors.New("too many pending commands, discard command"), c.connID):
