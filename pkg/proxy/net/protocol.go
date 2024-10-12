@@ -26,6 +26,8 @@ package net
 
 import (
 	"bytes"
+	"encoding/binary"
+	"fmt"
 	"io"
 )
 
@@ -125,12 +127,10 @@ func DumpLengthEncodedInt(buffer []byte, n uint64) []byte {
 	case n <= 0xffffff:
 		return append(buffer, 0xfd, byte(n), byte(n>>8), byte(n>>16))
 
-	case n <= 0xffffffffffffffff:
+	default:
 		return append(buffer, 0xfe, byte(n), byte(n>>8), byte(n>>16), byte(n>>24),
 			byte(n>>32), byte(n>>40), byte(n>>48), byte(n>>56))
 	}
-
-	return buffer
 }
 
 // DumpLengthEncodedString dumps string<int>.
@@ -181,4 +181,68 @@ func Uint64ToBytes(n uint64) []byte {
 		byte(n >> 48),
 		byte(n >> 56),
 	}
+}
+
+func BinaryDate(pos int, paramValues []byte) (int, string) {
+	year := binary.LittleEndian.Uint16(paramValues[pos : pos+2])
+	pos += 2
+	month := paramValues[pos]
+	pos++
+	day := paramValues[pos]
+	pos++
+	return pos, fmt.Sprintf("%04d-%02d-%02d", year, month, day)
+}
+
+func BinaryDateTime(pos int, paramValues []byte) (int, string) {
+	pos, date := BinaryDate(pos, paramValues)
+	hour := paramValues[pos]
+	pos++
+	minute := paramValues[pos]
+	pos++
+	second := paramValues[pos]
+	pos++
+	return pos, fmt.Sprintf("%s %02d:%02d:%02d", date, hour, minute, second)
+}
+
+func BinaryTimestamp(pos int, paramValues []byte) (int, string) {
+	pos, dateTime := BinaryDateTime(pos, paramValues)
+	microSecond := binary.LittleEndian.Uint32(paramValues[pos : pos+4])
+	pos += 4
+	return pos, fmt.Sprintf("%s.%06d", dateTime, microSecond)
+}
+
+func BinaryTimestampWithTZ(pos int, paramValues []byte) (int, string) {
+	pos, timestamp := BinaryTimestamp(pos, paramValues)
+	tzShiftInMin := int16(binary.LittleEndian.Uint16(paramValues[pos : pos+2]))
+	tzShiftHour := tzShiftInMin / 60
+	tzShiftAbsMin := tzShiftInMin % 60
+	if tzShiftAbsMin < 0 {
+		tzShiftAbsMin = -tzShiftAbsMin
+	}
+	pos += 2
+	return pos, fmt.Sprintf("%s%+02d:%02d", timestamp, tzShiftHour, tzShiftAbsMin)
+}
+
+func BinaryDuration(pos int, paramValues []byte, isNegative uint8) (int, string) {
+	sign := ""
+	if isNegative >= 1 {
+		sign = "-"
+	}
+	days := binary.LittleEndian.Uint32(paramValues[pos : pos+4])
+	pos += 4
+	hours := paramValues[pos]
+	pos++
+	minutes := paramValues[pos]
+	pos++
+	seconds := paramValues[pos]
+	pos++
+	return pos, fmt.Sprintf("%s%d %02d:%02d:%02d", sign, days, hours, minutes, seconds)
+}
+
+func BinaryDurationWithMS(pos int, paramValues []byte,
+	isNegative uint8) (int, string) {
+	pos, dur := BinaryDuration(pos, paramValues, isNegative)
+	microSecond := binary.LittleEndian.Uint32(paramValues[pos : pos+4])
+	pos += 4
+	return pos, fmt.Sprintf("%s.%06d", dur, microSecond)
 }

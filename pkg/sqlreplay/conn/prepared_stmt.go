@@ -4,7 +4,7 @@
 package conn
 
 const (
-	setSessionStates = "set session_states "
+	setSessionStates = "SET SESSION_STATES "
 )
 
 type sessionStates struct {
@@ -19,6 +19,7 @@ type preparedStmtInfo struct {
 
 // Used for parsing prepared stmt.
 type preparedStmt struct {
-	text     string
-	paramNum int
+	text       string
+	paramTypes []byte
+	paramNum   int
 }

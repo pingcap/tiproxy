@@ -4,6 +4,7 @@
 package conn
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -32,7 +33,7 @@ type BackendConn interface {
 	Query(ctx context.Context, stmt string) error
 	PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error)
 	ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error
-	GetPreparedStmt(stmtID uint32) (text string, paramNum int)
+	GetPreparedStmt(stmtID uint32) (text string, paramNum int, paramTypes []byte)
 	Close()
 }
 
@@ -74,10 +75,10 @@ func (bc *backendConn) ConnID() uint64 {
 
 func (bc *backendConn) ExecuteCmd(ctx context.Context, request []byte) error {
 	err := bc.backendConnMgr.ExecuteCmd(ctx, request)
-	bc.clientIO.Reset()
 	if err == nil {
 		bc.updatePreparedStmts(request, bc.clientIO.GetResp())
 	}
+	bc.clientIO.Reset()
 	return err
 }
 
@@ -87,6 +88,20 @@ func (bc *backendConn) updatePreparedStmts(request, response []byte) {
 		stmtID, paramNum := pnet.ParsePrepareStmtResp(response)
 		stmt := hack.String(request[1:])
 		bc.preparedStmts[stmtID] = preparedStmt{text: stmt, paramNum: paramNum}
+	case pnet.ComStmtExecute.Byte():
+		stmtID := binary.LittleEndian.Uint32(request[1:5])
+		ps, ok := bc.preparedStmts[stmtID]
+		// paramNum is contained in the ComStmtPrepare while paramTypes is contained in the first ComStmtExecute.
+		// Following ComStmtExecute requests will reuse the paramTypes from the first ComStmtExecute.
+		if ok && ps.paramNum > 0 && len(ps.paramTypes) == 0 {
+			_, _, paramTypes, err := pnet.ParseExecuteStmtRequest(request, ps.paramNum, ps.paramTypes)
+			if err != nil {
+				bc.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+			} else {
+				ps.paramTypes = paramTypes
+				bc.preparedStmts[stmtID] = ps
+			}
+		}
 	case pnet.ComStmtClose.Byte():
 		stmtID := binary.LittleEndian.Uint32(request[1:5])
 		delete(bc.preparedStmts, stmtID)
@@ -97,25 +112,28 @@ func (bc *backendConn) updatePreparedStmts(request, response []byte) {
 	case pnet.ComQuery.Byte():
 		if len(request[1:]) > len(setSessionStates) && strings.EqualFold(hack.String(request[1:len(setSessionStates)+1]), setSessionStates) {
 			query := request[len(setSessionStates)+1:]
-			query = hack.Slice(strings.Trim(hack.String(query), "'\" "))
+			query = bytes.TrimSpace(query)
+			query = bytes.Trim(query, "'\"")
+			query = bytes.ReplaceAll(query, []byte("\\\\"), []byte("\\"))
+			query = bytes.ReplaceAll(query, []byte("\\'"), []byte("'"))
 			var sessionStates sessionStates
 			if err := json.Unmarshal(query, &sessionStates); err != nil {
 				bc.lg.Warn("failed to unmarshal session states", zap.Error(err))
 			}
 			for stmtID, stmt := range sessionStates.PreparedStmts {
-				bc.preparedStmts[stmtID] = preparedStmt{text: stmt.StmtText, paramNum: len(stmt.ParamTypes)}
+				bc.preparedStmts[stmtID] = preparedStmt{text: stmt.StmtText, paramNum: len(stmt.ParamTypes) >> 1, paramTypes: stmt.ParamTypes}
 			}
 		}
 	}
 }
 
-func (bc *backendConn) GetPreparedStmt(stmtID uint32) (string, int) {
+func (bc *backendConn) GetPreparedStmt(stmtID uint32) (string, int, []byte) {
 	ps := bc.preparedStmts[stmtID]
-	return ps.text, ps.paramNum
+	return ps.text, ps.paramNum, ps.paramTypes
 }
 
 func (bc *backendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error {
-	request, err := pnet.MakeExecuteStmtRequest(stmtID, args)
+	request, err := pnet.MakeExecuteStmtRequest(stmtID, args, true)
 	if err != nil {
 		return err
 	}
@@ -145,5 +163,8 @@ func (bc *backendConn) Query(ctx context.Context, stmt string) error {
 func (bc *backendConn) Close() {
 	if err := bc.clientIO.Close(); err != nil {
 		bc.lg.Warn("failed to close client connection", zap.Error(err))
+	}
+	if err := bc.backendConnMgr.Close(); err != nil {
+		bc.lg.Warn("failed to close backend connection", zap.Error(err))
 	}
 }

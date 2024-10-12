@@ -30,6 +30,10 @@ issues:
       linters:
         - gosec
       text: "G204:"
+    - path: ".*.go"
+      linters:
+        - gosec
+      text: "G115:"
 
 linters:
   enable:

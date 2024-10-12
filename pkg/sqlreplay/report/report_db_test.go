@@ -55,6 +55,9 @@ func TestInsertExceptions(t *testing.T) {
 	now := time.Now()
 	failSample := conn.NewFailException(errors.New("mock error"),
 		cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), now, 1))
+	otherSample1 := conn.NewOtherException(errors.Wrapf(errors.New("mock error"), "wrap"), 1)
+	otherSample2 := conn.NewOtherException(errors.New("mock error"), 1)
+	otherSample3 := conn.NewOtherException(errors.New("another error"), 2)
 	tests := []struct {
 		tp     conn.ExceptionType
 		colls  map[string]*expCollection
@@ -66,26 +69,27 @@ func TestInsertExceptions(t *testing.T) {
 			colls: map[string]*expCollection{
 				"mock error": {
 					count:  1,
-					sample: conn.NewOtherException(errors.Wrapf(errors.New("mock error"), "wrap"), 1),
+					sample: otherSample1,
 				},
 			},
 			stmtID: []uint32{2},
-			args:   [][]any{{"mock error", "wrap: mock error", nil, uint64(1), uint64(1)}},
+			args:   [][]any{{"mock error", "wrap: mock error", otherSample1.Time().String(), uint64(1), uint64(1)}},
 		},
 		{
 			tp: conn.Other,
 			colls: map[string]*expCollection{
 				"mock error": {
 					count:  2,
-					sample: conn.NewOtherException(errors.New("mock error"), 1),
+					sample: otherSample2,
 				},
 				"another error": {
 					count:  2,
-					sample: conn.NewOtherException(errors.New("another error"), 2),
+					sample: otherSample3,
 				},
 			},
 			stmtID: []uint32{2, 2},
-			args:   [][]any{{"mock error", "mock error", nil, uint64(2), uint64(2)}, {"another error", "another error", nil, uint64(2), uint64(2)}},
+			args: [][]any{{"mock error", "mock error", otherSample2.Time().String(), uint64(2), uint64(2)},
+				{"another error", "another error", otherSample3.Time().String(), uint64(2), uint64(2)}},
 		},
 		{
 			tp: conn.Fail,
@@ -111,7 +115,7 @@ func TestInsertExceptions(t *testing.T) {
 		err := db.Init(context.Background())
 		require.NoErrorf(t, err, "case %d", i)
 		cn.clear()
-		err = db.InsertExceptions(context.Background(), test.tp, test.colls)
+		err = db.InsertExceptions(test.tp, test.colls)
 		require.NoErrorf(t, err, "case %d", i)
 		require.Equal(t, test.stmtID, cn.stmtID, "case %d", i)
 		if len(test.args) > 1 {

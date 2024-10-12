@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
@@ -61,15 +62,20 @@ func (c *conn) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			// ctx is canceled when the replay is finished
 			return
 		case command := <-c.cmdCh:
 			if err := c.backendConn.ExecuteCmd(ctx, command.Payload); err != nil {
+				if pnet.IsDisconnectError(err) {
+					c.exceptionCh <- NewOtherException(err, c.connID)
+					return
+				}
 				if c.updateCmdForExecuteStmt(command) {
 					c.exceptionCh <- NewFailException(err, command)
 				}
-				if pnet.IsDisconnectError(err) {
-					return
-				}
+			}
+			if command.Type == pnet.ComQuit {
+				return
 			}
 		}
 	}
@@ -78,14 +84,14 @@ func (c *conn) Run(ctx context.Context) {
 func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 	if command.Type == pnet.ComStmtExecute && len(command.Payload) >= 5 {
 		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-		text, paramNum := c.backendConn.GetPreparedStmt(stmtID)
+		text, paramNum, paramTypes := c.backendConn.GetPreparedStmt(stmtID)
 		if len(text) == 0 {
 			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID))
 			return false
 		}
-		_, args, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum)
+		_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum, paramTypes)
 		if err != nil {
-			c.lg.Error("parse execute stmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+			c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
 		}
 		command.PreparedStmt = text
 		command.Params = args
@@ -97,8 +103,9 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 func (c *conn) ExecuteCmd(command *cmd.Command) {
 	select {
 	case c.cmdCh <- command:
-	default:
-		// Discard this command to avoid block due to a bug.
+	case <-time.After(3 * time.Second):
+		// If the replay is slower, wait until it catches up, otherwise too many transactions are broken.
+		// But if it's blocked due to a bug, discard the command to avoid block the whole replay.
 		// If the discarded command is a COMMIT, let the next COMMIT finish the transaction.
 		select {
 		case c.exceptionCh <- NewOtherException(errors.New("too many pending commands, discard command"), c.connID):

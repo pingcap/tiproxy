@@ -277,7 +277,8 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, ini
 		// initSession is slow, do not call it in the lock.
 		sql, err := initSession()
 		if err != nil {
-			c.lg.Warn("failed to init session", zap.Error(err))
+			// Maybe the connection is in transaction or closing.
+			c.lg.Debug("failed to init session", zap.Uint64("connID", connID), zap.Error(err))
 			return
 		}
 		initPacket := make([]byte, 0, len(sql)+1)

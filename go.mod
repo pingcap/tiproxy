@@ -13,6 +13,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/j-keck/arping v1.0.3
 	github.com/klauspost/compress v1.16.6
+	github.com/pelletier/go-toml/v2 v2.0.5
 	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c
 	github.com/pingcap/sysutil v1.0.0
 	github.com/pingcap/tidb v1.1.0-beta.0.20230103132820-3ccff46aa3bc
@@ -73,7 +74,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/pelletier/go-toml/v2 v2.0.5 // indirect
 	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0 // indirect
 	github.com/pingcap/errors v0.11.5-0.20221009092201-b66cddb77c32 // indirect
 	github.com/pingcap/log v1.1.1-0.20221116035753-734d527bc87c // indirect

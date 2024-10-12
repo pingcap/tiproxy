@@ -95,7 +95,10 @@ func (r *report) Start(ctx context.Context, cfg ReportConfig) error {
 
 func (r *report) readExceptions(ctx context.Context) {
 	ticker := time.NewTicker(r.cfg.flushInterval)
-	defer ticker.Stop()
+	defer func() {
+		ticker.Stop()
+		r.flush()
+	}()
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
@@ -109,15 +112,16 @@ func (r *report) readExceptions(ctx context.Context) {
 				coll.inc()
 			}
 		case <-ticker.C:
-			r.flush(ctx)
+			r.flush()
 		}
 	}
 }
 
-func (r *report) flush(ctx context.Context) {
+// exceptions are flushed even when the context is canceled, so do not pass the canceled context in.
+func (r *report) flush() {
 	for tp, m := range r.exceptions {
-		if err := r.db.InsertExceptions(ctx, tp, m); err != nil {
-			r.lg.Error("insert exceptions failed", zap.Stringer("type", tp), zap.Error(err))
+		if err := r.db.InsertExceptions(tp, m); err != nil {
+			r.lg.Error("insert exceptions failed", zap.Stringer("type", tp), zap.Int("exceptions", len(m)), zap.Error(err))
 		}
 		for k := range m {
 			delete(m, k)

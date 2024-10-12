@@ -30,6 +30,7 @@ func TestBackendConn(t *testing.T) {
 	require.NoError(t, backendConn.ExecuteStmt(context.Background(), 1, []any{uint64(1), "abc", float64(1.0)}))
 	backendConn.ConnID()
 	backendConn.Close()
+	require.True(t, backendConnMgr.closed)
 }
 
 func TestPreparedStmt(t *testing.T) {
@@ -37,7 +38,7 @@ func TestPreparedStmt(t *testing.T) {
 		PreparedStmts: map[uint32]*preparedStmtInfo{
 			1: {
 				StmtText:   "select ?",
-				ParamTypes: []byte{0x08},
+				ParamTypes: []byte{0x08, 0x00},
 			},
 		},
 	}
@@ -59,8 +60,9 @@ func TestPreparedStmt(t *testing.T) {
 			response: pnet.MakeOKPacket(0, pnet.OKHeader),
 			preparedStmts: map[uint32]preparedStmt{
 				1: {
-					text:     "select ?",
-					paramNum: 1,
+					text:       "select ?",
+					paramNum:   1,
+					paramTypes: []byte{0x08, 0x00},
 				},
 			},
 		},
@@ -69,8 +71,9 @@ func TestPreparedStmt(t *testing.T) {
 			response: pnet.MakePrepareStmtResp(2, 2),
 			preparedStmts: map[uint32]preparedStmt{
 				1: {
-					text:     "select ?",
-					paramNum: 1,
+					text:       "select ?",
+					paramNum:   1,
+					paramTypes: []byte{0x08, 0x00},
 				},
 				2: {
 					text:     "insert into t values(?), (?)",

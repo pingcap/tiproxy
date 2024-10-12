@@ -35,7 +35,7 @@ func (db *mockReportDB) clear() {
 	db.exceptions = exceptions
 }
 
-func (db *mockReportDB) InsertExceptions(ctx context.Context, tp conn.ExceptionType, m map[string]*expCollection) error {
+func (db *mockReportDB) InsertExceptions(tp conn.ExceptionType, m map[string]*expCollection) error {
 	db.Lock()
 	defer db.Unlock()
 	exps := db.exceptions[tp]
@@ -86,8 +86,8 @@ func (c *mockBackendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args [
 	return c.execErr
 }
 
-func (c *mockBackendConn) GetPreparedStmt(stmtID uint32) (string, int) {
-	return "", 0
+func (c *mockBackendConn) GetPreparedStmt(stmtID uint32) (string, int, []byte) {
+	return "", 0, nil
 }
 
 func (c *mockBackendConn) clear() {

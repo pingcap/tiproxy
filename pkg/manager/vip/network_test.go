@@ -1,7 +1,7 @@
 // Copyright 2024 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-// go:build linux
+//go:build linux
 
 package vip
 
