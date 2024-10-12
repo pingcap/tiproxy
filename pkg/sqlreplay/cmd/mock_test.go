@@ -39,3 +39,7 @@ func (mr *mockReader) Read(data []byte) (string, int, error) {
 
 func (mr *mockReader) Close() {
 }
+
+func (mr *mockReader) String() string {
+	return "mockReader"
+}

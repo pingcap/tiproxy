@@ -87,6 +87,10 @@ func (m *mockChLoader) Close() {
 	close(m.cmdCh)
 }
 
+func (m *mockChLoader) String() string {
+	return "mockChLoader"
+}
+
 var _ cmd.LineReader = (*mockNormalLoader)(nil)
 
 type mockNormalLoader struct {
@@ -115,6 +119,10 @@ func (m *mockNormalLoader) ReadLine() ([]byte, string, int, error) {
 }
 
 func (m *mockNormalLoader) Close() {
+}
+
+func (m *mockNormalLoader) String() string {
+	return "mockNormalLoader"
 }
 
 func newMockCommand(connID uint64) *cmd.Command {

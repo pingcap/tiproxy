@@ -169,6 +169,7 @@ func (r *replay) readCommands(ctx context.Context) {
 		command := &cmd.Command{}
 		if err := command.Decode(reader); err != nil {
 			if errors.Is(err, io.EOF) {
+				r.lg.Info("replay reads EOF", zap.String("reader", reader.String()))
 				err = nil
 			}
 			r.Stop(err)

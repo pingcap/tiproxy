@@ -6,6 +6,7 @@ package store
 import (
 	"bufio"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -40,6 +41,10 @@ func NewLoader(lg *zap.Logger, cfg LoaderCfg) *loader {
 		cfg: cfg,
 		lg:  lg,
 	}
+}
+
+func (l *loader) String() string {
+	return fmt.Sprintf("curFile: %s, curLineIdx: %d", l.curFileName, l.curLineIdx)
 }
 
 func (l *loader) Read(data []byte) (string, int, error) {
