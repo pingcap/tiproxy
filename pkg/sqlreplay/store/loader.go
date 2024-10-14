@@ -108,7 +108,7 @@ func (l *loader) ReadLine() ([]byte, string, int, error) {
 func (l *loader) nextReader() error {
 	// has read the latest file
 	if l.curFileTs == math.MaxInt64 {
-		return io.EOF
+		return errors.WithStack(io.EOF)
 	}
 	files, err := os.ReadDir(l.cfg.Dir)
 	if err != nil {
@@ -147,7 +147,7 @@ func (l *loader) nextReader() error {
 		}
 	}
 	if minFileName == "" {
-		return io.EOF
+		return errors.WithStack(io.EOF)
 	}
 	r, err := os.Open(filepath.Join(l.cfg.Dir, minFileName))
 	if err != nil {
@@ -171,6 +171,7 @@ func (l *loader) nextReader() error {
 	} else {
 		l.reader = bufio.NewReader(r)
 	}
+	l.lg.Info("reading next file", zap.String("file", minFileName))
 	return nil
 }
 
