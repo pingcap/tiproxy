@@ -235,9 +235,10 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	c.Lock()
 	startTime := c.startTime
 	capturedCmds := c.capturedCmds
+	filteredCmds := c.filteredCmds
 	c.Unlock()
 	// Write meta outside of the lock to avoid affecting QPS.
-	c.writeMeta(time.Since(startTime), capturedCmds)
+	c.writeMeta(time.Since(startTime), capturedCmds, filteredCmds)
 }
 
 func (c *capture) InitConn(startTime time.Time, connID uint64, db string) {
@@ -334,8 +335,8 @@ func (c *capture) putCommand(command *cmd.Command) bool {
 	}
 }
 
-func (c *capture) writeMeta(duration time.Duration, cmds uint64) {
-	meta := store.Meta{Duration: duration, Cmds: cmds}
+func (c *capture) writeMeta(duration time.Duration, cmds, filteredCmds uint64) {
+	meta := store.NewMeta(duration, cmds, filteredCmds)
 	if err := meta.Write(c.cfg.Output); err != nil {
 		c.lg.Error("failed to write meta", zap.Error(err))
 	}

@@ -155,10 +155,7 @@ func TestReplaySpeed(t *testing.T) {
 
 func TestProgress(t *testing.T) {
 	dir := t.TempDir()
-	meta := &store.Meta{
-		Duration: 10 * time.Second,
-		Cmds:     10,
-	}
+	meta := store.NewMeta(10*time.Second, 10, 0)
 	require.NoError(t, meta.Write(dir))
 	loader := newMockNormalLoader()
 	now := time.Now()

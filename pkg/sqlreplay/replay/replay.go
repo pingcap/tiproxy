@@ -116,6 +116,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.startTime = time.Now()
 	r.endTime = time.Time{}
 	r.progress = 0
+	r.err = nil
 	r.replayedCmds = 0
 	r.filteredCmds = 0
 	r.connCount = 0
