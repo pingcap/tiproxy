@@ -7,9 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
-	"time"
 
-	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -18,7 +16,7 @@ import (
 )
 
 const (
-	maxPendingCommands = 100 // pending commands for each connection
+	maxPendingCommands = 0 // pending commands for each connection
 )
 
 type Conn interface {
@@ -101,18 +99,7 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 
 // ExecuteCmd executes a command asynchronously.
 func (c *conn) ExecuteCmd(command *cmd.Command) {
-	select {
-	case c.cmdCh <- command:
-	case <-time.After(3 * time.Second):
-		// If the replay is slower, wait until it catches up, otherwise too many transactions are broken.
-		// But if it's blocked due to a bug, discard the command to avoid block the whole replay.
-		// If the discarded command is a COMMIT, let the next COMMIT finish the transaction.
-		select {
-		case c.exceptionCh <- NewOtherException(errors.New("too many pending commands, discard command"), c.connID):
-		default:
-			c.lg.Warn("too many pending errors, discard error")
-		}
-	}
+	c.cmdCh <- command
 }
 
 func (c *conn) close() {

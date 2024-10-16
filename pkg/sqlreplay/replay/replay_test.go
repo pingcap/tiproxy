@@ -5,7 +5,6 @@ package replay
 
 import (
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
@@ -23,11 +22,13 @@ func TestManageConns(t *testing.T) {
 	defer replay.Close()
 
 	loader := newMockChLoader()
+	connCount := 0
 	cfg := ReplayConfig{
 		Input:    t.TempDir(),
 		Username: "u1",
 		reader:   loader,
 		connCreator: func(connID uint64) conn.Conn {
+			connCount++
 			return &mockConn{
 				connID:      connID,
 				exceptionCh: replay.exceptionCh,
@@ -43,8 +44,7 @@ func TestManageConns(t *testing.T) {
 	require.Eventually(t, func() bool {
 		replay.Lock()
 		defer replay.Unlock()
-		cn, ok := replay.conns[1]
-		return cn != nil && !reflect.ValueOf(cn).IsNil() && ok
+		return connCount == 1
 	}, 3*time.Second, 10*time.Millisecond)
 
 	command = newMockCommand(2)
@@ -52,19 +52,17 @@ func TestManageConns(t *testing.T) {
 	require.Eventually(t, func() bool {
 		replay.Lock()
 		defer replay.Unlock()
-		cn, ok := replay.conns[2]
-		return cn != nil && !reflect.ValueOf(cn).IsNil() && ok
+		return connCount == 2
 	}, 3*time.Second, 10*time.Millisecond)
 
+	replay.closeCh <- 1
 	replay.closeCh <- 2
+	loader.Close()
 	require.Eventually(t, func() bool {
 		replay.Lock()
 		defer replay.Unlock()
-		cn, ok := replay.conns[2]
-		return (cn == nil || reflect.ValueOf(cn).IsNil()) && ok
+		return replay.startTime.IsZero()
 	}, 3*time.Second, 10*time.Millisecond)
-
-	loader.Close()
 }
 
 func TestValidateCfg(t *testing.T) {

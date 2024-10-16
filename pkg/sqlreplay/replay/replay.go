@@ -78,7 +78,6 @@ type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig
 	meta             store.Meta
-	conns            map[uint64]conn.Conn
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
 	closeCh          chan uint64
@@ -92,7 +91,6 @@ type replay struct {
 	progress         float64
 	replayedCmds     uint64
 	filteredCmds     uint64
-	connCount        int
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
 }
@@ -119,8 +117,6 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.err = nil
 	r.replayedCmds = 0
 	r.filteredCmds = 0
-	r.connCount = 0
-	r.conns = make(map[uint64]conn.Conn)
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeCh = make(chan uint64, maxPendingExceptions)
 	hsHandler = NewHandshakeHandler(hsHandler)
@@ -149,9 +145,6 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.wg.RunWithRecover(func() {
 		r.readCommands(childCtx)
 	}, nil, r.lg)
-	r.wg.RunWithRecover(func() {
-		r.readCloseCh(childCtx)
-	}, nil, r.lg)
 	return nil
 }
 
@@ -166,14 +159,25 @@ func (r *replay) readCommands(ctx context.Context) {
 	defer reader.Close()
 
 	var captureStartTs, replayStartTs time.Time
+	conns := make(map[uint64]conn.Conn) // both alive and dead connections
+	connCount := 0                      // alive connection count
+	var err error
 	for ctx.Err() == nil {
+		for hasCloseEvent := true; hasCloseEvent; {
+			select {
+			case id := <-r.closeCh:
+				r.closeConn(id, conns, &connCount)
+			default:
+				hasCloseEvent = false
+			}
+		}
+
 		command := &cmd.Command{}
-		if err := command.Decode(reader); err != nil {
+		if err = command.Decode(reader); err != nil {
 			if errors.Is(err, io.EOF) {
 				r.lg.Info("replay reads EOF", zap.String("reader", reader.String()))
 				err = nil
 			}
-			r.Stop(err)
 			break
 		}
 		if captureStartTs.IsZero() {
@@ -193,23 +197,35 @@ func (r *replay) readCommands(ctx context.Context) {
 				}
 			}
 		}
-		if ctx.Err() != nil {
-			break
+		if ctx.Err() == nil {
+			r.executeCmd(ctx, command, conns, &connCount)
 		}
-		r.replayedCmds++
-		r.executeCmd(ctx, command)
 	}
+
+	// Make the connections stop.
+	r.Lock()
+	if r.cancel != nil {
+		r.cancel()
+		r.cancel = nil
+	}
+	r.Unlock()
+
+	// Drain all close events even if the context is canceled.
+	// Otherwise, the connections may block at writing to channels.
+	for connCount > 0 {
+		id := <-r.closeCh
+		r.closeConn(id, conns, &connCount)
+	}
+
+	r.stop(err)
 }
 
-func (r *replay) executeCmd(ctx context.Context, command *cmd.Command) {
-	r.Lock()
-	defer r.Unlock()
-
-	conn, ok := r.conns[command.ConnID]
+func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map[uint64]conn.Conn, connCount *int) {
+	conn, ok := conns[command.ConnID]
 	if !ok {
 		conn = r.connCreator(command.ConnID)
-		r.conns[command.ConnID] = conn
-		r.connCount++
+		conns[command.ConnID] = conn
+		*connCount++
 		r.wg.RunWithRecover(func() {
 			conn.Run(ctx)
 		}, nil, r.lg)
@@ -217,38 +233,18 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command) {
 	if conn != nil && !reflect.ValueOf(conn).IsNil() {
 		conn.ExecuteCmd(command)
 	}
+
+	r.Lock()
+	r.replayedCmds++
+	r.Unlock()
 }
 
-func (r *replay) readCloseCh(ctx context.Context) {
-	// Drain all close events even if the context is canceled.
-	// Otherwise, the connections may block at writing to channels.
-	for {
-		if ctx.Err() != nil {
-			r.Lock()
-			connCount := r.connCount
-			r.Unlock()
-			if connCount <= 0 {
-				return
-			}
-		}
-		select {
-		case c, ok := <-r.closeCh:
-			if !ok {
-				// impossible
-				return
-			}
-			// Keep the disconnected connections in the map to reject subsequent commands with the same connID,
-			// but release memory as much as possible.
-			r.Lock()
-			if conn, ok := r.conns[c]; ok && conn != nil && !reflect.ValueOf(conn).IsNil() {
-				r.conns[c] = nil
-				r.connCount--
-			}
-			r.Unlock()
-		case <-time.After(100 * time.Millisecond):
-			// If context is canceled now but no connection exists, it will block forever.
-			// Check the context and connCount again.
-		}
+func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount *int) {
+	// Keep the disconnected connections in the map to reject subsequent commands with the same connID,
+	// but release memory as much as possible.
+	if conn, ok := conns[connID]; ok && conn != nil && !reflect.ValueOf(conn).IsNil() {
+		conns[connID] = nil
+		*connCount--
 	}
 }
 
@@ -269,17 +265,9 @@ func (r *replay) readMeta() *store.Meta {
 	return m
 }
 
-func (r *replay) Stop(err error) {
+func (r *replay) stop(err error) {
 	r.Lock()
 	defer r.Unlock()
-	// already stopped
-	if r.startTime.IsZero() {
-		return
-	}
-	if r.cancel != nil {
-		r.cancel()
-		r.cancel = nil
-	}
 
 	r.endTime = time.Now()
 	fields := []zap.Field{
@@ -287,23 +275,39 @@ func (r *replay) Stop(err error) {
 		zap.Time("end_time", r.endTime),
 		zap.Uint64("replayed_cmds", r.replayedCmds),
 	}
-	if err != nil {
+	if r.meta.Cmds > 0 {
+		r.progress = float64(r.replayedCmds+r.filteredCmds) / float64(r.meta.Cmds)
+		fields = append(fields, zap.Uint64("captured_cmds", r.meta.Cmds))
+		fields = append(fields, zap.Float64("progress", r.progress))
+	}
+	if r.err == nil {
 		r.err = err
-		if r.meta.Cmds > 0 {
-			r.progress = float64(r.replayedCmds+r.filteredCmds) / float64(r.meta.Cmds)
-			fields = append(fields, zap.Float64("progress", r.progress))
-		}
-		fields = append(fields, zap.Error(err))
+	}
+	if r.err != nil {
+		fields = append(fields, zap.Error(r.err))
 		r.lg.Error("replay failed", fields...)
 	} else {
-		r.progress = 1
-		fields = append(fields, zap.Float64("progress", r.progress))
 		r.lg.Info("replay finished", fields...)
 	}
 	r.startTime = time.Time{}
 }
 
+func (r *replay) Stop(err error) {
+	r.Lock()
+	// already stopped
+	if r.startTime.IsZero() {
+		r.Unlock()
+		return
+	}
+	r.err = err
+	if r.cancel != nil {
+		r.cancel()
+		r.cancel = nil
+	}
+	r.Unlock()
+	r.wg.Wait()
+}
+
 func (r *replay) Close() {
 	r.Stop(errors.New("shutting down"))
-	r.wg.Wait()
 }
