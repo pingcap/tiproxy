@@ -65,7 +65,8 @@ func (c *conn) Run(ctx context.Context) {
 		case command := <-c.cmdCh:
 			c.updateCmdForExecuteStmt(command)
 			c.lg.Info("execute cmd", zap.String("cmd", command.QueryText()))
-			if err := c.backendConn.ExecuteCmd(ctx, command.Payload); err != nil {
+			err := c.backendConn.ExecuteCmd(ctx, command.Payload)
+			if err != nil {
 				if pnet.IsDisconnectError(err) {
 					c.exceptionCh <- NewOtherException(err, c.connID)
 					return
@@ -74,6 +75,7 @@ func (c *conn) Run(ctx context.Context) {
 					c.exceptionCh <- NewFailException(err, command)
 				}
 			}
+			c.lg.Info("execute cmd finished", zap.String("cmd", command.QueryText()), zap.Error(err))
 			if command.Type == pnet.ComQuit {
 				return
 			}
