@@ -63,6 +63,8 @@ func (c *conn) Run(ctx context.Context) {
 			// ctx is canceled when the replay is finished
 			return
 		case command := <-c.cmdCh:
+			c.updateCmdForExecuteStmt(command)
+			c.lg.Info("execute cmd", zap.String("cmd", command.QueryText()))
 			if err := c.backendConn.ExecuteCmd(ctx, command.Payload); err != nil {
 				if pnet.IsDisconnectError(err) {
 					c.exceptionCh <- NewOtherException(err, c.connID)
