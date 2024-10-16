@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	maxPendingCommands = 0 // pending commands for each connection
+	maxPendingCommands = 100 // pending commands for each connection
 )
 
 type Conn interface {
