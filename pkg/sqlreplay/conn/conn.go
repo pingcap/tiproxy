@@ -80,6 +80,10 @@ func (c *conn) Run(ctx context.Context) {
 				if command == nil {
 					break
 				}
+				c.updateCmdForExecuteStmt(command.Value)
+				if text := command.Value.QueryText(); len(text) > 0 {
+					c.lg.Info("execute cmd", zap.String("cmd", text))
+				}
 				if err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
 					if pnet.IsDisconnectError(err) {
 						c.exceptionCh <- NewOtherException(err, c.connID)
