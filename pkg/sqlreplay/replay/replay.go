@@ -201,6 +201,7 @@ func (r *replay) readCommands(ctx context.Context) {
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
+			startTime := time.Now()
 			// if pendingCmds > 1<<10 {
 			// 	extraWait := time.Duration(pendingCmds-1<<10) * 100 * time.Nanosecond
 			// 	totalWaitTime += extraWait
@@ -212,6 +213,7 @@ func (r *replay) readCommands(ctx context.Context) {
 				case <-time.After(expectedInterval):
 				}
 			}
+			totalWaitTime += time.Since(startTime) - expectedInterval
 		}
 		if ctx.Err() == nil {
 			r.executeCmd(ctx, command, conns, &connCount)
