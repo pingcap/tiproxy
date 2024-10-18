@@ -158,7 +158,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	}
 	defer reader.Close()
 
-	var captureTs time.Time
+	var captureStartTs, replayStartTs time.Time
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
 	connCount := 0                      // alive connection count
 	var err error
@@ -182,9 +182,10 @@ func (r *replay) readCommands(ctx context.Context) {
 			}
 			break
 		}
-		if captureTs.IsZero() {
+		if captureStartTs.IsZero() {
 			// first command
-			captureTs = command.StartTs
+			captureStartTs = command.StartTs
+			replayStartTs = time.Now()
 		} else {
 			pendingCmds := r.replayStats.PendingCmds.Load()
 			if pendingCmds > maxPendingCmds {
@@ -196,24 +197,27 @@ func (r *replay) readCommands(ctx context.Context) {
 				break
 			}
 
-			expectedInterval := command.StartTs.Sub(captureTs)
-			captureTs = command.StartTs
+			// Do not use relative time (time since last command) to calculate the wait time
+			// because go scheduler may wait longer than expected, and then the difference becomes larger and larger.
+			expectedInterval := command.StartTs.Sub(captureStartTs)
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
-			startTime := time.Now()
-			// if pendingCmds > 1<<10 {
-			// 	extraWait := time.Duration(pendingCmds-1<<10) * 100 * time.Nanosecond
-			// 	totalWaitTime += extraWait
-			// 	expectedInterval += extraWait
-			// }
+			expectedInterval = time.Until(replayStartTs.Add(expectedInterval))
+			if expectedInterval < 0 {
+				expectedInterval = 0
+			}
+			if pendingCmds > 1<<10 {
+				extraWait := time.Duration(pendingCmds-1<<10) * time.Microsecond
+				totalWaitTime += extraWait
+				expectedInterval += extraWait
+			}
 			if expectedInterval > time.Microsecond {
 				select {
 				case <-ctx.Done():
 				case <-time.After(expectedInterval):
 				}
 			}
-			totalWaitTime += time.Since(startTime) - expectedInterval
 		}
 		if ctx.Err() == nil {
 			r.executeCmd(ctx, command, conns, &connCount)
