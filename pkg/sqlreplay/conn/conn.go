@@ -125,7 +125,10 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 	return true
 }
 
-// ExecuteCmd executes a command asynchronously.
+// ExecuteCmd executes a command asynchronously by adding it to the list.
+// Adding commands should never block because it may cause cycle wait.
+// Conn A: wait for the lock held by conn B, and then its list becomes full and blocks the replay
+// Conn B: wait for next command, but the replay is blocked, so the lock won't be released
 func (c *conn) ExecuteCmd(command *cmd.Command) {
 	c.cmdLock.Lock()
 	c.cmdList.PushFront(command)

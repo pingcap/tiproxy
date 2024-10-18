@@ -191,14 +191,15 @@ func (r *replay) readCommands(ctx context.Context) {
 			if pendingCmds > maxPendingCmds {
 				maxPendingCmds = pendingCmds
 			}
-			if pendingCmds > 1<<20 {
+			// If there are too many pending commands, abort the replay to avoid OOM.
+			if pendingCmds > 1<<21 {
 				err = errors.Errorf("too many pending commands, quit replay")
 				r.lg.Error("too many pending commands, quit replay", zap.Int64("pending_cmds", pendingCmds))
 				break
 			}
 
-			// Do not use relative time (time since last command) to calculate the wait time
-			// because go scheduler may wait longer than expected, and then the difference becomes larger and larger.
+			// Do not use relative time (time since last command) to calculate the wait time because the go scheduler
+			// may wait longer than expected, and then the difference becomes larger and larger.
 			expectedInterval := command.StartTs.Sub(captureStartTs)
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
@@ -207,8 +208,9 @@ func (r *replay) readCommands(ctx context.Context) {
 			if expectedInterval < 0 {
 				expectedInterval = 0
 			}
-			if pendingCmds > 1<<10 {
-				extraWait := time.Duration(pendingCmds-1<<10) * time.Microsecond
+			// If there are too many pending commands, slow it down to avoid OOM.
+			if pendingCmds > 1<<18 {
+				extraWait := time.Duration(pendingCmds-1<<18) * 100 * time.Nanosecond
 				totalWaitTime += extraWait
 				expectedInterval += extraWait
 			}
