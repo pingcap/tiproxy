@@ -78,6 +78,7 @@ type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig
 	meta             store.Meta
+	replayStats      conn.ReplayStats
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
 	closeCh          chan uint64
@@ -89,8 +90,7 @@ type replay struct {
 	startTime        time.Time
 	endTime          time.Time
 	progress         float64
-	replayedCmds     uint64
-	filteredCmds     uint64
+	decodedCmds      uint64
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
 }
@@ -115,8 +115,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.endTime = time.Time{}
 	r.progress = 0
 	r.err = nil
-	r.replayedCmds = 0
-	r.filteredCmds = 0
+	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeCh = make(chan uint64, maxPendingExceptions)
 	hsHandler = NewHandshakeHandler(hsHandler)
@@ -124,7 +123,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	if r.connCreator == nil {
 		r.connCreator = func(connID uint64) conn.Conn {
 			return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
-				connID, bcConfig, r.exceptionCh, r.closeCh)
+				connID, bcConfig, r.exceptionCh, r.closeCh, &r.replayStats)
 		}
 	}
 	r.report = cfg.report
@@ -185,10 +184,18 @@ func (r *replay) readCommands(ctx context.Context) {
 			captureStartTs = command.StartTs
 			replayStartTs = time.Now()
 		} else {
+			pendingCmds := r.replayStats.PendingCmds.Load()
+			if pendingCmds > 1<<20 {
+				err = errors.Errorf("too many pending commands, quit replay, pending_cmds: %d", pendingCmds)
+				r.lg.Error("too many pending commands, quit replay", zap.Int64("pending_cmds", pendingCmds))
+				break
+			}
+			extraWait := time.Duration(pendingCmds) * time.Microsecond
 			expectedInterval := command.StartTs.Sub(captureStartTs)
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
+			expectedInterval += extraWait
 			curInterval := time.Since(replayStartTs)
 			if curInterval+time.Microsecond < expectedInterval {
 				select {
@@ -235,7 +242,7 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map
 	}
 
 	r.Lock()
-	r.replayedCmds++
+	r.decodedCmds++
 	r.Unlock()
 }
 
@@ -249,10 +256,11 @@ func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount 
 }
 
 func (r *replay) Progress() (float64, time.Time, error) {
+	pendingCmds := r.replayStats.PendingCmds.Load()
 	r.Lock()
 	defer r.Unlock()
 	if r.meta.Cmds > 0 {
-		r.progress = float64(r.replayedCmds+r.filteredCmds) / float64(r.meta.Cmds)
+		r.progress = float64(r.decodedCmds-uint64(pendingCmds)) / float64(r.meta.Cmds)
 	}
 	return r.progress, r.endTime, r.err
 }
@@ -270,13 +278,19 @@ func (r *replay) stop(err error) {
 	defer r.Unlock()
 
 	r.endTime = time.Now()
+	// decodedCmds - pendingCmds may be greater than replayedCmds because if a connection is closed unexpectedly,
+	// the pending commands of that connection are discarded. We calculate the progress based on decodedCmds - pendingCmds.
+	replayedCmds := r.replayStats.ReplayedCmds.Load()
+	pendingCmds := r.replayStats.PendingCmds.Load()
 	fields := []zap.Field{
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
-		zap.Uint64("replayed_cmds", r.replayedCmds),
+		zap.Uint64("decoded_cmds", r.decodedCmds),
+		zap.Uint64("replayed_cmds", replayedCmds),
+		zap.Int64("pending_cmds", pendingCmds),
 	}
 	if r.meta.Cmds > 0 {
-		r.progress = float64(r.replayedCmds+r.filteredCmds) / float64(r.meta.Cmds)
+		r.progress = float64(r.decodedCmds-uint64(pendingCmds)) / float64(r.meta.Cmds)
 		fields = append(fields, zap.Uint64("captured_cmds", r.meta.Cmds))
 		fields = append(fields, zap.Float64("progress", r.progress))
 	}

@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"sync"
+	"sync/atomic"
 
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
@@ -16,6 +17,16 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"go.uber.org/zap"
 )
+
+type ReplayStats struct {
+	ReplayedCmds atomic.Uint64
+	PendingCmds  atomic.Int64
+}
+
+func (s *ReplayStats) Reset() {
+	s.ReplayedCmds.Store(0)
+	s.PendingCmds.Store(0)
+}
 
 type Conn interface {
 	Run(ctx context.Context)
@@ -27,18 +38,20 @@ type ConnCreator func(connID uint64) Conn
 var _ Conn = (*conn)(nil)
 
 type conn struct {
-	cmdLock     sync.Mutex
-	cmdCh       chan struct{}
-	cmdList     *glist.List[*cmd.Command]
-	exceptionCh chan<- Exception
-	closeCh     chan<- uint64
-	lg          *zap.Logger
-	backendConn BackendConn
-	connID      uint64 // capture ID, not replay ID
+	cmdLock         sync.Mutex
+	cmdCh           chan struct{}
+	cmdList         *glist.List[*cmd.Command]
+	exceptionCh     chan<- Exception
+	closeCh         chan<- uint64
+	lg              *zap.Logger
+	backendConn     BackendConn
+	connID          uint64 // capture ID, not replay ID
+	replayStats     *ReplayStats
+	lastPendingCmds int // last pending cmds reported to the stats
 }
 
 func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
-	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64) *conn {
+	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64, replayStats *ReplayStats) *conn {
 	backendConnID := idMgr.NewID()
 	lg = lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID))
 	return &conn{
@@ -49,6 +62,7 @@ func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Co
 		exceptionCh: exceptionCh,
 		closeCh:     closeCh,
 		backendConn: NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
+		replayStats: replayStats,
 	}
 }
 
@@ -58,10 +72,6 @@ func (c *conn) Run(ctx context.Context) {
 		c.exceptionCh <- NewOtherException(err, c.connID)
 		return
 	}
-	pendingCmdNum := 0
-	defer func() {
-		c.lg.Info("pending cmd num", zap.Int("num", pendingCmdNum))
-	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -69,14 +79,13 @@ func (c *conn) Run(ctx context.Context) {
 		case <-c.cmdCh:
 			for ctx.Err() == nil {
 				c.cmdLock.Lock()
-				if c.cmdList.Len() > pendingCmdNum {
-					pendingCmdNum = c.cmdList.Len()
-				}
+				pendingCmds := c.cmdList.Len()
 				command := c.cmdList.Back()
 				if command != nil {
 					c.cmdList.Remove(command)
 				}
 				c.cmdLock.Unlock()
+				c.updatePendingCmds(pendingCmds)
 				if command == nil {
 					break
 				}
@@ -93,6 +102,7 @@ func (c *conn) Run(ctx context.Context) {
 						c.exceptionCh <- NewFailException(err, command.Value)
 					}
 				}
+				c.replayStats.ReplayedCmds.Add(1)
 				if command.Value.Type == pnet.ComQuit {
 					return
 				}
@@ -122,15 +132,26 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 // ExecuteCmd executes a command asynchronously.
 func (c *conn) ExecuteCmd(command *cmd.Command) {
 	c.cmdLock.Lock()
-	defer c.cmdLock.Unlock()
 	c.cmdList.PushFront(command)
+	pendingCmds := c.cmdList.Len()
+	c.cmdLock.Unlock()
+	c.updatePendingCmds(pendingCmds)
 	select {
 	case c.cmdCh <- struct{}{}:
 	default:
 	}
 }
 
+func (c *conn) updatePendingCmds(pendingCmds int) {
+	diff := pendingCmds - c.lastPendingCmds
+	c.lastPendingCmds = pendingCmds
+	if diff != 0 {
+		c.replayStats.PendingCmds.Add(int64(diff))
+	}
+}
+
 func (c *conn) close() {
+	c.updatePendingCmds(0)
 	c.backendConn.Close()
 	c.closeCh <- c.connID
 }

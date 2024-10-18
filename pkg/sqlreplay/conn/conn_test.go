@@ -39,7 +39,7 @@ func TestConnectError(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	for i, test := range tests {
 		exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-		conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh)
+		conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, &ReplayStats{})
 		backendConn := &mockBackendConn{connErr: test.connErr, execErr: test.execErr}
 		conn.backendConn = backendConn
 		wg.RunWithRecover(func() {
@@ -60,7 +60,7 @@ func TestExecuteCmd(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh)
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, &ReplayStats{})
 	backendConn := &mockBackendConn{}
 	conn.backendConn = backendConn
 	childCtx, cancel := context.WithCancel(context.Background())
@@ -106,7 +106,7 @@ func TestExecuteError(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh)
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, &ReplayStats{})
 	backendConn := &mockBackendConn{execErr: errors.New("mock error")}
 	conn.backendConn = backendConn
 	childCtx, cancel := context.WithCancel(context.Background())
