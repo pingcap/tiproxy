@@ -114,6 +114,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.startTime = time.Now()
 	r.endTime = time.Time{}
 	r.progress = 0
+	r.decodedCmds = 0
 	r.err = nil
 	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
@@ -200,8 +201,8 @@ func (r *replay) readCommands(ctx context.Context) {
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
-			if pendingCmds > 100 {
-				extraWait := time.Duration(pendingCmds-100) * time.Microsecond
+			if pendingCmds > 1<<10 {
+				extraWait := time.Duration(pendingCmds-1<<10) * 100 * time.Nanosecond
 				totalWaitTime += extraWait
 				expectedInterval += extraWait
 			}
