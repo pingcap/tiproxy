@@ -201,11 +201,11 @@ func (r *replay) readCommands(ctx context.Context) {
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
-			if pendingCmds > 1<<10 {
-				extraWait := time.Duration(pendingCmds-1<<10) * 100 * time.Nanosecond
-				totalWaitTime += extraWait
-				expectedInterval += extraWait
-			}
+			// if pendingCmds > 1<<10 {
+			// 	extraWait := time.Duration(pendingCmds-1<<10) * 100 * time.Nanosecond
+			// 	totalWaitTime += extraWait
+			// 	expectedInterval += extraWait
+			// }
 			if expectedInterval > time.Microsecond {
 				select {
 				case <-ctx.Done():
