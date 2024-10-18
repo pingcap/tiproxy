@@ -161,6 +161,8 @@ func (r *replay) readCommands(ctx context.Context) {
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
 	connCount := 0                      // alive connection count
 	var err error
+	maxPendingCmds := int64(0)
+	totalWaitTime := time.Duration(0)
 	for ctx.Err() == nil {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
@@ -185,12 +187,16 @@ func (r *replay) readCommands(ctx context.Context) {
 			replayStartTs = time.Now()
 		} else {
 			pendingCmds := r.replayStats.PendingCmds.Load()
+			if pendingCmds > maxPendingCmds {
+				maxPendingCmds = pendingCmds
+			}
 			if pendingCmds > 1<<20 {
 				err = errors.Errorf("too many pending commands, quit replay, pending_cmds: %d", pendingCmds)
 				r.lg.Error("too many pending commands, quit replay", zap.Int64("pending_cmds", pendingCmds))
 				break
 			}
 			extraWait := time.Duration(pendingCmds) * time.Microsecond
+			totalWaitTime += extraWait
 			expectedInterval := command.StartTs.Sub(captureStartTs)
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
@@ -208,6 +214,7 @@ func (r *replay) readCommands(ctx context.Context) {
 			r.executeCmd(ctx, command, conns, &connCount)
 		}
 	}
+	r.lg.Info("max pending commands", zap.Int64("max_pending_cmds", maxPendingCmds), zap.Duration("total_wait_time", totalWaitTime))
 
 	// Make the connections stop.
 	r.Lock()
