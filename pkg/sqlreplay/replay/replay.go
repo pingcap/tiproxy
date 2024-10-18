@@ -157,7 +157,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	}
 	defer reader.Close()
 
-	var captureStartTs, replayStartTs time.Time
+	var captureTs time.Time
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
 	connCount := 0                      // alive connection count
 	var err error
@@ -181,32 +181,34 @@ func (r *replay) readCommands(ctx context.Context) {
 			}
 			break
 		}
-		if captureStartTs.IsZero() {
+		if captureTs.IsZero() {
 			// first command
-			captureStartTs = command.StartTs
-			replayStartTs = time.Now()
+			captureTs = command.StartTs
 		} else {
 			pendingCmds := r.replayStats.PendingCmds.Load()
 			if pendingCmds > maxPendingCmds {
 				maxPendingCmds = pendingCmds
 			}
 			if pendingCmds > 1<<20 {
-				err = errors.Errorf("too many pending commands, quit replay, pending_cmds: %d", pendingCmds)
+				err = errors.Errorf("too many pending commands, quit replay")
 				r.lg.Error("too many pending commands, quit replay", zap.Int64("pending_cmds", pendingCmds))
 				break
 			}
-			extraWait := time.Duration(pendingCmds) * time.Microsecond
-			totalWaitTime += extraWait
-			expectedInterval := command.StartTs.Sub(captureStartTs)
+
+			expectedInterval := command.StartTs.Sub(captureTs)
+			captureTs = command.StartTs
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
-			expectedInterval += extraWait
-			curInterval := time.Since(replayStartTs)
-			if curInterval+time.Microsecond < expectedInterval {
+			if pendingCmds > 100 {
+				extraWait := time.Duration(pendingCmds-100) * time.Microsecond
+				totalWaitTime += extraWait
+				expectedInterval += extraWait
+			}
+			if expectedInterval > time.Microsecond {
 				select {
 				case <-ctx.Done():
-				case <-time.After(expectedInterval - curInterval):
+				case <-time.After(expectedInterval):
 				}
 			}
 		}
@@ -294,7 +296,6 @@ func (r *replay) stop(err error) {
 		zap.Time("end_time", r.endTime),
 		zap.Uint64("decoded_cmds", r.decodedCmds),
 		zap.Uint64("replayed_cmds", replayedCmds),
-		zap.Int64("pending_cmds", pendingCmds),
 	}
 	if r.meta.Cmds > 0 {
 		r.progress = float64(r.decodedCmds-uint64(pendingCmds)) / float64(r.meta.Cmds)
