@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -24,9 +25,16 @@ import (
 )
 
 const (
-	maxPendingExceptions = 1024 // pending exceptions for all connections
-	minSpeed             = 0.1
-	maxSpeed             = 10.0
+	// maxPendingExceptions is the maximum number of pending exceptions for all connections.
+	maxPendingExceptions = 1024
+	// slowDownThreshold is the threshold of pending commands to slow down. Following constants are tested with TPCC.
+	slowDownThreshold = 1 << 18
+	// slowDownFactor is the factor to slow down when there are too many pending commands.
+	slowDownFactor = 100 * time.Nanosecond
+	// abortThreshold is the threshold of pending commands to abort.
+	abortThreshold = 1 << 21
+	minSpeed       = 0.1
+	maxSpeed       = 10.0
 )
 
 type Replay interface {
@@ -90,7 +98,7 @@ type replay struct {
 	startTime        time.Time
 	endTime          time.Time
 	progress         float64
-	decodedCmds      uint64
+	decodedCmds      atomic.Uint64
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
 }
@@ -114,7 +122,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.startTime = time.Now()
 	r.endTime = time.Time{}
 	r.progress = 0
-	r.decodedCmds = 0
+	r.decodedCmds.Store(0)
 	r.err = nil
 	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
@@ -191,15 +199,15 @@ func (r *replay) readCommands(ctx context.Context) {
 			if pendingCmds > maxPendingCmds {
 				maxPendingCmds = pendingCmds
 			}
-			// If there are too many pending commands, abort the replay to avoid OOM.
-			if pendingCmds > 1<<21 {
+			// If slowing down still doesn't help, abort the replay to avoid OOM.
+			if pendingCmds > abortThreshold {
 				err = errors.Errorf("too many pending commands, quit replay")
 				r.lg.Error("too many pending commands, quit replay", zap.Int64("pending_cmds", pendingCmds))
 				break
 			}
 
-			// Do not use relative time (time since last command) to calculate the wait time because the go scheduler
-			// may wait longer than expected, and then the difference becomes larger and larger.
+			// Do not use calculate the wait time by the duration since last command because the go scheduler
+			// may wait a little bit longer than expected, and then the difference becomes larger and larger.
 			expectedInterval := command.StartTs.Sub(captureStartTs)
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
@@ -208,9 +216,9 @@ func (r *replay) readCommands(ctx context.Context) {
 			if expectedInterval < 0 {
 				expectedInterval = 0
 			}
-			// If there are too many pending commands, slow it down to avoid OOM.
-			if pendingCmds > 1<<18 {
-				extraWait := time.Duration(pendingCmds-1<<18) * 100 * time.Nanosecond
+			// If there are too many pending commands, slow it down to reduce memory usage.
+			if pendingCmds > slowDownThreshold {
+				extraWait := time.Duration(pendingCmds-slowDownThreshold) * slowDownFactor
 				totalWaitTime += extraWait
 				expectedInterval += extraWait
 			}
@@ -225,23 +233,15 @@ func (r *replay) readCommands(ctx context.Context) {
 			r.executeCmd(ctx, command, conns, &connCount)
 		}
 	}
-	r.lg.Info("max pending commands", zap.Int64("max_pending_cmds", maxPendingCmds), zap.Duration("total_wait_time", totalWaitTime))
+	r.lg.Info("finished decoding commands, waiting for connections to close", zap.Int64("max_pending_cmds", maxPendingCmds),
+		zap.Duration("total_wait_time", totalWaitTime), zap.Int("alive_conns", connCount))
 
-	// Make the connections stop.
-	r.Lock()
-	if r.cancel != nil {
-		r.cancel()
-		r.cancel = nil
-	}
-	r.Unlock()
-
-	// Drain all close events even if the context is canceled.
-	// Otherwise, the connections may block at writing to channels.
+	// Wait until all connections are closed before logging the finished message.
+	// Besides, drain all close events to avoid blocking connections at writing to channels.
 	for connCount > 0 {
 		id := <-r.closeCh
 		r.closeConn(id, conns, &connCount)
 	}
-
 	r.stop(err)
 }
 
@@ -258,10 +258,7 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map
 	if conn != nil && !reflect.ValueOf(conn).IsNil() {
 		conn.ExecuteCmd(command)
 	}
-
-	r.Lock()
-	r.decodedCmds++
-	r.Unlock()
+	r.decodedCmds.Add(1)
 }
 
 func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount *int) {
@@ -278,7 +275,7 @@ func (r *replay) Progress() (float64, time.Time, error) {
 	r.Lock()
 	defer r.Unlock()
 	if r.meta.Cmds > 0 {
-		r.progress = float64(r.decodedCmds-uint64(pendingCmds)) / float64(r.meta.Cmds)
+		r.progress = float64(r.decodedCmds.Load()-uint64(pendingCmds)) / float64(r.meta.Cmds)
 	}
 	return r.progress, r.endTime, r.err
 }
@@ -295,19 +292,24 @@ func (r *replay) stop(err error) {
 	r.Lock()
 	defer r.Unlock()
 
+	if r.cancel != nil {
+		r.cancel()
+		r.cancel = nil
+	}
 	r.endTime = time.Now()
 	// decodedCmds - pendingCmds may be greater than replayedCmds because if a connection is closed unexpectedly,
 	// the pending commands of that connection are discarded. We calculate the progress based on decodedCmds - pendingCmds.
 	replayedCmds := r.replayStats.ReplayedCmds.Load()
 	pendingCmds := r.replayStats.PendingCmds.Load()
+	decodedCmds := r.decodedCmds.Load()
 	fields := []zap.Field{
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
-		zap.Uint64("decoded_cmds", r.decodedCmds),
+		zap.Uint64("decoded_cmds", decodedCmds),
 		zap.Uint64("replayed_cmds", replayedCmds),
 	}
 	if r.meta.Cmds > 0 {
-		r.progress = float64(r.decodedCmds-uint64(pendingCmds)) / float64(r.meta.Cmds)
+		r.progress = float64(decodedCmds-uint64(pendingCmds)) / float64(r.meta.Cmds)
 		fields = append(fields, zap.Uint64("captured_cmds", r.meta.Cmds))
 		fields = append(fields, zap.Float64("progress", r.progress))
 	}
