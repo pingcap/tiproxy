@@ -73,40 +73,43 @@ func (c *conn) Run(ctx context.Context) {
 		c.exceptionCh <- NewOtherException(err, c.connID)
 		return
 	}
-	for {
+	// context is canceled when the replay is interrupted.
+	// cmdCh is closed when the replay is finished.
+	finished := false
+	for !finished {
 		select {
 		case <-ctx.Done():
 			return
 		case _, ok := <-c.cmdCh:
 			if !ok {
-				return
+				finished = true
 			}
-			for ctx.Err() == nil {
-				c.cmdLock.Lock()
-				pendingCmds := c.cmdList.Len()
-				command := c.cmdList.Back()
-				if command != nil {
-					c.cmdList.Remove(command)
-				}
-				c.cmdLock.Unlock()
-				c.updatePendingCmds(pendingCmds)
-				if command == nil {
-					break
-				}
-				if err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
-					if pnet.IsDisconnectError(err) {
-						c.exceptionCh <- NewOtherException(err, c.connID)
-						c.lg.Info("backend connection disconnected", zap.Error(err))
-						return
-					}
-					if c.updateCmdForExecuteStmt(command.Value) {
-						c.exceptionCh <- NewFailException(err, command.Value)
-					}
-				}
-				c.replayStats.ReplayedCmds.Add(1)
-				if command.Value.Type == pnet.ComQuit {
+		}
+		for ctx.Err() == nil {
+			c.cmdLock.Lock()
+			pendingCmds := c.cmdList.Len()
+			command := c.cmdList.Back()
+			if command != nil {
+				c.cmdList.Remove(command)
+			}
+			c.cmdLock.Unlock()
+			c.updatePendingCmds(pendingCmds)
+			if command == nil {
+				break
+			}
+			if err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
+				if pnet.IsDisconnectError(err) {
+					c.exceptionCh <- NewOtherException(err, c.connID)
+					c.lg.Info("backend connection disconnected", zap.Error(err))
 					return
 				}
+				if c.updateCmdForExecuteStmt(command.Value) {
+					c.exceptionCh <- NewFailException(err, command.Value)
+				}
+			}
+			c.replayStats.ReplayedCmds.Add(1)
+			if command.Value.Type == pnet.ComQuit {
+				return
 			}
 		}
 	}
