@@ -233,9 +233,10 @@ func (r *replay) readCommands(ctx context.Context) {
 			r.executeCmd(ctx, command, conns, &connCount)
 		}
 	}
-	r.lg.Info("finished decoding commands, waiting for connections to close", zap.Int64("max_pending_cmds", maxPendingCmds),
+	r.lg.Info("finished decoding commands, draining connections", zap.Int64("max_pending_cmds", maxPendingCmds),
 		zap.Duration("total_wait_time", totalWaitTime), zap.Int("alive_conns", connCount))
 
+	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
 		if conn != nil && !reflect.ValueOf(conn).IsNil() {
 			conn.Stop()
@@ -263,6 +264,8 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map
 	}
 	if conn != nil && !reflect.ValueOf(conn).IsNil() {
 		conn.ExecuteCmd(command)
+	} else {
+		r.lg.Warn("executeCmd on a nil conn", zap.Uint64("conn_id", command.ConnID), zap.Any("command", command))
 	}
 	r.decodedCmds.Add(1)
 }
