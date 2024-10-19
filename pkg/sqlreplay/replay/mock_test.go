@@ -36,6 +36,10 @@ func (c *mockConn) Run(ctx context.Context) {
 	c.closeCh <- c.connID
 }
 
+func (c *mockConn) Stop() {
+	close(c.cmdCh)
+}
+
 var _ cmd.LineReader = (*mockChLoader)(nil)
 
 type mockChLoader struct {

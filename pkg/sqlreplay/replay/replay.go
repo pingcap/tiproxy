@@ -236,6 +236,12 @@ func (r *replay) readCommands(ctx context.Context) {
 	r.lg.Info("finished decoding commands, waiting for connections to close", zap.Int64("max_pending_cmds", maxPendingCmds),
 		zap.Duration("total_wait_time", totalWaitTime), zap.Int("alive_conns", connCount))
 
+	for _, conn := range conns {
+		if conn != nil && !reflect.ValueOf(conn).IsNil() {
+			conn.Stop()
+		}
+	}
+
 	// Wait until all connections are closed before logging the finished message.
 	// Besides, drain all close events to avoid blocking connections at writing to channels.
 	for connCount > 0 {

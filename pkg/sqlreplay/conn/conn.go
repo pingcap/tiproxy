@@ -31,6 +31,7 @@ func (s *ReplayStats) Reset() {
 type Conn interface {
 	Run(ctx context.Context)
 	ExecuteCmd(command *cmd.Command)
+	Stop()
 }
 
 type ConnCreator func(connID uint64) Conn
@@ -76,7 +77,10 @@ func (c *conn) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-c.cmdCh:
+		case _, ok := <-c.cmdCh:
+			if !ok {
+				return
+			}
 			for ctx.Err() == nil {
 				c.cmdLock.Lock()
 				pendingCmds := c.cmdList.Len()
@@ -139,6 +143,10 @@ func (c *conn) ExecuteCmd(command *cmd.Command) {
 	case c.cmdCh <- struct{}{}:
 	default:
 	}
+}
+
+func (c *conn) Stop() {
+	close(c.cmdCh)
 }
 
 func (c *conn) updatePendingCmds(pendingCmds int) {
