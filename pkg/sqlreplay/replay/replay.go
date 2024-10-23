@@ -212,6 +212,7 @@ func (r *replay) readCommands(ctx context.Context) {
 			if pendingCmds > maxPendingCmds {
 				maxPendingCmds = pendingCmds
 			}
+			metrics.ReplayPendingCmdsGauge.Set(float64(pendingCmds))
 			// If slowing down still doesn't help, abort the replay to avoid OOM.
 			if pendingCmds > r.cfg.abortThreshold {
 				err = errors.Errorf("too many pending commands, quit replay")
@@ -236,7 +237,6 @@ func (r *replay) readCommands(ctx context.Context) {
 				expectedInterval += extraWait
 				metrics.ReplayWaitTime.Set(float64(totalWaitTime.Nanoseconds()))
 			}
-			metrics.ReplayPendingCmdsGauge.Set(float64(r.replayStats.PendingCmds.Load()))
 			if expectedInterval > time.Microsecond {
 				select {
 				case <-ctx.Done():
