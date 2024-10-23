@@ -121,6 +121,8 @@ func init() {
 		OutboundBytesCounter,
 		OutboundPacketsCounter,
 		CrossLocationBytesCounter,
+		ReplayPendingCmdsGauge,
+		ReplayWaitTime,
 	}
 }
 
