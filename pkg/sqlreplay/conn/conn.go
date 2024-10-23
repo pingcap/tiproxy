@@ -95,8 +95,8 @@ func (c *conn) Run(ctx context.Context) {
 			if command != nil {
 				c.cmdList.Remove(command)
 			}
-			c.cmdLock.Unlock()
 			c.updatePendingCmds(pendingCmds)
+			c.cmdLock.Unlock()
 			if command == nil {
 				break
 			}
@@ -144,8 +144,8 @@ func (c *conn) ExecuteCmd(command *cmd.Command) {
 	c.cmdLock.Lock()
 	c.cmdList.PushFront(command)
 	pendingCmds := c.cmdList.Len()
-	c.cmdLock.Unlock()
 	c.updatePendingCmds(pendingCmds)
+	c.cmdLock.Unlock()
 	select {
 	case c.cmdCh <- struct{}{}:
 	default:
@@ -169,8 +169,8 @@ func (c *conn) close() {
 	if c.cmdList.Len() > 0 {
 		c.lg.Debug("backend connection closed while there are still pending commands", zap.Int("pending_cmds", c.cmdList.Len()))
 	}
-	c.cmdLock.Unlock()
 	c.updatePendingCmds(0)
+	c.cmdLock.Unlock()
 	c.backendConn.Close()
 	c.closeCh <- c.connID
 }
