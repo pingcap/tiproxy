@@ -12,6 +12,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/retry"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
+	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +62,11 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 		rdb.conn.Close()
 	}
 	rdb.conn = rdb.connCreator()
-	return rdb.conn.Connect(ctx)
+	if err := rdb.conn.Connect(ctx); err != nil {
+		return err
+	}
+	// Set sql_mode to non-strict mode so that inserted data can be truncated automatically.
+	return rdb.conn.ExecuteCmd(ctx, append([]byte{pnet.ComQuery.Byte()}, hack.Slice("set sql_mode=''")...))
 }
 
 func (rdb *reportDB) initTables(ctx context.Context) error {
