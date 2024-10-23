@@ -19,10 +19,10 @@ import (
 var _ conn.Conn = (*mockConn)(nil)
 
 type mockConn struct {
-	exceptionCh chan conn.Exception
-	closeCh     chan uint64
-	cmdCh       chan *cmd.Command
-	connID      uint64
+	closeCh chan uint64
+	cmdCh   chan *cmd.Command
+	connID  uint64
+	closed  chan struct{}
 }
 
 func (c *mockConn) ExecuteCmd(command *cmd.Command) {
@@ -32,12 +32,35 @@ func (c *mockConn) ExecuteCmd(command *cmd.Command) {
 }
 
 func (c *mockConn) Run(ctx context.Context) {
-	<-ctx.Done()
+	<-c.closed
 	c.closeCh <- c.connID
 }
 
 func (c *mockConn) Stop() {
-	close(c.cmdCh)
+	c.closed <- struct{}{}
+}
+
+type mockPendingConn struct {
+	closeCh     chan uint64
+	connID      uint64
+	closed      chan struct{}
+	pendingCmds int64
+	stats       *conn.ReplayStats
+}
+
+func (c *mockPendingConn) ExecuteCmd(command *cmd.Command) {
+	c.pendingCmds++
+	c.stats.PendingCmds.Add(1)
+}
+
+func (c *mockPendingConn) Run(ctx context.Context) {
+	<-c.closed
+	c.stats.PendingCmds.Add(-c.pendingCmds)
+	c.closeCh <- c.connID
+}
+
+func (c *mockPendingConn) Stop() {
+	c.closed <- struct{}{}
 }
 
 var _ cmd.LineReader = (*mockChLoader)(nil)

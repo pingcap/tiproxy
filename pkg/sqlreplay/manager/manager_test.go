@@ -69,6 +69,7 @@ func TestMarshalJobHistory(t *testing.T) {
 				endTime:   endTime,
 				progress:  0.5,
 				err:       errors.New("mock error"),
+				done:      true,
 			},
 			cfg: capture.CaptureConfig{
 				Output:   "/tmp/traffic",
@@ -90,6 +91,7 @@ func TestMarshalJobHistory(t *testing.T) {
 				startTime: startTime,
 				endTime:   endTime,
 				progress:  1,
+				done:      true,
 			},
 			cfg: replay.ReplayConfig{
 				Input:    "/tmp/traffic",

@@ -66,11 +66,11 @@ func (jm *jobManager) updateProgress() {
 	if job.IsRunning() {
 		switch job.Type() {
 		case Capture:
-			progress, endTime, err := jm.capture.Progress()
-			job.SetProgress(progress, endTime, err)
+			progress, endTime, done, err := jm.capture.Progress()
+			job.SetProgress(progress, endTime, done, err)
 		case Replay:
-			progress, endTime, err := jm.replay.Progress()
-			job.SetProgress(progress, endTime, err)
+			progress, endTime, done, err := jm.replay.Progress()
+			job.SetProgress(progress, endTime, done, err)
 		}
 	}
 }

@@ -60,20 +60,38 @@ func TestExecuteCmd(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, &ReplayStats{})
+	stats := &ReplayStats{}
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, stats)
 	backendConn := &mockBackendConn{}
 	conn.backendConn = backendConn
 	childCtx, cancel := context.WithCancel(context.Background())
 	wg.RunWithRecover(func() {
 		conn.Run(childCtx)
 	}, nil, lg)
-	for i := 0; i < 100; i++ {
+	cmds := 1000
+	for i := 0; i < cmds; i++ {
 		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComFieldList})
 	}
 	require.Eventually(t, func() bool {
-		return backendConn.cmds.Load() == 100
+		return backendConn.cmds.Load() == int32(cmds)
 	}, 3*time.Second, time.Millisecond)
+	require.EqualValues(t, cmds, stats.ReplayedCmds.Load())
+	require.EqualValues(t, 0, stats.PendingCmds.Load())
 	cancel()
+	wg.Wait()
+}
+
+func TestStopExecution(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	var wg waitgroup.WaitGroup
+	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, &ReplayStats{})
+	conn.backendConn = &mockBackendConn{}
+	wg.RunWithRecover(func() {
+		conn.Run(context.Background())
+	}, nil, lg)
+	conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComFieldList})
+	conn.Stop()
 	wg.Wait()
 }
 

@@ -95,7 +95,7 @@ func TestSetProgress(t *testing.T) {
 			},
 		}
 		now := time.Now()
-		job.SetProgress(test.progress, now, test.err)
+		job.SetProgress(test.progress, now, test.err != nil || test.progress >= 1.0, test.err)
 		require.Equal(t, now, job.endTime, "case %d", i)
 		require.Equal(t, test.expectedProgress, job.progress, "case %d", i)
 		require.Equal(t, test.running, job.IsRunning(), "case %d", i)
@@ -119,6 +119,7 @@ func TestMarshalJob(t *testing.T) {
 					endTime:   endTime,
 					progress:  0.5,
 					err:       errors.New("mock error"),
+					done:      true,
 				},
 				cfg: capture.CaptureConfig{
 					Output:   "/tmp/traffic",
@@ -146,6 +147,7 @@ func TestMarshalJob(t *testing.T) {
 					startTime: startTime,
 					endTime:   endTime,
 					progress:  1,
+					done:      true,
 				},
 				cfg: replay.ReplayConfig{
 					Input:    "/tmp/traffic",

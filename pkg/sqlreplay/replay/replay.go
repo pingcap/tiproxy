@@ -16,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
@@ -43,7 +44,7 @@ type Replay interface {
 	// Stop stops the replay
 	Stop(err error)
 	// Progress returns the progress of the replay job
-	Progress() (float64, time.Time, error)
+	Progress() (float64, time.Time, bool, error)
 	// Close closes the replay
 	Close()
 }
@@ -54,9 +55,12 @@ type ReplayConfig struct {
 	Password string
 	Speed    float64
 	// the following fields are for testing
-	reader      cmd.LineReader
-	report      report.Report
-	connCreator conn.ConnCreator
+	reader            cmd.LineReader
+	report            report.Report
+	connCreator       conn.ConnCreator
+	abortThreshold    int64
+	slowDownThreshold int64
+	slowDownFactor    time.Duration
 }
 
 func (cfg *ReplayConfig) Validate() error {
@@ -78,6 +82,15 @@ func (cfg *ReplayConfig) Validate() error {
 		cfg.Speed = 1
 	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
 		return errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
+	}
+	if cfg.abortThreshold == 0 {
+		cfg.abortThreshold = abortThreshold
+	}
+	if cfg.slowDownThreshold == 0 {
+		cfg.slowDownThreshold = slowDownThreshold
+	}
+	if cfg.slowDownFactor == 0 {
+		cfg.slowDownFactor = slowDownFactor
 	}
 	return nil
 }
@@ -200,7 +213,7 @@ func (r *replay) readCommands(ctx context.Context) {
 				maxPendingCmds = pendingCmds
 			}
 			// If slowing down still doesn't help, abort the replay to avoid OOM.
-			if pendingCmds > abortThreshold {
+			if pendingCmds > r.cfg.abortThreshold {
 				err = errors.Errorf("too many pending commands, quit replay")
 				r.lg.Error("too many pending commands, quit replay", zap.Int64("pending_cmds", pendingCmds))
 				break
@@ -217,11 +230,13 @@ func (r *replay) readCommands(ctx context.Context) {
 				expectedInterval = 0
 			}
 			// If there are too many pending commands, slow it down to reduce memory usage.
-			if pendingCmds > slowDownThreshold {
-				extraWait := time.Duration(pendingCmds-slowDownThreshold) * slowDownFactor
+			if pendingCmds > r.cfg.slowDownThreshold {
+				extraWait := time.Duration(pendingCmds-r.cfg.slowDownThreshold) * r.cfg.slowDownFactor
 				totalWaitTime += extraWait
 				expectedInterval += extraWait
+				metrics.ReplayWaitTime.Set(float64(totalWaitTime.Nanoseconds()))
 			}
+			metrics.ReplayPendingCmdsGauge.Set(float64(r.replayStats.PendingCmds.Load()))
 			if expectedInterval > time.Microsecond {
 				select {
 				case <-ctx.Done():
@@ -277,14 +292,14 @@ func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount 
 	}
 }
 
-func (r *replay) Progress() (float64, time.Time, error) {
+func (r *replay) Progress() (float64, time.Time, bool, error) {
 	pendingCmds := r.replayStats.PendingCmds.Load()
 	r.Lock()
 	defer r.Unlock()
 	if r.meta.Cmds > 0 {
 		r.progress = float64(r.decodedCmds.Load()-uint64(pendingCmds)) / float64(r.meta.Cmds)
 	}
-	return r.progress, r.endTime, r.err
+	return r.progress, r.endTime, r.startTime.IsZero(), r.err
 }
 
 func (r *replay) readMeta() *store.Meta {
@@ -333,6 +348,8 @@ func (r *replay) stop(err error) {
 		r.lg.Info("replay finished", fields...)
 	}
 	r.startTime = time.Time{}
+	metrics.ReplayPendingCmdsGauge.Set(0)
+	metrics.ReplayWaitTime.Set(0)
 }
 
 func (r *replay) Stop(err error) {

@@ -170,12 +170,13 @@ func TestProgress(t *testing.T) {
 
 	now := time.Now()
 	require.NoError(t, cpt.Start(cfg))
-	progress, _, err := cpt.Progress()
+	progress, _, done, err := cpt.Progress()
 	require.NoError(t, err)
 	require.Less(t, progress, 0.3)
+	require.False(t, done)
 
 	setStartTime(now.Add(-5 * time.Second))
-	progress, _, err = cpt.Progress()
+	progress, _, _, err = cpt.Progress()
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, progress, 0.5)
 
@@ -183,10 +184,11 @@ func TestProgress(t *testing.T) {
 	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	cpt.Stop(errors.Errorf("mock error"))
 	cpt.wg.Wait()
-	progress, _, err = cpt.Progress()
+	progress, _, done, err = cpt.Progress()
 	require.ErrorContains(t, err, "mock error")
 	require.GreaterOrEqual(t, progress, 0.5)
 	require.Less(t, progress, 1.0)
+	require.True(t, done)
 
 	m := store.Meta{}
 	require.NoError(t, m.Read(cfg.Output))

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
@@ -30,9 +31,9 @@ func TestManageConns(t *testing.T) {
 		connCreator: func(connID uint64) conn.Conn {
 			connCount++
 			return &mockConn{
-				connID:      connID,
-				exceptionCh: replay.exceptionCh,
-				closeCh:     replay.closeCh,
+				connID:  connID,
+				closeCh: replay.closeCh,
+				closed:  make(chan struct{}),
 			}
 		},
 		report: newMockReport(replay.exceptionCh),
@@ -111,10 +112,10 @@ func TestReplaySpeed(t *testing.T) {
 			report:   newMockReport(replay.exceptionCh),
 			connCreator: func(connID uint64) conn.Conn {
 				return &mockConn{
-					connID:      connID,
-					cmdCh:       cmdCh,
-					exceptionCh: replay.exceptionCh,
-					closeCh:     replay.closeCh,
+					connID:  connID,
+					cmdCh:   cmdCh,
+					closeCh: replay.closeCh,
+					closed:  make(chan struct{}),
 				}
 			},
 		}
@@ -171,10 +172,10 @@ func TestProgress(t *testing.T) {
 		report:   newMockReport(replay.exceptionCh),
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockConn{
-				connID:      connID,
-				cmdCh:       cmdCh,
-				exceptionCh: replay.exceptionCh,
-				closeCh:     replay.closeCh,
+				connID:  connID,
+				cmdCh:   cmdCh,
+				closeCh: replay.closeCh,
+				closed:  make(chan struct{}),
 			}
 		},
 	}
@@ -189,7 +190,7 @@ func TestProgress(t *testing.T) {
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 		for j := 0; j < 10; j++ {
 			<-cmdCh
-			progress, _, err := replay.Progress()
+			progress, _, _, err := replay.Progress()
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, progress, float64(i)/10)
 			require.LessOrEqual(t, progress, 1.0)
@@ -197,4 +198,53 @@ func TestProgress(t *testing.T) {
 			// require.LessOrEqual(t, progress, float64(i+2)/10)
 		}
 	}
+}
+
+func TestPendingCmds(t *testing.T) {
+	dir := t.TempDir()
+	meta := store.NewMeta(10*time.Second, 10, 0)
+	require.NoError(t, meta.Write(dir))
+	loader := newMockNormalLoader()
+	defer loader.Close()
+
+	lg, text := logger.CreateLoggerForTest(t)
+	replay := NewReplay(lg, id.NewIDManager())
+	defer replay.Close()
+	cfg := ReplayConfig{
+		Input:    dir,
+		Username: "u1",
+		reader:   loader,
+		report:   newMockReport(replay.exceptionCh),
+		connCreator: func(connID uint64) conn.Conn {
+			return &mockPendingConn{
+				connID:  connID,
+				closeCh: replay.closeCh,
+				closed:  make(chan struct{}),
+				stats:   &replay.replayStats,
+			}
+		},
+		abortThreshold:    15,
+		slowDownThreshold: 10,
+		slowDownFactor:    10 * time.Millisecond,
+	}
+
+	now := time.Now()
+	for i := 0; i < 20; i++ {
+		command := newMockCommand(1)
+		command.StartTs = now
+		loader.writeCommand(command)
+	}
+
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	require.Eventually(t, func() bool {
+		_, _, _, err := replay.Progress()
+		return err != nil
+	}, 5*time.Second, 10*time.Millisecond)
+	progress, _, done, err := replay.Progress()
+	require.NotEqualValues(t, 1, progress)
+	require.True(t, done)
+	require.Contains(t, err.Error(), "too many pending commands")
+	logs := text.String()
+	require.Contains(t, logs, `"total_wait_time": "150ms"`)
+	require.Contains(t, logs, "too many pending commands")
 }

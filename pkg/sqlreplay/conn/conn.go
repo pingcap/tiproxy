@@ -59,7 +59,7 @@ func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Co
 		lg:          lg,
 		connID:      connID,
 		cmdList:     glist.New[*cmd.Command](),
-		cmdCh:       make(chan struct{}),
+		cmdCh:       make(chan struct{}, 1),
 		exceptionCh: exceptionCh,
 		closeCh:     closeCh,
 		backendConn: NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
