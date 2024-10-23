@@ -28,6 +28,7 @@ const (
 )
 
 type LineReader interface {
+	String() string
 	ReadLine() ([]byte, string, int, error)
 	Read([]byte) (string, int, error)
 	Close()

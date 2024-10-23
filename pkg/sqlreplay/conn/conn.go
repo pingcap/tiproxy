@@ -7,9 +7,10 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
-	"time"
+	"sync"
+	"sync/atomic"
 
-	"github.com/pingcap/tiproxy/lib/util/errors"
+	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -17,13 +18,23 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	maxPendingCommands = 100 // pending commands for each connection
-)
+// ReplayStats record the statistics during replay. All connections share one ReplayStats and update it concurrently.
+type ReplayStats struct {
+	// ReplayedCmds is the number of executed commands.
+	ReplayedCmds atomic.Uint64
+	// PendingCmds is the number of decoded but not executed commands.
+	PendingCmds atomic.Int64
+}
+
+func (s *ReplayStats) Reset() {
+	s.ReplayedCmds.Store(0)
+	s.PendingCmds.Store(0)
+}
 
 type Conn interface {
 	Run(ctx context.Context)
 	ExecuteCmd(command *cmd.Command)
+	Stop()
 }
 
 type ConnCreator func(connID uint64) Conn
@@ -31,25 +42,31 @@ type ConnCreator func(connID uint64) Conn
 var _ Conn = (*conn)(nil)
 
 type conn struct {
-	cmdCh       chan *cmd.Command
-	exceptionCh chan<- Exception
-	closeCh     chan<- uint64
-	lg          *zap.Logger
-	backendConn BackendConn
-	connID      uint64 // capture ID, not replay ID
+	cmdLock         sync.Mutex
+	cmdCh           chan struct{}
+	cmdList         *glist.List[*cmd.Command]
+	exceptionCh     chan<- Exception
+	closeCh         chan<- uint64
+	lg              *zap.Logger
+	backendConn     BackendConn
+	connID          uint64 // capture ID, not replay ID
+	replayStats     *ReplayStats
+	lastPendingCmds int // last pending cmds reported to the stats
 }
 
 func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
-	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64) *conn {
+	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64, replayStats *ReplayStats) *conn {
 	backendConnID := idMgr.NewID()
 	lg = lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID))
 	return &conn{
 		lg:          lg,
 		connID:      connID,
-		cmdCh:       make(chan *cmd.Command, maxPendingCommands),
+		cmdList:     glist.New[*cmd.Command](),
+		cmdCh:       make(chan struct{}, 1),
 		exceptionCh: exceptionCh,
 		closeCh:     closeCh,
 		backendConn: NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
+		replayStats: replayStats,
 	}
 }
 
@@ -59,22 +76,42 @@ func (c *conn) Run(ctx context.Context) {
 		c.exceptionCh <- NewOtherException(err, c.connID)
 		return
 	}
-	for {
+	// context is canceled when the replay is interrupted.
+	// cmdCh is closed when the replay is finished.
+	finished := false
+	for !finished {
 		select {
 		case <-ctx.Done():
-			// ctx is canceled when the replay is finished
 			return
-		case command := <-c.cmdCh:
-			if err := c.backendConn.ExecuteCmd(ctx, command.Payload); err != nil {
+		case _, ok := <-c.cmdCh:
+			if !ok {
+				finished = true
+			}
+		}
+		for ctx.Err() == nil {
+			c.cmdLock.Lock()
+			pendingCmds := c.cmdList.Len()
+			command := c.cmdList.Back()
+			if command != nil {
+				c.cmdList.Remove(command)
+			}
+			c.updatePendingCmds(pendingCmds)
+			c.cmdLock.Unlock()
+			if command == nil {
+				break
+			}
+			if err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
 				if pnet.IsDisconnectError(err) {
 					c.exceptionCh <- NewOtherException(err, c.connID)
+					c.lg.Debug("backend connection disconnected", zap.Error(err))
 					return
 				}
-				if c.updateCmdForExecuteStmt(command) {
-					c.exceptionCh <- NewFailException(err, command)
+				if c.updateCmdForExecuteStmt(command.Value) {
+					c.exceptionCh <- NewFailException(err, command.Value)
 				}
 			}
-			if command.Type == pnet.ComQuit {
+			c.replayStats.ReplayedCmds.Add(1)
+			if command.Value.Type == pnet.ComQuit {
 				return
 			}
 		}
@@ -99,23 +136,41 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 	return true
 }
 
-// ExecuteCmd executes a command asynchronously.
+// ExecuteCmd executes a command asynchronously by adding it to the list.
+// Adding commands should never block because it may cause cycle wait, so we don't use channels.
+// Conn A: wait for the lock held by conn B, and then its list becomes full and blocks the replay
+// Conn B: wait for next command, but the replay is blocked, so the lock won't be released
 func (c *conn) ExecuteCmd(command *cmd.Command) {
+	c.cmdLock.Lock()
+	c.cmdList.PushFront(command)
+	pendingCmds := c.cmdList.Len()
+	c.updatePendingCmds(pendingCmds)
+	c.cmdLock.Unlock()
 	select {
-	case c.cmdCh <- command:
-	case <-time.After(3 * time.Second):
-		// If the replay is slower, wait until it catches up, otherwise too many transactions are broken.
-		// But if it's blocked due to a bug, discard the command to avoid block the whole replay.
-		// If the discarded command is a COMMIT, let the next COMMIT finish the transaction.
-		select {
-		case c.exceptionCh <- NewOtherException(errors.New("too many pending commands, discard command"), c.connID):
-		default:
-			c.lg.Warn("too many pending errors, discard error")
-		}
+	case c.cmdCh <- struct{}{}:
+	default:
+	}
+}
+
+func (c *conn) Stop() {
+	close(c.cmdCh)
+}
+
+func (c *conn) updatePendingCmds(pendingCmds int) {
+	diff := pendingCmds - c.lastPendingCmds
+	c.lastPendingCmds = pendingCmds
+	if diff != 0 {
+		c.replayStats.PendingCmds.Add(int64(diff))
 	}
 }
 
 func (c *conn) close() {
+	c.cmdLock.Lock()
+	if c.cmdList.Len() > 0 {
+		c.lg.Debug("backend connection closed while there are still pending commands", zap.Int("pending_cmds", c.cmdList.Len()))
+	}
+	c.updatePendingCmds(0)
+	c.cmdLock.Unlock()
 	c.backendConn.Close()
 	c.closeCh <- c.connID
 }

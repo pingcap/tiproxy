@@ -14,11 +14,23 @@ import (
 
 const (
 	metaFile = "meta"
+	version  = "v1"
 )
 
 type Meta struct {
-	Duration time.Duration
-	Cmds     uint64
+	Version      string
+	Duration     time.Duration
+	Cmds         uint64
+	FilteredCmds uint64
+}
+
+func NewMeta(duration time.Duration, cmds, filteredCmds uint64) *Meta {
+	return &Meta{
+		Version:      version,
+		Duration:     duration,
+		Cmds:         cmds,
+		FilteredCmds: filteredCmds,
+	}
 }
 
 func (m *Meta) Write(path string) error {
