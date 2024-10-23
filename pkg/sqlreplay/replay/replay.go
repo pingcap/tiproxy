@@ -264,8 +264,6 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map
 	}
 	if conn != nil && !reflect.ValueOf(conn).IsNil() {
 		conn.ExecuteCmd(command)
-	} else {
-		r.lg.Warn("executeCmd on a nil conn", zap.Uint64("conn_id", command.ConnID), zap.Any("command", command))
 	}
 	r.decodedCmds.Add(1)
 }
@@ -311,6 +309,9 @@ func (r *replay) stop(err error) {
 	replayedCmds := r.replayStats.ReplayedCmds.Load()
 	pendingCmds := r.replayStats.PendingCmds.Load()
 	decodedCmds := r.decodedCmds.Load()
+	if pendingCmds != 0 {
+		r.lg.Warn("pending command count is not 0", zap.Int64("pending_cmds", pendingCmds))
+	}
 	fields := []zap.Field{
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
@@ -318,7 +319,7 @@ func (r *replay) stop(err error) {
 		zap.Uint64("replayed_cmds", replayedCmds),
 	}
 	if r.meta.Cmds > 0 {
-		r.progress = float64(decodedCmds-uint64(pendingCmds)) / float64(r.meta.Cmds)
+		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
 		fields = append(fields, zap.Uint64("captured_cmds", r.meta.Cmds))
 		fields = append(fields, zap.Float64("progress", r.progress))
 	}

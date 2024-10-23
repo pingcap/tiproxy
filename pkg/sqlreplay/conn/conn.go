@@ -100,7 +100,7 @@ func (c *conn) Run(ctx context.Context) {
 			if err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
 				if pnet.IsDisconnectError(err) {
 					c.exceptionCh <- NewOtherException(err, c.connID)
-					c.lg.Info("backend connection disconnected", zap.Error(err))
+					c.lg.Debug("backend connection disconnected", zap.Error(err))
 					return
 				}
 				if c.updateCmdForExecuteStmt(command.Value) {
@@ -164,7 +164,7 @@ func (c *conn) updatePendingCmds(pendingCmds int) {
 func (c *conn) close() {
 	c.cmdLock.Lock()
 	if c.cmdList.Len() > 0 {
-		c.lg.Warn("backend connection closed while there are still pending commands", zap.Int("pending_cmds", c.cmdList.Len()))
+		c.lg.Debug("backend connection closed while there are still pending commands", zap.Int("pending_cmds", c.cmdList.Len()))
 	}
 	c.cmdLock.Unlock()
 	c.updatePendingCmds(0)
