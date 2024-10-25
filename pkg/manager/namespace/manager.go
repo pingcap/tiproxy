@@ -22,7 +22,19 @@ import (
 	"go.uber.org/zap"
 )
 
-type NamespaceManager struct {
+type NamespaceManager interface {
+	Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
+		promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
+		metricsReader metricsreader.MetricsReader) error
+	CommitNamespaces(nss []*config.Namespace, nssDelete []bool) error
+	GetNamespace(nm string) (*Namespace, bool)
+	GetNamespaceByUser(user string) (*Namespace, bool)
+	RedirectConnections() []error
+	Ready() bool
+	Close() error
+}
+
+type namespaceManager struct {
 	sync.RWMutex
 	nsm           map[string]*Namespace
 	tpFetcher     observer.TopologyFetcher
@@ -33,17 +45,17 @@ type NamespaceManager struct {
 	cfgMgr        *mconfig.ConfigManager
 }
 
-func NewNamespaceManager() *NamespaceManager {
-	return &NamespaceManager{}
+func NewNamespaceManager() *namespaceManager {
+	return &namespaceManager{}
 }
 
-func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
+func (mgr *namespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
 	// init BackendFetcher
 	var fetcher observer.BackendFetcher
 	healthCheckCfg := config.NewDefaultHealthCheckConfig()
-	if !reflect.ValueOf(mgr.tpFetcher).IsNil() {
+	if mgr.tpFetcher != nil && !reflect.ValueOf(mgr.tpFetcher).IsNil() {
 		fetcher = observer.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), healthCheckCfg)
 	} else {
 		fetcher = observer.NewStaticFetcher(cfg.Backend.Instances)
@@ -65,7 +77,7 @@ func (mgr *NamespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	}, nil
 }
 
-func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delete []bool) error {
+func (mgr *namespaceManager) CommitNamespaces(nss []*config.Namespace, nssDelete []bool) error {
 	nsm := make(map[string]*Namespace)
 	mgr.RLock()
 	for k, v := range mgr.nsm {
@@ -74,7 +86,7 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	mgr.RUnlock()
 
 	for i, nsc := range nss {
-		if nss_delete != nil && nss_delete[i] {
+		if nssDelete != nil && nssDelete[i] {
 			delete(nsm, nsc.Namespace)
 			continue
 		}
@@ -92,7 +104,7 @@ func (mgr *NamespaceManager) CommitNamespaces(nss []*config.Namespace, nss_delet
 	return nil
 }
 
-func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
+func (mgr *namespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
 	metricsReader metricsreader.MetricsReader) error {
 	mgr.Lock()
@@ -106,7 +118,7 @@ func (mgr *NamespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, 
 	return mgr.CommitNamespaces(nscs, nil)
 }
 
-func (mgr *NamespaceManager) GetNamespace(nm string) (*Namespace, bool) {
+func (mgr *namespaceManager) GetNamespace(nm string) (*Namespace, bool) {
 	mgr.RLock()
 	defer mgr.RUnlock()
 
@@ -114,7 +126,7 @@ func (mgr *NamespaceManager) GetNamespace(nm string) (*Namespace, bool) {
 	return ns, ok
 }
 
-func (mgr *NamespaceManager) GetNamespaceByUser(user string) (*Namespace, bool) {
+func (mgr *namespaceManager) GetNamespaceByUser(user string) (*Namespace, bool) {
 	mgr.RLock()
 	defer mgr.RUnlock()
 
@@ -126,7 +138,7 @@ func (mgr *NamespaceManager) GetNamespaceByUser(user string) (*Namespace, bool) 
 	return nil, false
 }
 
-func (mgr *NamespaceManager) RedirectConnections() []error {
+func (mgr *namespaceManager) RedirectConnections() []error {
 	mgr.RLock()
 	defer mgr.RUnlock()
 
@@ -140,7 +152,21 @@ func (mgr *NamespaceManager) RedirectConnections() []error {
 	return errs
 }
 
-func (mgr *NamespaceManager) Close() error {
+func (mgr *namespaceManager) Ready() bool {
+	mgr.RLock()
+	defer mgr.RUnlock()
+	if len(mgr.nsm) == 0 {
+		return false
+	}
+	for _, ns := range mgr.nsm {
+		if ns.GetRouter().HealthyBackendCount() <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (mgr *namespaceManager) Close() error {
 	mgr.RLock()
 	for _, ns := range mgr.nsm {
 		ns.Close()

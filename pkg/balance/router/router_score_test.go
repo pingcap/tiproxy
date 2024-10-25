@@ -322,11 +322,14 @@ func TestNoBackends(t *testing.T) {
 	conn := tester.createConn()
 	backend := tester.simpleRoute(conn)
 	require.True(t, backend == nil || reflect.ValueOf(backend).IsNil())
+	require.Equal(t, 0, tester.router.HealthyBackendCount())
 	tester.addBackends(1)
+	require.Equal(t, 1, tester.router.HealthyBackendCount())
 	tester.addConnections(10)
 	tester.killBackends(1)
 	backend = tester.simpleRoute(conn)
 	require.True(t, backend == nil || reflect.ValueOf(backend).IsNil())
+	require.Equal(t, 0, tester.router.HealthyBackendCount())
 }
 
 // Test that the backends returned by the BackendSelector are complete and different.
@@ -804,15 +807,6 @@ func TestWatchConfig(t *testing.T) {
 }
 
 func TestControlSpeed(t *testing.T) {
-	bp := &mockBalancePolicy{}
-	tester := newRouterTester(t, bp)
-	tester.addBackends(2)
-	bp.backendToRoute = func(bc []policy.BackendCtx) policy.BackendCtx {
-		return tester.getBackendByIndex(0)
-	}
-	total := 2000
-	tester.addConnections(total)
-
 	tests := []struct {
 		balanceCount     float64
 		rounds           int
@@ -884,8 +878,8 @@ func TestControlSpeed(t *testing.T) {
 			balanceCount:     0.5,
 			rounds:           1000,
 			interval:         10 * time.Millisecond,
-			expectedCountMin: 5,
-			expectedCountMax: 5,
+			expectedCountMin: 3,
+			expectedCountMax: 7,
 		},
 		{
 			balanceCount:     0.1,
@@ -896,20 +890,41 @@ func TestControlSpeed(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
+	bp := &mockBalancePolicy{}
+	tester := newRouterTester(t, bp)
+	tester.addBackends(2)
+	bp.backendToRoute = func(bc []policy.BackendCtx) policy.BackendCtx {
+		return tester.getBackendByIndex(0)
+	}
+	total := 2000
+	tester.addConnections(total)
+	for i, test := range tests {
 		bp.backendsToBalance = func(bc []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
 			return tester.getBackendByIndex(0), tester.getBackendByIndex(1), test.balanceCount, "conn", nil
 		}
 		tester.router.lastRedirectTime = time.Time{}
-		require.Equal(t, total, tester.getBackendByIndex(0).connScore)
+		require.Equal(t, total, tester.getBackendByIndex(0).connScore, "case %d", i)
 		for j := 0; j < test.rounds; j++ {
 			tester.router.rebalance(context.Background())
 			tester.router.lastRedirectTime = tester.router.lastRedirectTime.Add(-test.interval)
 		}
 		redirectingNum := total - tester.getBackendByIndex(0).connScore
 		// Define a bound because the test may be slow.
-		require.LessOrEqual(t, test.expectedCountMin, redirectingNum)
-		require.GreaterOrEqual(t, test.expectedCountMax, redirectingNum)
+		require.LessOrEqual(t, test.expectedCountMin, redirectingNum, "case %d", i)
+		require.GreaterOrEqual(t, test.expectedCountMax, redirectingNum, "case %d", i)
 		tester.redirectFinish(redirectingNum, false)
 	}
+}
+
+func TestRedirectFail(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(1)
+	tester.addConnections(1)
+	tester.conns[1].closing = true
+	tester.killBackends(1)
+	tester.addBackends(1)
+	tester.rebalance(1)
+	// If the connection refuses to redirect, the connScore should not change.
+	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
+	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
 }

@@ -6,6 +6,8 @@ package net
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"math"
 	"net"
 
 	gomysql "github.com/go-mysql-org/go-mysql/mysql"
@@ -27,16 +29,127 @@ var (
 	Status        = ServerStatusAutocommit
 )
 
-// ParseInitialHandshake parses the initial handshake received from the server.
-func ParseInitialHandshake(data []byte) (Capability, uint64, string) {
-	// skip min version
-	serverVersion := string(data[1 : 1+bytes.IndexByte(data[1:], 0)])
-	pos := 1 + len(serverVersion) + 1
-	connid := binary.LittleEndian.Uint32(data[pos : pos+4])
-	// skip salt first part
-	// skip filter
-	pos += 4 + 8 + 1
+// WriteSwitchRequest writes a switch request to the client. It's only for testing.
+func MakeSwitchRequest(authPlugin string, salt [20]byte) []byte {
+	length := 1 + len(authPlugin) + 1 + len(salt) + 1
+	data := make([]byte, 0, length)
+	// check https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_connection_phase_packets_protocol_auth_switch_request.html
+	data = append(data, byte(AuthSwitchHeader))
+	data = append(data, authPlugin...)
+	data = append(data, 0x00)
+	data = append(data, salt[:]...)
+	data = append(data, 0x00)
+	return data
+}
 
+func MakeShaCommand() []byte {
+	return []byte{ShaCommand, FastAuthFail}
+}
+
+func ParseSSLRequestOrHandshakeResp(pkt []byte) bool {
+	capability := Capability(binary.LittleEndian.Uint32(pkt[:4]))
+	return capability&ClientSSL != 0
+}
+
+// WriteErrPacket writes an Error packet.
+func MakeErrPacket(merr *gomysql.MyError) []byte {
+	data := make([]byte, 0, 9+len(merr.Message))
+	data = append(data, ErrHeader.Byte())
+	data = append(data, byte(merr.Code), byte(merr.Code>>8))
+	// ClientProtocol41 is always enabled.
+	data = append(data, '#')
+	data = append(data, merr.State...)
+	data = append(data, merr.Message...)
+	return data
+}
+
+// WriteOKPacket writes an OK packet. It's only for testing.
+func MakeOKPacket(status uint16, header Header) []byte {
+	data := make([]byte, 0, 7)
+	data = append(data, header.Byte())
+	data = append(data, 0, 0)
+	// ClientProtocol41 is always enabled.
+	data = DumpUint16(data, status)
+	data = append(data, 0, 0)
+	return data
+}
+
+// WriteEOFPacket writes an EOF packet. It's only for testing.
+func MakeEOFPacket(status uint16) []byte {
+	data := make([]byte, 0, 5)
+	data = append(data, EOFHeader.Byte())
+	data = append(data, 0, 0)
+	// ClientProtocol41 is always enabled.
+	data = DumpUint16(data, status)
+	return data
+}
+
+// WriteUserError writes an unknown error to the client.
+func MakeUserError(err error) []byte {
+	if err == nil {
+		return nil
+	}
+	myErr := gomysql.NewError(gomysql.ER_UNKNOWN_ERROR, err.Error())
+	return MakeErrPacket(myErr)
+}
+
+type InitialHandshake struct {
+	Salt          [20]byte
+	ServerVersion string
+	AuthPlugin    string
+	ConnID        uint64
+	Capability    Capability
+}
+
+// MakeInitialHandshake creates an initial handshake as a server.
+// It's used for tenant-aware routing and testing.
+func MakeInitialHandshake(capability Capability, salt [20]byte, authPlugin string, serverVersion string, connID uint64) []byte {
+	saltLen := len(salt)
+	data := make([]byte, 0, 128)
+
+	// min version 10
+	data = append(data, 10)
+	// server version[NUL]
+	data = append(data, serverVersion...)
+	data = append(data, 0)
+	// connection id
+	data = append(data, byte(connID), byte(connID>>8), byte(connID>>16), byte(connID>>24))
+	// auth-plugin-data-part-1
+	data = append(data, salt[0:8]...)
+	// filler [00]
+	data = append(data, 0)
+	// capability flag lower 2 bytes, using default capability here
+	data = append(data, byte(capability), byte(capability>>8))
+	// charset
+	data = append(data, Collation)
+	// status
+	data = DumpUint16(data, Status)
+	// capability flag upper 2 bytes, using default capability here
+	data = append(data, byte(capability>>16), byte(capability>>24))
+	// length of auth-plugin-data
+	data = append(data, byte(saltLen+1))
+	// reserved 10 [00]
+	data = append(data, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+	// auth-plugin-data-part-2
+	data = append(data, salt[8:saltLen]...)
+	data = append(data, 0)
+	// auth-plugin name
+	data = append(data, []byte(authPlugin)...)
+	data = append(data, 0)
+	return data
+}
+
+// ParseInitialHandshake parses the initial handshake received from the server.
+func ParseInitialHandshake(data []byte) *InitialHandshake {
+	hs := &InitialHandshake{}
+	// skip min version
+	hs.ServerVersion = string(data[1 : 1+bytes.IndexByte(data[1:], 0)])
+	pos := 1 + len(hs.ServerVersion) + 1
+	hs.ConnID = uint64(binary.LittleEndian.Uint32(data[pos : pos+4]))
+	pos += 4
+	copy(hs.Salt[:], data[pos:pos+8])
+	// skip filter
+	pos += 8 + 1
 	// capability lower 2 bytes
 	capability := uint32(binary.LittleEndian.Uint16(data[pos : pos+2]))
 	pos += 2
@@ -46,13 +159,15 @@ func ParseInitialHandshake(data []byte) (Capability, uint64, string) {
 		pos += 1 + 2
 		// capability flags (upper 2 bytes)
 		capability = uint32(binary.LittleEndian.Uint16(data[pos:pos+2]))<<16 | capability
-
 		// skip auth data len or [00]
 		// skip reserved (all [00])
-		// skip salt second part
-		// skip auth plugin
+		pos += 2 + 1 + 10
+		copy(hs.Salt[8:], data[pos:])
+		pos += 13
+		hs.AuthPlugin = string(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
 	}
-	return Capability(capability), uint64(connid), serverVersion
+	hs.Capability = Capability(capability)
+	return hs
 }
 
 // HandshakeResp indicates the response read from the client.
@@ -460,4 +575,305 @@ func ParseQueryPacket(data []byte) string {
 		data = data[:len(data)-1]
 	}
 	return hack.String(data)
+}
+
+func MakeQueryPacket(stmt string) []byte {
+	request := make([]byte, len(stmt)+1)
+	request[0] = ComQuery.Byte()
+	copy(request[1:], hack.Slice(stmt))
+	return request
+}
+
+func MakePrepareStmtRequest(stmt string) []byte {
+	request := make([]byte, len(stmt)+1)
+	request[0] = ComStmtPrepare.Byte()
+	copy(request[1:], hack.Slice(stmt))
+	return request
+}
+
+// MakePrepareStmtResp creates a prepared statement response.
+// The packet is incomplete and it's only used for testing.
+func MakePrepareStmtResp(stmtID uint32, paramNum int) []byte {
+	// header
+	response := make([]byte, 1+4+2+2)
+	pos := 0
+	response[pos] = ComStmtPrepare.Byte()
+	pos += 1
+	binary.LittleEndian.PutUint32(response[pos:], stmtID)
+	pos += 4
+	// column count
+	pos += 2
+	// param count
+	binary.LittleEndian.PutUint16(response[pos:], uint16(paramNum))
+	// ignore rest part
+	return response
+}
+
+func ParsePrepareStmtResp(resp []byte) (stmtID uint32, paramNum int) {
+	// header
+	pos := 1
+	stmtID = binary.LittleEndian.Uint32(resp[pos:])
+	pos += 4
+	// column count
+	pos += 2
+	paramNum = int(binary.LittleEndian.Uint16(resp[pos:]))
+	// ignore rest part
+	return
+}
+
+func MakeExecuteStmtRequest(stmtID uint32, args []any, newParamBound bool) ([]byte, error) {
+	paramNum := len(args)
+	paramTypes := make([]byte, paramNum*2)
+	paramValues := make([][]byte, paramNum)
+	nullBitmap := make([]byte, (paramNum+7)>>3)
+	dataLen := 1 + 4 + 1 + 4
+	if paramNum > 0 {
+		dataLen += len(nullBitmap) + 1
+	}
+	var newParamBoundFlag byte = 0
+	if newParamBound {
+		newParamBoundFlag = 1
+		dataLen += len(paramTypes)
+	}
+
+	for i := range args {
+		if args[i] == nil {
+			nullBitmap[i/8] |= 1 << (uint(i) % 8)
+			paramTypes[i<<1] = fieldTypeNULL
+			continue
+		}
+
+		switch v := args[i].(type) {
+		case int8:
+			paramTypes[i<<1] = fieldTypeTiny
+			paramValues[i] = []byte{byte(v)}
+		case int16:
+			paramTypes[i<<1] = fieldTypeShort
+			paramValues[i] = Uint16ToBytes(uint16(v))
+		case int32:
+			paramTypes[i<<1] = fieldTypeLong
+			paramValues[i] = Uint32ToBytes(uint32(v))
+		case int:
+			paramTypes[i<<1] = fieldTypeLongLong
+			paramValues[i] = Uint64ToBytes(uint64(v))
+		case int64:
+			paramTypes[i<<1] = fieldTypeLongLong
+			paramValues[i] = Uint64ToBytes(uint64(v))
+		case uint8:
+			paramTypes[i<<1] = fieldTypeTiny
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = []byte{v}
+		case uint16:
+			paramTypes[i<<1] = fieldTypeShort
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = Uint16ToBytes(v)
+		case uint32:
+			paramTypes[i<<1] = fieldTypeLong
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = Uint32ToBytes(v)
+		case uint:
+			paramTypes[i<<1] = fieldTypeLongLong
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = Uint64ToBytes(uint64(v))
+		case uint64:
+			paramTypes[i<<1] = fieldTypeLongLong
+			paramTypes[(i<<1)+1] = 0x80
+			paramValues[i] = Uint64ToBytes(v)
+		case bool:
+			paramTypes[i<<1] = fieldTypeTiny
+			if v {
+				paramValues[i] = []byte{1}
+			} else {
+				paramValues[i] = []byte{0}
+			}
+		case float32:
+			paramTypes[i<<1] = fieldTypeFloat
+			paramValues[i] = Uint32ToBytes(math.Float32bits(v))
+		case float64:
+			paramTypes[i<<1] = fieldTypeDouble
+			paramValues[i] = Uint64ToBytes(math.Float64bits(v))
+		case string:
+			paramTypes[i<<1] = fieldTypeString
+			paramValues[i] = DumpLengthEncodedString(nil, hack.Slice(v))
+		case []byte:
+			paramTypes[i<<1] = fieldTypeString
+			paramValues[i] = DumpLengthEncodedString(nil, v)
+		case json.RawMessage:
+			paramTypes[i<<1] = fieldTypeString
+			paramValues[i] = DumpLengthEncodedString(nil, v)
+		default:
+			return nil, errors.WithStack(errors.Errorf("unsupported type %T", v))
+		}
+
+		dataLen += len(paramValues[i])
+	}
+
+	request := make([]byte, dataLen)
+	pos := 0
+	request[pos] = ComStmtExecute.Byte()
+	pos += 1
+	binary.LittleEndian.PutUint32(request[pos:], uint32(stmtID))
+	pos += 4
+	// cursor flag
+	pos += 1
+	// iteration count
+	request[pos] = 1
+	pos += 4
+
+	if paramNum > 0 {
+		copy(request[pos:], nullBitmap)
+		pos += len(nullBitmap)
+		request[pos] = newParamBoundFlag
+		pos++
+		if newParamBound {
+			copy(request[pos:], paramTypes)
+			pos += len(paramTypes)
+		}
+		for _, v := range paramValues {
+			copy(request[pos:], v)
+			pos += len(v)
+		}
+	}
+	return request, nil
+}
+
+// ParseExecuteStmtRequest parses ComStmtExecute request.
+// NOTICE: the type of returned args may be wrong because it doesn't have the knowledge of real param types.
+// E.g. []byte is returned as string, and int is returned as int32.
+func ParseExecuteStmtRequest(data []byte, paramNum int, paramTypes []byte) (stmtID uint32, args []any, newParamTypes []byte, err error) {
+	if len(data) < 1+4+1+4 {
+		return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
+	}
+
+	pos := 1
+	stmtID = binary.LittleEndian.Uint32(data[pos : pos+4])
+	// paramNum is contained in the ComStmtPrepare but paramTypes is contained in the first ComStmtExecute (with newParamBoundFlag==1).
+	// If the prepared statement is parsed from the session states, the paramTypes may be empty but the paramNum is not in the session states.
+	// Just return empty args in this case, which is fine currently.
+	if paramNum == 0 {
+		return stmtID, nil, nil, nil
+	}
+	// cursor flag and iteration count
+	pos += 4 + 1 + 4
+	if len(data) < pos+((paramNum+7)>>3)+1 {
+		return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
+	}
+	nullBitmap := data[pos : pos+((paramNum+7)>>3)]
+	pos += len(nullBitmap)
+	newParamBoundFlag := data[pos]
+	pos += 1
+	args = make([]any, paramNum)
+
+	if newParamBoundFlag > 0 {
+		if len(data) < pos+paramNum<<1 {
+			return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
+		}
+		paramTypes = data[pos : pos+paramNum<<1]
+		pos += paramNum << 1
+	}
+
+	for i := 0; i < paramNum; i++ {
+		if nullBitmap[i/8]&(1<<(uint(i)%8)) > 0 {
+			args[i] = nil
+			continue
+		}
+		switch paramTypes[i<<1] {
+		case fieldTypeNULL:
+			args[i] = nil
+		case fieldTypeTiny:
+			if paramTypes[(i<<1)+1] == 0x80 {
+				args[i] = uint8(data[pos])
+			} else {
+				args[i] = int8(data[pos])
+			}
+			pos += 1
+		case fieldTypeShort, fieldTypeYear:
+			v := binary.LittleEndian.Uint16(data[pos : pos+2])
+			if paramTypes[(i<<1)+1] == 0x80 {
+				args[i] = v
+			} else {
+				args[i] = int16(v)
+			}
+			pos += 2
+		case fieldTypeLong, fieldTypeInt24:
+			v := binary.LittleEndian.Uint32(data[pos : pos+4])
+			if paramTypes[(i<<1)+1] == 0x80 {
+				args[i] = v
+			} else {
+				args[i] = int32(v)
+			}
+			pos += 4
+		case fieldTypeLongLong:
+			v := binary.LittleEndian.Uint64(data[pos : pos+8])
+			if paramTypes[(i<<1)+1] == 0x80 {
+				args[i] = v
+			} else {
+				args[i] = int64(v)
+			}
+			pos += 8
+		case fieldTypeFloat:
+			args[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[pos : pos+4]))
+			pos += 4
+		case fieldTypeDouble:
+			args[i] = math.Float64frombits(binary.LittleEndian.Uint64(data[pos : pos+8]))
+			pos += 8
+		case fieldTypeDate, fieldTypeTimestamp, fieldTypeDateTime:
+			length := data[pos]
+			pos++
+			switch length {
+			case 0:
+				args[i] = "0000-00-00 00:00:00"
+			case 4:
+				pos, args[i] = BinaryDate(pos, data)
+			case 7:
+				pos, args[i] = BinaryDateTime(pos, data)
+			case 11:
+				pos, args[i] = BinaryTimestamp(pos, data)
+			case 13:
+				pos, args[i] = BinaryTimestampWithTZ(pos, data)
+			default:
+				return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
+			}
+		case fieldTypeTime:
+			length := data[pos]
+			pos++
+			switch length {
+			case 0:
+				args[i] = "0"
+			case 8:
+				isNegative := data[pos]
+				pos++
+				pos, args[i] = BinaryDuration(pos, data, isNegative)
+			case 12:
+				isNegative := data[pos]
+				pos++
+				pos, args[i] = BinaryDurationWithMS(pos, data, isNegative)
+			default:
+				return 0, nil, nil, errors.WithStack(gomysql.ErrMalformPacket)
+			}
+		case fieldTypeDecimal, fieldTypeNewDecimal, fieldTypeVarChar, fieldTypeString, fieldTypeVarString, fieldTypeBLOB, fieldTypeTinyBLOB,
+			fieldTypeMediumBLOB, fieldTypeLongBLOB, fieldTypeEnum, fieldTypeSet, fieldTypeGeometry, fieldTypeBit, fieldTypeJSON, fieldTypeVector:
+			v, isNull, n, err := ParseLengthEncodedBytes(data[pos:])
+			if err != nil {
+				return 0, nil, nil, errors.Wrapf(err, "parse param err, type: %d, idx: %d, pos: %d", paramTypes[i<<1], i, pos)
+			}
+			if isNull {
+				args[i] = nil
+			} else {
+				args[i] = hack.String(v)
+			}
+			pos += n
+		default:
+			return 0, nil, nil, errors.Errorf("unsupported type %d", paramTypes[i<<1])
+		}
+	}
+
+	return stmtID, args, paramTypes, nil
+}
+
+func MakeCloseStmtRequest(stmtID uint32) []byte {
+	request := make([]byte, 1+4)
+	request[0] = ComStmtClose.Byte()
+	binary.LittleEndian.PutUint32(request[1:], stmtID)
+	return request
 }

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/cmd"
+	lg "github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/security"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +27,8 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 
 	ctx := &Context{}
 
-	curls := rootCmd.PersistentFlags().StringArray("curls", []string{"localhost:3080"}, "API gateway addresses")
+	host := rootCmd.PersistentFlags().String("host", "localhost", "API gateway host")
+	port := rootCmd.PersistentFlags().Int("port", 3080, "API gateway port")
 	logEncoder := rootCmd.PersistentFlags().String("log_encoder", "tidb", "log in format of tidb, console, or json")
 	logLevel := rootCmd.PersistentFlags().String("log_level", "warn", "log level")
 	insecure := rootCmd.PersistentFlags().BoolP("insecure", "k", false, "enable TLS without CA, useful for testing, or for expired certs")
@@ -36,7 +37,7 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 	keyPath := rootCmd.PersistentFlags().String("key", "", "key for server-side client authentication")
 	rootCmd.PersistentFlags().Bool("indent", true, "whether indent the returned json")
 	rootCmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
-		logger, _, _, err := cmd.BuildLogger(&config.Log{
+		logger, _, _, err := lg.BuildLogger(&config.Log{
 			Encoder: *logEncoder,
 			LogOnline: config.LogOnline{
 				Level: *logLevel,
@@ -76,7 +77,8 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 				ExpectContinueTimeout: 1 * time.Second,
 			},
 		}
-		ctx.CUrls = *curls
+		ctx.Host = *host
+		ctx.Port = *port
 		ctx.SSL = tlsConfig != nil
 		return nil
 	}
@@ -84,5 +86,6 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 	rootCmd.AddCommand(GetNamespaceCmd(ctx))
 	rootCmd.AddCommand(GetConfigCmd(ctx))
 	rootCmd.AddCommand(GetHealthCmd(ctx))
+	rootCmd.AddCommand(GetTrafficCmd(ctx))
 	return rootCmd
 }

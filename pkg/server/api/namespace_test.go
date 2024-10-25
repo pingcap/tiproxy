@@ -13,10 +13,10 @@ import (
 )
 
 func TestNamespace(t *testing.T) {
-	_, doHTTP := createServer(t)
+	srv, doHTTP := createServer(t)
 
 	// test list
-	doHTTP(t, http.MethodGet, "/api/admin/namespace", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/namespace", httpOpts{}, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Equal(t, `""`, string(all))
@@ -24,15 +24,15 @@ func TestNamespace(t *testing.T) {
 	})
 
 	// test set
-	doHTTP(t, http.MethodPut, "/api/admin/namespace/gg", strings.NewReader(`{}`), nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPut, "/api/admin/namespace/gg", httpOpts{reader: strings.NewReader(`{}`)}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodPut, "/api/admin/namespace", strings.NewReader(`{"namespace": "dge"}`), nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPut, "/api/admin/namespace", httpOpts{reader: strings.NewReader(`{"namespace": "dge"}`)}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 
 	// test get
-	doHTTP(t, http.MethodGet, "/api/admin/namespace/dge", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/namespace/dge", httpOpts{}, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Equal(t, `{"namespace":"dge","frontend":{"user":"","security":{}},"backend":{"instances":null,"security":{}}}`, string(all))
@@ -40,18 +40,19 @@ func TestNamespace(t *testing.T) {
 	})
 
 	// test remove
-	doHTTP(t, http.MethodDelete, "/api/admin/namespace/dge", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodDelete, "/api/admin/namespace/dge", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodGet, "/api/admin/namespace/dge", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodGet, "/api/admin/namespace/dge", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
 	})
 
 	// test commit
-	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit?namespace=xx", nil, nil, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit?namespace=xx", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
 	})
-	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit", nil, nil, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
+	srv.mgr.NsMgr.(*mockNamespaceManager).success.Store(true)
+	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 }

@@ -69,8 +69,8 @@ func TestLogAttrs(t *testing.T) {
 
 func TestMySQLError(t *testing.T) {
 	myerr := &mysql.MyError{}
-	require.True(t, IsMySQLError(errors.Wrap(ErrHandshakeTLS, myerr)))
-	require.False(t, IsMySQLError(errors.Wrap(myerr, ErrHandshakeTLS)))
+	require.True(t, IsMySQLError(errors.Wrap(myerr, ErrHandshakeTLS)))
+	require.False(t, IsMySQLError(errors.Wrap(ErrHandshakeTLS, myerr)))
 	require.False(t, IsMySQLError(ErrHandshakeTLS))
 	require.True(t, errors.Is(errors.Wrap(ErrHandshakeTLS, myerr), ErrHandshakeTLS))
 	require.True(t, errors.Is(errors.Wrap(myerr, ErrHandshakeTLS), ErrHandshakeTLS))
@@ -109,4 +109,57 @@ func TestCheckSqlPort(t *testing.T) {
 			conn := packet.NewConn(c)
 			require.NoError(t, conn.WritePacket(data))
 		}, 1)
+}
+
+func TestPrepareStmts(t *testing.T) {
+	args := []any{
+		nil,
+		"hello",
+		byte(10),
+		int16(-100),
+		int32(-200),
+		int64(-300),
+		uint16(100),
+		uint32(200),
+		uint64(300),
+		float32(1.1),
+		float64(1.2),
+		nil,
+	}
+	expectedTypes := []byte{
+		fieldTypeNULL, 0,
+		fieldTypeString, 0,
+		fieldTypeTiny, 0x80,
+		fieldTypeShort, 0,
+		fieldTypeLong, 0,
+		fieldTypeLongLong, 0,
+		fieldTypeShort, 0x80,
+		fieldTypeLong, 0x80,
+		fieldTypeLongLong, 0x80,
+		fieldTypeFloat, 0,
+		fieldTypeDouble, 0,
+		fieldTypeNULL, 0,
+	}
+
+	b := MakePrepareStmtRequest("select ?")
+	require.Len(t, b, len("select ?")+1)
+
+	data1, err := MakeExecuteStmtRequest(1, args, true)
+	require.NoError(t, err)
+
+	stmtID, pArgs, newParamTypes, err := ParseExecuteStmtRequest(data1, len(args), nil)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), stmtID)
+	require.EqualValues(t, args, pArgs)
+	require.Equal(t, expectedTypes, newParamTypes)
+
+	data2, err := MakeExecuteStmtRequest(1, pArgs, false)
+	require.NoError(t, err)
+	require.NotEqual(t, data1, data2)
+
+	stmtID, pArgs, newParamTypes, err = ParseExecuteStmtRequest(data1, len(args), newParamTypes)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), stmtID)
+	require.EqualValues(t, args, pArgs)
+	require.Equal(t, expectedTypes, newParamTypes)
 }

@@ -15,13 +15,10 @@ import (
 // query is called when the proxy sends requests to the backend by itself,
 // such as querying session states, committing the current transaction.
 // It only supports limited cases, excluding loading file, cursor fetch, multi-statements, etc.
-func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *mysql.Resultset, response []byte, err error) {
+func (cp *CmdProcessor) query(packetIO pnet.PacketIO, sql string) (result *mysql.Resultset, response []byte, err error) {
 	// send request
 	packetIO.ResetSequence()
-	data := hack.Slice(sql)
-	request := make([]byte, 0, 1+len(data))
-	request = append(request, pnet.ComQuery.Byte())
-	request = append(request, data...)
+	request := pnet.MakeQueryPacket(sql)
 	if err = packetIO.WritePacket(request, true); err != nil {
 		return
 	}
@@ -47,7 +44,7 @@ func (cp *CmdProcessor) query(packetIO *pnet.PacketIO, sql string) (result *mysq
 }
 
 // readResultSet is only used for reading the results of `show session_states` currently.
-func (cp *CmdProcessor) readResultSet(packetIO *pnet.PacketIO, data []byte) (*mysql.Result, error) {
+func (cp *CmdProcessor) readResultSet(packetIO pnet.PacketIO, data []byte) (*mysql.Result, error) {
 	columnCount, _, n := pnet.ParseLengthEncodedInt(data)
 	if n-len(data) != 0 {
 		return nil, errors.WithStack(mysql.ErrMalformPacket)
@@ -65,7 +62,7 @@ func (cp *CmdProcessor) readResultSet(packetIO *pnet.PacketIO, data []byte) (*my
 	return result, nil
 }
 
-func (cp *CmdProcessor) readResultColumns(packetIO *pnet.PacketIO, result *mysql.Result) (err error) {
+func (cp *CmdProcessor) readResultColumns(packetIO pnet.PacketIO, result *mysql.Result) (err error) {
 	var fieldIndex int
 	var data []byte
 
@@ -97,7 +94,7 @@ func (cp *CmdProcessor) readResultColumns(packetIO *pnet.PacketIO, result *mysql
 	}
 }
 
-func (cp *CmdProcessor) readResultRows(packetIO *pnet.PacketIO, result *mysql.Result) (err error) {
+func (cp *CmdProcessor) readResultRows(packetIO pnet.PacketIO, result *mysql.Result) (err error) {
 	var data []byte
 
 	for {

@@ -14,6 +14,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
+	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
@@ -23,6 +24,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sctx"
 	"github.com/pingcap/tiproxy/pkg/server/api"
+	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
@@ -35,13 +37,14 @@ type Server struct {
 	wg waitgroup.WaitGroup
 	// managers
 	configManager    *mgrcfg.ConfigManager
-	namespaceManager *mgrns.NamespaceManager
+	namespaceManager mgrns.NamespaceManager
 	metricsManager   *metrics.MetricsManager
 	loggerManager    *logger.LoggerManager
 	certManager      *cert.CertManager
 	vipManager       vip.VIPManager
 	infoSyncer       *infosync.InfoSyncer
 	metricsReader    metricsreader.MetricsReader
+	replay           mgrrp.JobManager
 	// etcd client
 	etcdCli *clientv3.Client
 	// HTTP client
@@ -65,13 +68,13 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// set up logger
 	var lg *zap.Logger
-	if srv.loggerManager, lg, err = logger.NewLoggerManager(&sctx.Overlay.Log); err != nil {
+	if srv.loggerManager, lg, err = logger.NewLoggerManager(nil); err != nil {
 		return
 	}
 	srv.loggerManager.Init(srv.configManager.WatchConfig())
 
 	// setup config manager
-	if err = srv.configManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, &sctx.Overlay); err != nil {
+	if err = srv.configManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, sctx.AdvertiseAddr); err != nil {
 		return
 	}
 	cfg := srv.configManager.GetConfig()
@@ -153,15 +156,22 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		}
 	}
 
+	var hsHandler backend.HandshakeHandler
+	if handler != nil {
+		hsHandler = handler
+	} else {
+		hsHandler = backend.NewDefaultHandshakeHandler(srv.namespaceManager)
+	}
+	idMgr := id.NewIDManager()
+
+	// setup capture and replay job manager
+	{
+		srv.replay = mgrrp.NewJobManager(lg.Named("replay"), srv.configManager.GetConfig(), srv.certManager, idMgr, hsHandler)
+	}
+
 	// setup proxy server
 	{
-		var hsHandler backend.HandshakeHandler
-		if handler != nil {
-			hsHandler = handler
-		} else {
-			hsHandler = backend.NewDefaultHandshakeHandler(srv.namespaceManager)
-		}
-		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, hsHandler)
+		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), hsHandler)
 		if err != nil {
 			return
 		}
@@ -169,8 +179,14 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	}
 
 	// setup http & grpc
-	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), srv.namespaceManager, srv.configManager, srv.certManager,
-		srv.metricsReader, handler, ready); err != nil {
+	mgrs := api.Managers{
+		CfgMgr:        srv.configManager,
+		NsMgr:         srv.namespaceManager,
+		CertMgr:       srv.certManager,
+		BackendReader: srv.metricsReader,
+		ReplayJobMgr:  srv.replay,
+	}
+	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), mgrs, handler, ready); err != nil {
 		return
 	}
 

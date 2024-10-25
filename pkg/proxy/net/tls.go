@@ -23,29 +23,29 @@ func (br *tlsInternalConn) Write(p []byte) (n int, err error) {
 	return br.packetReadWriter.DirectWrite(p)
 }
 
-func (p *PacketIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error) {
+func (p *packetIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error) {
 	tlsConfig = tlsConfig.Clone()
 	conn := &tlsInternalConn{p.readWriter}
 	tlsConn := tls.Server(conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
-		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(ErrHandshakeTLS, errors.WithStack(err)))
+		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(errors.WithStack(err), ErrHandshakeTLS))
 	}
 	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn)
 	return tlsConn.ConnectionState(), nil
 }
 
-func (p *PacketIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
+func (p *packetIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 	tlsConfig = tlsConfig.Clone()
 	conn := &tlsInternalConn{p.readWriter}
 	tlsConn := tls.Client(conn, tlsConfig)
 	if err := tlsConn.Handshake(); err != nil {
-		return p.wrapErr(errors.Wrap(ErrHandshakeTLS, errors.WithStack(err)))
+		return p.wrapErr(errors.Wrap(errors.WithStack(err), ErrHandshakeTLS))
 	}
 	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn)
 	return nil
 }
 
-func (p *PacketIO) TLSConnectionState() tls.ConnectionState {
+func (p *packetIO) TLSConnectionState() tls.ConnectionState {
 	return p.readWriter.TLSConnectionState()
 }
 

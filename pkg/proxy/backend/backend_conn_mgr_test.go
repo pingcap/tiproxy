@@ -111,9 +111,9 @@ func (mbi *mockBackendInst) setLocal(local bool) {
 }
 
 type runner struct {
-	client  func(packetIO *pnet.PacketIO) error
-	proxy   func(clientIO, backendIO *pnet.PacketIO) error
-	backend func(packetIO *pnet.PacketIO) error
+	client  func(packetIO pnet.PacketIO) error
+	proxy   func(clientIO, backendIO pnet.PacketIO) error
+	backend func(packetIO pnet.PacketIO) error
 }
 
 // backendMgrTester encapsulates testSuite but is dedicated for BackendConnMgr.
@@ -152,22 +152,22 @@ func newBackendMgrTester(t *testing.T, cfg ...cfgOverrider) *backendMgrTester {
 }
 
 // Define some common runners here to reduce code redundancy.
-func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO *pnet.PacketIO) error {
-	err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+func (ts *backendMgrTester) firstHandshake4Proxy(clientIO, backendIO pnet.PacketIO) error {
+	err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, ts.mp.username, ts.mp.password)
 	require.NoError(ts.t, err)
 	mer := newMockEventReceiver()
 	ts.mp.SetEventReceiver(mer)
 	return nil
 }
 
-func (ts *backendMgrTester) handshake4Backend(packetIO *pnet.PacketIO) error {
+func (ts *backendMgrTester) handshake4Backend(packetIO pnet.PacketIO) error {
 	conn, err := ts.tc.backendListener.Accept()
 	require.NoError(ts.t, err)
 	ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg, pnet.DefaultConnBufferSize)
 	return ts.mb.authenticate(ts.tc.backendIO)
 }
 
-func (ts *backendMgrTester) redirectSucceed4Backend(packetIO *pnet.PacketIO) error {
+func (ts *backendMgrTester) redirectSucceed4Backend(packetIO pnet.PacketIO) error {
 	// respond to `SHOW SESSION STATES`
 	ts.mb.respondType = responseTypeResultSet
 	err := ts.mb.respond(packetIO)
@@ -183,7 +183,7 @@ func (ts *backendMgrTester) redirectSucceed4Backend(packetIO *pnet.PacketIO) err
 	return nil
 }
 
-func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ *pnet.PacketIO) error {
+func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ pnet.PacketIO) error {
 	backend1 := ts.mp.backendIO.Load()
 	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
@@ -192,32 +192,35 @@ func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ *pnet.PacketIO) error {
 	return nil
 }
 
-func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO *pnet.PacketIO) error {
+func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO pnet.PacketIO) error {
 	clientIO.ResetSequence()
 	request, err := clientIO.ReadPacket()
 	require.NoError(ts.t, err)
 	prevCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+	if pnet.IsMySQLError(rsErr) {
+		rsErr = nil
+	}
 	curCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	require.Equal(ts.t, prevCounter+1, curCounter)
 	return rsErr
 }
 
-func (ts *backendMgrTester) respondWithNoTxn4Backend(packetIO *pnet.PacketIO) error {
+func (ts *backendMgrTester) respondWithNoTxn4Backend(packetIO pnet.PacketIO) error {
 	ts.mb.respondType = responseTypeOK
 	ts.mb.status = 0
 	return ts.mb.respond(packetIO)
 }
 
-func (ts *backendMgrTester) startTxn4Backend(packetIO *pnet.PacketIO) error {
+func (ts *backendMgrTester) startTxn4Backend(packetIO pnet.PacketIO) error {
 	ts.mb.respondType = responseTypeOK
 	ts.mb.status = pnet.ServerStatusInTrans
 	return ts.mb.respond(packetIO)
 }
 
-func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO *pnet.PacketIO) error {
+func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO pnet.PacketIO) error {
 	redirInfo := ts.mp.redirectInfo.Load()
 	require.Nil(ts.t, redirInfo)
 	backend1 := ts.mp.backendIO.Load()
@@ -231,7 +234,7 @@ func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO *pnet.P
 	return nil
 }
 
-func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.PacketIO) error {
+func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO pnet.PacketIO) error {
 	backend1 := ts.mp.backendIO.Load()
 	err := ts.forwardCmd4Proxy(clientIO, backendIO)
 	require.NoError(ts.t, err)
@@ -240,7 +243,7 @@ func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO *pnet.Pac
 	return nil
 }
 
-func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketIO) error {
+func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO pnet.PacketIO) error {
 	backend1 := ts.mp.backendIO.Load()
 	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
@@ -248,7 +251,7 @@ func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO *pnet.PacketI
 	return nil
 }
 
-func (ts *backendMgrTester) checkConnClosed4Proxy(_, _ *pnet.PacketIO) error {
+func (ts *backendMgrTester) checkConnClosed4Proxy(_, _ pnet.PacketIO) error {
 	require.Eventually(ts.t, func() bool {
 		switch ts.mp.closeStatus.Load() {
 		case statusClosing, statusClosed:
@@ -311,7 +314,7 @@ func TestRedirectInTxn(t *testing.T) {
 		{
 			client: ts.mc.request,
 			proxy:  ts.redirectAfterCmd4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				// respond to the client request
 				err := ts.respondWithNoTxn4Backend(packetIO)
 				require.NoError(t, err)
@@ -330,12 +333,12 @@ func TestRedirectInTxn(t *testing.T) {
 		},
 		// hold the request and then make it redirect-able
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.sql = "begin"
 				return ts.mc.request(packetIO)
 			},
 			proxy: ts.redirectAfterCmd4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				// respond to internal COMMIT
 				err := ts.respondWithNoTxn4Backend(packetIO)
 				require.NoError(t, err)
@@ -358,12 +361,12 @@ func TestRedirectInTxn(t *testing.T) {
 		},
 		// CHANGE_USER clears the txn
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.cmd = pnet.ComChangeUser
 				return ts.mc.request(packetIO)
 			},
 			proxy: ts.redirectAfterCmd4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				// respond to the client request
 				err := ts.respondWithNoTxn4Backend(packetIO)
 				require.NoError(t, err)
@@ -372,7 +375,7 @@ func TestRedirectInTxn(t *testing.T) {
 		},
 		// start a transaction to make it unredirect-able
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.cmd = pnet.ComQuery
 				return ts.mc.request(packetIO)
 			},
@@ -385,14 +388,14 @@ func TestRedirectInTxn(t *testing.T) {
 		},
 		// internal COMMIT fails and the `begin` is not sent
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.sql = "begin"
 				return ts.mc.request(packetIO)
 			},
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				return ts.forwardCmd4Proxy(clientIO, backendIO)
 			},
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				// respond to internal COMMIT
 				ts.mb.respondType = responseTypeErr
 				return ts.mb.respond(packetIO)
@@ -400,11 +403,11 @@ func TestRedirectInTxn(t *testing.T) {
 		},
 		// show session states fails and the `begin` is sent to the old backend
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.sql = "begin"
 				return ts.mc.request(packetIO)
 			},
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				backend1 := ts.mp.backendIO.Load()
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(t, err)
@@ -413,7 +416,7 @@ func TestRedirectInTxn(t *testing.T) {
 				require.Equal(t, SrcNone, ts.mp.QuitSource())
 				return nil
 			},
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				// respond to internal COMMIT
 				err := ts.respondWithNoTxn4Backend(packetIO)
 				require.NoError(t, err)
@@ -436,10 +439,10 @@ func TestConnectFail(t *testing.T) {
 	runners := []runner{
 		{
 			client: ts.mc.authenticate,
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				return ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				return ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 			},
-			backend: func(_ *pnet.PacketIO) error {
+			backend: func(_ pnet.PacketIO) error {
 				conn, err := ts.tc.backendListener.Accept()
 				require.NoError(ts.t, err)
 				ts.tc.backendIO = pnet.NewPacketIO(conn, ts.lg, pnet.DefaultConnBufferSize)
@@ -448,7 +451,7 @@ func TestConnectFail(t *testing.T) {
 			},
 		},
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.Equal(t, SrcClientAuthFail, ts.mp.QuitSource())
 				return nil
 			},
@@ -470,7 +473,7 @@ func TestRedirectFail(t *testing.T) {
 		// show session states fails
 		{
 			proxy: ts.redirectFail4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				// respond to `SHOW SESSION_STATES`
 				ts.mb.respondType = responseTypeErr
 				return ts.mb.respond(packetIO)
@@ -479,7 +482,7 @@ func TestRedirectFail(t *testing.T) {
 		// 2nd handshake fails
 		{
 			proxy: ts.redirectFail4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				// respond to `SHOW SESSION_STATES`
 				ts.mb.respondType = responseTypeResultSet
 				err := ts.mb.respondOnce(packetIO)
@@ -500,7 +503,7 @@ func TestRedirectFail(t *testing.T) {
 		// set session states fails
 		{
 			proxy: ts.redirectFail4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				// respond to `SHOW SESSION STATES`
 				ts.mb.respondType = responseTypeResultSet
 				err := ts.mb.respond(packetIO)
@@ -537,7 +540,7 @@ func TestSpecialCmds(t *testing.T) {
 		},
 		// change user
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.cmd = pnet.ComChangeUser
 				ts.mc.username = "another_user"
 				ts.mc.dbName = "another_db"
@@ -548,7 +551,7 @@ func TestSpecialCmds(t *testing.T) {
 		},
 		// disable multi-stmts
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.cmd = pnet.ComSetOption
 				ts.mc.dataBytes = []byte{1, 0}
 				return ts.mc.request(packetIO)
@@ -560,7 +563,7 @@ func TestSpecialCmds(t *testing.T) {
 		{
 			client: nil,
 			proxy:  ts.redirectSucceed4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				ts.mb.sessionStates = "{\"current-db\":\"session_db\"}"
 				require.NoError(t, ts.redirectSucceed4Backend(packetIO))
 				require.Equal(t, "another_user", ts.mb.username)
@@ -569,6 +572,41 @@ func TestSpecialCmds(t *testing.T) {
 				gotCap := ts.mb.capability &^ pnet.ClientPluginAuthLenencClientData
 				require.Equal(t, expectCap, gotCap, "expected=%s,got=%s", expectCap, gotCap)
 				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+// Test that ExecuteCmd may return a mysql error, which is required by traffic replay.
+func TestReturnMySQLError(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// mysql error
+		{
+			client: func(packetIO pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComQuery
+				ts.mc.sql = "select $$"
+				return ts.mc.request(packetIO)
+			},
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				clientIO.ResetSequence()
+				request, err := clientIO.ReadPacket()
+				require.NoError(ts.t, err)
+				rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+				require.True(ts.t, pnet.IsMySQLError(rsErr))
+				require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
+				return nil
+			},
+			backend: func(packetIO pnet.PacketIO) error {
+				ts.mb.respondType = responseTypeErr
+				return ts.mb.respond(packetIO)
 			},
 		},
 	}
@@ -587,7 +625,7 @@ func TestCloseWhileRedirect(t *testing.T) {
 		},
 		// close and redirect concurrently
 		{
-			proxy: func(_, _ *pnet.PacketIO) error {
+			proxy: func(_, _ pnet.PacketIO) error {
 				// Send an event to make Close() block at notifying.
 				addr := ts.tc.backendListener.Addr().String()
 				eventReceiver := ts.mp.getEventReceiver().(*mockEventReceiver)
@@ -600,8 +638,8 @@ func TestCloseWhileRedirect(t *testing.T) {
 				})
 				// Make sure the process goroutine finishes.
 				ts.mp.wg.Wait()
-				// Redirect() should not panic after Close().
-				ts.mp.Redirect(newMockBackendInst(ts))
+				// Redirect() should not panic after Close() and it returns false.
+				require.False(t, ts.mp.Redirect(newMockBackendInst(ts)))
 				eventReceiver.checkEvent(t, eventSucceed)
 				wg.Wait()
 				eventReceiver.checkEvent(t, eventClose)
@@ -630,7 +668,7 @@ func TestCustomHandshake(t *testing.T) {
 	runners := []runner{
 		// 1st handshake
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				if err := ts.mc.authenticate(packetIO); err != nil {
 					return err
 				}
@@ -642,12 +680,12 @@ func TestCustomHandshake(t *testing.T) {
 		},
 		// query
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.sql = "select 1"
 				return ts.mc.request(packetIO)
 			},
 			proxy: ts.forwardCmd4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				ts.mb.respondType = responseTypeResultSet
 				ts.mb.columns = 1
 				ts.mb.rows = 1
@@ -661,7 +699,7 @@ func TestCustomHandshake(t *testing.T) {
 			backend: ts.redirectSucceed4Backend,
 		},
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.Equal(t, SrcNone, ts.mp.QuitSource())
 				return nil
 			},
@@ -681,7 +719,7 @@ func TestGracefulCloseWhenIdle(t *testing.T) {
 		},
 		// graceful close
 		{
-			proxy: func(_, _ *pnet.PacketIO) error {
+			proxy: func(_, _ pnet.PacketIO) error {
 				ts.mp.GracefulClose()
 				return nil
 			},
@@ -691,7 +729,7 @@ func TestGracefulCloseWhenIdle(t *testing.T) {
 			proxy: ts.checkConnClosed4Proxy,
 		},
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
 				return nil
 			},
@@ -717,7 +755,7 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 		},
 		// try to gracefully close but it doesn't close
 		{
-			proxy: func(_, _ *pnet.PacketIO) error {
+			proxy: func(_, _ pnet.PacketIO) error {
 				ts.mp.GracefulClose()
 				time.Sleep(300 * time.Millisecond)
 				require.Equal(t, statusNotifyClose, ts.mp.closeStatus.Load())
@@ -735,7 +773,7 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 			proxy: ts.checkConnClosed4Proxy,
 		},
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
 				return nil
 			},
@@ -749,15 +787,15 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 	runners := []runner{
 		// try to gracefully close before handshake
 		{
-			proxy: func(_, _ *pnet.PacketIO) error {
+			proxy: func(_, _ pnet.PacketIO) error {
 				ts.mp.GracefulClose()
 				return nil
 			},
 		},
 		// connect fails
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 				require.Error(ts.t, err)
 				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
 				return nil
@@ -805,14 +843,14 @@ func TestHandlerReturnError(t *testing.T) {
 	for _, test := range tests {
 		ts := newBackendMgrTester(t, test.cfg)
 		rn := runner{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				err := ts.mc.authenticate(packetIO)
 				require.NoError(t, err)
 				require.ErrorContains(t, ts.mc.mysqlErr, test.errMsg)
 				return nil
 			},
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 				require.Error(t, err)
 				require.Equal(t, test.quitSource, ts.mp.QuitSource())
 				return nil
@@ -844,12 +882,12 @@ func TestOnTraffic(t *testing.T) {
 		},
 		// query
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.sql = "select 1"
 				return ts.mc.request(packetIO)
 			},
 			proxy: ts.forwardCmd4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				ts.mb.respondType = responseTypeResultSet
 				ts.mb.columns = 1
 				ts.mb.rows = 1
@@ -887,7 +925,7 @@ func TestGetBackendIO(t *testing.T) {
 		},
 	}
 	lg, _ := logger.CreateLoggerForTest(t)
-	mgr := NewBackendConnManager(lg, handler, 0, &BCConfig{ConnectTimeout: time.Second})
+	mgr := NewBackendConnManager(lg, handler, &mockCapture{}, 0, &BCConfig{ConnectTimeout: time.Second})
 	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
 		wg.Run(func() {
@@ -929,7 +967,7 @@ func TestBackendInactive(t *testing.T) {
 		},
 		// do some queries and the interval is less than checkBackendInterval
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				for i := 0; i < 10; i++ {
 					time.Sleep(5 * time.Millisecond)
 					if err := ts.mc.request(packetIO); err != nil {
@@ -938,7 +976,7 @@ func TestBackendInactive(t *testing.T) {
 				}
 				return nil
 			},
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				for i := 0; i < 10; i++ {
 					if err := ts.forwardCmd4Proxy(clientIO, backendIO); err != nil {
 						return err
@@ -946,7 +984,7 @@ func TestBackendInactive(t *testing.T) {
 				}
 				return nil
 			},
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				for i := 0; i < 10; i++ {
 					if err := ts.respondWithNoTxn4Backend(packetIO); err != nil {
 						return err
@@ -957,7 +995,7 @@ func TestBackendInactive(t *testing.T) {
 		},
 		// do some queries and the interval is longer than checkBackendInterval
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				for i := 0; i < 5; i++ {
 					time.Sleep(30 * time.Millisecond)
 					if err := ts.mc.request(packetIO); err != nil {
@@ -966,7 +1004,7 @@ func TestBackendInactive(t *testing.T) {
 				}
 				return nil
 			},
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				for i := 0; i < 5; i++ {
 					if err := ts.forwardCmd4Proxy(clientIO, backendIO); err != nil {
 						return err
@@ -974,7 +1012,7 @@ func TestBackendInactive(t *testing.T) {
 				}
 				return nil
 			},
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				for i := 0; i < 5; i++ {
 					if err := ts.respondWithNoTxn4Backend(packetIO); err != nil {
 						return err
@@ -986,12 +1024,12 @@ func TestBackendInactive(t *testing.T) {
 		// close the backend and the client connection will close
 		{
 			proxy: ts.checkConnClosed4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				return packetIO.Close()
 			},
 		},
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.Equal(t, SrcBackendNetwork, ts.mp.QuitSource())
 				return nil
 			},
@@ -1009,23 +1047,23 @@ func TestKeepAlive(t *testing.T) {
 	runners := []runner{
 		{
 			client: ts.mc.authenticate,
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.NoError(t, ts.firstHandshake4Proxy(clientIO, backendIO))
-				require.Equal(t, time.Minute, ts.mp.backendIO.Load().LastKeepAlive().Idle)
+				require.Equal(t, time.Minute, (*ts.mp.backendIO.Load()).LastKeepAlive().Idle)
 				return nil
 			},
 			backend: ts.handshake4Backend,
 		},
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
-				require.Equal(t, time.Minute, ts.mp.backendIO.Load().LastKeepAlive().Idle)
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				require.Equal(t, time.Minute, (*ts.mp.backendIO.Load()).LastKeepAlive().Idle)
 				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(false)
 				require.Eventually(t, func() bool {
-					return ts.mp.backendIO.Load().LastKeepAlive().Idle == time.Second
+					return (*ts.mp.backendIO.Load()).LastKeepAlive().Idle == time.Second
 				}, 3*time.Second, 10*time.Millisecond)
 				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(true)
 				require.Eventually(t, func() bool {
-					return ts.mp.backendIO.Load().LastKeepAlive().Idle == time.Minute
+					return (*ts.mp.backendIO.Load()).LastKeepAlive().Idle == time.Minute
 				}, 3*time.Second, 10*time.Millisecond)
 				return nil
 			},
@@ -1041,7 +1079,7 @@ func TestConnID(t *testing.T) {
 			config.proxyConfig.connectionID = id
 		})
 		runners := []runner{{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				err := ts.mc.authenticate(packetIO)
 				require.Equal(t, ts.mc.connid, id)
 				return err
@@ -1060,12 +1098,12 @@ func TestConnAttrs(t *testing.T) {
 	runners := []runner{
 		// 1st handshake
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.attrs = attr1
 				return ts.mc.authenticate(packetIO)
 			},
 			proxy: ts.firstHandshake4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				err := ts.handshake4Backend(packetIO)
 				require.NoError(t, err)
 				require.Equal(t, attr1, ts.mb.attrs)
@@ -1075,7 +1113,7 @@ func TestConnAttrs(t *testing.T) {
 		// 2nd handshake
 		{
 			proxy: ts.redirectSucceed4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				err := ts.redirectSucceed4Backend(packetIO)
 				require.NoError(t, err)
 				require.Equal(t, attr1, ts.mb.attrs)
@@ -1084,13 +1122,13 @@ func TestConnAttrs(t *testing.T) {
 		},
 		// CHANGE_USER updates attrs
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.cmd = pnet.ComChangeUser
 				ts.mc.attrs = attr2
 				return ts.mc.request(packetIO)
 			},
 			proxy: ts.forwardCmd4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				err := ts.respondWithNoTxn4Backend(packetIO)
 				require.NoError(t, err)
 				require.Equal(t, attr2, ts.mb.attrs)
@@ -1100,7 +1138,7 @@ func TestConnAttrs(t *testing.T) {
 		// 2nd handshake
 		{
 			proxy: ts.redirectSucceed4Proxy,
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				err := ts.redirectSucceed4Backend(packetIO)
 				require.NoError(t, err)
 				require.Equal(t, attr2, ts.mb.attrs)
@@ -1130,7 +1168,7 @@ func TestBackendStatusChange(t *testing.T) {
 		},
 		// try to redirect but it doesn't redirect
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				ts.mp.Redirect(mbi)
 				ts.mp.signalReceived <- signalTypeRedirect
 				// the target backend becomes unhealthy now
@@ -1141,7 +1179,7 @@ func TestBackendStatusChange(t *testing.T) {
 		// finish the transaction and the redirection fails
 		{
 			client: ts.mc.request,
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				backend1 := ts.mp.backendIO.Load()
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(ts.t, err)
@@ -1165,11 +1203,11 @@ func TestCloseWhileConnect(t *testing.T) {
 		// 1st handshake while force close
 		{
 			client: ts.mc.authenticate,
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				go func() {
 					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
 				}()
-				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig)
+				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 				if err == nil {
 					mer := newMockEventReceiver()
 					ts.mp.SetEventReceiver(mer)
@@ -1195,7 +1233,7 @@ func TestCloseWhileExecute(t *testing.T) {
 		// execute cmd while force close
 		{
 			client: ts.mc.request,
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				clientIO.ResetSequence()
 				request, err := clientIO.ReadPacket()
 				if err != nil {
@@ -1224,7 +1262,7 @@ func TestCloseWhileGracefulClose(t *testing.T) {
 		},
 		// graceful close while force close
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				go func() {
 					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
 				}()
@@ -1249,11 +1287,11 @@ func TestTrafficMetrics(t *testing.T) {
 		},
 		// receive at least 1000 packets
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.sql = "select * from t"
 				return ts.mc.request(packetIO)
 			},
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				addr := ts.tc.backendListener.Addr().String()
 				var err error
 				inBytes, inPackets, outBytes, outPackets, err = readTraffic(addr)
@@ -1273,7 +1311,7 @@ func TestTrafficMetrics(t *testing.T) {
 				require.True(t, crossLocationBytes2 == crossLocationBytes)
 				return nil
 			},
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				ts.mb.respondType = responseTypeResultSet
 				ts.mb.columns = 1
 				ts.mb.rows = 1000
@@ -1283,7 +1321,7 @@ func TestTrafficMetrics(t *testing.T) {
 		// 2nd handshake: redirect
 		{
 			client: nil,
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				backendInst := newMockBackendInst(ts)
 				backendInst.setLocal(false)
 				ts.mp.Redirect(backendInst)
@@ -1294,11 +1332,11 @@ func TestTrafficMetrics(t *testing.T) {
 		},
 		// the traffic should still increase after redirection
 		{
-			client: func(packetIO *pnet.PacketIO) error {
+			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.sql = "select 1"
 				return ts.mc.request(packetIO)
 			},
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				addr := ts.tc.backendListener.Addr().String()
 				inBytes1, inPackets1, outBytes1, outPackets1, err := readTraffic(addr)
 				require.NoError(t, err)
@@ -1315,7 +1353,7 @@ func TestTrafficMetrics(t *testing.T) {
 				require.True(t, crossLocationBytes2 > crossLocationBytes)
 				return nil
 			},
-			backend: func(packetIO *pnet.PacketIO) error {
+			backend: func(packetIO pnet.PacketIO) error {
 				ts.mb.respondType = responseTypeResultSet
 				ts.mb.columns = 1
 				ts.mb.rows = 1
@@ -1343,16 +1381,16 @@ func TestDisconnectLog(t *testing.T) {
 		{
 			// proxy logs SQL when the backend disconnects
 			runner: runner{
-				client: func(packetIO *pnet.PacketIO) error {
+				client: func(packetIO pnet.PacketIO) error {
 					ts.mc.sql = "select 1"
 					return ts.mc.request(packetIO)
 				},
-				proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+				proxy: func(clientIO, backendIO pnet.PacketIO) error {
 					err := ts.forwardCmd4Proxy(clientIO, backendIO)
 					_ = clientIO.Close()
 					return err
 				},
-				backend: func(packetIO *pnet.PacketIO) error {
+				backend: func(packetIO pnet.PacketIO) error {
 					return packetIO.Close()
 				},
 			},
@@ -1379,7 +1417,7 @@ func TestProcessSignalsPanic(t *testing.T) {
 			backend: ts.handshake4Backend,
 		},
 		{
-			proxy: func(clientIO, backendIO *pnet.PacketIO) error {
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				// Mock panic in `mgr.processSignals()`.
 				ts.mp.handler.onHandshake = func(connContext ConnContext, s string, err error, source ErrorSource) {
 					panic("mock panic")
@@ -1391,6 +1429,84 @@ func TestProcessSignalsPanic(t *testing.T) {
 				return nil
 			},
 			backend: ts.redirectSucceed4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestCapture(t *testing.T) {
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.clientConfig.dbName = "test"
+		config.proxyConfig.connectionID = 100
+		config.proxyConfig.capture = &mockCapture{}
+	})
+	runners := []runner{
+		// 1st handshake
+		{
+			client: ts.mc.authenticate,
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				now := time.Now()
+				err := ts.firstHandshake4Proxy(clientIO, backendIO)
+				require.NoError(t, err)
+				cpt := ts.mp.cpt.(*mockCapture)
+				require.Equal(t, "test", cpt.db)
+				require.GreaterOrEqual(t, cpt.startTime, now)
+				require.EqualValues(t, 100, cpt.connID)
+				return nil
+			},
+			backend: ts.handshake4Backend,
+		},
+		{
+			client: func(packetIO pnet.PacketIO) error {
+				ts.mc.sql = "select 1"
+				return ts.mc.request(packetIO)
+			},
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				now := time.Now()
+				err := ts.forwardCmd4Proxy(clientIO, backendIO)
+				cpt := ts.mp.cpt.(*mockCapture)
+				packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
+				require.Equal(t, packet, cpt.packet)
+				require.GreaterOrEqual(t, cpt.startTime, now)
+				require.EqualValues(t, 100, cpt.connID)
+				require.Contains(t, cpt.initSql, "SET SESSION_STATES")
+				return err
+			},
+			backend: func(packetIO pnet.PacketIO) error {
+				// respond to `SHOW SESSION STATES`
+				ts.mb.respondType = responseTypeResultSet
+				err := ts.mb.respond(packetIO)
+				require.NoError(ts.t, err)
+				// respond to `select 1`
+				ts.mb.respondType = responseTypeResultSet
+				ts.mb.columns = 1
+				ts.mb.rows = 1
+				return ts.mb.respond(packetIO)
+			},
+		},
+		{
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				_ = ts.mp.Close()
+				ts.closed = true
+				cpt := ts.mp.cpt.(*mockCapture)
+				require.Equal(t, []byte{pnet.ComQuit.Byte()}, cpt.packet)
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestConnectWithBackend(t *testing.T) {
+	ts := newBackendMgrTester(t, func(config *testConfig) {
+		config.proxyConfig.username = "u1"
+		config.proxyConfig.password = "fake_password"
+	})
+	runners := []runner{
+		{
+			client:  nil,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
 		},
 	}
 	ts.runTests(runners)

@@ -8,10 +8,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"go.uber.org/zap"
 )
 
@@ -20,6 +22,9 @@ type proxyConfig struct {
 	backendTLSConfig  *tls.Config
 	handler           *CustomHandshakeHandler
 	bcConfig          *BCConfig
+	capture           capture.Capture
+	username          string
+	password          string
 	sessionToken      string
 	capability        pnet.Capability
 	waitRedirect      bool
@@ -54,15 +59,15 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 		proxyConfig:        cfg,
 		logger:             lg.Named("mockProxy"),
 		text:               text,
-		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.connectionID, cfg.bcConfig),
+		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.capture, cfg.connectionID, cfg.bcConfig),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
 }
 
-func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) error {
+func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO pnet.PacketIO) error {
 	if err := mp.authenticator.handshakeFirstTime(context.Background(), mp.logger, mp, clientIO, mp.handshakeHandler,
-		func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (*pnet.PacketIO, error) {
+		func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
 			return backendIO, nil
 		}, mp.frontendTLSConfig, mp.backendTLSConfig); err != nil {
 		return err
@@ -71,11 +76,22 @@ func (mp *mockProxy) authenticateFirstTime(clientIO, backendIO *pnet.PacketIO) e
 	return nil
 }
 
-func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO *pnet.PacketIO) error {
+func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO pnet.PacketIO) error {
 	return mp.authenticator.handshakeSecondTime(mp.logger, clientIO, backendIO, mp.backendTLSConfig, mp.sessionToken)
 }
 
-func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {
+func (mp *mockProxy) authenticateWithBackend(_, backendIO pnet.PacketIO) error {
+	if err := mp.authenticator.handshakeWithBackend(context.Background(), mp.logger, mp, mp.handshakeHandler,
+		mp.username, mp.password, func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
+			return backendIO, nil
+		}, mp.backendTLSConfig); err != nil {
+		return err
+	}
+	mp.cmdProcessor.capability = mp.authenticator.capability
+	return nil
+}
+
+func (mp *mockProxy) processCmd(clientIO, backendIO pnet.PacketIO) error {
 	clientIO.ResetSequence()
 	request, err := clientIO.ReadPacket()
 	if err != nil {
@@ -91,8 +107,47 @@ func (mp *mockProxy) processCmd(clientIO, backendIO *pnet.PacketIO) error {
 	return err
 }
 
-func (mp *mockProxy) directQuery(_, backendIO *pnet.PacketIO) error {
+func (mp *mockProxy) directQuery(_, backendIO pnet.PacketIO) error {
 	rs, _, err := mp.cmdProcessor.query(backendIO, mockCmdStr)
 	mp.rs = rs
 	return err
+}
+
+var _ capture.Capture = (*mockCapture)(nil)
+
+type mockCapture struct {
+	db        string
+	initSql   string
+	packet    []byte
+	startTime time.Time
+	connID    uint64
+}
+
+func (mc *mockCapture) Start(cfg capture.CaptureConfig) error {
+	return nil
+}
+
+func (mc *mockCapture) Stop(err error) {
+}
+
+func (mc *mockCapture) InitConn(startTime time.Time, connID uint64, dbname string) {
+	mc.db = dbname
+	mc.startTime = startTime
+	mc.connID = connID
+}
+
+func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error)) {
+	mc.packet = packet
+	mc.startTime = startTime
+	mc.connID = connID
+	if initSession != nil {
+		mc.initSql, _ = initSession()
+	}
+}
+
+func (mc *mockCapture) Progress() (float64, time.Time, bool, error) {
+	return 0, time.Time{}, false, nil
+}
+
+func (mc *mockCapture) Close() {
 }

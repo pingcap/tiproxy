@@ -15,7 +15,7 @@ type BackendReader interface {
 }
 
 func (h *Server) BackendMetrics(c *gin.Context) {
-	metrics := h.mgr.br.GetBackendMetrics()
+	metrics := h.mgr.BackendReader.GetBackendMetrics()
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(http.StatusOK)
 	if _, err := c.Writer.Write(metrics); err != nil {

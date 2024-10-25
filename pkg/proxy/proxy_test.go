@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
@@ -31,7 +32,7 @@ func TestCreateConn(t *testing.T) {
 	cfg := &config.Config{}
 	certManager := cert.NewCertManager()
 	require.NoError(t, certManager.Init(cfg, lg, nil))
-	server, err := NewSQLServer(lg, cfg, certManager, &mockHsHandler{})
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 	defer func() {
@@ -79,7 +80,7 @@ func TestGracefulCloseConn(t *testing.T) {
 			},
 		},
 	}
-	server, err := NewSQLServer(lg, cfg, nil, hsHandler)
+	server, err := NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler)
 	require.NoError(t, err)
 	finish := make(chan struct{})
 	go func() {
@@ -102,14 +103,14 @@ func TestGracefulCloseConn(t *testing.T) {
 		}()
 		conn, err := server.listeners[0].Accept()
 		require.NoError(t, err)
-		clientConn := client.NewClientConnection(lg, conn, nil, nil, hsHandler, 0, "", &backend.BCConfig{})
+		clientConn := client.NewClientConnection(lg, conn, nil, nil, hsHandler, nil, 0, "", &backend.BCConfig{})
 		server.mu.clients[1] = clientConn
 		server.mu.Unlock()
 		return clientConn
 	}
 
 	// Graceful shutdown will be blocked if there are alive connections.
-	server, err = NewSQLServer(lg, cfg, nil, hsHandler)
+	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler)
 	require.NoError(t, err)
 	clientConn := createClientConn()
 	go func() {
@@ -135,7 +136,7 @@ func TestGracefulCloseConn(t *testing.T) {
 
 	// Graceful shutdown will shut down after GracefulCloseConnTimeout.
 	cfg.Proxy.GracefulCloseConnTimeout = 1
-	server, err = NewSQLServer(lg, cfg, nil, hsHandler)
+	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler)
 	require.NoError(t, err)
 	createClientConn()
 	go func() {
@@ -163,7 +164,7 @@ func TestGracefulShutDown(t *testing.T) {
 			},
 		},
 	}
-	server, err := NewSQLServer(lg, cfg, certManager, &mockHsHandler{})
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -201,7 +202,7 @@ func TestMultiAddr(t *testing.T) {
 		Proxy: config.ProxyServer{
 			Addr: "0.0.0.0:0,0.0.0.0:0",
 		},
-	}, certManager, &mockHsHandler{})
+	}, certManager, id.NewIDManager(), nil, &mockHsHandler{})
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -221,7 +222,7 @@ func TestWatchCfg(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil)
 	cfgch := make(chan *config.Config)
-	server, err := NewSQLServer(lg, &config.Config{}, nil, hsHandler)
+	server, err := NewSQLServer(lg, &config.Config{}, nil, id.NewIDManager(), nil, hsHandler)
 	require.NoError(t, err)
 	server.Run(context.Background(), cfgch)
 	cfg := &config.Config{
@@ -256,9 +257,9 @@ func TestRecoverPanic(t *testing.T) {
 	certManager := cert.NewCertManager()
 	err := certManager.Init(&config.Config{}, lg, nil)
 	require.NoError(t, err)
-	server, err := NewSQLServer(lg, &config.Config{}, certManager, &mockHsHandler{
+	server, err := NewSQLServer(lg, &config.Config{}, certManager, id.NewIDManager(), nil, &mockHsHandler{
 		handshakeResp: func(ctx backend.ConnContext, _ *pnet.HandshakeResp) error {
-			if ctx.Value(backend.ConnContextKeyConnID).(uint64) == 0 {
+			if ctx.Value(backend.ConnContextKeyConnID).(uint64) == 1 {
 				panic("HandleHandshakeResp panic")
 			}
 			return nil

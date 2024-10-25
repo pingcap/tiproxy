@@ -18,7 +18,7 @@ import (
 // executeCmd forwards requests and responses between the client and the backend.
 // holdRequest: should the proxy send the request to the new backend.
 // err: unexpected errors or MySQL errors.
-func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool) (holdRequest bool, err error) {
+func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO pnet.PacketIO, waitingRedirect bool) (holdRequest bool, err error) {
 	backendIO.ResetSequence()
 	if waitingRedirect && cp.needHoldRequest(request) {
 		var response []byte
@@ -37,7 +37,7 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 	return false, cp.forwardCommand(clientIO, backendIO, request)
 }
 
-func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+func (cp *CmdProcessor) forwardCommand(clientIO, backendIO pnet.PacketIO, request []byte) error {
 	cmd := pnet.Command(request[0])
 	// ComChangeUser is special: we need to modify the packet before forwarding.
 	if cmd != pnet.ComChangeUser {
@@ -89,14 +89,14 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 	return errors.Errorf("unexpected response, cmd:%d resp:%d", cmd, response[0])
 }
 
-func forwardOnePacket(destIO, srcIO *pnet.PacketIO, flush bool) (data []byte, err error) {
+func forwardOnePacket(destIO, srcIO pnet.PacketIO, flush bool) (data []byte, err error) {
 	if data, err = srcIO.ReadPacket(); err != nil {
 		return
 	}
 	return data, destIO.WritePacket(data, flush)
 }
 
-func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
+func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO pnet.PacketIO, request []byte) (uint16, error) {
 	var serverStatus uint16
 	err := backendIO.ForwardUntil(clientIO, func(firstByte byte, length int) (end, needData bool) {
 		switch {
@@ -125,7 +125,7 @@ func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO
 	return serverStatus, err
 }
 
-func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) error {
+func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO pnet.PacketIO) error {
 	response, err := forwardOnePacket(clientIO, backendIO, false)
 	if err != nil {
 		return err
@@ -167,17 +167,17 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 	return errors.Errorf("unexpected response, cmd:%d resp:%d", pnet.ComStmtPrepare, response[0])
 }
 
-func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO pnet.PacketIO, request []byte) error {
 	_, err := cp.forwardUntilResultEnd(clientIO, backendIO, request)
 	return err
 }
 
-func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO pnet.PacketIO, request []byte) error {
 	_, err := cp.forwardUntilResultEnd(clientIO, backendIO, request)
 	return err
 }
 
-func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO pnet.PacketIO, request []byte) error {
 	for {
 		var serverStatus uint16
 		var first byte
@@ -219,7 +219,7 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 	return nil
 }
 
-func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, request []byte) (serverStatus uint16, err error) {
+func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO pnet.PacketIO, request []byte) (serverStatus uint16, err error) {
 	if err = clientIO.Flush(); err != nil {
 		return
 	}
@@ -251,7 +251,7 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 	return serverStatus, errors.Errorf("unexpected response, cmd:%d resp:%d", pnet.ComQuery, response[0])
 }
 
-func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
+func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO pnet.PacketIO, request []byte) (uint16, error) {
 	if cp.capability&pnet.ClientDeprecateEOF == 0 {
 		var serverStatus uint16
 		// read columns
@@ -287,7 +287,7 @@ func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) error {
 	return nil
 }
 
-func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO pnet.PacketIO, request []byte) error {
 	req, err := pnet.ParseChangeUser(request, cp.capability)
 	if err != nil {
 		cp.logger.Warn("parse COM_CHANGE_USER packet encounters error", zap.Error(err))
@@ -325,7 +325,7 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 	}
 }
 
-func (cp *CmdProcessor) forwardStatisticsCmd(clientIO, backendIO *pnet.PacketIO) error {
+func (cp *CmdProcessor) forwardStatisticsCmd(clientIO, backendIO pnet.PacketIO) error {
 	// It just sends a string.
 	_, err := forwardOnePacket(clientIO, backendIO, true)
 	return err

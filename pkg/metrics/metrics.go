@@ -32,6 +32,7 @@ const (
 	LabelMonitor = "monitor"
 	LabelBackend = "backend"
 	LabelTraffic = "traffic"
+	LabelReplay  = "replay"
 )
 
 // MetricsManager manages metrics.
@@ -120,6 +121,8 @@ func init() {
 		OutboundBytesCounter,
 		OutboundPacketsCounter,
 		CrossLocationBytesCounter,
+		ReplayPendingCmdsGauge,
+		ReplayWaitTime,
 	}
 }
 

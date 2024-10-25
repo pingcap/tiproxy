@@ -7,7 +7,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
@@ -16,7 +19,8 @@ import (
 type Context struct {
 	Logger *zap.Logger
 	Client *http.Client
-	CUrls  []string
+	Host   string
+	Port   int
 	SSL    bool
 }
 
@@ -36,43 +40,41 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 		return "", err
 	}
 
-	var rete string
-	var res *http.Response
-	for _, url := range bctx.CUrls {
-		req.URL.Host = url
-
-		res, err = bctx.Client.Do(req)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if req.URL.Scheme == "https" {
-					req.URL.Scheme = "http"
-				} else if req.URL.Scheme == "http" {
-					req.URL.Scheme = "https"
-				}
-				// probably server did not enable TLS, try again with plain http
-				// or the reverse, server enabled TLS, but we should try https
-				res, err = bctx.Client.Do(req)
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	req.URL.Host = net.JoinHostPort(bctx.Host, fmt.Sprintf("%d", bctx.Port))
+	res, err := bctx.Client.Do(req)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			if req.URL.Scheme == "https" {
+				req.URL.Scheme = "http"
+			} else if req.URL.Scheme == "http" {
+				req.URL.Scheme = "https"
 			}
-			if err != nil {
-				return "", err
-			}
+			// probably server did not enable TLS, try again with plain http
+			// or the reverse, server enabled TLS, but we should try https
+			res, err = bctx.Client.Do(req)
 		}
-		resb, _ := io.ReadAll(res.Body)
-		res.Body.Close()
-
-		switch res.StatusCode {
-		case http.StatusOK:
-			return string(resb), nil
-		case http.StatusBadRequest:
-			return "", errors.Errorf("bad request: %s", string(resb))
-		case http.StatusInternalServerError:
-			err = errors.Errorf("internal error: %s", string(resb))
-			continue
-		default:
-			rete = fmt.Sprintf("%s: %s", res.Status, string(resb))
-			continue
+		if err != nil {
+			return "", err
 		}
 	}
+	resb, _ := io.ReadAll(res.Body)
+	res.Body.Close()
 
-	return rete, err
+	switch res.StatusCode {
+	case http.StatusOK:
+		return string(resb), nil
+	default:
+		return "", errors.Errorf("%s: %s", res.Status, string(resb))
+	}
+}
+
+func GetFormReader(m map[string]string) io.Reader {
+	form := url.Values{}
+	for key, value := range m {
+		form.Add(key, value)
+	}
+	return strings.NewReader(form.Encode())
 }

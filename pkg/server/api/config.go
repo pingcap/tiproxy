@@ -23,7 +23,7 @@ func (h *Server) ConfigSet(c *gin.Context) {
 		return
 	}
 
-	if err := h.mgr.cfg.SetTOMLConfig(data); err != nil {
+	if err := h.mgr.CfgMgr.SetTOMLConfig(data); err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,
 			Err:  errors.Errorf("can not update config: %+v", err),
@@ -39,9 +39,9 @@ func (h *Server) ConfigGet(c *gin.Context) {
 	// TiDB cluster_config uses format=json, while tiproxyctl expects toml (both PUT and GET) by default.
 	// Users can choose the format on TiDB-Dashboard.
 	if strings.EqualFold(c.Query("format"), "json") || c.GetHeader("Accept") == "application/json" {
-		c.JSON(http.StatusOK, h.mgr.cfg.GetConfig())
+		c.JSON(http.StatusOK, h.mgr.CfgMgr.GetConfig())
 	} else {
-		c.TOML(http.StatusOK, h.mgr.cfg.GetConfig())
+		c.TOML(http.StatusOK, h.mgr.CfgMgr.GetConfig())
 	}
 }
 

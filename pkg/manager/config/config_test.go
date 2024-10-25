@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,9 +23,9 @@ func TestConfigReload(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	cfgmgr1, _, _ := testConfigManager(t, tmpcfg)
+	cfgmgr1, _, _ := testConfigManager(t, tmpcfg, "addr")
 
-	cfgmgr2, _, _ := testConfigManager(t, "")
+	cfgmgr2, _, _ := testConfigManager(t, "", "addr")
 
 	cases := []struct {
 		name      string
@@ -41,7 +42,7 @@ func TestConfigReload(t *testing.T) {
 			},
 			postcfg: `proxy.pd-addrs = ""`,
 			postcheck: func(c *config.Config) bool {
-				return c.Proxy.PDAddrs == ""
+				return c.Proxy.PDAddrs == "" && c.Proxy.AdvertiseAddr == "addr"
 			},
 		},
 		{
@@ -135,14 +136,14 @@ func TestConfigRemove(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
 
-	cfgmgr, _, _ := testConfigManager(t, tmpcfg)
+	cfgmgr, _, _ := testConfigManager(t, tmpcfg, "")
 
 	// remove and recreate the file in a very short time
 	require.NoError(t, os.Remove(tmpcfg))
 	require.NoError(t, os.WriteFile(tmpcfg, []byte(`proxy.addr = "gg"`), 0644))
 
 	// check that re-watch still works
-	require.Eventually(t, func() bool { return cfgmgr.GetConfig().Proxy.Addr == "gg" }, 3*time.Second, 100*time.Millisecond)
+	require.Eventually(t, func() bool { return cfgmgr.GetConfig() != nil && cfgmgr.GetConfig().Proxy.Addr == "gg" }, 3*time.Second, 100*time.Millisecond)
 
 	// remove again but with a long sleep
 	require.NoError(t, os.Remove(tmpcfg))
@@ -271,7 +272,7 @@ func TestFilePath(t *testing.T) {
 				require.NoError(t, f.Close())
 			}
 
-			cfgmgr, _, _ = testConfigManager(t, test.filename)
+			cfgmgr, _, _ = testConfigManager(t, test.filename, "")
 			require.Equal(t, pdAddr1, cfgmgr.GetConfig().Proxy.PDAddrs)
 
 			// Test write.
@@ -298,13 +299,19 @@ func TestFilePath(t *testing.T) {
 }
 
 func TestChecksum(t *testing.T) {
-	cfgmgr, _, _ := testConfigManager(t, "")
+	cfgmgr, text, _ := testConfigManager(t, "", "")
+	require.Equal(t, 1, strings.Count(text.String(), "current config"))
 	c1 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
+	require.Equal(t, 2, strings.Count(text.String(), "current config"))
+	// same config, shouldn't log it again
+	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
+	require.Equal(t, 2, strings.Count(text.String(), "current config"))
 	c2 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "vv"`)))
 	c3 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr="gg"`)))
+	require.Equal(t, 4, strings.Count(text.String(), "current config"))
 	c4 := cfgmgr.GetConfigChecksum()
 	require.Equal(t, c2, c4)
 	require.NotEqual(t, c1, c2)

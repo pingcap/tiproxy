@@ -61,7 +61,7 @@ func newMockClient(cfg *clientConfig) *mockClient {
 	}
 }
 
-func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) authenticate(packetIO pnet.PacketIO) error {
 	if mc.abnormalExit {
 		return packetIO.Close()
 	}
@@ -69,10 +69,10 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 	if err != nil {
 		return err
 	}
-	serverCap, connid, serverVersion := pnet.ParseInitialHandshake(pkt)
-	mc.capability = mc.capability & serverCap
-	mc.serverVersion = serverVersion
-	mc.connid = connid
+	initialHandshake := pnet.ParseInitialHandshake(pkt)
+	mc.capability = mc.capability & initialHandshake.Capability
+	mc.serverVersion = initialHandshake.ServerVersion
+	mc.connid = initialHandshake.ConnID
 
 	resp := &pnet.HandshakeResp{
 		User:       mc.username,
@@ -99,7 +99,7 @@ func (mc *mockClient) authenticate(packetIO *pnet.PacketIO) error {
 	return mc.writePassword(packetIO)
 }
 
-func (mc *mockClient) writePassword(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) writePassword(packetIO pnet.PacketIO) error {
 	for {
 		serverPkt, err := packetIO.ReadPacket()
 		if err != nil {
@@ -122,7 +122,7 @@ func (mc *mockClient) writePassword(packetIO *pnet.PacketIO) error {
 }
 
 // request sends commands except prepared statements commands.
-func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) request(packetIO pnet.PacketIO) error {
 	if mc.abnormalExit {
 		return packetIO.Close()
 	}
@@ -166,7 +166,7 @@ func (mc *mockClient) request(packetIO *pnet.PacketIO) error {
 	return err
 }
 
-func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) requestChangeUser(packetIO pnet.PacketIO) error {
 	req := &pnet.ChangeUserReq{
 		User:       mc.username,
 		DB:         mc.dbName,
@@ -198,7 +198,7 @@ func (mc *mockClient) requestChangeUser(packetIO *pnet.PacketIO) error {
 	}
 }
 
-func (mc *mockClient) requestPrepare(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) requestPrepare(packetIO pnet.PacketIO) error {
 	data := make([]byte, 0, len(mc.sql)+1)
 	data = append(data, pnet.ComStmtPrepare.Byte())
 	data = append(data, []byte(mc.sql)...)
@@ -231,7 +231,7 @@ func (mc *mockClient) requestPrepare(packetIO *pnet.PacketIO) error {
 	return nil
 }
 
-func (mc *mockClient) requestExecute(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) requestExecute(packetIO pnet.PacketIO) error {
 	data := make([]byte, 0, len(mc.dataBytes)+5)
 	data = append(data, pnet.ComStmtExecute.Byte())
 	data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
@@ -242,7 +242,7 @@ func (mc *mockClient) requestExecute(packetIO *pnet.PacketIO) error {
 	return mc.readResultSet(packetIO)
 }
 
-func (mc *mockClient) requestFetch(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) requestFetch(packetIO pnet.PacketIO) error {
 	data := make([]byte, 0, len(mc.dataBytes)+5)
 	data = append(data, pnet.ComStmtFetch.Byte())
 	data = pnet.DumpUint32(data, uint32(mc.prepStmtID))
@@ -254,7 +254,7 @@ func (mc *mockClient) requestFetch(packetIO *pnet.PacketIO) error {
 	return err
 }
 
-func (mc *mockClient) requestFieldList(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) requestFieldList(packetIO pnet.PacketIO) error {
 	data := make([]byte, 0, len(mockCmdStr)+2)
 	data = append(data, pnet.ComFieldList.Byte())
 	data = append(data, []byte(mockCmdStr)...)
@@ -267,7 +267,7 @@ func (mc *mockClient) requestFieldList(packetIO *pnet.PacketIO) error {
 	return err
 }
 
-func (mc *mockClient) readUntilResultEnd(packetIO *pnet.PacketIO) (pkt []byte, err error) {
+func (mc *mockClient) readUntilResultEnd(packetIO pnet.PacketIO) (pkt []byte, err error) {
 	for {
 		pkt, err = packetIO.ReadPacket()
 		if err != nil {
@@ -290,14 +290,14 @@ func (mc *mockClient) readUntilResultEnd(packetIO *pnet.PacketIO) (pkt []byte, e
 	return
 }
 
-func (mc *mockClient) requestProcessInfo(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) requestProcessInfo(packetIO pnet.PacketIO) error {
 	if err := packetIO.WritePacket([]byte{pnet.ComProcessInfo.Byte()}, true); err != nil {
 		return err
 	}
 	return mc.readResultSet(packetIO)
 }
 
-func (mc *mockClient) query(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) query(packetIO pnet.PacketIO) error {
 	data := make([]byte, 0, len(mc.sql)+1)
 	data = append(data, pnet.ComQuery.Byte())
 	data = append(data, []byte(mc.sql)...)
@@ -307,7 +307,7 @@ func (mc *mockClient) query(packetIO *pnet.PacketIO) error {
 	return mc.readResultSet(packetIO)
 }
 
-func (mc *mockClient) readResultSet(packetIO *pnet.PacketIO) error {
+func (mc *mockClient) readResultSet(packetIO pnet.PacketIO) error {
 	for {
 		var serverStatus uint16
 		pkt, err := packetIO.ReadPacket()

@@ -18,7 +18,7 @@ func (h *Server) NamespaceGet(c *gin.Context) {
 		return
 	}
 
-	nsc, err := h.mgr.cfg.GetNamespace(c, ns)
+	nsc, err := h.mgr.CfgMgr.GetNamespace(c, ns)
 	if err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,
@@ -42,7 +42,7 @@ func (h *Server) NamespaceUpsert(c *gin.Context) {
 		return
 	}
 
-	if err := h.mgr.cfg.SetNamespace(c, nsc.Namespace, nsc); err != nil {
+	if err := h.mgr.CfgMgr.SetNamespace(c, nsc.Namespace, nsc); err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,
 			Err:  errors.Errorf("can not update namespace[%s]: %+v", nsc.Namespace, err),
@@ -61,7 +61,7 @@ func (h *Server) NamespaceRemove(c *gin.Context) {
 		return
 	}
 
-	if err := h.mgr.cfg.DelNamespace(c, ns); err != nil {
+	if err := h.mgr.CfgMgr.DelNamespace(c, ns); err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,
 			Err:  errors.Errorf("can not update namespace[%s]: %+v", ns, err),
@@ -80,7 +80,7 @@ func (h *Server) NamespaceCommit(c *gin.Context) {
 	var nss_delete []bool
 	var err error
 	if len(ns_names) == 0 {
-		nss, err = h.mgr.cfg.ListAllNamespace(c)
+		nss, err = h.mgr.CfgMgr.ListAllNamespace(c)
 		if err != nil {
 			c.Errors = append(c.Errors, &gin.Error{
 				Type: gin.ErrorTypePrivate,
@@ -93,7 +93,7 @@ func (h *Server) NamespaceCommit(c *gin.Context) {
 		nss = make([]*config.Namespace, len(ns_names))
 		nss_delete = make([]bool, len(ns_names))
 		for i, ns_name := range ns_names {
-			ns, err := h.mgr.cfg.GetNamespace(c, ns_name)
+			ns, err := h.mgr.CfgMgr.GetNamespace(c, ns_name)
 			if err != nil {
 				c.Errors = append(c.Errors, &gin.Error{
 					Type: gin.ErrorTypePrivate,
@@ -107,7 +107,7 @@ func (h *Server) NamespaceCommit(c *gin.Context) {
 		}
 	}
 
-	if err := h.mgr.ns.CommitNamespaces(nss, nss_delete); err != nil {
+	if err := h.mgr.NsMgr.CommitNamespaces(nss, nss_delete); err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,
 			Err:  errors.Errorf("failed to reload namespaces: %v, %+v", nss, err),
@@ -120,7 +120,7 @@ func (h *Server) NamespaceCommit(c *gin.Context) {
 }
 
 func (h *Server) NamespaceList(c *gin.Context) {
-	nscs, err := h.mgr.cfg.ListAllNamespace(c)
+	nscs, err := h.mgr.CfgMgr.ListAllNamespace(c)
 	if err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,

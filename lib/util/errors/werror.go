@@ -21,15 +21,15 @@ func (e *WError) Format(st fmt.State, verb rune) {
 	switch verb {
 	case 'v':
 		if st.Flag('+') {
-			fmt.Fprintf(st, "%+v: %+v", e.cerr, e.uerr)
+			fmt.Fprintf(st, "%+v: %+v", e.uerr, e.cerr)
 		} else {
-			fmt.Fprintf(st, "%v: %v", e.cerr, e.uerr)
+			fmt.Fprintf(st, "%v: %v", e.uerr, e.cerr)
 		}
 	case 's':
 		if st.Flag('+') {
-			fmt.Fprintf(st, "%+s: %+s", e.cerr, e.uerr)
+			fmt.Fprintf(st, "%+s: %+s", e.uerr, e.cerr)
 		} else {
-			fmt.Fprintf(st, "%s: %s", e.cerr, e.uerr)
+			fmt.Fprintf(st, "%s: %s", e.uerr, e.cerr)
 		}
 	}
 }
@@ -47,21 +47,21 @@ func (e *WError) Is(s error) bool {
 }
 
 func (e *WError) Unwrap() error {
-	return e.uerr
+	return e.cerr
 }
 
 // Wrap is used to wrapping unknown errors. A typical example is that:
 // 1. have a function `ReadMyConfig()`
 // 2. it got errors returned from external libraries
-// 3. you want to wrap these errors, expect `Unwrap(err) == ErrExternalErrors && Is(err, ErrReadMyConfig) && Is(err, ErrExternalErrors)`.
+// 3. you want to wrap these errors, expect `Unwrap(err) == ErrReadMyConfig && Is(err, ErrReadMyConfig) && Is(err, ErrExternalErrors)`.
 // 4. then you are finding `err := Wrap(ErrReadMyConfig, ErrExternalErrors)`
 // Note that wrap nil error will get nil error.
 func Wrap(cerr error, uerr error) error {
 	if cerr == nil {
-		return uerr
+		return nil
 	}
 	if uerr == nil {
-		return nil
+		return cerr
 	}
 	return &WError{
 		uerr: uerr,

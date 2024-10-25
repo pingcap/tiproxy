@@ -155,8 +155,8 @@ func (ts *testSuite) changeUser(username, db string) {
 	ts.mp.authenticator.changeUser(req)
 }
 
-func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendRunner func(*pnet.PacketIO) error,
-	proxyRunner func(*pnet.PacketIO, *pnet.PacketIO) error) {
+func (ts *testSuite) runAndCheck(t *testing.T, c checker, clientRunner, backendRunner func(pnet.PacketIO) error,
+	proxyRunner func(pnet.PacketIO, pnet.PacketIO) error) {
 	ts.mc.err, ts.mb.err, ts.mp.err = ts.tc.run(t, clientRunner, backendRunner, proxyRunner)
 	if c == nil {
 		require.NoError(t, ts.mc.err)
@@ -206,6 +206,13 @@ func (ts *testSuite) authenticateSecondTime(t *testing.T, c checker) {
 		require.Equal(t, ts.mc.username, ts.mb.username)
 		require.Equal(t, ts.mc.dbName, ts.mb.db)
 		require.Equal(t, []byte(ts.mp.sessionToken), ts.mb.authData)
+	}
+}
+
+func (ts *testSuite) authenticateWithBackend(t *testing.T, c checker) {
+	ts.runAndCheck(t, c, nil, ts.mb.authenticate, ts.mp.authenticateWithBackend)
+	if c == nil {
+		require.Equal(t, ts.mp.username, ts.mb.username)
 	}
 }
 

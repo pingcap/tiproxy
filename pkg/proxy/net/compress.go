@@ -40,7 +40,7 @@ const (
 	zlibCompressionLevel = 6
 )
 
-func (p *PacketIO) SetCompressionAlgorithm(algorithm CompressAlgorithm, zstdLevel int) error {
+func (p *packetIO) SetCompressionAlgorithm(algorithm CompressAlgorithm, zstdLevel int) error {
 	switch algorithm {
 	case CompressionZlib, CompressionZstd:
 		p.readWriter = newCompressedReadWriter(p.readWriter, algorithm, zstdLevel, p.logger)
@@ -273,7 +273,7 @@ func (crw *compressedReadWriter) compress(data []byte) ([]byte, error) {
 		compressWriter, err = zstd.NewWriter(&compressedPacket, zstd.WithEncoderLevel(crw.zstdLevel))
 	}
 	if err != nil {
-		return nil, errors.WithStack(errors.Wrap(mysql.ErrMalformPacket, err))
+		return nil, errors.WithStack(errors.Wrap(err, mysql.ErrMalformPacket))
 	}
 	if _, err = compressWriter.Write(data); err != nil {
 		return nil, errors.WithStack(err)
@@ -290,12 +290,12 @@ func (crw *compressedReadWriter) uncompress(data []byte, uncompressedLength int)
 	switch crw.algorithm {
 	case CompressionZlib:
 		if compressedReader, err = zlib.NewReader(bytes.NewReader(data)); err != nil {
-			return errors.WithStack(errors.Wrap(mysql.ErrMalformPacket, err))
+			return errors.WithStack(errors.Wrap(err, mysql.ErrMalformPacket))
 		}
 	case CompressionZstd:
 		var decoder *zstd.Decoder
 		if decoder, err = zstd.NewReader(bytes.NewReader(data)); err != nil {
-			return errors.WithStack(errors.Wrap(mysql.ErrMalformPacket, err))
+			return errors.WithStack(errors.Wrap(err, mysql.ErrMalformPacket))
 		}
 		compressedReader = decoder.IOReadCloser()
 	}
