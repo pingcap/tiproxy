@@ -1,5 +1,25 @@
 # Change Log
 
+## [v1.3.0] 2024.10.26
+
+### Features
+
+- Support traffic replay as an experimental feature [#642](https://github.com/pingcap/tiproxy/issues/642)
+
+### Improvements
+
+- Make the API `/api/debug/health` return error when no backends are available [#692](https://github.com/pingcap/tiproxy/pull/692)
+- Do not log config when the config is not changed [#694](https://github.com/pingcap/tiproxy/pull/694)
+
+### Bug Fixes
+
+- Fix that the configuration `proxy` is reset when the command line flag `--advertise-addr` is set [#691](https://github.com/pingcap/tiproxy/pull/691)
+- Fix that an unhealthy backend may never be removed [#697](https://github.com/pingcap/tiproxy/pull/697)
+
+### Compatibility Breakers
+
+- Change the tiproxyctl flag `--curls` to `--host` and `--port` [#664](https://github.com/pingcap/tiproxy/pull/664)
+
 ## [v1.2.0] 2024.8.15
 
 ### Features
