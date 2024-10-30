@@ -5,6 +5,7 @@ package vip
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync/atomic"
 
@@ -15,8 +16,9 @@ import (
 )
 
 const (
-	// vipKey is the key in etcd for VIP election.
-	vipKey = "/tiproxy/vip/owner"
+	// vipKey is the key in etcd for VIP election. The key contains the VIP address so that
+	// multiple VIP can coexist.
+	vipKey = "/tiproxy/vip/%s/owner"
 	// sessionTTL is the session's TTL in seconds for VIP election.
 	// The etcd client keeps alive every TTL/3 seconds.
 	// The TTL determines the failover time so it should be short.
@@ -74,7 +76,8 @@ func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error
 
 	id := net.JoinHostPort(ip, port)
 	electionCfg := elect.DefaultElectionConfig(sessionTTL)
-	vm.election = elect.NewElection(vm.lg.Named("elect"), etcdCli, electionCfg, id, vipKey, vm)
+	key := fmt.Sprintf(vipKey, vm.operation.Addr())
+	vm.election = elect.NewElection(vm.lg.Named("elect"), etcdCli, electionCfg, id, key, vm)
 	vm.election.Start(ctx)
 	return nil
 }
