@@ -121,3 +121,15 @@ func (mno *mockNetworkOperation) SendARP() error {
 	}
 	return nil
 }
+
+func (mno *mockNetworkOperation) Addr() string {
+	return ""
+}
+
+func newMockConfig() *config.Config {
+	return &config.Config{
+		Proxy: config.ProxyServer{Addr: "0.0.0.0:6000"},
+		API:   config.API{Addr: "0.0.0.0:3080"},
+		HA:    config.HA{VirtualIP: "127.0.0.2/24", Interface: "lo"},
+	}
+}
