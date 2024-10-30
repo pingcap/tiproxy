@@ -99,5 +99,5 @@ func (no *networkOperation) Addr() string {
 	if no.address == nil {
 		return ""
 	}
-	return no.address.String()
+	return no.address.IP.String()
 }
