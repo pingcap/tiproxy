@@ -20,6 +20,7 @@ type NetworkOperation interface {
 	AddIP() error
 	DeleteIP() error
 	SendARP() error
+	Addr() string
 }
 
 var _ NetworkOperation = (*networkOperation)(nil)
@@ -92,4 +93,11 @@ func (no *networkOperation) SendARP() error {
 		err = cmd.ExecCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
 	}
 	return errors.WithStack(err)
+}
+
+func (no *networkOperation) Addr() string {
+	if no.address == nil {
+		return ""
+	}
+	return no.address.String()
 }
