@@ -207,7 +207,7 @@ func TestMultiVIP(t *testing.T) {
 	err = vm2.Start(context.Background(), client)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
-		return strings.Contains(text.String(), "adding VIP success")
+		return strings.Count(text.String(), "adding VIP success") >= 2
 	}, 3*time.Second, 10*time.Millisecond)
 	vm1.PreClose()
 	vm2.PreClose()
