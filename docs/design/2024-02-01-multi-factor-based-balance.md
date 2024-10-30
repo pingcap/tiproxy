@@ -43,16 +43,18 @@ Therefore, TiProxy should consider more factors, and here come the challenges:
 
 The goals can be ordered by importance:
 1. Zero downtime. If a critical failure makes TiDB keep reporting errors, this situation is equivalent to unavailability.
-2. Avoid connection failure, which may be caused by TiDB OOM.
-3. Reduce query latency. TiProxy should keep TiDB load-balanced to make full use of TiDB resources.
-4. Save costs. Cross-AZ traffic should be minimized.
+2. Isolate TiDB resources to avoid the interruption of different workloads.
+3. Avoid connection failure, which may be caused by TiDB OOM.
+4. Reduce query latency. TiProxy should keep TiDB load-balanced to make full use of TiDB resources.
+5. Save costs. Cross-AZ traffic should be minimized.
 
 Thus, I propose to sort the factors by priority. More specifically, the factors are considered in this order:
 1. Status and health
-2. Memory
-3. CPU usage
-4. Location, including AZ
-5. Connection counts
+2. Label
+3. Memory
+4. CPU usage
+5. Location, including AZ
+6. Connection counts
 
 ### Factors
 
@@ -61,6 +63,19 @@ Thus, I propose to sort the factors by priority. More specifically, the factors 
 Status means whether the TiDB is serving and undoubtedly deserves the highest priority. Currently, TiProxy checks TiDB status by these means:
 - Connect to the SQL port and read the initial handshake packet. If it fails, TiDB may be down, too busy, encountering a network partition, initializing statistics, or disconnecting to PD.
 - Read the status through the HTTP API `/status`. If it fails, TiDB may be about to shut down.
+
+#### Label
+
+To isolate TiDB resources, we need a way to mark the TiDB instances. Labeling is the best way.
+
+The steps of label-based balance:
+1. The user specifies a customized label name which is used to match label values in TiProxy labels and TiDB labels.
+2. TiProxy then routes connections to the TiDB instances that have the same label value.
+3. Alternatively, the user can deploy multiple TiProxy instances for each group with VIP.
+4. Alternatively, the user can also partition a TiDB group to do background jobs. No TiProxy routes to this group.
+5. Different applications connect to the corresponding TiProxy instances.
+
+<img src="./imgs/balance-label.png" alt="balance label" width="600">
 
 #### Health
 
@@ -160,9 +175,9 @@ Thus, the status-based, health-based, and memory-based balance should migrate co
 We only expose important configurations to users to improve the experience.
 
 Only these factor combinations are available:
-- Resource: the order is status > health > memory > CPU > location > connection. This is the default one.
-- Location: the order is status > location > health > memory > CPU > connection. This is reserved for the case where the cluster is large and the cross-AZ traffic is very high.
-- Connection: the order is status > connection.
+- Resource: the order is status > label > health > memory > CPU > location > connection. This is the default one.
+- Location: the order is status > label > location > health > memory > CPU > connection. This is reserved for the case where the cluster is large and the cross-AZ traffic is very high.
+- Connection: the order is status > label > connection.
 
 ### Observability
 
