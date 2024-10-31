@@ -136,8 +136,8 @@ func (crw *compressedReadWriter) readFromConn() error {
 	}
 	compressedSequence := crw.header[3]
 	if compressedSequence != crw.sequence {
-		return ErrInvalidSequence.GenWithStack(
-			"invalid compressed sequence, expected %d, actual %d", crw.sequence, compressedSequence)
+		return errors.WithStack(errors.Wrapf(ErrInvalidSequence,
+			"invalid compressed sequence, expected %d, actual %d", crw.sequence, compressedSequence))
 	}
 	crw.sequence++
 	compressedLength := int(uint32(crw.header[0]) | uint32(crw.header[1])<<8 | uint32(crw.header[2])<<16)

@@ -16,7 +16,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.0.5
 	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c
 	github.com/pingcap/sysutil v1.0.0
-	github.com/pingcap/tidb v1.1.0-beta.0.20230103132820-3ccff46aa3bc
 	github.com/pingcap/tidb/parser v0.0.0-20230103132820-3ccff46aa3bc
 	github.com/pingcap/tiproxy/lib v0.0.0-00010101000000-000000000000
 	github.com/prometheus/client_golang v1.14.0
