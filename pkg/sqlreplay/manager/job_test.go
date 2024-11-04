@@ -52,7 +52,8 @@ func TestIsRunning(t *testing.T) {
 			job: &replayJob{
 				job: job{
 					startTime: time.Now().Add(-20 * time.Second),
-					progress:  1.0,
+					progress:  0.5,
+					done:      true,
 				},
 			},
 			tp:      Replay,

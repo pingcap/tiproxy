@@ -45,6 +45,7 @@ func TestStartAndStop(t *testing.T) {
 	// Test that Jobs() also update progress.
 	require.NoError(t, mgr.StartReplay(replay.ReplayConfig{}))
 	rep.progress = 1.0
+	rep.done = true
 	mgr.Jobs()
 	job := mgr.jobHistory[len(mgr.jobHistory)-1]
 	require.Equal(t, 1.0, job.(*replayJob).progress)
