@@ -90,7 +90,8 @@ func NewFailException(err error, command *cmd.Command) *FailException {
 	}
 	var b []byte
 	switch command.Type {
-	case pnet.ComQuery, pnet.ComStmtPrepare, pnet.ComStmtExecute:
+	case pnet.ComQuery, pnet.ComStmtPrepare, pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtSendLongData,
+		pnet.ComStmtReset, pnet.ComStmtFetch:
 		digest := command.Digest()
 		b = make([]byte, 1+len(digest))
 		b[0] = command.Type.Byte()

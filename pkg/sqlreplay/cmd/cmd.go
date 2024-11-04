@@ -14,6 +14,7 @@ import (
 	"github.com/pingcap/tidb/parser"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util/lex"
 	"github.com/siddontang/go/hack"
 )
 
@@ -201,7 +202,7 @@ func (c *Command) Digest() string {
 			stmt := hack.String(c.Payload[1:])
 			_, digest := parser.NormalizeDigest(stmt)
 			c.digest = digest.String()
-		case pnet.ComStmtExecute:
+		case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
 			_, digest := parser.NormalizeDigest(c.PreparedStmt)
 			c.digest = digest.String()
 		}
@@ -215,8 +216,22 @@ func (c *Command) QueryText() string {
 		return hack.String(c.Payload[1:])
 	case pnet.ComStmtExecute:
 		return fmt.Sprintf("%s params=%v", c.PreparedStmt, c.Params)
+	case pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
+		return c.PreparedStmt
 	}
 	return ""
+}
+
+func (c *Command) ReadOnly() bool {
+	switch c.Type {
+	case pnet.ComQuery, pnet.ComStmtPrepare:
+		return lex.IsReadOnly(c.QueryText())
+	case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
+		return lex.IsReadOnly(c.PreparedStmt)
+	case pnet.ComCreateDB, pnet.ComDropDB, pnet.ComDelayedInsert:
+		return false
+	}
+	return true
 }
 
 func writeString(key, value string, writer *bytes.Buffer) error {

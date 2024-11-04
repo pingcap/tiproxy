@@ -54,6 +54,7 @@ type ReplayConfig struct {
 	Username string
 	Password string
 	Speed    float64
+	ReadOnly bool
 	// the following fields are for testing
 	reader            cmd.LineReader
 	report            report.Report
@@ -145,7 +146,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	if r.connCreator == nil {
 		r.connCreator = func(connID uint64) conn.Conn {
 			return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
-				connID, bcConfig, r.exceptionCh, r.closeCh, &r.replayStats)
+				connID, bcConfig, r.exceptionCh, r.closeCh, cfg.ReadOnly, &r.replayStats)
 		}
 	}
 	r.report = cfg.report
@@ -323,6 +324,7 @@ func (r *replay) stop(err error) {
 	// the pending commands of that connection are discarded. We calculate the progress based on decodedCmds - pendingCmds.
 	replayedCmds := r.replayStats.ReplayedCmds.Load()
 	pendingCmds := r.replayStats.PendingCmds.Load()
+	filteredCmds := r.replayStats.FilteredCmds.Load()
 	decodedCmds := r.decodedCmds.Load()
 	if pendingCmds != 0 {
 		r.lg.Warn("pending command count is not 0", zap.Int64("pending_cmds", pendingCmds))
@@ -332,6 +334,7 @@ func (r *replay) stop(err error) {
 		zap.Time("end_time", r.endTime),
 		zap.Uint64("decoded_cmds", decodedCmds),
 		zap.Uint64("replayed_cmds", replayedCmds),
+		zap.Uint64("filtered_cmds", filteredCmds),
 	}
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
