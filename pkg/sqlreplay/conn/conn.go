@@ -24,11 +24,14 @@ type ReplayStats struct {
 	ReplayedCmds atomic.Uint64
 	// PendingCmds is the number of decoded but not executed commands.
 	PendingCmds atomic.Int64
+	// FilteredCmds is the number of filtered commands.
+	FilteredCmds atomic.Uint64
 }
 
 func (s *ReplayStats) Reset() {
 	s.ReplayedCmds.Store(0)
 	s.PendingCmds.Store(0)
+	s.FilteredCmds.Store(0)
 }
 
 type Conn interface {
@@ -52,10 +55,12 @@ type conn struct {
 	connID          uint64 // capture ID, not replay ID
 	replayStats     *ReplayStats
 	lastPendingCmds int // last pending cmds reported to the stats
+	readonly        bool
 }
 
 func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
-	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64, replayStats *ReplayStats) *conn {
+	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64,
+	readonly bool, replayStats *ReplayStats) *conn {
 	backendConnID := idMgr.NewID()
 	lg = lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID))
 	return &conn{
@@ -67,6 +72,7 @@ func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Co
 		closeCh:     closeCh,
 		backendConn: NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
 		replayStats: replayStats,
+		readonly:    readonly,
 	}
 }
 
@@ -100,6 +106,13 @@ func (c *conn) Run(ctx context.Context) {
 			if command == nil {
 				break
 			}
+			if c.readonly {
+				c.updateCmdForExecuteStmt(command.Value)
+				if !command.Value.ReadOnly() {
+					c.replayStats.FilteredCmds.Add(1)
+					continue
+				}
+			}
 			if err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
 				if pnet.IsDisconnectError(err) {
 					c.exceptionCh <- NewOtherException(err, c.connID)
@@ -118,20 +131,27 @@ func (c *conn) Run(ctx context.Context) {
 	}
 }
 
+// updateCmdForExecuteStmt may be called multiple times, avoid duplicated works.
 func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
-	if command.Type == pnet.ComStmtExecute && len(command.Payload) >= 5 {
+	if command.PreparedStmt != "" {
+		return true
+	}
+	switch command.Type {
+	case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
 		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
 		text, paramNum, paramTypes := c.backendConn.GetPreparedStmt(stmtID)
 		if len(text) == 0 {
-			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID))
+			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID), zap.Stringer("cmd_type", command.Type))
 			return false
 		}
-		_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum, paramTypes)
-		if err != nil {
-			c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+		if command.Type == pnet.ComStmtExecute {
+			_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum, paramTypes)
+			if err != nil {
+				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+			}
+			command.Params = args
 		}
 		command.PreparedStmt = text
-		command.Params = args
 	}
 	return true
 }

@@ -39,8 +39,9 @@ func TestConnectError(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	for i, test := range tests {
 		exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-		conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, &ReplayStats{})
-		backendConn := &mockBackendConn{connErr: test.connErr, execErr: test.execErr}
+		conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
+		backendConn := newMockBackendConn()
+		backendConn.connErr, backendConn.execErr = test.connErr, test.execErr
 		conn.backendConn = backendConn
 		wg.RunWithRecover(func() {
 			conn.Run(context.Background())
@@ -61,8 +62,8 @@ func TestExecuteCmd(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, stats)
-	backendConn := &mockBackendConn{}
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+	backendConn := newMockBackendConn()
 	conn.backendConn = backendConn
 	childCtx, cancel := context.WithCancel(context.Background())
 	wg.RunWithRecover(func() {
@@ -73,9 +74,8 @@ func TestExecuteCmd(t *testing.T) {
 		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComFieldList})
 	}
 	require.Eventually(t, func() bool {
-		return backendConn.cmds.Load() == int32(cmds)
+		return stats.ReplayedCmds.Load() == uint64(cmds)
 	}, 3*time.Second, time.Millisecond)
-	require.EqualValues(t, cmds, stats.ReplayedCmds.Load())
 	require.EqualValues(t, 0, stats.PendingCmds.Load())
 	cancel()
 	wg.Wait()
@@ -85,8 +85,8 @@ func TestStopExecution(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, &ReplayStats{})
-	conn.backendConn = &mockBackendConn{}
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
+	conn.backendConn = newMockBackendConn()
 	wg.RunWithRecover(func() {
 		conn.Run(context.Background())
 	}, nil, lg)
@@ -110,10 +110,16 @@ func TestExecuteError(t *testing.T) {
 		},
 		{
 			prepare: func(bc *mockBackendConn) []byte {
+				return append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)
+			},
+			digest:    "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
+			queryText: "select ?",
+		},
+		{
+			prepare: func(bc *mockBackendConn) []byte {
 				request, err := pnet.MakeExecuteStmtRequest(1, []any{uint64(100), "abc", nil}, true)
 				require.NoError(t, err)
-				bc.prepareStmt = "select ?"
-				bc.paramNum = 3
+				bc.prepared[1].paramNum = 3
 				return request
 			},
 			digest:    "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
@@ -124,8 +130,9 @@ func TestExecuteError(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, &ReplayStats{})
-	backendConn := &mockBackendConn{execErr: errors.New("mock error")}
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
+	backendConn := newMockBackendConn()
+	backendConn.execErr = errors.New("mock error")
 	conn.backendConn = backendConn
 	childCtx, cancel := context.WithCancel(context.Background())
 	wg.RunWithRecover(func() {
@@ -139,6 +146,77 @@ func TestExecuteError(t *testing.T) {
 		require.Equal(t, "mock error", exp.(*FailException).Error(), "case %d", i)
 		require.Equal(t, test.digest, exp.(*FailException).command.Digest(), "case %d", i)
 		require.Equal(t, test.queryText, exp.(*FailException).command.QueryText(), "case %d", i)
+	}
+	cancel()
+	wg.Wait()
+}
+
+func TestSkipReadOnly(t *testing.T) {
+	tests := []struct {
+		cmd      *cmd.Command
+		readonly bool
+	}{
+		{
+			cmd:      &cmd.Command{Type: pnet.ComQuery, Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)},
+			readonly: true,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComQuery, Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("insert into t value(1)")...)},
+			readonly: false,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)},
+			readonly: true,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte(), 1, 0, 0, 0, 0, 0, 0, 0}},
+			readonly: true,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtFetch, Payload: []byte{pnet.ComStmtFetch.Byte(), 1, 0, 0, 0}},
+			readonly: true,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("insert into t value(?)")...)},
+			readonly: false,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte(), 2, 0, 0, 0}},
+			readonly: false,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtSendLongData, Payload: []byte{pnet.ComStmtFetch.Byte(), 2, 0, 0, 0, 0, 0, 0, 0}},
+			readonly: false,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComQuit},
+			readonly: true,
+		},
+	}
+
+	lg, _ := logger.CreateLoggerForTest(t)
+	var wg waitgroup.WaitGroup
+	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
+	stats := &ReplayStats{}
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, true, stats)
+	conn.backendConn = newMockBackendConn()
+	childCtx, cancel := context.WithCancel(context.Background())
+	wg.RunWithRecover(func() {
+		conn.Run(childCtx)
+	}, nil, lg)
+	replayedCmds, filteredCmds := uint64(0), uint64(0)
+	for i, test := range tests {
+		if test.readonly {
+			replayedCmds++
+		} else {
+			filteredCmds++
+		}
+		conn.ExecuteCmd(test.cmd)
+		require.Eventually(t, func() bool {
+			return stats.ReplayedCmds.Load()+stats.FilteredCmds.Load() == replayedCmds+filteredCmds
+		}, 3*time.Second, 10*time.Millisecond, "case %d", i)
+		require.EqualValues(t, replayedCmds, stats.ReplayedCmds.Load(), "case %d", i)
+		require.EqualValues(t, filteredCmds, stats.FilteredCmds.Load(), "case %d", i)
 	}
 	cancel()
 	wg.Wait()

@@ -6,6 +6,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -52,6 +53,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	}
 	cfg.Username = c.PostForm("username")
 	cfg.Password = c.PostForm("password")
+	cfg.ReadOnly = strings.EqualFold(c.PostForm("readonly"), "true")
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/pingcap/tiproxy/pkg/proxy/net"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
 var _ BackendConnManager = (*mockBackendConnMgr)(nil)
@@ -39,12 +40,17 @@ func (m *mockBackendConnMgr) Close() error {
 var _ BackendConn = (*mockBackendConn)(nil)
 
 type mockBackendConn struct {
-	cmds        atomic.Int32
-	connErr     error
-	execErr     error
-	close       atomic.Bool
-	prepareStmt string
-	paramNum    int
+	connErr  error
+	execErr  error
+	close    atomic.Bool
+	stmtID   uint32
+	prepared map[uint32]*preparedStmt
+}
+
+func newMockBackendConn() *mockBackendConn {
+	return &mockBackendConn{
+		prepared: make(map[uint32]*preparedStmt),
+	}
 }
 
 func (c *mockBackendConn) Connect(ctx context.Context) error {
@@ -56,27 +62,37 @@ func (c *mockBackendConn) ConnID() uint64 {
 }
 
 func (c *mockBackendConn) ExecuteCmd(ctx context.Context, request []byte) (err error) {
-	c.cmds.Add(1)
+	if len(request) > 0 && request[0] == pnet.ComStmtPrepare.Byte() {
+		c.stmtID++
+		c.prepared[c.stmtID] = &preparedStmt{
+			text: string(request[1:]),
+		}
+	}
 	return c.execErr
 }
 
 func (c *mockBackendConn) Query(ctx context.Context, stmt string) error {
-	c.cmds.Add(1)
 	return c.execErr
 }
 
 func (c *mockBackendConn) PrepareStmt(ctx context.Context, stmt string) (uint32, error) {
-	c.cmds.Add(1)
-	return 1, c.execErr
+	c.stmtID++
+	c.prepared[c.stmtID] = &preparedStmt{
+		text: stmt,
+	}
+	return c.stmtID, c.execErr
 }
 
 func (c *mockBackendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error {
-	c.cmds.Add(1)
 	return c.execErr
 }
 
 func (c *mockBackendConn) GetPreparedStmt(stmtID uint32) (string, int, []byte) {
-	return c.prepareStmt, c.paramNum, nil
+	ps := c.prepared[stmtID]
+	if ps == nil {
+		return "", 0, nil
+	}
+	return ps.text, ps.paramNum, ps.paramTypes
 }
 
 func (c *mockBackendConn) Close() {

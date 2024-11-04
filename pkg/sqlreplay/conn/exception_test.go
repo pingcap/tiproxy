@@ -34,6 +34,10 @@ func TestFailException(t *testing.T) {
 			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte()}, PreparedStmt: "select ?", Params: []any{uint64(100), "abc", nil}},
 			key: "\x17e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
 		},
+		{
+			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComStmtFetch, Payload: []byte{pnet.ComStmtFetch.Byte()}, PreparedStmt: "select ?"},
+			key: "\x1ce1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
+		},
 	}
 	for i, test := range tests {
 		exception := NewFailException(errors.New("mock error"), test.cmd)
