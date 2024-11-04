@@ -51,7 +51,7 @@ type job4Marshal struct {
 }
 
 func (job *job) IsRunning() bool {
-	return job.err == nil && job.progress < 1
+	return job.err == nil && !job.done
 }
 
 func (job *job) SetProgress(progress float64, endTime time.Time, done bool, err error) {
