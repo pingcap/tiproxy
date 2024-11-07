@@ -26,7 +26,7 @@ func TestCertServer(t *testing.T) {
 	keyPath := filepath.Join(tmpdir, "key")
 	caPath := filepath.Join(tmpdir, "ca")
 
-	require.NoError(t, CreateTLSCertificates(logger, certPath, keyPath, caPath, 0, time.Hour))
+	require.NoError(t, CreateTLSCertificates(logger, certPath, keyPath, caPath, 1024, time.Hour))
 
 	type certCase struct {
 		config.TLSConfig
@@ -48,7 +48,8 @@ func TestCertServer(t *testing.T) {
 		{
 			server: true,
 			TLSConfig: config.TLSConfig{
-				CA: caPath,
+				CA:         caPath,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.Nil(t, c)
@@ -60,7 +61,8 @@ func TestCertServer(t *testing.T) {
 		{
 			server: true,
 			TLSConfig: config.TLSConfig{
-				AutoCerts: true,
+				AutoCerts:  true,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -73,8 +75,9 @@ func TestCertServer(t *testing.T) {
 		{
 			server: true,
 			TLSConfig: config.TLSConfig{
-				Cert: certPath,
-				Key:  keyPath,
+				Cert:       certPath,
+				Key:        keyPath,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -87,9 +90,10 @@ func TestCertServer(t *testing.T) {
 		{
 			server: true,
 			TLSConfig: config.TLSConfig{
-				Cert: certPath,
-				Key:  keyPath,
-				CA:   caPath,
+				Cert:       certPath,
+				Key:        keyPath,
+				CA:         caPath,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -107,6 +111,7 @@ func TestCertServer(t *testing.T) {
 				Key:           keyPath,
 				CA:            caPath,
 				MinTLSVersion: "1.1",
+				RSAKeySize:    1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -120,10 +125,11 @@ func TestCertServer(t *testing.T) {
 		{
 			server: true,
 			TLSConfig: config.TLSConfig{
-				Cert:   certPath,
-				Key:    keyPath,
-				CA:     caPath,
-				SkipCA: true,
+				Cert:       certPath,
+				Key:        keyPath,
+				CA:         caPath,
+				SkipCA:     true,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -137,8 +143,9 @@ func TestCertServer(t *testing.T) {
 		{
 			server: true,
 			TLSConfig: config.TLSConfig{
-				AutoCerts: true,
-				CA:        caPath,
+				AutoCerts:  true,
+				CA:         caPath,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -155,6 +162,7 @@ func TestCertServer(t *testing.T) {
 				AutoCerts:     true,
 				CA:            caPath,
 				MinTLSVersion: "1.1",
+				RSAKeySize:    1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -175,8 +183,9 @@ func TestCertServer(t *testing.T) {
 		},
 		{
 			TLSConfig: config.TLSConfig{
-				Cert: certPath,
-				Key:  keyPath,
+				Cert:       certPath,
+				Key:        keyPath,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.Nil(t, c)
@@ -187,7 +196,8 @@ func TestCertServer(t *testing.T) {
 		},
 		{
 			TLSConfig: config.TLSConfig{
-				SkipCA: true,
+				SkipCA:     true,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -199,8 +209,9 @@ func TestCertServer(t *testing.T) {
 		},
 		{
 			TLSConfig: config.TLSConfig{
-				SkipCA: true,
-				Cert:   certPath,
+				SkipCA:     true,
+				Cert:       certPath,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -212,7 +223,8 @@ func TestCertServer(t *testing.T) {
 		},
 		{
 			TLSConfig: config.TLSConfig{
-				CA: caPath,
+				CA:         caPath,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -224,9 +236,10 @@ func TestCertServer(t *testing.T) {
 		},
 		{
 			TLSConfig: config.TLSConfig{
-				Cert: certPath,
-				Key:  keyPath,
-				CA:   caPath,
+				Cert:       certPath,
+				Key:        keyPath,
+				CA:         caPath,
+				RSAKeySize: 1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -242,6 +255,7 @@ func TestCertServer(t *testing.T) {
 				Key:           keyPath,
 				CA:            caPath,
 				MinTLSVersion: "1.1",
+				RSAKeySize:    1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -283,7 +297,7 @@ func TestReload(t *testing.T) {
 	}
 
 	// Create a cert and record the expiration.
-	require.NoError(t, CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, time.Hour))
+	require.NoError(t, CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, time.Hour))
 	ci := NewCert(true)
 	ci.SetConfig(cfg)
 	tcfg, err := ci.Reload(lg)
@@ -292,7 +306,7 @@ func TestReload(t *testing.T) {
 	expire1 := getExpireTime(t, ci)
 
 	// Replace the cert and then reload. Check that the expiration is different.
-	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, 2*time.Hour)
+	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, 2*time.Hour)
 	require.NoError(t, err)
 	_, err = ci.Reload(lg)
 	require.NoError(t, err)
@@ -303,7 +317,8 @@ func TestReload(t *testing.T) {
 func TestAutoCerts(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := config.TLSConfig{
-		AutoCerts: true,
+		AutoCerts:  true,
+		RSAKeySize: 1024,
 	}
 
 	// Create an auto cert.
@@ -373,8 +388,8 @@ func TestCertPool(t *testing.T) {
 	keyPath2 := filepath.Join(tmpdir, "c2", "key")
 	certPath2 := filepath.Join(tmpdir, "c2", "cert")
 
-	require.NoError(t, CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, DefaultCertExpiration))
-	require.NoError(t, CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 0, DefaultCertExpiration))
+	require.NoError(t, CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 1024, DefaultCertExpiration))
+	require.NoError(t, CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 1024, DefaultCertExpiration))
 
 	serverCfg := config.TLSConfig{
 		Cert: certPath1,
