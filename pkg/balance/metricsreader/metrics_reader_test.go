@@ -77,6 +77,9 @@ func TestFallback(t *testing.T) {
 
 	// read from backend
 	promHttpHandler.statusCode.Store(http.StatusInternalServerError)
+	require.Eventually(t, func() bool {
+		return mr.backendReader.isOwner.Load()
+	}, 3*time.Second, 10*time.Millisecond)
 	mr.readMetrics(context.Background())
 	qr = mr.GetQueryResult("rule_id1")
 	require.False(t, qr.Empty())
