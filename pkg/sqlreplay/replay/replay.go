@@ -53,6 +53,7 @@ type ReplayConfig struct {
 	Input    string
 	Username string
 	Password string
+	KeyFile  string
 	Speed    float64
 	ReadOnly bool
 	// the following fields are for testing
@@ -174,9 +175,16 @@ func (r *replay) readCommands(ctx context.Context) {
 	// cfg.reader is set in tests
 	reader := r.cfg.reader
 	if reader == nil {
-		reader = store.NewLoader(r.lg.Named("loader"), store.LoaderCfg{
-			Dir: r.cfg.Input,
+		var err error
+		reader, err = store.NewReader(r.lg.Named("loader"), store.ReaderCfg{
+			Dir:           r.cfg.Input,
+			KeyFile:       r.cfg.KeyFile,
+			EncryptMethod: r.meta.EncryptMethod,
 		})
+		if err != nil {
+			r.stop(err)
+			return
+		}
 	}
 	defer reader.Close()
 
