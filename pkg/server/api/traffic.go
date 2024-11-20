@@ -32,6 +32,8 @@ func (h *Server) TrafficCapture(c *gin.Context) {
 		}
 		cfg.Duration = duration
 	}
+	cfg.EncryptMethod = c.PostForm("encrypt-method")
+	cfg.KeyFile = h.mgr.CfgMgr.GetConfig().Security.Encryption.KeyPath
 
 	if err := h.mgr.ReplayJobMgr.StartCapture(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
@@ -54,6 +56,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	cfg.Username = c.PostForm("username")
 	cfg.Password = c.PostForm("password")
 	cfg.ReadOnly = strings.EqualFold(c.PostForm("readonly"), "true")
+	cfg.KeyFile = h.mgr.CfgMgr.GetConfig().Security.Encryption.KeyPath
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

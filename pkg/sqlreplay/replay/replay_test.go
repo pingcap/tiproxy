@@ -154,7 +154,7 @@ func TestReplaySpeed(t *testing.T) {
 
 func TestProgress(t *testing.T) {
 	dir := t.TempDir()
-	meta := store.NewMeta(10*time.Second, 10, 0)
+	meta := store.NewMeta(10*time.Second, 10, 0, "")
 	require.NoError(t, meta.Write(dir))
 	loader := newMockNormalLoader()
 	now := time.Now()
@@ -202,7 +202,7 @@ func TestProgress(t *testing.T) {
 
 func TestPendingCmds(t *testing.T) {
 	dir := t.TempDir()
-	meta := store.NewMeta(10*time.Second, 10, 0)
+	meta := store.NewMeta(10*time.Second, 10, 0, "")
 	require.NoError(t, meta.Write(dir))
 	loader := newMockNormalLoader()
 	defer loader.Close()

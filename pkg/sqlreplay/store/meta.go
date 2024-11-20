@@ -18,18 +18,20 @@ const (
 )
 
 type Meta struct {
-	Version      string
-	Duration     time.Duration
-	Cmds         uint64
-	FilteredCmds uint64
+	Version       string
+	Duration      time.Duration
+	Cmds          uint64
+	FilteredCmds  uint64 `json:"FilteredCmds,omitempty"`
+	EncryptMethod string `json:"EncryptMethod,omitempty"`
 }
 
-func NewMeta(duration time.Duration, cmds, filteredCmds uint64) *Meta {
+func NewMeta(duration time.Duration, cmds, filteredCmds uint64, EncryptMethod string) *Meta {
 	return &Meta{
-		Version:      version,
-		Duration:     duration,
-		Cmds:         cmds,
-		FilteredCmds: filteredCmds,
+		Version:       version,
+		Duration:      duration,
+		Cmds:          cmds,
+		FilteredCmds:  filteredCmds,
+		EncryptMethod: EncryptMethod,
 	}
 }
 

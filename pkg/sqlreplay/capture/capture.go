@@ -52,6 +52,8 @@ type Capture interface {
 
 type CaptureConfig struct {
 	Output             string
+	EncryptMethod      string
+	KeyFile            string
 	Duration           time.Duration
 	cmdLogger          store.Writer
 	bufferCap          int
@@ -219,7 +221,16 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	// cfg.cmdLogger is set in tests
 	cmdLogger := c.cfg.cmdLogger
 	if cmdLogger == nil {
-		cmdLogger = store.NewWriter(store.WriterCfg{Dir: c.cfg.Output})
+		var err error
+		cmdLogger, err = store.NewWriter(store.WriterCfg{
+			Dir:           c.cfg.Output,
+			EncryptMethod: c.cfg.EncryptMethod,
+			KeyFile:       c.cfg.KeyFile,
+		})
+		if err != nil {
+			c.lg.Error("failed to create capture writer", zap.Error(err))
+			return
+		}
 	}
 	// Flush all buffers even if the context is timeout.
 	for buf := range bufCh {
@@ -337,7 +348,7 @@ func (c *capture) putCommand(command *cmd.Command) bool {
 }
 
 func (c *capture) writeMeta(duration time.Duration, cmds, filteredCmds uint64) {
-	meta := store.NewMeta(duration, cmds, filteredCmds)
+	meta := store.NewMeta(duration, cmds, filteredCmds, c.cfg.EncryptMethod)
 	if err := meta.Write(c.cfg.Output); err != nil {
 		c.lg.Error("failed to write meta", zap.Error(err))
 	}
