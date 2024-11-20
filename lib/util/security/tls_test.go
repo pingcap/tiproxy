@@ -63,3 +63,11 @@ func TestGetMinTLSVer(t *testing.T) {
 		}
 	}
 }
+
+func TestRsaSize(t *testing.T) {
+	sizes := []int{0, 512, 1024, 2048, 4096}
+	for _, size := range sizes {
+		_, _, _, err := createTempTLS(size, DefaultCertExpiration)
+		require.Nil(t, err)
+	}
+}

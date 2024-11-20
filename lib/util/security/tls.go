@@ -77,7 +77,9 @@ func CreateTLSCertificates(logger *zap.Logger, certpath, keypath, capath string,
 }
 
 func createTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []byte, error) {
-	if rsaKeySize < 1024 {
+	if rsaKeySize <= 0 {
+		rsaKeySize = 4096
+	} else if rsaKeySize < 1024 {
 		rsaKeySize = 1024
 	}
 
@@ -171,7 +173,7 @@ func createTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []
 
 // CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
 func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, err error) {
-	certPEM, keyPEM, caPEM, uerr := createTempTLS(0, DefaultCertExpiration)
+	certPEM, keyPEM, caPEM, uerr := createTempTLS(1024, DefaultCertExpiration)
 	if uerr != nil {
 		err = uerr
 		return
