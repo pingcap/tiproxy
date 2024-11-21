@@ -29,3 +29,12 @@ func TestMeta(t *testing.T) {
 	require.NoError(t, os.Remove(filepath.Join(dir, metaFile)))
 	require.Error(t, m3.Read(dir))
 }
+
+func TestPrecheckMeta(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, PreCheckMeta(dir))
+	f, err := os.Create(filepath.Join(dir, metaFile))
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	require.Error(t, PreCheckMeta(dir))
+}

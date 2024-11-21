@@ -72,6 +72,7 @@ func (cfg *CaptureConfig) Validate() error {
 		if !st.IsDir() {
 			return errors.New("output should be a directory")
 		}
+		err = store.PreCheckMeta(cfg.Output)
 	} else if os.IsNotExist(err) {
 		err = os.MkdirAll(cfg.Output, 0755)
 	}
