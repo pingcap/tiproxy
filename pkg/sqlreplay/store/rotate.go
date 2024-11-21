@@ -38,7 +38,7 @@ func newRotateWriter(cfg WriterCfg) *rotateWriter {
 			Filename:  filepath.Join(cfg.Dir, fileName),
 			MaxSize:   cfg.FileSize,
 			LocalTime: true,
-			Compress:  true,
+			Compress:  cfg.Compress,
 		},
 	}
 }
