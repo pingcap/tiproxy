@@ -30,8 +30,14 @@ func GetTrafficCaptureCmd(ctx *Context) *cobra.Command {
 	output := captureCmd.PersistentFlags().String("output", "", "output directory for traffic files")
 	duration := captureCmd.PersistentFlags().String("duration", "", "the duration of traffic capture")
 	encrypt := captureCmd.PersistentFlags().String("encrypt-method", "", "the encryption method used for encrypting traffic files")
+	compress := captureCmd.PersistentFlags().Bool("compress", true, "whether compress the traffic files")
 	captureCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		reader := GetFormReader(map[string]string{"output": *output, "duration": *duration, "encrypt-method": *encrypt})
+		reader := GetFormReader(map[string]string{
+			"output":         *output,
+			"duration":       *duration,
+			"encrypt-method": *encrypt,
+			"compress":       strconv.FormatBool(*compress),
+		})
 		resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, "/api/traffic/capture", reader)
 		if err != nil {
 			return err

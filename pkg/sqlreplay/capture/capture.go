@@ -55,6 +55,7 @@ type CaptureConfig struct {
 	EncryptMethod      string
 	KeyFile            string
 	Duration           time.Duration
+	Compress           bool
 	cmdLogger          store.Writer
 	bufferCap          int
 	flushThreshold     int
@@ -226,6 +227,7 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 			Dir:           c.cfg.Output,
 			EncryptMethod: c.cfg.EncryptMethod,
 			KeyFile:       c.cfg.KeyFile,
+			Compress:      c.cfg.Compress,
 		})
 		if err != nil {
 			c.lg.Error("failed to create capture writer", zap.Error(err))

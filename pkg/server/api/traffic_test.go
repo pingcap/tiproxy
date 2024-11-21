@@ -39,7 +39,25 @@ func TestTraffic(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "capture started", string(all))
 		require.Equal(t, "capture", mgr.curJob)
-		require.Equal(t, capture.CaptureConfig{Duration: time.Hour, Output: "/tmp"}, mgr.captureCfg)
+		require.Equal(t, capture.CaptureConfig{Duration: time.Hour, Output: "/tmp", Compress: true}, mgr.captureCfg)
+	})
+	doHTTP(t, http.MethodPost, "/api/traffic/cancel", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "stopped", string(all))
+		require.Equal(t, "", mgr.curJob)
+	})
+	doHTTP(t, http.MethodPost, "/api/traffic/capture", httpOpts{
+		reader: cli.GetFormReader(map[string]string{"output": "/tmp", "duration": "1h", "encrypt-method": "aes256-ctr", "compress": "false"}),
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "capture started", string(all))
+		require.Equal(t, "capture", mgr.curJob)
+		require.Equal(t, capture.CaptureConfig{Duration: time.Hour, Output: "/tmp", EncryptMethod: "aes256-ctr", Compress: false}, mgr.captureCfg)
 	})
 	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
 		reader: cli.GetFormReader(map[string]string{"input": "/tmp"}),
@@ -52,10 +70,6 @@ func TestTraffic(t *testing.T) {
 	})
 	doHTTP(t, http.MethodPost, "/api/traffic/cancel", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
-		all, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		require.Equal(t, "stopped", string(all))
-		require.Equal(t, "", mgr.curJob)
 	})
 	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
 		reader: cli.GetFormReader(map[string]string{"input": "/tmp", "speed": "abc"}),

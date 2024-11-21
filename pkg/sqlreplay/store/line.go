@@ -22,6 +22,7 @@ type WriterCfg struct {
 	EncryptMethod string
 	KeyFile       string
 	FileSize      int
+	Compress      bool
 }
 
 func NewWriter(cfg WriterCfg) (Writer, error) {
