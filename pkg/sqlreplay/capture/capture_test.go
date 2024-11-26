@@ -21,6 +21,7 @@ import (
 )
 
 func TestStartAndStop(t *testing.T) {
+	dir := t.TempDir()
 	cpt := NewCapture(zap.NewNop())
 	defer cpt.Close()
 
@@ -28,7 +29,7 @@ func TestStartAndStop(t *testing.T) {
 	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	writer := newMockWriter(store.WriterCfg{})
 	cfg := CaptureConfig{
-		Output:    t.TempDir(),
+		Output:    dir,
 		Duration:  10 * time.Second,
 		cmdLogger: writer,
 	}
@@ -48,12 +49,14 @@ func TestStartAndStop(t *testing.T) {
 	require.Equal(t, len(data), len(writer.getData()))
 
 	// start capture again
+	removeMeta(dir)
 	require.NoError(t, cpt.Start(cfg))
 	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	cpt.Stop(nil)
 	require.Greater(t, len(writer.getData()), len(data))
 
 	// duplicated start and stop
+	removeMeta(dir)
 	require.NoError(t, cpt.Start(cfg))
 	require.Error(t, cpt.Start(cfg))
 	cpt.Stop(nil)
@@ -61,12 +64,13 @@ func TestStartAndStop(t *testing.T) {
 }
 
 func TestConcurrency(t *testing.T) {
+	dir := t.TempDir()
 	cpt := NewCapture(zap.NewNop())
 	defer cpt.Close()
 
 	writer := newMockWriter(store.WriterCfg{})
 	cfg := CaptureConfig{
-		Output:         t.TempDir(),
+		Output:         dir,
 		Duration:       10 * time.Second,
 		bufferCap:      12 * 1024,
 		flushThreshold: 8 * 1024,
@@ -107,6 +111,7 @@ func TestConcurrency(t *testing.T) {
 					cpt.Stop(nil)
 					started = false
 				} else {
+					removeMeta(dir)
 					require.NoError(t, cpt.Start(cfg))
 					started = true
 				}
@@ -292,14 +297,16 @@ func TestFilterCmds(t *testing.T) {
 		},
 	}
 
+	dir := t.TempDir()
 	cfg := CaptureConfig{
-		Output:   t.TempDir(),
+		Output:   dir,
 		Duration: 10 * time.Second,
 	}
 	for i, test := range tests {
 		cpt := NewCapture(zap.NewNop())
 		writer := newMockWriter(store.WriterCfg{})
 		cfg.cmdLogger = writer
+		removeMeta(dir)
 		require.NoError(t, cpt.Start(cfg))
 		cpt.Capture(test.packet, time.Now(), 100, func() (string, error) {
 			return "init session 100", nil
@@ -321,4 +328,8 @@ func TestFilterCmds(t *testing.T) {
 
 		cpt.Close()
 	}
+}
+
+func removeMeta(dir string) {
+	_ = os.Remove(filepath.Join(dir, "meta"))
 }

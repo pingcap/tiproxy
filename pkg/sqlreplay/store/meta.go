@@ -58,3 +58,12 @@ func (m *Meta) Read(path string) error {
 	}
 	return nil
 }
+
+func PreCheckMeta(path string) error {
+	filePath := filepath.Join(path, metaFile)
+	_, err := os.Stat(filePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return errors.Errorf("file %s already exists, please remove it before capture", filePath)
+}
