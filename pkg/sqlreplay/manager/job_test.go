@@ -127,7 +127,7 @@ func TestMarshalJob(t *testing.T) {
 					Duration: 2 * time.Hour,
 				},
 			},
-			marshal: `{"type":"capture","status":"canceled","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","duration":"2h0m0s","output":"/tmp/traffic","progress":"50%","error":"mock error"}`,
+			marshal: `{"type":"capture","status":"canceled","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","duration":"2h0m0s","output":"/tmp/traffic","progress":"50%","error":"mock error"}`,
 		},
 		{
 			job: &replayJob{
@@ -140,7 +140,7 @@ func TestMarshalJob(t *testing.T) {
 					Username: "root",
 				},
 			},
-			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01 00:00:00 +0000 UTC","input":"/tmp/traffic","username":"root","speed":1,"progress":"0%"}`,
+			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01T00:00:00Z","input":"/tmp/traffic","username":"root","speed":1,"progress":"0%"}`,
 		},
 		{
 			job: &replayJob{
@@ -156,7 +156,7 @@ func TestMarshalJob(t *testing.T) {
 					Speed:    0.5,
 				},
 			},
-			marshal: `{"type":"replay","status":"done","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","input":"/tmp/traffic","username":"root","speed":0.5,"progress":"100%"}`,
+			marshal: `{"type":"replay","status":"done","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","input":"/tmp/traffic","username":"root","speed":0.5,"progress":"100%"}`,
 		},
 	}
 

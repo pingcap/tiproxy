@@ -65,11 +65,11 @@ func (job *job) SetProgress(progress float64, endTime time.Time, done bool, err 
 
 func (job *job) getJob4Marshal() *job4Marshal {
 	jm := &job4Marshal{
-		StartTime: job.startTime.String(),
+		StartTime: job.startTime.Format(time.RFC3339),
 		Progress:  fmt.Sprintf("%d%%", int(job.progress*100)),
 	}
 	if !job.endTime.IsZero() {
-		jm.EndTime = job.endTime.String()
+		jm.EndTime = job.endTime.Format(time.RFC3339)
 	}
 	if job.err != nil {
 		jm.Status = "canceled"

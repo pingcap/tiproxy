@@ -61,6 +61,8 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 	if rdb.conn != nil {
 		rdb.conn.Close()
 	}
+	// Connect to the backend using backendConn instead of the go driver,
+	// because the backend host is assigned by the router and adapting to the router needs some work.
 	rdb.conn = rdb.connCreator()
 	if err := rdb.conn.Connect(ctx); err != nil {
 		return err
@@ -70,10 +72,11 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 }
 
 func (rdb *reportDB) initTables(ctx context.Context) error {
-	// Do not truncate database in case that multiple TiProxy instances are running.
-	for _, stmt := range []string{createDatabase, createFailTable, createOtherTable} {
+	// Do not truncate the database or tables in case that multiple TiProxy instances are running.
+	// If checking tables fails, it means that the table was created by an older TiProxy version.
+	for _, stmt := range []string{createDatabase, createFailTable, checkFailTable, createOtherTable, checkOtherTable} {
 		if err := rdb.conn.Query(ctx, stmt); err != nil {
-			return errors.Wrapf(err, "initialize report database and tables failed")
+			return errors.Wrapf(errors.WithStack(err), "initialize report database and tables failed, sql: %s", stmt)
 		}
 	}
 	return nil
