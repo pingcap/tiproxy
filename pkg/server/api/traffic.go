@@ -45,6 +45,16 @@ func (h *Server) TrafficCapture(c *gin.Context) {
 	}
 	cfg.Compress = compress
 	cfg.KeyFile = h.mgr.CfgMgr.GetConfig().Security.Encryption.KeyPath
+	if startTimeStr := c.PostForm("start-time"); startTimeStr != "" {
+		startTime, err := time.Parse(time.RFC3339, startTimeStr)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.StartTime = startTime
+	} else {
+		cfg.StartTime = time.Now()
+	}
 
 	if err := h.mgr.ReplayJobMgr.StartCapture(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
@@ -63,6 +73,16 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 			return
 		}
 		cfg.Speed = speed
+	}
+	if startTimeStr := c.PostForm("start-time"); startTimeStr != "" {
+		startTime, err := time.Parse(time.RFC3339, startTimeStr)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.StartTime = startTime
+	} else {
+		cfg.StartTime = time.Now()
 	}
 	cfg.Username = c.PostForm("username")
 	cfg.Password = c.PostForm("password")

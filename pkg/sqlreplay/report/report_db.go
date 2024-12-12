@@ -20,7 +20,7 @@ type BackendConnCreator func() conn.BackendConn
 
 type ReportDB interface {
 	Init(ctx context.Context) error
-	InsertExceptions(tp conn.ExceptionType, m map[string]*expCollection) error
+	InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection) error
 	Close()
 }
 
@@ -61,6 +61,8 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 	if rdb.conn != nil {
 		rdb.conn.Close()
 	}
+	// Connect to the backend using backendConn instead of the go driver,
+	// because the backend host is assigned by the router and adapting to the router needs some work.
 	rdb.conn = rdb.connCreator()
 	if err := rdb.conn.Connect(ctx); err != nil {
 		return err
@@ -70,10 +72,11 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 }
 
 func (rdb *reportDB) initTables(ctx context.Context) error {
-	// Do not truncate database in case that multiple TiProxy instances are running.
-	for _, stmt := range []string{createDatabase, createFailTable, createOtherTable} {
+	// Do not truncate the database or tables in case that multiple TiProxy instances are running.
+	// If checking tables fails, it means that the table was created by an older TiProxy version.
+	for _, stmt := range []string{createDatabase, createFailTable, checkFailTable, createOtherTable, checkOtherTable} {
 		if err := rdb.conn.Query(ctx, stmt); err != nil {
-			return errors.Wrapf(err, "initialize report database and tables failed")
+			return errors.Wrapf(errors.WithStack(err), "initialize report database and tables failed, sql: %s", stmt)
 		}
 	}
 	return nil
@@ -90,18 +93,18 @@ func (rdb *reportDB) initStmts(ctx context.Context) (err error) {
 	return
 }
 
-func (rdb *reportDB) InsertExceptions(tp conn.ExceptionType, m map[string]*expCollection) error {
+func (rdb *reportDB) InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection) error {
 	for _, value := range m {
 		var args []any
 		switch tp {
 		case conn.Fail:
 			sample := value.sample.(*conn.FailException)
 			command := sample.Command()
-			args = []any{command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(),
+			args = []any{startTime.String(), command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(),
 				command.StartTs.String(), sample.Time().String(), value.count, value.count}
 		case conn.Other:
 			sample := value.sample.(*conn.OtherException)
-			args = []any{sample.Key(), sample.Error(), sample.Time().String(), value.count, value.count}
+			args = []any{startTime.String(), sample.Key(), sample.Error(), sample.Time().String(), value.count, value.count}
 		default:
 			return errors.WithStack(errors.New("unknown exception type"))
 		}

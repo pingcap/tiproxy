@@ -25,9 +25,10 @@ func TestManageConns(t *testing.T) {
 	loader := newMockChLoader()
 	connCount := 0
 	cfg := ReplayConfig{
-		Input:    t.TempDir(),
-		Username: "u1",
-		reader:   loader,
+		Input:     t.TempDir(),
+		Username:  "u1",
+		StartTime: time.Now(),
+		reader:    loader,
 		connCreator: func(connID uint64) conn.Conn {
 			connCount++
 			return &mockConn{
@@ -68,26 +69,42 @@ func TestManageConns(t *testing.T) {
 
 func TestValidateCfg(t *testing.T) {
 	dir := t.TempDir()
+	now := time.Now()
 	cfgs := []ReplayConfig{
 		{
-			Username: "u1",
+			Username:  "u1",
+			StartTime: now,
 		},
 		{
-			Input: dir,
+			Input:     dir,
+			StartTime: now,
 		},
 		{
-			Input:    filepath.Join(dir, "input"),
-			Username: "u1",
+			Input:     filepath.Join(dir, "input"),
+			Username:  "u1",
+			StartTime: now,
 		},
 		{
-			Input:    dir,
-			Username: "u1",
-			Speed:    0.01,
+			Input:     dir,
+			Username:  "u1",
+			Speed:     0.01,
+			StartTime: now,
 		},
 		{
-			Input:    dir,
-			Username: "u1",
-			Speed:    100,
+			Input:     dir,
+			Username:  "u1",
+			Speed:     100,
+			StartTime: now,
+		},
+		{
+			Input:     dir,
+			Username:  "u1",
+			StartTime: now.Add(time.Hour),
+		},
+		{
+			Input:     dir,
+			Username:  "u1",
+			StartTime: now.Add(-time.Hour),
 		},
 	}
 
@@ -105,11 +122,12 @@ func TestReplaySpeed(t *testing.T) {
 		cmdCh := make(chan *cmd.Command, 10)
 		loader := newMockNormalLoader()
 		cfg := ReplayConfig{
-			Input:    t.TempDir(),
-			Username: "u1",
-			Speed:    speed,
-			reader:   loader,
-			report:   newMockReport(replay.exceptionCh),
+			Input:     t.TempDir(),
+			Username:  "u1",
+			Speed:     speed,
+			StartTime: time.Now(),
+			reader:    loader,
+			report:    newMockReport(replay.exceptionCh),
 			connCreator: func(connID uint64) conn.Conn {
 				return &mockConn{
 					connID:  connID,
@@ -166,10 +184,11 @@ func TestProgress(t *testing.T) {
 	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
 	cfg := ReplayConfig{
-		Input:    dir,
-		Username: "u1",
-		reader:   loader,
-		report:   newMockReport(replay.exceptionCh),
+		Input:     dir,
+		Username:  "u1",
+		StartTime: time.Now(),
+		reader:    loader,
+		report:    newMockReport(replay.exceptionCh),
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockConn{
 				connID:  connID,
@@ -211,10 +230,11 @@ func TestPendingCmds(t *testing.T) {
 	replay := NewReplay(lg, id.NewIDManager())
 	defer replay.Close()
 	cfg := ReplayConfig{
-		Input:    dir,
-		Username: "u1",
-		reader:   loader,
-		report:   newMockReport(replay.exceptionCh),
+		Input:     dir,
+		Username:  "u1",
+		StartTime: time.Now(),
+		reader:    loader,
+		report:    newMockReport(replay.exceptionCh),
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockPendingConn{
 				connID:  connID,

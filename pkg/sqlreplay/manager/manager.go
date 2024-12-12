@@ -6,7 +6,6 @@ package manager
 import (
 	"crypto/tls"
 	"encoding/json"
-	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -98,7 +97,8 @@ func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
 	}
 	newJob := &captureJob{
 		job: job{
-			startTime: time.Now(),
+			// cfg.StartTime may act as the job ID in a TiProxy cluster.
+			startTime: cfg.StartTime,
 		},
 		cfg: cfg,
 	}
@@ -126,7 +126,8 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 	}
 	newJob := &replayJob{
 		job: job{
-			startTime: time.Now(),
+			// cfg.StartTime may act as the job ID in a TiProxy cluster.
+			startTime: cfg.StartTime,
 		},
 		cfg: cfg,
 	}

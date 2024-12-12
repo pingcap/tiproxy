@@ -32,6 +32,7 @@ func TestStartAndStop(t *testing.T) {
 		Output:    dir,
 		Duration:  10 * time.Second,
 		cmdLogger: writer,
+		StartTime: time.Now(),
 	}
 
 	// start capture and the traffic should be outputted
@@ -72,6 +73,7 @@ func TestConcurrency(t *testing.T) {
 	cfg := CaptureConfig{
 		Output:         dir,
 		Duration:       10 * time.Second,
+		StartTime:      time.Now(),
 		bufferCap:      12 * 1024,
 		flushThreshold: 8 * 1024,
 		cmdLogger:      writer,
@@ -125,19 +127,37 @@ func TestConcurrency(t *testing.T) {
 }
 
 func TestCaptureCfgError(t *testing.T) {
+	now := time.Now()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "traffic.log")
 	require.NoError(t, os.WriteFile(path, []byte{}, 0666))
 	cfgs := []CaptureConfig{
 		{
-			Duration: 10 * time.Second,
+			Duration:  10 * time.Second,
+			StartTime: now,
 		},
 		{
-			Output: dir,
+			Output:    dir,
+			StartTime: now,
 		},
 		{
 			Duration: 10 * time.Second,
-			Output:   path,
+			Output:   dir,
+		},
+		{
+			Duration:  10 * time.Second,
+			Output:    path,
+			StartTime: now.Add(time.Hour),
+		},
+		{
+			Duration:  10 * time.Second,
+			Output:    path,
+			StartTime: now.Add(-time.Hour),
+		},
+		{
+			Duration:  10 * time.Second,
+			Output:    path,
+			StartTime: now,
 		},
 	}
 
@@ -147,8 +167,9 @@ func TestCaptureCfgError(t *testing.T) {
 	}
 
 	cfg := CaptureConfig{
-		Output:   dir,
-		Duration: 10 * time.Second,
+		Output:    dir,
+		Duration:  10 * time.Second,
+		StartTime: now,
 	}
 	require.NoError(t, cfg.Validate())
 	require.Equal(t, bufferCap, cfg.bufferCap)
@@ -166,6 +187,7 @@ func TestProgress(t *testing.T) {
 		Output:    t.TempDir(),
 		Duration:  10 * time.Second,
 		cmdLogger: writer,
+		StartTime: time.Now(),
 	}
 	setStartTime := func(t time.Time) {
 		cpt.Lock()
@@ -212,6 +234,7 @@ func TestInitConn(t *testing.T) {
 		Output:    t.TempDir(),
 		Duration:  10 * time.Second,
 		cmdLogger: writer,
+		StartTime: time.Now(),
 	}
 
 	require.NoError(t, cpt.Start(cfg))
@@ -246,6 +269,7 @@ func TestQuit(t *testing.T) {
 		Output:    t.TempDir(),
 		Duration:  10 * time.Second,
 		cmdLogger: writer,
+		StartTime: time.Now(),
 	}
 
 	require.NoError(t, cpt.Start(cfg))
@@ -299,8 +323,9 @@ func TestFilterCmds(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := CaptureConfig{
-		Output:   dir,
-		Duration: 10 * time.Second,
+		Output:    dir,
+		Duration:  10 * time.Second,
+		StartTime: time.Now(),
 	}
 	for i, test := range tests {
 		cpt := NewCapture(zap.NewNop())

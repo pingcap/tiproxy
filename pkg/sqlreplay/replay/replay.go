@@ -54,8 +54,11 @@ type ReplayConfig struct {
 	Username string
 	Password string
 	KeyFile  string
-	Speed    float64
-	ReadOnly bool
+	// It's specified when executing with the statement `TRAFFIC REPLAY` so that all TiProxy instances
+	// use the same start time and the time acts as the job ID.
+	StartTime time.Time
+	Speed     float64
+	ReadOnly  bool
 	// the following fields are for testing
 	reader            cmd.LineReader
 	report            report.Report
@@ -84,6 +87,15 @@ func (cfg *ReplayConfig) Validate() error {
 		cfg.Speed = 1
 	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
 		return errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
+	}
+	// Maybe there's a time bias between TiDB and TiProxy, so add one minute.
+	now := time.Now()
+	if cfg.StartTime.IsZero() {
+		return errors.New("start time is not specified")
+	} else if now.Add(time.Minute).Before(cfg.StartTime) {
+		return errors.New("start time should not be in the future")
+	} else if cfg.StartTime.Add(time.Minute).Before(now) {
+		return errors.New("start time should not be in the past")
 	}
 	if cfg.abortThreshold == 0 {
 		cfg.abortThreshold = abortThreshold
@@ -134,7 +146,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	defer r.Unlock()
 	r.cfg = cfg
 	r.meta = *r.readMeta()
-	r.startTime = time.Now()
+	r.startTime = cfg.StartTime
 	r.endTime = time.Time{}
 	r.progress = 0
 	r.decodedCmds.Store(0)
@@ -161,6 +173,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	childCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 	if err := r.report.Start(childCtx, report.ReportConfig{
+		StartTime: r.startTime,
 		TlsConfig: r.backendTLSConfig,
 	}); err != nil {
 		return err

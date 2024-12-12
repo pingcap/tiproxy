@@ -51,9 +51,12 @@ type Capture interface {
 }
 
 type CaptureConfig struct {
-	Output             string
-	EncryptMethod      string
-	KeyFile            string
+	Output        string
+	EncryptMethod string
+	KeyFile       string
+	// It's specified when executing with the statement `TRAFFIC CAPTURE` so that all TiProxy instances
+	// use the same start time and the time acts as the job ID.
+	StartTime          time.Time
 	Duration           time.Duration
 	Compress           bool
 	cmdLogger          store.Writer
@@ -81,6 +84,15 @@ func (cfg *CaptureConfig) Validate() error {
 	}
 	if cfg.Duration == 0 {
 		return errors.New("duration is required")
+	}
+	// Maybe there's a time bias between TiDB and TiProxy, so add one minute.
+	now := time.Now()
+	if cfg.StartTime.IsZero() {
+		return errors.New("start time is not specified")
+	} else if now.Add(time.Minute).Before(cfg.StartTime) {
+		return errors.New("start time should not be in the future")
+	} else if cfg.StartTime.Add(cfg.Duration).Before(now) {
+		return errors.New("start time should not be in the past")
 	}
 	if cfg.bufferCap == 0 {
 		cfg.bufferCap = bufferCap
@@ -133,7 +145,7 @@ func (c *capture) Start(cfg CaptureConfig) error {
 		return errors.Errorf("traffic capture is running, start time: %s", c.startTime.String())
 	}
 	c.cfg = cfg
-	c.startTime = time.Now()
+	c.startTime = cfg.StartTime
 	c.endTime = time.Time{}
 	c.progress = 0
 	c.capturedCmds = 0
