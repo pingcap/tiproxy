@@ -73,7 +73,7 @@ func TestInsertExceptions(t *testing.T) {
 				},
 			},
 			stmtID: []uint32{2},
-			args:   [][]any{{"mock error", "wrap: mock error", otherSample1.Time().String(), uint64(1), uint64(1)}},
+			args:   [][]any{{now.String(), "mock error", "wrap: mock error", otherSample1.Time().String(), uint64(1), uint64(1)}},
 		},
 		{
 			tp: conn.Other,
@@ -88,8 +88,8 @@ func TestInsertExceptions(t *testing.T) {
 				},
 			},
 			stmtID: []uint32{2, 2},
-			args: [][]any{{"mock error", "mock error", otherSample2.Time().String(), uint64(2), uint64(2)},
-				{"another error", "another error", otherSample3.Time().String(), uint64(2), uint64(2)}},
+			args: [][]any{{now.String(), "mock error", "mock error", otherSample2.Time().String(), uint64(2), uint64(2)},
+				{now.String(), "another error", "another error", otherSample3.Time().String(), uint64(2), uint64(2)}},
 		},
 		{
 			tp: conn.Fail,
@@ -100,7 +100,7 @@ func TestInsertExceptions(t *testing.T) {
 				},
 			},
 			stmtID: []uint32{1},
-			args: [][]any{{"Query", "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471", "select 1", "mock error",
+			args: [][]any{{now.String(), "Query", "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471", "select 1", "mock error",
 				uint64(1), now.String(), failSample.Time().String(), uint64(1), uint64(1)}},
 		},
 	}
@@ -115,12 +115,12 @@ func TestInsertExceptions(t *testing.T) {
 		err := db.Init(context.Background())
 		require.NoErrorf(t, err, "case %d", i)
 		cn.clear()
-		err = db.InsertExceptions(test.tp, test.colls)
+		err = db.InsertExceptions(now, test.tp, test.colls)
 		require.NoErrorf(t, err, "case %d", i)
 		require.Equal(t, test.stmtID, cn.stmtID, "case %d", i)
 		if len(test.args) > 1 {
-			sort.Slice(test.args, func(i, j int) bool { return test.args[i][0].(string) < test.args[j][0].(string) })
-			sort.Slice(cn.args, func(i, j int) bool { return cn.args[i][0].(string) < cn.args[j][0].(string) })
+			sort.Slice(test.args, func(i, j int) bool { return test.args[i][1].(string) < test.args[j][1].(string) })
+			sort.Slice(cn.args, func(i, j int) bool { return cn.args[i][1].(string) < cn.args[j][1].(string) })
 		}
 		require.Equal(t, test.args, cn.args, "case %d", i)
 		db.Close()

@@ -20,7 +20,7 @@ type BackendConnCreator func() conn.BackendConn
 
 type ReportDB interface {
 	Init(ctx context.Context) error
-	InsertExceptions(tp conn.ExceptionType, m map[string]*expCollection) error
+	InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection) error
 	Close()
 }
 
@@ -93,18 +93,18 @@ func (rdb *reportDB) initStmts(ctx context.Context) (err error) {
 	return
 }
 
-func (rdb *reportDB) InsertExceptions(tp conn.ExceptionType, m map[string]*expCollection) error {
+func (rdb *reportDB) InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection) error {
 	for _, value := range m {
 		var args []any
 		switch tp {
 		case conn.Fail:
 			sample := value.sample.(*conn.FailException)
 			command := sample.Command()
-			args = []any{command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(),
+			args = []any{startTime.String(), command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(),
 				command.StartTs.String(), sample.Time().String(), value.count, value.count}
 		case conn.Other:
 			sample := value.sample.(*conn.OtherException)
-			args = []any{sample.Key(), sample.Error(), sample.Time().String(), value.count, value.count}
+			args = []any{startTime.String(), sample.Key(), sample.Error(), sample.Time().String(), value.count, value.count}
 		default:
 			return errors.WithStack(errors.New("unknown exception type"))
 		}

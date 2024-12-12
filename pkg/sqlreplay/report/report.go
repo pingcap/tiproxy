@@ -34,6 +34,7 @@ func (c *expCollection) inc() {
 }
 
 type ReportConfig struct {
+	StartTime     time.Time
 	TlsConfig     *tls.Config
 	flushInterval time.Duration
 }
@@ -120,7 +121,7 @@ func (r *report) readExceptions(ctx context.Context) {
 // exceptions are flushed even when the context is canceled, so do not pass the canceled context in.
 func (r *report) flush() {
 	for tp, m := range r.exceptions {
-		if err := r.db.InsertExceptions(tp, m); err != nil {
+		if err := r.db.InsertExceptions(r.cfg.StartTime, tp, m); err != nil {
 			r.lg.Error("insert exceptions failed", zap.Stringer("type", tp), zap.Int("exceptions", len(m)), zap.Error(err))
 		}
 		for k := range m {

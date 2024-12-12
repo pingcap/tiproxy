@@ -173,6 +173,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	childCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 	if err := r.report.Start(childCtx, report.ReportConfig{
+		StartTime: r.startTime,
 		TlsConfig: r.backendTLSConfig,
 	}); err != nil {
 		return err
