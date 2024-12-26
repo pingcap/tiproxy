@@ -11,45 +11,26 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestFileRotation(t *testing.T) {
 	tmpDir := t.TempDir()
-	writer := newRotateWriter(WriterCfg{
+	writer := newRotateWriter(zap.NewNop(), WriterCfg{
 		Dir:      tmpDir,
-		FileSize: 1,
-		Compress: true,
+		FileSize: 1000,
 	})
-	defer writer.Close()
-
-	data := make([]byte, 100*1024)
-	for i := 0; i < 11; i++ {
-		require.NoError(t, writer.Write(data))
+	data := make([]byte, 100)
+	for i := 0; i < 25; i++ {
+		n, err := writer.Write(data)
+		require.NoError(t, err)
+		require.Equal(t, len(data), n)
 	}
-
-	// files are rotated and compressed at backendground asynchronously
-	require.Eventually(t, func() bool {
-		files := listFiles(t, tmpDir)
-		count := 0
-		compressed := false
-		for _, f := range files {
-			if strings.HasPrefix(f, "traffic") {
-				count++
-			}
-			if strings.HasSuffix(f, ".gz") {
-				compressed = true
-			}
-		}
-		if count == 2 && compressed {
-			return true
-		}
-		t.Logf("traffic files: %v", files)
-		return false
-	}, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, 3, countTrafficFiles(t, tmpDir))
+	require.NoError(t, writer.Close())
 }
 
 func listFiles(t *testing.T, dir string) []string {
@@ -60,6 +41,50 @@ func listFiles(t *testing.T, dir string) []string {
 		names = append(names, f.Name())
 	}
 	return names
+}
+
+func countTrafficFiles(t *testing.T, dir string) int {
+	files, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	count := 0
+	for _, f := range files {
+		if strings.HasPrefix(f.Name(), "traffic") {
+			count++
+		}
+	}
+	return count
+}
+
+func TestCompress(t *testing.T) {
+	tests := []struct {
+		compress bool
+		ext      string
+	}{
+		{
+			compress: true,
+			ext:      fileCompressFormat,
+		},
+		{
+			compress: false,
+			ext:      fileNameSuffix,
+		},
+	}
+
+	tmpDir := t.TempDir()
+	for i, test := range tests {
+		writer := newRotateWriter(zap.NewNop(), WriterCfg{
+			Dir:      tmpDir,
+			Compress: test.compress,
+		})
+		n, err := writer.Write([]byte("test"))
+		require.NoError(t, err, "case %d", i)
+		require.Equal(t, 4, n, "case %d", i)
+		files := listFiles(t, tmpDir)
+		require.Len(t, files, 1, "case %d", i)
+		require.True(t, strings.HasSuffix(files[0], test.ext), "case %d", i)
+		require.NoError(t, os.Remove(filepath.Join(tmpDir, files[0])), "case %d", i)
+		require.NoError(t, writer.Close(), "case %d", i)
+	}
 }
 
 func TestParseFileTs(t *testing.T) {
@@ -191,45 +216,35 @@ func TestReadGZip(t *testing.T) {
 		require.NoError(t, os.RemoveAll(tmpDir))
 		require.NoError(t, os.MkdirAll(tmpDir, 0777))
 
-		writer := newRotateWriter(WriterCfg{
+		writer := newRotateWriter(zap.NewNop(), WriterCfg{
 			Dir:      tmpDir,
-			FileSize: 1,
+			FileSize: 1000,
 			Compress: compress,
 		})
-		data := make([]byte, 100*1024)
-		for i := 0; i < 11; i++ {
-			require.NoError(t, writer.Write(data))
+		data := make([]byte, 100)
+		for i := 0; i < 12; i++ {
+			n, err := writer.Write(data)
+			require.NoError(t, err)
+			require.Equal(t, len(data), n)
 		}
-		// files are rotated and compressed at backendground asynchronously
-		if compress {
-			require.Eventually(t, func() bool {
-				files := listFiles(t, tmpDir)
-				for _, f := range files {
-					if strings.HasPrefix(f, "traffic") && strings.HasSuffix(f, ".gz") {
-						return true
-					}
-				}
-				t.Logf("traffic files: %v", files)
-				return false
-			}, 5*time.Second, 10*time.Millisecond)
-		} else {
-			time.Sleep(100 * time.Millisecond)
-			files := listFiles(t, tmpDir)
-			for _, f := range files {
-				if strings.HasPrefix(f, "traffic") {
-					require.False(t, strings.HasSuffix(f, ".gz"))
-				}
+		files := listFiles(t, tmpDir)
+		for _, f := range files {
+			require.True(t, strings.HasPrefix(f, fileNamePrefix))
+			if compress {
+				require.True(t, strings.HasSuffix(f, fileCompressFormat))
+			} else {
+				require.True(t, strings.HasSuffix(f, fileNameSuffix))
 			}
 		}
 		require.NoError(t, writer.Close())
 
 		lg, _ := logger.CreateLoggerForTest(t)
 		l := newRotateReader(lg, tmpDir)
-		for i := 0; i < 11; i++ {
-			data = make([]byte, 100*1024)
+		for i := 0; i < 12; i++ {
+			data = make([]byte, 100)
 			_, err := io.ReadFull(l, data)
 			require.NoError(t, err)
-			for j := 0; j < 100*1024; j++ {
+			for j := 0; j < 100; j++ {
 				require.Equal(t, byte(0), data[j])
 			}
 		}

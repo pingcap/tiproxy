@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,13 +231,15 @@ func TestEncryptMethods(t *testing.T) {
 		EncryptPlain,
 		EncryptAes,
 	} {
-		writer, err := NewWriter(WriterCfg{
+		writer, err := NewWriter(zap.NewNop(), WriterCfg{
 			Dir:           dir,
 			EncryptMethod: method,
 			KeyFile:       keyFile,
 		})
 		require.NoError(t, err, method)
-		require.NoError(t, writer.Write([]byte("test")), method)
+		n, err := writer.Write([]byte("test"))
+		require.NoError(t, err, method)
+		require.Equal(t, 4, n, method)
 		require.NoError(t, writer.Close(), method)
 
 		reader, err := NewReader(zap.NewNop(), ReaderCfg{
@@ -248,7 +251,7 @@ func TestEncryptMethods(t *testing.T) {
 		data := make([]byte, 4)
 		curFile, lineIdx, err := reader.Read(data)
 		require.NoError(t, err, method)
-		require.Equal(t, fileName, curFile, method)
+		require.True(t, strings.HasPrefix(curFile, fileNamePrefix), method)
 		require.Equal(t, 1, lineIdx, method)
 		reader.Close()
 	}

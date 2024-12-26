@@ -21,11 +21,10 @@ func newMockWriter(store.WriterCfg) *mockWriter {
 	return &mockWriter{}
 }
 
-func (w *mockWriter) Write(p []byte) error {
+func (w *mockWriter) Write(p []byte) (int, error) {
 	w.Lock()
 	defer w.Unlock()
-	_, err := w.buf.Write(p)
-	return err
+	return w.buf.Write(p)
 }
 
 func (w *mockWriter) getData() []byte {

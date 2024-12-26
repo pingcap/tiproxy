@@ -236,7 +236,7 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	cmdLogger := c.cfg.cmdLogger
 	if cmdLogger == nil {
 		var err error
-		cmdLogger, err = store.NewWriter(store.WriterCfg{
+		cmdLogger, err = store.NewWriter(c.lg.Named("writer"), store.WriterCfg{
 			Dir:           c.cfg.Output,
 			EncryptMethod: c.cfg.EncryptMethod,
 			KeyFile:       c.cfg.KeyFile,
@@ -249,8 +249,7 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	}
 	// Flush all buffers even if the context is timeout.
 	for buf := range bufCh {
-		// TODO: each write size should be less than MaxSize.
-		if err := cmdLogger.Write(buf.Bytes()); err != nil {
+		if _, err := cmdLogger.Write(buf.Bytes()); err != nil {
 			c.stop(errors.Wrapf(err, "failed to flush traffic to disk"))
 			break
 		}

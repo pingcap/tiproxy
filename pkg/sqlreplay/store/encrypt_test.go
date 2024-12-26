@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -15,34 +16,37 @@ import (
 
 func TestAes256(t *testing.T) {
 	dir := t.TempDir()
-	rotateWriter := newRotateWriter(WriterCfg{
+	rotateWriter := newRotateWriter(zap.NewNop(), WriterCfg{
 		Dir:      dir,
-		FileSize: 1,
+		FileSize: 1000,
 	})
 	keyFile := filepath.Join(dir, "key")
 	genAesKey(t, keyFile)
 	aesWriter, err := newAESCTRWriter(rotateWriter, keyFile)
 	require.NoError(t, err)
-	require.NoError(t, aesWriter.Write([]byte("test")))
+	n, err := aesWriter.Write([]byte("test"))
+	require.Equal(t, 4, n)
+	require.NoError(t, err)
 	require.NoError(t, aesWriter.Close())
 
 	rotateReader := newRotateReader(zap.NewNop(), dir)
 	aesReader, err := newAESCTRReader(rotateReader, keyFile)
 	require.NoError(t, err)
 	data := make([]byte, 100)
-	n, err := io.ReadFull(aesReader, data)
+	n, err = io.ReadFull(aesReader, data)
 	require.Equal(t, len("test"), n)
 	require.ErrorContains(t, err, "unexpected EOF")
 	require.Equal(t, []byte("test"), data[:n])
-	require.Equal(t, fileName, aesReader.CurFile())
-	aesReader.Close()
+	fileName := aesReader.CurFile()
+	require.True(t, strings.HasPrefix(fileName, fileNamePrefix))
+	require.NoError(t, aesReader.Close())
 }
 
 func TestAes256Error(t *testing.T) {
 	dir := t.TempDir()
-	rotateWriter := newRotateWriter(WriterCfg{
+	rotateWriter := newRotateWriter(zap.NewNop(), WriterCfg{
 		Dir:      dir,
-		FileSize: 1,
+		FileSize: 1000,
 	})
 	keyFile := filepath.Join(dir, "key")
 	_, err := newAESCTRWriter(rotateWriter, keyFile)

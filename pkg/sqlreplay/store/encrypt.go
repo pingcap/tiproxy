@@ -43,10 +43,10 @@ func newAESCTRWriter(writer Writer, keyFile string) (*aesCTRWriter, error) {
 	}, nil
 }
 
-func (ctr *aesCTRWriter) Write(data []byte) error {
+func (ctr *aesCTRWriter) Write(data []byte) (int, error) {
 	if !ctr.inited {
 		if err := ctr.writeIV(); err != nil {
-			return err
+			return 0, err
 		}
 		ctr.inited = true
 	}
@@ -55,7 +55,8 @@ func (ctr *aesCTRWriter) Write(data []byte) error {
 }
 
 func (ctr *aesCTRWriter) writeIV() error {
-	return ctr.Writer.Write(ctr.iv)
+	_, err := ctr.Writer.Write(ctr.iv)
+	return err
 }
 
 func (ctr *aesCTRWriter) Close() error {
@@ -118,8 +119,9 @@ func (ctr *aesCTRReader) CurFile() string {
 	return ctr.Reader.CurFile()
 }
 
-func (ctr *aesCTRReader) Close() {
+func (ctr *aesCTRReader) Close() error {
 	ctr.Reader.Close()
+	return nil
 }
 
 func readAesKey(filename string) ([]byte, error) {

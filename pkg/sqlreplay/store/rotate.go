@@ -6,56 +6,115 @@ package store
 import (
 	"bufio"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type Writer interface {
-	Write([]byte) error
-	Close() error
+	io.WriteCloser
 }
 
 var _ Writer = (*rotateWriter)(nil)
 
 type rotateWriter struct {
-	lg *lumberjack.Logger
+	cfg       WriterCfg
+	writer    io.WriteCloser
+	file      *os.File
+	lg        *zap.Logger
+	lastMilli int64
+	writeLen  int
 }
 
-func newRotateWriter(cfg WriterCfg) *rotateWriter {
+func newRotateWriter(lg *zap.Logger, cfg WriterCfg) *rotateWriter {
 	if cfg.FileSize == 0 {
 		cfg.FileSize = fileSize
 	}
 	return &rotateWriter{
-		lg: &lumberjack.Logger{
-			Filename:  filepath.Join(cfg.Dir, fileName),
-			MaxSize:   cfg.FileSize,
-			LocalTime: true,
-			Compress:  cfg.Compress,
-		},
+		cfg: cfg,
+		lg:  lg,
 	}
 }
 
-func (w *rotateWriter) Write(data []byte) error {
-	_, err := w.lg.Write(data)
+func (w *rotateWriter) Write(data []byte) (n int, err error) {
+	if w.writer == nil || reflect.ValueOf(w.writer).IsNil() {
+		if err = w.createFile(); err != nil {
+			return
+		}
+	}
+	if n, err = w.writer.Write(data); err != nil {
+		return n, errors.WithStack(err)
+	}
+	w.writeLen += n
+	if w.writeLen >= w.cfg.FileSize {
+		err = w.closeFile()
+		w.writeLen = 0
+	}
+	return n, err
+}
+
+func (w *rotateWriter) createFile() error {
+	// Get a different time if the current time is the same as the last time.
+	now := time.Now()
+	if millis := now.UnixMilli(); millis <= w.lastMilli {
+		w.lastMilli += 1
+		now = time.Unix(w.lastMilli/1e3, (w.lastMilli%1e3)*1e6)
+	} else {
+		w.lastMilli = millis
+	}
+	t := now.Format(fileTsLayout)
+
+	var ext string
+	if w.cfg.Compress {
+		ext = fileCompressFormat
+	}
+	fileName := fmt.Sprintf("%s-%s%s%s", fileNamePrefix, t, fileNameSuffix, ext)
+	path := filepath.Join(w.cfg.Dir, fileName)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	w.file = file
+	if w.cfg.Compress {
+		w.writer = gzip.NewWriter(file)
+	} else {
+		w.writer = file
+	}
+	return nil
+}
+
+func (w *rotateWriter) closeFile() error {
+	var err error
+	if w.writer != nil && !reflect.ValueOf(w.writer).IsNil() {
+		if err = w.writer.Close(); err != nil {
+			w.lg.Warn("failed to close writer", zap.Error(err))
+		}
+		w.writer = nil
+	}
+	if w.cfg.Compress && w.file != nil {
+		if err = w.file.Close(); err != nil {
+			w.lg.Warn("failed to close traffic file", zap.Error(err))
+		}
+	}
+	w.file = nil
 	return err
 }
 
 func (w *rotateWriter) Close() error {
-	return w.lg.Close()
+	return w.closeFile()
 }
 
 type Reader interface {
-	Read([]byte) (int, error)
+	io.ReadCloser
 	CurFile() string
-	Close()
 }
 
 var _ Reader = (*rotateReader)(nil)
@@ -105,13 +164,15 @@ func (r *rotateReader) CurFile() string {
 	return r.curFileName
 }
 
-func (r *rotateReader) Close() {
+func (r *rotateReader) Close() error {
 	if r.curFile != nil {
 		if err := r.curFile.Close(); err != nil {
 			r.lg.Warn("failed to close file", zap.String("filename", r.curFile.Name()), zap.Error(err))
+			return err
 		}
 		r.curFile = nil
 	}
+	return nil
 }
 
 func (r *rotateReader) nextReader() error {
@@ -133,7 +194,7 @@ func (r *rotateReader) nextReader() error {
 		if !strings.HasPrefix(name, fileNamePrefix) {
 			continue
 		}
-		// traffic.log
+		// traffic.log (used for lumberjack before, not used anymore)
 		if name == fileName {
 			if minFileName == "" {
 				minFileTs = math.MaxInt64

@@ -25,8 +25,8 @@ type WriterCfg struct {
 	Compress      bool
 }
 
-func NewWriter(cfg WriterCfg) (Writer, error) {
-	rotateWriter := newRotateWriter(cfg)
+func NewWriter(lg *zap.Logger, cfg WriterCfg) (Writer, error) {
+	rotateWriter := newRotateWriter(lg, cfg)
 	encryptMethod := strings.ToLower(cfg.EncryptMethod)
 	switch encryptMethod {
 	case "", EncryptPlain:
