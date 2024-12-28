@@ -87,26 +87,27 @@ func TestCompress(t *testing.T) {
 	}
 }
 
-func TestParseFileTs(t *testing.T) {
+func TestParseFileIdx(t *testing.T) {
 	tests := []struct {
 		fileName string
-		ts       int64
+		fileIdx  int
 	}{
-		{"traffic-2024-08-29T17-37-12.477.log", 1724953032477},
-		{"traffic-2024-08-29T17-37-12.477.log.gz", 1724953032477},
-		{"traffic-2024-08-29T17-37-12.477.gz", 0},
+		{"traffic-1.log", 1},
+		{"traffic-2.log.gz", 2},
+		{"traffic-100.log.gz", 100},
 		{"traffic-2024-08-29T17-37-12.log", 0},
 		{"traffic-2024-08-29T17-37-12.log.gz", 0},
 		{"traffic-.log", 0},
 		{"traffic-.log.gz", 0},
-		{"test.log", 0},
+		{"traffic.log", 0},
+		{"traffic-100.gz", 0},
 		{"test", 0},
 		{"traffic.log.gz", 0},
 	}
 
 	for i, test := range tests {
-		ts := parseFileTs(test.fileName)
-		require.Equal(t, test.ts, ts, "case %d", i)
+		idx := parseFileIdx(test.fileName)
+		require.Equal(t, test.fileIdx, idx, "case %d", i)
 	}
 }
 
@@ -121,58 +122,43 @@ func TestIterateFiles(t *testing.T) {
 		},
 		{
 			fileNames: []string{
-				"traffic.log",
+				"traffic-1.log.gz",
 			},
 			order: []string{
-				"traffic.log",
+				"traffic-1.log.gz",
 			},
 		},
 		{
 			fileNames: []string{
-				"traffic-2024-08-29T17-37-12.477.log.gz",
-				"traffic.log",
+				"traffic-2.log.gz",
+				"traffic-1.log.gz",
 			},
 			order: []string{
-				"traffic-2024-08-29T17-37-12.477.log.gz",
-				"traffic.log",
+				"traffic-1.log.gz",
+				"traffic-2.log.gz",
 			},
 		},
 		{
 			fileNames: []string{
-				"traffic-2024-08-29T17-37-12.477.log.gz",
-				"traffic-2024-08-30T17-37-12.477.log.gz",
-				"traffic.log",
+				"traffic-1.log",
+				"traffic-2.log",
 			},
 			order: []string{
-				"traffic-2024-08-29T17-37-12.477.log.gz",
-				"traffic-2024-08-30T17-37-12.477.log.gz",
-				"traffic.log",
+				"traffic-1.log",
+				"traffic-2.log",
 			},
 		},
 		{
 			fileNames: []string{
-				"traffic-2024-08-29T17-37-12.477.log",
-				"traffic-2024-08-30T17-37-12.477.log",
-				"traffic.log",
-			},
-			order: []string{
-				"traffic-2024-08-29T17-37-12.477.log",
-				"traffic-2024-08-30T17-37-12.477.log",
-				"traffic.log",
-			},
-		},
-		{
-			fileNames: []string{
-				"traffic-2024-08-29T17-37-12.477.log.gz",
-				"traffic-2024-08-30T17-37-12.477.log.gz",
+				"traffic-1.log.gz",
+				"traffic-2.log.gz",
 				"traffic.log",
 				"meta",
 				"dir",
 			},
 			order: []string{
-				"traffic-2024-08-29T17-37-12.477.log.gz",
-				"traffic-2024-08-30T17-37-12.477.log.gz",
-				"traffic.log",
+				"traffic-1.log.gz",
+				"traffic-2.log.gz",
 			},
 		},
 	}
@@ -197,7 +183,7 @@ func TestIterateFiles(t *testing.T) {
 			}
 			require.NoError(t, f.Close())
 		}
-		l := newRotateReader(lg, dir)
+		l := newRotateReader(lg, ReaderCfg{Dir: dir})
 		fileOrder := make([]string, 0, len(test.order))
 		for {
 			if err := l.nextReader(); err != nil {
@@ -239,7 +225,7 @@ func TestReadGZip(t *testing.T) {
 		require.NoError(t, writer.Close())
 
 		lg, _ := logger.CreateLoggerForTest(t)
-		l := newRotateReader(lg, tmpDir)
+		l := newRotateReader(lg, ReaderCfg{Dir: tmpDir})
 		for i := 0; i < 12; i++ {
 			data = make([]byte, 100)
 			_, err := io.ReadFull(l, data)

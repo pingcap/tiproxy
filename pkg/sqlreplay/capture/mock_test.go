@@ -5,12 +5,13 @@ package capture
 
 import (
 	"bytes"
+	"io"
 	"sync"
 
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 )
 
-var _ store.Writer = (*mockWriter)(nil)
+var _ io.WriteCloser = (*mockWriter)(nil)
 
 type mockWriter struct {
 	sync.Mutex

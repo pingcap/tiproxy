@@ -6,6 +6,7 @@ package capture
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -59,7 +60,7 @@ type CaptureConfig struct {
 	StartTime          time.Time
 	Duration           time.Duration
 	Compress           bool
-	cmdLogger          store.Writer
+	cmdLogger          io.WriteCloser
 	bufferCap          int
 	flushThreshold     int
 	maxBuffers         int

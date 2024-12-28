@@ -4,18 +4,14 @@
 package store
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 func TestReadLine(t *testing.T) {
@@ -93,14 +89,13 @@ func TestReadLine(t *testing.T) {
 	dir := t.TempDir()
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := ReaderCfg{Dir: dir}
-	now := time.Now()
 	for i, test := range tests {
 		require.NoError(t, os.RemoveAll(dir), "case %d", i)
 		require.NoError(t, os.MkdirAll(dir, 0777), "case %d", i)
 		fileNames := make([]string, 0, len(test.data))
 		for j, data := range test.data {
-			name := fmt.Sprintf("traffic-%s.log", now.Add(time.Duration(j)*time.Second).Format(fileTsLayout))
-			err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0777)
+			name := fmt.Sprintf("%s%d%s", fileNamePrefix, j+1, fileNameSuffix)
+			err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600)
 			require.NoError(t, err, "case %d", i)
 			fileNames = append(fileNames, name)
 		}
@@ -117,7 +112,7 @@ func TestReadLine(t *testing.T) {
 			}
 		}
 		_, _, _, err = l.ReadLine()
-		require.True(t, errors.Is(err, io.EOF))
+		require.ErrorIs(t, err, io.EOF, "case %d, err %v", i, err)
 		l.Close()
 	}
 }
@@ -194,14 +189,13 @@ func TestRead(t *testing.T) {
 	dir := t.TempDir()
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := ReaderCfg{Dir: dir}
-	now := time.Now()
 	for i, test := range tests {
 		require.NoError(t, os.RemoveAll(dir), "case %d", i)
 		require.NoError(t, os.MkdirAll(dir, 0777), "case %d", i)
 		fileNames := make([]string, 0, len(test.data))
 		for j, data := range test.data {
-			name := fmt.Sprintf("traffic-%s.log", now.Add(time.Duration(j)*time.Second).Format(fileTsLayout))
-			err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0777)
+			name := fmt.Sprintf("%s%d%s", fileNamePrefix, j+1, fileNameSuffix)
+			err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600)
 			require.NoError(t, err, "case %d", i)
 			fileNames = append(fileNames, name)
 		}
@@ -217,42 +211,7 @@ func TestRead(t *testing.T) {
 			require.Equal(t, test.lineIdx[j], idx, "case %d", i)
 		}
 		_, _, err = l.Read(data)
-		require.True(t, errors.Is(err, io.EOF), "case %d, err %v", i, err)
+		require.ErrorIs(t, err, io.EOF, "case %d, err %v", i, err)
 		l.Close()
-	}
-}
-
-func TestEncryptMethods(t *testing.T) {
-	dir := t.TempDir()
-	keyFile := filepath.Join(dir, "key")
-	genAesKey(t, keyFile)
-	for _, method := range []string{
-		"",
-		EncryptPlain,
-		EncryptAes,
-	} {
-		writer, err := NewWriter(zap.NewNop(), WriterCfg{
-			Dir:           dir,
-			EncryptMethod: method,
-			KeyFile:       keyFile,
-		})
-		require.NoError(t, err, method)
-		n, err := writer.Write([]byte("test"))
-		require.NoError(t, err, method)
-		require.Equal(t, 4, n, method)
-		require.NoError(t, writer.Close(), method)
-
-		reader, err := NewReader(zap.NewNop(), ReaderCfg{
-			Dir:           dir,
-			EncryptMethod: method,
-			KeyFile:       keyFile,
-		})
-		require.NoError(t, err, method)
-		data := make([]byte, 4)
-		curFile, lineIdx, err := reader.Read(data)
-		require.NoError(t, err, method)
-		require.True(t, strings.HasPrefix(curFile, fileNamePrefix), method)
-		require.Equal(t, 1, lineIdx, method)
-		reader.Close()
 	}
 }

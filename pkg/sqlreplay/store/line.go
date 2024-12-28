@@ -6,15 +6,10 @@ package store
 import (
 	"bufio"
 	"fmt"
-	"strings"
+	"io"
 
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"go.uber.org/zap"
-)
-
-const (
-	EncryptPlain = "plaintext"
-	EncryptAes   = "aes256-ctr"
 )
 
 type WriterCfg struct {
@@ -25,17 +20,8 @@ type WriterCfg struct {
 	Compress      bool
 }
 
-func NewWriter(lg *zap.Logger, cfg WriterCfg) (Writer, error) {
-	rotateWriter := newRotateWriter(lg, cfg)
-	encryptMethod := strings.ToLower(cfg.EncryptMethod)
-	switch encryptMethod {
-	case "", EncryptPlain:
-		return rotateWriter, nil
-	case EncryptAes:
-		return newAESCTRWriter(rotateWriter, cfg.KeyFile)
-	default:
-		return nil, fmt.Errorf("unsupported encrypt method: %s", encryptMethod)
-	}
+func NewWriter(lg *zap.Logger, cfg WriterCfg) (io.WriteCloser, error) {
+	return newRotateWriter(lg, cfg), nil
 }
 
 type ReaderCfg struct {
@@ -56,18 +42,7 @@ type loader struct {
 }
 
 func NewReader(lg *zap.Logger, cfg ReaderCfg) (*loader, error) {
-	var reader Reader
-	reader = newRotateReader(lg, cfg.Dir)
-	encryptMethod := strings.ToLower(cfg.EncryptMethod)
-	switch encryptMethod {
-	case "", EncryptPlain:
-	case EncryptAes:
-		var err error
-		reader, err = newAESCTRReader(reader, cfg.KeyFile)
-		if err != nil {
-			return nil, err
-		}
-	}
+	reader := newRotateReader(lg, cfg)
 	return &loader{
 		cfg:       cfg,
 		lg:        lg,

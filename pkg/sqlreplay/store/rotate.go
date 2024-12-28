@@ -4,34 +4,26 @@
 package store
 
 import (
-	"bufio"
-	"compress/gzip"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
 )
 
-type Writer interface {
-	io.WriteCloser
-}
-
-var _ Writer = (*rotateWriter)(nil)
+var _ io.WriteCloser = (*rotateWriter)(nil)
 
 type rotateWriter struct {
-	cfg       WriterCfg
-	writer    io.WriteCloser
-	file      *os.File
-	lg        *zap.Logger
-	lastMilli int64
-	writeLen  int
+	cfg      WriterCfg
+	writer   io.WriteCloser
+	lg       *zap.Logger
+	fileIdx  int
+	writeLen int
 }
 
 func newRotateWriter(lg *zap.Logger, cfg WriterCfg) *rotateWriter {
@@ -62,50 +54,34 @@ func (w *rotateWriter) Write(data []byte) (n int, err error) {
 }
 
 func (w *rotateWriter) createFile() error {
-	// Get a different time if the current time is the same as the last time.
-	now := time.Now()
-	if millis := now.UnixMilli(); millis <= w.lastMilli {
-		w.lastMilli += 1
-		now = time.Unix(w.lastMilli/1e3, (w.lastMilli%1e3)*1e6)
-	} else {
-		w.lastMilli = millis
-	}
-	t := now.Format(fileTsLayout)
-
 	var ext string
 	if w.cfg.Compress {
 		ext = fileCompressFormat
 	}
-	fileName := fmt.Sprintf("%s-%s%s%s", fileNamePrefix, t, fileNameSuffix, ext)
+	w.fileIdx++
+	fileName := fmt.Sprintf("%s%d%s%s", fileNamePrefix, w.fileIdx, fileNameSuffix, ext)
 	path := filepath.Join(w.cfg.Dir, fileName)
+	// compressWriter -> encryptWriter -> file
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	w.file = file
+	if w.writer, err = newWriterWithEncryptOpts(file, w.cfg.EncryptMethod, w.cfg.KeyFile); err != nil {
+		return err
+	}
 	if w.cfg.Compress {
-		w.writer = gzip.NewWriter(file)
-	} else {
-		w.writer = file
+		w.writer = newCompressWriter(w.lg, w.writer)
 	}
 	return nil
 }
 
 func (w *rotateWriter) closeFile() error {
-	var err error
 	if w.writer != nil && !reflect.ValueOf(w.writer).IsNil() {
-		if err = w.writer.Close(); err != nil {
-			w.lg.Warn("failed to close writer", zap.Error(err))
-		}
+		err := w.writer.Close()
 		w.writer = nil
+		return err
 	}
-	if w.cfg.Compress && w.file != nil {
-		if err = w.file.Close(); err != nil {
-			w.lg.Warn("failed to close traffic file", zap.Error(err))
-		}
-	}
-	w.file = nil
-	return err
+	return nil
 }
 
 func (w *rotateWriter) Close() error {
@@ -120,24 +96,27 @@ type Reader interface {
 var _ Reader = (*rotateReader)(nil)
 
 type rotateReader struct {
-	dir string
-	// the time in the file name
+	cfg         ReaderCfg
 	curFileName string
-	curFileTs   int64
+	curFileIdx  int
 	curFile     *os.File
-	reader      *bufio.Reader
+	reader      io.Reader
 	lg          *zap.Logger
+	eof         bool
 }
 
-func newRotateReader(lg *zap.Logger, dir string) *rotateReader {
+func newRotateReader(lg *zap.Logger, cfg ReaderCfg) *rotateReader {
 	return &rotateReader{
-		dir: dir,
+		cfg: cfg,
 		lg:  lg,
 	}
 }
 
 func (r *rotateReader) Read(data []byte) (int, error) {
-	if r.reader == nil {
+	if r.eof {
+		return 0, io.EOF
+	}
+	if r.reader == nil || reflect.ValueOf(r.reader).IsNil() {
 		if err := r.nextReader(); err != nil {
 			return 0, err
 		}
@@ -151,7 +130,9 @@ func (r *rotateReader) Read(data []byte) (int, error) {
 		if err != io.EOF {
 			return m, errors.WithStack(err)
 		}
+		_ = r.Close()
 		if err := r.nextReader(); err != nil {
+			r.eof = true
 			return m, err
 		}
 		if m > 0 {
@@ -176,15 +157,11 @@ func (r *rotateReader) Close() error {
 }
 
 func (r *rotateReader) nextReader() error {
-	// has read the latest file
-	if r.curFileTs == math.MaxInt64 {
-		return io.EOF
-	}
-	files, err := os.ReadDir(r.dir)
+	files, err := os.ReadDir(r.cfg.Dir)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	var minFileTs int64
+	var minFileIdx int
 	var minFileName string
 	for _, file := range files {
 		if file.IsDir() {
@@ -194,80 +171,64 @@ func (r *rotateReader) nextReader() error {
 		if !strings.HasPrefix(name, fileNamePrefix) {
 			continue
 		}
-		// traffic.log (used for lumberjack before, not used anymore)
-		if name == fileName {
-			if minFileName == "" {
-				minFileTs = math.MaxInt64
-				minFileName = name
-			}
-			continue
-		}
-		// rotated traffic file
-		fileTs := parseFileTs(name)
-		if fileTs == 0 {
+		fileIdx := parseFileIdx(name)
+		if fileIdx == 0 {
 			r.lg.Warn("traffic file name is invalid", zap.String("filename", name))
 			continue
 		}
-		if fileTs <= r.curFileTs {
+		if fileIdx <= r.curFileIdx {
 			continue
 		}
-		if minFileName == "" || fileTs < minFileTs {
-			minFileTs = fileTs
+		if minFileName == "" || fileIdx < minFileIdx {
+			minFileIdx = fileIdx
 			minFileName = name
 		}
 	}
 	if minFileName == "" {
 		return io.EOF
 	}
-	fileReader, err := os.Open(filepath.Join(r.dir, minFileName))
+	fileReader, err := os.Open(filepath.Join(r.cfg.Dir, minFileName))
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if r.curFile != nil {
-		if err := r.curFile.Close(); err != nil {
-			r.lg.Warn("failed to close file", zap.String("filename", r.curFile.Name()), zap.Error(err))
-		}
-	}
 	r.curFile = fileReader
-	r.curFileTs = minFileTs
+	r.curFileIdx = minFileIdx
 	r.curFileName = minFileName
+	// compressReader -> encryptReader -> file
+	r.reader, err = newReaderWithEncryptOpts(fileReader, r.cfg.EncryptMethod, r.cfg.KeyFile)
+	if err != nil {
+		return err
+	}
 	if strings.HasSuffix(minFileName, fileCompressFormat) {
-		gr, err := gzip.NewReader(fileReader)
-		if err != nil {
-			return errors.WithStack(err)
+		if r.reader, err = newCompressReader(r.reader); err != nil {
+			return err
 		}
-		r.reader = bufio.NewReader(gr)
-	} else {
-		r.reader = bufio.NewReader(fileReader)
 	}
 	r.lg.Info("reading next file", zap.String("file", minFileName))
 	return nil
 }
 
-// Parse the file name to get the file time.
-// filename pattern: traffic-2024-08-29T17-37-12.477.log.gz
-// Ordering by string should also work.
-func parseFileTs(name string) int64 {
+// Parse the file name to get the file index.
+// filename pattern: traffic-1.log.gz
+func parseFileIdx(name string) int {
+	if !strings.HasPrefix(name, fileNamePrefix) {
+		return 0
+	}
 	startIdx := len(fileNamePrefix)
-	if len(name) <= startIdx {
+	if len(name) <= startIdx+len(fileNameSuffix) {
 		return 0
 	}
-	if name[startIdx] != '-' {
-		return 0
-	}
-	startIdx++
 	endIdx := len(name)
 	if strings.HasSuffix(name, fileCompressFormat) {
-		endIdx -= 3
+		endIdx -= len(fileCompressFormat)
 	}
 	if !strings.HasSuffix(name[:endIdx], fileNameSuffix) {
 		return 0
 	}
 	endIdx -= len(fileNameSuffix)
-	timeStr := name[startIdx:endIdx]
-	t, err := time.Parse(fileTsLayout, timeStr)
+	fileIdx, err := strconv.Atoi(name[startIdx:endIdx])
 	if err != nil {
 		return 0
 	}
-	return t.UnixMilli()
+	return fileIdx
 }
