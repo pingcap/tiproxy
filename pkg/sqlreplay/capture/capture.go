@@ -232,6 +232,8 @@ func (c *capture) collectCmds(bufCh chan<- *bytes.Buffer) {
 	}
 }
 
+// Writing commands requires a bytes buffer instead of a simple bufio.Writer,
+// so the buffer can not be pushed down to the store package.
 func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	// cfg.cmdLogger is set in tests
 	cmdLogger := c.cfg.cmdLogger

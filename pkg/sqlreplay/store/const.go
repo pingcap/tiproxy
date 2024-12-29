@@ -8,4 +8,5 @@ const (
 	fileNameSuffix     = ".log"
 	fileCompressFormat = ".gz"
 	fileSize           = 300 << 20
+	bufferSize         = 1 << 20
 )
