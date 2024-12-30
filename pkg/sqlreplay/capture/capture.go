@@ -6,6 +6,7 @@ package capture
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -59,7 +60,7 @@ type CaptureConfig struct {
 	StartTime          time.Time
 	Duration           time.Duration
 	Compress           bool
-	cmdLogger          store.Writer
+	cmdLogger          io.WriteCloser
 	bufferCap          int
 	flushThreshold     int
 	maxBuffers         int
@@ -231,12 +232,14 @@ func (c *capture) collectCmds(bufCh chan<- *bytes.Buffer) {
 	}
 }
 
+// Writing commands requires a bytes buffer instead of a simple bufio.Writer,
+// so the buffer can not be pushed down to the store package.
 func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	// cfg.cmdLogger is set in tests
 	cmdLogger := c.cfg.cmdLogger
 	if cmdLogger == nil {
 		var err error
-		cmdLogger, err = store.NewWriter(store.WriterCfg{
+		cmdLogger, err = store.NewWriter(c.lg.Named("writer"), store.WriterCfg{
 			Dir:           c.cfg.Output,
 			EncryptMethod: c.cfg.EncryptMethod,
 			KeyFile:       c.cfg.KeyFile,
@@ -249,8 +252,7 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	}
 	// Flush all buffers even if the context is timeout.
 	for buf := range bufCh {
-		// TODO: each write size should be less than MaxSize.
-		if err := cmdLogger.Write(buf.Bytes()); err != nil {
+		if _, err := cmdLogger.Write(buf.Bytes()); err != nil {
 			c.stop(errors.Wrapf(err, "failed to flush traffic to disk"))
 			break
 		}

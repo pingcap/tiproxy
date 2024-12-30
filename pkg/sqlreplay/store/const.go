@@ -4,10 +4,9 @@
 package store
 
 const (
-	fileNamePrefix     = "traffic"
+	fileNamePrefix     = "traffic-"
 	fileNameSuffix     = ".log"
-	fileName           = fileNamePrefix + fileNameSuffix
-	fileTsLayout       = "2006-01-02T15-04-05.000"
 	fileCompressFormat = ".gz"
-	fileSize           = 300 // 300MB
+	fileSize           = 300 << 20
+	bufferSize         = 1 << 20
 )

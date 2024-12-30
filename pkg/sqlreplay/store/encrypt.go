@@ -7,27 +7,43 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"os"
-	"reflect"
+	"strings"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
-var _ Writer = (*aesCTRWriter)(nil)
+const (
+	EncryptPlain = "plaintext"
+	EncryptAes   = "aes256-ctr"
+)
+
+var _ io.WriteCloser = (*aesCTRWriter)(nil)
 
 type aesCTRWriter struct {
-	Writer
+	io.WriteCloser
 	stream cipher.Stream
-	iv     []byte
-	inited bool
 }
 
-func newAESCTRWriter(writer Writer, keyFile string) (*aesCTRWriter, error) {
+func newWriterWithEncryptOpts(writer io.WriteCloser, encryptMethod string, keyFile string) (io.WriteCloser, error) {
+	switch strings.ToLower(encryptMethod) {
+	case "", EncryptPlain:
+		return writer, nil
+	case EncryptAes:
+	default:
+		return nil, fmt.Errorf("unsupported encrypt method: %s", encryptMethod)
+	}
+
 	key, err := readAesKey(keyFile)
 	if err != nil {
 		return nil, err
 	}
+	return newAESCTRWriter(writer, key)
+}
+
+func newAESCTRWriter(writer io.WriteCloser, key []byte) (*aesCTRWriter, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -36,93 +52,76 @@ func newAESCTRWriter(writer Writer, keyFile string) (*aesCTRWriter, error) {
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
 		return nil, errors.WithStack(err)
 	}
-	return &aesCTRWriter{
-		Writer: writer,
-		stream: cipher.NewCTR(block, iv),
-		iv:     iv,
-	}, nil
-}
-
-func (ctr *aesCTRWriter) Write(data []byte) error {
-	if !ctr.inited {
-		if err := ctr.writeIV(); err != nil {
-			return err
-		}
-		ctr.inited = true
+	ctr := &aesCTRWriter{
+		WriteCloser: writer,
+		stream:      cipher.NewCTR(block, iv),
 	}
+	_, err = ctr.WriteCloser.Write(iv)
+	return ctr, err
+}
+
+func (ctr *aesCTRWriter) Write(data []byte) (int, error) {
 	ctr.stream.XORKeyStream(data, data)
-	return ctr.Writer.Write(data)
+	return ctr.WriteCloser.Write(data)
 }
 
-func (ctr *aesCTRWriter) writeIV() error {
-	return ctr.Writer.Write(ctr.iv)
-}
-
-func (ctr *aesCTRWriter) Close() error {
-	return ctr.Writer.Close()
-}
-
-var _ Reader = (*aesCTRReader)(nil)
+var _ io.Reader = (*aesCTRReader)(nil)
 
 type aesCTRReader struct {
-	Reader
+	io.Reader
 	stream cipher.Stream
-	key    []byte
 }
 
-func newAESCTRReader(reader Reader, keyFile string) (*aesCTRReader, error) {
+func newReaderWithEncryptOpts(reader io.Reader, encryptMethod string, keyFile string) (io.Reader, error) {
+	switch strings.ToLower(encryptMethod) {
+	case "", EncryptPlain:
+		return reader, nil
+	case EncryptAes:
+	default:
+		return nil, fmt.Errorf("unsupported encrypt method: %s", encryptMethod)
+	}
+
 	key, err := readAesKey(keyFile)
 	if err != nil {
 		return nil, err
 	}
+	return newAESCTRReader(reader, key)
+}
+
+func newAESCTRReader(reader io.Reader, key []byte) (*aesCTRReader, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	iv := make([]byte, aes.BlockSize)
+	for readLen := 0; readLen < len(iv); {
+		m, err := reader.Read(iv[readLen:])
+		if err != nil {
+			return nil, err
+		}
+		readLen += m
+	}
 	return &aesCTRReader{
 		Reader: reader,
-		key:    key,
+		stream: cipher.NewCTR(block, iv),
 	}, nil
 }
 
 func (ctr *aesCTRReader) Read(data []byte) (int, error) {
-	if ctr.stream == nil || reflect.ValueOf(ctr.stream).IsNil() {
-		if err := ctr.init(); err != nil {
-			return 0, err
-		}
-	}
 	n, err := ctr.Reader.Read(data)
 	if n > 0 {
 		ctr.stream.XORKeyStream(data[:n], data[:n])
 	}
 	if err != nil {
-		return n, err
+		return n, errors.WithStack(err)
 	}
 	return n, nil
 }
 
-func (ctr *aesCTRReader) init() error {
-	block, err := aes.NewCipher(ctr.key)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	iv := make([]byte, aes.BlockSize)
-	for readLen := 0; readLen < len(iv); {
-		m, err := ctr.Reader.Read(iv[readLen:])
-		if err != nil {
-			return err
-		}
-		readLen += m
-	}
-	ctr.stream = cipher.NewCTR(block, iv)
-	return nil
-}
-
-func (ctr *aesCTRReader) CurFile() string {
-	return ctr.Reader.CurFile()
-}
-
-func (ctr *aesCTRReader) Close() {
-	ctr.Reader.Close()
-}
-
 func readAesKey(filename string) ([]byte, error) {
+	if len(filename) == 0 {
+		return nil, errors.New("encryption key file name is not set")
+	}
 	key, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, errors.WithStack(err)

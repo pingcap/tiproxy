@@ -5,12 +5,13 @@ package capture
 
 import (
 	"bytes"
+	"io"
 	"sync"
 
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 )
 
-var _ store.Writer = (*mockWriter)(nil)
+var _ io.WriteCloser = (*mockWriter)(nil)
 
 type mockWriter struct {
 	sync.Mutex
@@ -21,11 +22,10 @@ func newMockWriter(store.WriterCfg) *mockWriter {
 	return &mockWriter{}
 }
 
-func (w *mockWriter) Write(p []byte) error {
+func (w *mockWriter) Write(p []byte) (int, error) {
 	w.Lock()
 	defer w.Unlock()
-	_, err := w.buf.Write(p)
-	return err
+	return w.buf.Write(p)
 }
 
 func (w *mockWriter) getData() []byte {
