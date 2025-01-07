@@ -62,19 +62,19 @@ func (w *rotateWriter) createFile() error {
 	}
 	w.fileIdx++
 	fileName := fmt.Sprintf("%s%d%s%s", fileNamePrefix, w.fileIdx, fileNameSuffix, ext)
-	// compressWriter -> encryptWriter -> file
+	// rotateWriter -> encryptWriter -> compressWriter -> file
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	fileWriter, err := w.storage.Create(ctx, fileName, &storage.WriterOption{})
 	cancel()
-	writer := NewStorageWriter(fileWriter)
+	w.writer = NewStorageWriter(fileWriter)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if w.writer, err = newWriterWithEncryptOpts(writer, w.cfg.EncryptMethod, w.cfg.KeyFile); err != nil {
-		return err
-	}
 	if w.cfg.Compress {
 		w.writer = newCompressWriter(w.lg, w.writer)
+	}
+	if w.writer, err = newWriterWithEncryptOpts(w.writer, w.cfg.EncryptMethod, w.cfg.KeyFile); err != nil {
+		return err
 	}
 	return nil
 }
@@ -199,17 +199,18 @@ func (r *rotateReader) nextReader() error {
 		return errors.WithStack(err)
 	}
 	r.externalFile = fileReader
+	r.reader = fileReader
 	r.curFileIdx = minFileIdx
 	r.curFileName = minFileName
-	// compressReader -> encryptReader -> file
-	r.reader, err = newReaderWithEncryptOpts(fileReader, r.cfg.EncryptMethod, r.cfg.KeyFile)
-	if err != nil {
-		return err
-	}
+	// rotateReader -> encryptReader -> compressReader -> file
 	if strings.HasSuffix(minFileName, fileCompressFormat) {
 		if r.reader, err = newCompressReader(r.reader); err != nil {
 			return err
 		}
+	}
+	r.reader, err = newReaderWithEncryptOpts(r.reader, r.cfg.EncryptMethod, r.cfg.KeyFile)
+	if err != nil {
+		return err
 	}
 	r.lg.Info("reading next file", zap.String("file", minFileName))
 	return nil
