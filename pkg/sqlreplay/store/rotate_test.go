@@ -19,10 +19,14 @@ import (
 
 func TestFileRotation(t *testing.T) {
 	tmpDir := t.TempDir()
-	writer := newRotateWriter(zap.NewNop(), WriterCfg{
+	storage, err := NewStorage(tmpDir)
+	require.NoError(t, err)
+	defer storage.Close()
+	writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
 		Dir:      tmpDir,
 		FileSize: 1000,
 	})
+	require.NoError(t, err)
 	data := make([]byte, 100)
 	for i := 0; i < 25; i++ {
 		n, err := writer.Write(data)
@@ -71,11 +75,15 @@ func TestCompress(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
+	storage, err := NewStorage(tmpDir)
+	require.NoError(t, err)
+	defer storage.Close()
 	for i, test := range tests {
-		writer := newRotateWriter(zap.NewNop(), WriterCfg{
+		writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
 			Dir:      tmpDir,
 			Compress: test.compress,
 		})
+		require.NoError(t, err, "case %d", i)
 		n, err := writer.Write([]byte("test"))
 		require.NoError(t, err, "case %d", i)
 		require.Equal(t, 4, n, "case %d", i)
@@ -164,6 +172,9 @@ func TestIterateFiles(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
 	for i, test := range tests {
 		require.NoError(t, os.RemoveAll(dir), "case %d", i)
@@ -183,7 +194,8 @@ func TestIterateFiles(t *testing.T) {
 			}
 			require.NoError(t, f.Close())
 		}
-		l := newRotateReader(lg, ReaderCfg{Dir: dir})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir})
+		require.NoError(t, err)
 		fileOrder := make([]string, 0, len(test.order))
 		for {
 			if err := l.nextReader(); err != nil {
@@ -198,15 +210,19 @@ func TestIterateFiles(t *testing.T) {
 
 func TestReadGZip(t *testing.T) {
 	tmpDir := t.TempDir()
+	storage, err := NewStorage(tmpDir)
+	require.NoError(t, err)
+	defer storage.Close()
 	for _, compress := range []bool{true, false} {
 		require.NoError(t, os.RemoveAll(tmpDir))
 		require.NoError(t, os.MkdirAll(tmpDir, 0777))
 
-		writer := newRotateWriter(zap.NewNop(), WriterCfg{
+		writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
 			Dir:      tmpDir,
 			FileSize: 1000,
 			Compress: compress,
 		})
+		require.NoError(t, err)
 		data := make([]byte, 100)
 		for i := 0; i < 12; i++ {
 			n, err := writer.Write(data)
@@ -225,7 +241,8 @@ func TestReadGZip(t *testing.T) {
 		require.NoError(t, writer.Close())
 
 		lg, _ := logger.CreateLoggerForTest(t)
-		l := newRotateReader(lg, ReaderCfg{Dir: tmpDir})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: tmpDir})
+		require.NoError(t, err)
 		for i := 0; i < 12; i++ {
 			data = make([]byte, 100)
 			_, err := io.ReadFull(l, data)
@@ -235,7 +252,7 @@ func TestReadGZip(t *testing.T) {
 			}
 		}
 		data = make([]byte, 1)
-		_, err := l.Read(data)
+		_, err = l.Read(data)
 		require.True(t, errors.Is(err, io.EOF))
 		l.Close()
 	}

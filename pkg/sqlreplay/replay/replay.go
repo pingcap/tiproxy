@@ -7,12 +7,12 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
-	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
@@ -68,34 +68,30 @@ type ReplayConfig struct {
 	slowDownFactor    time.Duration
 }
 
-func (cfg *ReplayConfig) Validate() error {
+func (cfg *ReplayConfig) Validate() (storage.ExternalStorage, error) {
 	if cfg.Input == "" {
-		return errors.New("input is required")
+		return nil, errors.New("input is required")
 	}
-	st, err := os.Stat(cfg.Input)
-	if err == nil {
-		if !st.IsDir() {
-			return errors.New("output should be a directory")
-		}
-	} else {
-		return errors.WithStack(err)
+	storage, err := store.NewStorage(cfg.Input)
+	if err != nil {
+		return storage, err
 	}
 	if cfg.Username == "" {
-		return errors.New("username is required")
+		return storage, errors.New("username is required")
 	}
 	if cfg.Speed == 0 {
 		cfg.Speed = 1
 	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
-		return errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
+		return storage, errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
 	}
 	// Maybe there's a time bias between TiDB and TiProxy, so add one minute.
 	now := time.Now()
 	if cfg.StartTime.IsZero() {
-		return errors.New("start time is not specified")
+		return storage, errors.New("start time is not specified")
 	} else if now.Add(time.Minute).Before(cfg.StartTime) {
-		return errors.New("start time should not be in the future")
+		return storage, errors.New("start time should not be in the future")
 	} else if cfg.StartTime.Add(time.Minute).Before(now) {
-		return errors.New("start time should not be in the past")
+		return storage, errors.New("start time should not be in the past")
 	}
 	if cfg.abortThreshold == 0 {
 		cfg.abortThreshold = abortThreshold
@@ -106,13 +102,14 @@ func (cfg *ReplayConfig) Validate() error {
 	if cfg.slowDownFactor == 0 {
 		cfg.slowDownFactor = slowDownFactor
 	}
-	return nil
+	return storage, nil
 }
 
 type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig
 	meta             store.Meta
+	storage          storage.ExternalStorage
 	replayStats      conn.ReplayStats
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
@@ -138,13 +135,16 @@ func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 }
 
 func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
-	if err := cfg.Validate(); err != nil {
+	storage, err := cfg.Validate()
+	if err != nil {
+		storage.Close()
 		return err
 	}
 
 	r.Lock()
 	defer r.Unlock()
 	r.cfg = cfg
+	r.storage = storage
 	r.meta = *r.readMeta()
 	r.startTime = cfg.StartTime
 	r.endTime = time.Time{}
@@ -189,7 +189,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	reader := r.cfg.reader
 	if reader == nil {
 		var err error
-		reader, err = store.NewReader(r.lg.Named("loader"), store.ReaderCfg{
+		reader, err = store.NewReader(r.lg.Named("loader"), r.storage, store.ReaderCfg{
 			Dir:           r.cfg.Input,
 			KeyFile:       r.cfg.KeyFile,
 			EncryptMethod: r.meta.EncryptMethod,
@@ -326,7 +326,7 @@ func (r *replay) Progress() (float64, time.Time, bool, error) {
 
 func (r *replay) readMeta() *store.Meta {
 	m := new(store.Meta)
-	if err := m.Read(r.cfg.Input); err != nil {
+	if err := m.Read(r.storage); err != nil {
 		r.lg.Error("read meta failed", zap.Error(err))
 	}
 	return m
@@ -374,6 +374,10 @@ func (r *replay) stop(err error) {
 	r.startTime = time.Time{}
 	metrics.ReplayPendingCmdsGauge.Set(0)
 	metrics.ReplayWaitTime.Set(0)
+	if r.storage != nil && !reflect.ValueOf(r.storage).IsNil() {
+		r.storage.Close()
+		r.storage = nil
+	}
 }
 
 func (r *replay) Stop(err error) {

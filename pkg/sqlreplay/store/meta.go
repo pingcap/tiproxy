@@ -4,11 +4,11 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
@@ -35,21 +35,23 @@ func NewMeta(duration time.Duration, cmds, filteredCmds uint64, EncryptMethod st
 	}
 }
 
-func (m *Meta) Write(path string) error {
-	filePath := filepath.Join(path, metaFile)
+func (m *Meta) Write(externalStorage storage.ExternalStorage) error {
 	b, err := json.Marshal(m)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if err = os.WriteFile(filePath, b, 0600); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	if err = externalStorage.WriteFile(ctx, metaFile, b); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil
 }
 
-func (m *Meta) Read(path string) error {
-	filePath := filepath.Join(path, metaFile)
-	b, err := os.ReadFile(filePath)
+func (m *Meta) Read(externalStorage storage.ExternalStorage) error {
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	b, err := externalStorage.ReadFile(ctx, metaFile)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -59,11 +61,15 @@ func (m *Meta) Read(path string) error {
 	return nil
 }
 
-func PreCheckMeta(path string) error {
-	filePath := filepath.Join(path, metaFile)
-	_, err := os.Stat(filePath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+func PreCheckMeta(externalStorage storage.ExternalStorage) error {
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	exists, err := externalStorage.FileExists(ctx, metaFile)
+	cancel()
+	if err != nil {
+		return errors.Wrapf(err, "check meta file failed")
 	}
-	return errors.Errorf("file %s already exists, please remove it before capture", filePath)
+	if exists {
+		return errors.Errorf("file %s already exists, please remove it before capture", metaFile)
+	}
+	return nil
 }

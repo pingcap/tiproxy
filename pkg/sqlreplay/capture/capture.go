@@ -7,10 +7,11 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"os"
+	"reflect"
 	"sync"
 	"time"
 
+	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -67,33 +68,28 @@ type CaptureConfig struct {
 	maxPendingCommands int
 }
 
-func (cfg *CaptureConfig) Validate() error {
+func (cfg *CaptureConfig) Validate() (storage.ExternalStorage, error) {
 	if cfg.Output == "" {
-		return errors.New("output is required")
+		return nil, errors.New("output is required")
 	}
-	st, err := os.Stat(cfg.Output)
-	if err == nil {
-		if !st.IsDir() {
-			return errors.New("output should be a directory")
-		}
-		err = store.PreCheckMeta(cfg.Output)
-	} else if os.IsNotExist(err) {
-		err = os.MkdirAll(cfg.Output, 0755)
-	}
+	storage, err := store.NewStorage(cfg.Output)
 	if err != nil {
-		return err
+		return storage, err
+	}
+	if err = store.PreCheckMeta(storage); err != nil {
+		return storage, err
 	}
 	if cfg.Duration == 0 {
-		return errors.New("duration is required")
+		return storage, errors.New("duration is required")
 	}
 	// Maybe there's a time bias between TiDB and TiProxy, so add one minute.
 	now := time.Now()
 	if cfg.StartTime.IsZero() {
-		return errors.New("start time is not specified")
+		return storage, errors.New("start time is not specified")
 	} else if now.Add(time.Minute).Before(cfg.StartTime) {
-		return errors.New("start time should not be in the future")
+		return storage, errors.New("start time should not be in the future")
 	} else if cfg.StartTime.Add(cfg.Duration).Before(now) {
-		return errors.New("start time should not be in the past")
+		return storage, errors.New("start time should not be in the past")
 	}
 	if cfg.bufferCap == 0 {
 		cfg.bufferCap = bufferCap
@@ -107,7 +103,7 @@ func (cfg *CaptureConfig) Validate() error {
 	if cfg.maxPendingCommands == 0 {
 		cfg.maxPendingCommands = maxPendingCommands
 	}
-	return nil
+	return storage, nil
 }
 
 var _ Capture = (*capture)(nil)
@@ -118,6 +114,7 @@ type capture struct {
 	conns        map[uint64]struct{}
 	wg           waitgroup.WaitGroup
 	cancel       context.CancelFunc
+	storage      storage.ExternalStorage
 	cmdCh        chan *cmd.Command
 	err          error
 	startTime    time.Time
@@ -136,7 +133,9 @@ func NewCapture(lg *zap.Logger) *capture {
 }
 
 func (c *capture) Start(cfg CaptureConfig) error {
-	if err := cfg.Validate(); err != nil {
+	storage, err := cfg.Validate()
+	if err != nil {
+		storage.Close()
 		return err
 	}
 
@@ -146,6 +145,7 @@ func (c *capture) Start(cfg CaptureConfig) error {
 		return errors.Errorf("traffic capture is running, start time: %s", c.startTime.String())
 	}
 	c.cfg = cfg
+	c.storage = storage
 	c.startTime = cfg.StartTime
 	c.endTime = time.Time{}
 	c.progress = 0
@@ -200,6 +200,10 @@ func (c *capture) run(ctx context.Context, bufCh chan *bytes.Buffer) {
 		c.progress = 1
 		c.lg.Info("capture finished", fields...)
 	}
+	if c.storage != nil && !reflect.ValueOf(c.storage).IsNil() {
+		c.storage.Close()
+		c.storage = nil
+	}
 }
 
 func (c *capture) collectCmds(bufCh chan<- *bytes.Buffer) {
@@ -239,7 +243,7 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	cmdLogger := c.cfg.cmdLogger
 	if cmdLogger == nil {
 		var err error
-		cmdLogger, err = store.NewWriter(c.lg.Named("writer"), store.WriterCfg{
+		cmdLogger, err = store.NewWriter(c.lg.Named("writer"), c.storage, store.WriterCfg{
 			Dir:           c.cfg.Output,
 			EncryptMethod: c.cfg.EncryptMethod,
 			KeyFile:       c.cfg.KeyFile,
@@ -265,9 +269,10 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	startTime := c.startTime
 	capturedCmds := c.capturedCmds
 	filteredCmds := c.filteredCmds
+	storage := c.storage
 	c.Unlock()
 	// Write meta outside of the lock to avoid affecting QPS.
-	c.writeMeta(time.Since(startTime), capturedCmds, filteredCmds)
+	c.writeMeta(storage, time.Since(startTime), capturedCmds, filteredCmds)
 }
 
 func (c *capture) InitConn(startTime time.Time, connID uint64, db string) {
@@ -364,9 +369,9 @@ func (c *capture) putCommand(command *cmd.Command) bool {
 	}
 }
 
-func (c *capture) writeMeta(duration time.Duration, cmds, filteredCmds uint64) {
+func (c *capture) writeMeta(storage storage.ExternalStorage, duration time.Duration, cmds, filteredCmds uint64) {
 	meta := store.NewMeta(duration, cmds, filteredCmds, c.cfg.EncryptMethod)
-	if err := meta.Write(c.cfg.Output); err != nil {
+	if err := meta.Write(storage); err != nil {
 		c.lg.Error("failed to write meta", zap.Error(err))
 	}
 }

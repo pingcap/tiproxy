@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -162,8 +163,11 @@ func TestCaptureCfgError(t *testing.T) {
 	}
 
 	for i, cfg := range cfgs {
-		err := cfg.Validate()
+		storage, err := cfg.Validate()
 		require.Error(t, err, "case %d", i)
+		if storage != nil && !reflect.ValueOf(storage).IsNil() {
+			storage.Close()
+		}
 	}
 
 	cfg := CaptureConfig{
@@ -171,7 +175,9 @@ func TestCaptureCfgError(t *testing.T) {
 		Duration:  10 * time.Second,
 		StartTime: now,
 	}
-	require.NoError(t, cfg.Validate())
+	storage, err := cfg.Validate()
+	require.NoError(t, err)
+	require.NotNil(t, storage)
 	require.Equal(t, bufferCap, cfg.bufferCap)
 	require.Equal(t, flushThreshold, cfg.flushThreshold)
 	require.Equal(t, maxBuffers, cfg.maxBuffers)
@@ -210,7 +216,6 @@ func TestProgress(t *testing.T) {
 	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
 	cpt.Capture(packet, time.Now(), 100, mockInitSession)
 	cpt.Stop(errors.Errorf("mock error"))
-	cpt.wg.Wait()
 	progress, _, done, err = cpt.Progress()
 	require.ErrorContains(t, err, "mock error")
 	require.GreaterOrEqual(t, progress, 0.5)
@@ -218,7 +223,10 @@ func TestProgress(t *testing.T) {
 	require.True(t, done)
 
 	m := store.Meta{}
-	require.NoError(t, m.Read(cfg.Output))
+	storage, err := store.NewStorage(cfg.Output)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, m.Read(storage))
 	require.Equal(t, uint64(2), m.Cmds)
 	require.GreaterOrEqual(t, m.Duration, 5*time.Second)
 	require.Less(t, m.Duration, 10*time.Second)

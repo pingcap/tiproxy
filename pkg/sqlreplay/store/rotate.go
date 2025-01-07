@@ -4,14 +4,14 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
 )
@@ -21,19 +21,21 @@ var _ io.WriteCloser = (*rotateWriter)(nil)
 type rotateWriter struct {
 	cfg      WriterCfg
 	writer   io.WriteCloser
+	storage  storage.ExternalStorage
 	lg       *zap.Logger
 	fileIdx  int
 	writeLen int
 }
 
-func newRotateWriter(lg *zap.Logger, cfg WriterCfg) *rotateWriter {
+func newRotateWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg WriterCfg) (*rotateWriter, error) {
 	if cfg.FileSize == 0 {
 		cfg.FileSize = fileSize
 	}
 	return &rotateWriter{
-		cfg: cfg,
-		lg:  lg,
-	}
+		cfg:     cfg,
+		lg:      lg,
+		storage: externalStorage,
+	}, nil
 }
 
 func (w *rotateWriter) Write(data []byte) (n int, err error) {
@@ -60,13 +62,15 @@ func (w *rotateWriter) createFile() error {
 	}
 	w.fileIdx++
 	fileName := fmt.Sprintf("%s%d%s%s", fileNamePrefix, w.fileIdx, fileNameSuffix, ext)
-	path := filepath.Join(w.cfg.Dir, fileName)
 	// compressWriter -> encryptWriter -> file
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	fileWriter, err := w.storage.Create(ctx, fileName, &storage.WriterOption{})
+	cancel()
+	writer := NewStorageWriter(fileWriter)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if w.writer, err = newWriterWithEncryptOpts(file, w.cfg.EncryptMethod, w.cfg.KeyFile); err != nil {
+	if w.writer, err = newWriterWithEncryptOpts(writer, w.cfg.EncryptMethod, w.cfg.KeyFile); err != nil {
 		return err
 	}
 	if w.cfg.Compress {
@@ -96,20 +100,22 @@ type Reader interface {
 var _ Reader = (*rotateReader)(nil)
 
 type rotateReader struct {
-	cfg         ReaderCfg
-	curFileName string
-	curFileIdx  int
-	curFile     *os.File
-	reader      io.Reader
-	lg          *zap.Logger
-	eof         bool
+	cfg          ReaderCfg
+	curFileName  string
+	curFileIdx   int
+	reader       io.Reader
+	externalFile storage.ExternalFileReader
+	storage      storage.ExternalStorage
+	lg           *zap.Logger
+	eof          bool
 }
 
-func newRotateReader(lg *zap.Logger, cfg ReaderCfg) *rotateReader {
+func newRotateReader(lg *zap.Logger, storage storage.ExternalStorage, cfg ReaderCfg) (*rotateReader, error) {
 	return &rotateReader{
-		cfg: cfg,
-		lg:  lg,
-	}
+		cfg:     cfg,
+		lg:      lg,
+		storage: storage,
+	}, nil
 }
 
 func (r *rotateReader) Read(data []byte) (int, error) {
@@ -146,52 +152,53 @@ func (r *rotateReader) CurFile() string {
 }
 
 func (r *rotateReader) Close() error {
-	if r.curFile != nil {
-		if err := r.curFile.Close(); err != nil {
-			r.lg.Warn("failed to close file", zap.String("filename", r.curFile.Name()), zap.Error(err))
+	if r.externalFile != nil && !reflect.ValueOf(r.externalFile).IsNil() {
+		if err := r.externalFile.Close(); err != nil {
+			r.lg.Warn("failed to close file", zap.String("filename", r.curFileName), zap.Error(err))
 			return err
 		}
-		r.curFile = nil
+		r.externalFile = nil
 	}
 	return nil
 }
 
 func (r *rotateReader) nextReader() error {
-	files, err := os.ReadDir(r.cfg.Dir)
-	if err != nil {
-		return errors.WithStack(err)
-	}
 	var minFileIdx int
 	var minFileName string
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-		name := file.Name()
-		if !strings.HasPrefix(name, fileNamePrefix) {
-			continue
-		}
-		fileIdx := parseFileIdx(name)
-		if fileIdx == 0 {
-			r.lg.Warn("traffic file name is invalid", zap.String("filename", name))
-			continue
-		}
-		if fileIdx <= r.curFileIdx {
-			continue
-		}
-		if minFileName == "" || fileIdx < minFileIdx {
-			minFileIdx = fileIdx
-			minFileName = name
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	err := r.storage.WalkDir(ctx, &storage.WalkOption{},
+		func(name string, size int64) error {
+			if !strings.HasPrefix(name, fileNamePrefix) {
+				return nil
+			}
+			fileIdx := parseFileIdx(name)
+			if fileIdx == 0 {
+				r.lg.Warn("traffic file name is invalid", zap.String("filename", name))
+				return nil
+			}
+			if fileIdx <= r.curFileIdx {
+				return nil
+			}
+			if minFileName == "" || fileIdx < minFileIdx {
+				minFileIdx = fileIdx
+				minFileName = name
+			}
+			return nil
+		})
+	cancel()
+	if err != nil {
+		return err
 	}
 	if minFileName == "" {
 		return io.EOF
 	}
-	fileReader, err := os.Open(filepath.Join(r.cfg.Dir, minFileName))
+	ctx, cancel = context.WithTimeout(context.Background(), opTimeout)
+	fileReader, err := r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
+	cancel()
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	r.curFile = fileReader
+	r.externalFile = fileReader
 	r.curFileIdx = minFileIdx
 	r.curFileName = minFileName
 	// compressReader -> encryptReader -> file
