@@ -969,7 +969,7 @@ func TestBeginStmt(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		require.Equal(t, test.isBegin, isBeginStmt(test.stmt))
+		require.Equal(t, test.isBegin, isBeginStmt(test.stmt), test.stmt)
 	}
 }
 

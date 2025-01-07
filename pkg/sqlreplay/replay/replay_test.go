@@ -4,7 +4,7 @@
 package replay
 
 import (
-	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -80,11 +80,6 @@ func TestValidateCfg(t *testing.T) {
 			StartTime: now,
 		},
 		{
-			Input:     filepath.Join(dir, "input"),
-			Username:  "u1",
-			StartTime: now,
-		},
-		{
 			Input:     dir,
 			Username:  "u1",
 			Speed:     0.01,
@@ -109,7 +104,11 @@ func TestValidateCfg(t *testing.T) {
 	}
 
 	for i, cfg := range cfgs {
-		require.Error(t, cfg.Validate(), "case %d", i)
+		storage, err := cfg.Validate()
+		require.Error(t, err, "case %d", i)
+		if storage != nil && !reflect.ValueOf(storage).IsNil() {
+			storage.Close()
+		}
 	}
 }
 
@@ -173,7 +172,10 @@ func TestReplaySpeed(t *testing.T) {
 func TestProgress(t *testing.T) {
 	dir := t.TempDir()
 	meta := store.NewMeta(10*time.Second, 10, 0, "")
-	require.NoError(t, meta.Write(dir))
+	storage, err := store.NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, meta.Write(storage))
 	loader := newMockNormalLoader()
 	now := time.Now()
 	defer loader.Close()
@@ -221,8 +223,11 @@ func TestProgress(t *testing.T) {
 
 func TestPendingCmds(t *testing.T) {
 	dir := t.TempDir()
-	meta := store.NewMeta(10*time.Second, 10, 0, "")
-	require.NoError(t, meta.Write(dir))
+	meta := store.NewMeta(10*time.Second, 20, 0, "")
+	storage, err := store.NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, meta.Write(storage))
 	loader := newMockNormalLoader()
 	defer loader.Close()
 

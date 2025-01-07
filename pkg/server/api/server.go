@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -73,11 +72,11 @@ func NewServer(cfg config.API, lg *zap.Logger, mgr Managers, handler HTTPHandler
 		ready: ready,
 		lg:    lg,
 		grpc: grpc.NewServer(
-			grpc_middleware.WithUnaryServerChain(
+			grpc.ChainUnaryInterceptor(
 				grpc_ctxtags.UnaryServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),
 				grpc_zap.UnaryServerInterceptor(lg.Named("grpcu"), grpcOpts...),
 			),
-			grpc_middleware.WithStreamServerChain(
+			grpc.ChainStreamInterceptor(
 				grpc_ctxtags.StreamServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),
 				grpc_zap.StreamServerInterceptor(lg.Named("grpcs"), grpcOpts...),
 			),

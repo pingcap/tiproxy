@@ -14,27 +14,33 @@ import (
 
 func TestMeta(t *testing.T) {
 	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
 	for i := 0; i < 2; i++ {
 		m1 := Meta{
 			Duration: 10 * time.Second,
 			Cmds:     100,
 		}
-		require.NoError(t, m1.Write(dir))
+		require.NoError(t, m1.Write(storage))
 		m2 := Meta{}
-		require.NoError(t, m2.Read(dir))
+		require.NoError(t, m2.Read(storage))
 		require.Equal(t, m1, m2)
 	}
 
 	m3 := Meta{}
 	require.NoError(t, os.Remove(filepath.Join(dir, metaFile)))
-	require.Error(t, m3.Read(dir))
+	require.Error(t, m3.Read(storage))
 }
 
 func TestPrecheckMeta(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, PreCheckMeta(dir))
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, PreCheckMeta(storage))
 	f, err := os.Create(filepath.Join(dir, metaFile))
 	require.NoError(t, err)
 	require.NoError(t, f.Close())
-	require.Error(t, PreCheckMeta(dir))
+	require.Error(t, PreCheckMeta(storage))
 }

@@ -86,7 +86,7 @@ func (mm *MetricsManager) setupMonitor(ctx context.Context) {
 // registerProxyMetrics registers metrics.
 func (mm *MetricsManager) registerProxyMetrics() {
 	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
-	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollections(collectors.GoRuntimeMetricsCollection | collectors.GoRuntimeMemStatsCollection)))
+	prometheus.MustRegister(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsGC, collectors.MetricsMemory, collectors.MetricsScheduler)))
 	for _, c := range colls {
 		prometheus.MustRegister(c)
 	}
@@ -163,8 +163,8 @@ func ReadGauge(gauge prometheus.Gauge) (float64, error) {
 	return metric.Gauge.GetValue(), nil
 }
 
-func Collect(coll prometheus.Collector) ([]dto.Metric, error) {
-	results := make([]dto.Metric, 0)
+func Collect(coll prometheus.Collector) ([]*dto.Metric, error) {
+	results := make([]*dto.Metric, 0)
 	ch := make(chan prometheus.Metric)
 	go func() {
 		coll.Collect(ch)
@@ -175,7 +175,7 @@ func Collect(coll prometheus.Collector) ([]dto.Metric, error) {
 		if err := m.Write(&metric); err != nil {
 			return nil, err
 		}
-		results = append(results, metric)
+		results = append(results, &metric)
 	}
 	return results, nil
 }

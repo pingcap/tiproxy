@@ -335,7 +335,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 			cmd, data := pnet.Command(request[0]), request[1:]
 			var query string
 			if cmd == pnet.ComQuery {
-				query = parser.Normalize(pnet.ParseQueryPacket(data), "OFF")
+				query = parser.Normalize(pnet.ParseQueryPacket(data), "ON")
 				if len(query) > 256 {
 					query = query[:256]
 				}

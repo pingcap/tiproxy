@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"go.uber.org/zap"
 )
@@ -22,8 +23,8 @@ type WriterCfg struct {
 
 // NewWriter just wraps the rotate writer. It doesn't use a buffer because Capture writes data in a big batch.
 // Capture uses a bytes buffer to encode commands and the buffer can not be replaced with a bufio.Writer.
-func NewWriter(lg *zap.Logger, cfg WriterCfg) (io.WriteCloser, error) {
-	return newRotateWriter(lg, cfg)
+func NewWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg WriterCfg) (io.WriteCloser, error) {
+	return newRotateWriter(lg, externalStorage, cfg)
 }
 
 type ReaderCfg struct {
@@ -43,8 +44,8 @@ type loader struct {
 	lg          *zap.Logger
 }
 
-func NewReader(lg *zap.Logger, cfg ReaderCfg) (*loader, error) {
-	reader, err := newRotateReader(lg, cfg)
+func NewReader(lg *zap.Logger, storage storage.ExternalStorage, cfg ReaderCfg) (*loader, error) {
+	reader, err := newRotateReader(lg, storage, cfg)
 	if err != nil {
 		return nil, err
 	}

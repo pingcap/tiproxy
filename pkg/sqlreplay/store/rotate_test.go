@@ -19,7 +19,10 @@ import (
 
 func TestFileRotation(t *testing.T) {
 	tmpDir := t.TempDir()
-	writer, err := newRotateWriter(zap.NewNop(), WriterCfg{
+	storage, err := NewStorage(tmpDir)
+	require.NoError(t, err)
+	defer storage.Close()
+	writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
 		Dir:      tmpDir,
 		FileSize: 1000,
 	})
@@ -72,8 +75,11 @@ func TestCompress(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
+	storage, err := NewStorage(tmpDir)
+	require.NoError(t, err)
+	defer storage.Close()
 	for i, test := range tests {
-		writer, err := newRotateWriter(zap.NewNop(), WriterCfg{
+		writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
 			Dir:      tmpDir,
 			Compress: test.compress,
 		})
@@ -166,6 +172,9 @@ func TestIterateFiles(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
 	for i, test := range tests {
 		require.NoError(t, os.RemoveAll(dir), "case %d", i)
@@ -185,7 +194,7 @@ func TestIterateFiles(t *testing.T) {
 			}
 			require.NoError(t, f.Close())
 		}
-		l, err := newRotateReader(lg, ReaderCfg{Dir: dir})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir})
 		require.NoError(t, err)
 		fileOrder := make([]string, 0, len(test.order))
 		for {
@@ -201,11 +210,14 @@ func TestIterateFiles(t *testing.T) {
 
 func TestReadGZip(t *testing.T) {
 	tmpDir := t.TempDir()
+	storage, err := NewStorage(tmpDir)
+	require.NoError(t, err)
+	defer storage.Close()
 	for _, compress := range []bool{true, false} {
 		require.NoError(t, os.RemoveAll(tmpDir))
 		require.NoError(t, os.MkdirAll(tmpDir, 0777))
 
-		writer, err := newRotateWriter(zap.NewNop(), WriterCfg{
+		writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
 			Dir:      tmpDir,
 			FileSize: 1000,
 			Compress: compress,
@@ -229,7 +241,7 @@ func TestReadGZip(t *testing.T) {
 		require.NoError(t, writer.Close())
 
 		lg, _ := logger.CreateLoggerForTest(t)
-		l, err := newRotateReader(lg, ReaderCfg{Dir: tmpDir})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: tmpDir})
 		require.NoError(t, err)
 		for i := 0; i < 12; i++ {
 			data = make([]byte, 100)

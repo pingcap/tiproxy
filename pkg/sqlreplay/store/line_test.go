@@ -87,6 +87,9 @@ func TestReadLine(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := ReaderCfg{Dir: dir}
 	for i, test := range tests {
@@ -100,7 +103,7 @@ func TestReadLine(t *testing.T) {
 			fileNames = append(fileNames, name)
 		}
 
-		l, err := NewReader(lg, cfg)
+		l, err := NewReader(lg, storage, cfg)
 		require.NoError(t, err)
 		for fileIdx := 0; fileIdx < len(test.lines); fileIdx++ {
 			for lineIdx := 0; lineIdx < len(test.lines[fileIdx]); lineIdx++ {
@@ -187,6 +190,9 @@ func TestRead(t *testing.T) {
 	}
 
 	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := ReaderCfg{Dir: dir}
 	for i, test := range tests {
@@ -200,7 +206,7 @@ func TestRead(t *testing.T) {
 			fileNames = append(fileNames, name)
 		}
 
-		l, err := NewReader(lg, cfg)
+		l, err := NewReader(lg, storage, cfg)
 		require.NoError(t, err)
 		data := make([]byte, 5)
 		for j := 0; j < len(test.str); j++ {

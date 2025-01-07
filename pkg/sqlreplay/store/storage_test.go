@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
@@ -13,10 +14,11 @@ import (
 )
 
 func TestStorage(t *testing.T) {
+	// write a file
 	dir := t.TempDir()
 	st, err := NewStorage(dir)
 	require.NoError(t, err)
-	fileWriter, err := st.Create(context.Background(), "test", &storage.WriterOption{})
+	fileWriter, err := st.Create(context.Background(), "test_file", &storage.WriterOption{})
 	require.NoError(t, err)
 	sWriter := NewStorageWriter(fileWriter)
 	n, err := sWriter.Write([]byte("test"))
@@ -24,11 +26,36 @@ func TestStorage(t *testing.T) {
 	require.Equal(t, 4, n)
 	require.NoError(t, sWriter.Close())
 
-	fileReader, err := st.Open(context.Background(), "test", &storage.ReaderOption{})
+	// read the file
+	fileReader, err := st.Open(context.Background(), "test_file", &storage.ReaderOption{})
 	require.NoError(t, err)
 	data := make([]byte, 100)
 	n, err = io.ReadFull(fileReader, data)
 	require.ErrorContains(t, err, "EOF")
 	require.Equal(t, 4, n)
 	require.NoError(t, fileReader.Close())
+	st.Close()
+
+	// write fails if the directory is a file
+	path := filepath.Join(dir, "test_file")
+	st, err = NewStorage(path)
+	require.NoError(t, err)
+	fileWriter, err = st.Create(context.Background(), "test", &storage.WriterOption{})
+	require.Error(t, err)
+	require.Nil(t, fileWriter)
+	st.Close()
+
+	// if the file doesn't exist, create a one
+	path = filepath.Join(dir, "test_dir")
+	st, err = NewStorage(path)
+	require.NoError(t, err)
+	fileWriter, err = st.Create(context.Background(), "test", &storage.WriterOption{})
+	require.NoError(t, err)
+	require.NoError(t, fileWriter.Close(context.Background()))
+
+	// read fails if the file doesn't exist
+	fileReader, err = st.Open(context.Background(), "not_exist", &storage.ReaderOption{})
+	require.Error(t, err)
+	require.Nil(t, fileReader)
+	st.Close()
 }

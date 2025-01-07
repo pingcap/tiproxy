@@ -27,18 +27,14 @@ type rotateWriter struct {
 	writeLen int
 }
 
-func newRotateWriter(lg *zap.Logger, cfg WriterCfg) (*rotateWriter, error) {
+func newRotateWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg WriterCfg) (*rotateWriter, error) {
 	if cfg.FileSize == 0 {
 		cfg.FileSize = fileSize
-	}
-	storage, err := NewStorage(cfg.Dir)
-	if err != nil {
-		return nil, err
 	}
 	return &rotateWriter{
 		cfg:     cfg,
 		lg:      lg,
-		storage: storage,
+		storage: externalStorage,
 	}, nil
 }
 
@@ -114,11 +110,7 @@ type rotateReader struct {
 	eof          bool
 }
 
-func newRotateReader(lg *zap.Logger, cfg ReaderCfg) (*rotateReader, error) {
-	storage, err := NewStorage(cfg.Dir)
-	if err != nil {
-		return nil, err
-	}
+func newRotateReader(lg *zap.Logger, storage storage.ExternalStorage, cfg ReaderCfg) (*rotateReader, error) {
 	return &rotateReader{
 		cfg:     cfg,
 		lg:      lg,
