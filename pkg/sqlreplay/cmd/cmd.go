@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/tidb/parser"
+	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/util/lex"

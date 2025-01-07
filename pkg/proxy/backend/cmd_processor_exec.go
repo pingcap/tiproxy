@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tidb/parser"
+	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
@@ -365,6 +365,6 @@ func (cp *CmdProcessor) needHoldRequest(request []byte) bool {
 }
 
 func isBeginStmt(query string) bool {
-	normalized := parser.Normalize(query)
+	normalized := parser.Normalize(query, "OFF")
 	return strings.HasPrefix(normalized, "begin") || strings.HasPrefix(normalized, "start transaction")
 }

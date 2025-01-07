@@ -23,7 +23,7 @@ type WriterCfg struct {
 // NewWriter just wraps the rotate writer. It doesn't use a buffer because Capture writes data in a big batch.
 // Capture uses a bytes buffer to encode commands and the buffer can not be replaced with a bufio.Writer.
 func NewWriter(lg *zap.Logger, cfg WriterCfg) (io.WriteCloser, error) {
-	return newRotateWriter(lg, cfg), nil
+	return newRotateWriter(lg, cfg)
 }
 
 type ReaderCfg struct {
@@ -44,7 +44,10 @@ type loader struct {
 }
 
 func NewReader(lg *zap.Logger, cfg ReaderCfg) (*loader, error) {
-	reader := newRotateReader(lg, cfg)
+	reader, err := newRotateReader(lg, cfg)
+	if err != nil {
+		return nil, err
+	}
 	return &loader{
 		cfg:       cfg,
 		lg:        lg,
