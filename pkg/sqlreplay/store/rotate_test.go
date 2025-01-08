@@ -5,6 +5,7 @@ package store
 
 import (
 	"compress/gzip"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -256,4 +257,50 @@ func TestReadGZip(t *testing.T) {
 		require.True(t, errors.Is(err, io.EOF))
 		l.Close()
 	}
+}
+
+func TestCompressAndEncrypt(t *testing.T) {
+	tmpDir := t.TempDir()
+	storage, err := NewStorage(tmpDir)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, storage.WriteFile(context.Background(), "key", genAesKey()))
+	keyFile := filepath.Join(tmpDir, "key")
+
+	// write with compression and encryption
+	writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
+		Dir:           tmpDir,
+		FileSize:      1000,
+		Compress:      true,
+		EncryptMethod: EncryptAes,
+		KeyFile:       keyFile,
+	})
+	require.NoError(t, err)
+	_, err = writer.Write([]byte("test"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	// make sure data is compressed after encryption
+	file, err := os.Open(filepath.Join(tmpDir, "traffic-1.log.gz"))
+	require.NoError(t, err)
+	greader, err := gzip.NewReader(file)
+	require.NoError(t, err)
+	data := make([]byte, 1000)
+	n, err := io.ReadFull(greader, data)
+	require.ErrorContains(t, err, "EOF")
+	require.Equal(t, 20, n)
+	require.NoError(t, file.Close())
+
+	// rotateReader is able to read the file
+	reader, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{
+		Dir:           tmpDir,
+		EncryptMethod: EncryptAes,
+		KeyFile:       keyFile,
+	})
+	require.NoError(t, err)
+	n, err = io.ReadFull(reader, data)
+	require.ErrorContains(t, err, "EOF")
+	require.Equal(t, 4, n)
+	require.Equal(t, []byte("test"), data[:4])
+	require.NoError(t, reader.Close())
 }
