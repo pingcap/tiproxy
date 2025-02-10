@@ -146,11 +146,11 @@ func (b *backendWrapper) GetBackendInfo() observer.BackendInfo {
 	return info
 }
 
-func (b *backendWrapper) Equals(health observer.BackendHealth) bool {
+func (b *backendWrapper) HasSigningCert() bool {
 	b.mu.RLock()
-	equal := b.mu.BackendHealth.Equals(health)
+	hasSigningCert := b.mu.HasSigningCert
 	b.mu.RUnlock()
-	return equal
+	return hasSigningCert
 }
 
 func (b *backendWrapper) String() string {

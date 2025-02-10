@@ -5,6 +5,7 @@ package observer
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 )
@@ -16,6 +17,10 @@ type BackendHealth struct {
 	PingErr error
 	// The backend version that returned to the client during handshake.
 	ServerVersion string
+	// The last time checking the signing cert.
+	LastCheckSigningCertTime time.Time
+	// Whether the backend has set the signing cert. If not, the connection redirection will be disabled.
+	HasSigningCert bool
 	// Whether the backend in the same zone with TiProxy. If TiProxy location is undefined, take all backends as local.
 	Local bool
 }
@@ -37,10 +42,6 @@ func (bh *BackendHealth) setLocal(cfg *config.Config) {
 	bh.Local = false
 }
 
-func (bh *BackendHealth) Equals(health BackendHealth) bool {
-	return bh.Healthy == health.Healthy && bh.ServerVersion == health.ServerVersion && bh.Local == health.Local
-}
-
 func (bh *BackendHealth) String() string {
 	str := "down"
 	if bh.Healthy {
@@ -48,6 +49,9 @@ func (bh *BackendHealth) String() string {
 	}
 	if bh.PingErr != nil {
 		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
+	}
+	if !bh.HasSigningCert {
+		str += fmt.Sprintf(", has_signing_cert: false")
 	}
 	return str
 }

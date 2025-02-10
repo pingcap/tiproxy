@@ -43,6 +43,8 @@ type ScoreBasedRouter struct {
 	serverVersion string
 	// To limit the speed of redirection.
 	lastRedirectTime time.Time
+	// The backend supports redirection only when they have signing certs.
+	supportRedirection bool
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
@@ -206,7 +208,8 @@ func (router *ScoreBasedRouter) ensureBackend(addr string) *backendWrapper {
 			IP:         ip,
 			StatusPort: 10080, // impossible anyway
 		},
-		Healthy: false,
+		HasSigningCert: true,
+		Healthy:        false,
 	})
 	router.backends[addr] = backend
 	return backend
@@ -277,30 +280,35 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	for addr, backend := range router.backends {
 		if _, ok := backends[addr]; !ok {
 			backends[addr] = &observer.BackendHealth{
-				BackendInfo: backend.GetBackendInfo(),
-				Healthy:     false,
-				PingErr:     errors.New("removed from backend list"),
+				BackendInfo:    backend.GetBackendInfo(),
+				HasSigningCert: backend.HasSigningCert(),
+				Healthy:        false,
+				PingErr:        errors.New("removed from backend list"),
 			}
 		}
 	}
 	var serverVersion string
+	hasSigningCert := true
 	for addr, health := range backends {
 		backend, ok := router.backends[addr]
 		if !ok && health.Healthy {
 			router.backends[addr] = newBackendWrapper(addr, *health)
 			serverVersion = health.ServerVersion
 		} else if ok {
-			if !backend.Equals(*health) {
-				backend.setHealth(*health)
-				router.removeBackendIfEmpty(backend)
-				if health.Healthy {
-					serverVersion = health.ServerVersion
-				}
+			backend.setHealth(*health)
+			router.removeBackendIfEmpty(backend)
+			if health.Healthy {
+				serverVersion = health.ServerVersion
 			}
 		}
+		hasSigningCert = health.HasSigningCert && hasSigningCert
 	}
 	if len(serverVersion) > 0 {
 		router.serverVersion = serverVersion
+	}
+	if router.supportRedirection != hasSigningCert {
+		router.logger.Info("updated supporting redirection", zap.Bool("support", hasSigningCert))
+		router.supportRedirection = hasSigningCert
 	}
 }
 
@@ -328,6 +336,9 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	router.Lock()
 	defer router.Unlock()
 
+	if !router.supportRedirection {
+		return
+	}
 	if len(router.backends) <= 1 {
 		return
 	}

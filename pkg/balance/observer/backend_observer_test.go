@@ -284,8 +284,9 @@ func (ts *observerTestSuite) addBackend() (string, BackendInfo) {
 	}
 	ts.fetcher.setBackend(addr, info)
 	ts.hc.setBackend(addr, &BackendHealth{
-		BackendInfo: *info,
-		Healthy:     true,
+		BackendInfo:    *info,
+		HasSigningCert: true,
+		Healthy:        true,
 	})
 	return addr, *info
 }

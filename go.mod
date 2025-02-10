@@ -4,6 +4,7 @@ go 1.23.4
 
 require (
 	github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c
+	github.com/Masterminds/semver v1.5.0
 	github.com/bahlo/generic-list-go v0.2.0
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/gin-contrib/pprof v1.4.0

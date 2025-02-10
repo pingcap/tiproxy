@@ -5,6 +5,7 @@ package observer
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sync"
 	"testing"
@@ -81,7 +82,7 @@ func newMockHealthCheck() *mockHealthCheck {
 	}
 }
 
-func (mhc *mockHealthCheck) Check(_ context.Context, addr string, info *BackendInfo) *BackendHealth {
+func (mhc *mockHealthCheck) Check(_ context.Context, addr string, info *BackendInfo, _ *BackendHealth) *BackendHealth {
 	mhc.Lock()
 	defer mhc.Unlock()
 	mhc.backends[addr].BackendInfo = *info
@@ -109,18 +110,28 @@ func (mhc *mockHealthCheck) removeBackend(addr string) {
 }
 
 type mockHttpHandler struct {
-	t        *testing.T
-	httpOK   atomic.Bool
-	respBody atomic.String
-	wait     atomic.Int64
+	t      *testing.T
+	httpOK atomic.Bool
+	status atomic.String
+	config atomic.String
+	wait   atomic.Int64
 }
 
 func (handler *mockHttpHandler) setHTTPResp(succeed bool) {
 	handler.httpOK.Store(succeed)
 }
 
-func (handler *mockHttpHandler) setHTTPRespBody(body string) {
-	handler.respBody.Store(body)
+func (handler *mockHttpHandler) setStatusRespBody(body string) {
+	handler.status.Store(body)
+}
+
+func (handler *mockHttpHandler) setHasSigningCert(hasSigningCert bool) {
+	var resp backendHttpConfigRespBody
+	if hasSigningCert {
+		resp.Security.SessionTokenSigningCert = "/tmp"
+	}
+	b, _ := json.Marshal(resp)
+	handler.config.Store(string(b))
 }
 
 func (handler *mockHttpHandler) setHTTPWait(wait time.Duration) {
@@ -134,7 +145,11 @@ func (handler *mockHttpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 	if handler.httpOK.Load() {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(handler.respBody.Load()))
+		if r.RequestURI == statusPathSuffix {
+			_, _ = w.Write([]byte(handler.status.Load()))
+		} else {
+			_, _ = w.Write([]byte(handler.config.Load()))
+		}
 	} else {
 		w.WriteHeader(http.StatusInternalServerError)
 	}

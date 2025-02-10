@@ -25,19 +25,19 @@ func TestReadServerVersion(t *testing.T) {
 	hc := NewDefaultHealthCheck(nil, newHealthCheckConfigForTest(), lg)
 	backend, info := newBackendServer(t)
 	backend.setServerVersion("1.0")
-	health := hc.Check(context.Background(), backend.sqlAddr, info)
+	health := hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.Equal(t, "1.0", health.ServerVersion)
 	backend.stopSQLServer()
 	backend.setServerVersion("2.0")
 	backend.startSQLServer()
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.Equal(t, "2.0", health.ServerVersion)
 	backend.stopSQLServer()
 
 	//test for respBody not ok
-	backend.mockHttpHandler.setHTTPRespBody("")
+	backend.mockHttpHandler.setStatusRespBody("")
 	backend.startSQLServer()
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.False(t, health.Healthy)
 	require.NotNil(t, health.PingErr)
 	require.Equal(t, true, strings.Contains(health.PingErr.Error(), "unexpected end of JSON input"))
@@ -52,37 +52,47 @@ func TestHealthCheck(t *testing.T) {
 	hc := NewDefaultHealthCheck(nil, cfg, lg)
 	backend, info := newBackendServer(t)
 	backend.setServerVersion("1.0")
-	health := hc.Check(context.Background(), backend.sqlAddr, info)
+	backend.setHasSigningCert(true)
+	health := hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.True(t, health.Healthy)
 
 	backend.stopSQLServer()
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.False(t, health.Healthy)
 	backend.startSQLServer()
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.True(t, health.Healthy)
-
 	backend.setHTTPResp(false)
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.False(t, health.Healthy)
 	require.NotContains(t, text.String(), "unmarshal body")
 	backend.setHTTPResp(true)
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.True(t, health.Healthy)
 
 	backend.setHTTPWait(time.Second + cfg.DialTimeout)
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.False(t, health.Healthy)
 	backend.setHTTPWait(time.Duration(0))
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.True(t, health.Healthy)
 
 	backend.setSqlResp(false)
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.False(t, health.Healthy)
 	backend.setSqlResp(true)
-	health = hc.Check(context.Background(), backend.sqlAddr, info)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.True(t, health.Healthy)
+
+	require.True(t, health.HasSigningCert)
+	health.LastCheckSigningCertTime = time.Time{}
+	health = hc.Check(context.Background(), backend.sqlAddr, info, health)
+	require.True(t, health.HasSigningCert)
+	backend.setHasSigningCert(false)
+	health.LastCheckSigningCertTime = time.Time{}
+	health = hc.Check(context.Background(), backend.sqlAddr, info, health)
+	require.False(t, health.HasSigningCert)
 	backend.close()
 }
 
@@ -105,7 +115,7 @@ func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
 	}
 	backend.startHTTPServer()
 	backend.setHTTPResp(true)
-	backend.setHTTPRespBody("")
+	backend.setStatusRespBody("")
 	backend.setSqlResp(true)
 	backend.startSQLServer()
 	return backend, &BackendInfo{
@@ -120,7 +130,7 @@ func (srv *backendServer) setServerVersion(version string) {
 		GitHash:     "",
 	}
 	body, _ := json.Marshal(resp)
-	srv.mockHttpHandler.setHTTPRespBody(string(body))
+	srv.mockHttpHandler.setStatusRespBody(string(body))
 }
 
 func (srv *backendServer) startHTTPServer() {
