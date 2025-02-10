@@ -17,6 +17,7 @@ type backendConfig struct {
 	tlsConfig     *tls.Config
 	authPlugin    string
 	sessionStates string
+	sessionToken  string
 	columns       int
 	loops         int
 	params        int
@@ -40,6 +41,7 @@ func newBackendConfig() *backendConfig {
 		loops:         1,
 		stmtNum:       1,
 		sessionStates: mockSessionStates,
+		sessionToken:  mockToken,
 	}
 }
 
@@ -399,7 +401,7 @@ func (mb *mockBackend) respondSessionStates(packetIO pnet.PacketIO) error {
 	names := []string{sessionStatesCol, sessionTokenCol}
 	values := [][]any{
 		{
-			mb.sessionStates, mockCmdStr,
+			mb.sessionStates, mb.sessionToken,
 		},
 	}
 	return mb.writeResultSet(packetIO, names, values)

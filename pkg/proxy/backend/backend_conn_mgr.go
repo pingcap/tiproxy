@@ -560,6 +560,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	if len(sessionToken) == 0 {
 		// Before TiDB v9.0, `show session_states` reports an error if the signing cert is unavailable.
 		// From TiDB v9.0, `show session_states` returns nil in the token column if the signing cert is unavailable.
+		rs.err = errors.New("session token is empty")
 		return
 	}
 	if ctx.Err() != nil {
