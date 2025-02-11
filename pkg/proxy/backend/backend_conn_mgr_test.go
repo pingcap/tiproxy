@@ -479,12 +479,22 @@ func TestRedirectFail(t *testing.T) {
 				return ts.mb.respond(packetIO)
 			},
 		},
-		// 2nd handshake fails
+		// session token is empty
 		{
 			proxy: ts.redirectFail4Proxy,
 			backend: func(packetIO pnet.PacketIO) error {
 				// respond to `SHOW SESSION_STATES`
 				ts.mb.respondType = responseTypeResultSet
+				ts.mb.sessionToken = ""
+				return ts.mb.respond(packetIO)
+			},
+		},
+		// 2nd handshake fails
+		{
+			proxy: ts.redirectFail4Proxy,
+			backend: func(packetIO pnet.PacketIO) error {
+				// respond to `SHOW SESSION_STATES`
+				ts.mb.sessionToken = mockToken
 				err := ts.mb.respondOnce(packetIO)
 				require.NoError(t, err)
 				conn, err := ts.tc.backendListener.Accept()

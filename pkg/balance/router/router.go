@@ -146,11 +146,11 @@ func (b *backendWrapper) GetBackendInfo() observer.BackendInfo {
 	return info
 }
 
-func (b *backendWrapper) Equals(health observer.BackendHealth) bool {
+func (b *backendWrapper) SupportRedirection() bool {
 	b.mu.RLock()
-	equal := b.mu.BackendHealth.Equals(health)
+	supportRedirection := b.mu.SupportRedirection
 	b.mu.RUnlock()
-	return equal
+	return supportRedirection
 }
 
 func (b *backendWrapper) String() string {

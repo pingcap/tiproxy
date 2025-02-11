@@ -65,7 +65,8 @@ func (tester *routerTester) addBackends(num int) {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
 		tester.backends[addr] = &observer.BackendHealth{
-			Healthy: true,
+			Healthy:            true,
+			SupportRedirection: true,
 		}
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
@@ -107,7 +108,8 @@ func (tester *routerTester) updateBackendStatusByAddr(addr string, healthy bool)
 		health.Healthy = healthy
 	} else {
 		tester.backends[addr] = &observer.BackendHealth{
-			Healthy: healthy,
+			SupportRedirection: true,
+			Healthy:            healthy,
 		}
 	}
 	tester.notifyHealth()
@@ -927,4 +929,34 @@ func TestRedirectFail(t *testing.T) {
 	// If the connection refuses to redirect, the connScore should not change.
 	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
 	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
+}
+
+func TestSkipRedirection(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	backends := map[string]*observer.BackendHealth{
+		"0": {
+			Healthy:            true,
+			SupportRedirection: false,
+		},
+		"1": {
+			Healthy:            true,
+			SupportRedirection: true,
+		},
+	}
+	result := observer.NewHealthResult(backends, nil)
+	tester.router.updateBackendHealth(result)
+	require.False(t, tester.router.supportRedirection)
+
+	tester.addConnections(10)
+	require.Equal(t, 5, tester.getBackendByIndex(0).connScore)
+	backends["0"].Healthy = false
+	tester.router.updateBackendHealth(result)
+	tester.rebalance(1)
+	require.Equal(t, 5, tester.getBackendByIndex(0).connScore)
+
+	backends["0"].SupportRedirection = true
+	tester.router.updateBackendHealth(result)
+	require.True(t, tester.router.supportRedirection)
+	tester.rebalance(1)
+	require.NotEqual(t, 5, tester.getBackendByIndex(0).connScore)
 }

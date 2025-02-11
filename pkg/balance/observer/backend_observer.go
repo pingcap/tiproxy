@@ -123,8 +123,9 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 	if !bo.healthCheckConfig.Enable {
 		for addr, backend := range backends {
 			curBackendHealth[addr] = &BackendHealth{
-				BackendInfo: *backend,
-				Healthy:     true,
+				BackendInfo:        *backend,
+				SupportRedirection: true,
+				Healthy:            true,
 			}
 		}
 		return curBackendHealth
@@ -139,7 +140,8 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 				if ctx.Err() != nil {
 					return
 				}
-				health := bo.hc.Check(ctx, addr, info)
+				lastHealth := bo.curBackends[addr]
+				health := bo.hc.Check(ctx, addr, info, lastHealth)
 				health.setLocal(cfg)
 				lock.Lock()
 				curBackendHealth[addr] = health
