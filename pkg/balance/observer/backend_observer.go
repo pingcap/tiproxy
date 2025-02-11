@@ -123,9 +123,9 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 	if !bo.healthCheckConfig.Enable {
 		for addr, backend := range backends {
 			curBackendHealth[addr] = &BackendHealth{
-				BackendInfo:    *backend,
-				HasSigningCert: true,
-				Healthy:        true,
+				BackendInfo:        *backend,
+				SupportRedirection: true,
+				Healthy:            true,
 			}
 		}
 		return curBackendHealth

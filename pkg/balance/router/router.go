@@ -146,11 +146,11 @@ func (b *backendWrapper) GetBackendInfo() observer.BackendInfo {
 	return info
 }
 
-func (b *backendWrapper) HasSigningCert() bool {
+func (b *backendWrapper) SupportRedirection() bool {
 	b.mu.RLock()
-	hasSigningCert := b.mu.HasSigningCert
+	supportRedirection := b.mu.SupportRedirection
 	b.mu.RUnlock()
-	return hasSigningCert
+	return supportRedirection
 }
 
 func (b *backendWrapper) String() string {

@@ -208,8 +208,8 @@ func (router *ScoreBasedRouter) ensureBackend(addr string) *backendWrapper {
 			IP:         ip,
 			StatusPort: 10080, // impossible anyway
 		},
-		HasSigningCert: true,
-		Healthy:        false,
+		SupportRedirection: true,
+		Healthy:            false,
 	})
 	router.backends[addr] = backend
 	return backend
@@ -280,15 +280,15 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	for addr, backend := range router.backends {
 		if _, ok := backends[addr]; !ok {
 			backends[addr] = &observer.BackendHealth{
-				BackendInfo:    backend.GetBackendInfo(),
-				HasSigningCert: backend.HasSigningCert(),
-				Healthy:        false,
-				PingErr:        errors.New("removed from backend list"),
+				BackendInfo:        backend.GetBackendInfo(),
+				SupportRedirection: backend.SupportRedirection(),
+				Healthy:            false,
+				PingErr:            errors.New("removed from backend list"),
 			}
 		}
 	}
 	var serverVersion string
-	hasSigningCert := true
+	supportRedirection := true
 	for addr, health := range backends {
 		backend, ok := router.backends[addr]
 		if !ok && health.Healthy {
@@ -301,14 +301,14 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 				serverVersion = health.ServerVersion
 			}
 		}
-		hasSigningCert = health.HasSigningCert && hasSigningCert
+		supportRedirection = health.SupportRedirection && supportRedirection
 	}
 	if len(serverVersion) > 0 {
 		router.serverVersion = serverVersion
 	}
-	if router.supportRedirection != hasSigningCert {
-		router.logger.Info("updated supporting redirection", zap.Bool("support", hasSigningCert))
-		router.supportRedirection = hasSigningCert
+	if router.supportRedirection != supportRedirection {
+		router.logger.Info("updated supporting redirection", zap.Bool("support", supportRedirection))
+		router.supportRedirection = supportRedirection
 	}
 }
 

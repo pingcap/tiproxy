@@ -18,9 +18,9 @@ type BackendHealth struct {
 	// The backend version that returned to the client during handshake.
 	ServerVersion string
 	// The last time checking the signing cert.
-	LastCheckSigningCertTime time.Time
+	lastCheckSigningCertTime time.Time
 	// Whether the backend has set the signing cert. If not, the connection redirection will be disabled.
-	HasSigningCert bool
+	SupportRedirection bool
 	// Whether the backend in the same zone with TiProxy. If TiProxy location is undefined, take all backends as local.
 	Local bool
 }
@@ -50,8 +50,8 @@ func (bh *BackendHealth) String() string {
 	if bh.PingErr != nil {
 		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
 	}
-	if !bh.HasSigningCert {
-		str += fmt.Sprintf(", has_signing_cert: false")
+	if !bh.SupportRedirection {
+		str += ", support redirection: false"
 	}
 	return str
 }

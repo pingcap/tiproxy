@@ -65,8 +65,8 @@ func (tester *routerTester) addBackends(num int) {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
 		tester.backends[addr] = &observer.BackendHealth{
-			Healthy:        true,
-			HasSigningCert: true,
+			Healthy:            true,
+			SupportRedirection: true,
 		}
 		metrics.BackendConnGauge.WithLabelValues(addr).Set(0)
 	}
@@ -108,8 +108,8 @@ func (tester *routerTester) updateBackendStatusByAddr(addr string, healthy bool)
 		health.Healthy = healthy
 	} else {
 		tester.backends[addr] = &observer.BackendHealth{
-			HasSigningCert: true,
-			Healthy:        healthy,
+			SupportRedirection: true,
+			Healthy:            healthy,
 		}
 	}
 	tester.notifyHealth()
@@ -935,12 +935,12 @@ func TestSkipRedirection(t *testing.T) {
 	tester := newRouterTester(t, nil)
 	backends := map[string]*observer.BackendHealth{
 		"0": {
-			Healthy:        true,
-			HasSigningCert: false,
+			Healthy:            true,
+			SupportRedirection: false,
 		},
 		"1": {
-			Healthy:        true,
-			HasSigningCert: true,
+			Healthy:            true,
+			SupportRedirection: true,
 		},
 	}
 	result := observer.NewHealthResult(backends, nil)
@@ -954,7 +954,7 @@ func TestSkipRedirection(t *testing.T) {
 	tester.rebalance(1)
 	require.Equal(t, 5, tester.getBackendByIndex(0).connScore)
 
-	backends["0"].HasSigningCert = true
+	backends["0"].SupportRedirection = true
 	tester.router.updateBackendHealth(result)
 	require.True(t, tester.router.supportRedirection)
 	tester.rebalance(1)

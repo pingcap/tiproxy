@@ -85,14 +85,14 @@ func TestHealthCheck(t *testing.T) {
 	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.True(t, health.Healthy)
 
-	require.True(t, health.HasSigningCert)
-	health.LastCheckSigningCertTime = time.Time{}
+	require.True(t, health.SupportRedirection)
+	health.lastCheckSigningCertTime = time.Time{}
 	health = hc.Check(context.Background(), backend.sqlAddr, info, health)
-	require.True(t, health.HasSigningCert)
+	require.True(t, health.SupportRedirection)
 	backend.setHasSigningCert(false)
-	health.LastCheckSigningCertTime = time.Time{}
+	health.lastCheckSigningCertTime = time.Time{}
 	health = hc.Check(context.Background(), backend.sqlAddr, info, health)
-	require.False(t, health.HasSigningCert)
+	require.False(t, health.SupportRedirection)
 	backend.close()
 }
 

@@ -150,21 +150,21 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 
 	now := time.Now()
 	if lastBh != nil {
-		bh.HasSigningCert = lastBh.HasSigningCert
-		if lastBh.LastCheckSigningCertTime.Add(checkSigningCertInterval).After(now) {
-			bh.LastCheckSigningCertTime = lastBh.LastCheckSigningCertTime
+		bh.SupportRedirection = lastBh.SupportRedirection
+		if lastBh.lastCheckSigningCertTime.Add(checkSigningCertInterval).After(now) {
+			bh.lastCheckSigningCertTime = lastBh.lastCheckSigningCertTime
 			return
 		}
 	} else {
 		// Assume it has the signing cert if reading config fails.
-		bh.HasSigningCert = true
+		bh.SupportRedirection = true
 	}
-	bh.LastCheckSigningCertTime = now
+	bh.lastCheckSigningCertTime = now
 
 	var err error
 	defer func() {
-		if lastBh == nil || lastBh.HasSigningCert != bh.HasSigningCert {
-			dhc.logger.Info("backend has updated signing cert", zap.Bool("has_signing_cert", bh.HasSigningCert), zap.Error(err))
+		if lastBh == nil || lastBh.SupportRedirection != bh.SupportRedirection {
+			dhc.logger.Info("backend has updated signing cert", zap.Bool("support_redirection", bh.SupportRedirection), zap.Error(err))
 		}
 	}()
 
@@ -180,6 +180,6 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 		return
 	}
 	if len(respBody.Security.SessionTokenSigningCert) == 0 {
-		bh.HasSigningCert = false
+		bh.SupportRedirection = false
 	}
 }
