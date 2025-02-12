@@ -6,8 +6,8 @@ package security
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -70,7 +70,7 @@ func (ci *CertInfo) getClientCert(*tls.CertificateRequestInfo) (*tls.Certificate
 	return cert, nil
 }
 
-func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+func (ci *CertInfo) verifyCA(rawCerts [][]byte) error {
 	if len(rawCerts) == 0 {
 		return nil
 	}
@@ -108,26 +108,23 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 	return err
 }
 
-func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
-	pool := x509.NewCertPool()
-	for len(pemCerts) > 0 {
-		var block *pem.Block
-		block, pemCerts = pem.Decode(pemCerts)
-		if block == nil {
-			break
-		}
-		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-			continue
-		}
-
-		certBytes := block.Bytes
-		cert, err := x509.ParseCertificate(certBytes)
-		if err != nil {
-			continue
-		}
-		pool.AddCert(cert)
+func verifyCommonName(allowedCN []string, verifiedChains [][]*x509.Certificate) error {
+	if len(allowedCN) == 0 {
+		return nil
 	}
-	return pool, nil
+	checkCN := make(map[string]struct{})
+	for _, cn := range allowedCN {
+		cn = strings.TrimSpace(cn)
+		checkCN[cn] = struct{}{}
+	}
+	for _, chain := range verifiedChains {
+		if len(chain) != 0 {
+			if _, match := checkCN[chain[0].Subject.CommonName]; match {
+				return nil
+			}
+		}
+	}
+	return errors.Errorf("peer certificate authentication failed. The Common Name from the peer certificate was not found in the configuration cert-allowed-cn with value: %v", allowedCN)
 }
 
 func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
@@ -144,10 +141,15 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:            GetMinTLSVer(cfg.MinTLSVersion, lg),
-		GetCertificate:        ci.getCert,
-		GetClientCertificate:  ci.getClientCert,
-		VerifyPeerCertificate: ci.verifyPeerCertificate,
+		MinVersion:           GetMinTLSVer(cfg.MinTLSVersion, lg),
+		GetCertificate:       ci.getCert,
+		GetClientCertificate: ci.getClientCert,
+		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			if err := ci.verifyCA(rawCerts); err != nil {
+				return err
+			}
+			return verifyCommonName(cfg.CertAllowedCN, verifiedChains)
+		},
 	}
 
 	var certPEM, keyPEM []byte
@@ -160,7 +162,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 				dur = DefaultCertExpiration
 			}
 			ci.autoCertExp.Store(now.Add(DefaultCertExpiration - recreateAutoCertAdvance).Unix())
-			certPEM, keyPEM, _, err = createTempTLS(cfg.RSAKeySize, dur)
+			certPEM, keyPEM, _, err = createTempTLS(cfg.RSAKeySize, dur, "")
 			if err != nil {
 				return nil, err
 			}
@@ -193,14 +195,20 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	cas, err := ci.loadCA(caPEM)
-	if err != nil {
-		return nil, errors.WithStack(err)
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caPEM) {
+		return nil, errors.New("failed to append ca certs")
 	}
-	ci.ca.Store(cas)
+	ci.ca.Store(certPool)
 
-	if cfg.SkipCA {
+	// RequireAndVerifyClientCert requires ClientCAs to verify client certificates.
+	// But the problem is, the ClientCAs in the returned tls.Config can't be updated after reload,
+	// which results in connection failure after CA rotation and cert-allowed-cn is set.
+	tcfg.ClientCAs = certPool
+
+	if len(cfg.CertAllowedCN) > 0 {
+		tcfg.ClientAuth = tls.RequireAndVerifyClientCert
+	} else if cfg.SkipCA {
 		tcfg.ClientAuth = tls.RequestClientCert
 	} else {
 		tcfg.ClientAuth = tls.RequireAnyClientCert
@@ -213,7 +221,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg.Load()))
 	cfg := ci.cfg.Load()
 	if cfg.AutoCerts {
-		lg.Info("specified auto-certs in a client tls config, ignored")
+		lg.Warn("specified auto-certs in a client tls config, ignored")
 	}
 
 	if !cfg.HasCA() {
@@ -229,22 +237,25 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:            GetMinTLSVer(cfg.MinTLSVersion, lg),
-		GetCertificate:        ci.getCert,
-		GetClientCertificate:  ci.getClientCert,
-		InsecureSkipVerify:    true,
-		VerifyPeerCertificate: ci.verifyPeerCertificate,
+		MinVersion:           GetMinTLSVer(cfg.MinTLSVersion, lg),
+		GetCertificate:       ci.getCert,
+		GetClientCertificate: ci.getClientCert,
+		InsecureSkipVerify:   true,
+		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+			return ci.verifyCA(rawCerts)
+		},
 	}
 
-	certBytes, err := os.ReadFile(cfg.CA)
+	caPEM, err := os.ReadFile(cfg.CA)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
-	cas, err := ci.loadCA(certBytes)
-	if err != nil {
-		return nil, errors.WithStack(err)
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caPEM) {
+		return nil, errors.New("failed to append ca certs")
 	}
-	ci.ca.Store(cas)
+	ci.ca.Store(certPool)
+	tcfg.RootCAs = certPool
 
 	if !cfg.HasCert() {
 		lg.Info("no certificates, server may reject the connection")

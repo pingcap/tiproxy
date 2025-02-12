@@ -159,8 +159,8 @@ func TestRotate(t *testing.T) {
 	createFile(t, caPath)
 	createFile(t, keyPath)
 	createFile(t, certPath)
-	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration))
-	require.NoError(t, security.CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 0, security.DefaultCertExpiration))
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration, ""))
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 0, security.DefaultCertExpiration, ""))
 
 	cfg := &config.Config{
 		Workdir: tmpdir,
@@ -335,16 +335,17 @@ func TestBidirectional(t *testing.T) {
 	keyPath2 := filepath.Join(tmpdir, "c2", "key")
 	certPath2 := filepath.Join(tmpdir, "c2", "cert")
 
-	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration))
-	require.NoError(t, security.CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 0, security.DefaultCertExpiration))
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration, ""))
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 0, security.DefaultCertExpiration, "server"))
 
 	cfg := &config.Config{
 		Workdir: tmpdir,
 		Security: config.Security{
 			ServerSQLTLS: config.TLSConfig{
-				Cert: certPath1,
-				Key:  keyPath1,
-				CA:   caPath2,
+				Cert:          certPath1,
+				Key:           keyPath1,
+				CA:            caPath2,
+				CertAllowedCN: []string{"server"},
 			},
 			SQLTLS: config.TLSConfig{
 				CA:   caPath1,
@@ -369,7 +370,7 @@ func TestWatchConfig(t *testing.T) {
 	caPath1 := filepath.Join(tmpdir, "c1", "ca")
 	keyPath1 := filepath.Join(tmpdir, "c1", "key")
 	certPath1 := filepath.Join(tmpdir, "c1", "cert")
-	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration))
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration, ""))
 
 	tests := []struct {
 		cfg     config.TLSConfig

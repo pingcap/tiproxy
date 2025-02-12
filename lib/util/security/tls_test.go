@@ -13,7 +13,7 @@ import (
 
 func BenchmarkCreateTLS(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_, _, _, err := createTempTLS(0, DefaultCertExpiration)
+		_, _, _, err := createTempTLS(0, DefaultCertExpiration, "")
 		require.Nil(b, err)
 	}
 }
@@ -67,7 +67,7 @@ func TestGetMinTLSVer(t *testing.T) {
 func TestRsaSize(t *testing.T) {
 	sizes := []int{0, 512, 1024, 2048, 4096}
 	for _, size := range sizes {
-		_, _, _, err := createTempTLS(size, DefaultCertExpiration)
+		_, _, _, err := createTempTLS(size, DefaultCertExpiration, "")
 		require.Nil(t, err)
 	}
 }
