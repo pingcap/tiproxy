@@ -107,6 +107,7 @@ graceful-close-conn-timeout = 15
 	[security.server-http-tls]
 	# proxy HTTP port will use this
 	# auto-certs = true
+	# cert-allowed-cn = ["tiproxy", "tidb", "test-client", "prometheus"]
 
 # require-backend-tls = false
 

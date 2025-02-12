@@ -6,7 +6,6 @@ package security
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
 	"net"
 	"os"
 	"path/filepath"
@@ -26,13 +25,12 @@ func TestCertServer(t *testing.T) {
 	keyPath := filepath.Join(tmpdir, "key")
 	caPath := filepath.Join(tmpdir, "ca")
 
-	require.NoError(t, CreateTLSCertificates(logger, certPath, keyPath, caPath, 1024, time.Hour))
+	require.NoError(t, CreateTLSCertificates(logger, certPath, keyPath, caPath, 1024, time.Hour, ""))
 
 	type certCase struct {
 		config.TLSConfig
 		server  bool
 		checker func(*testing.T, *tls.Config, *CertInfo)
-		err     string
 	}
 
 	cases := []certCase{
@@ -40,10 +38,8 @@ func TestCertServer(t *testing.T) {
 			server: true,
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.Nil(t, c)
-				require.Nil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
 			},
-			err: "",
 		},
 		{
 			server: true,
@@ -53,10 +49,8 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.Nil(t, c)
-				require.Nil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
 			},
-			err: "",
 		},
 		{
 			server: true,
@@ -66,11 +60,10 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
-				require.Nil(t, ci.ca.Load())
+				require.Nil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			server: true,
@@ -81,11 +74,10 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
-				require.Nil(t, ci.ca.Load())
+				require.Nil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			server: true,
@@ -98,11 +90,10 @@ func TestCertServer(t *testing.T) {
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
-				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			server: true,
@@ -116,11 +107,10 @@ func TestCertServer(t *testing.T) {
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
-				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			server: true,
@@ -134,11 +124,10 @@ func TestCertServer(t *testing.T) {
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.Equal(t, tls.RequestClientCert, c.ClientAuth)
-				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			server: true,
@@ -150,11 +139,10 @@ func TestCertServer(t *testing.T) {
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
-				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			server: true,
@@ -167,19 +155,16 @@ func TestCertServer(t *testing.T) {
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
-				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.Nil(t, c)
-				require.Nil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
 			},
-			err: "",
 		},
 		{
 			TLSConfig: config.TLSConfig{
@@ -189,10 +174,8 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.Nil(t, c)
-				require.Nil(t, ci.ca.Load())
 				require.Nil(t, ci.cert.Load())
 			},
-			err: "",
 		},
 		{
 			TLSConfig: config.TLSConfig{
@@ -201,11 +184,10 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
-				require.Nil(t, ci.ca.Load())
+				require.Nil(t, c.RootCAs)
 				require.Nil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			TLSConfig: config.TLSConfig{
@@ -215,11 +197,10 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
-				require.Nil(t, ci.ca.Load())
+				require.Nil(t, c.RootCAs)
 				require.Nil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			TLSConfig: config.TLSConfig{
@@ -228,11 +209,10 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
-				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, c.RootCAs)
 				require.Nil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			TLSConfig: config.TLSConfig{
@@ -243,11 +223,10 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
-				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, c.RootCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
 			},
-			err: "",
 		},
 		{
 			TLSConfig: config.TLSConfig{
@@ -259,25 +238,18 @@ func TestCertServer(t *testing.T) {
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
-				require.NotNil(t, ci.ca.Load())
+				require.NotNil(t, c.RootCAs)
 				require.NotNil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
 			},
-			err: "",
 		},
 	}
 
-	for _, tc := range cases {
+	for i, tc := range cases {
 		ci := NewCert(tc.server)
 		ci.SetConfig(tc.TLSConfig)
 		tcfg, err := ci.Reload(logger)
-		if len(tc.err) > 0 {
-			require.Nil(t, ci)
-			require.ErrorContains(t, err, tc.err)
-		} else {
-			require.NotNil(t, ci)
-			require.NoError(t, err)
-		}
+		require.NoError(t, err, "case %d", i)
 		if tc.checker != nil {
 			tc.checker(t, tcfg, ci)
 		}
@@ -297,7 +269,7 @@ func TestReload(t *testing.T) {
 	}
 
 	// Create a cert and record the expiration.
-	require.NoError(t, CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, time.Hour))
+	require.NoError(t, CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, time.Hour, ""))
 	ci := NewCert(true)
 	ci.SetConfig(cfg)
 	tcfg, err := ci.Reload(lg)
@@ -306,7 +278,7 @@ func TestReload(t *testing.T) {
 	expire1 := getExpireTime(t, ci)
 
 	// Replace the cert and then reload. Check that the expiration is different.
-	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, 2*time.Hour)
+	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, 2*time.Hour, "")
 	require.NoError(t, err)
 	_, err = ci.Reload(lg)
 	require.NoError(t, err)
@@ -388,8 +360,8 @@ func TestCertPool(t *testing.T) {
 	keyPath2 := filepath.Join(tmpdir, "c2", "key")
 	certPath2 := filepath.Join(tmpdir, "c2", "cert")
 
-	require.NoError(t, CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 1024, DefaultCertExpiration))
-	require.NoError(t, CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 1024, DefaultCertExpiration))
+	require.NoError(t, CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 1024, DefaultCertExpiration, ""))
+	require.NoError(t, CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 1024, DefaultCertExpiration, ""))
 
 	serverCfg := config.TLSConfig{
 		Cert: certPath1,
@@ -413,8 +385,9 @@ func TestCertPool(t *testing.T) {
 	require.Error(t, serverErr)
 
 	// Add both caPath1 and caPath2 to the cert pool and it succeeds to verify certPath1.
-	err = loadCA(caPath1, clientCert.ca.Load())
+	caPEM, err := os.ReadFile(caPath1)
 	require.NoError(t, err)
+	require.True(t, clientTLS.RootCAs.AppendCertsFromPEM(caPEM))
 	clientErr, serverErr = connectWithTLS(clientTLS, serverTLS)
 	require.NoError(t, clientErr)
 	require.NoError(t, serverErr)
@@ -432,31 +405,6 @@ func TestCertPool(t *testing.T) {
 	require.NoError(t, serverErr)
 }
 
-func loadCA(caPath string, pool *x509.CertPool) error {
-	pemCerts, err := os.ReadFile(caPath)
-	if err != nil {
-		return err
-	}
-	for len(pemCerts) > 0 {
-		var block *pem.Block
-		block, pemCerts = pem.Decode(pemCerts)
-		if block == nil {
-			break
-		}
-		if block.Type != "CERTIFICATE" || len(block.Headers) != 0 {
-			continue
-		}
-
-		certBytes := block.Bytes
-		cert, err := x509.ParseCertificate(certBytes)
-		if err != nil {
-			continue
-		}
-		pool.AddCert(cert)
-	}
-	return nil
-}
-
 func connectWithTLS(ctls, stls *tls.Config) (clientErr, serverErr error) {
 	client, server := net.Pipe()
 	var wg waitgroup.WaitGroup
@@ -472,4 +420,75 @@ func connectWithTLS(ctls, stls *tls.Config) (clientErr, serverErr error) {
 	})
 	wg.Wait()
 	return
+}
+
+func TestCommonName(t *testing.T) {
+	tests := []struct {
+		commonName string
+		allowedCN  []string
+		success    bool
+	}{
+		{
+			commonName: "",
+			allowedCN:  []string{"server1"},
+			success:    false,
+		},
+		{
+			commonName: "server1",
+			allowedCN:  []string{"server1"},
+			success:    true,
+		},
+		{
+			commonName: "server1",
+			allowedCN:  []string{"server2"},
+			success:    false,
+		},
+		{
+			commonName: "server1",
+			allowedCN:  []string{"server2", "server1"},
+			success:    true,
+		},
+	}
+
+	tmpdir := t.TempDir()
+	lg, _ := logger.CreateLoggerForTest(t)
+	clientCertPath := filepath.Join(tmpdir, "c1", "cert")
+	clientKeyPath := filepath.Join(tmpdir, "c1", "key")
+	clientCAPath := filepath.Join(tmpdir, "c1", "ca")
+	serverCertPath := filepath.Join(tmpdir, "c2", "cert")
+	serverKeyPath := filepath.Join(tmpdir, "c2", "key")
+	serverCAPath := filepath.Join(tmpdir, "c2", "ca")
+	require.NoError(t, CreateTLSCertificates(lg, serverCertPath, serverKeyPath, serverCAPath, 2048, DefaultCertExpiration, ""))
+
+	for i, test := range tests {
+		require.NoError(t, CreateTLSCertificates(lg, clientCertPath, clientKeyPath, clientCAPath, 2048, DefaultCertExpiration, test.commonName))
+		serverCfg := config.TLSConfig{
+			CertAllowedCN: test.allowedCN,
+			Cert:          serverCertPath,
+			Key:           serverKeyPath,
+			CA:            clientCAPath,
+		}
+		serverCert := NewCert(true)
+		serverCert.cfg.Store(&serverCfg)
+		serverTLS, err := serverCert.Reload(lg)
+		require.NoError(t, err)
+
+		clientCfg := config.TLSConfig{
+			Cert: clientCertPath,
+			Key:  clientKeyPath,
+			CA:   serverCAPath,
+		}
+		clientCert := NewCert(false)
+		clientCert.cfg.Store(&clientCfg)
+		clientTLS, err := clientCert.Reload(lg)
+		require.NoError(t, err)
+
+		clientErr, serverErr := connectWithTLS(clientTLS, serverTLS)
+		if test.success {
+			require.NoError(t, clientErr, "case %d", i)
+			require.NoError(t, serverErr, "case %d", i)
+		} else {
+			require.Error(t, serverErr, "case %d", i)
+		}
+	}
 }

@@ -25,7 +25,7 @@ import (
 
 const DefaultCertExpiration = 24 * 90 * time.Hour
 
-func CreateTLSCertificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration) error {
+func CreateTLSCertificates(logger *zap.Logger, certpath, keypath, capath string, rsaKeySize int, expiration time.Duration, commonName string) error {
 	logger = logger.With(zap.String("cert", certpath), zap.String("key", keypath), zap.String("ca", capath), zap.Int("rsaKeySize", rsaKeySize))
 
 	_, e1 := os.Stat(certpath)
@@ -55,7 +55,7 @@ func CreateTLSCertificates(logger *zap.Logger, certpath, keypath, capath string,
 		}
 	}
 
-	certPEM, keyPEM, caPEM, err := createTempTLS(rsaKeySize, expiration)
+	certPEM, keyPEM, caPEM, err := createTempTLS(rsaKeySize, expiration, commonName)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func CreateTLSCertificates(logger *zap.Logger, certpath, keypath, capath string,
 	return nil
 }
 
-func createTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []byte, error) {
+func createTempTLS(rsaKeySize int, expiration time.Duration, commonName string) ([]byte, []byte, []byte, error) {
 	if rsaKeySize <= 0 {
 		rsaKeySize = 4096
 	} else if rsaKeySize < 1024 {
@@ -133,6 +133,7 @@ func createTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []
 			Locality:      []string{"San Francisco"},
 			StreetAddress: []string{"Golden Gate Bridge"},
 			PostalCode:    []string{"94016"},
+			CommonName:    commonName,
 		},
 		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
 		NotBefore:    time.Now(),
@@ -173,7 +174,7 @@ func createTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []
 
 // CreateTLSConfigForTest is from https://gist.github.com/shaneutt/5e1995295cff6721c89a71d13a71c251.
 func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, err error) {
-	certPEM, keyPEM, caPEM, uerr := createTempTLS(1024, DefaultCertExpiration)
+	certPEM, keyPEM, caPEM, uerr := createTempTLS(1024, DefaultCertExpiration, "")
 	if uerr != nil {
 		err = uerr
 		return
