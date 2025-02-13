@@ -16,11 +16,17 @@ import (
 func (h *Server) registerTraffic(group *gin.RouterGroup) {
 	group.POST("/capture", h.TrafficCapture)
 	group.POST("/replay", h.TrafficReplay)
-	group.POST("/cancel", h.TrafficStop)
+	group.POST("/cancel", h.TrafficCancel)
 	group.GET("/show", h.TrafficShow)
 }
 
 func (h *Server) TrafficCapture(c *gin.Context) {
+	globalCfg := h.mgr.CfgMgr.GetConfig()
+	if !globalCfg.EnableTrafficReplay {
+		c.String(http.StatusBadRequest, "traffic capture is disabled")
+		return
+	}
+
 	cfg := capture.CaptureConfig{}
 	cfg.Output = c.PostForm("output")
 	if durationStr := c.PostForm("duration"); durationStr != "" {
@@ -31,6 +37,31 @@ func (h *Server) TrafficCapture(c *gin.Context) {
 		}
 		cfg.Duration = duration
 	}
+<<<<<<< HEAD
+=======
+	cfg.EncryptMethod = c.PostForm("encrypt-method")
+
+	compress := true
+	if compressStr := c.PostForm("compress"); compressStr != "" {
+		var err error
+		if compress, err = strconv.ParseBool(compressStr); err != nil {
+			h.lg.Warn("parsing argument 'compress' error, using true", zap.String("compress", c.PostForm("compress")), zap.Error(err))
+			compress = true
+		}
+	}
+	cfg.Compress = compress
+	cfg.KeyFile = globalCfg.Security.Encryption.KeyPath
+	if startTimeStr := c.PostForm("start-time"); startTimeStr != "" {
+		startTime, err := time.Parse(time.RFC3339, startTimeStr)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.StartTime = startTime
+	} else {
+		cfg.StartTime = time.Now()
+	}
+>>>>>>> acbb0eb (config, api: add a config to turn off traffic replay on TiDB Cloud (#738))
 
 	if err := h.mgr.ReplayJobMgr.StartCapture(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
@@ -40,6 +71,12 @@ func (h *Server) TrafficCapture(c *gin.Context) {
 }
 
 func (h *Server) TrafficReplay(c *gin.Context) {
+	globalCfg := h.mgr.CfgMgr.GetConfig()
+	if !globalCfg.EnableTrafficReplay {
+		c.String(http.StatusBadRequest, "traffic replay is disabled")
+		return
+	}
+
 	cfg := replay.ReplayConfig{}
 	cfg.Input = c.PostForm("input")
 	if speedStr := c.PostForm("speed"); speedStr != "" {
@@ -52,6 +89,11 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	}
 	cfg.Username = c.PostForm("username")
 	cfg.Password = c.PostForm("password")
+<<<<<<< HEAD
+=======
+	cfg.ReadOnly = strings.EqualFold(c.PostForm("readonly"), "true")
+	cfg.KeyFile = globalCfg.Security.Encryption.KeyPath
+>>>>>>> acbb0eb (config, api: add a config to turn off traffic replay on TiDB Cloud (#738))
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
@@ -60,12 +102,24 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	c.String(http.StatusOK, "replay started")
 }
 
-func (h *Server) TrafficStop(c *gin.Context) {
+func (h *Server) TrafficCancel(c *gin.Context) {
+	globalCfg := h.mgr.CfgMgr.GetConfig()
+	if !globalCfg.EnableTrafficReplay {
+		c.String(http.StatusBadRequest, "traffic cancel is disabled")
+		return
+	}
+
 	result := h.mgr.ReplayJobMgr.Stop()
 	c.String(http.StatusOK, result)
 }
 
 func (h *Server) TrafficShow(c *gin.Context) {
+	globalCfg := h.mgr.CfgMgr.GetConfig()
+	if !globalCfg.EnableTrafficReplay {
+		c.String(http.StatusBadRequest, "traffic show is disabled")
+		return
+	}
+
 	result := h.mgr.ReplayJobMgr.Jobs()
 	c.String(http.StatusOK, result)
 }
