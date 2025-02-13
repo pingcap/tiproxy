@@ -29,7 +29,7 @@ func GetTrafficCaptureCmd(ctx *Context) *cobra.Command {
 	}
 	output := captureCmd.PersistentFlags().String("output", "", "output directory for traffic files")
 	duration := captureCmd.PersistentFlags().String("duration", "", "the duration of traffic capture")
-	encrypt := captureCmd.PersistentFlags().String("encrypt-method", "", "the encryption method used for encrypting traffic files")
+	encrypt := captureCmd.PersistentFlags().String("encryption-method", "", "the encryption method used for encrypting traffic files")
 	compress := captureCmd.PersistentFlags().Bool("compress", true, "whether compress the traffic files")
 	captureCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reader := GetFormReader(map[string]string{
@@ -58,7 +58,7 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 	speed := replayCmd.PersistentFlags().Float64("speed", 1, "replay speed")
 	username := replayCmd.PersistentFlags().String("username", "", "the username to connect to TiDB for replay")
 	password := replayCmd.PersistentFlags().String("password", "", "the password to connect to TiDB for replay")
-	readonly := replayCmd.PersistentFlags().Bool("readonly", false, "only replay read-only queries, default is false")
+	readonly := replayCmd.PersistentFlags().Bool("read-only", false, "only replay read-only queries, default is false")
 	replayCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reader := GetFormReader(map[string]string{
 			"input":    *input,
