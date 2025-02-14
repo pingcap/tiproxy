@@ -50,7 +50,7 @@ func (h *Server) TrafficCapture(c *gin.Context) {
 		}
 	}
 	cfg.Compress = compress
-	cfg.KeyFile = globalCfg.Security.Encryption.KeyPath
+	cfg.KeyFile = globalCfg.Security.EncryptionKeyPath
 	if startTimeStr := c.PostForm("start-time"); startTimeStr != "" {
 		startTime, err := time.Parse(time.RFC3339, startTimeStr)
 		if err != nil {
@@ -99,7 +99,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	cfg.Username = c.PostForm("username")
 	cfg.Password = c.PostForm("password")
 	cfg.ReadOnly = strings.EqualFold(c.PostForm("readonly"), "true")
-	cfg.KeyFile = globalCfg.Security.Encryption.KeyPath
+	cfg.KeyFile = globalCfg.Security.EncryptionKeyPath
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

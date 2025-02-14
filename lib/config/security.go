@@ -24,14 +24,10 @@ func (c TLSConfig) HasCA() bool {
 }
 
 type Security struct {
-	ServerSQLTLS      TLSConfig  `yaml:"server-tls,omitempty" toml:"server-tls,omitempty" json:"server-tls,omitempty"`
-	ServerHTTPTLS     TLSConfig  `yaml:"server-http-tls,omitempty" toml:"server-http-tls,omitempty" json:"server-http-tls,omitempty"`
-	ClusterTLS        TLSConfig  `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
-	SQLTLS            TLSConfig  `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
-	Encryption        Encryption `yaml:"encryption,omitempty" toml:"encryption,omitempty" json:"encryption,omitempty"`
-	RequireBackendTLS bool       `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
-}
-
-type Encryption struct {
-	KeyPath string `yaml:"key-path,omitempty" toml:"key-path,omitempty" json:"key-path,omitempty"`
+	ServerSQLTLS      TLSConfig `yaml:"server-tls,omitempty" toml:"server-tls,omitempty" json:"server-tls,omitempty"`
+	ServerHTTPTLS     TLSConfig `yaml:"server-http-tls,omitempty" toml:"server-http-tls,omitempty" json:"server-http-tls,omitempty"`
+	ClusterTLS        TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
+	SQLTLS            TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
+	EncryptionKeyPath string    `yaml:"encryption-key-path,omitempty" toml:"encryption-key-path,omitempty" json:"encryption-key-path,omitempty"`
+	RequireBackendTLS bool      `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
 }
