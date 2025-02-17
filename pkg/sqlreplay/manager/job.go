@@ -13,15 +13,15 @@ import (
 	"github.com/siddontang/go/hack"
 )
 
-type jobType int
+type JobType int
 
 const (
-	Capture jobType = iota
+	Capture JobType = 1 << iota
 	Replay
 )
 
 type Job interface {
-	Type() jobType
+	Type() JobType
 	String() string
 	MarshalJSON() ([]byte, error)
 	SetProgress(progress float64, endTime time.Time, done bool, err error)
@@ -89,7 +89,7 @@ type captureJob struct {
 	cfg capture.CaptureConfig
 }
 
-func (job *captureJob) Type() jobType {
+func (job *captureJob) Type() JobType {
 	return Capture
 }
 
@@ -116,7 +116,7 @@ type replayJob struct {
 	cfg replay.ReplayConfig
 }
 
-func (job *replayJob) Type() jobType {
+func (job *replayJob) Type() JobType {
 	return Replay
 }
 

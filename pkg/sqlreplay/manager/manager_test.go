@@ -22,7 +22,7 @@ func TestStartAndStop(t *testing.T) {
 	cpt, rep := &mockCapture{}, &mockReplay{}
 	mgr.capture, mgr.replay = cpt, rep
 
-	require.Contains(t, mgr.Stop(), "no job running")
+	require.Contains(t, mgr.Stop(CancelConfig{Type: Capture | Replay}), "no job running")
 	require.NotNil(t, mgr.GetCapture())
 
 	require.NoError(t, mgr.StartCapture(capture.CaptureConfig{}))
@@ -30,16 +30,18 @@ func TestStartAndStop(t *testing.T) {
 	require.Error(t, mgr.StartReplay(replay.ReplayConfig{}))
 	require.Len(t, mgr.jobHistory, 1)
 	require.NotEmpty(t, mgr.Jobs())
-	require.Contains(t, mgr.Stop(), "stopped")
-	require.Contains(t, mgr.Stop(), "no job running")
+	require.Contains(t, mgr.Stop(CancelConfig{Type: Replay}), "no privilege to stop the job")
+	require.Contains(t, mgr.Stop(CancelConfig{Type: Capture}), "stopped")
+	require.Contains(t, mgr.Stop(CancelConfig{Type: Capture}), "no job running")
 	require.Len(t, mgr.jobHistory, 1)
 
 	require.NoError(t, mgr.StartReplay(replay.ReplayConfig{}))
 	require.Error(t, mgr.StartCapture(capture.CaptureConfig{}))
 	require.Error(t, mgr.StartReplay(replay.ReplayConfig{}))
 	require.Len(t, mgr.jobHistory, 2)
-	require.Contains(t, mgr.Stop(), "stopped")
-	require.Contains(t, mgr.Stop(), "no job running")
+	require.Contains(t, mgr.Stop(CancelConfig{Type: Capture}), "no privilege to stop the job")
+	require.Contains(t, mgr.Stop(CancelConfig{Type: Replay}), "stopped")
+	require.Contains(t, mgr.Stop(CancelConfig{Type: Replay}), "no job running")
 	require.Len(t, mgr.jobHistory, 2)
 
 	// Test that Jobs() also update progress.
@@ -144,7 +146,7 @@ func TestHistoryLen(t *testing.T) {
 
 	for i := 0; i < maxJobHistoryCount+1; i++ {
 		require.NoError(t, mgr.StartCapture(capture.CaptureConfig{}))
-		require.Contains(t, mgr.Stop(), "stopped")
+		require.Contains(t, mgr.Stop(CancelConfig{Type: Capture}), "stopped")
 		expectedLen := i + 1
 		if expectedLen > maxJobHistoryCount {
 			expectedLen = maxJobHistoryCount

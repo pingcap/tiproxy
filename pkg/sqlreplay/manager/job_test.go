@@ -16,7 +16,7 @@ import (
 func TestIsRunning(t *testing.T) {
 	tests := []struct {
 		job     Job
-		tp      jobType
+		tp      JobType
 		running bool
 	}{
 		{

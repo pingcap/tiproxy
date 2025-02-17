@@ -21,6 +21,10 @@ const (
 	maxJobHistoryCount = 10
 )
 
+type CancelConfig struct {
+	Type JobType
+}
+
 type CertManager interface {
 	SQLTLS() *tls.Config
 }
@@ -29,7 +33,7 @@ type JobManager interface {
 	StartCapture(capture.CaptureConfig) error
 	StartReplay(replay.ReplayConfig) error
 	GetCapture() capture.Capture
-	Stop() string
+	Stop(CancelConfig) string
 	Jobs() string
 	Close()
 }
@@ -158,10 +162,13 @@ func (jm *jobManager) Jobs() string {
 	return hack.String(b)
 }
 
-func (jm *jobManager) Stop() string {
+func (jm *jobManager) Stop(cfg CancelConfig) string {
 	job := jm.runningJob()
 	if job == nil {
 		return "no job running"
+	}
+	if job.Type()&cfg.Type == 0 {
+		return "no privilege to stop the job"
 	}
 	switch job.Type() {
 	case Capture:

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"go.uber.org/zap"
 )
@@ -115,7 +116,17 @@ func (h *Server) TrafficCancel(c *gin.Context) {
 		return
 	}
 
-	result := h.mgr.ReplayJobMgr.Stop()
+	cfg := manager.CancelConfig{}
+	cfg.Type = manager.Capture | manager.Replay
+	if tp := c.PostForm("type"); tp != "" {
+		switch strings.ToLower(tp) {
+		case "capture":
+			cfg.Type = manager.Capture
+		case "replay":
+			cfg.Type = manager.Replay
+		}
+	}
+	result := h.mgr.ReplayJobMgr.Stop(cfg)
 	c.String(http.StatusOK, result)
 }
 
