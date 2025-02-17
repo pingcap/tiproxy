@@ -4,10 +4,14 @@
 package cli
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"syscall"
 
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func GetTrafficCmd(ctx *Context) *cobra.Command {
@@ -60,11 +64,24 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 	password := replayCmd.PersistentFlags().String("password", "", "the password to connect to TiDB for replay")
 	readonly := replayCmd.PersistentFlags().Bool("read-only", false, "only replay read-only queries, default is false")
 	replayCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		username := *username
+		if len(username) == 0 {
+			return errors.New("username is required")
+		}
+		password := *password
+		if !cmd.Flags().Changed("password") {
+			fmt.Printf("Input password for user %s: ", username)
+			bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+			if err != nil {
+				return err
+			}
+			password = string(bytePassword)
+		}
 		reader := GetFormReader(map[string]string{
 			"input":    *input,
 			"speed":    strconv.FormatFloat(*speed, 'f', -1, 64),
-			"username": *username,
-			"password": *password,
+			"username": username,
+			"password": password,
 			"readonly": strconv.FormatBool(*readonly),
 		})
 		resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, "/api/traffic/replay", reader)
