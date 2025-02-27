@@ -133,7 +133,7 @@ func (r *rotateReader) Read(data []byte) (int, error) {
 		if err == nil {
 			return m, nil
 		}
-		if err != io.EOF {
+		if !errors.Is(err, io.EOF) {
 			return m, errors.WithStack(err)
 		}
 		_ = r.Close()

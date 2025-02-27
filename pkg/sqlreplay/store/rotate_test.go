@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -270,26 +271,31 @@ func TestCompressAndEncrypt(t *testing.T) {
 	// write with compression and encryption
 	writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
 		Dir:           tmpDir,
-		FileSize:      1000,
+		FileSize:      1,
 		Compress:      true,
 		EncryptMethod: EncryptAes,
 		KeyFile:       keyFile,
 	})
 	require.NoError(t, err)
-	_, err = writer.Write([]byte("test"))
-	require.NoError(t, err)
+	// write into 2 files
+	for i := 0; i < 2; i++ {
+		_, err = writer.Write([]byte("test"))
+		require.NoError(t, err)
+	}
 	require.NoError(t, writer.Close())
 
 	// make sure data is compressed after encryption
-	file, err := os.Open(filepath.Join(tmpDir, "traffic-1.log.gz"))
-	require.NoError(t, err)
-	greader, err := gzip.NewReader(file)
-	require.NoError(t, err)
-	data := make([]byte, 1000)
-	n, err := io.ReadFull(greader, data)
-	require.ErrorContains(t, err, "EOF")
-	require.Equal(t, 20, n)
-	require.NoError(t, file.Close())
+	for i := 0; i < 2; i++ {
+		file, err := os.Open(filepath.Join(tmpDir, fmt.Sprintf("traffic-%d.log.gz", i+1)))
+		require.NoError(t, err)
+		greader, err := gzip.NewReader(file)
+		require.NoError(t, err)
+		data := make([]byte, 1000)
+		n, err := io.ReadFull(greader, data)
+		require.ErrorContains(t, err, "EOF")
+		require.Equal(t, 20, n)
+		require.NoError(t, file.Close())
+	}
 
 	// rotateReader is able to read the file
 	reader, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{
@@ -298,9 +304,10 @@ func TestCompressAndEncrypt(t *testing.T) {
 		KeyFile:       keyFile,
 	})
 	require.NoError(t, err)
-	n, err = io.ReadFull(reader, data)
+	data := make([]byte, 1000)
+	n, err := io.ReadFull(reader, data)
 	require.ErrorContains(t, err, "EOF")
-	require.Equal(t, 4, n)
-	require.Equal(t, []byte("test"), data[:4])
+	require.Equal(t, 8, n)
+	require.Equal(t, []byte("testtest"), data[:8])
 	require.NoError(t, reader.Close())
 }
