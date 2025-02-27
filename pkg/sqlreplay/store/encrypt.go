@@ -112,10 +112,10 @@ func (ctr *aesCTRReader) Read(data []byte) (int, error) {
 	if n > 0 {
 		ctr.stream.XORKeyStream(data[:n], data[:n])
 	}
-	if err != nil {
-		return n, errors.WithStack(err)
+	if errors.Is(err, io.EOF) {
+		return n, err
 	}
-	return n, nil
+	return n, errors.WithStack(err)
 }
 
 func readAesKey(filename string) ([]byte, error) {

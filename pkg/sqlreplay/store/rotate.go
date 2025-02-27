@@ -133,7 +133,7 @@ func (r *rotateReader) Read(data []byte) (int, error) {
 		if err == nil {
 			return m, nil
 		}
-		if err != io.EOF {
+		if !errors.Is(err, io.EOF) {
 			return m, errors.WithStack(err)
 		}
 		_ = r.Close()
@@ -192,9 +192,8 @@ func (r *rotateReader) nextReader() error {
 	if minFileName == "" {
 		return io.EOF
 	}
-	ctx, cancel = context.WithTimeout(context.Background(), opTimeout)
-	fileReader, err := r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
-	cancel()
+	// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
+	fileReader, err := r.storage.Open(context.Background(), minFileName, &storage.ReaderOption{})
 	if err != nil {
 		return errors.WithStack(err)
 	}
