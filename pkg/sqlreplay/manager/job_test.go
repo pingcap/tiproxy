@@ -127,7 +127,7 @@ func TestMarshalJob(t *testing.T) {
 					Duration: 2 * time.Hour,
 				},
 			},
-			marshal: `{"type":"capture","status":"canceled","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","duration":"2h0m0s","output":"/tmp/traffic","progress":"50%","error":"mock error"}`,
+			marshal: `{"type":"capture","status":"canceled","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","progress":"50%","error":"mock error","output":"/tmp/traffic","duration":"2h0m0s"}`,
 		},
 		{
 			job: &captureJob{
@@ -138,11 +138,13 @@ func TestMarshalJob(t *testing.T) {
 					done:      true,
 				},
 				cfg: capture.CaptureConfig{
-					Output:   "s3://bucket/prefix?access-key=abcdefghi&secret-access-key=123&force-path-style=true",
-					Duration: 2 * time.Hour,
+					Output:           "s3://bucket/prefix?access-key=abcdefghi&secret-access-key=123&force-path-style=true",
+					Duration:         2 * time.Hour,
+					Compress:         true,
+					EncryptionMethod: "aes256-ctr",
 				},
 			},
-			marshal: `{"type":"capture","status":"done","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","duration":"2h0m0s","output":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","progress":"50%"}`,
+			marshal: `{"type":"capture","status":"done","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","progress":"50%","output":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","duration":"2h0m0s","compress":true,"encryption-method":"aes256-ctr"}`,
 		},
 		{
 			job: &replayJob{
@@ -155,7 +157,7 @@ func TestMarshalJob(t *testing.T) {
 					Username: "root",
 				},
 			},
-			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01T00:00:00Z","input":"/tmp/traffic","username":"root","speed":1,"progress":"0%"}`,
+			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01T00:00:00Z","progress":"0%","input":"/tmp/traffic","username":"root"}`,
 		},
 		{
 			job: &replayJob{
@@ -168,10 +170,12 @@ func TestMarshalJob(t *testing.T) {
 				cfg: replay.ReplayConfig{
 					Input:    "/tmp/traffic",
 					Username: "root",
+					Password: "123456",
 					Speed:    0.5,
+					ReadOnly: true,
 				},
 			},
-			marshal: `{"type":"replay","status":"done","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","input":"/tmp/traffic","username":"root","speed":0.5,"progress":"100%"}`,
+			marshal: `{"type":"replay","status":"done","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","progress":"100%","input":"/tmp/traffic","username":"root","speed":0.5,"readonly":true}`,
 		},
 		{
 			job: &replayJob{
@@ -184,7 +188,7 @@ func TestMarshalJob(t *testing.T) {
 					Username: "root",
 				},
 			},
-			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01T00:00:00Z","input":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","username":"root","speed":1,"progress":"0%"}`,
+			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01T00:00:00Z","progress":"0%","input":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","username":"root"}`,
 		},
 	}
 

@@ -53,9 +53,9 @@ type Capture interface {
 }
 
 type CaptureConfig struct {
-	Output        string
-	EncryptMethod string
-	KeyFile       string
+	Output           string
+	EncryptionMethod string
+	KeyFile          string
 	// It's specified when executing with the statement `TRAFFIC CAPTURE` so that all TiProxy instances
 	// use the same start time and the time acts as the job ID.
 	StartTime          time.Time
@@ -245,7 +245,7 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 		var err error
 		cmdLogger, err = store.NewWriter(c.lg.Named("writer"), c.storage, store.WriterCfg{
 			Dir:           c.cfg.Output,
-			EncryptMethod: c.cfg.EncryptMethod,
+			EncryptMethod: c.cfg.EncryptionMethod,
 			KeyFile:       c.cfg.KeyFile,
 			Compress:      c.cfg.Compress,
 		})
@@ -370,7 +370,7 @@ func (c *capture) putCommand(command *cmd.Command) bool {
 }
 
 func (c *capture) writeMeta(storage storage.ExternalStorage, duration time.Duration, cmds, filteredCmds uint64) {
-	meta := store.NewMeta(duration, cmds, filteredCmds, c.cfg.EncryptMethod)
+	meta := store.NewMeta(duration, cmds, filteredCmds, c.cfg.EncryptionMethod)
 	if err := meta.Write(storage); err != nil {
 		c.lg.Error("failed to write meta", zap.Error(err))
 	}

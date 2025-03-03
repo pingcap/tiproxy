@@ -95,16 +95,16 @@ func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
 	if running != nil {
 		return errors.Errorf("a job is running: %s", running.String())
 	}
-	if err := jm.capture.Start(cfg); err != nil {
-		jm.lg.Warn("start capture failed", zap.Error(err))
-		return errors.Wrapf(err, "start capture failed")
-	}
 	newJob := &captureJob{
 		job: job{
 			// cfg.StartTime may act as the job ID in a TiProxy cluster.
 			startTime: cfg.StartTime,
 		},
 		cfg: cfg,
+	}
+	if err := jm.capture.Start(cfg); err != nil {
+		jm.lg.Warn("start capture failed", zap.String("job", newJob.String()), zap.Error(err))
+		return errors.Wrapf(err, "start capture failed")
 	}
 	jm.lg.Info("start capture", zap.String("job", newJob.String()))
 	jm.addToHistory(newJob)
@@ -116,6 +116,13 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 	if running != nil {
 		return errors.Errorf("a job is running: %s", running.String())
 	}
+	newJob := &replayJob{
+		job: job{
+			// cfg.StartTime may act as the job ID in a TiProxy cluster.
+			startTime: cfg.StartTime,
+		},
+		cfg: cfg,
+	}
 	// TODO: support update configs online
 	err := jm.replay.Start(cfg, jm.certManager.SQLTLS(), jm.hsHandler, &backend.BCConfig{
 		ProxyProtocol:      jm.cfg.Proxy.ProxyProtocol != "",
@@ -125,15 +132,8 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 		ConnBufferSize:     jm.cfg.Proxy.ConnBufferSize,
 	})
 	if err != nil {
-		jm.lg.Warn("start replay failed", zap.Error(err))
+		jm.lg.Warn("start replay failed", zap.String("job", newJob.String()), zap.Error(err))
 		return errors.Wrapf(err, "start replay failed")
-	}
-	newJob := &replayJob{
-		job: job{
-			// cfg.StartTime may act as the job ID in a TiProxy cluster.
-			startTime: cfg.StartTime,
-		},
-		cfg: cfg,
 	}
 	jm.lg.Info("start replay", zap.String("job", newJob.String()))
 	jm.addToHistory(newJob)

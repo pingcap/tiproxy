@@ -74,7 +74,7 @@ func TestTraffic(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "capture started", string(all))
 		require.Equal(t, "capture", mgr.curJob)
-		require.Equal(t, capture.CaptureConfig{Duration: time.Hour, Output: "/tmp", EncryptMethod: "aes256-ctr", Compress: false,
+		require.Equal(t, capture.CaptureConfig{Duration: time.Hour, Output: "/tmp", EncryptionMethod: "aes256-ctr", Compress: false,
 			StartTime: mgr.captureCfg.StartTime}, mgr.captureCfg)
 	})
 	// job is running error
