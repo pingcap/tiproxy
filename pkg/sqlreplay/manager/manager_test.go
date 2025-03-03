@@ -110,26 +110,25 @@ func TestMarshalJobHistory(t *testing.T) {
     "status": "canceled",
     "start_time": "2020-01-01T00:00:00Z",
     "end_time": "2020-01-01T02:01:01Z",
-	"progress": "50%",
+    "progress": "50%",
     "error": "mock error",
-	"output": "/tmp/traffic",
+    "output": "/tmp/traffic",
     "duration": "2h0m0s"
   },
   {
     "type": "replay",
     "status": "running",
     "start_time": "2020-01-01T00:00:00Z",
-	"progress": "0%",
+    "progress": "0%",
     "input": "/tmp/traffic",
-    "username": "root",
-    "speed": 1
+    "username": "root"
   },
   {
     "type": "replay",
     "status": "done",
     "start_time": "2020-01-01T00:00:00Z",
     "end_time": "2020-01-01T02:01:01Z",
-	"progress": "100%",
+    "progress": "100%",
     "input": "/tmp/traffic",
     "username": "root",
     "speed": 0.5
