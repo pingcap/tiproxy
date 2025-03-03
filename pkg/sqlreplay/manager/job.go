@@ -38,17 +38,12 @@ type job struct {
 }
 
 type job4Marshal struct {
-	Type      string  `json:"type"`
-	Status    string  `json:"status"`
-	StartTime string  `json:"start_time"`
-	EndTime   string  `json:"end_time,omitempty"`
-	Duration  string  `json:"duration,omitempty"`
-	Output    string  `json:"output,omitempty"`
-	Input     string  `json:"input,omitempty"`
-	Username  string  `json:"username,omitempty"`
-	Speed     float64 `json:"speed,omitempty"`
-	Progress  string  `json:"progress"`
-	Err       string  `json:"error,omitempty"`
+	Type      string `json:"type"`
+	Status    string `json:"status"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time,omitempty"`
+	Progress  string `json:"progress"`
+	Err       string `json:"error,omitempty"`
 }
 
 func (job *job) IsRunning() bool {
@@ -90,6 +85,14 @@ type captureJob struct {
 	cfg capture.CaptureConfig
 }
 
+type captureJob4Marshal struct {
+	job4Marshal
+	Output           string `json:"output,omitempty"`
+	Duration         string `json:"duration,omitempty"`
+	Compress         bool   `json:"compress,omitempty"`
+	EncryptionMethod string `json:"encryption-method,omitempty"`
+}
+
 func (job *captureJob) Type() JobType {
 	return Capture
 }
@@ -97,9 +100,14 @@ func (job *captureJob) Type() JobType {
 func (job *captureJob) MarshalJSON() ([]byte, error) {
 	job4Marshal := job.getJob4Marshal()
 	job4Marshal.Type = "capture"
-	job4Marshal.Output = ast.RedactURL(job.cfg.Output)
-	job4Marshal.Duration = job.cfg.Duration.String()
-	return json.Marshal(job4Marshal)
+	c := captureJob4Marshal{
+		job4Marshal:      *job4Marshal,
+		Output:           ast.RedactURL(job.cfg.Output),
+		Duration:         job.cfg.Duration.String(),
+		Compress:         job.cfg.Compress,
+		EncryptionMethod: job.cfg.EncryptionMethod,
+	}
+	return json.Marshal(c)
 }
 
 func (job *captureJob) String() string {
@@ -117,6 +125,14 @@ type replayJob struct {
 	cfg replay.ReplayConfig
 }
 
+type replayJob4Marshal struct {
+	job4Marshal
+	Input    string  `json:"input,omitempty"`
+	Username string  `json:"username,omitempty"`
+	Speed    float64 `json:"speed,omitempty"`
+	ReadOnly bool    `json:"readonly,omitempty"`
+}
+
 func (job *replayJob) Type() JobType {
 	return Replay
 }
@@ -124,13 +140,14 @@ func (job *replayJob) Type() JobType {
 func (job *replayJob) MarshalJSON() ([]byte, error) {
 	job4Marshal := job.getJob4Marshal()
 	job4Marshal.Type = "replay"
-	job4Marshal.Input = ast.RedactURL(job.cfg.Input)
-	job4Marshal.Username = job.cfg.Username
-	job4Marshal.Speed = job.cfg.Speed
-	if job4Marshal.Speed == 0 {
-		job4Marshal.Speed = 1
+	r := replayJob4Marshal{
+		job4Marshal: *job4Marshal,
+		Input:       ast.RedactURL(job.cfg.Input),
+		Username:    job.cfg.Username,
+		Speed:       job.cfg.Speed,
+		ReadOnly:    job.cfg.ReadOnly,
 	}
-	return json.Marshal(job4Marshal)
+	return json.Marshal(r)
 }
 
 func (job *replayJob) String() string {

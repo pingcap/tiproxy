@@ -40,7 +40,7 @@ func (h *Server) TrafficCapture(c *gin.Context) {
 		}
 		cfg.Duration = duration
 	}
-	cfg.EncryptMethod = c.PostForm("encrypt-method")
+	cfg.EncryptionMethod = c.PostForm("encrypt-method")
 
 	compress := true
 	if compressStr := c.PostForm("compress"); compressStr != "" {
