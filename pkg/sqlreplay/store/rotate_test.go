@@ -5,7 +5,6 @@ package store
 
 import (
 	"compress/gzip"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -265,16 +264,15 @@ func TestCompressAndEncrypt(t *testing.T) {
 	storage, err := NewStorage(tmpDir)
 	require.NoError(t, err)
 	defer storage.Close()
-	require.NoError(t, storage.WriteFile(context.Background(), "key", genAesKey()))
-	keyFile := filepath.Join(tmpDir, "key")
+	key := genAesKey()
 
 	// write with compression and encryption
 	writer, err := newRotateWriter(zap.NewNop(), storage, WriterCfg{
-		Dir:           tmpDir,
-		FileSize:      1,
-		Compress:      true,
-		EncryptMethod: EncryptAes,
-		KeyFile:       keyFile,
+		Dir:              tmpDir,
+		FileSize:         1,
+		Compress:         true,
+		EncryptionMethod: EncryptAes,
+		EncryptionKey:    key,
 	})
 	require.NoError(t, err)
 	// write into 2 files
@@ -299,9 +297,9 @@ func TestCompressAndEncrypt(t *testing.T) {
 
 	// rotateReader is able to read the file
 	reader, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{
-		Dir:           tmpDir,
-		EncryptMethod: EncryptAes,
-		KeyFile:       keyFile,
+		Dir:              tmpDir,
+		EncryptionMethod: EncryptAes,
+		EncryptionKey:    key,
 	})
 	require.NoError(t, err)
 	data := make([]byte, 1000)
