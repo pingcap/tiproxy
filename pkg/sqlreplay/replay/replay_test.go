@@ -273,3 +273,22 @@ func TestPendingCmds(t *testing.T) {
 	require.Contains(t, logs, `"total_wait_time": "150ms"`)
 	require.Contains(t, logs, "too many pending commands")
 }
+
+func TestStartError(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	dir := t.TempDir()
+	meta := store.NewMeta(10*time.Second, 20, 0, store.EncryptAes)
+	storage, err := store.NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, meta.Write(storage))
+	now := time.Now()
+
+	cfg := ReplayConfig{
+		Input:     dir,
+		Username:  "u1",
+		StartTime: now,
+	}
+	err = replay.Start(cfg, nil, nil, &backend.BCConfig{})
+	require.ErrorContains(t, err, "encryption")
+}

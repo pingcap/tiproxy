@@ -56,9 +56,10 @@ type ReplayConfig struct {
 	KeyFile  string
 	// It's specified when executing with the statement `TRAFFIC REPLAY` so that all TiProxy instances
 	// use the same start time and the time acts as the job ID.
-	StartTime time.Time
-	Speed     float64
-	ReadOnly  bool
+	StartTime     time.Time
+	Speed         float64
+	ReadOnly      bool
+	encryptionKey []byte
 	// the following fields are for testing
 	reader            cmd.LineReader
 	report            report.Report
@@ -154,6 +155,12 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeCh = make(chan uint64, maxPendingExceptions)
+	key, err := store.LoadEncryptionKey(r.meta.EncryptMethod, cfg.KeyFile)
+	if err != nil {
+		return errors.Wrapf(err, "failed to load encryption key")
+	}
+	cfg.encryptionKey = key
+
 	hsHandler = NewHandshakeHandler(hsHandler)
 	r.connCreator = cfg.connCreator
 	if r.connCreator == nil {
@@ -190,9 +197,9 @@ func (r *replay) readCommands(ctx context.Context) {
 	if reader == nil {
 		var err error
 		reader, err = store.NewReader(r.lg.Named("loader"), r.storage, store.ReaderCfg{
-			Dir:           r.cfg.Input,
-			KeyFile:       r.cfg.KeyFile,
-			EncryptMethod: r.meta.EncryptMethod,
+			Dir:              r.cfg.Input,
+			EncryptionKey:    r.cfg.encryptionKey,
+			EncryptionMethod: r.meta.EncryptMethod,
 		})
 		if err != nil {
 			r.stop(err)

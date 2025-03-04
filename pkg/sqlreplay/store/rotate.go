@@ -73,7 +73,7 @@ func (w *rotateWriter) createFile() error {
 	if w.cfg.Compress {
 		w.writer = newCompressWriter(w.lg, w.writer)
 	}
-	if w.writer, err = newWriterWithEncryptOpts(w.writer, w.cfg.EncryptMethod, w.cfg.KeyFile); err != nil {
+	if w.writer, err = newWriterWithEncryptOpts(w.writer, w.cfg.EncryptionMethod, w.cfg.EncryptionKey); err != nil {
 		return err
 	}
 	return nil
@@ -207,7 +207,7 @@ func (r *rotateReader) nextReader() error {
 			return err
 		}
 	}
-	r.reader, err = newReaderWithEncryptOpts(r.reader, r.cfg.EncryptMethod, r.cfg.KeyFile)
+	r.reader, err = newReaderWithEncryptOpts(r.reader, r.cfg.EncryptionMethod, r.cfg.EncryptionKey)
 	if err != nil {
 		return err
 	}

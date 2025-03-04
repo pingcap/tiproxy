@@ -160,6 +160,13 @@ func TestCaptureCfgError(t *testing.T) {
 			Output:    path,
 			StartTime: now,
 		},
+		{
+			Duration:         10 * time.Second,
+			Output:           dir,
+			StartTime:        now,
+			EncryptionMethod: store.EncryptAes,
+			KeyFile:          "",
+		},
 	}
 
 	for i, cfg := range cfgs {
