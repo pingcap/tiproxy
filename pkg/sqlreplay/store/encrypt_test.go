@@ -50,22 +50,21 @@ func TestAes256(t *testing.T) {
 func TestEncryptOpts(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test")
-	keyFile := filepath.Join(dir, "key")
-	require.NoError(t, os.WriteFile(keyFile, genAesKey(), 0600))
+	aesKey := genAesKey()
 
 	tests := []struct {
-		method  string
-		keyFile string
+		method string
+		key    []byte
 	}{
-		{EncryptPlain, ""},
-		{"", ""},
-		{EncryptAes, keyFile},
+		{EncryptPlain, nil},
+		{"", nil},
+		{EncryptAes, aesKey},
 	}
 	for i, test := range tests {
 		// write
 		file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 		require.NoError(t, err)
-		writer, err := newWriterWithEncryptOpts(file, test.method, test.keyFile)
+		writer, err := newWriterWithEncryptOpts(file, test.method, test.key)
 		require.NoError(t, err, "case %d", i)
 		n, err := writer.Write([]byte("test"))
 		require.NoError(t, err)
@@ -75,7 +74,7 @@ func TestEncryptOpts(t *testing.T) {
 		// read
 		file, err = os.OpenFile(path, os.O_RDONLY, 0600)
 		require.NoError(t, err)
-		reader, err := newReaderWithEncryptOpts(file, test.method, test.keyFile)
+		reader, err := newReaderWithEncryptOpts(file, test.method, test.key)
 		require.NoError(t, err)
 		data := make([]byte, 100)
 		n, err = io.ReadFull(reader, data)
@@ -85,32 +84,40 @@ func TestEncryptOpts(t *testing.T) {
 	}
 }
 
-func TestAes256Error(t *testing.T) {
+func TestLoadKey(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "test")
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
-	require.NoError(t, err)
-	defer file.Close()
+	key := genAesKey()
+
 	keyFile := filepath.Join(dir, "key")
-	require.NoError(t, os.WriteFile(keyFile, genAesKey(), 0600))
+	require.NoError(t, os.WriteFile(keyFile, key, 0600))
 	invalidKeyFile := filepath.Join(dir, "invalid")
 	require.NoError(t, os.WriteFile(invalidKeyFile, []byte("invalid"), 0600))
 	noKeyFile := filepath.Join(dir, "nonexist")
+	longKeyFile := filepath.Join(dir, "valid")
+	longKey := make([]byte, 33)
+	copy(longKey, key)
+	longKey[32] = '\n'
+	require.NoError(t, os.WriteFile(longKeyFile, longKey, 0600))
 
 	tests := []struct {
 		method  string
 		keyFile string
+		err     bool
 	}{
-		{"unknown", keyFile},
-		{EncryptAes, ""},
-		{EncryptAes, noKeyFile},
-		{EncryptAes, invalidKeyFile},
+		{"unknown", keyFile, true},
+		{EncryptAes, "", true},
+		{EncryptAes, noKeyFile, true},
+		{EncryptAes, invalidKeyFile, true},
+		{EncryptAes, keyFile, false},
+		{EncryptAes, longKeyFile, false},
 	}
 	for i, test := range tests {
-		_, err = newWriterWithEncryptOpts(file, test.method, test.keyFile)
-		require.Error(t, err, "case %d", i)
-		_, err = newReaderWithEncryptOpts(file, test.method, test.keyFile)
-		require.Error(t, err, "case %d", i)
+		actual, err := LoadEncryptionKey(test.method, test.keyFile)
+		if test.err {
+			require.Error(t, err, "case %d", i)
+		} else {
+			require.Equal(t, key, actual, "case %d", i)
+		}
 	}
 }
 

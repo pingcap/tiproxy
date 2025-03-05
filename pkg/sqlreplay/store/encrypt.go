@@ -27,20 +27,15 @@ type aesCTRWriter struct {
 	stream cipher.Stream
 }
 
-func newWriterWithEncryptOpts(writer io.WriteCloser, encryptMethod string, keyFile string) (io.WriteCloser, error) {
-	switch strings.ToLower(encryptMethod) {
+func newWriterWithEncryptOpts(writer io.WriteCloser, encryptionMethod string, encrytionKey []byte) (io.WriteCloser, error) {
+	switch strings.ToLower(encryptionMethod) {
 	case "", EncryptPlain:
 		return writer, nil
 	case EncryptAes:
+		return newAESCTRWriter(writer, encrytionKey)
 	default:
-		return nil, fmt.Errorf("unsupported encrypt method: %s", encryptMethod)
+		return nil, fmt.Errorf("unsupported encrypt method: %s", encryptionMethod)
 	}
-
-	key, err := readAesKey(keyFile)
-	if err != nil {
-		return nil, err
-	}
-	return newAESCTRWriter(writer, key)
 }
 
 func newAESCTRWriter(writer io.WriteCloser, key []byte) (*aesCTRWriter, error) {
@@ -72,20 +67,15 @@ type aesCTRReader struct {
 	stream cipher.Stream
 }
 
-func newReaderWithEncryptOpts(reader io.Reader, encryptMethod string, keyFile string) (io.Reader, error) {
-	switch strings.ToLower(encryptMethod) {
+func newReaderWithEncryptOpts(reader io.Reader, encryptionMethod string, encryptionKey []byte) (io.Reader, error) {
+	switch strings.ToLower(encryptionMethod) {
 	case "", EncryptPlain:
 		return reader, nil
 	case EncryptAes:
+		return newAESCTRReader(reader, encryptionKey)
 	default:
-		return nil, fmt.Errorf("unsupported encrypt method: %s", encryptMethod)
+		return nil, fmt.Errorf("unsupported encrypt method: %s", encryptionMethod)
 	}
-
-	key, err := readAesKey(keyFile)
-	if err != nil {
-		return nil, err
-	}
-	return newAESCTRReader(reader, key)
 }
 
 func newAESCTRReader(reader io.Reader, key []byte) (*aesCTRReader, error) {
@@ -118,16 +108,28 @@ func (ctr *aesCTRReader) Read(data []byte) (int, error) {
 	return n, errors.WithStack(err)
 }
 
+func LoadEncryptionKey(encryptionMethod, keyFile string) ([]byte, error) {
+	switch strings.ToLower(encryptionMethod) {
+	case "", EncryptPlain:
+		return nil, nil
+	case EncryptAes:
+		return readAesKey(keyFile)
+	default:
+		return nil, fmt.Errorf("unsupported encrypt method: %s", encryptionMethod)
+	}
+}
+
 func readAesKey(filename string) ([]byte, error) {
 	if len(filename) == 0 {
-		return nil, errors.New("encryption key file name is not set")
+		return nil, errors.New("security.encryption-key-file is not set")
 	}
 	key, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	if len(key) != 32 {
+	if len(key) < 32 {
 		return nil, errors.Errorf("invalid aes-256 key length: %d, expecting 32", len(key))
 	}
-	return key, nil
+	// in case it's ended with a new line
+	return key[:32], nil
 }

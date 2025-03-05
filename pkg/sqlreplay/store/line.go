@@ -14,11 +14,11 @@ import (
 )
 
 type WriterCfg struct {
-	Dir           string
-	EncryptMethod string
-	KeyFile       string
-	FileSize      int
-	Compress      bool
+	Dir              string
+	EncryptionMethod string
+	EncryptionKey    []byte
+	FileSize         int
+	Compress         bool
 }
 
 // NewWriter just wraps the rotate writer. It doesn't use a buffer because Capture writes data in a big batch.
@@ -28,9 +28,9 @@ func NewWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg Writ
 }
 
 type ReaderCfg struct {
-	Dir           string
-	EncryptMethod string
-	KeyFile       string
+	Dir              string
+	EncryptionMethod string
+	EncryptionKey    []byte
 }
 
 var _ cmd.LineReader = (*loader)(nil)

@@ -61,6 +61,7 @@ type CaptureConfig struct {
 	StartTime          time.Time
 	Duration           time.Duration
 	Compress           bool
+	encryptionKey      []byte
 	cmdLogger          io.WriteCloser
 	bufferCap          int
 	flushThreshold     int
@@ -91,6 +92,11 @@ func (cfg *CaptureConfig) Validate() (storage.ExternalStorage, error) {
 	} else if cfg.StartTime.Add(cfg.Duration).Before(now) {
 		return storage, errors.New("start time should not be in the past")
 	}
+	key, err := store.LoadEncryptionKey(cfg.EncryptionMethod, cfg.KeyFile)
+	if err != nil {
+		return storage, errors.Wrapf(err, "failed to load encryption key")
+	}
+	cfg.encryptionKey = key
 	if cfg.bufferCap == 0 {
 		cfg.bufferCap = bufferCap
 	}
@@ -244,10 +250,10 @@ func (c *capture) flushBuffer(bufCh <-chan *bytes.Buffer) {
 	if cmdLogger == nil {
 		var err error
 		cmdLogger, err = store.NewWriter(c.lg.Named("writer"), c.storage, store.WriterCfg{
-			Dir:           c.cfg.Output,
-			EncryptMethod: c.cfg.EncryptionMethod,
-			KeyFile:       c.cfg.KeyFile,
-			Compress:      c.cfg.Compress,
+			Dir:              c.cfg.Output,
+			EncryptionMethod: c.cfg.EncryptionMethod,
+			EncryptionKey:    c.cfg.encryptionKey,
+			Compress:         c.cfg.Compress,
 		})
 		if err != nil {
 			c.lg.Error("failed to create capture writer", zap.Error(err))
