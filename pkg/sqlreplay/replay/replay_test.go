@@ -4,6 +4,8 @@
 package replay
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -274,21 +276,55 @@ func TestPendingCmds(t *testing.T) {
 	require.Contains(t, logs, "too many pending commands")
 }
 
-func TestStartError(t *testing.T) {
-	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+func TestLoadEncryptionKey(t *testing.T) {
 	dir := t.TempDir()
 	meta := store.NewMeta(10*time.Second, 20, 0, store.EncryptAes)
 	storage, err := store.NewStorage(dir)
 	require.NoError(t, err)
 	defer storage.Close()
 	require.NoError(t, meta.Write(storage))
+	keyFile := filepath.Join(dir, "encryption")
+	key := make([]byte, 32)
+	require.NoError(t, os.WriteFile(keyFile, key, 0600))
 	now := time.Now()
 
+	tests := []struct {
+		keyFile string
+		err     string
+	}{
+		{
+			err: "encryption",
+		},
+		{
+			keyFile: "/nonexist",
+			err:     "encryption",
+		},
+		{
+			keyFile: keyFile,
+		},
+	}
+
+	loader := newMockNormalLoader()
+	defer loader.Close()
 	cfg := ReplayConfig{
 		Input:     dir,
 		Username:  "u1",
 		StartTime: now,
+		reader:    loader,
 	}
-	err = replay.Start(cfg, nil, nil, &backend.BCConfig{})
-	require.ErrorContains(t, err, "encryption")
+	for _, test := range tests {
+		cfg.KeyFile = test.keyFile
+		replay := NewReplay(zap.NewNop(), id.NewIDManager())
+		cfg.report = newMockReport(replay.exceptionCh)
+		err = replay.Start(cfg, nil, nil, &backend.BCConfig{})
+		if len(test.err) > 0 {
+			require.ErrorContains(t, err, test.err)
+		} else {
+			require.NoError(t, err)
+			replay.Lock()
+			require.Equal(t, key, replay.cfg.encryptionKey)
+			replay.Unlock()
+			replay.Close()
+		}
+	}
 }

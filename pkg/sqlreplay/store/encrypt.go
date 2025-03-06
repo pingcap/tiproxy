@@ -121,7 +121,7 @@ func LoadEncryptionKey(encryptionMethod, keyFile string) ([]byte, error) {
 
 func readAesKey(filename string) ([]byte, error) {
 	if len(filename) == 0 {
-		return nil, errors.New("security.encryption-key-file is not set")
+		return nil, errors.New("security.encryption-key-path is not set")
 	}
 	key, err := os.ReadFile(filename)
 	if err != nil {
