@@ -139,39 +139,28 @@ func (h *Server) rateLimit(c *gin.Context) {
 }
 
 func (h *Server) attachLogger(c *gin.Context) {
-	path := c.Request.URL.Path
+	start := time.Now()
+	c.Next()
+	latency := time.Since(start)
 
-	fields := make([]zapcore.Field, 0, 9)
-
+	fields := make([]zapcore.Field, 0, 7)
 	fields = append(fields,
 		zap.Int("status", c.Writer.Status()),
 		zap.String("method", c.Request.Method),
-		zap.String("path", path),
 		zap.String("query", c.Request.URL.RawQuery),
 		zap.String("ip", c.ClientIP()),
 		zap.String("user-agent", c.Request.UserAgent()),
-	)
-
-	start := time.Now().UTC()
-	c.Next()
-	end := time.Now().UTC()
-	latency := end.Sub(start)
-
-	fields = append(fields,
 		zap.Duration("latency", latency),
-		zap.String("time", end.Format("")),
 	)
 
-	if len(c.Errors) > 0 {
+	path := c.Request.URL.Path
+	switch {
+	case len(c.Errors) > 0:
 		errs := make([]error, 0, len(c.Errors))
 		for _, e := range c.Errors {
 			errs = append(errs, e)
 		}
 		fields = append(fields, zap.Errors("errs", errs))
-	}
-
-	switch {
-	case len(c.Errors) > 0:
 		h.lg.Warn(path, fields...)
 	default:
 		h.lg.Debug(path, fields...)
