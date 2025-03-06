@@ -159,7 +159,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	if err != nil {
 		return errors.Wrapf(err, "failed to load encryption key")
 	}
-	cfg.encryptionKey = key
+	r.cfg.encryptionKey = key
 
 	hsHandler = NewHandshakeHandler(hsHandler)
 	r.connCreator = cfg.connCreator
