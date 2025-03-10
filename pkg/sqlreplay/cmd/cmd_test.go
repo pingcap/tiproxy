@@ -176,6 +176,11 @@ func TestReadOnly(t *testing.T) {
 			readOnly: true,
 		},
 		{
+			cmd:      pnet.ComStmtPrepare,
+			payload:  []byte("insert into t value(?)"),
+			readOnly: true,
+		},
+		{
 			cmd:         pnet.ComStmtExecute,
 			prepareStmt: "select ?",
 			readOnly:    true,
@@ -192,6 +197,11 @@ func TestReadOnly(t *testing.T) {
 		{
 			cmd:         pnet.ComStmtClose,
 			prepareStmt: "select ?",
+			readOnly:    true,
+		},
+		{
+			cmd:         pnet.ComStmtClose,
+			prepareStmt: "insert into t value(?)",
 			readOnly:    true,
 		},
 		{

@@ -3,75 +3,66 @@
 
 package lex
 
-var sensitiveKeywords = [][]string{
-	// contain passwords
-	{
-		"CREATE", "USER",
-	},
-	{
-		"ALTER", "USER",
-	},
-	{
-		"SET", "PASSWORD",
-	},
-	{
-		"GRANT",
-	},
-	// contain cloud storage url
-	{
-		"BACKUP",
-	},
-	{
-		"RESTORE",
-	},
-	{
-		"IMPORT",
-	},
-	// not supported yet
-	{
-		"LOAD", "DATA",
-	},
+func startsWithKeyword(sql string, keywords [][]string) bool {
+	lexer := NewLexer(sql)
+	tokens := make([]string, 0, 2)
+	for _, kw := range keywords {
+		match := true
+		for i, t := range kw {
+			if len(tokens) <= i {
+				tokens = append(tokens, lexer.NextToken())
+			}
+			if tokens[i] != t {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
-// ignore prepared statements in text-protocol
-// ignore EXPLAIN (including EXPLAIN ANALYZE) and TRACE
-// include SELECT FOR UPDATE because it releases locks immediately in auto-commit transactions
-// include SET because SET SESSION_STATES and SET session variables should be executed
-var readOnlyKeywords = []string{
-	"SELECT", "SHOW", "WITH", "SET", "USE", "DESC", "DESCRIBE", "TABLE", "DO",
+var sensitiveKeywords = [][]string{
+	// contain passwords
+	{"CREATE", "USER"},
+	{"ALTER", "USER"},
+	{"SET", "PASSWORD"},
+	{"GRANT"},
+	// contain cloud storage url
+	{"BACKUP"},
+	{"RESTORE"},
+	{"IMPORT"},
+	// not supported yet
+	{"LOAD", "DATA"},
 }
 
 func IsSensitiveSQL(sql string) bool {
-	lexer := NewLexer(sql)
-	keyword := lexer.NextToken()
-	if len(keyword) == 0 {
-		return false
-	}
-	for _, kw := range sensitiveKeywords {
-		if keyword != kw[0] {
-			continue
-		}
-		if len(kw) <= 1 {
-			return true
-		}
-		keyword = lexer.NextToken()
-		if keyword == kw[1] {
-			return true
-		}
-	}
-	return false
+	return startsWithKeyword(sql, sensitiveKeywords)
+}
+
+// ignore prepared statements in text-protocol
+// ignore EXPLAIN, EXPLAIN ANALYZE, and TRACE
+// include SELECT FOR UPDATE because it doesn't require write privilege
+// include SET because SET SESSION_STATES and SET session variables should be executed
+// include BEGIN / COMMIT in case the user sets autocommit to false, either in SET SESSION_STATES or SET @@autocommit
+var readOnlyKeywords = [][]string{
+	{"SELECT"},
+	{"SHOW"},
+	{"WITH"},
+	{"SET"},
+	{"USE"},
+	{"DESC"},
+	{"DESCRIBE"},
+	{"TABLE"},
+	{"DO"},
+	{"BEGIN"},
+	{"COMMIT"},
+	{"ROLLBACK"},
+	{"START", "TRANSACTION"},
 }
 
 func IsReadOnly(sql string) bool {
-	lexer := NewLexer(sql)
-	keyword := lexer.NextToken()
-	if len(keyword) == 0 {
-		return false
-	}
-	for _, kw := range readOnlyKeywords {
-		if keyword == kw {
-			return true
-		}
-	}
-	return false
+	return startsWithKeyword(sql, readOnlyKeywords)
 }

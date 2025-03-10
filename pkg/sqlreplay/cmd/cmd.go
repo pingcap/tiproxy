@@ -224,13 +224,17 @@ func (c *Command) QueryText() string {
 
 func (c *Command) ReadOnly() bool {
 	switch c.Type {
-	case pnet.ComQuery, pnet.ComStmtPrepare:
+	case pnet.ComQuery:
 		return lex.IsReadOnly(c.QueryText())
-	case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
+	case pnet.ComStmtExecute, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
 		return lex.IsReadOnly(c.PreparedStmt)
 	case pnet.ComCreateDB, pnet.ComDropDB, pnet.ComDelayedInsert:
 		return false
 	}
+	// Treat ComStmtPrepare and ComStmtClose as read-only to make prepared stmt IDs in capture and replay phases the same.
+	// The problem is that it still requires write privilege. Better solutions are much more complex:
+	// - Replace all prepared DML statements with `SELECT 1`, including ComStmtPrepare and `SET SESSION_STATES`.
+	// - Remove all prepared DML statements and map catpure prepared stmt ID to replay prepared stmt ID, including ComStmtPrepare and `SET SESSION_STATES`.
 	return true
 }
 

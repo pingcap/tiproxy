@@ -147,7 +147,9 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 		if command.Type == pnet.ComStmtExecute {
 			_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum, paramTypes)
 			if err != nil {
-				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+				// Failing to parse the request is not critical, so don't return false.
+				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Int("param_num", paramNum),
+					zap.ByteString("param_types", paramTypes), zap.Error(err))
 			}
 			command.Params = args
 		}

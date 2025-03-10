@@ -3,6 +3,8 @@
 
 package lex
 
+import "github.com/siddontang/go/hack"
+
 type Lexer struct {
 	sql      string
 	curToken []byte
@@ -64,13 +66,13 @@ func (l *Lexer) NextToken() string {
 		default:
 			if len(l.curToken) > 0 {
 				l.curIdx++
-				return string(l.curToken)
+				return hack.String(l.curToken)
 			}
 		}
 	}
 
 	if len(l.curToken) > 0 {
-		return string(l.curToken)
+		return hack.String(l.curToken)
 	}
 	return ""
 }
