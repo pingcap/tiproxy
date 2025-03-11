@@ -178,7 +178,7 @@ func TestSkipReadOnly(t *testing.T) {
 		},
 		{
 			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("insert into t value(?)")...)},
-			readonly: false,
+			readonly: true,
 		},
 		{
 			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte(), 2, 0, 0, 0}},
