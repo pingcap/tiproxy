@@ -918,61 +918,6 @@ func TestHoldRequest(t *testing.T) {
 	}
 }
 
-func TestBeginStmt(t *testing.T) {
-	tests := []struct {
-		stmt    string
-		isBegin bool
-	}{
-		{
-			stmt:    "begin",
-			isBegin: true,
-		},
-		{
-			stmt:    "BEGIN",
-			isBegin: true,
-		},
-		{
-			stmt:    "begin optimistic as of timestamp now()",
-			isBegin: true,
-		},
-		{
-			stmt:    "    begin",
-			isBegin: true,
-		},
-		{
-			stmt:    "start transaction",
-			isBegin: true,
-		},
-		{
-			stmt:    "START transaction",
-			isBegin: true,
-		},
-		{
-			stmt:    "start transaction with consistent snapshot",
-			isBegin: true,
-		},
-		{
-			stmt:    "begin; select 1",
-			isBegin: true,
-		},
-		{
-			stmt:    "/*+ some_hint */begin",
-			isBegin: true,
-		},
-		{
-			stmt:    "commit",
-			isBegin: false,
-		},
-		{
-			stmt:    "select 1; begin",
-			isBegin: false,
-		},
-	}
-	for _, test := range tests {
-		require.Equal(t, test.isBegin, isBeginStmt(test.stmt), test.stmt)
-	}
-}
-
 // Test forwarding multi-statements works well.
 func TestMultiStmt(t *testing.T) {
 	tc := newTCPConnSuite(t)

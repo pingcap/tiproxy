@@ -5,12 +5,11 @@ package backend
 
 import (
 	"encoding/binary"
-	"strings"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util/lex"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
@@ -361,10 +360,5 @@ func (cp *CmdProcessor) needHoldRequest(request []byte) bool {
 		data = data[:len(data)-1]
 	}
 	query := hack.String(data)
-	return isBeginStmt(query)
-}
-
-func isBeginStmt(query string) bool {
-	normalized := parser.Normalize(query, "ON")
-	return strings.HasPrefix(normalized, "begin") || strings.HasPrefix(normalized, "start transaction")
+	return lex.IsStartTxn(query)
 }

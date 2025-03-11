@@ -66,3 +66,12 @@ var readOnlyKeywords = [][]string{
 func IsReadOnly(sql string) bool {
 	return startsWithKeyword(sql, readOnlyKeywords)
 }
+
+var startTxnKeywords = [][]string{
+	{"START", "TRANSACTION"},
+	{"BEGIN"},
+}
+
+func IsStartTxn(sql string) bool {
+	return startsWithKeyword(sql, startTxnKeywords)
+}
