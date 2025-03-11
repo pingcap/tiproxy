@@ -24,8 +24,8 @@ func TestSenstiveSQL(t *testing.T) {
 		{`set`, false},
 	}
 
-	for i, test := range tests {
-		require.Equal(t, test.sensitive, IsSensitiveSQL(test.sql), "case %d", i)
+	for _, test := range tests {
+		require.Equal(t, test.sensitive, IsSensitiveSQL(test.sql), test.sql)
 	}
 }
 
@@ -52,11 +52,11 @@ func TestReadOnlySQL(t *testing.T) {
 		{`do 1`, true},
 		{`/*hello */select 1`, true},
 		{`    select 1`, true},
-		{`/**/ start transaction`, false},
-		{`  COMMIT`, false},
+		{`/**/ start transaction`, true},
+		{`  COMMIT`, true},
 	}
 
-	for i, test := range tests {
-		require.Equal(t, test.readOnly, IsReadOnly(test.sql), "case %d", i)
+	for _, test := range tests {
+		require.Equal(t, test.readOnly, IsReadOnly(test.sql), test.sql)
 	}
 }

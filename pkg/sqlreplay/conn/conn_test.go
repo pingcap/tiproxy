@@ -178,7 +178,7 @@ func TestSkipReadOnly(t *testing.T) {
 		},
 		{
 			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("insert into t value(?)")...)},
-			readonly: false,
+			readonly: true,
 		},
 		{
 			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte(), 2, 0, 0, 0}},
@@ -220,4 +220,72 @@ func TestSkipReadOnly(t *testing.T) {
 	}
 	cancel()
 	wg.Wait()
+}
+
+func TestReadOnly(t *testing.T) {
+	tests := []struct {
+		cmd      pnet.Command
+		stmt     string
+		readOnly bool
+	}{
+		{
+			cmd:      pnet.ComQuery,
+			stmt:     "select 1",
+			readOnly: true,
+		},
+		{
+			cmd:      pnet.ComQuery,
+			stmt:     "insert into t value(1)",
+			readOnly: false,
+		},
+		{
+			cmd:      pnet.ComStmtPrepare,
+			stmt:     "select ?",
+			readOnly: true,
+		},
+		{
+			cmd:      pnet.ComStmtPrepare,
+			stmt:     "insert into t value(?)",
+			readOnly: true,
+		},
+		{
+			cmd:      pnet.ComStmtExecute,
+			stmt:     "select ?",
+			readOnly: true,
+		},
+		{
+			cmd:      pnet.ComStmtExecute,
+			stmt:     "insert into t value(?)",
+			readOnly: false,
+		},
+		{
+			cmd:      pnet.ComStmtClose,
+			stmt:     "insert into t value(?)",
+			readOnly: true,
+		},
+		{
+			cmd:      pnet.ComQuit,
+			readOnly: true,
+		},
+		{
+			cmd:      pnet.ComCreateDB,
+			readOnly: false,
+		},
+	}
+
+	conn := &conn{}
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+	for i, test := range tests {
+		var payload []byte
+		switch test.cmd {
+		case pnet.ComQuery:
+			payload = append([]byte{test.cmd.Byte()}, []byte(test.stmt)...)
+		default:
+			backendConn.prepared[1] = &preparedStmt{text: test.stmt}
+			payload = []byte{test.cmd.Byte(), 1, 0, 0, 0}
+		}
+		command := cmd.NewCommand(payload, time.Time{}, 100)
+		require.Equal(t, test.readOnly, conn.isReadOnly(command), "case %d", i)
+	}
 }

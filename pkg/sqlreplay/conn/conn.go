@@ -15,6 +15,8 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/util/lex"
+	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
 
@@ -107,8 +109,7 @@ func (c *conn) Run(ctx context.Context) {
 				break
 			}
 			if c.readonly {
-				c.updateCmdForExecuteStmt(command.Value)
-				if !command.Value.ReadOnly() {
+				if !c.isReadOnly(command.Value) {
 					c.replayStats.FilteredCmds.Add(1)
 					continue
 				}
@@ -131,8 +132,30 @@ func (c *conn) Run(ctx context.Context) {
 	}
 }
 
-// updateCmdForExecuteStmt may be called multiple times, avoid duplicated works.
+func (c *conn) isReadOnly(command *cmd.Command) bool {
+	switch command.Type {
+	case pnet.ComQuery:
+		return lex.IsReadOnly(hack.String(command.Payload[1:]))
+	case pnet.ComStmtExecute, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
+		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
+		text, _, _ := c.backendConn.GetPreparedStmt(stmtID)
+		if len(text) == 0 {
+			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID), zap.Stringer("cmd_type", command.Type))
+			return false
+		}
+		return lex.IsReadOnly(text)
+	case pnet.ComCreateDB, pnet.ComDropDB, pnet.ComDelayedInsert:
+		return false
+	}
+	// Treat ComStmtPrepare and ComStmtClose as read-only to make prepared stmt IDs in capture and replay phases the same.
+	// The problem is that it still requires write privilege. Better solutions are much more complex:
+	// - Replace all prepared DML statements with `SELECT 1`, including ComStmtPrepare and `SET SESSION_STATES`.
+	// - Remove all prepared DML statements and map catpure prepared stmt ID to replay prepared stmt ID, including ComStmtPrepare and `SET SESSION_STATES`.
+	return true
+}
+
 func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
+	// updated before
 	if command.PreparedStmt != "" {
 		return true
 	}
@@ -147,7 +170,9 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 		if command.Type == pnet.ComStmtExecute {
 			_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum, paramTypes)
 			if err != nil {
-				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+				// Failing to parse the request is not critical, so don't return false.
+				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.String("sql", text),
+					zap.Int("param_num", paramNum), zap.ByteString("param_types", paramTypes), zap.Error(err))
 			}
 			command.Params = args
 		}

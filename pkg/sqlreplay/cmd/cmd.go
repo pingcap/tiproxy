@@ -14,7 +14,6 @@ import (
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/pingcap/tiproxy/pkg/util/lex"
 	"github.com/siddontang/go/hack"
 )
 
@@ -220,18 +219,6 @@ func (c *Command) QueryText() string {
 		return c.PreparedStmt
 	}
 	return ""
-}
-
-func (c *Command) ReadOnly() bool {
-	switch c.Type {
-	case pnet.ComQuery, pnet.ComStmtPrepare:
-		return lex.IsReadOnly(c.QueryText())
-	case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
-		return lex.IsReadOnly(c.PreparedStmt)
-	case pnet.ComCreateDB, pnet.ComDropDB, pnet.ComDelayedInsert:
-		return false
-	}
-	return true
 }
 
 func writeString(key, value string, writer *bytes.Buffer) error {

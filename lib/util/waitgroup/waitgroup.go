@@ -47,7 +47,7 @@ func recoverFromErr(wg *sync.WaitGroup, recoverFn func(r interface{}), logger *z
 	}()
 	if r != nil && logger != nil {
 		logger.Error("panic in the recoverable goroutine",
-			zap.Reflect("r", r),
+			zap.Any("err", r),
 			zap.Stack("stack trace"))
 	}
 	// Call Done() before recoverFn because recoverFn normally calls `Close()`, which may call `wg.Wait()`.
