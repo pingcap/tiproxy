@@ -4,15 +4,19 @@
 package factor
 
 import (
+	"time"
+
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"go.uber.org/zap"
 )
 
 const (
-	maxBitNum = 64
+	maxBitNum            = 64
+	updateMetricInterval = 10 * time.Second
 )
 
 var _ policy.BalancePolicy = (*FactorBasedBalance)(nil)
@@ -33,6 +37,7 @@ type FactorBasedBalance struct {
 	factorLocation  *FactorLocation
 	factorConnCount *FactorConnCount
 	totalBitNum     int
+	lastMetricTime  time.Time
 }
 
 func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *FactorBasedBalance {
@@ -117,6 +122,7 @@ func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
 	if err != nil {
 		panic(err.Error())
 	}
+	metrics.BackendScoreGauge.Reset()
 	for _, factor := range fbb.factors {
 		factor.SetConfig(cfg)
 	}
@@ -140,12 +146,23 @@ func (fbb *FactorBasedBalance) updateScore(backends []policy.BackendCtx) []score
 	for _, backend := range backends {
 		scoredBackends = append(scoredBackends, newScoredBackend(backend))
 	}
+	needUpdateMetric := false
+	now := time.Now()
+	if now.Sub(fbb.lastMetricTime) > updateMetricInterval {
+		needUpdateMetric = true
+		fbb.lastMetricTime = now
+	}
 	for _, factor := range fbb.factors {
 		bitNum := factor.ScoreBitNum()
 		for j := 0; j < len(scoredBackends); j++ {
 			scoredBackends[j].prepareScore(bitNum)
 		}
 		factor.UpdateScore(scoredBackends)
+		if needUpdateMetric {
+			for j := 0; j < len(scoredBackends); j++ {
+				metrics.BackendScoreGauge.WithLabelValues(backends[j].Addr(), factor.Name()).Set(float64(scoredBackends[0].factorScore(bitNum)))
+			}
+		}
 	}
 	return scoredBackends
 }
