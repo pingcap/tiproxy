@@ -11,6 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
+	"go.uber.org/zap"
 )
 
 const (
@@ -87,14 +88,16 @@ type FactorCPU struct {
 	// The estimated average CPU usage used by one connection.
 	usagePerConn float64
 	mr           metricsreader.MetricsReader
+	lg           *zap.Logger
 	bitNum       int
 }
 
-func NewFactorCPU(mr metricsreader.MetricsReader) *FactorCPU {
+func NewFactorCPU(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorCPU {
 	fc := &FactorCPU{
 		mr:       mr,
 		bitNum:   5,
 		snapshot: make(map[string]cpuBackendSnapshot),
+		lg:       lg,
 	}
 	mr.AddQueryExpr(fc.Name(), cpuQueryExpr, cpuQueryRule)
 	return fc
@@ -217,6 +220,7 @@ func (fc *FactorCPU) updateCpuPerConn() {
 			fc.usagePerConn = usagePerConn
 		}
 	}
+	fc.lg.Info("updateCpuPerConn", zap.Float64("usagePerConn", fc.usagePerConn), zap.Float64("totalUsage", totalUsage), zap.Int("totalConns", totalConns))
 	if fc.usagePerConn <= 0 {
 		fc.usagePerConn = minCpuPerConn
 	}
