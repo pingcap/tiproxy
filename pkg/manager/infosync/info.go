@@ -275,6 +275,7 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBTopo
 			delete(infos, addr)
 		}
 	}
+	is.lg.Info("get TiDB topology", zap.Any("infos", infos))
 	return infos, nil
 }
 

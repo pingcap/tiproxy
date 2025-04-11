@@ -142,6 +142,7 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 				}
 				lastHealth := bo.curBackends[addr]
 				health := bo.hc.Check(ctx, addr, info, lastHealth)
+				bo.logger.Info("check backend health", zap.String("addr", addr), zap.String("self", cfg.GetLocation()), zap.Any("backend", health.Labels))
 				health.setLocal(cfg)
 				lock.Lock()
 				curBackendHealth[addr] = health

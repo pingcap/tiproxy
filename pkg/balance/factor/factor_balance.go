@@ -151,6 +151,7 @@ func (fbb *FactorBasedBalance) updateScore(backends []policy.BackendCtx) []score
 	if now.Sub(fbb.lastMetricTime) > updateMetricInterval {
 		needUpdateMetric = true
 		fbb.lastMetricTime = now
+		fbb.lg.Info("update score", zap.Int("backends", len(backends)))
 	}
 	for _, factor := range fbb.factors {
 		bitNum := factor.ScoreBitNum()
