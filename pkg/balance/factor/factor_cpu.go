@@ -147,12 +147,11 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 			// If this backend is not updated, ignore it.
 			if snapshot, ok := fc.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
 				avgUsage, latestUsage := calcAvgUsage(pairs)
-				fc.lg.Info("updateSnapshot", zap.String("addr", addr), zap.Int("connCount", backend.ConnCount()), zap.Int("connScore", backend.ConnScore()))
 				if avgUsage >= 0 {
 					snapshots[addr] = cpuBackendSnapshot{
 						avgUsage:    avgUsage,
 						latestUsage: latestUsage,
-						connCount:   backend.ConnCount(),
+						connCount:   backend.ConnScore(),
 						updatedTime: updateTime,
 					}
 					valid = true
@@ -221,7 +220,6 @@ func (fc *FactorCPU) updateCpuPerConn() {
 			fc.usagePerConn = usagePerConn
 		}
 	}
-	fc.lg.Info("updateCpuPerConn", zap.Float64("usagePerConn", fc.usagePerConn), zap.Float64("totalUsage", totalUsage), zap.Int("totalConns", totalConns))
 	if fc.usagePerConn <= 0 {
 		fc.usagePerConn = minCpuPerConn
 	}
