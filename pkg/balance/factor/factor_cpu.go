@@ -11,7 +11,6 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
-	"go.uber.org/zap"
 )
 
 const (
@@ -88,7 +87,6 @@ type FactorCPU struct {
 	// The estimated average CPU usage used by one connection.
 	usagePerConn float64
 	mr           metricsreader.MetricsReader
-	lg           *zap.Logger
 	bitNum       int
 }
 

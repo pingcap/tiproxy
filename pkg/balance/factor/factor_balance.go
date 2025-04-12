@@ -187,14 +187,6 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 			idlestBackend = scoredBackends[i]
 		}
 	}
-	if !idlestBackend.Local() {
-		fields := make([]zap.Field, 0, 3)
-		fields = append(fields, zap.String("idlestBackend", idlestBackend.Addr()))
-		for j := 0; j < len(scoredBackends); j++ {
-			fields = append(fields, zap.Uint64(scoredBackends[j].Addr(), scoredBackends[j].score()))
-		}
-		fbb.lg.Info("idlest backend is not local", fields...)
-	}
 	return idlestBackend.BackendCtx
 }
 
