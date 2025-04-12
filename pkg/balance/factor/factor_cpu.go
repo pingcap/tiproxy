@@ -156,6 +156,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 						connCount:   backend.ConnCount(),
 						updatedTime: updateTime,
 					}
+					fc.lg.Info("updateSnapshot", zap.String("addr", addr), zap.Any("snapshots", snapshots))
 					valid = true
 				}
 			}
@@ -203,6 +204,7 @@ func calcAvgUsage(usageHistory []model.SamplePair) (avgUsage, latestUsage float6
 // E.g. auto-analyze uses 30% CPU and the backend has 1 connection. You may mistakenly think the connection uses 30% CPU.
 func (fc *FactorCPU) updateCpuPerConn() {
 	totalUsage, totalConns := 0.0, 0
+	fc.lg.Info("updateCpuPerConn", zap.Any("snapshot", fc.snapshot))
 	for _, backend := range fc.snapshot {
 		if backend.latestUsage > 0 && backend.connCount > 0 {
 			totalUsage += backend.latestUsage
