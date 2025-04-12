@@ -92,12 +92,11 @@ type FactorCPU struct {
 	bitNum       int
 }
 
-func NewFactorCPU(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorCPU {
+func NewFactorCPU(mr metricsreader.MetricsReader) *FactorCPU {
 	fc := &FactorCPU{
 		mr:       mr,
 		bitNum:   5,
 		snapshot: make(map[string]cpuBackendSnapshot),
-		lg:       lg,
 	}
 	mr.AddQueryExpr(fc.Name(), cpuQueryExpr, cpuQueryRule)
 	return fc
@@ -151,7 +150,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 					snapshots[addr] = cpuBackendSnapshot{
 						avgUsage:    avgUsage,
 						latestUsage: latestUsage,
-						connCount:   backend.ConnScore(),
+						connCount:   backend.ConnCount(),
 						updatedTime: updateTime,
 					}
 					valid = true

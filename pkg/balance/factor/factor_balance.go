@@ -85,7 +85,7 @@ func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
 			fbb.factorMemory = NewFactorMemory(fbb.mr)
 		}
 		if fbb.factorCPU == nil {
-			fbb.factorCPU = NewFactorCPU(fbb.mr, fbb.lg)
+			fbb.factorCPU = NewFactorCPU(fbb.mr)
 		}
 	default:
 		if fbb.factorLocation != nil {
