@@ -147,6 +147,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 			// If this backend is not updated, ignore it.
 			if snapshot, ok := fc.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
 				avgUsage, latestUsage := calcAvgUsage(pairs)
+				fc.lg.Info("updateSnapshot", zap.String("addr", addr), zap.Int("connCount", backend.ConnCount()), zap.Int("connScore", backend.ConnScore()))
 				if avgUsage >= 0 {
 					snapshots[addr] = cpuBackendSnapshot{
 						avgUsage:    avgUsage,
@@ -154,7 +155,6 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 						connCount:   backend.ConnCount(),
 						updatedTime: updateTime,
 					}
-					fc.lg.Info("updateSnapshot", zap.String("addr", addr), zap.Float64("avgUsage", snapshots[addr].avgUsage), zap.Float64("latestUsage", snapshots[addr].latestUsage), zap.Int("connCount", snapshots[addr].connCount))
 					valid = true
 				}
 			}
@@ -202,7 +202,6 @@ func calcAvgUsage(usageHistory []model.SamplePair) (avgUsage, latestUsage float6
 func (fc *FactorCPU) updateCpuPerConn() {
 	totalUsage, totalConns := 0.0, 0
 	for _, backend := range fc.snapshot {
-		fc.lg.Info("updateSnapshot", zap.Float64("avgUsage", backend.avgUsage), zap.Float64("latestUsage", backend.latestUsage), zap.Int("connCount", backend.connCount))
 		if backend.latestUsage > 0 && backend.connCount > 0 {
 			totalUsage += backend.latestUsage
 			totalConns += backend.connCount
