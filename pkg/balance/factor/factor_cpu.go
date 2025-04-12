@@ -141,14 +141,12 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
-		fc.lg.Info("updateSnapshot", zap.String("addr", addr), zap.Any("pairs", pairs))
 		if len(pairs) > 0 {
 			updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
 			// The time point of updating each backend is different, so only partial of the backends are updated every time.
 			// If this backend is not updated, ignore it.
 			if snapshot, ok := fc.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
 				avgUsage, latestUsage := calcAvgUsage(pairs)
-				fc.lg.Info("calcAvgUsage", zap.String("addr", addr), zap.Float64("avgUsage", avgUsage), zap.Float64("latestUsage", latestUsage))
 				if avgUsage >= 0 {
 					snapshots[addr] = cpuBackendSnapshot{
 						avgUsage:    avgUsage,
@@ -156,7 +154,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 						connCount:   backend.ConnCount(),
 						updatedTime: updateTime,
 					}
-					fc.lg.Info("updateSnapshot", zap.String("addr", addr), zap.Any("snapshots", snapshots))
+					fc.lg.Info("updateSnapshot", zap.String("addr", addr), zap.Float64("avgUsage", snapshots[addr].avgUsage), zap.Float64("latestUsage", snapshots[addr].latestUsage), zap.Int("connCount", snapshots[addr].connCount))
 					valid = true
 				}
 			}
@@ -170,7 +168,6 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 			}
 		}
 	}
-	fc.lg.Info("updateSnapshot", zap.Any("snapshots", snapshots))
 	fc.snapshot = snapshots
 }
 
@@ -204,8 +201,8 @@ func calcAvgUsage(usageHistory []model.SamplePair) (avgUsage, latestUsage float6
 // E.g. auto-analyze uses 30% CPU and the backend has 1 connection. You may mistakenly think the connection uses 30% CPU.
 func (fc *FactorCPU) updateCpuPerConn() {
 	totalUsage, totalConns := 0.0, 0
-	fc.lg.Info("updateCpuPerConn", zap.Any("snapshot", fc.snapshot))
 	for _, backend := range fc.snapshot {
+		fc.lg.Info("updateSnapshot", zap.Float64("avgUsage", backend.avgUsage), zap.Float64("latestUsage", backend.latestUsage), zap.Int("connCount", backend.connCount))
 		if backend.latestUsage > 0 && backend.connCount > 0 {
 			totalUsage += backend.latestUsage
 			totalConns += backend.connCount
