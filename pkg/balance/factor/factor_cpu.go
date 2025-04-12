@@ -141,12 +141,14 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
+		fc.lg.Info("updateSnapshot", zap.String("addr", addr), zap.Any("pairs", pairs))
 		if len(pairs) > 0 {
 			updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
 			// The time point of updating each backend is different, so only partial of the backends are updated every time.
 			// If this backend is not updated, ignore it.
 			if snapshot, ok := fc.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
 				avgUsage, latestUsage := calcAvgUsage(pairs)
+				fc.lg.Info("calcAvgUsage", zap.String("addr", addr), zap.Float64("avgUsage", avgUsage), zap.Float64("latestUsage", latestUsage))
 				if avgUsage >= 0 {
 					snapshots[addr] = cpuBackendSnapshot{
 						avgUsage:    avgUsage,
@@ -167,6 +169,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 			}
 		}
 	}
+	fc.lg.Info("updateSnapshot", zap.Any("snapshots", snapshots))
 	fc.snapshot = snapshots
 }
 
