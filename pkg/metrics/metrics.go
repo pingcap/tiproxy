@@ -113,6 +113,7 @@ func init() {
 		GetBackendCounter,
 		PingBackendGauge,
 		BackendConnGauge,
+		BackendScoreGauge,
 		HealthCheckCycleGauge,
 		MigrateCounter,
 		MigrateDurationHistogram,
