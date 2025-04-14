@@ -31,6 +31,12 @@ func (b *scoredBackend) addScore(score int, bitNum int) {
 	b.scoreBits += uint64(score)
 }
 
+// score returns the total score.
 func (b *scoredBackend) score() uint64 {
 	return b.scoreBits
+}
+
+// factorScore gets the score for a factor.
+func (b *scoredBackend) factorScore(bitNum int) int {
+	return int(b.scoreBits & ((1 << bitNum) - 1))
 }
