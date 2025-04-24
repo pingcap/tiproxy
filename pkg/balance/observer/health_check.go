@@ -179,7 +179,6 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 		return
 	}
 	if len(respBody.Security.SessionTokenSigningCert) == 0 {
-		dhc.logger.Info("backend has no signing cert", zap.String("addr", addr))
 		bh.SupportRedirection = false
 	}
 }

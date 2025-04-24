@@ -368,9 +368,6 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 			return
 		}
 	}
-	if reason == "status" {
-		router.logger.Info("migrate because of status", zap.Float64("balanceCount", balanceCount), zap.Int("count", count), zap.String("from", fromBackend.addr))
-	}
 	// Migrate balanceCount connections.
 	for i := 0; i < count && ctx.Err() == nil; i++ {
 		var ce *glist.Element[*connWrapper]
