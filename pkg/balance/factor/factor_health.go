@@ -11,6 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
+	"go.uber.org/zap"
 )
 
 const (
@@ -165,14 +166,16 @@ type FactorHealth struct {
 	indicators []errIndicator
 	mr         metricsreader.MetricsReader
 	bitNum     int
+	lg         *zap.Logger
 }
 
-func NewFactorHealth(mr metricsreader.MetricsReader) *FactorHealth {
+func NewFactorHealth(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorHealth {
 	return &FactorHealth{
 		mr:         mr,
 		snapshot:   make(map[string]healthBackendSnapshot),
 		indicators: initErrIndicator(mr),
 		bitNum:     2,
+		lg:         lg,
 	}
 }
 
@@ -265,6 +268,8 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				balanceCount = snapshot.balanceCount
 			} else {
 				balanceCount = float64(backend.ConnScore()) / balanceSeconds4Health
+				fh.lg.Debug("update balance count for health", zap.String("addr", addr), zap.Float64("balanceCount", balanceCount),
+					zap.Int("connScore", backend.ConnScore()))
 			}
 		}
 

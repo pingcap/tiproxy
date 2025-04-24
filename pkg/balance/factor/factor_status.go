@@ -3,7 +3,10 @@
 
 package factor
 
-import "github.com/pingcap/tiproxy/lib/config"
+import (
+	"github.com/pingcap/tiproxy/lib/config"
+	"go.uber.org/zap"
+)
 
 const (
 	// balanceSeconds4Status indicates the time (in seconds) to migrate all the connections.
@@ -24,12 +27,14 @@ var _ Factor = (*FactorStatus)(nil)
 type FactorStatus struct {
 	snapshot map[string]statusBackendSnapshot
 	bitNum   int
+	lg       *zap.Logger
 }
 
-func NewFactorStatus() *FactorStatus {
+func NewFactorStatus(lg *zap.Logger) *FactorStatus {
 	return &FactorStatus{
 		bitNum:   1,
 		snapshot: make(map[string]statusBackendSnapshot),
+		lg:       lg,
 	}
 }
 
@@ -59,6 +64,7 @@ func (fs *FactorStatus) updateSnapshot(backends []scoredBackend) {
 				balanceCount = snapshot.balanceCount
 			} else {
 				balanceCount = float64(backends[i].ConnScore()) / balanceSeconds4Status
+				fs.lg.Debug("update balance count for status", zap.String("addr", addr), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backends[i].ConnScore()))
 			}
 		}
 		snapshots[addr] = statusBackendSnapshot{

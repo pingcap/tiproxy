@@ -11,6 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
+	"go.uber.org/zap"
 )
 
 const (
@@ -100,9 +101,10 @@ type FactorMemory struct {
 	lastMetricTime time.Time
 	mr             metricsreader.MetricsReader
 	bitNum         int
+	lg             *zap.Logger
 }
 
-func NewFactorMemory(mr metricsreader.MetricsReader) *FactorMemory {
+func NewFactorMemory(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorMemory {
 	bitNum := 0
 	for levels := len(oomRiskLevels); ; bitNum++ {
 		if levels == 0 {
@@ -114,6 +116,7 @@ func NewFactorMemory(mr metricsreader.MetricsReader) *FactorMemory {
 		mr:       mr,
 		bitNum:   bitNum,
 		snapshot: make(map[string]memBackendSnapshot),
+		lg:       lg,
 	}
 	mr.AddQueryExpr(fm.Name(), memQueryExpr, memoryQueryRule)
 	return fm
@@ -248,9 +251,12 @@ func (fm *FactorMemory) calcBalanceCount(backend scoredBackend, usage float64, t
 	}
 	balanceCount := float64(backend.ConnScore()) / seconds
 	// If the migration started eariler, reuse the balance count.
-	if snapshot := fm.snapshot[backend.Addr()]; snapshot.balanceCount > balanceCount {
-		return snapshot.balanceCount
+	snapshot := fm.snapshot[backend.Addr()]
+	if snapshot.balanceCount > balanceCount {
+		balanceCount = snapshot.balanceCount
 	}
+	fm.lg.Debug("update balance count for memory", zap.String("addr", backend.Addr()), zap.Float64("balanceCount", balanceCount),
+		zap.Int("connScore", backend.ConnScore()), zap.Duration("timeToOOM", timeToOOM), zap.Float64("memUsage", usage), zap.Float64("snapshot", snapshot.balanceCount))
 	return balanceCount
 }
 
