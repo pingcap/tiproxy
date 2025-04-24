@@ -162,13 +162,13 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 	bh.lastCheckSigningCertTime = now
 
 	var err error
+	addr := net.JoinHostPort(info.IP, strconv.Itoa(int(info.StatusPort)))
 	defer func() {
 		if lastBh == nil || lastBh.SupportRedirection != bh.SupportRedirection {
-			dhc.logger.Info("backend has updated signing cert", zap.Bool("support_redirection", bh.SupportRedirection), zap.Error(err))
+			dhc.logger.Info("backend has updated signing cert", zap.String("addr", addr), zap.Bool("support_redirection", bh.SupportRedirection), zap.Error(err))
 		}
 	}()
 
-	addr := net.JoinHostPort(info.IP, strconv.Itoa(int(info.StatusPort)))
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
 	var resp []byte
 	if resp, err = dhc.httpCli.Get(addr, configPathSuffix, b, dhc.cfg.DialTimeout); err != nil {
@@ -180,6 +180,7 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 		return
 	}
 	if len(respBody.Security.SessionTokenSigningCert) == 0 {
+		dhc.logger.Info("backend has no signing cert", zap.String("addr", addr))
 		bh.SupportRedirection = false
 	}
 }
