@@ -66,6 +66,12 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 	bh := &BackendHealth{
 		BackendInfo: *info,
 		Healthy:     true,
+		// Assume it has the signing cert if reading config fails.
+		SupportRedirection: true,
+	}
+	if lastBh != nil {
+		bh.SupportRedirection = lastBh.SupportRedirection
+		bh.lastCheckSigningCertTime = lastBh.lastCheckSigningCertTime
 	}
 	if !dhc.cfg.Enable {
 		return bh
@@ -149,15 +155,8 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 	}
 
 	now := time.Now()
-	if lastBh != nil {
-		bh.SupportRedirection = lastBh.SupportRedirection
-		if lastBh.lastCheckSigningCertTime.Add(checkSigningCertInterval).After(now) {
-			bh.lastCheckSigningCertTime = lastBh.lastCheckSigningCertTime
-			return
-		}
-	} else {
-		// Assume it has the signing cert if reading config fails.
-		bh.SupportRedirection = true
+	if bh.lastCheckSigningCertTime.Add(checkSigningCertInterval).After(now) {
+		return
 	}
 	bh.lastCheckSigningCertTime = now
 
