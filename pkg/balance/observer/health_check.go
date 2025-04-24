@@ -66,6 +66,12 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 	bh := &BackendHealth{
 		BackendInfo: *info,
 		Healthy:     true,
+		// Assume it has the signing cert if reading config fails.
+		SupportRedirection: true,
+	}
+	if lastBh != nil {
+		bh.SupportRedirection = lastBh.SupportRedirection
+		bh.lastCheckSigningCertTime = lastBh.lastCheckSigningCertTime
 	}
 	if !dhc.cfg.Enable {
 		return bh
@@ -149,26 +155,19 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 	}
 
 	now := time.Now()
-	if lastBh != nil {
-		bh.SupportRedirection = lastBh.SupportRedirection
-		if lastBh.lastCheckSigningCertTime.Add(checkSigningCertInterval).After(now) {
-			bh.lastCheckSigningCertTime = lastBh.lastCheckSigningCertTime
-			return
-		}
-	} else {
-		// Assume it has the signing cert if reading config fails.
-		bh.SupportRedirection = true
+	if bh.lastCheckSigningCertTime.Add(checkSigningCertInterval).After(now) {
+		return
 	}
 	bh.lastCheckSigningCertTime = now
 
 	var err error
+	addr := net.JoinHostPort(info.IP, strconv.Itoa(int(info.StatusPort)))
 	defer func() {
 		if lastBh == nil || lastBh.SupportRedirection != bh.SupportRedirection {
-			dhc.logger.Info("backend has updated signing cert", zap.Bool("support_redirection", bh.SupportRedirection), zap.Error(err))
+			dhc.logger.Info("backend has updated signing cert", zap.String("addr", addr), zap.Bool("support_redirection", bh.SupportRedirection), zap.Error(err))
 		}
 	}()
 
-	addr := net.JoinHostPort(info.IP, strconv.Itoa(int(info.StatusPort)))
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
 	var resp []byte
 	if resp, err = dhc.httpCli.Get(addr, configPathSuffix, b, dhc.cfg.DialTimeout); err != nil {
