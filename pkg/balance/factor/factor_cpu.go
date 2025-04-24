@@ -219,6 +219,7 @@ func (fc *FactorCPU) updateCpuPerConn() {
 		} else {
 			fc.usagePerConn = usagePerConn
 		}
+		fc.lg.Debug("updateCpuPerConn", zap.Float64("usagePerConn", fc.usagePerConn), zap.Int("totalConns", totalConns), zap.Float64("totalUsage", totalUsage))
 	}
 	if fc.usagePerConn <= 0 {
 		fc.usagePerConn = minCpuPerConn
@@ -254,7 +255,8 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) float64 {
 		balanceCount := 1 / fc.usagePerConn / balanceRatio4Cpu
 		fc.lg.Debug("update balance count for cpu", zap.String("from", from.Addr()), zap.String("to", to.Addr()), zap.Float64("fromAvgUsage", fromAvgUsage),
 			zap.Float64("fromLatestUsage", fromLatestUsage), zap.Float64("toAvgUsage", toAvgUsage), zap.Float64("toLatestUsage", toLatestUsage),
-			zap.Float64("balanceCount", balanceCount), zap.Float64("usagePerConn", fc.usagePerConn))
+			zap.Int("fromConnScore", from.ConnScore()), zap.Int("toConnScore", to.ConnScore()), zap.Float64("balanceCount", balanceCount),
+			zap.Float64("usagePerConn", fc.usagePerConn))
 		return balanceCount
 	}
 	return 0
