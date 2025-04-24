@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestCPUBalanceOnce(t *testing.T) {
@@ -89,7 +90,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 				},
 			},
 		}
-		fc := NewFactorCPU(mmr)
+		fc := NewFactorCPU(mmr, zap.NewNop())
 		updateScore(fc, backends)
 		sortedIdx := make([]int, 0, len(test.cpus))
 		for _, backend := range backends {
@@ -186,7 +187,7 @@ func TestCPUBalanceContinuously(t *testing.T) {
 	}
 
 	mmr := newMockMetricsReader()
-	fc := NewFactorCPU(mmr)
+	fc := NewFactorCPU(mmr, zap.NewNop())
 	curTime := model.Now().Add(-10 * time.Second)
 	for i, test := range tests {
 		backends := make([]scoredBackend, 0, len(test.cpus))
@@ -242,7 +243,7 @@ func TestNoCPUMetric(t *testing.T) {
 		},
 	}
 	mmr := newMockMetricsReader()
-	fc := NewFactorCPU(mmr)
+	fc := NewFactorCPU(mmr, zap.NewNop())
 	backends := []scoredBackend{createBackend(0, 0, 0), createBackend(1, 0, 0)}
 	for i, test := range tests {
 		values := make([]*model.SampleStream, 0, len(test.cpus))
@@ -284,7 +285,7 @@ func TestCPUResultNotUpdated(t *testing.T) {
 	}
 
 	mmr := newMockMetricsReader()
-	fc := NewFactorCPU(mmr)
+	fc := NewFactorCPU(mmr, zap.NewNop())
 	backends := []scoredBackend{createBackend(0, 0, 0), createBackend(1, 0, 0)}
 	for i, test := range tests {
 		array := []float64{test.cpu}
