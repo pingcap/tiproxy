@@ -236,7 +236,7 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 	snapshots := make(map[string]healthBackendSnapshot, len(fh.snapshot))
 	for _, backend := range backends {
 		// Get the current value range.
-		updatedTime, valueRange := time.Time{}, valueRangeNormal
+		updatedTime, valueRange, indicator, value := time.Time{}, valueRangeNormal, "", 0
 		for i := 0; i < len(fh.indicators); i++ {
 			ts := fh.indicators[i].queryResult.UpdateTime
 			if time.Since(ts) > errMetricExpDuration {
@@ -250,6 +250,8 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 			vr := calcValueRange(sample, fh.indicators[i])
 			if vr > valueRange {
 				valueRange = vr
+				indicator = fh.indicators[i].key
+				value = int(sample.Value)
 			}
 		}
 		// If the metric is unavailable, try to reuse the latest one.
@@ -268,11 +270,13 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				balanceCount = snapshot.balanceCount
 			} else {
 				balanceCount = float64(backend.ConnScore()) / balanceSeconds4Health
-				fh.lg.Debug("update balance count for health", zap.String("addr", addr), zap.Float64("balanceCount", balanceCount),
-					zap.Int("connScore", backend.ConnScore()))
 			}
 		}
-
+		// Log it whenever the health changes, even from unhealthy to healthy and no connections.
+		if balanceCount != snapshot.balanceCount {
+			fh.lg.Info("update health risk", zap.String("addr", addr), zap.String("indicator", indicator), zap.Int("value", value), zap.Int("lastRisk", int(snapshot.valueRange)),
+				zap.Int("curRisk", int(valueRange)), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backend.ConnScore()))
+		}
 		snapshots[addr] = healthBackendSnapshot{
 			updatedTime:  updatedTime,
 			valueRange:   valueRange,

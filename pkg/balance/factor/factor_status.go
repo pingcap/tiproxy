@@ -64,7 +64,10 @@ func (fs *FactorStatus) updateSnapshot(backends []scoredBackend) {
 				balanceCount = snapshot.balanceCount
 			} else {
 				balanceCount = float64(backends[i].ConnScore()) / balanceSeconds4Status
-				fs.lg.Debug("update balance count for status", zap.String("addr", addr), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backends[i].ConnScore()))
+				// Do not log it when the balance counts are both 0.
+				if balanceCount != snapshot.balanceCount {
+					fs.lg.Info("update status risk", zap.String("addr", addr), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backends[i].ConnScore()))
+				}
 			}
 		}
 		snapshots[addr] = statusBackendSnapshot{
