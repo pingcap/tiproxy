@@ -253,7 +253,7 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) float64 {
 	// Use the average usage to avoid thrash when CPU jitters too much and use the latest usage to avoid migrate too many connections.
 	if 1.3-toAvgUsage > (1.3-fromAvgUsage)*cpuBalancedRatio && 1.3-toLatestUsage > (1.3-fromLatestUsage)*cpuBalancedRatio {
 		balanceCount := 1 / fc.usagePerConn / balanceRatio4Cpu
-		fc.lg.Debug("update balance count for cpu", zap.String("from", from.Addr()), zap.String("to", to.Addr()), zap.Float64("fromAvgUsage", fromAvgUsage),
+		fc.lg.Debug("update cpu balance", zap.String("from", from.Addr()), zap.String("to", to.Addr()), zap.Float64("fromAvgUsage", fromAvgUsage),
 			zap.Float64("fromLatestUsage", fromLatestUsage), zap.Float64("toAvgUsage", toAvgUsage), zap.Float64("toLatestUsage", toLatestUsage),
 			zap.Int("fromConnScore", from.ConnScore()), zap.Int("toConnScore", to.ConnScore()), zap.Float64("balanceCount", balanceCount),
 			zap.Float64("usagePerConn", fc.usagePerConn))

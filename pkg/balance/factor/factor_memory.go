@@ -167,13 +167,22 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 			if !existsSnapshot || snapshot.updatedTime.Before(updateTime) {
 				latestUsage, timeToOOM := calcMemUsage(pairs)
 				if latestUsage >= 0 {
+					balanceCount := fm.calcBalanceCount(backend, latestUsage, timeToOOM)
 					snapshots[addr] = memBackendSnapshot{
 						updatedTime:  updateTime,
 						memUsage:     latestUsage,
 						timeToOOM:    timeToOOM,
-						balanceCount: fm.calcBalanceCount(backend, latestUsage, timeToOOM),
+						balanceCount: balanceCount,
 					}
 					valid = true
+					// Log it whenever the risk changes, even from high risk to no risk and no connections.
+					lastRisk, _ := getRiskLevel(snapshot.memUsage, snapshot.timeToOOM)
+					curRisk, _ := getRiskLevel(latestUsage, timeToOOM)
+					if lastRisk != curRisk {
+						fm.lg.Info("update memory risk", zap.String("addr", addr), zap.Float64("memUsage", latestUsage), zap.Duration("timeToOOM", timeToOOM),
+							zap.Int("lastRisk", lastRisk), zap.Float64("lastMemUsage", snapshot.memUsage), zap.Duration("lastTimeToOOM", snapshot.timeToOOM),
+							zap.Int("curRisk", curRisk), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backend.ConnScore()))
+					}
 				}
 			}
 		}
@@ -251,12 +260,9 @@ func (fm *FactorMemory) calcBalanceCount(backend scoredBackend, usage float64, t
 	}
 	balanceCount := float64(backend.ConnScore()) / seconds
 	// If the migration started eariler, reuse the balance count.
-	snapshot := fm.snapshot[backend.Addr()]
-	if snapshot.balanceCount > balanceCount {
-		balanceCount = snapshot.balanceCount
+	if snapshot := fm.snapshot[backend.Addr()]; snapshot.balanceCount > balanceCount {
+		return snapshot.balanceCount
 	}
-	fm.lg.Debug("update balance count for memory", zap.String("addr", backend.Addr()), zap.Float64("balanceCount", balanceCount),
-		zap.Int("connScore", backend.ConnScore()), zap.Duration("timeToOOM", timeToOOM), zap.Float64("memUsage", usage), zap.Float64("snapshot", snapshot.balanceCount))
 	return balanceCount
 }
 
