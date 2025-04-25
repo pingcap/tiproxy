@@ -11,6 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
+	"go.uber.org/zap"
 )
 
 const (
@@ -100,9 +101,10 @@ type FactorMemory struct {
 	lastMetricTime time.Time
 	mr             metricsreader.MetricsReader
 	bitNum         int
+	lg             *zap.Logger
 }
 
-func NewFactorMemory(mr metricsreader.MetricsReader) *FactorMemory {
+func NewFactorMemory(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorMemory {
 	bitNum := 0
 	for levels := len(oomRiskLevels); ; bitNum++ {
 		if levels == 0 {
@@ -114,6 +116,7 @@ func NewFactorMemory(mr metricsreader.MetricsReader) *FactorMemory {
 		mr:       mr,
 		bitNum:   bitNum,
 		snapshot: make(map[string]memBackendSnapshot),
+		lg:       lg,
 	}
 	mr.AddQueryExpr(fm.Name(), memQueryExpr, memoryQueryRule)
 	return fm
@@ -164,13 +167,22 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 			if !existsSnapshot || snapshot.updatedTime.Before(updateTime) {
 				latestUsage, timeToOOM := calcMemUsage(pairs)
 				if latestUsage >= 0 {
+					balanceCount := fm.calcBalanceCount(backend, latestUsage, timeToOOM)
 					snapshots[addr] = memBackendSnapshot{
 						updatedTime:  updateTime,
 						memUsage:     latestUsage,
 						timeToOOM:    timeToOOM,
-						balanceCount: fm.calcBalanceCount(backend, latestUsage, timeToOOM),
+						balanceCount: balanceCount,
 					}
 					valid = true
+					// Log it whenever the risk changes, even from high risk to no risk and no connections.
+					lastRisk, _ := getRiskLevel(snapshot.memUsage, snapshot.timeToOOM)
+					curRisk, _ := getRiskLevel(latestUsage, timeToOOM)
+					if lastRisk != curRisk {
+						fm.lg.Info("update memory risk", zap.String("addr", addr), zap.Float64("memUsage", latestUsage), zap.Duration("timeToOOM", timeToOOM),
+							zap.Int("lastRisk", lastRisk), zap.Float64("lastMemUsage", snapshot.memUsage), zap.Duration("lastTimeToOOM", snapshot.timeToOOM),
+							zap.Int("curRisk", curRisk), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backend.ConnScore()))
+					}
 				}
 			}
 		}

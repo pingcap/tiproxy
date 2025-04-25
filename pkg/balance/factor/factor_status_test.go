@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestFactorStatus(t *testing.T) {
@@ -24,7 +25,7 @@ func TestFactorStatus(t *testing.T) {
 		},
 	}
 
-	fs := NewFactorStatus()
+	fs := NewFactorStatus(zap.NewNop())
 	backends := make([]scoredBackend, 0, len(tests))
 	for _, test := range tests {
 		backend := scoredBackend{
@@ -72,7 +73,7 @@ func TestStatusBalanceCount(t *testing.T) {
 	backends = append(backends, createBackend(0, 0, 0))
 	backends = append(backends, createBackend(1, 0, 0))
 	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
-	fs := NewFactorStatus()
+	fs := NewFactorStatus(zap.NewNop())
 	for i, test := range tests {
 		unhealthyBackend.healthy = test.healthy
 		unhealthyBackend.connScore = test.conn

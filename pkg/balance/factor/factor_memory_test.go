@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestMemoryScore(t *testing.T) {
@@ -101,7 +102,7 @@ func TestMemoryScore(t *testing.T) {
 			},
 		},
 	}
-	fm := NewFactorMemory(mmr)
+	fm := NewFactorMemory(mmr, zap.NewNop())
 	fm.UpdateScore(backends)
 	for i, test := range tests {
 		require.Equal(t, test.score, backends[i].score(), "test index %d", i)
@@ -213,7 +214,7 @@ func TestMemoryBalance(t *testing.T) {
 				},
 			},
 		}
-		fm := NewFactorMemory(mmr)
+		fm := NewFactorMemory(mmr, zap.NewNop())
 		fm.UpdateScore(backends)
 		scores := make([]uint64, 0, len(backends))
 		for _, backend := range backends {
@@ -248,7 +249,7 @@ func TestNoMemMetrics(t *testing.T) {
 	}
 
 	mmr := newMockMetricsReader()
-	fm := NewFactorMemory(mmr)
+	fm := NewFactorMemory(mmr, zap.NewNop())
 	backends := make([]scoredBackend, 0, 2)
 	for i := 0; i < 2; i++ {
 		backends = append(backends, createBackend(i, i*100, i*100))
@@ -331,7 +332,7 @@ func TestMemoryBalanceCount(t *testing.T) {
 			Value:      model.Matrix(values),
 		}
 	}
-	fs := NewFactorMemory(mmr)
+	fs := NewFactorMemory(mmr, zap.NewNop())
 	backends := make([]scoredBackend, 0, 2)
 	backends = append(backends, createBackend(0, 0, 0))
 	backends = append(backends, createBackend(1, 0, 0))
