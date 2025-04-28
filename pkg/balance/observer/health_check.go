@@ -178,7 +178,5 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 		dhc.logger.Error("unmarshal body in healthy check failed", zap.String("addr", addr), zap.String("resp body", string(resp)), zap.Error(err))
 		return
 	}
-	if len(respBody.Security.SessionTokenSigningCert) == 0 {
-		bh.SupportRedirection = false
-	}
+	bh.SupportRedirection = len(respBody.Security.SessionTokenSigningCert) > 0
 }

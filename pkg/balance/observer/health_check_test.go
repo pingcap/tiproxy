@@ -51,6 +51,7 @@ func TestHealthCheck(t *testing.T) {
 	cfg := newHealthCheckConfigForTest()
 	hc := NewDefaultHealthCheck(nil, cfg, lg)
 	backend, info := newBackendServer(t)
+	defer backend.close()
 	backend.setServerVersion("1.0")
 	backend.setHasSigningCert(true)
 	health := hc.Check(context.Background(), backend.sqlAddr, info, nil)
@@ -82,20 +83,41 @@ func TestHealthCheck(t *testing.T) {
 	backend.setSqlResp(false)
 	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.False(t, health.Healthy)
+	backend.setSqlResp(true)
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	require.True(t, health.Healthy)
+}
+
+func TestSupportRedirection(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newHealthCheckConfigForTest()
+	hc := NewDefaultHealthCheck(nil, cfg, lg)
+	backend, info := newBackendServer(t)
+	defer backend.close()
+	backend.setServerVersion("1.0")
+	backend.setHasSigningCert(false)
+	health := hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	require.True(t, health.Healthy)
+	require.False(t, health.SupportRedirection)
+
+	backend.setHasSigningCert(true)
+	health.lastCheckSigningCertTime = time.Time{}
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	require.True(t, health.SupportRedirection)
+
+	backend.setSqlResp(false)
+	health.lastCheckSigningCertTime = time.Time{}
+	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	require.False(t, health.Healthy)
 	require.True(t, health.SupportRedirection)
 	backend.setSqlResp(true)
 	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
 	require.True(t, health.Healthy)
 
-	require.True(t, health.SupportRedirection)
-	health.lastCheckSigningCertTime = time.Time{}
-	health = hc.Check(context.Background(), backend.sqlAddr, info, health)
-	require.True(t, health.SupportRedirection)
 	backend.setHasSigningCert(false)
 	health.lastCheckSigningCertTime = time.Time{}
 	health = hc.Check(context.Background(), backend.sqlAddr, info, health)
 	require.False(t, health.SupportRedirection)
-	backend.close()
 }
 
 type backendServer struct {

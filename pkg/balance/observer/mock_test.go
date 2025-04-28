@@ -13,6 +13,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
 
@@ -130,7 +131,8 @@ func (handler *mockHttpHandler) setHasSigningCert(hasSigningCert bool) {
 	if hasSigningCert {
 		resp.Security.SessionTokenSigningCert = "/tmp"
 	}
-	b, _ := json.Marshal(resp)
+	b, err := json.Marshal(resp)
+	require.NoError(handler.t, err)
 	handler.config.Store(string(b))
 }
 
