@@ -27,6 +27,8 @@ func (b *scoredBackend) prepareScore(bitNum int) {
 func (b *scoredBackend) addScore(score int, bitNum int) {
 	if score >= 1<<bitNum {
 		score = 1<<bitNum - 1
+	} else if score < 0 {
+		score = 0
 	}
 	b.scoreBits += uint64(score)
 }
