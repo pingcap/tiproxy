@@ -364,3 +364,53 @@ tidb_server_maxprocs 2
 		}
 	}
 }
+
+func TestCPUScore(t *testing.T) {
+	tests := []struct {
+		connCounts   []int
+		connScores   []int
+		scores       []uint64
+		usagePerConn float64
+	}{
+		{
+			connCounts:   []int{18, 2},
+			connScores:   []int{18, 2},
+			scores:       []uint64{8, 8},
+			usagePerConn: 0.04,
+		},
+		// cpu1=0.4-8*0.04, cpu2=0.4+8*0.04
+		{
+			connCounts:   []int{10, 10},
+			connScores:   []int{10, 10},
+			scores:       []uint64{1, 14},
+			usagePerConn: 0.04,
+		},
+		// cpu1=0.4-16*0.04, cpu2=0.4+16*0.04
+		{
+			connCounts:   []int{2, 18},
+			connScores:   []int{2, 18},
+			scores:       []uint64{0, 20},
+			usagePerConn: 0.04,
+		},
+	}
+
+	mmr := newMockMetricsReader()
+	fc := NewFactorCPU(mmr, zap.NewNop())
+	cpus := []float64{0.4}
+	curTime := model.Now().Add(-10 * time.Second)
+	values := []*model.SampleStream{createSampleStream(cpus, 0, curTime), createSampleStream(cpus, 1, curTime)}
+	mmr.qrs["cpu"] = metricsreader.QueryResult{
+		UpdateTime: curTime.Time(),
+		Value:      model.Matrix(values),
+	}
+	for i, test := range tests {
+		backends := []scoredBackend{createBackend(0, test.connCounts[0], test.connScores[0]), createBackend(1, test.connCounts[1], test.connScores[1])}
+		fc.UpdateScore(backends)
+		require.Equal(t, test.usagePerConn, fc.usagePerConn, "test index %d", i)
+		scores := make([]uint64, 0, len(backends))
+		for _, backend := range backends {
+			scores = append(scores, backend.scoreBits)
+		}
+		require.Equal(t, test.scores, scores, "test index %d", i)
+	}
+}
