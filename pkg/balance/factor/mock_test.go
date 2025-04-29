@@ -31,6 +31,7 @@ func newMockBackend(healthy bool, connScore int) *mockBackend {
 	return &mockBackend{
 		healthy:   healthy,
 		connScore: connScore,
+		connCount: connScore,
 	}
 }
 
