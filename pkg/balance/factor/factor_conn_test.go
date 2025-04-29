@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestFactorConnCount(t *testing.T) {
@@ -30,11 +31,7 @@ func TestFactorConnCount(t *testing.T) {
 	}
 	backends := make([]scoredBackend, 0, len(tests))
 	for _, test := range tests {
-		backends = append(backends, scoredBackend{
-			BackendCtx: &mockBackend{
-				connScore: test.connScore,
-			},
-		})
+		backends = append(backends, newScoredBackend(newMockBackend(true, test.connScore), zap.NewNop()))
 	}
 	factor.UpdateScore(backends)
 	for i, test := range tests {
