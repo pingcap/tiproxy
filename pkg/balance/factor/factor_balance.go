@@ -211,7 +211,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			idlestBackend = backend
 		}
 		// Skip the backends without connections.
-		if score > maxScore && backend.ConnScore() > 0 {
+		if score > maxScore && backend.ConnScore() > 0 && backend.ConnCount() > 0 {
 			maxScore = score
 			busiestBackend = backend
 		}
