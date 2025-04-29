@@ -144,7 +144,7 @@ func (fbb *FactorBasedBalance) updateBitNum() error {
 func (fbb *FactorBasedBalance) updateScore(backends []policy.BackendCtx) []scoredBackend {
 	scoredBackends := fbb.cachedList[:0]
 	for _, backend := range backends {
-		scoredBackends = append(scoredBackends, newScoredBackend(backend))
+		scoredBackends = append(scoredBackends, newScoredBackend(backend, fbb.lg))
 	}
 	needUpdateMetric := false
 	now := time.Now()
