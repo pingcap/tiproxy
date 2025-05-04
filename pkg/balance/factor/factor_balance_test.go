@@ -4,6 +4,8 @@
 package factor
 
 import (
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -15,21 +17,37 @@ import (
 func TestRouteWithOneFactor(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factor := &mockFactor{bitNum: 2}
+	factor := &mockFactor{bitNum: 8, balanceCount: 1, threshold: 1}
 	fm.factors = []Factor{factor}
 	require.NoError(t, fm.updateBitNum())
 
 	tests := []struct {
-		scores      []int
-		expectedIdx int
+		scores   []int
+		idxRange []int
 	}{
 		{
-			scores:      []int{1, 2, 3},
-			expectedIdx: 0,
+			scores:   []int{10},
+			idxRange: []int{0},
 		},
 		{
-			scores:      []int{3, 2, 1},
-			expectedIdx: 2,
+			scores:   []int{10, 20},
+			idxRange: []int{0},
+		},
+		{
+			scores:   []int{10, 20, 30},
+			idxRange: []int{0},
+		},
+		{
+			scores:   []int{30, 20, 10},
+			idxRange: []int{2},
+		},
+		{
+			scores:   []int{30, 11, 10},
+			idxRange: []int{1, 2},
+		},
+		{
+			scores:   []int{11, 11, 10},
+			idxRange: []int{0, 1, 2},
 		},
 	}
 	for tIdx, test := range tests {
@@ -39,47 +57,64 @@ func TestRouteWithOneFactor(t *testing.T) {
 			}
 		}
 		backends := createBackends(len(test.scores))
-		backend := fm.BackendToRoute(backends)
-		require.Equal(t, backends[test.expectedIdx], backend, "test index %d", tIdx)
+		targets := make(map[int]struct{}, len(test.scores))
+		for i := 0; len(targets) < len(test.idxRange) || i < 100; i++ {
+			require.Less(t, i, 100000, "test index %d", tIdx)
+			backend := fm.BackendToRoute(backends)
+			idx := slices.Index(backends, backend)
+			require.Contains(t, test.idxRange, idx, "test index %d", tIdx)
+			targets[idx] = struct{}{}
+		}
 	}
 }
 
 func TestRouteWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factor1, factor2 := &mockFactor{bitNum: 1}, &mockFactor{bitNum: 12}
+	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1}
+	factor2 := &mockFactor{bitNum: 12, balanceCount: 1, threshold: 1}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
 
 	tests := []struct {
-		scores1     []int
-		scores2     []int
-		expectedIdx int
+		scores1  []int
+		scores2  []int
+		idxRange []int
 	}{
 		{
-			scores1:     []int{1, 0, 0},
-			scores2:     []int{0, 100, 200},
-			expectedIdx: 1,
+			scores1:  []int{10, 0, 0},
+			scores2:  []int{0, 100, 200},
+			idxRange: []int{1},
 		},
 		{
-			scores1:     []int{1, 1, 0},
-			scores2:     []int{0, 100, 200},
-			expectedIdx: 2,
+			scores1:  []int{10, 10, 0},
+			scores2:  []int{0, 100, 200},
+			idxRange: []int{2},
 		},
 		{
-			scores1:     []int{1, 1, 1},
-			scores2:     []int{0, 100, 200},
-			expectedIdx: 0,
+			scores1:  []int{10, 10, 10},
+			scores2:  []int{0, 100, 200},
+			idxRange: []int{0},
 		},
 		{
-			scores1:     []int{0, 0, 0},
-			scores2:     []int{200, 100, 0},
-			expectedIdx: 2,
+			scores1:  []int{10, 11, 11},
+			scores2:  []int{100, 101, 100},
+			idxRange: []int{0, 1, 2},
 		},
 		{
-			scores1:     []int{0, 1, 0},
-			scores2:     []int{100, 0, 0},
-			expectedIdx: 2,
+			scores1:  []int{10, 11, 11},
+			scores2:  []int{100, 101, 110},
+			idxRange: []int{0, 1},
+		},
+		{
+			scores1:  []int{10, 11, 11},
+			scores2:  []int{110, 101, 100},
+			idxRange: []int{1, 2},
+		},
+		{
+			scores1:  []int{10, 20, 11},
+			scores2:  []int{110, 0, 100},
+			idxRange: []int{2},
 		},
 	}
 	for tIdx, test := range tests {
@@ -94,8 +129,14 @@ func TestRouteWith2Factors(t *testing.T) {
 			}
 		}
 		backends := createBackends(len(test.scores1))
-		backend := fm.BackendToRoute(backends)
-		require.Equal(t, backends[test.expectedIdx], backend, "test index %d", tIdx)
+		targets := make(map[int]struct{}, len(test.scores1))
+		for i := 0; len(targets) < len(test.idxRange) || i < 100; i++ {
+			require.Less(t, i, 100000, "test index %d", tIdx)
+			backend := fm.BackendToRoute(backends)
+			idx := slices.Index(backends, backend)
+			require.Contains(t, test.idxRange, idx, "test index %d", tIdx)
+			targets[idx] = struct{}{}
+		}
 	}
 }
 
@@ -300,7 +341,9 @@ func TestScoreAlwaysUpdated(t *testing.T) {
 func createBackends(num int) []policy.BackendCtx {
 	backends := make([]policy.BackendCtx, 0, num)
 	for i := 0; i < num; i++ {
-		backends = append(backends, newMockBackend(true, 100))
+		backend := newMockBackend(true, 100)
+		backend.addr = strconv.Itoa(i)
+		backends = append(backends, backend)
 	}
 	return backends
 }

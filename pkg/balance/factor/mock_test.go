@@ -62,7 +62,9 @@ func (mb *mockBackend) Local() bool {
 var _ Factor = (*mockFactor)(nil)
 
 type mockFactor struct {
+	scores       map[string]int
 	bitNum       int
+	threshold    int
 	balanceCount float64
 	updateScore  func(backends []scoredBackend)
 	cfg          *config.Config
@@ -74,6 +76,12 @@ func (mf *mockFactor) Name() string {
 
 func (mf *mockFactor) UpdateScore(backends []scoredBackend) {
 	mf.updateScore(backends)
+	if mf.scores == nil {
+		mf.scores = make(map[string]int)
+	}
+	for _, backend := range backends {
+		mf.scores[backend.Addr()] = backend.factorScore(mf.bitNum)
+	}
 }
 
 func (mf *mockFactor) ScoreBitNum() int {
@@ -81,7 +89,11 @@ func (mf *mockFactor) ScoreBitNum() int {
 }
 
 func (mf *mockFactor) BalanceCount(from, to scoredBackend) float64 {
-	return mf.balanceCount
+	fromScore, toScore := mf.scores[from.Addr()], mf.scores[to.Addr()]
+	if fromScore-toScore > mf.threshold {
+		return mf.balanceCount
+	}
+	return 0
 }
 
 func (mf *mockFactor) SetConfig(cfg *config.Config) {

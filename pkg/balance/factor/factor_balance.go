@@ -4,6 +4,9 @@
 package factor
 
 import (
+	"math/rand/v2"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -27,6 +30,7 @@ type FactorBasedBalance struct {
 	factors []Factor
 	// to reduce memory allocation
 	cachedList      []scoredBackend
+	cachedIdxes     []int
 	mr              metricsreader.MetricsReader
 	lg              *zap.Logger
 	factorStatus    *FactorStatus
@@ -42,9 +46,10 @@ type FactorBasedBalance struct {
 
 func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *FactorBasedBalance {
 	return &FactorBasedBalance{
-		lg:         lg,
-		mr:         mr,
-		cachedList: make([]scoredBackend, 0, 512),
+		lg:          lg,
+		mr:          mr,
+		cachedList:  make([]scoredBackend, 0, 512),
+		cachedIdxes: make([]int, 0, 512),
 	}
 }
 
@@ -167,7 +172,7 @@ func (fbb *FactorBasedBalance) updateScore(backends []policy.BackendCtx) []score
 	return scoredBackends
 }
 
-// BackendToRoute returns the idlest backend.
+// BackendToRoute returns one backend to route a new connection to.
 func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) policy.BackendCtx {
 	if len(backends) == 0 {
 		return nil
@@ -175,19 +180,61 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	if len(backends) == 1 {
 		return backends[0]
 	}
-	scoredBackends := fbb.updateScore(backends)
 
-	// Find the idlest backend.
-	idlestBackend := scoredBackends[0]
-	minScore := idlestBackend.score()
-	for i := 1; i < len(scoredBackends); i++ {
-		score := scoredBackends[i].score()
-		if score < minScore {
-			minScore = score
-			idlestBackend = scoredBackends[i]
-		}
+	scoredBackends := fbb.updateScore(backends)
+	indexes := fbb.cachedIdxes[:0]
+	for i := 0; i < len(scoredBackends); i++ {
+		indexes = append(indexes, i)
 	}
-	return idlestBackend.BackendCtx
+
+	var fields []zap.Field
+	for _, backend := range scoredBackends {
+		fields = append(fields, zap.String(backend.Addr(), strconv.FormatUint(backend.scoreBits, 16)))
+	}
+
+	leftBitNum := fbb.totalBitNum
+	// For each factor, if a backend is so busy that it should migrate connections to another, evict this backend.
+	// Always choosing the idlest one works bad for short connections because even a little jitter may cause all the connections
+	// in the next second route to the same backend.
+	for _, factor := range fbb.factors {
+		bitNum := factor.ScoreBitNum()
+		sort.Slice(indexes, func(i int, j int) bool {
+			score1 := scoredBackends[indexes[i]].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			score2 := scoredBackends[indexes[j]].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			return score1 > score2
+		})
+		minScore := scoredBackends[indexes[len(indexes)-1]].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+		startIdx := 0
+		for i := 0; i < len(indexes)-1; i++ {
+			score := scoredBackends[indexes[i]].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			if score > minScore {
+				balanceCount := factor.BalanceCount(scoredBackends[indexes[i]], scoredBackends[indexes[len(indexes)-1]])
+				if balanceCount > 0.0001 {
+					fields = append(fields, zap.String(scoredBackends[indexes[i]].Addr(), factor.Name()))
+					startIdx++
+					continue
+				}
+			}
+			break
+		}
+		if startIdx > 0 {
+			indexes = indexes[startIdx:]
+		}
+		if len(indexes) < 2 {
+			break
+		}
+		leftBitNum -= bitNum
+	}
+
+	// For the rest backends, choose a random one.
+	idx := 0
+	if len(indexes) > 1 {
+		idx = rand.IntN(len(indexes))
+	}
+	idx = indexes[idx]
+	fields = append(fields, zap.String("target", scoredBackends[idx].Addr()), zap.Ints("rand_indexes", indexes))
+	fbb.lg.Debug("route", fields...)
+	return scoredBackends[idx].BackendCtx
 }
 
 // BackendsToBalance returns the busiest/unhealthy backend and the idlest backend.
@@ -222,11 +269,12 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 
 	// Get the unbalanced factor and the connection count to migrate.
 	var factor Factor
+	var score1, score2 uint64
 	leftBitNum := fbb.totalBitNum
 	for _, factor = range fbb.factors {
 		bitNum := factor.ScoreBitNum()
-		score1 := maxScore << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-		score2 := minScore << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+		score1 = maxScore << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+		score2 = minScore << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
 		if score1 > score2 {
 			// The previous factors are ordered, so this factor won't violate them.
 			// E.g.
@@ -250,8 +298,11 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 	reason = factor.Name()
 	fields := []zap.Field{
 		zap.String("factor", reason),
-		zap.Uint64("from_score", maxScore),
-		zap.Uint64("to_score", minScore),
+		zap.String("from_total_score", strconv.FormatUint(maxScore, 16)),
+		zap.String("to_total_score", strconv.FormatUint(minScore, 16)),
+		zap.Uint64("from_factor_score", score1),
+		zap.Uint64("to_factor_score", score2),
+		zap.Float64("balance_count", balanceCount),
 	}
 	return busiestBackend.BackendCtx, idlestBackend.BackendCtx, balanceCount, reason, fields
 }
