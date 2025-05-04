@@ -194,7 +194,7 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 
 	leftBitNum := fbb.totalBitNum
 	// For each factor, if a backend is so busy that it should migrate connections to another, evict this backend.
-	// Always choosing the idlest one works bad for short connections because even a little jitter may cause all the connections
+	// Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
 	// in the next second route to the same backend.
 	for _, factor := range fbb.factors {
 		bitNum := factor.ScoreBitNum()
