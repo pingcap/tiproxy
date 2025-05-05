@@ -114,7 +114,7 @@ func TestRouteWith2Factors(t *testing.T) {
 		{
 			scores1:  []int{10, 20, 11},
 			scores2:  []int{110, 0, 100},
-			idxRange: []int{2},
+			idxRange: []int{0, 2},
 		},
 	}
 	for tIdx, test := range tests {
