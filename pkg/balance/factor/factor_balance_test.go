@@ -109,7 +109,7 @@ func TestRouteWith2Factors(t *testing.T) {
 		{
 			scores1:  []int{10, 11, 11},
 			scores2:  []int{110, 101, 100},
-			idxRange: []int{1, 2},
+			idxRange: []int{0, 1, 2},
 		},
 		{
 			scores1:  []int{10, 20, 11},
