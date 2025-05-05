@@ -4,7 +4,8 @@
 package factor
 
 import (
-	"math/rand/v2"
+	"crypto/rand"
+	"math/big"
 	"sort"
 	"strconv"
 	"time"
@@ -30,7 +31,6 @@ type FactorBasedBalance struct {
 	factors []Factor
 	// to reduce memory allocation
 	cachedList      []scoredBackend
-	cachedIdxes     []int
 	mr              metricsreader.MetricsReader
 	lg              *zap.Logger
 	factorStatus    *FactorStatus
@@ -46,10 +46,9 @@ type FactorBasedBalance struct {
 
 func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *FactorBasedBalance {
 	return &FactorBasedBalance{
-		lg:          lg,
-		mr:          mr,
-		cachedList:  make([]scoredBackend, 0, 512),
-		cachedIdxes: make([]int, 0, 512),
+		lg:         lg,
+		mr:         mr,
+		cachedList: make([]scoredBackend, 0, 512),
 	}
 }
 
@@ -182,57 +181,51 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	}
 
 	scoredBackends := fbb.updateScore(backends)
-	indexes := fbb.cachedIdxes[:0]
-	for i := 0; i < len(scoredBackends); i++ {
-		indexes = append(indexes, i)
-	}
+	sort.Slice(scoredBackends, func(i int, j int) bool {
+		return scoredBackends[i].scoreBits < scoredBackends[j].scoreBits
+	})
 
 	var fields []zap.Field
 	for _, backend := range scoredBackends {
 		fields = append(fields, zap.String(backend.Addr(), strconv.FormatUint(backend.scoreBits, 16)))
 	}
 
-	leftBitNum := fbb.totalBitNum
-	// For each factor, if a backend is so busy that it should migrate connections to another, evict this backend.
+	// Evict the backends that are so busy that it should migrate connections to another, and then randomly choose one.
 	// Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
 	// in the next second route to the same backend.
-	for _, factor := range fbb.factors {
-		bitNum := factor.ScoreBitNum()
-		sort.Slice(indexes, func(i int, j int) bool {
-			score1 := scoredBackends[indexes[i]].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-			score2 := scoredBackends[indexes[j]].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-			return score1 > score2
-		})
-		minScore := scoredBackends[indexes[len(indexes)-1]].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-		startIdx := 0
-		for i := 0; i < len(indexes)-1; i++ {
-			score := scoredBackends[indexes[i]].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-			if score > minScore {
-				balanceCount := factor.BalanceCount(scoredBackends[indexes[i]], scoredBackends[indexes[len(indexes)-1]])
-				if balanceCount > 0.0001 {
-					fields = append(fields, zap.String(scoredBackends[indexes[i]].Addr(), factor.Name()))
-					startIdx++
-					continue
+	endIdx := len(scoredBackends)
+	for i := len(scoredBackends) - 1; i > 0; i-- {
+		leftBitNum := fbb.totalBitNum
+		for _, factor := range fbb.factors {
+			bitNum := factor.ScoreBitNum()
+			score1 := scoredBackends[i].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			score2 := scoredBackends[0].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			if score1 > score2 {
+				// This backend is too busy. If it's routed, migration may happen.
+				if balanceCount := factor.BalanceCount(scoredBackends[i], scoredBackends[0]); balanceCount > 0.0001 {
+					fields = append(fields, zap.String(scoredBackends[i].Addr(), factor.Name()))
+					endIdx = i
+					break
 				}
+			} else if score1 < score2 {
+				break
 			}
+			leftBitNum -= bitNum
+		}
+		// The backend is not evicted in this round, stop.
+		if endIdx > i {
 			break
 		}
-		if startIdx > 0 {
-			indexes = indexes[startIdx:]
-		}
-		if len(indexes) < 2 {
-			break
-		}
-		leftBitNum -= bitNum
 	}
 
 	// For the rest backends, choose a random one.
 	idx := 0
-	if len(indexes) > 1 {
-		idx = rand.IntN(len(indexes))
+	if endIdx > 1 {
+		// math/rand is faster but can't pass security scanning tools.
+		bigInt, _ := rand.Int(rand.Reader, big.NewInt(int64(endIdx)))
+		idx = int(bigInt.Int64())
 	}
-	idx = indexes[idx]
-	fields = append(fields, zap.String("target", scoredBackends[idx].Addr()), zap.Ints("rand_indexes", indexes))
+	fields = append(fields, zap.String("target", scoredBackends[idx].Addr()), zap.Int("rand_num", endIdx))
 	fbb.lg.Debug("route", fields...)
 	return scoredBackends[idx].BackendCtx
 }
