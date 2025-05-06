@@ -17,7 +17,9 @@ import (
 const (
 	errMetricExpDuration = 1 * time.Minute
 	// balanceSeconds4Health indicates the time (in seconds) to migrate all the connections.
-	balanceSeconds4Health = 5.0
+	// Do not migrate too fast because TiProxy may mistakenly migrate connections due to metric delay.
+	// E.g. If the PD leader is down, TiDB-0 fails to connect to PD, and after 5 seconds, TiDB-1 also fails.
+	balanceSeconds4Health = 60.0
 )
 
 type valueRange int
@@ -63,9 +65,10 @@ var (
 			// may be caused by disconnection to PD
 			// test with no connection in no network: around 80/m
 			// test with 100 connections in unstable network: [50, 135]/2m
+			// test with 50 TPS in unstable network: around 500/2m, the higher the TPS, the higher the metric value
 			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[2m])) by (instance)`,
-			failThreshold:    50,
-			recoverThreshold: 10,
+			failThreshold:    500,
+			recoverThreshold: 50,
 			key:              "health_pd",
 			queryRule: metricsreader.QueryRule{
 				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
@@ -102,10 +105,12 @@ var (
 		{
 			// may be caused by disconnection to TiKV
 			// test with no connection in no network: regionMiss is around 1300/m, tikvRPC is around 40/m
-			// test with 100 connections in unstable network: [1000, 3300]/2m
+			// test with 100 idle connections in unstable network: [1000, 3300]/2m
+			// test with 100 QPS in unstable network: around 1000/2m
+			// test with 50 TPS in unstable network: around 5000/2m, the higher the TPS, the higher the metric value
 			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type=~"regionMiss|tikvRPC"}[2m])) by (instance)`,
-			failThreshold:    1000,
-			recoverThreshold: 100,
+			failThreshold:    5000,
+			recoverThreshold: 500,
 			key:              "health_tikv",
 			queryRule: metricsreader.QueryRule{
 				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
