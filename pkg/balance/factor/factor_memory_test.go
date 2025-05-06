@@ -79,11 +79,11 @@ func TestMemoryScore(t *testing.T) {
 			score:  2,
 		},
 		{
-			memory: []float64{0.55, math.NaN(), math.NaN(), 0.6},
+			memory: []float64{0.45, math.NaN(), math.NaN(), 0.6},
 			score:  1,
 		},
 		{
-			memory: []float64{0.55, 0.6, 0.55, 0.6},
+			memory: []float64{0.5, 0.6, 0.5, 0.6},
 			score:  1,
 		},
 	}
