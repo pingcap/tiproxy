@@ -100,7 +100,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 		}
 		require.Equal(t, test.scoreOrder, sortedIdx, "test index %d", i)
 		from, to := backends[len(backends)-1], backends[0]
-		balanceCount := fc.BalanceCount(from, to)
+		balanceCount, _ := fc.BalanceCount(from, to)
 		require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
@@ -207,7 +207,7 @@ func TestCPUBalanceContinuously(t *testing.T) {
 				t.Fatal("balance doesn't stop")
 			}
 			updateScore(fc, backends)
-			balanceCount := fc.BalanceCount(backends[len(backends)-1], backends[0])
+			balanceCount, _ := fc.BalanceCount(backends[len(backends)-1], backends[0])
 			if balanceCount == 0 {
 				break
 			}

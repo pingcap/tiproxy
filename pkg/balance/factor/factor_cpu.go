@@ -9,6 +9,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"go.uber.org/zap"
@@ -147,6 +148,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 			// If this backend is not updated, ignore it.
 			if snapshot, ok := fc.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
 				avgUsage, latestUsage := calcAvgUsage(pairs)
+				metrics.BackendMetricGauge.WithLabelValues(addr, "cpu").Set(avgUsage)
 				if avgUsage >= 0 {
 					snapshots[addr] = cpuBackendSnapshot{
 						avgUsage:    avgUsage,
@@ -211,15 +213,16 @@ func (fc *FactorCPU) updateCpuPerConn() {
 		// When the cluster is idle and the clients are connecting to it all at once (e.g. when sysbench starts),
 		// the CPU usage lags behind, so the usagePerConn may be very low. In this case, all the connections may be
 		// routed to the same backend just because the CPU usage of the backend is a little lower.
-		if usagePerConn < minCpuPerConn {
-			// If the average usage is below 10%, we take the cluster as just started and don't update usagePerConn.
-			if totalUsage/float64(len(fc.snapshot)) > 0.1 {
-				fc.usagePerConn = usagePerConn
-			}
-		} else {
-			fc.usagePerConn = usagePerConn
+		if usagePerConn < minCpuPerConn && totalUsage/float64(len(fc.snapshot)) <= 0.1 {
+			usagePerConn = fc.usagePerConn
 		}
-		fc.lg.Debug("updateCpuPerConn", zap.Float64("usagePerConn", fc.usagePerConn), zap.Int("totalConns", totalConns), zap.Float64("totalUsage", totalUsage))
+		if fc.usagePerConn != 0 && math.Abs(usagePerConn/fc.usagePerConn-1) > 0.05 {
+			fc.lg.Debug("update CPU usage per connection",
+				zap.Float64("usage_per_conn", usagePerConn),
+				zap.Int("total_conns", totalConns),
+				zap.Float64("total_usage", totalUsage))
+		}
+		fc.usagePerConn = usagePerConn
 	}
 	if fc.usagePerConn <= 0 {
 		fc.usagePerConn = minCpuPerConn
@@ -243,21 +246,27 @@ func (fc *FactorCPU) ScoreBitNum() int {
 	return fc.bitNum
 }
 
-func (fc *FactorCPU) BalanceCount(from, to scoredBackend) float64 {
+func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
 	fromAvgUsage, fromLatestUsage := fc.getUsage(from)
 	toAvgUsage, toLatestUsage := fc.getUsage(to)
+	fields := []zap.Field{
+		zap.Float64("from_avg_usage", fromAvgUsage),
+		zap.Float64("from_latest_usage", fromLatestUsage),
+		zap.Int("from_snapshot_conn", fc.snapshot[from.Addr()].connCount),
+		zap.Int("from_conn", from.ConnScore()),
+		zap.Float64("to_avg_usage", toAvgUsage),
+		zap.Float64("to_latest_usage", toLatestUsage),
+		zap.Int("to_snapshot_conn", fc.snapshot[to.Addr()].connCount),
+		zap.Int("to_conn", to.ConnScore()),
+		zap.Float64("usage_per_conn", fc.usagePerConn),
+	}
 	// The higher the CPU usage, the more sensitive the load balance should be.
 	// E.g. 10% vs 25% don't need rebalance, but 80% vs 95% need rebalance.
 	// Use the average usage to avoid thrash when CPU jitters too much and use the latest usage to avoid migrate too many connections.
-	if 1.3-toAvgUsage > (1.3-fromAvgUsage)*cpuBalancedRatio && 1.3-toLatestUsage > (1.3-fromLatestUsage)*cpuBalancedRatio {
-		balanceCount := 1 / fc.usagePerConn / balanceRatio4Cpu
-		fc.lg.Debug("update cpu balance", zap.String("from", from.Addr()), zap.String("to", to.Addr()), zap.Float64("fromAvgUsage", fromAvgUsage),
-			zap.Float64("fromLatestUsage", fromLatestUsage), zap.Float64("toAvgUsage", toAvgUsage), zap.Float64("toLatestUsage", toLatestUsage),
-			zap.Int("fromConnScore", from.ConnScore()), zap.Int("toConnScore", to.ConnScore()), zap.Float64("balanceCount", balanceCount),
-			zap.Float64("usagePerConn", fc.usagePerConn))
-		return balanceCount
+	if 1.3-toAvgUsage < (1.3-fromAvgUsage)*cpuBalancedRatio || 1.3-toLatestUsage < (1.3-fromLatestUsage)*cpuBalancedRatio {
+		return 0, nil
 	}
-	return 0
+	return 1 / fc.usagePerConn / balanceRatio4Cpu, fields
 }
 
 func (fc *FactorCPU) SetConfig(cfg *config.Config) {

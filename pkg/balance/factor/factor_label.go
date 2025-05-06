@@ -3,7 +3,10 @@
 
 package factor
 
-import "github.com/pingcap/tiproxy/lib/config"
+import (
+	"github.com/pingcap/tiproxy/lib/config"
+	"go.uber.org/zap"
+)
 
 const (
 	// balanceCount4Label indicates how many connections to balance per second.
@@ -49,8 +52,8 @@ func (fl *FactorLabel) ScoreBitNum() int {
 	return fl.bitNum
 }
 
-func (fl *FactorLabel) BalanceCount(from, to scoredBackend) float64 {
-	return balanceCount4Label
+func (fl *FactorLabel) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
+	return balanceCount4Label, nil
 }
 
 func (fl *FactorLabel) SetConfig(cfg *config.Config) {

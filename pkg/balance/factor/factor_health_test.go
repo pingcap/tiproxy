@@ -163,7 +163,7 @@ func TestHealthBalance(t *testing.T) {
 			return backends[i].score() < backends[j].score()
 		})
 		from, to := backends[len(backends)-1], backends[0]
-		balanceCount := fh.BalanceCount(from, to)
+		balanceCount, _ := fh.BalanceCount(from, to)
 		require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
@@ -281,7 +281,7 @@ func TestHealthBalanceCount(t *testing.T) {
 		if test.count == 0 {
 			continue
 		}
-		count := fh.BalanceCount(backends[0], backends[1])
+		count, _ := fh.BalanceCount(backends[0], backends[1])
 		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }

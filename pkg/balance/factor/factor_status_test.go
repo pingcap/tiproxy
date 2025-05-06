@@ -81,7 +81,7 @@ func TestStatusBalanceCount(t *testing.T) {
 		if test.count == 0 {
 			continue
 		}
-		count := fs.BalanceCount(backends[0], backends[1])
+		count, _ := fs.BalanceCount(backends[0], backends[1])
 		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }

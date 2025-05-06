@@ -31,10 +31,11 @@ func (b *scoredBackend) prepareScore(bitNum int) {
 // addScore must be called after prepareScore.
 func (b *scoredBackend) addScore(score int, bitNum int) {
 	if score >= 1<<bitNum {
-		b.lg.Warn("factor score overflows", zap.String("backend", b.Addr()), zap.Int("score", score), zap.Int("bit_num", bitNum), zap.Stack("stack"))
+		// It should be a warning, but it's likely to keep reporting if this bug happens, so change to debug level.
+		b.lg.Debug("factor score overflows", zap.String("backend", b.Addr()), zap.Uint64("cur", b.scoreBits), zap.Int("score", score), zap.Int("bit_num", bitNum))
 		score = 1<<bitNum - 1
 	} else if score < 0 {
-		b.lg.Warn("factor score is negtive", zap.String("backend", b.Addr()), zap.Int("score", score), zap.Stack("stack"))
+		b.lg.Debug("factor score is negtive", zap.String("backend", b.Addr()), zap.Uint64("cur", b.scoreBits), zap.Int("score", score), zap.Int("bit_num", bitNum))
 		score = 0
 	}
 	b.scoreBits += uint64(score)

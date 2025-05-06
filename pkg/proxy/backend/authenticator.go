@@ -135,7 +135,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	}
 	commonCaps := frontendCapability & proxyCapability
 	if frontendCapability^commonCaps != 0 {
-		logger.Debug("frontend send capabilities unsupported by proxy", zap.Stringer("common", commonCaps), zap.Stringer("frontend", frontendCapability^commonCaps), zap.Stringer("proxy", proxyCapability^commonCaps))
+		logger.Debug("frontend send capabilities unsupported by proxy", zap.Stringer("frontend", frontendCapability^commonCaps), zap.Stringer("proxy", proxyCapability^commonCaps))
 	}
 	auth.capability = commonCaps
 	if auth.capability&pnet.ClientPluginAuth == 0 {
@@ -202,7 +202,7 @@ RECONNECT:
 		// but TiDB does not send all of its supported capabilities
 		// thus we must ignore server capabilities
 		// however, I will log something
-		logger.Debug("backend does not support capabilities from proxy", zap.Stringer("common", common), zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
+		logger.Debug("backend does not support capabilities from proxy", zap.Stringer("proxy", proxyCapability^common), zap.Stringer("backend", backendCapability^common))
 	}
 
 	// forward client handshake resp
@@ -475,7 +475,7 @@ func (auth *Authenticator) updateCurrentDB(db string) {
 
 func (auth *Authenticator) ConnInfo() []zap.Field {
 	fields := pnet.Attr2ZapFields(auth.attrs)
-	fields = append(fields, zap.Stringer("capability", auth.capability), zap.Bool("proxy-protocol", auth.proxyProtocol))
+	fields = append(fields, zap.Uint32("capability", auth.capability.Uint32()), zap.Bool("proxy-protocol", auth.proxyProtocol))
 	return fields
 }
 

@@ -3,7 +3,10 @@
 
 package factor
 
-import "github.com/pingcap/tiproxy/lib/config"
+import (
+	"github.com/pingcap/tiproxy/lib/config"
+	"go.uber.org/zap"
+)
 
 type Factor interface {
 	// Name returns the name of the factor.
@@ -14,7 +17,7 @@ type Factor interface {
 	ScoreBitNum() int
 	// BalanceCount returns the count of connections to balance per second.
 	// 0 indicates the factor is already balanced.
-	BalanceCount(from, to scoredBackend) float64
+	BalanceCount(from, to scoredBackend) (float64, []zap.Field)
 	SetConfig(cfg *config.Config)
 	Close()
 }
