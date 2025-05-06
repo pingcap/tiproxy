@@ -9,6 +9,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"go.uber.org/zap"
@@ -153,6 +154,8 @@ var _ Factor = (*FactorHealth)(nil)
 type healthBackendSnapshot struct {
 	updatedTime time.Time
 	valueRange  valueRange
+	indicator   string
+	value       int
 	// Record the balance count when the backend becomes unhealthy so that it won't be smaller in the next rounds.
 	balanceCount float64
 }
@@ -252,6 +255,7 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				updatedTime = ts
 			}
 			sample := fh.indicators[i].queryResult.GetSample4Backend(backend)
+			metrics.BackendMetricGauge.WithLabelValues(backend.Addr(), fh.indicators[i].key).Set(float64(sample.Value))
 			vr := calcValueRange(sample, fh.indicators[i])
 			if vr > valueRange {
 				valueRange = vr
@@ -279,12 +283,20 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 		}
 		// Log it whenever the health changes, even from unhealthy to healthy and no connections.
 		if balanceCount != snapshot.balanceCount {
-			fh.lg.Info("update health risk", zap.String("addr", addr), zap.String("indicator", indicator), zap.Int("value", value), zap.Int("lastRisk", int(snapshot.valueRange)),
-				zap.Int("curRisk", int(valueRange)), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backend.ConnScore()))
+			fh.lg.Info("update health risk",
+				zap.String("addr", addr),
+				zap.Int("risk", int(valueRange)),
+				zap.String("indicator", indicator),
+				zap.Int("value", value),
+				zap.Int("last_risk", int(snapshot.valueRange)),
+				zap.Float64("balance_count", balanceCount),
+				zap.Int("conn_score", backend.ConnScore()))
 		}
 		snapshots[addr] = healthBackendSnapshot{
 			updatedTime:  updatedTime,
 			valueRange:   valueRange,
+			indicator:    indicator,
+			value:        value,
 			balanceCount: balanceCount,
 		}
 	}
@@ -327,14 +339,18 @@ func (fh *FactorHealth) ScoreBitNum() int {
 	return fh.bitNum
 }
 
-func (fh *FactorHealth) BalanceCount(from, to scoredBackend) float64 {
+func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
 	// Only migrate connections when one is valueRangeNormal and the other is valueRangeAbnormal.
 	fromScore := fh.caclErrScore(from.Addr())
 	toScore := fh.caclErrScore(to.Addr())
 	if fromScore-toScore <= 1 {
-		return 0
+		return 0, nil
 	}
-	return fh.snapshot[from.Addr()].balanceCount
+	snapshot := fh.snapshot[from.Addr()]
+	fields := []zap.Field{
+		zap.String("indicator", snapshot.indicator),
+		zap.Int("value", snapshot.value)}
+	return snapshot.balanceCount, fields
 }
 
 func (fh *FactorHealth) SetConfig(cfg *config.Config) {

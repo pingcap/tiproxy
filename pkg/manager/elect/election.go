@@ -118,6 +118,7 @@ func (m *election) campaignLoop(ctx context.Context) {
 		return
 	}
 	for {
+		m.lg.Debug("begin campaign")
 		select {
 		case <-session.Done():
 			m.lg.Info("etcd session is done, creates a new one")
