@@ -4,6 +4,10 @@
 package factor
 
 import (
+	"crypto/rand"
+	"math/big"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -167,7 +171,7 @@ func (fbb *FactorBasedBalance) updateScore(backends []policy.BackendCtx) []score
 	return scoredBackends
 }
 
-// BackendToRoute returns the idlest backend.
+// BackendToRoute returns one backend to route a new connection to.
 func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) policy.BackendCtx {
 	if len(backends) == 0 {
 		return nil
@@ -175,19 +179,55 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	if len(backends) == 1 {
 		return backends[0]
 	}
-	scoredBackends := fbb.updateScore(backends)
 
-	// Find the idlest backend.
-	idlestBackend := scoredBackends[0]
-	minScore := idlestBackend.score()
-	for i := 1; i < len(scoredBackends); i++ {
-		score := scoredBackends[i].score()
-		if score < minScore {
-			minScore = score
-			idlestBackend = scoredBackends[i]
+	scoredBackends := fbb.updateScore(backends)
+	sort.Slice(scoredBackends, func(i int, j int) bool {
+		return scoredBackends[i].scoreBits < scoredBackends[j].scoreBits
+	})
+
+	var fields []zap.Field
+	for _, backend := range scoredBackends {
+		fields = append(fields, zap.String(backend.Addr(), strconv.FormatUint(backend.scoreBits, 16)))
+	}
+
+	// Evict the backends that are so busy that it should migrate connections to another, and then randomly choose one.
+	// Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
+	// in the next second route to the same backend.
+	endIdx := len(scoredBackends)
+	for i := len(scoredBackends) - 1; i > 0; i-- {
+		leftBitNum := fbb.totalBitNum
+		for _, factor := range fbb.factors {
+			bitNum := factor.ScoreBitNum()
+			score1 := scoredBackends[i].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			score2 := scoredBackends[0].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			if score1 > score2 {
+				// This backend is too busy. If it's routed, migration may happen.
+				if balanceCount := factor.BalanceCount(scoredBackends[i], scoredBackends[0]); balanceCount > 0.0001 {
+					fields = append(fields, zap.String(scoredBackends[i].Addr(), factor.Name()))
+					endIdx = i
+					break
+				}
+			} else if score1 < score2 {
+				break
+			}
+			leftBitNum -= bitNum
+		}
+		// The backend is not evicted in this round, stop.
+		if endIdx > i {
+			break
 		}
 	}
-	return idlestBackend.BackendCtx
+
+	// For the rest backends, choose a random one.
+	idx := 0
+	if endIdx > 1 {
+		// math/rand is faster but can't pass security scanning tools.
+		bigInt, _ := rand.Int(rand.Reader, big.NewInt(int64(endIdx)))
+		idx = int(bigInt.Int64())
+	}
+	fields = append(fields, zap.String("target", scoredBackends[idx].Addr()), zap.Int("rand_num", endIdx))
+	fbb.lg.Debug("route", fields...)
+	return scoredBackends[idx].BackendCtx
 }
 
 // BackendsToBalance returns the busiest/unhealthy backend and the idlest backend.
@@ -222,11 +262,12 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 
 	// Get the unbalanced factor and the connection count to migrate.
 	var factor Factor
+	var score1, score2 uint64
 	leftBitNum := fbb.totalBitNum
 	for _, factor = range fbb.factors {
 		bitNum := factor.ScoreBitNum()
-		score1 := maxScore << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-		score2 := minScore << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+		score1 = maxScore << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+		score2 = minScore << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
 		if score1 > score2 {
 			// The previous factors are ordered, so this factor won't violate them.
 			// E.g.
@@ -250,8 +291,11 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 	reason = factor.Name()
 	fields := []zap.Field{
 		zap.String("factor", reason),
-		zap.Uint64("from_score", maxScore),
-		zap.Uint64("to_score", minScore),
+		zap.String("from_total_score", strconv.FormatUint(maxScore, 16)),
+		zap.String("to_total_score", strconv.FormatUint(minScore, 16)),
+		zap.Uint64("from_factor_score", score1),
+		zap.Uint64("to_factor_score", score2),
+		zap.Float64("balance_count", balanceCount),
 	}
 	return busiestBackend.BackendCtx, idlestBackend.BackendCtx, balanceCount, reason, fields
 }
