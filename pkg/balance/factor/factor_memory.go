@@ -22,7 +22,7 @@ const (
 	// balanceSeconds4HighMemory indicates the time (in seconds) to migrate all the connections when memory is high.
 	balanceSeconds4HighMemory = 60.0
 	// balanceSeconds4OOMRisk indicates the time (in seconds) to migrate all the connections when there's an OOM risk.
-	balanceSeconds4OOMRisk = 5.0
+	balanceSeconds4OOMRisk = 10.0
 )
 
 var _ Factor = (*FactorCPU)(nil)
@@ -65,31 +65,32 @@ type oomRiskLevel struct {
 // We only need to rescue as many connections as possible when the backend is going OOM.
 var (
 	oomRiskLevels = []oomRiskLevel{
-		{memUsage: 0.75, timeToOOM: time.Minute},
-		{memUsage: 0.6, timeToOOM: 5 * time.Minute},
+		{memUsage: 0.75, timeToOOM: 45 * time.Second},
+		{memUsage: 0.6, timeToOOM: 3 * time.Minute},
 	}
 )
 
 // 2: high risk
 // 1: low risk
 // 0: no risk
-func getRiskLevel(usage float64, timeToOOM time.Duration) (int, bool) {
+func getRiskLevel(usage float64, timeToOOM time.Duration) int {
 	level := 0
 	for j := 0; j < len(oomRiskLevels); j++ {
 		if timeToOOM < oomRiskLevels[j].timeToOOM {
-			return len(oomRiskLevels) - j, true
+			return len(oomRiskLevels) - j
 		}
 		if usage > oomRiskLevels[j].memUsage {
-			return len(oomRiskLevels) - j, false
+			return len(oomRiskLevels) - j
 		}
 	}
-	return level, false
+	return level
 }
 
 type memBackendSnapshot struct {
 	updatedTime time.Time
 	memUsage    float64
 	timeToOOM   time.Duration
+	riskLevel   int
 	// Record the balance count when the backend has OOM risk so that it won't be smaller in the next rounds.
 	balanceCount float64
 }
@@ -147,7 +148,8 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 
 	for i := 0; i < len(backends); i++ {
 		addr := backends[i].Addr()
-		score, _ := fm.calcMemScore(addr)
+		// If the backend is new or the backend misses metrics, take it safe.
+		score := fm.snapshot[addr].riskLevel
 		backends[i].addScore(score, fm.bitNum)
 	}
 }
@@ -167,22 +169,29 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 			if !existsSnapshot || snapshot.updatedTime.Before(updateTime) {
 				latestUsage, timeToOOM := calcMemUsage(pairs)
 				if latestUsage >= 0 {
-					balanceCount := fm.calcBalanceCount(backend, latestUsage, timeToOOM)
+					riskLevel := getRiskLevel(latestUsage, timeToOOM)
+					balanceCount := fm.calcBalanceCount(backend, riskLevel, timeToOOM)
+					// Log it whenever the risk changes, even from high risk to no risk and no connections.
+					if riskLevel != snapshot.riskLevel {
+						fm.lg.Info("update memory risk",
+							zap.String("addr", addr),
+							zap.Int("risk", riskLevel),
+							zap.Float64("mem_usage", latestUsage),
+							zap.Duration("time_to_oom", timeToOOM),
+							zap.Int("last_risk", snapshot.riskLevel),
+							zap.Float64("last_mem_usage", snapshot.memUsage),
+							zap.Duration("last_time_to_oom", snapshot.timeToOOM),
+							zap.Float64("balance_count", balanceCount),
+							zap.Int("conn_score", backend.ConnScore()))
+					}
 					snapshots[addr] = memBackendSnapshot{
 						updatedTime:  updateTime,
 						memUsage:     latestUsage,
 						timeToOOM:    timeToOOM,
 						balanceCount: balanceCount,
+						riskLevel:    riskLevel,
 					}
 					valid = true
-					// Log it whenever the risk changes, even from high risk to no risk and no connections.
-					lastRisk, _ := getRiskLevel(snapshot.memUsage, snapshot.timeToOOM)
-					curRisk, _ := getRiskLevel(latestUsage, timeToOOM)
-					if lastRisk != curRisk {
-						fm.lg.Info("update memory risk", zap.String("addr", addr), zap.Float64("memUsage", latestUsage), zap.Duration("timeToOOM", timeToOOM),
-							zap.Int("lastRisk", lastRisk), zap.Float64("lastMemUsage", snapshot.memUsage), zap.Duration("lastTimeToOOM", snapshot.timeToOOM),
-							zap.Int("curRisk", curRisk), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backend.ConnScore()))
-					}
 				}
 			}
 		}
@@ -230,32 +239,14 @@ func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToO
 	return
 }
 
-func (fm *FactorMemory) calcMemScore(addr string) (int, bool) {
-	usage := 1.0
-	timeToOOM := time.Duration(0)
-	snapshot, ok := fm.snapshot[addr]
-	if ok {
-		usage = snapshot.memUsage
-		timeToOOM = snapshot.timeToOOM
-	}
-	// If one backend misses metric, maybe its version < v8.0.0. When the backends rolling upgrade to v8.1.0,
-	// we don't want the connections are migrated all at once because of memory imbalance. Typical score is 0,
-	// so give it 0.
-	if !ok || usage < 0 {
-		return 0, false
-	}
-	return getRiskLevel(usage, timeToOOM)
-}
-
-func (fm *FactorMemory) calcBalanceCount(backend scoredBackend, usage float64, timeToOOM time.Duration) float64 {
-	score, isOOM := getRiskLevel(usage, timeToOOM)
-	if score < 2 {
+func (fm *FactorMemory) calcBalanceCount(backend scoredBackend, riskLevel int, timeToOOM time.Duration) float64 {
+	if riskLevel < 2 {
 		return 0
 	}
 	// Assuming all backends have high memory and the user scales out a new backend, we don't want all the connections
 	// are migrated all at once.
 	seconds := balanceSeconds4HighMemory
-	if isOOM {
+	if timeToOOM < oomRiskLevels[0].timeToOOM {
 		seconds = balanceSeconds4OOMRisk
 	}
 	balanceCount := float64(backend.ConnScore()) / seconds
@@ -274,12 +265,12 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) float64 {
 	// The risk level may change frequently, e.g. last time timeToOOM was 30s and connections were migrated away,
 	// then this time it becomes 60s and the connections are migrated back.
 	// So we only rebalance when the difference of risk levels of 2 backends is big enough.
-	fromScore, _ := fm.calcMemScore(from.Addr())
-	toScore, _ := fm.calcMemScore(to.Addr())
-	if fromScore-toScore <= 1 {
+	fromSnapshot := fm.snapshot[from.Addr()]
+	toSnapshot := fm.snapshot[to.Addr()]
+	if fromSnapshot.riskLevel-toSnapshot.riskLevel <= 1 {
 		return 0
 	}
-	return fm.snapshot[from.Addr()].balanceCount
+	return fromSnapshot.balanceCount
 }
 
 func (fm *FactorMemory) SetConfig(cfg *config.Config) {
