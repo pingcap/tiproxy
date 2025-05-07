@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestHealthScore(t *testing.T) {
@@ -75,7 +76,7 @@ func TestHealthScore(t *testing.T) {
 			},
 		},
 	}
-	fh := NewFactorHealth(mmr)
+	fh := NewFactorHealth(mmr, zap.NewNop())
 	fh.UpdateScore(backends)
 	for i, test := range tests {
 		require.Equal(t, test.score, backends[i].score(), "test index %d", i)
@@ -151,7 +152,7 @@ func TestHealthBalance(t *testing.T) {
 				},
 			},
 		}
-		fh := NewFactorHealth(mmr)
+		fh := NewFactorHealth(mmr, zap.NewNop())
 		fh.UpdateScore(backends)
 		scores := make([]uint64, 0, len(backends))
 		for _, backend := range backends {
@@ -186,7 +187,7 @@ func TestNoHealthMetrics(t *testing.T) {
 	}
 
 	mmr := newMockMetricsReader()
-	fh := NewFactorHealth(mmr)
+	fh := NewFactorHealth(mmr, zap.NewNop())
 	backends := make([]scoredBackend, 0, 2)
 	for i := 0; i < 2; i++ {
 		backends = append(backends, createBackend(i, i*100, i*100))
@@ -257,7 +258,7 @@ func TestHealthBalanceCount(t *testing.T) {
 	mmr := &mockMetricsReader{
 		qrs: map[string]metricsreader.QueryResult{},
 	}
-	fh := NewFactorHealth(mmr)
+	fh := NewFactorHealth(mmr, zap.NewNop())
 	updateMmr := func(healthy bool) {
 		number := 0.0
 		if !healthy {

@@ -59,7 +59,7 @@ func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
 	fbb.factors = fbb.factors[:0]
 
 	if fbb.factorStatus == nil {
-		fbb.factorStatus = NewFactorStatus()
+		fbb.factorStatus = NewFactorStatus(fbb.lg.Named("status"))
 	}
 	fbb.factors = append(fbb.factors, fbb.factorStatus)
 
@@ -79,13 +79,13 @@ func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
 			fbb.factorLocation = NewFactorLocation()
 		}
 		if fbb.factorHealth == nil {
-			fbb.factorHealth = NewFactorHealth(fbb.mr)
+			fbb.factorHealth = NewFactorHealth(fbb.mr, fbb.lg.Named("health"))
 		}
 		if fbb.factorMemory == nil {
-			fbb.factorMemory = NewFactorMemory(fbb.mr)
+			fbb.factorMemory = NewFactorMemory(fbb.mr, fbb.lg.Named("memory"))
 		}
 		if fbb.factorCPU == nil {
-			fbb.factorCPU = NewFactorCPU(fbb.mr)
+			fbb.factorCPU = NewFactorCPU(fbb.mr, fbb.lg.Named("cpu"))
 		}
 	default:
 		if fbb.factorLocation != nil {

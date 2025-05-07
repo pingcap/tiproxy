@@ -11,6 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
+	"go.uber.org/zap"
 )
 
 const (
@@ -88,13 +89,15 @@ type FactorCPU struct {
 	usagePerConn float64
 	mr           metricsreader.MetricsReader
 	bitNum       int
+	lg           *zap.Logger
 }
 
-func NewFactorCPU(mr metricsreader.MetricsReader) *FactorCPU {
+func NewFactorCPU(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorCPU {
 	fc := &FactorCPU{
 		mr:       mr,
 		bitNum:   5,
 		snapshot: make(map[string]cpuBackendSnapshot),
+		lg:       lg,
 	}
 	mr.AddQueryExpr(fc.Name(), cpuQueryExpr, cpuQueryRule)
 	return fc
@@ -216,6 +219,7 @@ func (fc *FactorCPU) updateCpuPerConn() {
 		} else {
 			fc.usagePerConn = usagePerConn
 		}
+		fc.lg.Debug("updateCpuPerConn", zap.Float64("usagePerConn", fc.usagePerConn), zap.Int("totalConns", totalConns), zap.Float64("totalUsage", totalUsage))
 	}
 	if fc.usagePerConn <= 0 {
 		fc.usagePerConn = minCpuPerConn
@@ -248,7 +252,12 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) float64 {
 	// E.g. 10% vs 25% don't need rebalance, but 80% vs 95% need rebalance.
 	// Use the average usage to avoid thrash when CPU jitters too much and use the latest usage to avoid migrate too many connections.
 	if 1.3-toAvgUsage > (1.3-fromAvgUsage)*cpuBalancedRatio && 1.3-toLatestUsage > (1.3-fromLatestUsage)*cpuBalancedRatio {
-		return 1 / fc.usagePerConn / balanceRatio4Cpu
+		balanceCount := 1 / fc.usagePerConn / balanceRatio4Cpu
+		fc.lg.Debug("update cpu balance", zap.String("from", from.Addr()), zap.String("to", to.Addr()), zap.Float64("fromAvgUsage", fromAvgUsage),
+			zap.Float64("fromLatestUsage", fromLatestUsage), zap.Float64("toAvgUsage", toAvgUsage), zap.Float64("toLatestUsage", toLatestUsage),
+			zap.Int("fromConnScore", from.ConnScore()), zap.Int("toConnScore", to.ConnScore()), zap.Float64("balanceCount", balanceCount),
+			zap.Float64("usagePerConn", fc.usagePerConn))
+		return balanceCount
 	}
 	return 0
 }

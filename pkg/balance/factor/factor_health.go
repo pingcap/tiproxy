@@ -11,6 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
+	"go.uber.org/zap"
 )
 
 const (
@@ -165,14 +166,16 @@ type FactorHealth struct {
 	indicators []errIndicator
 	mr         metricsreader.MetricsReader
 	bitNum     int
+	lg         *zap.Logger
 }
 
-func NewFactorHealth(mr metricsreader.MetricsReader) *FactorHealth {
+func NewFactorHealth(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorHealth {
 	return &FactorHealth{
 		mr:         mr,
 		snapshot:   make(map[string]healthBackendSnapshot),
 		indicators: initErrIndicator(mr),
 		bitNum:     2,
+		lg:         lg,
 	}
 }
 
@@ -233,7 +236,7 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 	snapshots := make(map[string]healthBackendSnapshot, len(fh.snapshot))
 	for _, backend := range backends {
 		// Get the current value range.
-		updatedTime, valueRange := time.Time{}, valueRangeNormal
+		updatedTime, valueRange, indicator, value := time.Time{}, valueRangeNormal, "", 0
 		for i := 0; i < len(fh.indicators); i++ {
 			ts := fh.indicators[i].queryResult.UpdateTime
 			if time.Since(ts) > errMetricExpDuration {
@@ -247,6 +250,8 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 			vr := calcValueRange(sample, fh.indicators[i])
 			if vr > valueRange {
 				valueRange = vr
+				indicator = fh.indicators[i].key
+				value = int(sample.Value)
 			}
 		}
 		// If the metric is unavailable, try to reuse the latest one.
@@ -267,7 +272,11 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				balanceCount = float64(backend.ConnScore()) / balanceSeconds4Health
 			}
 		}
-
+		// Log it whenever the health changes, even from unhealthy to healthy and no connections.
+		if balanceCount != snapshot.balanceCount {
+			fh.lg.Info("update health risk", zap.String("addr", addr), zap.String("indicator", indicator), zap.Int("value", value), zap.Int("lastRisk", int(snapshot.valueRange)),
+				zap.Int("curRisk", int(valueRange)), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backend.ConnScore()))
+		}
 		snapshots[addr] = healthBackendSnapshot{
 			updatedTime:  updatedTime,
 			valueRange:   valueRange,
