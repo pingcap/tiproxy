@@ -202,8 +202,9 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 			score2 := scoredBackends[0].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
 			if score1 > score2 {
 				// This backend is too busy. If it's routed, migration may happen.
-				if balanceCount := factor.BalanceCount(scoredBackends[i], scoredBackends[0]); balanceCount > 0.0001 {
+				if balanceCount, balanceFields := factor.BalanceCount(scoredBackends[i], scoredBackends[0]); balanceCount > 0.0001 {
 					fields = append(fields, zap.String(scoredBackends[i].Addr(), factor.Name()))
+					fields = append(fields, balanceFields...)
 					endIdx = i
 					break
 				}
@@ -262,6 +263,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 
 	// Get the unbalanced factor and the connection count to migrate.
 	var factor Factor
+	var fields []zap.Field
 	var score1, score2 uint64
 	leftBitNum := fbb.totalBitNum
 	for _, factor = range fbb.factors {
@@ -274,7 +276,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			// backend1 factor scores: 1, 1
 			// backend2 factor scores: 0, 0
 			// Balancing the second factor won't make the first factor unbalanced.
-			balanceCount = factor.BalanceCount(*busiestBackend, *idlestBackend)
+			balanceCount, fields = factor.BalanceCount(*busiestBackend, *idlestBackend)
 			if balanceCount > 0.0001 {
 				break
 			}
@@ -289,14 +291,12 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 		leftBitNum -= bitNum
 	}
 	reason = factor.Name()
-	fields := []zap.Field{
-		zap.String("factor", reason),
+	fields = append(fields, zap.String("factor", reason),
 		zap.String("from_total_score", strconv.FormatUint(maxScore, 16)),
 		zap.String("to_total_score", strconv.FormatUint(minScore, 16)),
 		zap.Uint64("from_factor_score", score1),
 		zap.Uint64("to_factor_score", score2),
-		zap.Float64("balance_count", balanceCount),
-	}
+		zap.Float64("balance_count", balanceCount))
 	return busiestBackend.BackendCtx, idlestBackend.BackendCtx, balanceCount, reason, fields
 }
 

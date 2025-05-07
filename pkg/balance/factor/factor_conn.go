@@ -3,7 +3,10 @@
 
 package factor
 
-import "github.com/pingcap/tiproxy/lib/config"
+import (
+	"github.com/pingcap/tiproxy/lib/config"
+	"go.uber.org/zap"
+)
 
 const (
 	// connBalancedRatio is the threshold of ratio of the most connection count and least count.
@@ -32,7 +35,13 @@ func (fcc *FactorConnCount) Name() string {
 
 func (fcc *FactorConnCount) UpdateScore(backends []scoredBackend) {
 	for i := 0; i < len(backends); i++ {
-		backends[i].addScore(backends[i].ConnScore(), fcc.bitNum)
+		score := backends[i].ConnScore()
+		if score < 0 {
+			score = 0
+		} else if score > 1<<fcc.bitNum-1 {
+			score = 1<<fcc.bitNum - 1
+		}
+		backends[i].addScore(score, fcc.bitNum)
 	}
 }
 
@@ -40,11 +49,11 @@ func (fcc *FactorConnCount) ScoreBitNum() int {
 	return fcc.bitNum
 }
 
-func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) float64 {
+func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
 	if float64(from.ConnScore()) > float64(to.ConnScore()+1)*connBalancedRatio {
-		return balanceCount4Conn
+		return balanceCount4Conn, nil
 	}
-	return 0
+	return 0, nil
 }
 
 func (fcc *FactorConnCount) SetConfig(cfg *config.Config) {
