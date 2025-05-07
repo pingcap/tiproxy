@@ -66,7 +66,10 @@ func (fs *FactorStatus) updateSnapshot(backends []scoredBackend) {
 				balanceCount = float64(backends[i].ConnScore()) / balanceSeconds4Status
 				// Do not log it when the balance counts are both 0.
 				if balanceCount != snapshot.balanceCount {
-					fs.lg.Info("update status risk", zap.String("addr", addr), zap.Float64("balanceCount", balanceCount), zap.Int("connScore", backends[i].ConnScore()))
+					fs.lg.Info("update status risk",
+						zap.String("addr", addr),
+						zap.Float64("balance_count", balanceCount),
+						zap.Int("conn_score", backends[i].ConnScore()))
 				}
 			}
 		}
@@ -81,8 +84,8 @@ func (fs *FactorStatus) ScoreBitNum() int {
 	return fs.bitNum
 }
 
-func (fs *FactorStatus) BalanceCount(from, to scoredBackend) float64 {
-	return fs.snapshot[from.Addr()].balanceCount
+func (fs *FactorStatus) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
+	return fs.snapshot[from.Addr()].balanceCount, nil
 }
 
 func (fs *FactorStatus) SetConfig(cfg *config.Config) {

@@ -6,7 +6,8 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 const (
-	LblRes = "res"
+	LblRes        = "res"
+	LblMetricName = "metric"
 )
 
 var (
@@ -35,6 +36,14 @@ var (
 			Help:      "Counter of getting backend.",
 		}, []string{LblRes})
 
+	DialBackendFailCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelBackend,
+			Name:      "dial_backend_fail",
+			Help:      "Counter of failing to dial backends.",
+		}, []string{LblBackend})
+
 	PingBackendGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: ModuleProxy,
@@ -50,4 +59,12 @@ var (
 			Name:      "health_check_seconds",
 			Help:      "Time (s) of each health check cycle.",
 		})
+
+	BackendMetricGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelBackend,
+			Name:      "backend_metric",
+			Help:      "The backend metric.",
+		}, []string{LblBackend, LblMetricName})
 )

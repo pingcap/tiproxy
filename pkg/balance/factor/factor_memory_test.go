@@ -225,7 +225,7 @@ func TestMemoryBalance(t *testing.T) {
 			return backends[i].score() < backends[j].score()
 		})
 		from, to := backends[len(backends)-1], backends[0]
-		balanceCount := fm.BalanceCount(from, to)
+		balanceCount, _ := fm.BalanceCount(from, to)
 		require.EqualValues(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
@@ -344,7 +344,7 @@ func TestMemoryBalanceCount(t *testing.T) {
 		if test.riskLevel == 0 {
 			continue
 		}
-		count := fs.BalanceCount(backends[0], backends[1])
+		count, _ := fs.BalanceCount(backends[0], backends[1])
 		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }
