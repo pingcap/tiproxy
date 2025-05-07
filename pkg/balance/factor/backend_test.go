@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestAddScore(t *testing.T) {
@@ -34,9 +35,15 @@ func TestAddScore(t *testing.T) {
 			factorScores:  []int{1<<3 - 1, 1<<5 - 1},
 			expectedScore: (1<<3-1)<<5 + 1<<5 - 1,
 		},
+		{
+			scores:        []int{-1, -10},
+			bitNums:       []int{3, 5},
+			factorScores:  []int{0, 0},
+			expectedScore: 0,
+		},
 	}
 	for idx, test := range tests {
-		backend := newScoredBackend(nil)
+		backend := newScoredBackend(newMockBackend(true, 0), zap.NewNop())
 		for i := 0; i < len(test.scores); i++ {
 			backend.prepareScore(test.bitNums[i])
 			backend.addScore(test.scores[i], test.bitNums[i])

@@ -235,9 +235,7 @@ func (fc *FactorCPU) getUsage(backend scoredBackend) (avgUsage, latestUsage floa
 	}
 	avgUsage = snapshot.avgUsage
 	latestUsage = snapshot.latestUsage + float64(backend.ConnScore()-snapshot.connCount)*fc.usagePerConn
-	if latestUsage > 1 {
-		latestUsage = 1
-	}
+	latestUsage = math.Max(math.Min(latestUsage, 1), 0)
 	return
 }
 
