@@ -282,7 +282,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
 			selector.Finish(mgr, err == nil)
 			if err != nil {
-				metrics.DialBackendFailCounter.WithLabelValues(addr).Add(1)
+				metrics.DialBackendFailCounter.WithLabelValues(addr).Inc()
 				return nil, errors.Wrap(errors.Wrapf(err, "dial backend %s error", addr), ErrBackendHandshake)
 			}
 

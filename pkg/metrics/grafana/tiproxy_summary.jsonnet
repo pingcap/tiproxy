@@ -498,7 +498,7 @@ graphPanel.new(
 .addTarget(
   prometheus.target(
     'label_replace(sum(rate(tiproxy_backend_dial_backend_fail{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (instance, backend), "backend", "$1", "backend", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
-    legendFormat='{{instance}}-{{backend}}',
+    legendFormat='{{instance}} => {{backend}}',
   )
 );
 
