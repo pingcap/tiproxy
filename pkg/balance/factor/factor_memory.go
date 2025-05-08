@@ -9,6 +9,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/model"
 	"go.uber.org/zap"
@@ -168,6 +169,7 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 			// If this backend is not updated, ignore it.
 			if !existsSnapshot || snapshot.updatedTime.Before(updateTime) {
 				latestUsage, timeToOOM := calcMemUsage(pairs)
+				metrics.BackendMetricGauge.WithLabelValues(addr, "memory").Set(latestUsage)
 				if latestUsage >= 0 {
 					riskLevel := getRiskLevel(latestUsage, timeToOOM)
 					balanceCount := fm.calcBalanceCount(backend, riskLevel, timeToOOM)
