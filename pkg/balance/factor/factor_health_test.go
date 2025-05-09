@@ -174,7 +174,12 @@ func TestNoHealthMetrics(t *testing.T) {
 		updateTime time.Time
 	}{
 		{
-			errCounts: [][]float64{nil, nil},
+			errCounts:  [][]float64{nil, nil},
+			updateTime: time.Now(),
+		},
+		{
+			errCounts:  [][]float64{nil, {1, 1}},
+			updateTime: time.Now(),
 		},
 		{
 			errCounts:  [][]float64{{1, 1}, {0, 0}},

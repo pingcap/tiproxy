@@ -255,7 +255,11 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				updatedTime = ts
 			}
 			sample := fh.indicators[i].queryResult.GetSample4Backend(backend)
-			metrics.BackendMetricGauge.WithLabelValues(backend.Addr(), fh.indicators[i].key).Set(float64(sample.Value))
+			var float float64
+			if sample != nil {
+				float = float64(sample.Value)
+			}
+			metrics.BackendMetricGauge.WithLabelValues(backend.Addr(), fh.indicators[i].key).Set(float)
 			vr := calcValueRange(sample, fh.indicators[i])
 			if vr > valueRange {
 				valueRange = vr
