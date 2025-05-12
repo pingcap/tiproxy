@@ -4,6 +4,8 @@
 package factor
 
 import (
+	"time"
+
 	"github.com/pingcap/tiproxy/lib/config"
 	"go.uber.org/zap"
 )
@@ -14,10 +16,13 @@ const (
 	// We need to migrate connections in time but it can't be too fast because the table statistics of the target backend
 	// may be loaded slowly.
 	balanceSeconds4Status = 5.0
+	backendExpiration     = time.Minute
 )
 
 // The snapshot of backend data of the last round.
 type statusBackendSnapshot struct {
+	// The last time that the backend calculates the score. If the backend is not in the list for a long time, prune it.
+	lastAccess time.Time
 	// Record the balance count when the backend becomes unhealthy so that it won't be smaller in the next rounds.
 	balanceCount float64
 }
@@ -54,30 +59,41 @@ func (fs *FactorStatus) UpdateScore(backends []scoredBackend) {
 }
 
 func (fs *FactorStatus) updateSnapshot(backends []scoredBackend) {
-	snapshots := make(map[string]statusBackendSnapshot, len(backends))
+	now := time.Now()
 	for i := 0; i < len(backends); i++ {
-		var balanceCount float64
 		addr := backends[i].Addr()
-		if !backends[i].Healthy() {
-			snapshot, existSnapshot := fs.snapshot[addr]
-			if existSnapshot && snapshot.balanceCount > 0.0001 {
-				balanceCount = snapshot.balanceCount
-			} else {
-				balanceCount = float64(backends[i].ConnScore()) / balanceSeconds4Status
-				// Do not log it when the balance counts are both 0.
-				if balanceCount != snapshot.balanceCount {
-					fs.lg.Info("update status risk",
-						zap.String("addr", addr),
-						zap.Float64("balance_count", balanceCount),
-						zap.Int("conn_score", backends[i].ConnScore()))
-				}
-			}
+		if backends[i].Healthy() {
+			delete(fs.snapshot, addr)
+			continue
 		}
-		snapshots[addr] = statusBackendSnapshot{
+		snapshot := fs.snapshot[addr]
+		// The rebalance was already started, don't update it.
+		if snapshot.balanceCount > 0.0001 {
+			snapshot.lastAccess = now
+			fs.snapshot[addr] = snapshot
+			continue
+		}
+		balanceCount := float64(backends[i].ConnScore()) / balanceSeconds4Status
+		// Do not log it when the balance counts are both 0.
+		if balanceCount != snapshot.balanceCount {
+			fs.lg.Info("update status risk",
+				zap.String("addr", addr),
+				zap.Float64("balance_count", balanceCount),
+				zap.Int("conn_score", backends[i].ConnScore()))
+		}
+		fs.snapshot[addr] = statusBackendSnapshot{
 			balanceCount: balanceCount,
+			lastAccess:   now,
 		}
 	}
-	fs.snapshot = snapshots
+
+	// An unhealthy backend may sometimes be not passed in, but its balanceCount should be preserved.
+	// We only delete the backends that are not accessed for a while.
+	for addr, backend := range fs.snapshot {
+		if backend.lastAccess.Add(backendExpiration).Before(now) {
+			delete(fs.snapshot, addr)
+		}
+	}
 }
 
 func (fs *FactorStatus) ScoreBitNum() int {

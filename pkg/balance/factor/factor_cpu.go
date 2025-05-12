@@ -135,41 +135,41 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 }
 
 func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []scoredBackend) {
-	snapshots := make(map[string]cpuBackendSnapshot, len(fc.snapshot))
+	now := time.Now()
 	for _, backend := range backends {
 		addr := backend.Addr()
-		valid := false
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
-		if len(pairs) > 0 {
-			updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
-			// The time point of updating each backend is different, so only partial of the backends are updated every time.
-			// If this backend is not updated, ignore it.
-			if snapshot, ok := fc.snapshot[addr]; !ok || snapshot.updatedTime.Before(updateTime) {
-				avgUsage, latestUsage := calcAvgUsage(pairs)
-				metrics.BackendMetricGauge.WithLabelValues(addr, "cpu").Set(avgUsage)
-				if avgUsage >= 0 {
-					snapshots[addr] = cpuBackendSnapshot{
-						avgUsage:    avgUsage,
-						latestUsage: latestUsage,
-						connCount:   backend.ConnCount(),
-						updatedTime: updateTime,
-					}
-					valid = true
-				}
-			}
+		if len(pairs) <= 0 {
+			continue
 		}
-		// Merge the old snapshot just in case some metrics have missed for a short period.
-		if !valid {
-			if snapshot, ok := fc.snapshot[addr]; ok {
-				if time.Since(snapshot.updatedTime) < cpuMetricExpDuration {
-					snapshots[addr] = snapshot
-				}
-			}
+		updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
+		// The time point of updating each backend is different, so only partial of the backends are updated every time.
+		// If this backend is not updated, ignore it.
+		snapshot := fc.snapshot[addr]
+		if !snapshot.updatedTime.Before(updateTime) {
+			continue
+		}
+		avgUsage, latestUsage := calcAvgUsage(pairs)
+		if avgUsage < 0 {
+			continue
+		}
+		metrics.BackendMetricGauge.WithLabelValues(addr, "cpu").Set(avgUsage)
+		fc.snapshot[addr] = cpuBackendSnapshot{
+			avgUsage:    avgUsage,
+			latestUsage: latestUsage,
+			connCount:   backend.ConnCount(),
+			updatedTime: updateTime,
 		}
 	}
-	fc.snapshot = snapshots
+
+	// Besides missing metrics, backends may also be not in the backend list.
+	for addr, backend := range fc.snapshot {
+		if backend.updatedTime.Add(cpuMetricExpDuration).Before(now) {
+			delete(fc.snapshot, addr)
+		}
+	}
 }
 
 func calcAvgUsage(usageHistory []model.SamplePair) (avgUsage, latestUsage float64) {

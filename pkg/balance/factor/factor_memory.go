@@ -155,56 +155,62 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 	}
 }
 
+// - Not exist in the backends for a long time: delete it
+// - Metric is missing for a long time: delete it
+// - Metric is missing temporarily or missing in the backends temporarily: preserve the snapshot
+// - Exist in the backends but the metric is not updated: perserve the snapshot
+// - Exist in the backends and metric is updated: update the snapshot
 func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []scoredBackend) {
-	snapshots := make(map[string]memBackendSnapshot, len(fm.snapshot))
+	now := time.Now()
 	for _, backend := range backends {
 		addr := backend.Addr()
-		valid := false
+		snapshot := fm.snapshot[addr]
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
-		snapshot, existsSnapshot := fm.snapshot[addr]
-		if len(pairs) > 0 {
-			updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
-			// If this backend is not updated, ignore it.
-			if !existsSnapshot || snapshot.updatedTime.Before(updateTime) {
-				latestUsage, timeToOOM := calcMemUsage(pairs)
-				metrics.BackendMetricGauge.WithLabelValues(addr, "memory").Set(latestUsage)
-				if latestUsage >= 0 {
-					riskLevel := getRiskLevel(latestUsage, timeToOOM)
-					balanceCount := fm.calcBalanceCount(backend, riskLevel, timeToOOM)
-					// Log it whenever the risk changes, even from high risk to no risk and no connections.
-					if riskLevel != snapshot.riskLevel {
-						fm.lg.Info("update memory risk",
-							zap.String("addr", addr),
-							zap.Int("risk", riskLevel),
-							zap.Float64("mem_usage", latestUsage),
-							zap.Duration("time_to_oom", timeToOOM),
-							zap.Int("last_risk", snapshot.riskLevel),
-							zap.Float64("last_mem_usage", snapshot.memUsage),
-							zap.Duration("last_time_to_oom", snapshot.timeToOOM),
-							zap.Float64("balance_count", balanceCount),
-							zap.Int("conn_score", backend.ConnScore()))
-					}
-					snapshots[addr] = memBackendSnapshot{
-						updatedTime:  updateTime,
-						memUsage:     latestUsage,
-						timeToOOM:    timeToOOM,
-						balanceCount: balanceCount,
-						riskLevel:    riskLevel,
-					}
-					valid = true
-				}
-			}
+		if len(pairs) == 0 {
+			continue
 		}
-		// Merge the old snapshot just in case some metrics have missed for a short period.
-		if !valid && existsSnapshot {
-			if time.Since(snapshot.updatedTime) < memMetricExpDuration {
-				snapshots[addr] = snapshot
-			}
+		updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
+		// If this backend is not updated, ignore it.
+		if !snapshot.updatedTime.Before(updateTime) {
+			continue
+		}
+		latestUsage, timeToOOM := calcMemUsage(pairs)
+		if latestUsage < 0 {
+			continue
+		}
+		metrics.BackendMetricGauge.WithLabelValues(addr, "memory").Set(latestUsage)
+		riskLevel := getRiskLevel(latestUsage, timeToOOM)
+		balanceCount := fm.calcBalanceCount(backend, riskLevel, timeToOOM)
+		// Log it whenever the risk changes, even from high risk to no risk and no connections.
+		if riskLevel != snapshot.riskLevel {
+			fm.lg.Info("update memory risk",
+				zap.String("addr", addr),
+				zap.Int("risk", riskLevel),
+				zap.Float64("mem_usage", latestUsage),
+				zap.Duration("time_to_oom", timeToOOM),
+				zap.Int("last_risk", snapshot.riskLevel),
+				zap.Float64("last_mem_usage", snapshot.memUsage),
+				zap.Duration("last_time_to_oom", snapshot.timeToOOM),
+				zap.Float64("balance_count", balanceCount),
+				zap.Int("conn_score", backend.ConnScore()))
+		}
+		fm.snapshot[addr] = memBackendSnapshot{
+			updatedTime:  updateTime,
+			memUsage:     latestUsage,
+			timeToOOM:    timeToOOM,
+			balanceCount: balanceCount,
+			riskLevel:    riskLevel,
 		}
 	}
-	fm.snapshot = snapshots
+
+	// Besides missing metrics, backends may also be not in the backend list.
+	for addr, backend := range fm.snapshot {
+		if backend.updatedTime.Add(memMetricExpDuration).Before(now) {
+			delete(fm.snapshot, addr)
+		}
+	}
 }
 
 func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToOOM time.Duration) {
