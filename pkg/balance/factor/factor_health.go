@@ -240,14 +240,20 @@ func (fh *FactorHealth) UpdateScore(backends []scoredBackend) {
 	}
 }
 
+// - Not exist in the backends for a long time: delete it
+// - Metric is missing for a long time: delete it
+// - Metric is missing temporarily or missing in the backends temporarily: preserve the snapshot
+// - Exist in the backends but the metric is not updated: perserve the snapshot
+// - Exist in the backends and metric is updated: update the snapshot
 func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
-	snapshots := make(map[string]healthBackendSnapshot, len(fh.snapshot))
+	now := time.Now()
 	for _, backend := range backends {
+		addr := backend.Addr()
 		// Get the current value range.
 		updatedTime, valueRange, indicator, value := time.Time{}, valueRangeNormal, "", 0
 		for i := 0; i < len(fh.indicators); i++ {
 			ts := fh.indicators[i].queryResult.UpdateTime
-			if time.Since(ts) > errMetricExpDuration {
+			if ts.Add(errMetricExpDuration).Before(now) {
 				// The metrics have not been updated for a long time (maybe Prometheus is unavailable).
 				continue
 			}
@@ -255,31 +261,26 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				updatedTime = ts
 			}
 			sample := fh.indicators[i].queryResult.GetSample4Backend(backend)
-			var float float64
-			if sample != nil {
-				float = float64(sample.Value)
+			if sample == nil {
+				continue
 			}
-			metrics.BackendMetricGauge.WithLabelValues(backend.Addr(), fh.indicators[i].key).Set(float)
+			indicator = fh.indicators[i].key
+			metrics.BackendMetricGauge.WithLabelValues(addr, indicator).Set(float64(sample.Value))
 			vr := calcValueRange(sample, fh.indicators[i])
 			if vr > valueRange {
 				valueRange = vr
-				indicator = fh.indicators[i].key
 				value = int(sample.Value)
 			}
 		}
 		// If the metric is unavailable, try to reuse the latest one.
-		addr := backend.Addr()
-		snapshot, existSnapshot := fh.snapshot[addr]
+		snapshot := fh.snapshot[addr]
 		if updatedTime.IsZero() {
-			if existSnapshot && time.Since(snapshot.updatedTime) < errMetricExpDuration {
-				snapshots[addr] = snapshot
-			}
 			continue
 		}
 		// Set balance count if the backend is unhealthy, otherwise reset it to 0.
 		var balanceCount float64
 		if valueRange >= valueRangeAbnormal {
-			if existSnapshot && snapshot.balanceCount > 0.0001 {
+			if snapshot.balanceCount > 0.0001 {
 				balanceCount = snapshot.balanceCount
 			} else {
 				balanceCount = float64(backend.ConnScore()) / balanceSeconds4Health
@@ -296,7 +297,7 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				zap.Float64("balance_count", balanceCount),
 				zap.Int("conn_score", backend.ConnScore()))
 		}
-		snapshots[addr] = healthBackendSnapshot{
+		fh.snapshot[addr] = healthBackendSnapshot{
 			updatedTime:  updatedTime,
 			valueRange:   valueRange,
 			indicator:    indicator,
@@ -304,7 +305,13 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 			balanceCount: balanceCount,
 		}
 	}
-	fh.snapshot = snapshots
+
+	// Besides missing metrics, backends may also be not in the backend list.
+	for addr, backend := range fh.snapshot {
+		if backend.updatedTime.Add(errMetricExpDuration).Before(now) {
+			delete(fh.snapshot, addr)
+		}
+	}
 }
 
 func calcValueRange(sample *model.Sample, indicator errIndicator) valueRange {
