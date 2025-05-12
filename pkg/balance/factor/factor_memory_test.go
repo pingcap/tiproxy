@@ -383,3 +383,32 @@ tidb_server_memory_quota_bytes 8e+08
 		require.Equal(t, test.finalValue, value, "case %d", i)
 	}
 }
+
+func TestMissBackendInMemory(t *testing.T) {
+	mmr := newMockMetricsReader()
+	fm := NewFactorMemory(mmr, zap.NewNop())
+	backends := make([]scoredBackend, 0, 2)
+	usages := [][]float64{{0.8, 0.8}, {0.1, 0.1}}
+	var values []*model.SampleStream
+	for i := 0; i < 2; i++ {
+		backends = append(backends, createBackend(i, 100, 100))
+		ss := createSampleStream(usages[i], i, model.Now())
+		ss.Values[0].Timestamp = model.TimeFromUnixNano(time.Now().Unix())
+		values = append(values, ss)
+	}
+	mmr.qrs["memory"] = metricsreader.QueryResult{
+		UpdateTime: time.Now(),
+		Value:      model.Matrix(values),
+	}
+	fm.UpdateScore(backends)
+	count, _ := fm.BalanceCount(backends[0], backends[1])
+	require.Equal(t, 100/balanceSeconds4HighMemory, count)
+
+	// Miss the first backend but the snapshot should be preserved.
+	fm.UpdateScore(backends[1:])
+	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
+	unhealthyBackend.connScore = 50
+	fm.UpdateScore(backends)
+	count, _ = fm.BalanceCount(backends[0], backends[1])
+	require.Equal(t, 100/balanceSeconds4HighMemory, count)
+}
