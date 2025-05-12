@@ -157,7 +157,7 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 
 // - Not exist in the backends or metric is missing for a long time: delete it
 // - Metric is missing temporarily or not exist in the backends temporarily: preserve the snapshot
-// - Exist in the backends but the metric is not updated: perserve the snapshot
+// - Exist in the backends but the metric is not updated: preserve the snapshot
 // - Exist in the backends and metric is updated: update the snapshot
 func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []scoredBackend) {
 	now := time.Now()
