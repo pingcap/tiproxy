@@ -264,8 +264,8 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 					from, to = scoredBackends[i].BackendCtx, scoredBackends[0].BackendCtx
 					reason = factor.Name()
 					logFields = append(fields, zap.String("factor", reason),
-						zap.String("from_total_score", strconv.FormatUint(score1, 16)),
-						zap.String("to_total_score", strconv.FormatUint(score2, 16)),
+						zap.String("from_total_score", strconv.FormatUint(scoredBackends[i].scoreBits, 16)),
+						zap.String("to_total_score", strconv.FormatUint(scoredBackends[0].scoreBits, 16)),
 						zap.Uint64("from_factor_score", score1),
 						zap.Uint64("to_factor_score", score2),
 						zap.Float64("balance_count", balanceCount))
