@@ -193,7 +193,8 @@ func TestBalanceWithOneFactor(t *testing.T) {
 func TestBalanceWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factor1, factor2 := &mockFactor{bitNum: 1, balanceCount: 2}, &mockFactor{bitNum: 12, balanceCount: 1}
+	factor1 := &mockFactor{bitNum: 2, balanceCount: 2, threshold: 1}
+	factor2 := &mockFactor{bitNum: 12, balanceCount: 1}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
 
@@ -205,14 +206,14 @@ func TestBalanceWith2Factors(t *testing.T) {
 		count   int
 	}{
 		{
-			scores1: []int{1, 0, 0},
+			scores1: []int{2, 0, 0},
 			scores2: []int{0, 100, 200},
 			fromIdx: 0,
 			toIdx:   1,
 			count:   2,
 		},
 		{
-			scores1: []int{1, 1, 0},
+			scores1: []int{2, 2, 0},
 			scores2: []int{0, 100, 200},
 			fromIdx: 1,
 			toIdx:   2,
@@ -233,7 +234,7 @@ func TestBalanceWith2Factors(t *testing.T) {
 			count:   1,
 		},
 		{
-			scores1: []int{0, 1, 0},
+			scores1: []int{0, 2, 0},
 			scores2: []int{100, 0, 0},
 			fromIdx: 1,
 			toIdx:   2,
@@ -243,6 +244,13 @@ func TestBalanceWith2Factors(t *testing.T) {
 			scores1: []int{0, 0, 0},
 			scores2: []int{100, 100, 100},
 			count:   0,
+		},
+		{
+			scores1: []int{1, 0, 0},
+			scores2: []int{0, 100, 0},
+			fromIdx: 1,
+			toIdx:   2,
+			count:   1,
 		},
 	}
 	for tIdx, test := range tests {

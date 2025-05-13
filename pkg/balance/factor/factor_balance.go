@@ -191,7 +191,6 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	// Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
 	// in the next second route to the same backend.
 	idxes := make([]int, 0, len(scoredBackends))
-	idxes = append(idxes, 0)
 	for i := len(scoredBackends) - 1; i > 0; i-- {
 		leftBitNum := fbb.totalBitNum
 		var balanceCount float64
@@ -216,10 +215,15 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 			idxes = append(idxes, i)
 		}
 	}
+	idxes = append(idxes, 0)
 
 	// For the rest backends, choose a random one.
-	// math/rand can not pass security scanning while crypto/rand is too slow. Use the current nanotime as a random seed.
-	idx := idxes[time.Now().Nanosecond()%len(idxes)]
+	idx := 0
+	if len(idxes) > 1 {
+		// math/rand can not pass security scanning while crypto/rand is too slow for short connections, so use the current time as a seed.
+		// Some platforms only produce microseconds, so use microseconds.
+		idx = idxes[int(time.Now().UnixMicro()%int64(len(idxes)))]
+	}
 	fields = append(fields, zap.String("target", scoredBackends[idx].Addr()), zap.Ints("rand", idxes))
 	fbb.lg.Debug("route", fields...)
 	return scoredBackends[idx].BackendCtx
