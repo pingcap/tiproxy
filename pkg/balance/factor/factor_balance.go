@@ -191,6 +191,7 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	// Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
 	// in the next second route to the same backend.
 	idxes := make([]int, 0, len(scoredBackends))
+	idxes = append(idxes, 0)
 	for i := len(scoredBackends) - 1; i > 0; i-- {
 		leftBitNum := fbb.totalBitNum
 		var balanceCount float64
