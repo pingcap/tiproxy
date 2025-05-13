@@ -357,3 +357,30 @@ tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 0
 		}
 	}
 }
+
+func TestMissBackendInHealth(t *testing.T) {
+	mmr := newMockMetricsReader()
+	fh := NewFactorHealth(mmr, zap.NewNop())
+	backends := make([]scoredBackend, 0, 2)
+	errors := []float64{10000, 0}
+	var values []*model.Sample
+	for i := 0; i < 2; i++ {
+		backends = append(backends, createBackend(i, 100, 100))
+		values = append(values, createSample(errors[i], i))
+	}
+	mmr.qrs["health_pd"] = metricsreader.QueryResult{
+		UpdateTime: time.Now(),
+		Value:      model.Vector(values),
+	}
+	fh.UpdateScore(backends)
+	count, _ := fh.BalanceCount(backends[0], backends[1])
+	require.Equal(t, 100/balanceSeconds4Health, count)
+
+	// Miss the first backend but the snapshot should be preserved.
+	fh.UpdateScore(backends[1:])
+	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
+	unhealthyBackend.connScore = 50
+	fh.UpdateScore(backends)
+	count, _ = fh.BalanceCount(backends[0], backends[1])
+	require.Equal(t, 100/balanceSeconds4Health, count)
+}
