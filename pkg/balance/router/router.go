@@ -10,6 +10,7 @@ import (
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"go.uber.org/zap"
 )
 
 var (
@@ -89,12 +90,16 @@ type backendWrapper struct {
 	// A list of *connWrapper and is ordered by the connecting or redirecting time.
 	// connList only includes the connections that are currently on this backend.
 	connList *glist.List[*connWrapper]
+	incoming map[uint64]struct{}
+	lg       *zap.Logger
 }
 
-func newBackendWrapper(addr string, health observer.BackendHealth) *backendWrapper {
+func newBackendWrapper(addr string, health observer.BackendHealth, lg *zap.Logger) *backendWrapper {
 	wrapper := &backendWrapper{
 		addr:     addr,
 		connList: glist.New[*connWrapper](),
+		incoming: make(map[uint64]struct{}),
+		lg:       lg.With(zap.String("backend", addr)),
 	}
 	wrapper.setHealth(health)
 	return wrapper
@@ -130,6 +135,25 @@ func (b *backendWrapper) ServerVersion() string {
 
 func (b *backendWrapper) ConnCount() int {
 	return b.connList.Len()
+}
+
+func (b *backendWrapper) AddIncoming(id uint64) {
+	if _, ok := b.incoming[id]; ok {
+		b.lg.Error("score error", zap.Uint64("id", id), zap.Stack("second"))
+	} else {
+		b.incoming[id] = struct{}{}
+	}
+}
+
+func (b *backendWrapper) DecIncoming(id uint64) {
+	if _, ok := b.incoming[id]; !ok {
+		b.lg.Error("score error", zap.Uint64("id", id), zap.Stack("nonexist"))
+	} else {
+		delete(b.incoming, id)
+	}
+	if b.connScore < 0 {
+		b.lg.Error("score error", zap.Int("connScore", b.connScore), zap.Stack("negative"))
+	}
 }
 
 func (b *backendWrapper) Local() bool {

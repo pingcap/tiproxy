@@ -152,6 +152,7 @@ func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn Redir
 		}
 		router.addConn(backend, connWrapper)
 		conn.SetEventReceiver(router)
+		backend.AddIncoming(conn.ConnectionID())
 	} else {
 		backend.connScore--
 	}
@@ -210,7 +211,7 @@ func (router *ScoreBasedRouter) ensureBackend(addr string) *backendWrapper {
 		},
 		SupportRedirection: true,
 		Healthy:            false,
-	})
+	}, router.logger)
 	router.backends[addr] = backend
 	return backend
 }
@@ -239,7 +240,9 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		connWrapper.phase = phaseRedirectEnd
 	} else {
 		fromBackend.connScore++
+		fromBackend.AddIncoming(conn.ConnectionID())
 		toBackend.connScore--
+		toBackend.DecIncoming(conn.ConnectionID())
 		router.removeBackendIfEmpty(toBackend)
 		connWrapper.phase = phaseRedirectFail
 	}
@@ -257,10 +260,12 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 	// If this connection is redirecting, decrease the score of the target backend.
 	if redirectingBackend != nil {
 		redirectingBackend.connScore--
+		redirectingBackend.DecIncoming(conn.ConnectionID())
 		connWrapper.Value.redirectingBackend = nil
 		router.removeBackendIfEmpty(redirectingBackend)
 	} else {
 		backend.connScore--
+		backend.DecIncoming(conn.ConnectionID())
 	}
 	router.removeConn(backend, connWrapper)
 	return nil
@@ -292,7 +297,7 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	for addr, health := range backends {
 		backend, ok := router.backends[addr]
 		if !ok && health.Healthy {
-			router.backends[addr] = newBackendWrapper(addr, *health)
+			router.backends[addr] = newBackendWrapper(addr, *health, router.logger)
 			serverVersion = health.ServerVersion
 		} else if ok {
 			backend.setHealth(*health)
@@ -406,8 +411,10 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 		fields = append(fields, logFields...)
 		router.logger.Debug("begin redirect connection", fields...)
 		fromBackend.connScore--
+		fromBackend.DecIncoming(conn.ConnectionID())
 		router.removeBackendIfEmpty(fromBackend)
 		toBackend.connScore++
+		toBackend.AddIncoming(conn.ConnectionID())
 		conn.phase = phaseRedirectNotify
 		conn.redirectReason = reason
 		conn.redirectingBackend = toBackend
