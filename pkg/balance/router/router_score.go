@@ -251,6 +251,7 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		connWrapper.phase = phaseRedirectFail
 	}
 	connWrapper.redirectingBackend = nil
+	toBackend.DecPending(conn.ConnectionID())
 	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 }
 
