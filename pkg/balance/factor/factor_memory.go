@@ -238,7 +238,7 @@ func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToO
 			}
 			usageDiff := latestUsage - value
 			if usageDiff > 1e-4 {
-				timeToOOM = timeDiff * time.Duration((oomMemoryUsage-latestUsage)/usageDiff)
+				timeToOOM = time.Duration(float64(timeDiff) * (oomMemoryUsage - latestUsage) / usageDiff)
 			}
 			break
 		}
