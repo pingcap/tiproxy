@@ -87,24 +87,24 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context) error {
 
 // readMetrics reads from Prometheus first. If it fails, fall back to read backends.
 func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) {
-	if ctx.Err() != nil {
-		return
-	}
-	promErr := dmr.promReader.ReadMetrics(ctx)
-	if promErr == nil {
-		dmr.setSource(sourceProm, nil)
-		return
-	}
+	// if ctx.Err() != nil {
+	// 	return
+	// }
+	// promErr := dmr.promReader.ReadMetrics(ctx)
+	// if promErr == nil {
+	// 	dmr.setSource(sourceProm, nil)
+	// 	return
+	// }
 
 	if ctx.Err() != nil {
 		return
 	}
 	backendErr := dmr.backendReader.ReadMetrics(ctx)
 	if backendErr == nil {
-		dmr.setSource(sourceBackend, promErr)
+		dmr.setSource(sourceBackend, nil)
 		return
 	}
-	dmr.lg.Warn("read metrics failed", zap.NamedError("prometheus", promErr), zap.NamedError("backends", backendErr))
+	// dmr.lg.Warn("read metrics failed", zap.NamedError("prometheus", promErr), zap.NamedError("backends", backendErr))
 }
 
 func (dmr *DefaultMetricsReader) setSource(source int32, err error) {
