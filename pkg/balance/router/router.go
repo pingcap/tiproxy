@@ -91,6 +91,7 @@ type backendWrapper struct {
 	// connList only includes the connections that are currently on this backend.
 	connList *glist.List[*connWrapper]
 	incoming map[uint64]struct{}
+	pending  map[uint64]struct{}
 	lg       *zap.Logger
 }
 
@@ -99,6 +100,7 @@ func newBackendWrapper(addr string, health observer.BackendHealth, lg *zap.Logge
 		addr:     addr,
 		connList: glist.New[*connWrapper](),
 		incoming: make(map[uint64]struct{}),
+		pending:  make(map[uint64]struct{}),
 		lg:       lg.With(zap.String("backend", addr)),
 	}
 	wrapper.setHealth(health)
@@ -153,6 +155,22 @@ func (b *backendWrapper) DecIncoming(id uint64) {
 	}
 	if b.connScore < 0 {
 		b.lg.Error("score error", zap.Int("connScore", b.connScore), zap.Stack("negative"))
+	}
+}
+
+func (b *backendWrapper) AddPending(id uint64) {
+	if _, ok := b.pending[id]; ok {
+		b.lg.Error("pending error", zap.Uint64("id", id), zap.Stack("second"))
+	} else {
+		b.pending[id] = struct{}{}
+	}
+}
+
+func (b *backendWrapper) DecPending(id uint64) {
+	if _, ok := b.pending[id]; !ok {
+		b.lg.Error("pending error", zap.Uint64("id", id), zap.Stack("nonexist"))
+	} else {
+		delete(b.pending, id)
 	}
 }
 

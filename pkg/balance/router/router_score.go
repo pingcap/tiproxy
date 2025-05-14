@@ -190,6 +190,7 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 				connWrapper.redirectReason = "test"
 				// Ignore the results.
 				if connWrapper.Redirect(backend) {
+					backend.AddPending(connWrapper.ConnectionID())
 					metrics.PendingMigrateGuage.WithLabelValues(backend.addr, backend.addr, connWrapper.redirectReason).Inc()
 				}
 				connWrapper.redirectingBackend = backend
@@ -266,6 +267,7 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 		redirectingBackend.DecIncoming(conn.ConnectionID())
 		connWrapper.Value.redirectingBackend = nil
 		router.removeBackendIfEmpty(redirectingBackend)
+		redirectingBackend.DecPending(conn.ConnectionID())
 		metrics.PendingMigrateGuage.WithLabelValues(backend.addr, redirectingBackend.addr, connWrapper.Value.redirectReason).Dec()
 	} else {
 		backend.connScore--
@@ -422,6 +424,7 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 		conn.phase = phaseRedirectNotify
 		conn.redirectReason = reason
 		conn.redirectingBackend = toBackend
+		toBackend.AddPending(conn.ConnectionID())
 		metrics.PendingMigrateGuage.WithLabelValues(fromBackend.addr, toBackend.addr, reason).Inc()
 	} else {
 		// Avoid it to be redirected again immediately.
