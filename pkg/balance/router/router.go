@@ -10,7 +10,6 @@ import (
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
-	"go.uber.org/zap"
 )
 
 var (
@@ -92,18 +91,12 @@ type backendWrapper struct {
 	// A list of *connWrapper and is ordered by the connecting or redirecting time.
 	// connList only includes the connections that are currently on this backend.
 	connList *glist.List[*connWrapper]
-	incoming map[uint64]struct{}
-	pending  map[uint64]struct{}
-	lg       *zap.Logger
 }
 
-func newBackendWrapper(addr string, health observer.BackendHealth, lg *zap.Logger) *backendWrapper {
+func newBackendWrapper(addr string, health observer.BackendHealth) *backendWrapper {
 	wrapper := &backendWrapper{
 		addr:     addr,
 		connList: glist.New[*connWrapper](),
-		incoming: make(map[uint64]struct{}),
-		pending:  make(map[uint64]struct{}),
-		lg:       lg.With(zap.String("backend", addr)),
 	}
 	wrapper.setHealth(health)
 	return wrapper

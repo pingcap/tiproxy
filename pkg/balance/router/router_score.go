@@ -212,7 +212,7 @@ func (router *ScoreBasedRouter) ensureBackend(addr string) *backendWrapper {
 		},
 		SupportRedirection: true,
 		Healthy:            false,
-	}, router.logger)
+	})
 	router.backends[addr] = backend
 	return backend
 }
@@ -299,7 +299,7 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	for addr, health := range backends {
 		backend, ok := router.backends[addr]
 		if !ok && health.Healthy {
-			router.backends[addr] = newBackendWrapper(addr, *health, router.logger)
+			router.backends[addr] = newBackendWrapper(addr, *health)
 			serverVersion = health.ServerVersion
 		} else if ok {
 			backend.setHealth(*health)
