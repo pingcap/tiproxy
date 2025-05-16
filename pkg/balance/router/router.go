@@ -141,41 +141,6 @@ func (b *backendWrapper) ConnCount() int {
 	return b.connList.Len()
 }
 
-func (b *backendWrapper) AddIncoming(id uint64) {
-	if _, ok := b.incoming[id]; ok {
-		b.lg.Error("score error", zap.Uint64("id", id), zap.Stack("second"))
-	} else {
-		b.incoming[id] = struct{}{}
-	}
-}
-
-func (b *backendWrapper) DecIncoming(id uint64) {
-	if _, ok := b.incoming[id]; !ok {
-		b.lg.Error("score error", zap.Uint64("id", id), zap.Stack("nonexist"))
-	} else {
-		delete(b.incoming, id)
-	}
-	if b.connScore < 0 {
-		b.lg.Error("score error", zap.Int("connScore", b.connScore), zap.Stack("negative"))
-	}
-}
-
-func (b *backendWrapper) AddPending(id uint64) {
-	if _, ok := b.pending[id]; ok {
-		b.lg.Error("pending error", zap.Uint64("id", id), zap.Stack("second"))
-	} else {
-		b.pending[id] = struct{}{}
-	}
-}
-
-func (b *backendWrapper) DecPending(id uint64) {
-	if _, ok := b.pending[id]; !ok {
-		b.lg.Error("pending error", zap.Uint64("id", id), zap.Stack("nonexist"))
-	} else {
-		delete(b.pending, id)
-	}
-}
-
 func (b *backendWrapper) Local() bool {
 	b.mu.RLock()
 	local := b.mu.Local

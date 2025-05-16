@@ -153,7 +153,6 @@ func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn Redir
 		}
 		router.addConn(backend, connWrapper)
 		conn.SetEventReceiver(router)
-		backend.AddIncoming(conn.ConnectionID())
 	} else {
 		backend.connScore--
 	}
@@ -190,7 +189,6 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 				connWrapper.redirectReason = "test"
 				// Ignore the results.
 				if connWrapper.Redirect(backend) {
-					backend.AddPending(connWrapper.ConnectionID())
 					metrics.PendingMigrateGuage.WithLabelValues(backend.addr, backend.addr, connWrapper.redirectReason).Inc()
 				}
 			}
@@ -237,7 +235,6 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 	fromBackend := router.ensureBackend(from)
 	toBackend := router.ensureBackend(to)
 	connWrapper := router.getConnWrapper(conn).Value
-	toBackend.DecPending(conn.ConnectionID())
 	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 	// The connection may be closed when this function is waiting for the lock.
 	if connWrapper.phase == phaseClosed {
@@ -250,9 +247,7 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		connWrapper.phase = phaseRedirectEnd
 	} else {
 		fromBackend.connScore++
-		fromBackend.AddIncoming(conn.ConnectionID())
 		toBackend.connScore--
-		toBackend.DecIncoming(conn.ConnectionID())
 		router.removeBackendIfEmpty(toBackend)
 		connWrapper.phase = phaseRedirectFail
 	}
@@ -268,13 +263,10 @@ func (router *ScoreBasedRouter) OnConnClosed(addr, redirectingAddr string, conn 
 	if redirectingAddr != "" {
 		redirectingBackend := router.ensureBackend(redirectingAddr)
 		redirectingBackend.connScore--
-		redirectingBackend.DecIncoming(conn.ConnectionID())
 		router.removeBackendIfEmpty(redirectingBackend)
-		redirectingBackend.DecPending(conn.ConnectionID())
 		metrics.PendingMigrateGuage.WithLabelValues(addr, redirectingAddr, connWrapper.Value.redirectReason).Dec()
 	} else {
 		backend.connScore--
-		backend.DecIncoming(conn.ConnectionID())
 	}
 	router.removeConn(backend, connWrapper)
 	connWrapper.Value.phase = phaseClosed
@@ -421,13 +413,10 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 		fields = append(fields, logFields...)
 		router.logger.Debug("begin redirect connection", fields...)
 		fromBackend.connScore--
-		fromBackend.DecIncoming(conn.ConnectionID())
 		router.removeBackendIfEmpty(fromBackend)
 		toBackend.connScore++
-		toBackend.AddIncoming(conn.ConnectionID())
 		conn.phase = phaseRedirectNotify
 		conn.redirectReason = reason
-		toBackend.AddPending(conn.ConnectionID())
 		metrics.PendingMigrateGuage.WithLabelValues(fromBackend.addr, toBackend.addr, reason).Inc()
 	} else {
 		// Avoid it to be redirected again immediately.
