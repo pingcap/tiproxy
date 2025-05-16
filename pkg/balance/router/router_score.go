@@ -160,9 +160,6 @@ func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn Redir
 }
 
 func (router *ScoreBasedRouter) removeConn(backend *backendWrapper, ce *glist.Element[*connWrapper]) {
-	if ce.Value.phase == phaseClosed {
-		return
-	}
 	backend.connList.Remove(ce)
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	router.removeBackendIfEmpty(backend)
@@ -240,10 +237,13 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 	fromBackend := router.ensureBackend(from)
 	toBackend := router.ensureBackend(to)
 	connWrapper := router.getConnWrapper(conn).Value
+	toBackend.DecPending(conn.ConnectionID())
+	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 	// The connection may be closed when this function is waiting for the lock.
 	if connWrapper.phase == phaseClosed {
 		return
 	}
+
 	if succeed {
 		router.removeConn(fromBackend, router.getConnWrapper(conn))
 		router.addConn(toBackend, connWrapper)
@@ -256,8 +256,6 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		router.removeBackendIfEmpty(toBackend)
 		connWrapper.phase = phaseRedirectFail
 	}
-	toBackend.DecPending(conn.ConnectionID())
-	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
@@ -266,14 +264,14 @@ func (router *ScoreBasedRouter) OnConnClosed(addr, redirectingAddr string, conn 
 	defer router.Unlock()
 	backend := router.ensureBackend(addr)
 	connWrapper := router.getConnWrapper(conn)
-	// If this connection is redirecting, decrease the score of the target backend.
+	// If this connection has not redirected yet, decrease the score of the target backend.
 	if redirectingAddr != "" {
 		redirectingBackend := router.ensureBackend(redirectingAddr)
 		redirectingBackend.connScore--
 		redirectingBackend.DecIncoming(conn.ConnectionID())
 		router.removeBackendIfEmpty(redirectingBackend)
 		redirectingBackend.DecPending(conn.ConnectionID())
-		metrics.PendingMigrateGuage.WithLabelValues(backend.addr, redirectingBackend.addr, connWrapper.Value.redirectReason).Dec()
+		metrics.PendingMigrateGuage.WithLabelValues(addr, redirectingAddr, connWrapper.Value.redirectReason).Dec()
 	} else {
 		backend.connScore--
 		backend.DecIncoming(conn.ConnectionID())
