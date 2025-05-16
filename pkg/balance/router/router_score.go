@@ -160,6 +160,9 @@ func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn Redir
 }
 
 func (router *ScoreBasedRouter) removeConn(backend *backendWrapper, ce *glist.Element[*connWrapper]) {
+	if ce.Value.phase == phaseClosed {
+		return
+	}
 	backend.connList.Remove(ce)
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	router.removeBackendIfEmpty(backend)
@@ -193,7 +196,6 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 					backend.AddPending(connWrapper.ConnectionID())
 					metrics.PendingMigrateGuage.WithLabelValues(backend.addr, backend.addr, connWrapper.redirectReason).Inc()
 				}
-				connWrapper.redirectingBackend = backend
 			}
 		}
 	}
@@ -238,6 +240,10 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 	fromBackend := router.ensureBackend(from)
 	toBackend := router.ensureBackend(to)
 	connWrapper := router.getConnWrapper(conn).Value
+	// The connection may be closed when this function is waiting for the lock.
+	if connWrapper.phase == phaseClosed {
+		return
+	}
 	if succeed {
 		router.removeConn(fromBackend, router.getConnWrapper(conn))
 		router.addConn(toBackend, connWrapper)
@@ -250,23 +256,21 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		router.removeBackendIfEmpty(toBackend)
 		connWrapper.phase = phaseRedirectFail
 	}
-	connWrapper.redirectingBackend = nil
 	toBackend.DecPending(conn.ConnectionID())
 	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
-func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn) error {
+func (router *ScoreBasedRouter) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
 	router.Lock()
 	defer router.Unlock()
 	backend := router.ensureBackend(addr)
 	connWrapper := router.getConnWrapper(conn)
-	redirectingBackend := connWrapper.Value.redirectingBackend
 	// If this connection is redirecting, decrease the score of the target backend.
-	if redirectingBackend != nil {
+	if redirectingAddr != "" {
+		redirectingBackend := router.ensureBackend(redirectingAddr)
 		redirectingBackend.connScore--
 		redirectingBackend.DecIncoming(conn.ConnectionID())
-		connWrapper.Value.redirectingBackend = nil
 		router.removeBackendIfEmpty(redirectingBackend)
 		redirectingBackend.DecPending(conn.ConnectionID())
 		metrics.PendingMigrateGuage.WithLabelValues(backend.addr, redirectingBackend.addr, connWrapper.Value.redirectReason).Dec()
@@ -275,6 +279,7 @@ func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn)
 		backend.DecIncoming(conn.ConnectionID())
 	}
 	router.removeConn(backend, connWrapper)
+	connWrapper.Value.phase = phaseClosed
 	return nil
 }
 
@@ -424,7 +429,6 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 		toBackend.AddIncoming(conn.ConnectionID())
 		conn.phase = phaseRedirectNotify
 		conn.redirectReason = reason
-		conn.redirectingBackend = toBackend
 		toBackend.AddPending(conn.ConnectionID())
 		metrics.PendingMigrateGuage.WithLabelValues(fromBackend.addr, toBackend.addr, reason).Inc()
 	} else {

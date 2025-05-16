@@ -62,9 +62,10 @@ func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.Redire
 	return nil
 }
 
-func (mer *mockEventReceiver) OnConnClosed(from string, conn router.RedirectableConn) error {
+func (mer *mockEventReceiver) OnConnClosed(from, to string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
 		from:      from,
+		to:        to,
 		eventName: eventClose,
 	}
 	return nil

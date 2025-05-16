@@ -36,11 +36,11 @@ func (fcc *FactorConnCount) Name() string {
 func (fcc *FactorConnCount) UpdateScore(backends []scoredBackend) {
 	for i := 0; i < len(backends); i++ {
 		score := backends[i].ConnScore()
-		if score < 0 {
-			score = 0
-		} else if score > 1<<fcc.bitNum-1 {
-			score = 1<<fcc.bitNum - 1
-		}
+		// if score < 0 {
+		// 	score = 0
+		// } else if score > 1<<fcc.bitNum-1 {
+		// 	score = 1<<fcc.bitNum - 1
+		// }
 		backends[i].addScore(score, fcc.bitNum)
 	}
 }

@@ -167,7 +167,7 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 		}
 	}
 	for _, conn := range conns {
-		err := tester.router.OnConnClosed(conn.from.Addr(), conn)
+		err := tester.router.OnConnClosed(conn.from.Addr(), "", conn)
 		require.NoError(tester.t, err)
 		delete(tester.conns, conn.connID)
 	}
@@ -620,7 +620,7 @@ func TestConcurrency(t *testing.T) {
 						from, to := conn.getAddr()
 						var err error
 						if i < 1 {
-							err = router.OnConnClosed(from, conn)
+							err = router.OnConnClosed(from, "", conn)
 							conn = nil
 						} else if i < 3 {
 							conn.redirectFail()
@@ -636,7 +636,7 @@ func TestConcurrency(t *testing.T) {
 						if i < 2 {
 							// The balancer may happen to redirect it concurrently - that's exactly what may happen.
 							from, _ := conn.getAddr()
-							err := router.OnConnClosed(from, conn)
+							err := router.OnConnClosed(from, "", conn)
 							require.NoError(t, err)
 							conn = nil
 						}
