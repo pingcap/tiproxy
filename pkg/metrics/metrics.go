@@ -117,6 +117,7 @@ func init() {
 		BackendScoreGauge,
 		HealthCheckCycleGauge,
 		BackendMetricGauge,
+		PendingMigrateGuage,
 		MigrateCounter,
 		MigrateDurationHistogram,
 		InboundBytesCounter,

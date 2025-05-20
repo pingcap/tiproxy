@@ -43,6 +43,14 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 26), // 0.1ms ~ 1h
 		}, []string{LblFrom, LblTo, LblMigrateResult})
 
+	PendingMigrateGuage = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelBalance,
+			Name:      "pending_migrate",
+			Help:      "Number of pending session migration.",
+		}, []string{LblFrom, LblTo, LblReason})
+
 	BackendScoreGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: ModuleProxy,

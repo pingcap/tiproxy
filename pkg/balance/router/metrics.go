@@ -28,6 +28,7 @@ func succeedToLabel(succeed bool) string {
 func addMigrateMetrics(from, to, reason string, succeed bool, startTime time.Time) {
 	resLabel := succeedToLabel(succeed)
 	metrics.MigrateCounter.WithLabelValues(from, to, reason, resLabel).Inc()
+	metrics.PendingMigrateGuage.WithLabelValues(from, to, reason).Dec()
 
 	cost := time.Since(startTime)
 	metrics.MigrateDurationHistogram.WithLabelValues(from, to, resLabel).Observe(cost.Seconds())

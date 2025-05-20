@@ -20,7 +20,7 @@ var (
 type ConnEventReceiver interface {
 	OnRedirectSucceed(from, to string, conn RedirectableConn) error
 	OnRedirectFail(from, to string, conn RedirectableConn) error
-	OnConnClosed(addr string, conn RedirectableConn) error
+	OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error
 }
 
 // Router routes client connections to backends.
@@ -49,6 +49,8 @@ const (
 	phaseRedirectEnd
 	// The session failed to redirect last time.
 	phaseRedirectFail
+	// The connection is closed.
+	phaseClosed
 )
 
 const (
@@ -165,8 +167,6 @@ type connWrapper struct {
 	RedirectableConn
 	// The reason why the redirection happens.
 	redirectReason string
-	// Reference to the target backend if it's redirecting, otherwise nil.
-	redirectingBackend *backendWrapper
 	// Last redirect start time of this connection.
 	lastRedirect time.Time
 	phase        connPhase
