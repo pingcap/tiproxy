@@ -1774,6 +1774,92 @@
                      "show": true
                   }
                ]
+            },
+            {
+               "aliasColors": { },
+               "bars": false,
+               "dashLength": 10,
+               "dashes": false,
+               "datasource": "${DS_TEST-CLUSTER}",
+               "description": "Number of pending session migrations.",
+               "fill": 1,
+               "fillGradient": 0,
+               "gridPos": {
+                  "h": 6,
+                  "w": 12,
+                  "x": 0,
+                  "y": 0
+               },
+               "id": 24,
+               "legend": {
+                  "alignAsTable": false,
+                  "avg": false,
+                  "current": false,
+                  "max": false,
+                  "min": false,
+                  "rightSide": true,
+                  "show": true,
+                  "sideWidth": null,
+                  "total": false,
+                  "values": false
+               },
+               "lines": true,
+               "linewidth": 1,
+               "links": [ ],
+               "nullPointMode": "null",
+               "percentage": false,
+               "pointradius": 5,
+               "points": false,
+               "renderer": "flot",
+               "repeat": null,
+               "seriesOverrides": [ ],
+               "spaceLength": 10,
+               "stack": false,
+               "steppedLine": false,
+               "targets": [
+                  {
+                     "expr": "label_replace(label_replace(tiproxy_balance_pending_migrate, \"from\", \"$1\", \"from\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\"), \"to\", \"$1\", \"to\", \"(.+-tidb-[0-9]+).*peer.*.svc.*\")",
+                     "format": "time_series",
+                     "intervalFactor": 2,
+                     "legendFormat": "{{instance}}: {{from}} => {{to}}",
+                     "refId": "A"
+                  }
+               ],
+               "thresholds": [ ],
+               "timeFrom": null,
+               "timeShift": null,
+               "title": "Pending Migration Count",
+               "tooltip": {
+                  "shared": true,
+                  "sort": 0,
+                  "value_type": "individual"
+               },
+               "type": "graph",
+               "xaxis": {
+                  "buckets": null,
+                  "mode": "time",
+                  "name": null,
+                  "show": true,
+                  "values": [ ]
+               },
+               "yaxes": [
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 2,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  },
+                  {
+                     "format": "short",
+                     "label": null,
+                     "logBase": 1,
+                     "max": null,
+                     "min": null,
+                     "show": true
+                  }
+               ]
             }
          ],
          "repeat": null,
@@ -1793,7 +1879,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 24,
+         "id": 25,
          "panels": [
             {
                "aliasColors": { },
@@ -1810,7 +1896,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 25,
+               "id": 26,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1910,7 +1996,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 26,
+               "id": 27,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -1996,7 +2082,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 27,
+               "id": 28,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -2082,7 +2168,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 28,
+               "id": 29,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -2171,7 +2257,7 @@
             "x": 0,
             "y": 0
          },
-         "id": 29,
+         "id": 30,
          "panels": [
             {
                "aliasColors": { },
@@ -2188,7 +2274,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 30,
+               "id": 31,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -2274,7 +2360,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 31,
+               "id": 32,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -2360,7 +2446,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 32,
+               "id": 33,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -2446,7 +2532,7 @@
                   "x": 12,
                   "y": 0
                },
-               "id": 33,
+               "id": 34,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,
@@ -2532,7 +2618,7 @@
                   "x": 0,
                   "y": 0
                },
-               "id": 34,
+               "id": 35,
                "legend": {
                   "alignAsTable": false,
                   "avg": false,

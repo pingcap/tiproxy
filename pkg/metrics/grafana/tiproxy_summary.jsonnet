@@ -427,6 +427,21 @@ local bMigReasonP = graphPanel.new(
   )
 );
 
+local bPendingP = graphPanel.new(
+  title='Pending Migration Count',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='Number of pending session migrations.',
+  format='short',
+  logBase1Y=2,
+)
+.addTarget(
+  prometheus.target(
+    'label_replace(label_replace(tiproxy_balance_pending_migrate, "from", "$1", "from", "(.+-tidb-[0-9]+).*peer.*.svc.*"), "to", "$1", "to", "(.+-tidb-[0-9]+).*peer.*.svc.*")',
+    legendFormat='{{instance}}: {{from}} => {{to}}',
+  )
+);
+
 // Backend Summary
 local backendRow = row.new(collapse=true, title='Backend');
 local bGetDurP = graphPanel.new(
@@ -616,6 +631,7 @@ newDash
   .addPanel(bMigCounterP, gridPos=rightPanelPos)
   .addPanel(bMigDurP, gridPos=leftPanelPos)
   .addPanel(bMigReasonP, gridPos=rightPanelPos)
+  .addPanel(bPendingP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )
