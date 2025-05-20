@@ -71,9 +71,10 @@ func (mer *mockEventReceiver) OnConnClosed(from, to string, conn router.Redirect
 	return nil
 }
 
-func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) {
+func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) event {
 	e := <-mer.eventCh
 	require.Equal(t, eventName, e.eventName)
+	return e
 }
 
 type mockBackendInst struct {
@@ -653,7 +654,9 @@ func TestCloseWhileRedirect(t *testing.T) {
 				require.False(t, ts.mp.Redirect(newMockBackendInst(ts)))
 				eventReceiver.checkEvent(t, eventSucceed)
 				wg.Wait()
-				eventReceiver.checkEvent(t, eventClose)
+				e := eventReceiver.checkEvent(t, eventClose)
+				require.Equal(t, addr, e.from)
+				require.Equal(t, "", e.to)
 				return nil
 			},
 		},
