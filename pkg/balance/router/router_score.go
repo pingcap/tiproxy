@@ -187,7 +187,6 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 			if connWrapper.phase != phaseRedirectNotify {
 				connWrapper.phase = phaseRedirectNotify
 				connWrapper.redirectReason = "test"
-				// Ignore the results.
 				if connWrapper.Redirect(backend) {
 					metrics.PendingMigrateGuage.WithLabelValues(backend.addr, backend.addr, connWrapper.redirectReason).Inc()
 				}
