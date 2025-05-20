@@ -16,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"go.uber.org/zap"
 )
 
@@ -184,9 +185,9 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 			if connWrapper.phase != phaseRedirectNotify {
 				connWrapper.phase = phaseRedirectNotify
 				connWrapper.redirectReason = "test"
-				// Ignore the results.
-				_ = connWrapper.Redirect(backend)
-				connWrapper.redirectingBackend = backend
+				if connWrapper.Redirect(backend) {
+					metrics.PendingMigrateGuage.WithLabelValues(backend.addr, backend.addr, connWrapper.redirectReason).Inc()
+				}
 			}
 		}
 	}
@@ -230,6 +231,12 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 	fromBackend := router.ensureBackend(from)
 	toBackend := router.ensureBackend(to)
 	connWrapper := router.getConnWrapper(conn).Value
+	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
+	// The connection may be closed when this function is waiting for the lock.
+	if connWrapper.phase == phaseClosed {
+		return
+	}
+
 	if succeed {
 		router.removeConn(fromBackend, router.getConnWrapper(conn))
 		router.addConn(toBackend, connWrapper)
@@ -240,26 +247,25 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		router.removeBackendIfEmpty(toBackend)
 		connWrapper.phase = phaseRedirectFail
 	}
-	connWrapper.redirectingBackend = nil
-	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
-func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn) error {
+func (router *ScoreBasedRouter) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
 	router.Lock()
 	defer router.Unlock()
 	backend := router.ensureBackend(addr)
 	connWrapper := router.getConnWrapper(conn)
-	redirectingBackend := connWrapper.Value.redirectingBackend
-	// If this connection is redirecting, decrease the score of the target backend.
-	if redirectingBackend != nil {
+	// If this connection has not redirected yet, decrease the score of the target backend.
+	if redirectingAddr != "" {
+		redirectingBackend := router.ensureBackend(redirectingAddr)
 		redirectingBackend.connScore--
-		connWrapper.Value.redirectingBackend = nil
 		router.removeBackendIfEmpty(redirectingBackend)
+		metrics.PendingMigrateGuage.WithLabelValues(addr, redirectingAddr, connWrapper.Value.redirectReason).Dec()
 	} else {
 		backend.connScore--
 	}
 	router.removeConn(backend, connWrapper)
+	connWrapper.Value.phase = phaseClosed
 	return nil
 }
 
@@ -399,7 +405,7 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 		toBackend.connScore++
 		conn.phase = phaseRedirectNotify
 		conn.redirectReason = reason
-		conn.redirectingBackend = toBackend
+		metrics.PendingMigrateGuage.WithLabelValues(fromBackend.addr, toBackend.addr, reason).Inc()
 	} else {
 		// Avoid it to be redirected again immediately.
 		conn.phase = phaseRedirectFail
