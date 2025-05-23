@@ -22,15 +22,16 @@ var (
 )
 
 type Config struct {
-	Proxy    ProxyServer       `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
-	API      API               `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
-	Advance  Advance           `yaml:"advance,omitempty" toml:"advance,omitempty" json:"advance,omitempty"`
-	Workdir  string            `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
-	Security Security          `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
-	Log      Log               `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
-	Balance  Balance           `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
-	Labels   map[string]string `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty"`
-	HA       HA                `yaml:"ha,omitempty" toml:"ha,omitempty" json:"ha,omitempty"`
+	Proxy               ProxyServer       `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
+	API                 API               `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
+	Advance             Advance           `yaml:"advance,omitempty" toml:"advance,omitempty" json:"advance,omitempty"`
+	Workdir             string            `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
+	Security            Security          `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
+	Log                 Log               `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
+	Balance             Balance           `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
+	Labels              map[string]string `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty"`
+	HA                  HA                `yaml:"ha,omitempty" toml:"ha,omitempty" json:"ha,omitempty"`
+	EnableTrafficReplay bool              `yaml:"enable-traffic-replay,omitempty" toml:"enable-traffic-replay,omitempty" json:"enable-traffic-replay,omitempty"`
 }
 
 type KeepAlive struct {
@@ -163,6 +164,8 @@ func NewConfig() *Config {
 	cfg.Security.ClusterTLS.MinTLSVersion = "1.2"
 
 	cfg.Balance = DefaultBalance()
+
+	cfg.EnableTrafficReplay = true
 
 	return &cfg
 }

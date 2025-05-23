@@ -88,6 +88,42 @@ func TestTraffic(t *testing.T) {
 	})
 }
 
+func TestDisableTrafficReplay(t *testing.T) {
+	server, doHTTP := createServer(t)
+	server.mgr.CfgMgr.GetConfig().EnableTrafficReplay = false
+
+	doHTTP(t, http.MethodPost, "/api/traffic/capture", httpOpts{
+		reader: cli.GetFormReader(map[string]string{"output": "/tmp", "duration": "1h"}),
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadRequest, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "traffic capture is disabled", string(all))
+	})
+	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
+		reader: cli.GetFormReader(map[string]string{"input": "/tmp"}),
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadRequest, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "traffic replay is disabled", string(all))
+	})
+	doHTTP(t, http.MethodPost, "/api/traffic/cancel", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadRequest, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "traffic cancel is disabled", string(all))
+	})
+	doHTTP(t, http.MethodGet, "/api/traffic/show", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadRequest, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "traffic show is disabled", string(all))
+	})
+}
+
 var _ manager.JobManager = (*mockReplayJobManager)(nil)
 
 type mockReplayJobManager struct {

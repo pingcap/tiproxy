@@ -16,11 +16,17 @@ import (
 func (h *Server) registerTraffic(group *gin.RouterGroup) {
 	group.POST("/capture", h.TrafficCapture)
 	group.POST("/replay", h.TrafficReplay)
-	group.POST("/cancel", h.TrafficStop)
+	group.POST("/cancel", h.TrafficCancel)
 	group.GET("/show", h.TrafficShow)
 }
 
 func (h *Server) TrafficCapture(c *gin.Context) {
+	globalCfg := h.mgr.CfgMgr.GetConfig()
+	if !globalCfg.EnableTrafficReplay {
+		c.String(http.StatusBadRequest, "traffic capture is disabled")
+		return
+	}
+
 	cfg := capture.CaptureConfig{}
 	cfg.Output = c.PostForm("output")
 	if durationStr := c.PostForm("duration"); durationStr != "" {
@@ -40,6 +46,12 @@ func (h *Server) TrafficCapture(c *gin.Context) {
 }
 
 func (h *Server) TrafficReplay(c *gin.Context) {
+	globalCfg := h.mgr.CfgMgr.GetConfig()
+	if !globalCfg.EnableTrafficReplay {
+		c.String(http.StatusBadRequest, "traffic replay is disabled")
+		return
+	}
+
 	cfg := replay.ReplayConfig{}
 	cfg.Input = c.PostForm("input")
 	if speedStr := c.PostForm("speed"); speedStr != "" {
@@ -60,12 +72,24 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	c.String(http.StatusOK, "replay started")
 }
 
-func (h *Server) TrafficStop(c *gin.Context) {
+func (h *Server) TrafficCancel(c *gin.Context) {
+	globalCfg := h.mgr.CfgMgr.GetConfig()
+	if !globalCfg.EnableTrafficReplay {
+		c.String(http.StatusBadRequest, "traffic cancel is disabled")
+		return
+	}
+
 	result := h.mgr.ReplayJobMgr.Stop()
 	c.String(http.StatusOK, result)
 }
 
 func (h *Server) TrafficShow(c *gin.Context) {
+	globalCfg := h.mgr.CfgMgr.GetConfig()
+	if !globalCfg.EnableTrafficReplay {
+		c.String(http.StatusBadRequest, "traffic show is disabled")
+		return
+	}
+
 	result := h.mgr.ReplayJobMgr.Jobs()
 	c.String(http.StatusOK, result)
 }
