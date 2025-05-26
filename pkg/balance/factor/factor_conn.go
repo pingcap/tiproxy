@@ -12,13 +12,18 @@ const (
 	// connBalancedRatio is the threshold of ratio of the most connection count and least count.
 	// If the ratio exceeds the threshold, we migrate connections.
 	connBalancedRatio = 1.2
-	// balanceCount4Conn indicates how many connections to balance per second.
-	// Migrate slowly because we don't know the CPU usage here and we may migrate too many connections.
-	balanceCount4Conn = 1
+	// Narrow it to 20% in 120s, but the speed is slower and slower because the difference is getting smaller.
+	// The original difference is 30%: after 120s, the difference is 23.5%.
+	// The original difference is 100%: after 120s, the difference is 43.9%.
+	balanceSeconds4Conn = 120
 )
 
 var _ Factor = (*FactorConnCount)(nil)
 
+// FactorConnCount balances by connection count and must be used in following cases:
+// - The policy is set to `connection`
+// - The backend CPU usages are unavailable
+// - The workload just starts and the backend CPU usages are low
 type FactorConnCount struct {
 	bitNum int
 }
@@ -50,10 +55,15 @@ func (fcc *FactorConnCount) ScoreBitNum() int {
 }
 
 func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
-	if float64(from.ConnScore()) > float64(to.ConnScore()+1)*connBalancedRatio {
-		return balanceCount4Conn, nil
+	if float64(from.ConnScore()) <= float64(to.ConnScore()+1)*connBalancedRatio {
+		return 0, nil
 	}
-	return 0, nil
+	targetTo := float64(from.ConnScore()+to.ConnScore()+1) / (1 + connBalancedRatio)
+	count := (targetTo - float64(to.ConnScore()+1)) / balanceSeconds4Conn
+	if count < 0 {
+		count = 0
+	}
+	return count, nil
 }
 
 func (fcc *FactorConnCount) SetConfig(cfg *config.Config) {
