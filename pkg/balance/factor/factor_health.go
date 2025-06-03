@@ -366,6 +366,10 @@ func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (float64, []zap.Fie
 func (fh *FactorHealth) SetConfig(cfg *config.Config) {
 }
 
+func (fh *FactorHealth) CanBeRouted(_ uint64) bool {
+	return true
+}
+
 func (fh *FactorHealth) Close() {
 	for _, indicator := range fh.indicators {
 		fh.mr.RemoveQueryExpr(indicator.key)
