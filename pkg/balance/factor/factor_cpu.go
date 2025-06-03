@@ -272,6 +272,10 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (float64, []zap.Field)
 func (fc *FactorCPU) SetConfig(cfg *config.Config) {
 }
 
+func (fc *FactorCPU) CanBeRouted(_ uint64) bool {
+	return true
+}
+
 func (fc *FactorCPU) Close() {
 	fc.mr.RemoveQueryExpr(fc.Name())
 }

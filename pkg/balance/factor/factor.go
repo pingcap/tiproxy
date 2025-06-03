@@ -19,5 +19,7 @@ type Factor interface {
 	// 0 indicates the factor is already balanced.
 	BalanceCount(from, to scoredBackend) (float64, []zap.Field)
 	SetConfig(cfg *config.Config)
+	// CanBeRouted returns whether a connection can be routed or migrated to the backend with the score.
+	CanBeRouted(score uint64) bool
 	Close()
 }

@@ -69,5 +69,9 @@ func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) (float64, []zap
 func (fcc *FactorConnCount) SetConfig(cfg *config.Config) {
 }
 
+func (fcc *FactorConnCount) CanBeRouted(_ uint64) bool {
+	return true
+}
+
 func (fcc *FactorConnCount) Close() {
 }
