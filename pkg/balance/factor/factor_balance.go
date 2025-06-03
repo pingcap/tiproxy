@@ -6,6 +6,7 @@ package factor
 import (
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -24,8 +25,8 @@ const (
 var _ policy.BalancePolicy = (*FactorBasedBalance)(nil)
 
 // FactorBasedBalance is the default balance policy.
-// It's not concurrency-safe for now.
 type FactorBasedBalance struct {
+	sync.Mutex
 	factors []Factor
 	// to reduce memory allocation
 	cachedList      []scoredBackend
@@ -53,6 +54,8 @@ func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *Fact
 // Init creates factors at the first time.
 // TODO: create factors according to config and update policy when config changes.
 func (fbb *FactorBasedBalance) Init(cfg *config.Config) {
+	fbb.Lock()
+	defer fbb.Unlock()
 	fbb.factors = make([]Factor, 0, 7)
 	fbb.setFactors(cfg)
 }
@@ -178,6 +181,8 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 		return nil
 	}
 
+	fbb.Lock()
+	defer fbb.Unlock()
 	scoredBackends := fbb.updateScore(backends)
 	if !fbb.canBeRouted(scoredBackends[0].scoreBits) {
 		return nil
@@ -240,6 +245,9 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 	if len(backends) <= 1 {
 		return
 	}
+
+	fbb.Lock()
+	defer fbb.Unlock()
 	scoredBackends := fbb.updateScore(backends)
 	if !fbb.canBeRouted(scoredBackends[0].scoreBits) {
 		return
@@ -304,10 +312,14 @@ func (fbb *FactorBasedBalance) canBeRouted(score uint64) bool {
 }
 
 func (fbb *FactorBasedBalance) SetConfig(cfg *config.Config) {
+	fbb.Lock()
+	defer fbb.Unlock()
 	fbb.setFactors(cfg)
 }
 
 func (fbb *FactorBasedBalance) Close() {
+	fbb.Lock()
+	defer fbb.Unlock()
 	for _, factor := range fbb.factors {
 		factor.Close()
 	}
