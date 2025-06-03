@@ -60,11 +60,6 @@ func (fbb *FactorBasedBalance) Init(cfg *config.Config) {
 func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
 	fbb.factors = fbb.factors[:0]
 
-	if fbb.factorStatus == nil {
-		fbb.factorStatus = NewFactorStatus(fbb.lg.Named("status"))
-	}
-	fbb.factors = append(fbb.factors, fbb.factorStatus)
-
 	if cfg.Balance.LabelName != "" {
 		if fbb.factorLabel == nil {
 			fbb.factorLabel = NewFactorLabel()
@@ -74,6 +69,11 @@ func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
 		fbb.factorLabel.Close()
 		fbb.factorLabel = nil
 	}
+
+	if fbb.factorStatus == nil {
+		fbb.factorStatus = NewFactorStatus(fbb.lg.Named("status"))
+	}
+	fbb.factors = append(fbb.factors, fbb.factorStatus)
 
 	switch cfg.Balance.Policy {
 	case config.BalancePolicyResource, config.BalancePolicyLocation:
@@ -177,12 +177,16 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	if len(backends) == 0 {
 		return nil
 	}
+
+	scoredBackends := fbb.updateScore(backends)
+	if !fbb.canBeRouted(scoredBackends[0].scoreBits) {
+		return nil
+	}
 	if len(backends) == 1 {
 		return backends[0]
 	}
 
 	var fields []zap.Field
-	scoredBackends := fbb.updateScore(backends)
 	for _, backend := range scoredBackends {
 		fields = append(fields, zap.String(backend.Addr(), strconv.FormatUint(backend.scoreBits, 16)))
 	}
@@ -237,8 +241,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 		return
 	}
 	scoredBackends := fbb.updateScore(backends)
-	// No need to migrate to unhealthy backends.
-	if !scoredBackends[0].Healthy() {
+	if !fbb.canBeRouted(scoredBackends[0].scoreBits) {
 		return
 	}
 	if scoredBackends[0].scoreBits == scoredBackends[len(scoredBackends)-1].scoreBits {
@@ -285,6 +288,19 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 		}
 	}
 	return
+}
+
+func (fbb *FactorBasedBalance) canBeRouted(score uint64) bool {
+	leftBitNum := fbb.totalBitNum
+	for _, factor := range fbb.factors {
+		bitNum := factor.ScoreBitNum()
+		score := score << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+		if !factor.CanBeRouted(score) {
+			return false
+		}
+		leftBitNum -= bitNum
+	}
+	return true
 }
 
 func (fbb *FactorBasedBalance) SetConfig(cfg *config.Config) {

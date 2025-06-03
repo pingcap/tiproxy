@@ -63,5 +63,10 @@ func (fl *FactorLabel) SetConfig(cfg *config.Config) {
 	}
 }
 
+func (fl *FactorLabel) CanBeRouted(score uint64) bool {
+	// Label is used to isolate business resources. Never route to the backends of another business.
+	return score == 0
+}
+
 func (fl *FactorLabel) Close() {
 }

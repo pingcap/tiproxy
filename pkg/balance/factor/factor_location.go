@@ -53,5 +53,9 @@ func (fl *FactorLocation) BalanceCount(from, to scoredBackend) (float64, []zap.F
 func (fl *FactorLocation) SetConfig(cfg *config.Config) {
 }
 
+func (fl *FactorLocation) CanBeRouted(_ uint64) bool {
+	return true
+}
+
 func (fl *FactorLocation) Close() {
 }
