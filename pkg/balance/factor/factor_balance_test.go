@@ -4,12 +4,15 @@
 package factor
 
 import (
+	"context"
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -470,4 +473,35 @@ func TestCanBeRouted(t *testing.T) {
 		b := fm.BackendToRoute(backends)
 		require.Equal(t, test.routed, b != nil, "test index %d", tIdx)
 	}
+}
+
+func TestSetFactorConcurrently(t *testing.T) {
+	fbb := NewFactorBasedBalance(zap.NewNop(), newMockMetricsReader())
+	var wg waitgroup.WaitGroup
+	cfg := &config.Config{}
+	fbb.Init(cfg)
+	wg.Add(10)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	wg.Run(func() {
+		defer wg.Done()
+		policies := []string{config.BalancePolicyConnection, config.BalancePolicyResource, config.BalancePolicyLocation}
+		for i := 0; ctx.Err() != nil; i++ {
+			cfg.Balance = config.Balance{
+				Policy: policies[i%len(policies)],
+			}
+			fbb.SetConfig(cfg)
+		}
+	})
+	for i := 0; i < 9; i++ {
+		wg.Run(func() {
+			defer wg.Done()
+			for ctx.Err() != nil {
+				backends := createBackends(5)
+				fbb.BackendToRoute(backends)
+			}
+		})
+	}
+	wg.Wait()
+	cancel()
+	fbb.Close()
 }
