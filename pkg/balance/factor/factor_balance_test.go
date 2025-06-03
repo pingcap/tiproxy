@@ -12,12 +12,13 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestRouteWithOneFactor(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factor := &mockFactor{bitNum: 8, balanceCount: 1, threshold: 1}
+	factor := &mockFactor{bitNum: 8, balanceCount: 1, threshold: 1, canBeRouted: true}
 	fm.factors = []Factor{factor}
 	require.NoError(t, fm.updateBitNum())
 
@@ -71,8 +72,8 @@ func TestRouteWithOneFactor(t *testing.T) {
 func TestRouteWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1}
-	factor2 := &mockFactor{bitNum: 12, balanceCount: 1, threshold: 1}
+	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1, canBeRouted: true}
+	factor2 := &mockFactor{bitNum: 12, balanceCount: 1, threshold: 1, canBeRouted: true}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
 
@@ -143,7 +144,7 @@ func TestRouteWith2Factors(t *testing.T) {
 func TestBalanceWithOneFactor(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factor := &mockFactor{bitNum: 2, balanceCount: 1}
+	factor := &mockFactor{bitNum: 2, balanceCount: 1, canBeRouted: true}
 	fm.factors = []Factor{factor}
 	require.NoError(t, fm.updateBitNum())
 
@@ -193,8 +194,8 @@ func TestBalanceWithOneFactor(t *testing.T) {
 func TestBalanceWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factor1 := &mockFactor{bitNum: 2, balanceCount: 2, threshold: 1}
-	factor2 := &mockFactor{bitNum: 12, balanceCount: 1}
+	factor1 := &mockFactor{bitNum: 2, balanceCount: 2, threshold: 1, canBeRouted: true}
+	factor2 := &mockFactor{bitNum: 12, balanceCount: 1, canBeRouted: true}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
 
@@ -280,7 +281,7 @@ func TestBalanceWith2Factors(t *testing.T) {
 func TestBalanceWith3Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factors := []*mockFactor{{bitNum: 1}, {bitNum: 2}, {bitNum: 2}}
+	factors := []*mockFactor{{bitNum: 1, canBeRouted: true}, {bitNum: 2, canBeRouted: true}, {bitNum: 2, canBeRouted: true}}
 	fm.factors = []Factor{factors[0], factors[1], factors[2]}
 	require.NoError(t, fm.updateBitNum())
 
@@ -333,7 +334,7 @@ func TestBalanceWith3Factors(t *testing.T) {
 func TestScoreAlwaysUpdated(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factors := []*mockFactor{{bitNum: 1}, {bitNum: 2}}
+	factors := []*mockFactor{{bitNum: 1, canBeRouted: true}, {bitNum: 2, canBeRouted: true}}
 	fm.factors = []Factor{factors[0], factors[1]}
 	factors[0].updateScore = func(backends []scoredBackend) {
 		for i := 0; i < len(backends); i++ {
@@ -375,14 +376,14 @@ func TestSetFactors(t *testing.T) {
 			setFunc: func(balance *config.Balance) {
 				balance.LabelName = "group"
 			},
-			expectedNames: []string{"status", "label", "health", "memory", "cpu", "location", "conn"},
+			expectedNames: []string{"label", "status", "health", "memory", "cpu", "location", "conn"},
 		},
 		{
 			setFunc: func(balance *config.Balance) {
 				balance.Policy = config.BalancePolicyLocation
 				balance.LabelName = "group"
 			},
-			expectedNames: []string{"status", "label", "location", "health", "memory", "cpu", "conn"},
+			expectedNames: []string{"label", "status", "location", "health", "memory", "cpu", "conn"},
 		},
 		{
 			setFunc: func(balance *config.Balance) {
@@ -395,7 +396,7 @@ func TestSetFactors(t *testing.T) {
 				balance.Policy = config.BalancePolicyConnection
 				balance.LabelName = "group"
 			},
-			expectedNames: []string{"status", "label", "conn"},
+			expectedNames: []string{"label", "status", "conn"},
 		},
 	}
 
@@ -416,4 +417,57 @@ func TestSetFactors(t *testing.T) {
 		}
 	}
 	fm.Close()
+}
+
+func TestCanBeRouted(t *testing.T) {
+	fm := NewFactorBasedBalance(zap.NewNop(), newMockMetricsReader())
+	factor1 := &mockFactor{bitNum: 2, balanceCount: 1, canBeRouted: false}
+	factor2 := &mockFactor{bitNum: 2, balanceCount: 1, canBeRouted: true}
+	fm.factors = []Factor{factor1, factor2}
+	require.NoError(t, fm.updateBitNum())
+
+	tests := []struct {
+		scores1 []int
+		scores2 []int
+		routed  bool
+	}{
+		{
+			scores1: []int{1, 0},
+			scores2: []int{0, 0},
+			routed:  true,
+		},
+		{
+			scores1: []int{1, 1},
+			scores2: []int{1, 0},
+			routed:  false,
+		},
+		{
+			scores1: []int{0, 0},
+			scores2: []int{2, 1},
+			routed:  true,
+		},
+		{
+			scores1: []int{2, 1},
+			scores2: []int{0, 0},
+			routed:  false,
+		},
+	}
+	for tIdx, test := range tests {
+		factor1.updateScore = func(backends []scoredBackend) {
+			for i := 0; i < len(backends); i++ {
+				backends[i].addScore(test.scores1[i], factor1.bitNum)
+			}
+		}
+		factor2.updateScore = func(backends []scoredBackend) {
+			for i := 0; i < len(backends); i++ {
+				backends[i].addScore(test.scores2[i], factor2.bitNum)
+			}
+		}
+		backends := createBackends(len(test.scores1))
+		_, _, count, _, _ := fm.BackendsToBalance(backends)
+		require.Equal(t, test.routed, count > 0, "test index %d", tIdx)
+		backends = createBackends(len(test.scores1))
+		b := fm.BackendToRoute(backends)
+		require.Equal(t, test.routed, b != nil, "test index %d", tIdx)
+	}
 }

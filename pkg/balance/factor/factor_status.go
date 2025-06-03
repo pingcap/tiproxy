@@ -107,5 +107,9 @@ func (fs *FactorStatus) BalanceCount(from, to scoredBackend) (float64, []zap.Fie
 func (fs *FactorStatus) SetConfig(cfg *config.Config) {
 }
 
+func (fl *FactorStatus) CanBeRouted(score uint64) bool {
+	return score == 0
+}
+
 func (fs *FactorStatus) Close() {
 }

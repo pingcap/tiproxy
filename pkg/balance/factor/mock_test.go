@@ -69,6 +69,7 @@ type mockFactor struct {
 	balanceCount float64
 	updateScore  func(backends []scoredBackend)
 	cfg          *config.Config
+	canBeRouted  bool
 }
 
 func (mf *mockFactor) Name() string {
@@ -99,6 +100,13 @@ func (mf *mockFactor) BalanceCount(from, to scoredBackend) (float64, []zap.Field
 
 func (mf *mockFactor) SetConfig(cfg *config.Config) {
 	mf.cfg = cfg
+}
+
+func (mf *mockFactor) CanBeRouted(score uint64) bool {
+	if mf.canBeRouted {
+		return true
+	}
+	return score == 0
 }
 
 func (mf *mockFactor) Close() {

@@ -288,6 +288,10 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) (float64, []zap.Fie
 func (fm *FactorMemory) SetConfig(cfg *config.Config) {
 }
 
+func (fm *FactorMemory) CanBeRouted(_ uint64) bool {
+	return true
+}
+
 func (fm *FactorMemory) Close() {
 	fm.mr.RemoveQueryExpr(fm.Name())
 }
