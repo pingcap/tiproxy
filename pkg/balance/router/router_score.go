@@ -366,7 +366,7 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	}
 	// Migrate balanceCount connections.
 	i := 0
-	for ele := fromBackend.connList.Front(); ele != nil && ctx.Err() != nil; ele = ele.Next() {
+	for ele := fromBackend.connList.Front(); ele != nil && ctx.Err() == nil && i < count; ele = ele.Next() {
 		conn := ele.Value
 		switch conn.phase {
 		case phaseRedirectNotify:
@@ -381,9 +381,6 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 		if router.redirectConn(conn, fromBackend, toBackend, reason, logFields, curTime) {
 			router.lastRedirectTime = curTime
 			i++
-			if i >= count {
-				break
-			}
 		}
 	}
 }
@@ -391,8 +388,8 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toBackend *backendWrapper,
 	reason string, logFields []zap.Field, curTime time.Time) bool {
 	// Skip the connection if it's closing.
-	var succeed bool
-	if conn.Redirect(toBackend) {
+	succeed := conn.Redirect(toBackend)
+	if succeed {
 		fields := []zap.Field{
 			zap.Uint64("connID", conn.ConnectionID()),
 			zap.String("from", fromBackend.addr),
@@ -407,12 +404,10 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 		conn.phase = phaseRedirectNotify
 		conn.redirectReason = reason
 		metrics.PendingMigrateGuage.WithLabelValues(fromBackend.addr, toBackend.addr, reason).Inc()
-		succeed = true
 	} else {
 		// Avoid it to be redirected again immediately.
 		conn.phase = phaseRedirectFail
 		router.logger.Debug("redirect connection failed because it's closing", zap.Time("create_time", conn.createTime))
-		succeed = false
 	}
 	conn.lastRedirect = curTime
 	return succeed
