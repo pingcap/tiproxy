@@ -137,6 +137,8 @@ type BackendConnManager struct {
 	redirectResCh chan *redirectResult
 	// GracefulClose() sets it without lock.
 	closeStatus atomic.Int32
+	// The time when the connection was created.
+	createTime time.Time
 	// The last time when the backend is active.
 	lastActiveTime time.Time
 	// The traffic recorded last time.
@@ -197,6 +199,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 		return errors.New("graceful shutdown before connecting")
 	}
 	startTime := time.Now()
+	mgr.createTime = startTime
 	var err error
 	if len(username) == 0 {
 		// real client
@@ -848,6 +851,8 @@ func (mgr *BackendConnManager) ConnInfo() []zap.Field {
 		fields = mgr.authenticator.ConnInfo()
 	}
 	mgr.processLock.Unlock()
-	fields = append(fields, zap.String("backend_addr", mgr.ServerAddr()))
+	fields = append(fields, zap.String("backend_addr", mgr.ServerAddr()),
+		zap.Time("create_time", mgr.createTime),
+		zap.Time("last_active_time", mgr.lastActiveTime))
 	return fields
 }

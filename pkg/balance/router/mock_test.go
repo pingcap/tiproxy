@@ -14,6 +14,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -78,6 +79,10 @@ func (conn *mockRedirectableConn) GetRedirectingAddr() string {
 
 func (conn *mockRedirectableConn) ConnectionID() uint64 {
 	return conn.connID
+}
+
+func (conn *mockRedirectableConn) ConnInfo() []zap.Field {
+	return nil
 }
 
 func (conn *mockRedirectableConn) getAddr() (string, string) {
