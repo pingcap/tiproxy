@@ -364,41 +364,38 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 		}
 	}
 	// Migrate balanceCount connections.
-	for i := 0; i < count && ctx.Err() == nil; i++ {
-		var ce *glist.Element[*connWrapper]
-		for ele := fromBackend.connList.Front(); ele != nil; ele = ele.Next() {
-			conn := ele.Value
-			switch conn.phase {
-			case phaseRedirectNotify:
-				// A connection cannot be redirected again when it has not finished redirecting.
+	i := 0
+	for ele := fromBackend.connList.Front(); ele != nil && ctx.Err() == nil && i < count; ele = ele.Next() {
+		conn := ele.Value
+		switch conn.phase {
+		case phaseRedirectNotify:
+			// A connection cannot be redirected again when it has not finished redirecting.
+			continue
+		case phaseRedirectFail:
+			// If it failed recently, it will probably fail this time.
+			if conn.lastRedirect.Add(redirectFailMinInterval).After(curTime) {
 				continue
-			case phaseRedirectFail:
-				// If it failed recently, it will probably fail this time.
-				if conn.lastRedirect.Add(redirectFailMinInterval).After(curTime) {
-					continue
-				}
 			}
-			ce = ele
-			break
 		}
-		if ce == nil {
-			break
+		if router.redirectConn(conn, fromBackend, toBackend, reason, logFields, curTime) {
+			router.lastRedirectTime = curTime
+			i++
 		}
-		router.redirectConn(ce.Value, fromBackend, toBackend, reason, logFields, curTime)
-		router.lastRedirectTime = curTime
 	}
 }
 
 func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toBackend *backendWrapper,
-	reason string, logFields []zap.Field, curTime time.Time) {
+	reason string, logFields []zap.Field, curTime time.Time) bool {
 	// Skip the connection if it's closing.
-	if conn.Redirect(toBackend) {
-		fields := []zap.Field{
-			zap.Uint64("connID", conn.ConnectionID()),
-			zap.String("from", fromBackend.addr),
-			zap.String("to", toBackend.addr),
-		}
-		fields = append(fields, logFields...)
+	fields := []zap.Field{
+		zap.Uint64("connID", conn.ConnectionID()),
+		zap.String("from", fromBackend.addr),
+		zap.String("to", toBackend.addr),
+	}
+	fields = append(fields, logFields...)
+	fields = append(fields, conn.ConnInfo()...)
+	succeed := conn.Redirect(toBackend)
+	if succeed {
 		router.logger.Debug("begin redirect connection", fields...)
 		fromBackend.connScore--
 		router.removeBackendIfEmpty(fromBackend)
@@ -409,8 +406,10 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 	} else {
 		// Avoid it to be redirected again immediately.
 		conn.phase = phaseRedirectFail
+		router.logger.Debug("skip redirecting because it's closing", fields...)
 	}
 	conn.lastRedirect = curTime
+	return succeed
 }
 
 func (router *ScoreBasedRouter) removeBackendIfEmpty(backend *backendWrapper) bool {
