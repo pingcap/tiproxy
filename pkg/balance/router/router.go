@@ -10,6 +10,7 @@ import (
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"go.uber.org/zap"
 )
 
 var (
@@ -69,6 +70,7 @@ type RedirectableConn interface {
 	// Redirect returns false if the current conn is not redirectable.
 	Redirect(backend BackendInst) bool
 	ConnectionID() uint64
+	ConnInfo() []zap.Field
 }
 
 // BackendInst defines a backend that a connection is redirecting to.
