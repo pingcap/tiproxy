@@ -844,6 +844,7 @@ func (mgr *BackendConnManager) UpdateLogger(fields ...zap.Field) {
 }
 
 // ConnInfo returns detailed info of the connection, which should not be logged too many times.
+// Be careful about deadlocks.
 func (mgr *BackendConnManager) ConnInfo() []zap.Field {
 	mgr.processLock.Lock()
 	var fields []zap.Field
