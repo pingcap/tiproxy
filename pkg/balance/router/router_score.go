@@ -393,7 +393,6 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 		zap.String("to", toBackend.addr),
 	}
 	fields = append(fields, logFields...)
-	fields = append(fields, conn.ConnInfo()...)
 	succeed := conn.Redirect(toBackend)
 	if succeed {
 		router.logger.Debug("begin redirect connection", fields...)
