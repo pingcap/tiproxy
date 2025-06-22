@@ -110,6 +110,13 @@ func (b *backendWrapper) setHealth(health observer.BackendHealth) {
 	b.mu.Unlock()
 }
 
+func (b *backendWrapper) getHealth() observer.BackendHealth {
+	b.mu.RLock()
+	health := b.mu.BackendHealth
+	b.mu.RUnlock()
+	return health
+}
+
 func (b *backendWrapper) ConnScore() int {
 	return b.connScore
 }

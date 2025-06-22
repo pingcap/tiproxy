@@ -5,6 +5,8 @@ package observer
 
 import (
 	"fmt"
+	"maps"
+	"strings"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -42,18 +44,34 @@ func (bh *BackendHealth) setLocal(cfg *config.Config) {
 	bh.Local = false
 }
 
+func (bh *BackendHealth) Equals(other BackendHealth) bool {
+	return bh.BackendInfo.Equals(other.BackendInfo) &&
+		bh.Healthy == other.Healthy &&
+		bh.ServerVersion == other.ServerVersion &&
+		bh.SupportRedirection == other.SupportRedirection
+}
+
 func (bh *BackendHealth) String() string {
-	str := "down"
+	var sb strings.Builder
 	if bh.Healthy {
-		str = "healthy"
+		_, _ = sb.WriteString("healthy")
+	} else {
+		_, _ = sb.WriteString("down")
 	}
 	if bh.PingErr != nil {
-		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
+		_, _ = sb.WriteString(fmt.Sprintf(", err: %s", bh.PingErr.Error()))
 	}
 	if !bh.SupportRedirection {
-		str += ", support redirection: false"
+		_, _ = sb.WriteString(", support redirection: false")
 	}
-	return str
+	if len(bh.ServerVersion) > 0 {
+		_, _ = sb.WriteString(", version: ")
+		_, _ = sb.WriteString(bh.ServerVersion)
+	}
+	if bh.Labels != nil {
+		_, _ = sb.WriteString(fmt.Sprintf(", labels: %v", bh.Labels))
+	}
+	return sb.String()
 }
 
 // BackendInfo stores the status info of each backend.
@@ -61,6 +79,12 @@ type BackendInfo struct {
 	Labels     map[string]string
 	IP         string
 	StatusPort uint
+}
+
+func (bi BackendInfo) Equals(other BackendInfo) bool {
+	return bi.IP == other.IP &&
+		bi.StatusPort == other.StatusPort &&
+		maps.Equal(bi.Labels, other.Labels)
 }
 
 // HealthResult contains the health check results and is used to notify the routers.
