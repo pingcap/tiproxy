@@ -19,11 +19,10 @@ func TestBackendHealthToString(t *testing.T) {
 				StatusPort: 1,
 				Labels:     map[string]string{"k1": "v1", "k2": "v2"},
 			},
-			Healthy:            true,
-			PingErr:            errors.New("mock error"),
-			ServerVersion:      "v1.0.0",
-			SupportRedirection: true,
-			Local:              true,
+			Healthy:       true,
+			PingErr:       errors.New("mock error"),
+			ServerVersion: "v1.0.0",
+			Local:         true,
 		},
 	}
 	// Just test no error happens
@@ -82,11 +81,10 @@ func TestBackendHealthEquals(t *testing.T) {
 					StatusPort: 1,
 					Labels:     map[string]string{"k1": "v1", "k2": "v2"},
 				},
-				Healthy:            true,
-				PingErr:            errors.New("mock error"),
-				ServerVersion:      "v1.0.0",
-				SupportRedirection: true,
-				Local:              true,
+				Healthy:       true,
+				PingErr:       errors.New("mock error"),
+				ServerVersion: "v1.0.0",
+				Local:         true,
 			},
 			b:     BackendHealth{},
 			equal: false,
@@ -97,15 +95,6 @@ func TestBackendHealthEquals(t *testing.T) {
 			},
 			b: BackendHealth{
 				ServerVersion: "v1.1.0",
-			},
-			equal: false,
-		},
-		{
-			a: BackendHealth{
-				SupportRedirection: true,
-			},
-			b: BackendHealth{
-				SupportRedirection: false,
 			},
 			equal: false,
 		},

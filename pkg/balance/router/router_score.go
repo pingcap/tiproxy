@@ -299,14 +299,6 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 			router.backends[addr] = newBackendWrapper(addr, *health)
 			serverVersion = health.ServerVersion
 		} else if ok {
-<<<<<<< HEAD
-			if !backend.Equals(*health) {
-				backend.setHealth(*health)
-				router.removeBackendIfEmpty(backend)
-				if health.Healthy {
-					serverVersion = health.ServerVersion
-				}
-=======
 			if !health.Equals(backend.getHealth()) {
 				router.logger.Debug("update backend in router", zap.String("addr", addr), zap.Stringer("health", health))
 			}
@@ -314,7 +306,6 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 			router.removeBackendIfEmpty(backend)
 			if health.Healthy {
 				serverVersion = health.ServerVersion
->>>>>>> c0ac6e4 (factor, router: routing fails when there's only one backend with a different label (#820))
 			}
 		} else {
 			router.logger.Debug("unhealthy backend is not in router", zap.String("addr", addr), zap.Stringer("health", health))
