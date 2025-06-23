@@ -285,6 +285,8 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	// If some backends are removed from the list, add them to `backends`.
 	for addr, backend := range router.backends {
 		if _, ok := backends[addr]; !ok {
+			health := backend.getHealth()
+			router.logger.Debug("backend is removed from the list, add it back to router", zap.String("addr", addr), zap.Stringer("health", &health))
 			backends[addr] = &observer.BackendHealth{
 				BackendInfo:        backend.GetBackendInfo(),
 				SupportRedirection: backend.SupportRedirection(),
@@ -298,14 +300,20 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	for addr, health := range backends {
 		backend, ok := router.backends[addr]
 		if !ok && health.Healthy {
+			router.logger.Debug("add new backend to router", zap.String("addr", addr), zap.Stringer("health", health))
 			router.backends[addr] = newBackendWrapper(addr, *health)
 			serverVersion = health.ServerVersion
 		} else if ok {
+			if !health.Equals(backend.getHealth()) {
+				router.logger.Debug("update backend in router", zap.String("addr", addr), zap.Stringer("health", health))
+			}
 			backend.setHealth(*health)
 			router.removeBackendIfEmpty(backend)
 			if health.Healthy {
 				serverVersion = health.ServerVersion
 			}
+		} else {
+			router.logger.Debug("unhealthy backend is not in router", zap.String("addr", addr), zap.Stringer("health", health))
 		}
 		supportRedirection = health.SupportRedirection && supportRedirection
 	}

@@ -53,11 +53,7 @@ func TestFactorLabelOneBackend(t *testing.T) {
 		backendCtx := &mockBackend{
 			BackendInfo: observer.BackendInfo{Labels: backendLabels},
 		}
-		// Create 2 backends so that UpdateScore won't skip calculating scores.
 		backends := []scoredBackend{
-			{
-				BackendCtx: backendCtx,
-			},
 			{
 				BackendCtx: backendCtx,
 			},
@@ -75,6 +71,7 @@ func TestFactorLabelOneBackend(t *testing.T) {
 		factor.UpdateScore(backends)
 		for _, backend := range backends {
 			require.Equal(t, test.expectedScore, backend.score(), "test idx: %d", i)
+			require.Equal(t, test.expectedScore == 0, factor.CanBeRouted(backend.score()), "test idx: %d", i)
 		}
 	}
 }
@@ -133,5 +130,6 @@ func TestFactorLabelMultiBackends(t *testing.T) {
 	factor.UpdateScore(backends)
 	for i, test := range tests {
 		require.Equal(t, test.expectedScore, backends[i].score(), "test idx: %d", i)
+		require.Equal(t, test.expectedScore == 0, factor.CanBeRouted(backends[i].score()), "test idx: %d", i)
 	}
 }

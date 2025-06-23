@@ -177,6 +177,11 @@ func (fbb *FactorBasedBalance) updateScore(backends []policy.BackendCtx) []score
 
 // BackendToRoute returns one backend to route a new connection to.
 func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) policy.BackendCtx {
+	fields := []zap.Field{zap.Int("backend_num", len(backends))}
+	defer func() {
+		fbb.lg.Debug("route", fields...)
+	}()
+
 	if len(backends) == 0 {
 		return nil
 	}
@@ -184,16 +189,15 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	fbb.Lock()
 	defer fbb.Unlock()
 	scoredBackends := fbb.updateScore(backends)
+	for _, backend := range scoredBackends {
+		fields = append(fields, zap.String(backend.Addr(), strconv.FormatUint(backend.scoreBits, 16)))
+	}
 	if !fbb.canBeRouted(scoredBackends[0].scoreBits) {
 		return nil
 	}
 	if len(backends) == 1 {
+		fields = append(fields, zap.String("target", backends[0].Addr()))
 		return backends[0]
-	}
-
-	var fields []zap.Field
-	for _, backend := range scoredBackends {
-		fields = append(fields, zap.String(backend.Addr(), strconv.FormatUint(backend.scoreBits, 16)))
 	}
 
 	// Evict the backends that are so busy that it should migrate connections to another, and then randomly choose one.
@@ -234,7 +238,6 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 		idx = idxes[int(time.Now().UnixMicro()%int64(len(idxes)))]
 	}
 	fields = append(fields, zap.String("target", scoredBackends[idx].Addr()), zap.Ints("rand", idxes))
-	fbb.lg.Debug("route", fields...)
 	return scoredBackends[idx].BackendCtx
 }
 
