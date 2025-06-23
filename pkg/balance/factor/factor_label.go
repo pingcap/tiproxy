@@ -35,7 +35,8 @@ func (fl *FactorLabel) Name() string {
 }
 
 func (fl *FactorLabel) UpdateScore(backends []scoredBackend) {
-	if len(fl.labelName) == 0 || len(fl.selfLabelVal) == 0 || len(backends) <= 1 {
+	// The score will be used for CanBeRouted so don't skip updating even when only one backend.
+	if len(fl.labelName) == 0 || len(fl.selfLabelVal) == 0 {
 		return
 	}
 	for i := 0; i < len(backends); i++ {
@@ -53,7 +54,12 @@ func (fl *FactorLabel) ScoreBitNum() int {
 }
 
 func (fl *FactorLabel) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
-	return balanceCount4Label, nil
+	fields := []zap.Field{
+		zap.String("label_key", fl.labelName),
+		zap.Any("from_labels", from.GetBackendInfo().Labels),
+		zap.String("self_label_value", fl.selfLabelVal),
+	}
+	return balanceCount4Label, fields
 }
 
 func (fl *FactorLabel) SetConfig(cfg *config.Config) {
