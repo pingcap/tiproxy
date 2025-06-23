@@ -5,6 +5,7 @@ package observer
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"time"
 
@@ -193,14 +194,13 @@ func (bo *DefaultBackendObserver) updateHealthResult(result HealthResult) {
 			continue
 		}
 		if oldHealth, ok := bo.curBackends[addr]; !ok || !oldHealth.Healthy {
-			prev := "none"
-			if oldHealth != nil {
-				prev = oldHealth.String()
-			}
-			bo.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev", prev), zap.String("cur", newHealth.String()))
+			bo.logger.Info("update backend", zap.String("addr", addr), zap.Stringer("prev", oldHealth), zap.Stringer("cur", newHealth),
+				zap.Int("total", len(bo.curBackends)))
 			updateBackendStatusMetrics(addr, true)
 			delete(bo.downBackends, addr)
+		} else if ok && !maps.Equal(oldHealth.Labels, newHealth.Labels) {
+			bo.logger.Info("update backend labels", zap.String("addr", addr),
+				zap.Any("prev", oldHealth.Labels), zap.Any("cur", newHealth.Labels))
 		}
 	}
 	for addr, oldHealth := range bo.curBackends {
@@ -208,12 +208,8 @@ func (bo *DefaultBackendObserver) updateHealthResult(result HealthResult) {
 			continue
 		}
 		if newHealth, ok := result.backends[addr]; !ok || !newHealth.Healthy {
-			cur := "not in list"
-			if newHealth != nil {
-				cur = newHealth.String()
-			}
-			bo.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev", oldHealth.String()), zap.String("cur", cur))
+			bo.logger.Info("update backend", zap.String("addr", addr), zap.Stringer("prev", oldHealth), zap.Stringer("cur", newHealth),
+				zap.Int("total", len(bo.curBackends)))
 			updateBackendStatusMetrics(addr, false)
 			bo.downBackends[addr] = time.Now()
 		}

@@ -5,6 +5,12 @@ package observer
 
 import (
 	"fmt"
+<<<<<<< HEAD
+=======
+	"maps"
+	"strings"
+	"time"
+>>>>>>> c0ac6e4 (factor, router: routing fails when there's only one backend with a different label (#820))
 
 	"github.com/pingcap/tiproxy/lib/config"
 )
@@ -37,19 +43,43 @@ func (bh *BackendHealth) setLocal(cfg *config.Config) {
 	bh.Local = false
 }
 
+<<<<<<< HEAD
 func (bh *BackendHealth) Equals(health BackendHealth) bool {
 	return bh.Healthy == health.Healthy && bh.ServerVersion == health.ServerVersion && bh.Local == health.Local
+=======
+func (bh *BackendHealth) Equals(other BackendHealth) bool {
+	return bh.BackendInfo.Equals(other.BackendInfo) &&
+		bh.Healthy == other.Healthy &&
+		bh.ServerVersion == other.ServerVersion &&
+		bh.SupportRedirection == other.SupportRedirection
+>>>>>>> c0ac6e4 (factor, router: routing fails when there's only one backend with a different label (#820))
 }
 
 func (bh *BackendHealth) String() string {
-	str := "down"
+	var sb strings.Builder
 	if bh.Healthy {
-		str = "healthy"
+		_, _ = sb.WriteString("healthy")
+	} else {
+		_, _ = sb.WriteString("down")
 	}
 	if bh.PingErr != nil {
-		str += fmt.Sprintf(", err: %s", bh.PingErr.Error())
+		_, _ = sb.WriteString(fmt.Sprintf(", err: %s", bh.PingErr.Error()))
 	}
+<<<<<<< HEAD
 	return str
+=======
+	if !bh.SupportRedirection {
+		_, _ = sb.WriteString(", support redirection: false")
+	}
+	if len(bh.ServerVersion) > 0 {
+		_, _ = sb.WriteString(", version: ")
+		_, _ = sb.WriteString(bh.ServerVersion)
+	}
+	if bh.Labels != nil {
+		_, _ = sb.WriteString(fmt.Sprintf(", labels: %v", bh.Labels))
+	}
+	return sb.String()
+>>>>>>> c0ac6e4 (factor, router: routing fails when there's only one backend with a different label (#820))
 }
 
 // BackendInfo stores the status info of each backend.
@@ -57,6 +87,12 @@ type BackendInfo struct {
 	Labels     map[string]string
 	IP         string
 	StatusPort uint
+}
+
+func (bi BackendInfo) Equals(other BackendInfo) bool {
+	return bi.IP == other.IP &&
+		bi.StatusPort == other.StatusPort &&
+		maps.Equal(bi.Labels, other.Labels)
 }
 
 // HealthResult contains the health check results and is used to notify the routers.
