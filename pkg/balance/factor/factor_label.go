@@ -53,13 +53,13 @@ func (fl *FactorLabel) ScoreBitNum() int {
 	return fl.bitNum
 }
 
-func (fl *FactorLabel) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
+func (fl *FactorLabel) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
 	fields := []zap.Field{
 		zap.String("label_key", fl.labelName),
 		zap.Any("from_labels", from.GetBackendInfo().Labels),
 		zap.String("self_label_value", fl.selfLabelVal),
 	}
-	return balanceCount4Label, fields
+	return AdvicePositive, balanceCount4Label, fields
 }
 
 func (fl *FactorLabel) SetConfig(cfg *config.Config) {

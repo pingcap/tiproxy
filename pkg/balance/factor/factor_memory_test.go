@@ -225,7 +225,8 @@ func TestMemoryBalance(t *testing.T) {
 			return backends[i].score() < backends[j].score()
 		})
 		from, to := backends[len(backends)-1], backends[0]
-		balanceCount, _ := fm.BalanceCount(from, to)
+		advice, balanceCount, _ := fm.BalanceCount(from, to)
+		require.Equal(t, test.balanced, advice == AdviceNeutral)
 		require.EqualValues(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
@@ -344,7 +345,8 @@ func TestMemoryBalanceCount(t *testing.T) {
 		if test.riskLevel == 0 {
 			continue
 		}
-		count, _ := fs.BalanceCount(backends[0], backends[1])
+		advice, count, _ := fs.BalanceCount(backends[0], backends[1])
+		require.Equal(t, AdvicePositive, advice)
 		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }
@@ -401,7 +403,8 @@ func TestMissBackendInMemory(t *testing.T) {
 		Value:      model.Matrix(values),
 	}
 	fm.UpdateScore(backends)
-	count, _ := fm.BalanceCount(backends[0], backends[1])
+	advice, count, _ := fm.BalanceCount(backends[0], backends[1])
+	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4HighMemory, count)
 
 	// Miss the first backend but the snapshot should be preserved.
@@ -409,6 +412,7 @@ func TestMissBackendInMemory(t *testing.T) {
 	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
 	unhealthyBackend.connScore = 50
 	fm.UpdateScore(backends)
-	count, _ = fm.BalanceCount(backends[0], backends[1])
+	advice, count, _ = fm.BalanceCount(backends[0], backends[1])
+	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4HighMemory, count)
 }

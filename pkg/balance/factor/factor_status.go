@@ -100,8 +100,8 @@ func (fs *FactorStatus) ScoreBitNum() int {
 	return fs.bitNum
 }
 
-func (fs *FactorStatus) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
-	return fs.snapshot[from.Addr()].balanceCount, nil
+func (fs *FactorStatus) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
+	return AdvicePositive, fs.snapshot[from.Addr()].balanceCount, nil
 }
 
 func (fs *FactorStatus) SetConfig(cfg *config.Config) {

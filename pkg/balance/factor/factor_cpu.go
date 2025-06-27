@@ -21,8 +21,9 @@ const (
 	cpuMetricExpDuration = 2 * time.Minute
 	cpuScoreStep         = 5
 	// 0.001 represents for 0.1%
-	minCpuPerConn    = 0.001
-	cpuBalancedRatio = 1.2
+	minCpuPerConn      = 0.001
+	cpuBalancedRatio   = 1.2
+	cpuUnbalancedRatio = 1.1
 	// If the CPU difference of 2 backends is 30% and we're narrowing it to 20% in 30 seconds,
 	// then in each round, we migrate ((30% - 20%) / 2) / usagePerConn / 30 = 1 / usagePerConn / 600 connections.
 	balanceRatio4Cpu = 600
@@ -246,7 +247,7 @@ func (fc *FactorCPU) ScoreBitNum() int {
 	return fc.bitNum
 }
 
-func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
+func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
 	fromAvgUsage, fromLatestUsage := fc.getUsage(from)
 	toAvgUsage, toLatestUsage := fc.getUsage(to)
 	fields := []zap.Field{
@@ -260,13 +261,18 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (float64, []zap.Field)
 		zap.Int("to_conn", to.ConnScore()),
 		zap.Float64("usage_per_conn", fc.usagePerConn),
 	}
+	// Reject migration if it will make the target backend even much busier than the source.
+	if (1.3-(toAvgUsage+fc.usagePerConn))*cpuUnbalancedRatio < 1.3-(fromAvgUsage-fc.usagePerConn) ||
+		(1.3-(toLatestUsage+fc.usagePerConn))*cpuUnbalancedRatio < 1.3-(fromLatestUsage-fc.usagePerConn) {
+		return AdviceNegtive, 0, fields
+	}
 	// The higher the CPU usage, the more sensitive the load balance should be.
 	// E.g. 10% vs 25% don't need rebalance, but 80% vs 95% need rebalance.
 	// Use the average usage to avoid thrash when CPU jitters too much and use the latest usage to avoid migrate too many connections.
 	if 1.3-toAvgUsage < (1.3-fromAvgUsage)*cpuBalancedRatio || 1.3-toLatestUsage < (1.3-fromLatestUsage)*cpuBalancedRatio {
-		return 0, nil
+		return AdviceNeutral, 0, nil
 	}
-	return 1 / fc.usagePerConn / balanceRatio4Cpu, fields
+	return AdvicePositive, 1 / fc.usagePerConn / balanceRatio4Cpu, fields
 }
 
 func (fc *FactorCPU) SetConfig(cfg *config.Config) {

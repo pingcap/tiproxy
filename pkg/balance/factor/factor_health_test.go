@@ -163,7 +163,8 @@ func TestHealthBalance(t *testing.T) {
 			return backends[i].score() < backends[j].score()
 		})
 		from, to := backends[len(backends)-1], backends[0]
-		balanceCount, _ := fh.BalanceCount(from, to)
+		advice, balanceCount, _ := fh.BalanceCount(from, to)
+		require.Equal(t, test.balanced, advice == AdviceNeutral, "test index %d", i)
 		require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
@@ -286,7 +287,8 @@ func TestHealthBalanceCount(t *testing.T) {
 		if test.count == 0 {
 			continue
 		}
-		count, _ := fh.BalanceCount(backends[0], backends[1])
+		advice, count, _ := fh.BalanceCount(backends[0], backends[1])
+		require.Equal(t, AdvicePositive, advice)
 		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }
@@ -373,7 +375,8 @@ func TestMissBackendInHealth(t *testing.T) {
 		Value:      model.Vector(values),
 	}
 	fh.UpdateScore(backends)
-	count, _ := fh.BalanceCount(backends[0], backends[1])
+	advice, count, _ := fh.BalanceCount(backends[0], backends[1])
+	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4Health, count)
 
 	// Miss the first backend but the snapshot should be preserved.
@@ -381,6 +384,7 @@ func TestMissBackendInHealth(t *testing.T) {
 	unhealthyBackend := backends[0].BackendCtx.(*mockBackend)
 	unhealthyBackend.connScore = 50
 	fh.UpdateScore(backends)
-	count, _ = fh.BalanceCount(backends[0], backends[1])
+	advice, count, _ = fh.BalanceCount(backends[0], backends[1])
+	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4Health, count)
 }
