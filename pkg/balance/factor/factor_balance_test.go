@@ -475,6 +475,51 @@ func TestCanBeRouted(t *testing.T) {
 	}
 }
 
+func TestCanBalance(t *testing.T) {
+	fm := NewFactorBasedBalance(zap.NewNop(), newMockMetricsReader())
+	factor1 := &mockFactor{bitNum: 2, balanceCount: 1, advice: AdviceNegtive}
+	factor2 := &mockFactor{bitNum: 2, balanceCount: 1}
+	fm.factors = []Factor{factor1, factor2}
+	require.NoError(t, fm.updateBitNum())
+
+	tests := []struct {
+		scores1  []int
+		scores2  []int
+		balanced bool
+	}{
+		{
+			scores1:  []int{1, 0},
+			scores2:  []int{0, 0},
+			balanced: false,
+		},
+		{
+			scores1:  []int{1, 1},
+			scores2:  []int{1, 0},
+			balanced: false,
+		},
+		{
+			scores1:  []int{1, 1},
+			scores2:  []int{1, 1},
+			balanced: false,
+		},
+	}
+	for tIdx, test := range tests {
+		factor1.updateScore = func(backends []scoredBackend) {
+			for i := 0; i < len(backends); i++ {
+				backends[i].addScore(test.scores1[i], factor1.bitNum)
+			}
+		}
+		factor2.updateScore = func(backends []scoredBackend) {
+			for i := 0; i < len(backends); i++ {
+				backends[i].addScore(test.scores2[i], factor2.bitNum)
+			}
+		}
+		backends := createBackends(len(test.scores1))
+		_, _, count, _, _ := fm.BackendsToBalance(backends)
+		require.Equal(t, test.balanced, count > 0, "test index %d", tIdx)
+	}
+}
+
 func TestSetFactorConcurrently(t *testing.T) {
 	fbb := NewFactorBasedBalance(zap.NewNop(), newMockMetricsReader())
 	var wg waitgroup.WaitGroup

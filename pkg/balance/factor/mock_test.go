@@ -69,6 +69,7 @@ type mockFactor struct {
 	balanceCount float64
 	updateScore  func(backends []scoredBackend)
 	cfg          *config.Config
+	advice       BalanceAdvice
 	canBeRouted  bool
 }
 
@@ -90,12 +91,15 @@ func (mf *mockFactor) ScoreBitNum() int {
 	return mf.bitNum
 }
 
-func (mf *mockFactor) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
+func (mf *mockFactor) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
 	fromScore, toScore := mf.scores[from.Addr()], mf.scores[to.Addr()]
-	if fromScore-toScore > mf.threshold {
-		return mf.balanceCount, nil
+	if mf.advice == AdviceNegtive {
+		return AdviceNegtive, 0, nil
 	}
-	return 0, nil
+	if fromScore-toScore > mf.threshold {
+		return AdvicePositive, mf.balanceCount, nil
+	}
+	return AdviceNeutral, 0, nil
 }
 
 func (mf *mockFactor) SetConfig(cfg *config.Config) {

@@ -54,16 +54,16 @@ func (fcc *FactorConnCount) ScoreBitNum() int {
 	return fcc.bitNum
 }
 
-func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
+func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
 	if float64(from.ConnScore()) <= float64(to.ConnScore()+1)*connBalancedRatio {
-		return 0, nil
+		return AdviceNeutral, 0, nil
 	}
 	targetTo := float64(from.ConnScore()+to.ConnScore()+1) / (1 + connBalancedRatio)
 	count := (targetTo - float64(to.ConnScore()+1)) / balanceSeconds4Conn
 	if count < 0 {
 		count = 0
 	}
-	return count, nil
+	return AdvicePositive, count, nil
 }
 
 func (fcc *FactorConnCount) SetConfig(cfg *config.Config) {
