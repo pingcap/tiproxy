@@ -73,8 +73,8 @@ func TestFactorConnSpeed(t *testing.T) {
 		lastRedirectTime := 0
 		// Simulate rebalance for 5 minutes.
 		for j := 0; j < 30000; j++ {
-			balanceCount, _ := factor.BalanceCount(scoredBackend1, scoredBackend2)
-			if balanceCount < 0.0001 {
+			advice, balanceCount, _ := factor.BalanceCount(scoredBackend1, scoredBackend2)
+			if advice != AdvicePositive || balanceCount < 0.0001 {
 				break
 			}
 			migrationInterval := 100 / balanceCount

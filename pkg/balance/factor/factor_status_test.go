@@ -81,7 +81,8 @@ func TestStatusBalanceCount(t *testing.T) {
 		if test.count == 0 {
 			continue
 		}
-		count, _ := fs.BalanceCount(backends[0], backends[1])
+		advice, count, _ := fs.BalanceCount(backends[0], backends[1])
+		require.Equal(t, AdvicePositive, advice, "test idx: %d", i)
 		require.Equal(t, test.count, count, "test idx: %d", i)
 	}
 }
@@ -94,13 +95,15 @@ func TestMissBackendInStatus(t *testing.T) {
 
 	fs := NewFactorStatus(zap.NewNop())
 	fs.UpdateScore(backends)
-	count, _ := fs.BalanceCount(backends[0], backends[1])
+	advice, count, _ := fs.BalanceCount(backends[0], backends[1])
+	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4Status, count)
 
 	// Miss the first backend but the snapshot should be preserved.
 	fs.UpdateScore(backends[1:])
 	unhealthyBackend.connScore = 50
 	fs.UpdateScore(backends)
-	count, _ = fs.BalanceCount(backends[0], backends[1])
+	advice, count, _ = fs.BalanceCount(backends[0], backends[1])
+	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4Status, count)
 }
