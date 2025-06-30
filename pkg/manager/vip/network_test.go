@@ -21,18 +21,19 @@ func TestAddDelIP(t *testing.T) {
 	tests := []struct {
 		virtualIP string
 		link      string
+		addr      string
 		initErr   string
-		addErr    string
 		delErr    string
-		sendErr   string
 	}{
 		{
 			virtualIP: "127.0.0.2/24",
+			addr:      "127.0.0.2",
 			link:      "lo",
 		},
 		{
 			virtualIP: "0.0.0.0/24",
 			link:      "lo",
+			addr:      "0.0.0.0",
 			delErr:    "cannot assign requested address",
 		},
 		{
@@ -55,27 +56,18 @@ func TestAddDelIP(t *testing.T) {
 		}
 		require.NoError(t, err, "case %d", i)
 		require.NotNil(t, operation, "case %d", i)
+		require.Equal(t, test.addr, operation.Addr(), "case %d", i)
 
 		err = operation.AddIP()
 		// Maybe the command is not installed.
-		if err != nil && isOtherErr(err) {
+		if err != nil {
+			require.True(t, isOtherErr(err))
 			continue
-		}
-		if test.addErr != "" {
-			require.Error(t, err, "case %d", i)
-			require.Contains(t, err.Error(), test.addErr, "case %d", i)
-		} else {
-			require.NoError(t, err, "case %d", i)
 		}
 
 		err = operation.SendARP()
-		if err == nil || !isOtherErr(err) {
-			if test.sendErr != "" {
-				require.Error(t, err, "case %d", i)
-				require.Contains(t, err.Error(), test.sendErr, "case %d", i)
-			} else {
-				require.NoError(t, err, "case %d", i)
-			}
+		if err != nil {
+			require.True(t, isOtherErr(err))
 		}
 
 		if err := operation.DeleteIP(); test.delErr != "" {

@@ -1297,8 +1297,7 @@ func TestElection(t *testing.T) {
 	// test owner
 	suite.delKV(ownerKey)
 	require.Eventually(t, func() bool {
-		kvs := suite.getKV(ownerKey)
-		return len(kvs) == 1 && strings.HasSuffix(string(kvs[0].Value), "3080")
+		return br.isOwner.Load()
 	}, 3*time.Second, 10*time.Millisecond)
 	err = br.ReadMetrics(context.Background())
 	require.NoError(t, err)
