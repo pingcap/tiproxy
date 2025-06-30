@@ -79,7 +79,7 @@ func TestCPUBalanceOnce(t *testing.T) {
 		backends := make([]scoredBackend, 0, len(test.cpus))
 		values := make([]*model.SampleStream, 0, len(test.cpus))
 		for j := 0; j < len(test.cpus); j++ {
-			backends = append(backends, createBackend(j, 0, 0))
+			backends = append(backends, createBackend(j, 100, 100))
 			values = append(values, createSampleStream(test.cpus[j], j, model.Now()))
 		}
 		mmr := &mockMetricsReader{
@@ -100,7 +100,8 @@ func TestCPUBalanceOnce(t *testing.T) {
 		}
 		require.Equal(t, test.scoreOrder, sortedIdx, "test index %d", i)
 		from, to := backends[len(backends)-1], backends[0]
-		balanceCount, _ := fc.BalanceCount(from, to)
+		advice, balanceCount, _ := fc.BalanceCount(from, to)
+		require.Equal(t, test.balanced, advice == AdviceNeutral, "test index %d", i)
 		require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
@@ -207,8 +208,8 @@ func TestCPUBalanceContinuously(t *testing.T) {
 				t.Fatal("balance doesn't stop")
 			}
 			updateScore(fc, backends)
-			balanceCount, _ := fc.BalanceCount(backends[len(backends)-1], backends[0])
-			if balanceCount == 0 {
+			advice, balanceCount, _ := fc.BalanceCount(backends[len(backends)-1], backends[0])
+			if advice != AdvicePositive || balanceCount == 0 {
 				break
 			}
 			count := int(balanceCount + 0.9999)
@@ -412,5 +413,55 @@ func TestCPUScore(t *testing.T) {
 			scores = append(scores, backend.scoreBits)
 		}
 		require.Equal(t, test.scores, scores, "test index %d", i)
+	}
+}
+
+func TestCPURejectBalance(t *testing.T) {
+	tests := []struct {
+		cpus   [][]float64
+		conns  []int
+		advice BalanceAdvice
+	}{
+		{
+			cpus:   [][]float64{{0.7}, {0.7}},
+			conns:  []int{10, 10},
+			advice: AdviceNegtive,
+		},
+		{
+			cpus:   [][]float64{{0.75}, {0.7}},
+			conns:  []int{10, 10},
+			advice: AdviceNegtive,
+		},
+		{
+			cpus:   [][]float64{{0.78}, {0.7}},
+			conns:  []int{20, 20},
+			advice: AdviceNeutral,
+		},
+		{
+			cpus:   [][]float64{{0.8}, {0.6}},
+			conns:  []int{10, 10},
+			advice: AdvicePositive,
+		},
+	}
+
+	for i, test := range tests {
+		backends := make([]scoredBackend, 0, len(test.cpus))
+		values := make([]*model.SampleStream, 0, len(test.cpus))
+		for j := 0; j < len(test.cpus); j++ {
+			backends = append(backends, createBackend(j, test.conns[j], test.conns[j]))
+			values = append(values, createSampleStream(test.cpus[j], j, model.Now()))
+		}
+		mmr := &mockMetricsReader{
+			qrs: map[string]metricsreader.QueryResult{
+				"cpu": {
+					UpdateTime: time.Now(),
+					Value:      model.Matrix(values),
+				},
+			},
+		}
+		fc := NewFactorCPU(mmr, zap.NewNop())
+		updateScore(fc, backends)
+		advice, _, _ := fc.BalanceCount(backends[1], backends[0])
+		require.Equal(t, test.advice, advice, "test index %d", i)
 	}
 }

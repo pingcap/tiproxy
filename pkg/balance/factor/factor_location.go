@@ -13,7 +13,7 @@ const (
 	balanceCount4Location = 1
 )
 
-var _ Factor = (*FactorLabel)(nil)
+var _ Factor = (*FactorLocation)(nil)
 
 type FactorLocation struct {
 	bitNum int
@@ -46,8 +46,8 @@ func (fl *FactorLocation) ScoreBitNum() int {
 	return fl.bitNum
 }
 
-func (fl *FactorLocation) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
-	return balanceCount4Location, nil
+func (fl *FactorLocation) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
+	return AdvicePositive, balanceCount4Location, nil
 }
 
 func (fl *FactorLocation) SetConfig(cfg *config.Config) {

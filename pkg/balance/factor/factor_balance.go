@@ -213,7 +213,9 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 			score2 := scoredBackends[0].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
 			if score1 > score2 {
 				var balanceFields []zap.Field
-				if balanceCount, balanceFields = factor.BalanceCount(scoredBackends[i], scoredBackends[0]); balanceCount > 0.0001 {
+				var advice BalanceAdvice
+				advice, balanceCount, balanceFields = factor.BalanceCount(scoredBackends[i], scoredBackends[0])
+				if advice == AdvicePositive && balanceCount > 0.0001 {
 					// This backend is too busy. If it's routed, migration may happen.
 					fields = append(fields, zap.String(scoredBackends[i].Addr(), factor.Name()))
 					fields = append(fields, balanceFields...)
@@ -274,20 +276,28 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			score1 := scoredBackends[i].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
 			score2 := scoredBackends[0].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
 			if score1 > score2 {
-				// The previous factors are ordered, so this factor won't violate them.
-				// E.g. the factor scores of 2 backends are [1, 1], [0, 0]
-				// Balancing the second factor won't make the first factor unbalanced.
+				// The factors with higher priorities are ordered, so this factor shouldn't violate them.
+				// E.g. if the CPU usage of A is higher than B, don't migrate from B to A even if A is preferred in location.
 				var fields []zap.Field
-				if balanceCount, fields = factor.BalanceCount(scoredBackends[i], scoredBackends[0]); balanceCount > 0.0001 {
-					from, to = scoredBackends[i].BackendCtx, scoredBackends[0].BackendCtx
-					reason = factor.Name()
-					logFields = append(fields, zap.String("factor", reason),
-						zap.String("from_total_score", strconv.FormatUint(scoredBackends[i].scoreBits, 16)),
-						zap.String("to_total_score", strconv.FormatUint(scoredBackends[0].scoreBits, 16)),
-						zap.Uint64("from_factor_score", score1),
-						zap.Uint64("to_factor_score", score2),
-						zap.Float64("balance_count", balanceCount))
-					return
+				var advice BalanceAdvice
+				advice, balanceCount, fields = factor.BalanceCount(scoredBackends[i], scoredBackends[0])
+				if advice == AdviceNegtive {
+					// If the factor will be unbalanced after migration, skip the rest factors.
+					// E.g. if the CPU usage of A will be much higher than B after migration,
+					// don't migrate from B to A even if A is preferred in location.
+					break
+				} else if advice == AdvicePositive {
+					if balanceCount > 0.0001 {
+						from, to = scoredBackends[i].BackendCtx, scoredBackends[0].BackendCtx
+						reason = factor.Name()
+						logFields = append(fields, zap.String("factor", reason),
+							zap.String("from_total_score", strconv.FormatUint(scoredBackends[i].scoreBits, 16)),
+							zap.String("to_total_score", strconv.FormatUint(scoredBackends[0].scoreBits, 16)),
+							zap.Uint64("from_factor_score", score1),
+							zap.Uint64("to_factor_score", score2),
+							zap.Float64("balance_count", balanceCount))
+						return
+					}
 				}
 			} else if score1 < score2 {
 				// Stop it once a factor is in the opposite order, otherwise a subsequent factor may violate this one.

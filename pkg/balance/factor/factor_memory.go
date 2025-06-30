@@ -26,7 +26,7 @@ const (
 	balanceSeconds4OOMRisk = 10.0
 )
 
-var _ Factor = (*FactorCPU)(nil)
+var _ Factor = (*FactorMemory)(nil)
 
 var (
 	memQueryExpr = metricsreader.QueryExpr{
@@ -268,21 +268,21 @@ func (fm *FactorMemory) ScoreBitNum() int {
 	return fm.bitNum
 }
 
-func (fm *FactorMemory) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
+func (fm *FactorMemory) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
 	// The risk level may change frequently, e.g. last time timeToOOM was 30s and connections were migrated away,
 	// then this time it becomes 60s and the connections are migrated back.
 	// So we only rebalance when the difference of risk levels of 2 backends is big enough.
 	fromSnapshot := fm.snapshot[from.Addr()]
 	toSnapshot := fm.snapshot[to.Addr()]
 	if fromSnapshot.riskLevel-toSnapshot.riskLevel <= 1 {
-		return 0, nil
+		return AdviceNeutral, 0, nil
 	}
 	fields := []zap.Field{
 		zap.Duration("from_time_to_oom", fromSnapshot.timeToOOM),
 		zap.Float64("from_mem_usage", fromSnapshot.memUsage),
 		zap.Duration("to_time_to_oom", toSnapshot.timeToOOM),
 		zap.Float64("to_mem_usage", toSnapshot.memUsage)}
-	return fromSnapshot.balanceCount, fields
+	return AdvicePositive, fromSnapshot.balanceCount, fields
 }
 
 func (fm *FactorMemory) SetConfig(cfg *config.Config) {

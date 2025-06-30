@@ -349,18 +349,18 @@ func (fh *FactorHealth) ScoreBitNum() int {
 	return fh.bitNum
 }
 
-func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (float64, []zap.Field) {
+func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
 	// Only migrate connections when one is valueRangeNormal and the other is valueRangeAbnormal.
 	fromScore := fh.caclErrScore(from.Addr())
 	toScore := fh.caclErrScore(to.Addr())
 	if fromScore-toScore <= 1 {
-		return 0, nil
+		return AdviceNeutral, 0, nil
 	}
 	snapshot := fh.snapshot[from.Addr()]
 	fields := []zap.Field{
 		zap.String("indicator", snapshot.indicator),
 		zap.Int("value", snapshot.value)}
-	return snapshot.balanceCount, fields
+	return AdvicePositive, snapshot.balanceCount, fields
 }
 
 func (fh *FactorHealth) SetConfig(cfg *config.Config) {
