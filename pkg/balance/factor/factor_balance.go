@@ -271,7 +271,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			continue
 		}
 		leftBitNum := fbb.totalBitNum
-		var factorFields []zap.Field
+		logFields = logFields[:0]
 		for _, factor := range fbb.factors {
 			bitNum := factor.ScoreBitNum()
 			score1 := scoredBackends[i].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
@@ -288,11 +288,11 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 					// don't migrate from B to A even if A is preferred in location.
 					break
 				}
-				factorFields = append(factorFields, fields...)
+				logFields = append(logFields, fields...)
 				if score1 > score2 && advice == AdvicePositive && balanceCount > 0.0001 {
 					from, to = scoredBackends[i].BackendCtx, scoredBackends[0].BackendCtx
 					reason = factor.Name()
-					logFields = append(factorFields, zap.String("factor", reason),
+					logFields = append(logFields, zap.String("factor", reason),
 						zap.String("from_total_score", strconv.FormatUint(scoredBackends[i].scoreBits, 16)),
 						zap.String("to_total_score", strconv.FormatUint(scoredBackends[0].scoreBits, 16)),
 						zap.Uint64("from_factor_score", score1),
