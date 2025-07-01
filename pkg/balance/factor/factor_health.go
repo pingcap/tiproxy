@@ -353,13 +353,13 @@ func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	// Only migrate connections when one is valueRangeNormal and the other is valueRangeAbnormal.
 	fromScore := fh.caclErrScore(from.Addr())
 	toScore := fh.caclErrScore(to.Addr())
-	if fromScore-toScore <= 1 {
-		return AdviceNeutral, 0, nil
-	}
 	snapshot := fh.snapshot[from.Addr()]
 	fields := []zap.Field{
 		zap.String("indicator", snapshot.indicator),
 		zap.Int("value", snapshot.value)}
+	if fromScore-toScore <= 1 {
+		return AdviceNeutral, 0, fields
+	}
 	return AdvicePositive, snapshot.balanceCount, fields
 }
 

@@ -477,8 +477,8 @@ func TestCanBeRouted(t *testing.T) {
 
 func TestCanBalance(t *testing.T) {
 	fm := NewFactorBasedBalance(zap.NewNop(), newMockMetricsReader())
-	factor1 := &mockFactor{bitNum: 2, balanceCount: 1, advice: AdviceNegtive}
-	factor2 := &mockFactor{bitNum: 2, balanceCount: 1}
+	factor1 := &mockFactor{bitNum: 2, balanceCount: 1, canBeRouted: true, advice: AdviceNegtive}
+	factor2 := &mockFactor{bitNum: 2, balanceCount: 1, canBeRouted: true}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
 
