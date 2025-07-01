@@ -274,14 +274,14 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	// So we only rebalance when the difference of risk levels of 2 backends is big enough.
 	fromSnapshot := fm.snapshot[from.Addr()]
 	toSnapshot := fm.snapshot[to.Addr()]
-	if fromSnapshot.riskLevel-toSnapshot.riskLevel <= 1 {
-		return AdviceNeutral, 0, nil
-	}
 	fields := []zap.Field{
 		zap.Duration("from_time_to_oom", fromSnapshot.timeToOOM),
 		zap.Float64("from_mem_usage", fromSnapshot.memUsage),
 		zap.Duration("to_time_to_oom", toSnapshot.timeToOOM),
 		zap.Float64("to_mem_usage", toSnapshot.memUsage)}
+	if fromSnapshot.riskLevel-toSnapshot.riskLevel <= 1 {
+		return AdviceNeutral, 0, fields
+	}
 	return AdvicePositive, fromSnapshot.balanceCount, fields
 }
 
