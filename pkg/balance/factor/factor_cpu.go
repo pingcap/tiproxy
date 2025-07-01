@@ -270,7 +270,7 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float6
 	// E.g. 10% vs 25% don't need rebalance, but 80% vs 95% need rebalance.
 	// Use the average usage to avoid thrash when CPU jitters too much and use the latest usage to avoid migrate too many connections.
 	if 1.3-toAvgUsage < (1.3-fromAvgUsage)*cpuBalancedRatio || 1.3-toLatestUsage < (1.3-fromLatestUsage)*cpuBalancedRatio {
-		return AdviceNeutral, 0, nil
+		return AdviceNeutral, 0, fields
 	}
 	return AdvicePositive, 1 / fc.usagePerConn / balanceRatio4Cpu, fields
 }
