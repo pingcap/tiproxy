@@ -276,7 +276,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			bitNum := factor.ScoreBitNum()
 			score1 := scoredBackends[i].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
 			score2 := scoredBackends[0].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-			if score1 > score2 {
+			if score1 >= score2 {
 				// The factors with higher priorities are ordered, so this factor shouldn't violate them.
 				// E.g. if the CPU usage of A is higher than B, don't migrate from B to A even if A is preferred in location.
 				var advice BalanceAdvice
@@ -289,7 +289,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 					break
 				}
 				factorFields = append(factorFields, fields...)
-				if advice == AdvicePositive && balanceCount > 0.0001 {
+				if score1 > score2 && advice == AdvicePositive && balanceCount > 0.0001 {
 					from, to = scoredBackends[i].BackendCtx, scoredBackends[0].BackendCtx
 					reason = factor.Name()
 					logFields = append(factorFields, zap.String("factor", reason),
