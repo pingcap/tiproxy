@@ -15,7 +15,7 @@ const (
 	AdviceNeutral BalanceAdvice = iota
 	// AdviceNegtive indicates don't balance these 2 backends, even for the rest factors.
 	AdviceNegtive
-	// AdvicePositive indicates balancing these 2 backends now.
+	// AdvicePositive indicates balancing these 2 backends now. It only works when the source score is greater.
 	AdvicePositive
 )
 
@@ -27,7 +27,7 @@ type Factor interface {
 	// ScoreBitNum returns the bit number of the score.
 	ScoreBitNum() int
 	// BalanceCount returns the count of connections to balance per second.
-	// 0 indicates the factor is already balanced.
+	// The caller ensures that the score of from is greater or equal to the score of to.
 	BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field)
 	SetConfig(cfg *config.Config)
 	// CanBeRouted returns whether a connection can be routed or migrated to the backend with the score.
