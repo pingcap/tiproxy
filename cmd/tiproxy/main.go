@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/cmd"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -28,15 +29,20 @@ func main() {
 
 	sctx := &sctx.Context{}
 
-	var deprecatedStr string
+	var deprecatedStr, configInfo string
 	rootCmd.PersistentFlags().StringVar(&sctx.ConfigFile, "config", "", "proxy config file path")
 	rootCmd.PersistentFlags().StringVar(&deprecatedStr, "log_encoder", "", "deprecated and will be removed")
 	rootCmd.PersistentFlags().StringVar(&deprecatedStr, "log_level", "", "deprecated and will be removed")
 	rootCmd.PersistentFlags().StringVar(&sctx.AdvertiseAddr, "advertise-addr", "", "advertise address")
+	rootCmd.PersistentFlags().StringVar(&configInfo, "config-info", "", "output config info and exit")
 
 	metrics.MaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		if configInfo != "" {
+			cmd.Println(config.ConfigInfo(configInfo))
+			return nil
+		}
 		srv, err := server.NewServer(cmd.Context(), sctx)
 		if err != nil {
 			return errors.Wrapf(err, "fail to create server")
