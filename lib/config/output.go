@@ -39,7 +39,7 @@ func ConfigInfo(format string) (string, error) {
 	fields = append(fields, res...)
 
 	op := output{
-		Component:  "tiproxy",
+		Component:  "TiProxy Server",
 		Version:    "",
 		Parameters: fields,
 	}
