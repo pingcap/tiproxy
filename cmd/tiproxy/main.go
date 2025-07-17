@@ -40,7 +40,11 @@ func main() {
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		if configInfo != "" {
-			cmd.Println(config.ConfigInfo(configInfo))
+			info, err := config.ConfigInfo(configInfo)
+			if err != nil {
+				return err
+			}
+			cmd.Println(info)
 			return nil
 		}
 		srv, err := server.NewServer(cmd.Context(), sctx)
