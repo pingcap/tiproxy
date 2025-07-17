@@ -35,11 +35,14 @@ const (
 )
 
 type errDefinition struct {
-	queryRule        metricsreader.QueryRule
-	promQL           string
-	key              string
-	failThreshold    int
-	recoverThreshold int
+	queryFailureRule metricsreader.QueryRule
+	queryTotalRule   metricsreader.QueryRule
+	failurePromQL    string
+	totalPromQL      string
+	failureKey       string
+	totalKey         string
+	failThreshold    float64
+	recoverThreshold float64
 }
 
 var (
@@ -64,89 +67,88 @@ var (
 	errDefinitions = []errDefinition{
 		{
 			// may be caused by disconnection to PD
-			// test with no connection in no network: around 80/m
-			// test with 100 connections in unstable network: [50, 135]/2m
-			// test with 50 TPS in unstable network: around 500/2m, the higher the TPS, the higher the metric value
-			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[2m])) by (instance)`,
-			failThreshold:    500,
-			recoverThreshold: 50,
-			key:              "health_pd",
-			queryRule: metricsreader.QueryRule{
+			failureKey:       "failure_pd",
+			totalKey:         "total_pd",
+			failThreshold:    0.3,
+			recoverThreshold: 0.05,
+			failurePromQL:    `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[2m])) by (instance)`,
+			queryFailureRule: metricsreader.QueryRule{
 				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
 				Retention: 2 * time.Minute,
 				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
-					mt := mfs["tidb_tikvclient_backoff_seconds_count"].Metric
-					total := 0
-					for _, m := range mt {
-						for _, label := range m.Label {
-							if *label.Name == "type" {
-								if *label.Value == "pdRPC" && m.Untyped != nil {
-									total += int(*m.Untyped.Value)
-								}
-								break
-							}
-						}
-					}
-					return model.SampleValue(total)
+					return generalMetric2Value(mfs, "tidb_tikvclient_backoff_seconds_count", "pdRPC")
 				},
-				Range2Value: func(pairs []model.SamplePair) model.SampleValue {
-					if len(pairs) < 2 {
-						return model.SampleValue(math.NaN())
-					}
-					diff := pairs[len(pairs)-1].Value - pairs[0].Value
-					// Maybe the backend just rebooted.
-					if diff < 0 {
-						return model.SampleValue(math.NaN())
-					}
-					return diff
+				Range2Value: generalRange2Value,
+				ResultType:  model.ValVector,
+			},
+			totalPromQL: `sum(increase(pd_client_request_handle_requests_duration_seconds_count[2m])) by (instance)`,
+			queryTotalRule: metricsreader.QueryRule{
+				Names:     []string{"pd_client_request_handle_requests_duration_seconds_count"},
+				Retention: 2 * time.Minute,
+				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+					return generalMetric2Value(mfs, "pd_client_request_handle_requests_duration_seconds_count", "")
 				},
-				ResultType: model.ValVector,
+				Range2Value: generalRange2Value,
+				ResultType:  model.ValVector,
 			},
 		},
 		{
 			// may be caused by disconnection to TiKV
-			// test with no connection in no network: regionMiss is around 1300/m, tikvRPC is around 40/m
-			// test with 100 idle connections in unstable network: [1000, 3300]/2m
-			// test with 100 QPS in unstable network: around 1000/2m
-			// test with 50 TPS in unstable network: around 5000/2m, the higher the TPS, the higher the metric value
-			promQL:           `sum(increase(tidb_tikvclient_backoff_seconds_count{type=~"regionMiss|tikvRPC"}[2m])) by (instance)`,
-			failThreshold:    5000,
-			recoverThreshold: 500,
-			key:              "health_tikv",
-			queryRule: metricsreader.QueryRule{
+			failureKey:       "failure_tikv",
+			totalKey:         "total_tikv",
+			failThreshold:    0.3,
+			recoverThreshold: 0.05,
+			failurePromQL:    `sum(increase(tidb_tikvclient_backoff_seconds_count{type="tikvRPC"}[2m])) by (instance)`,
+			queryFailureRule: metricsreader.QueryRule{
 				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
 				Retention: 2 * time.Minute,
 				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
-					mt := mfs["tidb_tikvclient_backoff_seconds_count"].Metric
-					total := 0
-					for _, m := range mt {
-						for _, label := range m.Label {
-							if *label.Name == "type" {
-								if (*label.Value == "regionMiss" || *label.Value == "tikvRPC") && m.Untyped != nil {
-									total += int(*m.Untyped.Value)
-								}
-								break
-							}
-						}
-					}
-					return model.SampleValue(total)
+					return generalMetric2Value(mfs, "tidb_tikvclient_backoff_seconds_count", "tikvRPC")
 				},
-				Range2Value: func(pairs []model.SamplePair) model.SampleValue {
-					if len(pairs) < 2 {
-						return model.SampleValue(math.NaN())
-					}
-					diff := pairs[len(pairs)-1].Value - pairs[0].Value
-					// Maybe the backend just rebooted.
-					if diff < 0 {
-						return model.SampleValue(math.NaN())
-					}
-					return diff
+				Range2Value: generalRange2Value,
+				ResultType:  model.ValVector,
+			},
+			totalPromQL: `sum(increase(tidb_tikvclient_request_seconds_count[2m])) by (instance)`,
+			queryTotalRule: metricsreader.QueryRule{
+				Names:     []string{"tidb_tikvclient_request_seconds_count"},
+				Retention: 2 * time.Minute,
+				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+					return generalMetric2Value(mfs, "tidb_tikvclient_request_seconds_count", "")
 				},
-				ResultType: model.ValVector,
+				Range2Value: generalRange2Value,
+				ResultType:  model.ValVector,
 			},
 		},
 	}
 )
+
+func generalMetric2Value(mfs map[string]*dto.MetricFamily, metricName string, typeValue string) model.SampleValue {
+	mt := mfs[metricName].Metric
+	total := 0
+	for _, m := range mt {
+		for _, label := range m.Label {
+			if *label.Name == "type" {
+				if (typeValue == "" || *label.Value == typeValue) && m.Untyped != nil {
+					total += int(*m.Untyped.Value)
+				}
+				break
+			}
+		}
+	}
+	return model.SampleValue(total)
+}
+
+func generalRange2Value(pairs []model.SamplePair) model.SampleValue {
+	if len(pairs) < 2 {
+		return model.SampleValue(math.NaN())
+	}
+	diff := pairs[len(pairs)-1].Value - pairs[0].Value
+	// Maybe the backend just rebooted.
+	if diff < 0 {
+		return model.SampleValue(math.NaN())
+	}
+	return diff
+}
 
 var _ Factor = (*FactorHealth)(nil)
 
@@ -154,19 +156,25 @@ var _ Factor = (*FactorHealth)(nil)
 type healthBackendSnapshot struct {
 	updatedTime time.Time
 	valueRange  valueRange
-	indicator   string
-	value       int
+	// indicator, failureValue, and totalValue are the info of the failed indicator.
+	indicator    string
+	failureValue int
+	totalValue   int
 	// Record the balance count when the backend becomes unhealthy so that it won't be smaller in the next rounds.
 	balanceCount float64
 }
 
 type errIndicator struct {
-	queryExpr        metricsreader.QueryExpr
-	queryRule        metricsreader.QueryRule
-	queryResult      metricsreader.QueryResult
-	key              string
-	failThreshold    int
-	recoverThreshold int
+	queryFailureRule   metricsreader.QueryRule
+	queryTotalRule     metricsreader.QueryRule
+	queryFailureExpr   metricsreader.QueryExpr
+	queryTotalExpr     metricsreader.QueryExpr
+	queryFailureResult metricsreader.QueryResult
+	queryTotalResult   metricsreader.QueryResult
+	failureKey         string
+	totalKey           string
+	failThreshold      float64
+	recoverThreshold   float64
 }
 
 type FactorHealth struct {
@@ -191,15 +199,21 @@ func initErrIndicator(mr metricsreader.MetricsReader) []errIndicator {
 	indicators := make([]errIndicator, 0, len(errDefinitions))
 	for _, def := range errDefinitions {
 		indicator := errIndicator{
-			queryExpr: metricsreader.QueryExpr{
-				PromQL: def.promQL,
+			queryFailureExpr: metricsreader.QueryExpr{
+				PromQL: def.failurePromQL,
 			},
-			queryRule:        def.queryRule,
-			key:              def.key,
+			queryTotalExpr: metricsreader.QueryExpr{
+				PromQL: def.totalPromQL,
+			},
+			queryFailureRule: def.queryFailureRule,
+			queryTotalRule:   def.queryTotalRule,
+			failureKey:       def.failureKey,
+			totalKey:         def.totalKey,
 			failThreshold:    def.failThreshold,
 			recoverThreshold: def.recoverThreshold,
 		}
-		mr.AddQueryExpr(indicator.key, indicator.queryExpr, indicator.queryRule)
+		mr.AddQueryExpr(indicator.failureKey, indicator.queryFailureExpr, indicator.queryFailureRule)
+		mr.AddQueryExpr(indicator.totalKey, indicator.queryTotalExpr, indicator.queryTotalRule)
 		indicators = append(indicators, indicator)
 	}
 	return indicators
@@ -215,16 +229,27 @@ func (fh *FactorHealth) UpdateScore(backends []scoredBackend) {
 	}
 	needUpdateSnapshot, latestTime := false, time.Time{}
 	for i := 0; i < len(fh.indicators); i++ {
-		qr := fh.mr.GetQueryResult(fh.indicators[i].key)
-		if qr.Empty() {
+		failureQR := fh.mr.GetQueryResult(fh.indicators[i].failureKey)
+		if failureQR.Empty() {
 			continue
 		}
-		if fh.indicators[i].queryResult.UpdateTime != qr.UpdateTime {
-			fh.indicators[i].queryResult = qr
+		totalQR := fh.mr.GetQueryResult(fh.indicators[i].totalKey)
+		if totalQR.Empty() {
+			continue
+		}
+		if fh.indicators[i].queryFailureResult.UpdateTime != failureQR.UpdateTime {
+			fh.indicators[i].queryFailureResult = failureQR
 			needUpdateSnapshot = true
 		}
-		if qr.UpdateTime.After(latestTime) {
-			latestTime = qr.UpdateTime
+		if failureQR.UpdateTime.After(latestTime) {
+			latestTime = failureQR.UpdateTime
+		}
+		if fh.indicators[i].queryTotalResult.UpdateTime != totalQR.UpdateTime {
+			fh.indicators[i].queryTotalResult = totalQR
+			needUpdateSnapshot = true
+		}
+		if totalQR.UpdateTime.After(latestTime) {
+			latestTime = totalQR.UpdateTime
 		}
 	}
 	if time.Since(latestTime) > errMetricExpDuration {
@@ -249,9 +274,12 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 	for _, backend := range backends {
 		addr := backend.Addr()
 		// Get the current value range.
-		updatedTime, valueRange, indicator, value := time.Time{}, valueRangeNormal, "", 0
-		for i := 0; i < len(fh.indicators); i++ {
-			ts := fh.indicators[i].queryResult.UpdateTime
+		updatedTime, valueRange, indicator, failureValue, totalValue := time.Time{}, valueRangeNormal, "", 0, 0
+		for _, ind := range fh.indicators {
+			ts := ind.queryFailureResult.UpdateTime
+			if ind.queryTotalResult.UpdateTime.After(ts) {
+				ts = ind.queryTotalResult.UpdateTime
+			}
 			if ts.Add(errMetricExpDuration).Before(now) {
 				// The metrics have not been updated for a long time (maybe Prometheus is unavailable).
 				continue
@@ -259,16 +287,18 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 			if ts.After(updatedTime) {
 				updatedTime = ts
 			}
-			sample := fh.indicators[i].queryResult.GetSample4Backend(backend)
-			if sample == nil {
+			failureSample, totalSample := ind.queryFailureResult.GetSample4Backend(backend), ind.queryTotalResult.GetSample4Backend(backend)
+			if failureSample == nil || totalSample == nil {
 				continue
 			}
-			indicator = fh.indicators[i].key
-			metrics.BackendMetricGauge.WithLabelValues(addr, indicator).Set(float64(sample.Value))
-			vr := calcValueRange(sample, fh.indicators[i])
+			metrics.BackendMetricGauge.WithLabelValues(addr, ind.failureKey).Set(float64(failureSample.Value))
+			metrics.BackendMetricGauge.WithLabelValues(addr, ind.totalKey).Set(float64(totalSample.Value))
+			vr := calcValueRange(failureSample, totalSample, ind)
 			if vr > valueRange {
 				valueRange = vr
-				value = int(sample.Value)
+				failureValue = int(failureSample.Value)
+				totalValue = int(totalSample.Value)
+				indicator = ind.failureKey
 			}
 		}
 		// If the metric is unavailable, try to reuse the latest one.
@@ -291,7 +321,8 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				zap.String("addr", addr),
 				zap.Int("risk", int(valueRange)),
 				zap.String("indicator", indicator),
-				zap.Int("value", value),
+				zap.Int("failure_value", failureValue),
+				zap.Int("total_value", totalValue),
 				zap.Int("last_risk", int(snapshot.valueRange)),
 				zap.Float64("balance_count", balanceCount),
 				zap.Int("conn_score", backend.ConnScore()))
@@ -300,7 +331,8 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 			updatedTime:  updatedTime,
 			valueRange:   valueRange,
 			indicator:    indicator,
-			value:        value,
+			failureValue: failureValue,
+			totalValue:   totalValue,
 			balanceCount: balanceCount,
 		}
 	}
@@ -313,15 +345,18 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 	}
 }
 
-func calcValueRange(sample *model.Sample, indicator errIndicator) valueRange {
+func calcValueRange(failureSample, totalSample *model.Sample, indicator errIndicator) valueRange {
 	// A backend is typically normal, so if its metric misses, take it as normal.
-	if sample == nil {
+	if failureSample == nil || totalSample == nil {
 		return valueRangeNormal
 	}
-	if math.IsNaN(float64(sample.Value)) {
+	if math.IsNaN(float64(failureSample.Value)) || math.IsNaN(float64(totalSample.Value)) {
 		return valueRangeNormal
 	}
-	value := int(sample.Value)
+	if failureSample.Value == 0 || totalSample.Value == 0 {
+		return valueRangeNormal
+	}
+	value := float64(failureSample.Value) / float64(totalSample.Value)
 	if indicator.failThreshold > indicator.recoverThreshold {
 		switch {
 		case value <= indicator.recoverThreshold:
@@ -356,7 +391,9 @@ func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	snapshot := fh.snapshot[from.Addr()]
 	fields := []zap.Field{
 		zap.String("indicator", snapshot.indicator),
-		zap.Int("value", snapshot.value)}
+		zap.Int("failure_value", snapshot.failureValue),
+		zap.Int("total_value", snapshot.totalValue),
+	}
 	if fromScore-toScore <= 1 {
 		return AdviceNeutral, 0, fields
 	}
@@ -372,6 +409,7 @@ func (fh *FactorHealth) CanBeRouted(_ uint64) bool {
 
 func (fh *FactorHealth) Close() {
 	for _, indicator := range fh.indicators {
-		fh.mr.RemoveQueryExpr(indicator.key)
+		fh.mr.RemoveQueryExpr(indicator.failureKey)
+		fh.mr.RemoveQueryExpr(indicator.totalKey)
 	}
 }
