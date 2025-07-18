@@ -101,7 +101,7 @@ graceful-close-conn-timeout = 15
 	# server object
 	[security.server-tls]
 	# proxy SQL port will use this
-	# auto-certs = true
+	auto-certs = true
 
 	# server object
 	[security.server-http-tls]
