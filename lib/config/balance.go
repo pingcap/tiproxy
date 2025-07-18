@@ -12,8 +12,8 @@ const (
 )
 
 type Balance struct {
-	LabelName string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty"`
-	Policy    string `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty"`
+	LabelName string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty" reloadable:"true"`
+	Policy    string `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
 }
 
 func (b *Balance) Check() error {

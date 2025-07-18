@@ -24,85 +24,81 @@ var (
 type Config struct {
 	Proxy               ProxyServer       `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
 	API                 API               `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
-	Advance             Advance           `yaml:"advance,omitempty" toml:"advance,omitempty" json:"advance,omitempty"`
-	Workdir             string            `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty"`
+	Workdir             string            `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty" reloadable:"false"`
 	Security            Security          `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
 	Log                 Log               `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
 	Balance             Balance           `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
-	Labels              map[string]string `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty"`
+	Labels              map[string]string `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty" reloadable:"true"`
 	HA                  HA                `yaml:"ha,omitempty" toml:"ha,omitempty" json:"ha,omitempty"`
-	EnableTrafficReplay bool              `yaml:"enable-traffic-replay,omitempty" toml:"enable-traffic-replay,omitempty" json:"enable-traffic-replay,omitempty"`
+	EnableTrafficReplay bool              `yaml:"enable-traffic-replay,omitempty" toml:"enable-traffic-replay,omitempty" json:"enable-traffic-replay,omitempty" reloadable:"true"`
 }
 
 type KeepAlive struct {
-	Enabled bool `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty"`
+	Enabled bool `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty" reloadable:"true"`
 	// Idle, Cnt, and Intvl works only when the connection is idle. User packets will interrupt keep-alive.
 	// If the peer crashes and doesn't send any packets, the connection will be closed within Idle+Cnt*Intvl.
-	Idle  time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty"`
-	Cnt   int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty"`
-	Intvl time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty"`
+	Idle  time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty" reloadable:"true"`
+	Cnt   int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty" reloadable:"true"`
+	Intvl time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty" reloadable:"true"`
 	// Timeout is the timeout of waiting ACK. It works for both user packets and keep-alive.
 	// It is suggested to be equal or close to Cnt*Intvl.
-	Timeout time.Duration `yaml:"timeout,omitempty" toml:"timeout,omitempty" json:"timeout,omitempty"`
+	Timeout time.Duration `yaml:"timeout,omitempty" toml:"timeout,omitempty" json:"timeout,omitempty" reloadable:"true"`
 }
 
 type ProxyServerOnline struct {
-	MaxConnections    uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty"`
-	ConnBufferSize    int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty"`
+	MaxConnections    uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty" reloadable:"true"`
+	ConnBufferSize    int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty" reloadable:"true"`
 	FrontendKeepalive KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
 	// BackendHealthyKeepalive applies when the observer treats the backend as healthy.
 	// The config values should be conservative to save CPU and tolerate network fluctuation.
 	BackendHealthyKeepalive KeepAlive `yaml:"backend-healthy-keepalive" toml:"backend-healthy-keepalive" json:"backend-healthy-keepalive"`
 	// BackendUnhealthyKeepalive applies when the observer treats the backend as unhealthy.
 	// The config values can be aggressive because the backend may stop anytime.
-	BackendUnhealthyKeepalive  KeepAlive `yaml:"backend-unhealthy-keepalive" toml:"backend-unhealthy-keepalive" json:"backend-unhealthy-keepalive"`
-	ProxyProtocol              string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
-	GracefulWaitBeforeShutdown int       `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty"`
-	GracefulCloseConnTimeout   int       `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty"`
+	BackendUnhealthyKeepalive KeepAlive `yaml:"backend-unhealthy-keepalive" toml:"backend-unhealthy-keepalive" json:"backend-unhealthy-keepalive"`
+	ProxyProtocol             string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty" reloadable:"true"`
+	// In k8s, the pod terminationGracePeriodSeconds can be set to very long so that these configs can be updated online.
+	GracefulWaitBeforeShutdown int `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty" reloadable:"true"`
+	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty" reloadable:"true"`
 }
 
 type ProxyServer struct {
-	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
-	AdvertiseAddr     string `yaml:"advertise-addr,omitempty" toml:"advertise-addr,omitempty" json:"advertise-addr,omitempty"`
-	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty"`
+	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty" reloadable:"false"`
+	AdvertiseAddr     string `yaml:"advertise-addr,omitempty" toml:"advertise-addr,omitempty" json:"advertise-addr,omitempty" reloadable:"false"`
+	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty" reloadable:"false"`
 	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
 type API struct {
-	Addr          string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty"`
-	ProxyProtocol string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
-}
-
-type Advance struct {
-	IgnoreWrongNamespace bool `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
+	Addr          string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty" reloadable:"false"`
+	ProxyProtocol string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty" reloadable:"false"`
 }
 
 type LogOnline struct {
-	Level   string  `yaml:"level,omitempty" toml:"level,omitempty" json:"level,omitempty"`
+	Level   string  `yaml:"level,omitempty" toml:"level,omitempty" json:"level,omitempty" reloadable:"true"`
 	LogFile LogFile `yaml:"log-file,omitempty" toml:"log-file,omitempty" json:"log-file,omitempty"`
 }
 
 type Log struct {
-	Encoder   string `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty"`
+	Encoder   string `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty" reloadable:"false"`
 	LogOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
 type LogFile struct {
-	Filename   string `yaml:"filename,omitempty" toml:"filename,omitempty" json:"filename,omitempty"`
-	MaxSize    int    `yaml:"max-size,omitempty" toml:"max-size,omitempty" json:"max-size,omitempty"`
-	MaxDays    int    `yaml:"max-days,omitempty" toml:"max-days,omitempty" json:"max-days,omitempty"`
-	MaxBackups int    `yaml:"max-backups,omitempty" toml:"max-backups,omitempty" json:"max-backups,omitempty"`
+	Filename   string `yaml:"filename,omitempty" toml:"filename,omitempty" json:"filename,omitempty" reloadable:"true"`
+	MaxSize    int    `yaml:"max-size,omitempty" toml:"max-size,omitempty" json:"max-size,omitempty" reloadable:"true"`
+	MaxDays    int    `yaml:"max-days,omitempty" toml:"max-days,omitempty" json:"max-days,omitempty" reloadable:"true"`
+	MaxBackups int    `yaml:"max-backups,omitempty" toml:"max-backups,omitempty" json:"max-backups,omitempty" reloadable:"true"`
 }
 
 type TLSConfig struct {
-	Cert               string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty"`
-	Key                string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty"`
-	CA                 string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty"`
-	MinTLSVersion      string `yaml:"min-tls-version,omitempty" toml:"min-tls-version,omitempty" json:"min-tls-version,omitempty"`
-	AutoCerts          bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty"`
-	RSAKeySize         int    `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty"`
-	AutoExpireDuration string `yaml:"autocert-expire-duration,omitempty" toml:"autocert-expire-duration,omitempty" json:"autocert-expire-duration,omitempty"`
-	SkipCA             bool   `yaml:"skip-ca,omitempty" toml:"skip-ca,omitempty" json:"skip-ca,omitempty"`
+	Cert               string `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty" reloadable:"true"`
+	Key                string `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty" reloadable:"true"`
+	CA                 string `yaml:"ca,omitempty" toml:"ca,omitempty" json:"ca,omitempty" reloadable:"true"`
+	MinTLSVersion      string `yaml:"min-tls-version,omitempty" toml:"min-tls-version,omitempty" json:"min-tls-version,omitempty" reloadable:"true"`
+	AutoCerts          bool   `yaml:"auto-certs,omitempty" toml:"auto-certs,omitempty" json:"auto-certs,omitempty" reloadable:"true"`
+	RSAKeySize         int    `yaml:"rsa-key-size,omitempty" toml:"rsa-key-size,omitempty" json:"rsa-key-size,omitempty" reloadable:"true"`
+	AutoExpireDuration string `yaml:"autocert-expire-duration,omitempty" toml:"autocert-expire-duration,omitempty" json:"autocert-expire-duration,omitempty" reloadable:"true"`
+	SkipCA             bool   `yaml:"skip-ca,omitempty" toml:"skip-ca,omitempty" json:"skip-ca,omitempty" reloadable:"true"`
 }
 
 func (c TLSConfig) HasCert() bool {
@@ -118,12 +114,12 @@ type Security struct {
 	ServerHTTPTLS     TLSConfig `yaml:"server-http-tls,omitempty" toml:"server-http-tls,omitempty" json:"server-http-tls,omitempty"`
 	ClusterTLS        TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
 	SQLTLS            TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
-	RequireBackendTLS bool      `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty"`
+	RequireBackendTLS bool      `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty" reloadable:"true"`
 }
 
 type HA struct {
-	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty"`
-	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty"`
+	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
+	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
@@ -157,7 +153,6 @@ func NewConfig() *Config {
 	cfg.Log.LogFile.MaxDays = 3
 	cfg.Log.LogFile.MaxBackups = 3
 
-	cfg.Advance.IgnoreWrongNamespace = true
 	cfg.Security.SQLTLS.MinTLSVersion = "1.2"
 	cfg.Security.ServerSQLTLS.MinTLSVersion = "1.2"
 	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.2"
