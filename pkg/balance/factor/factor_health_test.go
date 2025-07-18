@@ -4,6 +4,7 @@
 package factor
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -23,56 +24,60 @@ func TestHealthScore(t *testing.T) {
 		score     uint64
 	}{
 		{
-			errCounts: []float64{math.NaN(), math.NaN()},
+			errCounts: []float64{math.NaN(), math.NaN(), math.NaN(), math.NaN()},
 			score:     0,
 		},
 		{
-			errCounts: []float64{math.NaN(), 0},
+			errCounts: []float64{math.NaN(), 0, 0, math.NaN()},
 			score:     0,
 		},
 		{
-			errCounts: []float64{float64(errDefinitions[0].failThreshold + 1), 0},
+			errCounts: []float64{float64(errDefinitions[0].failThreshold*100 + 1), 100, float64(errDefinitions[1].failThreshold - 1), 100},
 			score:     2,
 		},
 		{
-			errCounts: []float64{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].failThreshold - 1)},
-			score:     2,
-		},
-		{
-			errCounts: []float64{float64(errDefinitions[0].recoverThreshold - 1), float64(errDefinitions[1].recoverThreshold - 1)},
+			errCounts: []float64{float64(errDefinitions[0].recoverThreshold*100 - 1), 100, float64(errDefinitions[1].recoverThreshold*100 - 1), 100},
 			score:     0,
 		},
 		{
-			errCounts: []float64{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
+			errCounts: []float64{float64(errDefinitions[0].recoverThreshold*100 + 1), 100, float64(errDefinitions[1].recoverThreshold*100 - 1), 100},
 			score:     1,
 		},
 		{
-			errCounts: []float64{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
+			errCounts: []float64{float64(errDefinitions[0].failThreshold*100 + 1), 100, float64(errDefinitions[1].recoverThreshold*100 - 1), 100},
 			score:     2,
 		},
 		{
-			errCounts: []float64{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold + 1)},
+			errCounts: []float64{float64(errDefinitions[0].recoverThreshold*100 + 1), 100, float64(errDefinitions[1].recoverThreshold*100 + 1), 100},
 			score:     1,
 		},
 	}
 
 	backends := make([]scoredBackend, 0, len(tests))
-	values1 := make([]*model.Sample, 0, len(tests))
-	values2 := make([]*model.Sample, 0, len(tests))
+	values := make([][]*model.Sample, 4)
 	for i, test := range tests {
 		backends = append(backends, createBackend(i, 0, 0))
-		values1 = append(values1, createSample(float64(test.errCounts[0]), i))
-		values2 = append(values2, createSample(float64(test.errCounts[1]), i))
+		for indIdx, fv := range test.errCounts {
+			values[indIdx] = append(values[indIdx], createSample(fv, i))
+		}
 	}
 	mmr := &mockMetricsReader{
 		qrs: map[string]metricsreader.QueryResult{
-			"health_pd": {
+			"failure_pd": {
 				UpdateTime: time.Now(),
-				Value:      model.Vector(values1),
+				Value:      model.Vector(values[0]),
 			},
-			"health_tikv": {
+			"total_pd": {
 				UpdateTime: time.Now(),
-				Value:      model.Vector(values2),
+				Value:      model.Vector(values[1]),
+			},
+			"failure_tikv": {
+				UpdateTime: time.Now(),
+				Value:      model.Vector(values[2]),
+			},
+			"total_tikv": {
+				UpdateTime: time.Now(),
+				Value:      model.Vector(values[3]),
 			},
 		},
 	}
@@ -96,76 +101,78 @@ func TestHealthBalance(t *testing.T) {
 		},
 		{
 			errCounts: [][]float64{
-				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
+				{float64(errDefinitions[0].recoverThreshold*100 + 1), 100},
 				{math.NaN(), math.NaN()}},
 			scores:   []uint64{1, 0},
 			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
-				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)},
-				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
+				{float64(errDefinitions[0].recoverThreshold*100 + 1), 100},
+				{float64(errDefinitions[0].recoverThreshold*100 + 1), 100}},
 			scores:   []uint64{1, 1},
 			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
-				{float64(errDefinitions[0].recoverThreshold - 1), float64(errDefinitions[1].recoverThreshold - 1)},
-				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
+				{float64(errDefinitions[0].recoverThreshold*100 - 1), 100},
+				{float64(errDefinitions[0].recoverThreshold*100 + 1), 100}},
 			scores:   []uint64{0, 1},
 			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
-				{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].recoverThreshold + 1)},
-				{float64(errDefinitions[0].recoverThreshold + 1), float64(errDefinitions[1].recoverThreshold - 1)}},
+				{float64(errDefinitions[0].failThreshold*100 + 1), 100},
+				{float64(errDefinitions[0].recoverThreshold*100 + 1), 100}},
 			scores:   []uint64{2, 1},
 			balanced: true,
 		},
 		{
 			errCounts: [][]float64{
-				{float64(errDefinitions[0].failThreshold + 1), float64(errDefinitions[1].recoverThreshold + 1)},
-				{float64(errDefinitions[0].recoverThreshold - 1), float64(errDefinitions[1].recoverThreshold - 1)}},
+				{float64(errDefinitions[0].failThreshold*100 + 1), 100},
+				{float64(errDefinitions[0].recoverThreshold*100 - 1), 100}},
 			scores:   []uint64{2, 0},
 			balanced: false,
 		},
 	}
 
 	for i, test := range tests {
-		backends := make([]scoredBackend, 0, len(test.errCounts))
-		values1 := make([]*model.Sample, 0, len(test.errCounts))
-		values2 := make([]*model.Sample, 0, len(test.errCounts))
-		for j := 0; j < len(test.errCounts); j++ {
-			backends = append(backends, createBackend(j, 100, 100))
-			values1 = append(values1, createSample(test.errCounts[j][0], j))
-			values2 = append(values2, createSample(test.errCounts[j][1], j))
-		}
-		mmr := &mockMetricsReader{
-			qrs: map[string]metricsreader.QueryResult{
-				"health_pd": {
-					UpdateTime: time.Now(),
-					Value:      model.Vector(values1),
+		for _, indicator := range []string{"pd", "tikv"} {
+			backends := make([]scoredBackend, 0, len(test.errCounts))
+			values1 := make([]*model.Sample, 0, len(test.errCounts))
+			values2 := make([]*model.Sample, 0, len(test.errCounts))
+			for beIndx := 0; beIndx < len(test.errCounts); beIndx++ {
+				backends = append(backends, createBackend(beIndx, 100, 100))
+				values1 = append(values1, createSample(test.errCounts[beIndx][0], beIndx))
+				values2 = append(values2, createSample(test.errCounts[beIndx][1], beIndx))
+			}
+			mmr := &mockMetricsReader{
+				qrs: map[string]metricsreader.QueryResult{
+					fmt.Sprintf("failure_%s", indicator): {
+						UpdateTime: time.Now(),
+						Value:      model.Vector(values1),
+					},
+					fmt.Sprintf("total_%s", indicator): {
+						UpdateTime: time.Now(),
+						Value:      model.Vector(values2),
+					},
 				},
-				"health_tikv": {
-					UpdateTime: time.Now(),
-					Value:      model.Vector(values2),
-				},
-			},
+			}
+			fh := NewFactorHealth(mmr, zap.NewNop())
+			fh.UpdateScore(backends)
+			scores := make([]uint64, 0, len(backends))
+			for _, backend := range backends {
+				scores = append(scores, backend.score())
+			}
+			require.Equal(t, test.scores, scores, "test index %d", i)
+			sort.Slice(backends, func(i, j int) bool {
+				return backends[i].score() < backends[j].score()
+			})
+			from, to := backends[len(backends)-1], backends[0]
+			advice, balanceCount, _ := fh.BalanceCount(from, to)
+			require.Equal(t, test.balanced, advice == AdviceNeutral, "test index %d, indicator %s", i, indicator)
+			require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d, indicator %s", i, indicator)
 		}
-		fh := NewFactorHealth(mmr, zap.NewNop())
-		fh.UpdateScore(backends)
-		scores := make([]uint64, 0, len(backends))
-		for _, backend := range backends {
-			scores = append(scores, backend.score())
-		}
-		require.Equal(t, test.scores, scores, "test index %d", i)
-		sort.Slice(backends, func(i, j int) bool {
-			return backends[i].score() < backends[j].score()
-		})
-		from, to := backends[len(backends)-1], backends[0]
-		advice, balanceCount, _ := fh.BalanceCount(from, to)
-		require.Equal(t, test.balanced, advice == AdviceNeutral, "test index %d", i)
-		require.Equal(t, test.balanced, balanceCount < 0.0001, "test index %d", i)
 	}
 }
 
@@ -179,15 +186,15 @@ func TestNoHealthMetrics(t *testing.T) {
 			updateTime: time.Now(),
 		},
 		{
-			errCounts:  [][]float64{nil, {1, 1}},
+			errCounts:  [][]float64{nil, {1, 10000, 0, 10000}},
 			updateTime: time.Now(),
 		},
 		{
-			errCounts:  [][]float64{{1, 1}, {0, 0}},
+			errCounts:  [][]float64{{1, 1, 1, 1}, {0, 0, 0, 0}},
 			updateTime: time.Now().Add(-errMetricExpDuration * 2),
 		},
 		{
-			errCounts:  [][]float64{{math.NaN(), math.NaN()}, {math.NaN(), math.NaN()}},
+			errCounts:  [][]float64{{math.NaN(), math.NaN(), math.NaN(), math.NaN()}, {math.NaN(), math.NaN(), math.NaN(), math.NaN()}},
 			updateTime: time.Now(),
 		},
 	}
@@ -199,29 +206,36 @@ func TestNoHealthMetrics(t *testing.T) {
 		backends = append(backends, createBackend(i, i*100, i*100))
 	}
 	for i, test := range tests {
-		values1 := make([]*model.Sample, 0, len(test.errCounts))
-		values2 := make([]*model.Sample, 0, len(test.errCounts))
-		for j := 0; j < len(test.errCounts); j++ {
-			if test.errCounts[j] != nil {
-				values1 = append(values1, createSample(test.errCounts[j][0], j))
-				values2 = append(values2, createSample(test.errCounts[j][1], j))
+		values := make([][]*model.Sample, 4)
+		for beIdx := range test.errCounts {
+			if test.errCounts[beIdx] != nil {
+				for indIdx := 0; indIdx < len(test.errCounts[beIdx]); indIdx++ {
+					values[indIdx] = append(values[indIdx], createSample(test.errCounts[beIdx][indIdx], beIdx))
+				}
 			}
 		}
-		var v1, v2 model.Vector
-		if len(values1) > 0 {
-			v1 = model.Vector(values1)
-		}
-		if len(values2) > 0 {
-			v2 = model.Vector(values2)
+		vecs := make([]model.Vector, 4)
+		for indIdx := range vecs {
+			if len(values[indIdx]) > 0 {
+				vecs[indIdx] = model.Vector(values[indIdx])
+			}
 		}
 		mmr.qrs = map[string]metricsreader.QueryResult{
-			"health_pd": {
+			"failure_pd": {
 				UpdateTime: test.updateTime,
-				Value:      v1,
+				Value:      vecs[0],
 			},
-			"health_tikv": {
+			"total_pd": {
 				UpdateTime: test.updateTime,
-				Value:      v2,
+				Value:      vecs[1],
+			},
+			"failure_tikv": {
+				UpdateTime: test.updateTime,
+				Value:      vecs[2],
+			},
+			"total_tikv": {
+				UpdateTime: test.updateTime,
+				Value:      vecs[3],
 			},
 		}
 		updateScore(fh, backends)
@@ -273,6 +287,12 @@ func TestHealthBalanceCount(t *testing.T) {
 		values := []*model.Sample{
 			createSample(number, 0),
 			createSample(0, 1),
+		}
+		mmr.qrs = map[string]metricsreader.QueryResult{
+			"failure_pd": {
+				UpdateTime: time.Now(),
+				Value:      model.Vector(values),
+			},
 		}
 		mmr.qrs["health_pd"] = metricsreader.QueryResult{
 			UpdateTime: time.Now(),
@@ -347,10 +367,10 @@ tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 0
 		mfs, err := parser.TextToMetricFamilies(strings.NewReader(test.text))
 		require.NoError(t, err, "case %d", i)
 		for j, ed := range errDefinitions {
-			value := ed.queryRule.Metric2Value(mfs)
+			value := ed.queryFailureRule.Metric2Value(mfs)
 			require.Equal(t, test.curValue[j], value, "case %d %d", i, j)
 			historyPair[j] = append(historyPair[j], model.SamplePair{Value: value})
-			value = ed.queryRule.Range2Value(historyPair[j])
+			value = ed.queryFailureRule.Range2Value(historyPair[j])
 			if math.IsNaN(float64(test.finalValue[j])) {
 				require.True(t, math.IsNaN(float64(value)), "case %d %d", i, j)
 			} else {
@@ -370,7 +390,7 @@ func TestMissBackendInHealth(t *testing.T) {
 		backends = append(backends, createBackend(i, 100, 100))
 		values = append(values, createSample(errors[i], i))
 	}
-	mmr.qrs["health_pd"] = metricsreader.QueryResult{
+	mmr.qrs["failure_pd"] = metricsreader.QueryResult{
 		UpdateTime: time.Now(),
 		Value:      model.Vector(values),
 	}
