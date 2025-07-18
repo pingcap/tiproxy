@@ -38,12 +38,12 @@ func ConfigInfo(format string) (string, error) {
 	}
 	fields = append(fields, res...)
 
-	// op := output{
-	// 	Component:  "TiProxy Server",
-	// 	Version:    "",
-	// 	Parameters: fields,
-	// }
-	bytes, err := json.MarshalIndent(fields, "", "    ")
+	op := output{
+		Component:  "TiProxy Server",
+		Version:    "",
+		Parameters: fields,
+	}
+	bytes, err := json.MarshalIndent(op, "", "    ")
 	return string(bytes), err
 }
 
