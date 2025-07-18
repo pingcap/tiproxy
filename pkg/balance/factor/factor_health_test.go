@@ -62,24 +62,13 @@ func TestHealthScore(t *testing.T) {
 		}
 	}
 	mmr := &mockMetricsReader{
-		qrs: map[string]metricsreader.QueryResult{
-			"failure_pd": {
-				UpdateTime: time.Now(),
-				Value:      model.Vector(values[0]),
-			},
-			"total_pd": {
-				UpdateTime: time.Now(),
-				Value:      model.Vector(values[1]),
-			},
-			"failure_tikv": {
-				UpdateTime: time.Now(),
-				Value:      model.Vector(values[2]),
-			},
-			"total_tikv": {
-				UpdateTime: time.Now(),
-				Value:      model.Vector(values[3]),
-			},
-		},
+		qrs: make(map[string]metricsreader.QueryResult),
+	}
+	for i, indicator := range []string{"failure_pd", "total_pd", "failure_tikv", "total_tikv"} {
+		mmr.qrs[indicator] = metricsreader.QueryResult{
+			UpdateTime: time.Now(),
+			Value:      model.Vector(values[i]),
+		}
 	}
 	fh := NewFactorHealth(mmr, zap.NewNop())
 	fh.UpdateScore(backends)
@@ -220,23 +209,12 @@ func TestNoHealthMetrics(t *testing.T) {
 				vecs[indIdx] = model.Vector(values[indIdx])
 			}
 		}
-		mmr.qrs = map[string]metricsreader.QueryResult{
-			"failure_pd": {
+		mmr.qrs = make(map[string]metricsreader.QueryResult)
+		for j, ind := range []string{"failure_pd", "total_pd", "failure_tikv", "total_tikv"} {
+			mmr.qrs[ind] = metricsreader.QueryResult{
 				UpdateTime: test.updateTime,
-				Value:      vecs[0],
-			},
-			"total_pd": {
-				UpdateTime: test.updateTime,
-				Value:      vecs[1],
-			},
-			"failure_tikv": {
-				UpdateTime: test.updateTime,
-				Value:      vecs[2],
-			},
-			"total_tikv": {
-				UpdateTime: test.updateTime,
-				Value:      vecs[3],
-			},
+				Value:      vecs[j],
+			}
 		}
 		updateScore(fh, backends)
 		require.Equal(t, backends[0].score(), backends[1].score(), "test index %d", i)
@@ -282,23 +260,26 @@ func TestHealthBalanceCount(t *testing.T) {
 	updateMmr := func(healthy bool) {
 		number := 0.0
 		if !healthy {
-			number = 99999999.0
+			number = 10000.0
 		}
-		values := []*model.Sample{
+		failureValues := []*model.Sample{
 			createSample(number, 0),
 			createSample(0, 1),
+		}
+		totalValues := []*model.Sample{
+			createSample(10000, 0),
+			createSample(10000, 1),
 		}
 		mmr.qrs = map[string]metricsreader.QueryResult{
 			"failure_pd": {
 				UpdateTime: time.Now(),
-				Value:      model.Vector(values),
+				Value:      model.Vector(failureValues),
+			},
+			"total_pd": {
+				UpdateTime: time.Now(),
+				Value:      model.Vector(totalValues),
 			},
 		}
-		mmr.qrs["health_pd"] = metricsreader.QueryResult{
-			UpdateTime: time.Now(),
-			Value:      model.Vector(values),
-		}
-		mmr.qrs["health_tikv"] = mmr.qrs["health_pd"]
 	}
 	for i, test := range tests {
 		updateMmr(test.healthy)
@@ -321,56 +302,73 @@ func TestHealthQueryRule(t *testing.T) {
 	}{
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 0
-tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 0
 tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 10
 tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 10
-tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 0
+pd_client_request_handle_requests_duration_seconds_count{type="tso"} 100
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 20
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 30
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 20
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 30
 `,
-			curValue:   []model.SampleValue{10, 10},
-			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
+			curValue:   []model.SampleValue{10, 100, 0, 100},
+			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
 		},
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 10
-tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 10
 tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 20
-tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 110
+tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 30
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 100
+pd_client_request_handle_requests_duration_seconds_count{type="tso"} 200
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 50
 `,
-			curValue:   []model.SampleValue{20, 210},
-			finalValue: []model.SampleValue{10, 200},
+			curValue:   []model.SampleValue{20, 200, 100, 200},
+			finalValue: []model.SampleValue{10, 100, 100, 100},
 		},
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 10
-tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 10
 tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 20
-tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 110
-tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 100
+tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 50
+tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 150
+pd_client_request_handle_requests_duration_seconds_count{type="tso"} 300
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 100
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 100
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 100
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 100
 `,
-			curValue:   []model.SampleValue{20, 210},
-			finalValue: []model.SampleValue{10, 200},
+			curValue:   []model.SampleValue{20, 300, 150, 400},
+			finalValue: []model.SampleValue{10, 200, 150, 300},
 		},
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 0
-tidb_tikvclient_backoff_seconds_count{type="dataNotReady"} 0
-tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 0
-tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 5
-tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 0
+tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 5
+tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 10
+pd_client_request_handle_requests_duration_seconds_count{type="tso"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 50
 `,
-			curValue:   []model.SampleValue{0, 5},
-			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
+			curValue:   []model.SampleValue{5, 50, 10, 50},
+			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), 10, model.SampleValue(math.NaN())},
 		},
 	}
 
-	historyPair := make([][]model.SamplePair, len(errDefinitions))
+	rules := []metricsreader.QueryRule{
+		errDefinitions[0].queryFailureRule,
+		errDefinitions[0].queryTotalRule,
+		errDefinitions[1].queryFailureRule,
+		errDefinitions[1].queryTotalRule,
+	}
+	historyPair := make([][]model.SamplePair, len(rules))
 	for i, test := range tests {
 		var parser expfmt.TextParser
 		mfs, err := parser.TextToMetricFamilies(strings.NewReader(test.text))
 		require.NoError(t, err, "case %d", i)
-		for j, ed := range errDefinitions {
-			value := ed.queryFailureRule.Metric2Value(mfs)
+		for j, rule := range rules {
+			value := rule.Metric2Value(mfs)
 			require.Equal(t, test.curValue[j], value, "case %d %d", i, j)
 			historyPair[j] = append(historyPair[j], model.SamplePair{Value: value})
-			value = ed.queryFailureRule.Range2Value(historyPair[j])
+			value = rule.Range2Value(historyPair[j])
 			if math.IsNaN(float64(test.finalValue[j])) {
 				require.True(t, math.IsNaN(float64(value)), "case %d %d", i, j)
 			} else {
@@ -385,14 +383,19 @@ func TestMissBackendInHealth(t *testing.T) {
 	fh := NewFactorHealth(mmr, zap.NewNop())
 	backends := make([]scoredBackend, 0, 2)
 	errors := []float64{10000, 0}
-	var values []*model.Sample
+	var failureValues, totalValues []*model.Sample
 	for i := 0; i < 2; i++ {
 		backends = append(backends, createBackend(i, 100, 100))
-		values = append(values, createSample(errors[i], i))
+		failureValues = append(failureValues, createSample(errors[i], i))
+		totalValues = append(totalValues, createSample(10000, i))
 	}
 	mmr.qrs["failure_pd"] = metricsreader.QueryResult{
 		UpdateTime: time.Now(),
-		Value:      model.Vector(values),
+		Value:      model.Vector(failureValues),
+	}
+	mmr.qrs["total_pd"] = metricsreader.QueryResult{
+		UpdateTime: time.Now(),
+		Value:      model.Vector(totalValues),
 	}
 	fh.UpdateScore(backends)
 	advice, count, _ := fh.BalanceCount(backends[0], backends[1])

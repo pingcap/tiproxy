@@ -70,7 +70,7 @@ var (
 			failureKey:       "failure_pd",
 			totalKey:         "total_pd",
 			failThreshold:    0.3,
-			recoverThreshold: 0.05,
+			recoverThreshold: 0.1,
 			failurePromQL:    `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[2m])) by (instance)`,
 			queryFailureRule: metricsreader.QueryRule{
 				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
@@ -97,7 +97,7 @@ var (
 			failureKey:       "failure_tikv",
 			totalKey:         "total_tikv",
 			failThreshold:    0.3,
-			recoverThreshold: 0.05,
+			recoverThreshold: 0.1,
 			failurePromQL:    `sum(increase(tidb_tikvclient_backoff_seconds_count{type="tikvRPC"}[2m])) by (instance)`,
 			queryFailureRule: metricsreader.QueryRule{
 				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
