@@ -389,10 +389,13 @@ func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	fromScore := fh.caclErrScore(from.Addr())
 	toScore := fh.caclErrScore(to.Addr())
 	snapshot := fh.snapshot[from.Addr()]
-	fields := []zap.Field{
-		zap.String("indicator", snapshot.indicator),
-		zap.Int("failure_value", snapshot.failureValue),
-		zap.Int("total_value", snapshot.totalValue),
+	var fields []zap.Field
+	if snapshot.indicator != "" {
+		fields = append(fields,
+			zap.String("indicator", snapshot.indicator),
+			zap.Int("failure_value", snapshot.failureValue),
+			zap.Int("total_value", snapshot.totalValue),
+		)
 	}
 	if fromScore-toScore <= 1 {
 		return AdviceNeutral, 0, fields
