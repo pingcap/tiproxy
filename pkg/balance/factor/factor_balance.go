@@ -265,13 +265,6 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 	// Even if the busiest backend can not migrate to the idlest one, the second busiest one may migrate.
 	// E.g. the factor scores of 3 backends are [1, 0], [0, 100], [0, 0].
 	// The first one is the busiest but not busy enough to migrate to the third one, but the second one is.
-	var logFactor string
-	var logAdvice int
-	defer func() {
-		if balanceCount > 0 && (from == nil || to == nil) {
-			fbb.lg.Debug("wrong count", zap.String("factor", logFactor), zap.Int("advice", logAdvice), zap.Float64("balance_count", balanceCount))
-		}
-	}()
 	for i := len(scoredBackends) - 1; i > 0; i-- {
 		// Skip the backends without connections.
 		if scoredBackends[i].ConnCount() <= 0 || scoredBackends[i].ConnScore() <= 0 {
@@ -286,11 +279,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			if score1 >= score2 {
 				// The factors with higher priorities are ordered, so this factor shouldn't violate them.
 				// E.g. if the CPU usage of A is higher than B, don't migrate from B to A even if A is preferred in location.
-				var advice BalanceAdvice
-				var fields []zap.Field
-				advice, balanceCount, fields = factor.BalanceCount(scoredBackends[i], scoredBackends[0])
-				logFactor = factor.Name()
-				logAdvice = int(advice)
+				advice, count, fields := factor.BalanceCount(scoredBackends[i], scoredBackends[0])
 				if advice == AdviceNegtive {
 					// If the factor will be unbalanced after migration, skip the rest factors.
 					// E.g. if the CPU usage of A will be much higher than B after migration,
@@ -298,8 +287,9 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 					break
 				}
 				logFields = append(logFields, fields...)
-				if score1 > score2 && advice == AdvicePositive && balanceCount > 0.0001 {
+				if score1 > score2 && advice == AdvicePositive && count > 0.0001 {
 					from, to = scoredBackends[i].BackendCtx, scoredBackends[0].BackendCtx
+					balanceCount = count
 					reason = factor.Name()
 					logFields = append(logFields, zap.String("factor", reason),
 						zap.String("from_total_score", strconv.FormatUint(scoredBackends[i].scoreBits, 16)),
