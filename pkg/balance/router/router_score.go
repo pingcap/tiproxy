@@ -63,9 +63,9 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 	r.cancelFunc = cancelFunc
 	r.cfgCh = cfgCh
 	// Failing to rebalance backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
-	r.wg.Run(func() {
+	r.wg.RunWithRecover(func() {
 		r.rebalanceLoop(childCtx)
-	})
+	}, nil, r.logger)
 }
 
 // GetBackendSelector implements Router.GetBackendSelector interface.
