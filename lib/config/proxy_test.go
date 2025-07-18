@@ -16,9 +16,6 @@ import (
 
 var testProxyConfig = Config{
 	Workdir: "./wd",
-	Advance: Advance{
-		IgnoreWrongNamespace: true,
-	},
 	Proxy: ProxyServer{
 		Addr:    "0.0.0.0:4000",
 		PDAddrs: "127.0.0.1:4089",

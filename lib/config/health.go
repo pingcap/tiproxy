@@ -22,13 +22,13 @@ const (
 // Some general configurations of them may be exposed to users in the future.
 // We can use shorter durations to speed up unit tests.
 type HealthCheck struct {
-	Enable          bool          `yaml:"enable" json:"enable" toml:"enable"`
-	Interval        time.Duration `yaml:"interval" json:"interval" toml:"interval"`
-	MaxRetries      int           `yaml:"max-retries" json:"max-retries" toml:"max-retries"`
-	RetryInterval   time.Duration `yaml:"retry-interval" json:"retry-interval" toml:"retry-interval"`
-	DialTimeout     time.Duration `yaml:"dial-timeout" json:"dial-timeout" toml:"dial-timeout"`
-	MetricsInterval time.Duration `yaml:"metrics-interval" json:"metrics-interval" toml:"metrics-interval"`
-	MetricsTimeout  time.Duration `yaml:"metrics-timeout" json:"metrics-timeout" toml:"metrics-timeout"`
+	Enable          bool          `yaml:"enable" json:"enable" toml:"enable" reloadable:"false"`
+	Interval        time.Duration `yaml:"interval" json:"interval" toml:"interval" reloadable:"false"`
+	MaxRetries      int           `yaml:"max-retries" json:"max-retries" toml:"max-retries" reloadable:"false"`
+	RetryInterval   time.Duration `yaml:"retry-interval" json:"retry-interval" toml:"retry-interval" reloadable:"false"`
+	DialTimeout     time.Duration `yaml:"dial-timeout" json:"dial-timeout" toml:"dial-timeout" reloadable:"false"`
+	MetricsInterval time.Duration `yaml:"metrics-interval" json:"metrics-interval" toml:"metrics-interval" reloadable:"false"`
+	MetricsTimeout  time.Duration `yaml:"metrics-timeout" json:"metrics-timeout" toml:"metrics-timeout" reloadable:"false"`
 }
 
 // NewDefaultHealthCheckConfig creates a default HealthCheck.
