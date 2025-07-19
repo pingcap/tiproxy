@@ -109,12 +109,12 @@ var (
 				Range2Value: generalRange2Value,
 				ResultType:  model.ValVector,
 			},
-			totalPromQL: `sum(increase(tidb_tikvclient_request_seconds_count[2m])) by (instance)`,
+			totalPromQL: `sum(increase(tidb_tikvclient_request_counter[2m])) by (instance)`,
 			queryTotalRule: metricsreader.QueryRule{
-				Names:     []string{"tidb_tikvclient_request_seconds_count"},
+				Names:     []string{"tidb_tikvclient_request_counter"},
 				Retention: 2 * time.Minute,
 				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
-					return generalMetric2Value(mfs, "tidb_tikvclient_request_seconds_count", "")
+					return generalMetric2Value(mfs, "tidb_tikvclient_request_counter", "")
 				},
 				Range2Value: generalRange2Value,
 				ResultType:  model.ValVector,
@@ -124,9 +124,12 @@ var (
 )
 
 func generalMetric2Value(mfs map[string]*dto.MetricFamily, metricName string, typeValue string) model.SampleValue {
-	mt := mfs[metricName].Metric
+	fm, ok := mfs[metricName]
+	if !ok {
+		return model.SampleValue(math.NaN())
+	}
 	total := 0
-	for _, m := range mt {
+	for _, m := range fm.Metric {
 		for _, label := range m.Label {
 			if *label.Name == "type" {
 				if (typeValue == "" || *label.Value == typeValue) && m.Untyped != nil {
@@ -141,6 +144,9 @@ func generalMetric2Value(mfs map[string]*dto.MetricFamily, metricName string, ty
 
 func generalRange2Value(pairs []model.SamplePair) model.SampleValue {
 	if len(pairs) < 2 {
+		return model.SampleValue(math.NaN())
+	}
+	if math.IsNaN(float64(pairs[0].Value)) || math.IsNaN(float64(pairs[len(pairs)-1].Value)) {
 		return model.SampleValue(math.NaN())
 	}
 	diff := pairs[len(pairs)-1].Value - pairs[0].Value
@@ -353,12 +359,9 @@ func calcValueRange(failureSample, totalSample *model.Sample, indicator errIndic
 	}
 
 	failureValue := float64(failureSample.Value)
-	if math.IsNaN(failureValue) {
-		failureValue = 0
-	}
 	totalValue := float64(totalSample.Value)
-	if math.IsNaN(totalValue) {
-		totalValue = 0
+	if math.IsNaN(failureValue) || math.IsNaN(totalValue) {
+		return failureValue, totalValue, valueRangeNormal
 	}
 
 	if failureValue == 0 {

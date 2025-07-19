@@ -89,6 +89,21 @@ func TestHealthBalance(t *testing.T) {
 			balanced:  true,
 		},
 		{
+			errCounts: [][]float64{{math.NaN(), 0}, {0, math.NaN()}},
+			scores:    []uint64{0, 0},
+			balanced:  true,
+		},
+		{
+			errCounts: [][]float64{{0, 0}, {0, 0}},
+			scores:    []uint64{0, 0},
+			balanced:  true,
+		},
+		{
+			errCounts: [][]float64{{10, 0}, {0, 0}},
+			scores:    []uint64{2, 0},
+			balanced:  false,
+		},
+		{
 			errCounts: [][]float64{
 				{float64(errDefinitions[0].recoverThreshold*100 + 1), 100},
 				{math.NaN(), math.NaN()}},
@@ -303,12 +318,12 @@ func TestHealthQueryRule(t *testing.T) {
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 0
 tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 10
-tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 10
-pd_client_request_handle_requests_duration_seconds_count{type="tso"} 100
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 20
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 30
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 20
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 30
+pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"} 10
+pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"} 100
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="Get"} 20
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="Get"} 30
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="BatchGet"} 20
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="BatchGet"} 30
 `,
 			curValue:   []model.SampleValue{10, 100, 0, 100},
 			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
@@ -316,13 +331,13 @@ tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2"
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 10
 tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 20
-tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 30
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 100
-pd_client_request_handle_requests_duration_seconds_count{type="tso"} 200
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 50
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 50
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 50
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 50
+pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"} 20
+pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"} 200
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="Get"} 50
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="Get"} 50
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="BatchGet"} 50
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="BatchGet"} 50
 `,
 			curValue:   []model.SampleValue{20, 200, 100, 200},
 			finalValue: []model.SampleValue{10, 100, 100, 100},
@@ -330,26 +345,31 @@ tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2"
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 10
 tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 20
-tidb_tikvclient_backoff_seconds_count{type="regionMiss"} 50
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 150
-pd_client_request_handle_requests_duration_seconds_count{type="tso"} 300
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 100
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 100
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 100
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 100
+pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"} 20
+pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"} 300
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="Get"} 100
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="Get"} 100
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="BatchGet"} 100
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="BatchGet"} 100
 `,
 			curValue:   []model.SampleValue{20, 300, 150, 400},
 			finalValue: []model.SampleValue{10, 200, 150, 300},
 		},
 		{
 			text: `tidb_tikvclient_backoff_seconds_count{type=""} 0
-tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 5
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 10
-pd_client_request_handle_requests_duration_seconds_count{type="tso"} 50
-tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 50
+pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"} 5
+pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"} 50
+tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="Get"} 50
 `,
 			curValue:   []model.SampleValue{5, 50, 10, 50},
 			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), 10, model.SampleValue(math.NaN())},
+		},
+		{
+			text:       ``,
+			curValue:   []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
+			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
 		},
 	}
 
@@ -366,7 +386,11 @@ tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1"
 		require.NoError(t, err, "case %d", i)
 		for j, rule := range rules {
 			value := rule.Metric2Value(mfs)
-			require.Equal(t, test.curValue[j], value, "case %d %d", i, j)
+			if math.IsNaN(float64(test.curValue[j])) {
+				require.True(t, math.IsNaN(float64(value)), "case %d %d", i, j)
+			} else {
+				require.Equal(t, test.curValue[j], value, "case %d %d", i, j)
+			}
 			historyPair[j] = append(historyPair[j], model.SamplePair{Value: value})
 			value = rule.Range2Value(historyPair[j])
 			if math.IsNaN(float64(test.finalValue[j])) {
