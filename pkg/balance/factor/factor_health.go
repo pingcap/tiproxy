@@ -69,24 +69,25 @@ var (
 			// may be caused by disconnection to PD
 			failureKey:       "failure_pd",
 			totalKey:         "total_pd",
-			failThreshold:    0.3,
+			failThreshold:    0.5,
 			recoverThreshold: 0.1,
-			failurePromQL:    `sum(increase(tidb_tikvclient_backoff_seconds_count{type="pdRPC"}[2m])) by (instance)`,
+			failurePromQL:    `sum(increase(pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"}[2m])) by (instance)`,
 			queryFailureRule: metricsreader.QueryRule{
-				Names:     []string{"tidb_tikvclient_backoff_seconds_count"},
+				Names:     []string{"pd_client_cmd_handle_failed_cmds_duration_seconds_count"},
 				Retention: 2 * time.Minute,
 				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
-					return generalMetric2Value(mfs, "tidb_tikvclient_backoff_seconds_count", "pdRPC")
+					return generalMetric2Value(mfs, "pd_client_cmd_handle_failed_cmds_duration_seconds_count", "tso")
 				},
 				Range2Value: generalRange2Value,
 				ResultType:  model.ValVector,
 			},
-			totalPromQL: `sum(increase(pd_client_request_handle_requests_duration_seconds_count[2m])) by (instance)`,
+			// pd_client_cmd_handle_cmds_duration_seconds_count only records successful commands
+			totalPromQL: `sum(increase(pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"}[2m])) by (instance)`,
 			queryTotalRule: metricsreader.QueryRule{
-				Names:     []string{"pd_client_request_handle_requests_duration_seconds_count"},
+				Names:     []string{"pd_client_cmd_handle_cmds_duration_seconds_count"},
 				Retention: 2 * time.Minute,
 				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
-					return generalMetric2Value(mfs, "pd_client_request_handle_requests_duration_seconds_count", "")
+					return generalMetric2Value(mfs, "pd_client_cmd_handle_cmds_duration_seconds_count", "tso")
 				},
 				Range2Value: generalRange2Value,
 				ResultType:  model.ValVector,
@@ -158,8 +159,8 @@ type healthBackendSnapshot struct {
 	valueRange  valueRange
 	// indicator, failureValue, and totalValue are the info of the failed indicator.
 	indicator    string
-	failureValue int
-	totalValue   int
+	failureValue float64
+	totalValue   float64
 	// Record the balance count when the backend becomes unhealthy so that it won't be smaller in the next rounds.
 	balanceCount float64
 }
@@ -274,7 +275,7 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 	for _, backend := range backends {
 		addr := backend.Addr()
 		// Get the current value range.
-		updatedTime, valueRange, indicator, failureValue, totalValue := time.Time{}, valueRangeNormal, "", 0, 0
+		updatedTime, valueRange, indicator, failureValue, totalValue := time.Time{}, valueRangeNormal, "", 0.0, 0.0
 		for _, ind := range fh.indicators {
 			ts := ind.queryFailureResult.UpdateTime
 			if ind.queryTotalResult.UpdateTime.After(ts) {
@@ -293,11 +294,11 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 			}
 			metrics.BackendMetricGauge.WithLabelValues(addr, ind.failureKey).Set(float64(failureSample.Value))
 			metrics.BackendMetricGauge.WithLabelValues(addr, ind.totalKey).Set(float64(totalSample.Value))
-			vr := calcValueRange(failureSample, totalSample, ind)
+			fv, tv, vr := calcValueRange(failureSample, totalSample, ind)
 			if vr > valueRange {
 				valueRange = vr
-				failureValue = int(failureSample.Value)
-				totalValue = int(totalSample.Value)
+				failureValue = fv
+				totalValue = tv
 				indicator = ind.failureKey
 			}
 		}
@@ -321,8 +322,8 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				zap.String("addr", addr),
 				zap.Int("risk", int(valueRange)),
 				zap.String("indicator", indicator),
-				zap.Int("failure_value", failureValue),
-				zap.Int("total_value", totalValue),
+				zap.Float64("failure_value", failureValue),
+				zap.Float64("total_value", totalValue),
 				zap.Int("last_risk", int(snapshot.valueRange)),
 				zap.Float64("balance_count", balanceCount),
 				zap.Int("conn_score", backend.ConnScore()))
@@ -345,34 +346,45 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 	}
 }
 
-func calcValueRange(failureSample, totalSample *model.Sample, indicator errIndicator) valueRange {
+func calcValueRange(failureSample, totalSample *model.Sample, indicator errIndicator) (float64, float64, valueRange) {
 	// A backend is typically normal, so if its metric misses, take it as normal.
 	if failureSample == nil || totalSample == nil {
-		return valueRangeNormal
+		return 0, 0, valueRangeNormal
 	}
-	if math.IsNaN(float64(failureSample.Value)) || math.IsNaN(float64(totalSample.Value)) {
-		return valueRangeNormal
+
+	failureValue := float64(failureSample.Value)
+	if math.IsNaN(failureValue) {
+		failureValue = 0
 	}
-	if failureSample.Value == 0 || totalSample.Value == 0 {
-		return valueRangeNormal
+	totalValue := float64(totalSample.Value)
+	if math.IsNaN(totalValue) {
+		totalValue = 0
 	}
-	value := float64(failureSample.Value) / float64(totalSample.Value)
+
+	if failureValue == 0 {
+		return failureValue, totalValue, valueRangeNormal
+	}
+	if totalValue == 0 {
+		return failureValue, totalValue, valueRangeAbnormal
+	}
+
+	value := failureValue / totalValue
 	if indicator.failThreshold > indicator.recoverThreshold {
 		switch {
 		case value <= indicator.recoverThreshold:
-			return valueRangeNormal
+			return failureValue, totalValue, valueRangeNormal
 		case value >= indicator.failThreshold:
-			return valueRangeAbnormal
+			return failureValue, totalValue, valueRangeAbnormal
 		}
 	} else {
 		switch {
 		case value >= indicator.recoverThreshold:
-			return valueRangeNormal
+			return failureValue, totalValue, valueRangeNormal
 		case value <= indicator.failThreshold:
-			return valueRangeAbnormal
+			return failureValue, totalValue, valueRangeAbnormal
 		}
 	}
-	return valueRangeMid
+	return failureValue, totalValue, valueRangeMid
 }
 
 func (fh *FactorHealth) caclErrScore(addr string) int {
@@ -393,8 +405,8 @@ func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	if snapshot.indicator != "" {
 		fields = append(fields,
 			zap.String("indicator", snapshot.indicator),
-			zap.Int("failure_value", snapshot.failureValue),
-			zap.Int("total_value", snapshot.totalValue),
+			zap.Float64("failure_value", snapshot.failureValue),
+			zap.Float64("total_value", snapshot.totalValue),
 		)
 	}
 	if fromScore-toScore <= 1 {
