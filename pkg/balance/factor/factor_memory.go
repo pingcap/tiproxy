@@ -38,6 +38,12 @@ var (
 		Names:     []string{"process_resident_memory_bytes", "tidb_server_memory_quota_bytes"},
 		Retention: 1 * time.Minute,
 		Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+			if mfs["process_resident_memory_bytes"] == nil || len(mfs["process_resident_memory_bytes"].Metric) == 0 {
+				return model.SampleValue(math.NaN())
+			}
+			if mfs["tidb_server_memory_quota_bytes"] == nil || len(mfs["tidb_server_memory_quota_bytes"].Metric) == 0 {
+				return model.SampleValue(math.NaN())
+			}
 			memoryUsage := mfs["process_resident_memory_bytes"].Metric[0].Untyped
 			memoryQuota := mfs["tidb_server_memory_quota_bytes"].Metric[0].Untyped
 			if memoryUsage == nil || memoryQuota == nil {
