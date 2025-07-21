@@ -41,6 +41,12 @@ var (
 		Names:     []string{"process_cpu_seconds_total", "tidb_server_maxprocs"},
 		Retention: 1 * time.Minute,
 		Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+			if mfs["process_cpu_seconds_total"] == nil || len(mfs["process_cpu_seconds_total"].Metric) == 0 {
+				return model.SampleValue(math.NaN())
+			}
+			if mfs["tidb_server_maxprocs"] == nil || len(mfs["tidb_server_maxprocs"].Metric) == 0 {
+				return model.SampleValue(math.NaN())
+			}
 			cpuTotal := mfs["process_cpu_seconds_total"].Metric[0].Untyped
 			maxProcs := mfs["tidb_server_maxprocs"].Metric[0].Untyped
 			if cpuTotal == nil || maxProcs == nil {
