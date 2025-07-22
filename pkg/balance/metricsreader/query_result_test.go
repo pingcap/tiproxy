@@ -85,6 +85,13 @@ func TestMatrixMatchLabel(t *testing.T) {
 			expectedPairs: []model.SamplePair{{Timestamp: 1712700000000, Value: 100}},
 		},
 		{
+			jsonRes:       `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-0","job":"tidb"},"values":[[1712700000,"100"]]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-1","job":"tidb"},"values":[[1712700000,"200"]]}]`,
+			addr:          "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local:4000",
+			ip:            "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local",
+			port:          10080,
+			expectedPairs: []model.SamplePair{{Timestamp: 1712700000000, Value: 100}},
+		},
+		{
 			jsonRes:       `[]`,
 			addr:          "tc-tidb-0.tc-tidb-peer.ns.svc:4000",
 			ip:            "tc-tidb-0.tc-tidb-peer.ns.svc",
@@ -149,6 +156,13 @@ func TestVectorMatchLabel(t *testing.T) {
 			expectedSample: &model.Sample{Timestamp: 1712700000000, Value: 100},
 		},
 		{
+			jsonRes:        `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-0","job":"tidb"},"value":[1712700000,"100"]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-1","job":"tidb"},"value":[1712700000,"200"]}]`,
+			addr:           "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local:4000",
+			ip:             "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local",
+			port:           10080,
+			expectedSample: &model.Sample{Timestamp: 1712700000000, Value: 100},
+		},
+		{
 			jsonRes:        `[]`,
 			addr:           "tc-tidb-0.tc-tidb-peer.ns.svc:4000",
 			ip:             "tc-tidb-0.tc-tidb-peer.ns.svc",
@@ -186,6 +200,10 @@ func TestAddrMatchLabel(t *testing.T) {
 		},
 		{
 			addr:  "tc-tidb-0.tc-tidb-peer.ns.svc:3080",
+			label: "tc-tidb-0",
+		},
+		{
+			addr:  "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local:3080",
 			label: "tc-tidb-0",
 		},
 	}
