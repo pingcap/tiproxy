@@ -117,7 +117,7 @@ func (qr QueryResult) GetSample4Backend(backend policy.BackendCtx) *model.Sample
 
 func getLabel4Backend(backend policy.BackendCtx) string {
 	addr := backend.Addr()
-	if strings.Contains(addr, ".svc:") {
+	if isOperatorDeployed(addr) {
 		// In operator deployment, the label value of `instance` is the pod name.
 		return addr[:strings.Index(addr, ".")]
 	}
@@ -128,10 +128,24 @@ func getLabel4Backend(backend policy.BackendCtx) string {
 
 // addr is the address of the backend status port.
 func getLabel4Addr(addr string) string {
-	if strings.Contains(addr, ".svc:") {
+	if isOperatorDeployed(addr) {
 		// In operator deployment, the label value of `instance` is the pod name.
 		return addr[:strings.Index(addr, ".")]
 	}
 	// In tiup deployment, the label value of `instance` is hostname:statusPort.
 	return addr
+}
+
+func isOperatorDeployed(addr string) bool {
+	// (.+-tidb-[0-9]+).*peer.*.svc.*")
+	idx := strings.Index(addr, "-tidb-")
+	if idx < 0 {
+		return false
+	}
+	idx = strings.Index(addr[idx:], "peer")
+	if idx < 0 {
+		return false
+	}
+	idx = strings.Index(addr[idx:], ".svc")
+	return idx >= 0
 }
