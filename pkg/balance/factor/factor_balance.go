@@ -279,9 +279,7 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 			if score1 >= score2 {
 				// The factors with higher priorities are ordered, so this factor shouldn't violate them.
 				// E.g. if the CPU usage of A is higher than B, don't migrate from B to A even if A is preferred in location.
-				var advice BalanceAdvice
-				var fields []zap.Field
-				advice, balanceCount, fields = factor.BalanceCount(scoredBackends[i], scoredBackends[0])
+				advice, count, fields := factor.BalanceCount(scoredBackends[i], scoredBackends[0])
 				if advice == AdviceNegtive {
 					// If the factor will be unbalanced after migration, skip the rest factors.
 					// E.g. if the CPU usage of A will be much higher than B after migration,
@@ -289,8 +287,9 @@ func (fbb *FactorBasedBalance) BackendsToBalance(backends []policy.BackendCtx) (
 					break
 				}
 				logFields = append(logFields, fields...)
-				if score1 > score2 && advice == AdvicePositive && balanceCount > 0.0001 {
+				if score1 > score2 && advice == AdvicePositive && count > 0.0001 {
 					from, to = scoredBackends[i].BackendCtx, scoredBackends[0].BackendCtx
+					balanceCount = count
 					reason = factor.Name()
 					logFields = append(logFields, zap.String("factor", reason),
 						zap.String("from_total_score", strconv.FormatUint(scoredBackends[i].scoreBits, 16)),
