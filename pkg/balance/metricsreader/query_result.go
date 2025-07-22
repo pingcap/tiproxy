@@ -117,6 +117,7 @@ func (qr QueryResult) GetSample4Backend(backend policy.BackendCtx) *model.Sample
 
 func getLabel4Backend(backend policy.BackendCtx) string {
 	addr := backend.Addr()
+	// (.+-tidb-[0-9]+).*peer.*.svc.*")
 	if strings.Contains(addr, ".svc") && strings.Contains(addr, "-tidb-") {
 		// In operator deployment, the label value of `instance` is the pod name.
 		return addr[:strings.Index(addr, ".")]
@@ -128,6 +129,7 @@ func getLabel4Backend(backend policy.BackendCtx) string {
 
 // addr is the address of the backend status port.
 func getLabel4Addr(addr string) string {
+	// (.+-tidb-[0-9]+).*peer.*.svc.*")
 	if strings.Contains(addr, ".svc") && strings.Contains(addr, "-tidb-") {
 		// In operator deployment, the label value of `instance` is the pod name.
 		return addr[:strings.Index(addr, ".")]
