@@ -30,7 +30,10 @@ const (
 	promTopologyPath    = "/topology/prometheus"
 
 	// tidbTopologyInformationPath means etcd path for storing topology info.
-	tidbTopologyInformationPath = "/topology/tidb"
+	// /topology/tidb/{address}/info and /topology/tidb/{address}/ttl
+	tidbTopologyInformationPath = "/topology/tidb/"
+	// /keyspaces/tidb/{keyspace}/topology/tidb/{address}/info
+	tidbKeyspaceTopologyInformationPath = "/keyspaces/tidb/"
 
 	topologySessionTTL    = 45
 	topologyRefreshIntvl  = 30 * time.Second
@@ -87,13 +90,15 @@ type TopologyInfo struct {
 
 // TiDBTopologyInfo is the topology info of TiDB.
 type TiDBTopologyInfo struct {
-	Version        string            `json:"version"`
-	GitHash        string            `json:"git_hash"`
-	IP             string            `json:"ip"`
-	StatusPort     uint              `json:"status_port"`
-	DeployPath     string            `json:"deploy_path"`
-	StartTimestamp int64             `json:"start_timestamp"`
-	Labels         map[string]string `json:"labels"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git_hash"`
+	IP             string `json:"ip"`
+	StatusPort     uint   `json:"status_port"`
+	DeployPath     string `json:"deploy_path"`
+	StartTimestamp int64  `json:"start_timestamp"`
+	// Parsed from the topology path
+	Keyspace string            `json:"-"`
+	Labels   map[string]string `json:"labels"`
 }
 
 // PrometheusInfo is the info of prometheus.
@@ -244,27 +249,48 @@ func (is *InfoSyncer) removeTopology(ctx context.Context) error {
 
 func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBTopologyInfo, error) {
 	// etcdCli.Get will retry infinitely internally.
-	res, err := is.etcdCli.Get(ctx, tidbTopologyInformationPath, clientv3.WithPrefix())
+	resNoKeyspace, err := is.etcdCli.Get(ctx, tidbTopologyInformationPath, clientv3.WithPrefix())
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
+	resWithKeyspace, err := is.etcdCli.Get(ctx, tidbKeyspaceTopologyInformationPath, clientv3.WithPrefix())
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	kvs := append(resNoKeyspace.Kvs, resWithKeyspace.Kvs...)
 
-	infos := make(map[string]*TiDBTopologyInfo, len(res.Kvs)/2)
-	ttls := make(map[string]struct{}, len(res.Kvs)/2)
-	for _, kv := range res.Kvs {
+	infos := make(map[string]*TiDBTopologyInfo, len(kvs)/2)
+	ttls := make(map[string]struct{}, len(kvs)/2)
+	for _, kv := range kvs {
 		key := hack.String(kv.Key)
+		var keyspace string
+		if strings.HasPrefix(key, tidbKeyspaceTopologyInformationPath) {
+			key = key[len(tidbKeyspaceTopologyInformationPath):]
+			slashIdx := strings.Index(key, "/")
+			if slashIdx <= 0 {
+				continue
+			}
+			keyspace = key[:slashIdx]
+			key = key[slashIdx:]
+			if !strings.HasPrefix(key, tidbTopologyInformationPath) {
+				continue
+			}
+		}
+		key = key[len(tidbTopologyInformationPath):]
+
 		switch {
 		case strings.HasSuffix(key, ttlSuffix):
-			addr := key[len(tidbTopologyInformationPath)+1 : len(key)-len(ttlSuffix)-1]
+			addr := key[:len(key)-len(ttlSuffix)-1]
 			ttls[addr] = struct{}{}
 		case strings.HasSuffix(key, infoSuffix):
 			var topology *TiDBTopologyInfo
-			addr := key[len(tidbTopologyInformationPath)+1 : len(key)-len(infoSuffix)-1]
+			addr := key[:len(key)-len(infoSuffix)-1]
 			if err = json.Unmarshal(kv.Value, &topology); err != nil {
 				is.lg.Error("unmarshal topology info failed", zap.String("key", key),
 					zap.String("value", hack.String(kv.Value)), zap.Error(err))
 			} else {
 				infos[addr] = topology
+				topology.Keyspace = keyspace
 			}
 		}
 	}

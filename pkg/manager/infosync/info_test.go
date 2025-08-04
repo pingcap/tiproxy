@@ -111,7 +111,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 		{
 			// Only update TTL.
 			update: func() {
-				ts.updateTTL("1.1.1.1:4000", []byte("123456789"))
+				ts.updateTTL("1.1.1.1:4000", "", []byte("123456789"))
 			},
 			check: func(info map[string]*TiDBTopologyInfo) {
 				require.Len(ts.t, info, 0)
@@ -120,7 +120,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 		{
 			// Then update info.
 			update: func() {
-				ts.updateInfo("1.1.1.1:4000", &TiDBTopologyInfo{
+				ts.updateInfo("1.1.1.1:4000", "", &TiDBTopologyInfo{
 					IP:         "1.1.1.1",
 					StatusPort: 10080,
 				})
@@ -135,8 +135,8 @@ func TestFetchTiDBTopology(t *testing.T) {
 		{
 			// Add another backend.
 			update: func() {
-				ts.updateTTL("2.2.2.2:4000", []byte("123456789"))
-				ts.updateInfo("2.2.2.2:4000", &TiDBTopologyInfo{
+				ts.updateTTL("2.2.2.2:4000", "", []byte("123456789"))
+				ts.updateInfo("2.2.2.2:4000", "", &TiDBTopologyInfo{
 					IP:         "2.2.2.2",
 					StatusPort: 10080,
 				})
@@ -151,7 +151,34 @@ func TestFetchTiDBTopology(t *testing.T) {
 		{
 			// Remove the backend TTL.
 			update: func() {
-				ts.deleteTTL("2.2.2.2:4000")
+				ts.deleteTTL("2.2.2.2:4000", "")
+			},
+			check: func(info map[string]*TiDBTopologyInfo) {
+				require.Len(ts.t, info, 1)
+				require.Contains(ts.t, info, "1.1.1.1:4000")
+			},
+		},
+		{
+			// Add another keyspace backend.
+			update: func() {
+				ts.updateTTL("3.3.3.3:4000", "test", []byte("123456789"))
+				ts.updateInfo("3.3.3.3:4000", "test", &TiDBTopologyInfo{
+					IP:         "3.3.3.3",
+					StatusPort: 10080,
+				})
+			},
+			check: func(info map[string]*TiDBTopologyInfo) {
+				require.Len(ts.t, info, 2)
+				require.NotNil(ts.t, info["3.3.3.3:4000"])
+				require.Equal(ts.t, "3.3.3.3", info["3.3.3.3:4000"].IP)
+				require.Equal(ts.t, uint(10080), info["3.3.3.3:4000"].StatusPort)
+				require.Equal(ts.t, "test", info["3.3.3.3:4000"].Keyspace)
+			},
+		},
+		{
+			// Remove the keyspace backend TTL.
+			update: func() {
+				ts.deleteTTL("3.3.3.3:4000", "test")
 			},
 			check: func(info map[string]*TiDBTopologyInfo) {
 				require.Len(ts.t, info, 1)
@@ -160,12 +187,12 @@ func TestFetchTiDBTopology(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
+	for i, test := range tests {
 		if test.update != nil {
 			test.update()
 		}
 		info, err := ts.is.GetTiDBTopology(context.Background())
-		require.NoError(t, err)
+		require.NoError(t, err, "case %d", i)
 		test.check(info)
 	}
 }
@@ -356,21 +383,33 @@ func (ts *etcdTestSuite) getTTLAndInfo(prefix string) (string, string) {
 }
 
 // Update the TTL for a backend.
-func (ts *etcdTestSuite) updateTTL(addr string, ttl []byte) {
-	_, err := ts.kv.Put(context.Background(), path.Join(tidbTopologyInformationPath, addr, ttlSuffix), string(ttl))
+func (ts *etcdTestSuite) updateTTL(addr, keyspace string, ttl []byte) {
+	p := path.Join(tidbTopologyInformationPath, addr, ttlSuffix)
+	if keyspace != "" {
+		p = path.Join(tidbKeyspaceTopologyInformationPath, keyspace, p)
+	}
+	_, err := ts.kv.Put(context.Background(), p, string(ttl))
 	require.NoError(ts.t, err)
 }
 
-func (ts *etcdTestSuite) deleteTTL(addr string) {
-	_, err := ts.kv.Delete(context.Background(), path.Join(tidbTopologyInformationPath, addr, ttlSuffix))
+func (ts *etcdTestSuite) deleteTTL(addr, keyspace string) {
+	p := path.Join(tidbTopologyInformationPath, addr, ttlSuffix)
+	if keyspace != "" {
+		p = path.Join(tidbKeyspaceTopologyInformationPath, keyspace, p)
+	}
+	_, err := ts.kv.Delete(context.Background(), p)
 	require.NoError(ts.t, err)
 }
 
 // Update the TopologyInfo for a backend.
-func (ts *etcdTestSuite) updateInfo(sqlAddr string, info *TiDBTopologyInfo) {
+func (ts *etcdTestSuite) updateInfo(sqlAddr, keyspace string, info *TiDBTopologyInfo) {
 	data, err := json.Marshal(info)
 	require.NoError(ts.t, err)
-	_, err = ts.kv.Put(context.Background(), path.Join(tidbTopologyInformationPath, sqlAddr, infoSuffix), string(data))
+	p := path.Join(tidbTopologyInformationPath, sqlAddr, infoSuffix)
+	if keyspace != "" {
+		p = path.Join(tidbKeyspaceTopologyInformationPath, keyspace, p)
+	}
+	_, err = ts.kv.Put(context.Background(), p, string(data))
 	require.NoError(ts.t, err)
 }
 
