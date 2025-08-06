@@ -12,7 +12,6 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -21,6 +20,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
 
@@ -134,7 +134,7 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 					s.wg.RunWithRecover(func() { s.onConn(ctx, conn, s.addrs[j]) }, nil, s.logger)
 				}
 			}
-		})
+		}, s.logger)
 	}
 }
 

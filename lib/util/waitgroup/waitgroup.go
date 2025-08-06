@@ -17,12 +17,24 @@ type WaitGroup struct {
 }
 
 // Run runs a function in a goroutine, adds 1 to WaitGroup
-// and calls done when function returns. Please DO NOT use panic
-// in the cb function.
+// and calls done when function returns.
 func (w *WaitGroup) Run(exec func()) {
+	w.RunWithLogger(exec, nil)
+}
+
+func (w *WaitGroup) RunWithLogger(exec func(), logger *zap.Logger) {
 	w.Add(1)
 	go func() {
-		defer w.Done()
+		defer func() {
+			r := recover()
+			if r != nil && logger != nil {
+				logger.Error("panic in an irrecoverable goroutine",
+					zap.Any("err", r),
+					zap.Stack("stack trace"))
+			}
+			w.Done()
+			panic(r)
+		}()
 		exec()
 	}()
 }
@@ -46,7 +58,7 @@ func recoverFromErr(wg *sync.WaitGroup, recoverFn func(r interface{}), logger *z
 		_ = recover()
 	}()
 	if r != nil && logger != nil {
-		logger.Error("panic in the recoverable goroutine",
+		logger.Error("panic in a recoverable goroutine",
 			zap.Any("err", r),
 			zap.Stack("stack trace"))
 	}

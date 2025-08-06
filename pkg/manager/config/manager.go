@@ -10,7 +10,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/tidwall/btree"
 	"go.uber.org/zap"
 )
