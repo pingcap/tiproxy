@@ -16,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -129,6 +130,7 @@ func (is *InfoSyncer) Init(ctx context.Context, cfg *config.Config) error {
 	topologyInfo, err := is.getTopologyInfo(cfg)
 	if err != nil {
 		is.lg.Error("get topology failed", zap.Error(err))
+		metrics.ServerErrCounter.WithLabelValues("info_syncer").Inc()
 		return err
 	}
 

@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -540,6 +541,7 @@ func (br *BackendReader) getBackendAddrs(ctx context.Context, excludeZones []str
 	backends, err := br.backendFetcher.GetTiDBTopology(ctx)
 	if err != nil {
 		br.lg.Error("failed to get backend addresses, stop reading metrics", zap.Error(err))
+		metrics.ServerErrCounter.WithLabelValues("backend_metrics").Inc()
 		return nil, err
 	}
 	addrs := make([]string, 0, len(backends))
