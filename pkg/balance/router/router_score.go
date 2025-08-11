@@ -13,10 +13,10 @@ import (
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
 
@@ -64,10 +64,10 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
 	r.cfgCh = cfgCh
-	// Log the panic.
-	r.wg.RunWithRecover(func() {
+	// Failing to route connections may cause even more serious problems than TiProxy reboot, so we don't recover panics.
+	r.wg.Run(func() {
 		r.rebalanceLoop(childCtx)
-	}, nil, r.logger)
+	}, r.logger)
 }
 
 // GetBackendSelector implements Router.GetBackendSelector interface.

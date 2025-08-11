@@ -19,10 +19,11 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -116,6 +117,7 @@ func (br *BackendReader) initElection(ctx context.Context, cfg *config.Config) e
 	var key string
 	br.lastZone = cfg.GetLocation()
 	if len(br.lastZone) > 0 {
+		// Zonal owners are responsible for the backends in the same zone or not in any TiProxy zone.
 		key = fmt.Sprintf("%s/%s/%s", readerOwnerKeyPrefix, br.lastZone, readerOwnerKeySuffix)
 	} else {
 		key = fmt.Sprintf("%s/%s", readerOwnerKeyPrefix, readerOwnerKeySuffix)
@@ -157,6 +159,7 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 	cfg := br.cfgGetter.GetConfig()
 	zone := cfg.GetLocation()
 	if zone != br.lastZone {
+		br.lg.Info("zone changed, restart election", zap.String("from", br.lastZone), zap.String("to", zone))
 		br.election.Close()
 		if err := br.initElection(ctx, cfg); err != nil {
 			return err
@@ -540,6 +543,7 @@ func (br *BackendReader) getBackendAddrs(ctx context.Context, excludeZones []str
 	backends, err := br.backendFetcher.GetTiDBTopology(ctx)
 	if err != nil {
 		br.lg.Error("failed to get backend addresses, stop reading metrics", zap.Error(err))
+		metrics.ServerErrCounter.WithLabelValues("backend_metrics").Inc()
 		return nil, err
 	}
 	addrs := make([]string, 0, len(backends))

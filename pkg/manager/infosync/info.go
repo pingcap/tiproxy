@@ -16,9 +16,10 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/siddontang/go/hack"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/concurrency"
@@ -129,21 +130,25 @@ func (is *InfoSyncer) Init(ctx context.Context, cfg *config.Config) error {
 	topologyInfo, err := is.getTopologyInfo(cfg)
 	if err != nil {
 		is.lg.Error("get topology failed", zap.Error(err))
+		metrics.ServerErrCounter.WithLabelValues("info_syncer").Inc()
 		return err
 	}
 
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	is.cancelFunc = cancelFunc
 	is.wg.RunWithRecover(func() {
-		is.updateTopologyLivenessLoop(childCtx, topologyInfo)
+		err := is.updateTopologyLivenessLoop(childCtx, topologyInfo)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			metrics.ServerErrCounter.WithLabelValues("info_syncer").Inc()
+		}
 	}, nil, is.lg)
 	return nil
 }
 
-func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyInfo *TopologyInfo) {
+func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyInfo *TopologyInfo) error {
 	// We allow TiProxy to start before PD, so do not fail in the main goroutine.
 	if err := is.initTopologySession(ctx); err != nil {
-		return
+		return err
 	}
 	is.syncTopology(ctx, topologyInfo)
 	ticker := time.NewTicker(is.syncConfig.refreshIntvl)
@@ -151,13 +156,13 @@ func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyIn
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-ticker.C:
 			is.syncTopology(ctx, topologyInfo)
 		case <-is.topologySession.Done():
 			is.lg.Warn("restart topology session")
 			if err := is.initTopologySession(ctx); err != nil {
-				return
+				return err
 			}
 		}
 	}

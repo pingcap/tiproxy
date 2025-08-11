@@ -14,7 +14,6 @@ import (
 
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
@@ -22,6 +21,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
 
