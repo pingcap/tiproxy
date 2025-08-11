@@ -11,10 +11,14 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
+<<<<<<< HEAD
+=======
+	"github.com/pingcap/tiproxy/pkg/util/lex"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
+>>>>>>> 23dcc97e (*: increase the server error counter for more errors (#842))
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
