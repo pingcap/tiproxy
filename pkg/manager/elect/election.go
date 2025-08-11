@@ -114,7 +114,9 @@ func (m *election) ID() string {
 func (m *election) campaignLoop(ctx context.Context) {
 	session, err := concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
 	if err != nil {
-		m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+		if !errors.Is(err, context.Canceled) {
+			m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+		}
 		return
 	}
 	for {
@@ -125,7 +127,9 @@ func (m *election) campaignLoop(ctx context.Context) {
 			leaseID := session.Lease()
 			session, err = concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
 			if err != nil {
-				m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+				if !errors.Is(err, context.Canceled) {
+					m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+				}
 				m.revokeLease(leaseID)
 				return
 			}

@@ -137,15 +137,18 @@ func (is *InfoSyncer) Init(ctx context.Context, cfg *config.Config) error {
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	is.cancelFunc = cancelFunc
 	is.wg.RunWithRecover(func() {
-		is.updateTopologyLivenessLoop(childCtx, topologyInfo)
+		err := is.updateTopologyLivenessLoop(childCtx, topologyInfo)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			metrics.ServerErrCounter.WithLabelValues("info_syncer").Inc()
+		}
 	}, nil, is.lg)
 	return nil
 }
 
-func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyInfo *TopologyInfo) {
+func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyInfo *TopologyInfo) error {
 	// We allow TiProxy to start before PD, so do not fail in the main goroutine.
 	if err := is.initTopologySession(ctx); err != nil {
-		return
+		return err
 	}
 	is.syncTopology(ctx, topologyInfo)
 	ticker := time.NewTicker(is.syncConfig.refreshIntvl)
@@ -153,13 +156,13 @@ func (is *InfoSyncer) updateTopologyLivenessLoop(ctx context.Context, topologyIn
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-ticker.C:
 			is.syncTopology(ctx, topologyInfo)
 		case <-is.topologySession.Done():
 			is.lg.Warn("restart topology session")
 			if err := is.initTopologySession(ctx); err != nil {
-				return
+				return err
 			}
 		}
 	}

@@ -117,6 +117,7 @@ func (br *BackendReader) initElection(ctx context.Context, cfg *config.Config) e
 	var key string
 	br.lastZone = cfg.GetLocation()
 	if len(br.lastZone) > 0 {
+		// Zonal owners are responsible for the backends in the same zone or not in any TiProxy zone.
 		key = fmt.Sprintf("%s/%s/%s", readerOwnerKeyPrefix, br.lastZone, readerOwnerKeySuffix)
 	} else {
 		key = fmt.Sprintf("%s/%s", readerOwnerKeyPrefix, readerOwnerKeySuffix)
@@ -158,6 +159,7 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 	cfg := br.cfgGetter.GetConfig()
 	zone := cfg.GetLocation()
 	if zone != br.lastZone {
+		br.lg.Info("zone changed, restart election", zap.String("from", br.lastZone), zap.String("to", zone))
 		br.election.Close()
 		if err := br.initElection(ctx, cfg); err != nil {
 			return err
