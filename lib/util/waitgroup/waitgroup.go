@@ -33,7 +33,10 @@ func (w *WaitGroup) RunWithLogger(exec func(), logger *zap.Logger) {
 					zap.Stack("stack trace"))
 			}
 			w.Done()
-			panic(r)
+			// exit still
+			if r != nil {
+				panic(r)
+			}
 		}()
 		exec()
 	}()
