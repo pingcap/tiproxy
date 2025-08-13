@@ -138,14 +138,12 @@ func getLabel4Addr(addr string) string {
 
 func isOperatorDeployed(addr string) bool {
 	// (.+-tidb-[0-9]+).*peer.*.svc.*")
-	idx := strings.Index(addr, "-tidb-")
-	if idx < 0 {
-		return false
+	for _, str := range []string{"-tidb-", ".", "peer", ".svc"} {
+		idx := strings.Index(addr, str)
+		if idx < 0 {
+			return false
+		}
+		addr = addr[idx+len(str):]
 	}
-	idx = strings.Index(addr[idx:], "peer")
-	if idx < 0 {
-		return false
-	}
-	idx = strings.Index(addr[idx:], ".svc")
-	return idx >= 0
+	return true
 }
