@@ -206,6 +206,14 @@ func TestAddrMatchLabel(t *testing.T) {
 			addr:  "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local:3080",
 			label: "tc-tidb-0",
 		},
+		{
+			addr:  "12345678-tidb-0.svc.peer:3080",
+			label: "12345678-tidb-0.svc.peer:3080",
+		},
+		{
+			addr:  "tc-tidb-0.peer:3080",
+			label: "tc-tidb-0.peer:3080",
+		},
 	}
 
 	for i, test := range tests {
