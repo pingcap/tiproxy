@@ -18,4 +18,4 @@ EXPOSE 3080
 EXPOSE 3081
 EXPOSE 6000
 
-ENTRYPOINT ["/bin/tiproxy", "-conf", "/etc/proxy/proxy.toml"]
+ENTRYPOINT ["/bin/tiproxy", "--config", "/etc/proxy/proxy.toml"]
