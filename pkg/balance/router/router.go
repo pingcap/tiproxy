@@ -26,9 +26,6 @@ type ConnEventReceiver interface {
 
 // Router routes client connections to backends.
 type Router interface {
-	// ConnEventReceiver handles connection events to balance connections if possible.
-	ConnEventReceiver
-
 	GetBackendSelector() BackendSelector
 	HealthyBackendCount() int
 	RefreshBackend()
@@ -93,6 +90,8 @@ type backendWrapper struct {
 	// A list of *connWrapper and is ordered by the connecting or redirecting time.
 	// connList only includes the connections that are currently on this backend.
 	connList *glist.List[*connWrapper]
+	// The group that this backend belongs to.
+	group *Group
 }
 
 func newBackendWrapper(addr string, health observer.BackendHealth) *backendWrapper {

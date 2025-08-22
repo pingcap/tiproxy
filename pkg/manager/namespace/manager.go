@@ -16,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/factor"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
+	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	mconfig "github.com/pingcap/tiproxy/pkg/manager/config"
 	"github.com/pingcap/tiproxy/pkg/util/http"
@@ -66,8 +67,12 @@ func (mgr *namespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 	hc := observer.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
 	bo := observer.NewDefaultBackendObserver(logger.Named("observer"), healthCheckCfg, fetcher, hc, mgr.cfgMgr)
 	bo.Start(context.Background())
-	balancePolicy := factor.NewFactorBasedBalance(logger.Named("factor"), mgr.metricsReader)
-	rt.Init(context.Background(), bo, balancePolicy, mgr.cfgMgr.GetConfig(), mgr.cfgMgr.WatchConfig())
+	bpCreator := func(lg *zap.Logger) policy.BalancePolicy {
+		policy := factor.NewFactorBasedBalance(lg, mgr.metricsReader)
+		policy.Init(mgr.cfgMgr.GetConfig())
+		return policy
+	}
+	rt.Init(context.Background(), bo, bpCreator, mgr.cfgMgr, mgr.cfgMgr.WatchConfig())
 
 	return &Namespace{
 		name:   cfg.Namespace,

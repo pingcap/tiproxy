@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -20,8 +21,13 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+var simpleBpCreator = func(_ *zap.Logger) policy.BalancePolicy {
+	return policy.NewSimpleBalancePolicy()
+}
 
 type routerTester struct {
 	t         *testing.T
@@ -35,11 +41,12 @@ type routerTester struct {
 func newRouterTester(t *testing.T, bp policy.BalancePolicy) *routerTester {
 	lg, _ := logger.CreateLoggerForTest(t)
 	router := NewScoreBasedRouter(lg)
-	if bp == nil {
-		router.policy = policy.NewSimpleBalancePolicy()
-		router.policy.Init(nil)
-	} else {
-		router.policy = bp
+	router.bpCreator = func(_ *zap.Logger) policy.BalancePolicy {
+		if bp == nil {
+			bp = policy.NewSimpleBalancePolicy()
+			bp.Init(nil)
+		}
+		return bp
 	}
 	t.Cleanup(router.Close)
 	return &routerTester{
@@ -167,7 +174,7 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 		}
 	}
 	for _, conn := range conns {
-		err := tester.router.OnConnClosed(conn.from.Addr(), conn.GetRedirectingAddr(), conn)
+		err := tester.router.groups[0].OnConnClosed(conn.from.Addr(), conn.GetRedirectingAddr(), conn)
 		require.NoError(tester.t, err)
 		delete(tester.conns, conn.connID)
 	}
@@ -175,7 +182,9 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 
 func (tester *routerTester) rebalance(num int) {
 	for i := 0; i < num; i++ {
-		tester.router.lastRedirectTime = time.Time{}
+		if len(tester.router.groups) > 0 {
+			tester.router.groups[0].lastRedirectTime = time.Time{}
+		}
 		tester.router.rebalance(context.Background())
 	}
 }
@@ -191,11 +200,11 @@ func (tester *routerTester) redirectFinish(num int, succeed bool) {
 		prevCount, err := readMigrateCounter(from.Addr(), to.Addr(), succeed)
 		require.NoError(tester.t, err)
 		if succeed {
-			err = tester.router.OnRedirectSucceed(from.Addr(), to.Addr(), conn)
+			err = tester.router.groups[0].OnRedirectSucceed(from.Addr(), to.Addr(), conn)
 			require.NoError(tester.t, err)
 			conn.redirectSucceed()
 		} else {
-			err = tester.router.OnRedirectFail(from.Addr(), to.Addr(), conn)
+			err = tester.router.groups[0].OnRedirectFail(from.Addr(), to.Addr(), conn)
 			require.NoError(tester.t, err)
 			conn.redirectFail()
 		}
@@ -213,8 +222,9 @@ func (tester *routerTester) redirectFinish(num int, succeed bool) {
 func (tester *routerTester) checkBalanced() {
 	maxNum, minNum := 0, math.MaxInt
 	for _, backend := range tester.router.backends {
-		// Empty unhealthy backends should be removed.
-		require.True(tester.t, backend.Healthy())
+		if !backend.Healthy() {
+			continue
+		}
 		curScore := backend.connScore
 		if curScore > maxNum {
 			maxNum = curScore
@@ -239,6 +249,7 @@ func (tester *routerTester) checkRedirectingNum(num int) {
 
 func (tester *routerTester) checkBackendNum(num int) {
 	require.Equal(tester.t, num, len(tester.router.backends))
+	require.Equal(tester.t, num, len(tester.router.groups[0].backends))
 }
 
 func (tester *routerTester) checkBackendConnMetrics() {
@@ -247,12 +258,14 @@ func (tester *routerTester) checkBackendConnMetrics() {
 		require.NoError(tester.t, err)
 		require.Equal(tester.t, backend.ConnCount(), val)
 	}
+	require.EqualValues(tester.t, len(tester.conns), tester.router.ConnCount())
 }
 
 func (tester *routerTester) clear() {
 	tester.backendID = 0
 	tester.connID = 0
 	tester.conns = make(map[uint64]*mockRedirectableConn)
+	tester.router.groups = nil
 	tester.router.backends = make(map[string]*backendWrapper)
 	tester.backends = make(map[string]*observer.BackendHealth)
 }
@@ -480,7 +493,6 @@ func TestRebalanceCornerCase(t *testing.T) {
 			backend := tester.getBackendByIndex(1)
 			require.Equal(t, 10, backend.connScore)
 			tester.redirectFinish(10, true)
-			tester.checkBackendNum(1)
 		},
 		func() {
 			// Connections won't be redirected again before redirection finishes.
@@ -563,16 +575,17 @@ func TestConcurrency(t *testing.T) {
 	router := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	router.Init(context.Background(), bo, policy.NewSimpleBalancePolicy(), nil, make(<-chan *config.Config))
+	cfgGetter := newMockConfigGetter(&config.Config{})
+	router.Init(context.Background(), bo, simpleBpCreator, cfgGetter, make(<-chan *config.Config))
 	t.Cleanup(bo.Close)
 	t.Cleanup(router.Close)
 
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	// Create 3 backends and change their status randomly.
-	bo.addBackend("0")
-	bo.addBackend("1")
-	bo.addBackend("2")
+	bo.addBackend("0", nil)
+	bo.addBackend("1", nil)
+	bo.addBackend("2", nil)
 	bo.notify(nil)
 	wg.Run(func() {
 		for {
@@ -620,14 +633,14 @@ func TestConcurrency(t *testing.T) {
 						from, to := conn.getAddr()
 						var err error
 						if i < 1 {
-							err = router.OnConnClosed(from, conn.GetRedirectingAddr(), conn)
+							err = router.groups[0].OnConnClosed(from, conn.GetRedirectingAddr(), conn)
 							conn = nil
 						} else if i < 3 {
 							conn.redirectFail()
-							err = router.OnRedirectFail(from, to, conn)
+							err = router.groups[0].OnRedirectFail(from, to, conn)
 						} else {
 							conn.redirectSucceed()
-							err = router.OnRedirectSucceed(from, to, conn)
+							err = router.groups[0].OnRedirectSucceed(from, to, conn)
 						}
 						require.NoError(t, err)
 					} else {
@@ -636,7 +649,7 @@ func TestConcurrency(t *testing.T) {
 						if i < 2 {
 							// The balancer may happen to redirect it concurrently - that's exactly what may happen.
 							from, _ := conn.getAddr()
-							err := router.OnConnClosed(from, conn.GetRedirectingAddr(), conn)
+							err := router.groups[0].OnConnClosed(from, conn.GetRedirectingAddr(), conn)
 							require.NoError(t, err)
 							conn = nil
 						}
@@ -655,7 +668,8 @@ func TestRefresh(t *testing.T) {
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy(), nil, make(<-chan *config.Config))
+	cfgGetter := newMockConfigGetter(&config.Config{})
+	rt.Init(context.Background(), bo, simpleBpCreator, cfgGetter, make(<-chan *config.Config))
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// The initial backends are empty.
@@ -675,7 +689,8 @@ func TestObserveError(t *testing.T) {
 	rt := NewScoreBasedRouter(lg)
 	bo := newMockBackendObserver()
 	bo.Start(context.Background())
-	rt.Init(context.Background(), bo, policy.NewSimpleBalancePolicy(), nil, make(<-chan *config.Config))
+	cfgGetter := newMockConfigGetter(&config.Config{})
+	rt.Init(context.Background(), bo, simpleBpCreator, cfgGetter, make(<-chan *config.Config))
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// Mock an observe error.
@@ -686,7 +701,7 @@ func TestObserveError(t *testing.T) {
 		return err != nil && err != ErrNoBackend
 	}, 3*time.Second, 10*time.Millisecond)
 	// Clear the observe error.
-	bo.addBackend("0")
+	bo.addBackend("0", nil)
 	bo.notify(nil)
 	require.Eventually(t, func() bool {
 		selector := rt.GetBackendSelector()
@@ -712,6 +727,7 @@ func TestSetBackendStatus(t *testing.T) {
 func TestGetServerVersion(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)
+	rt.bpCreator = simpleBpCreator
 	t.Cleanup(rt.Close)
 	backends := map[string]*observer.BackendHealth{
 		"0": {
@@ -799,19 +815,29 @@ func TestWatchConfig(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	router := NewScoreBasedRouter(lg)
 	cfgCh := make(chan *config.Config)
-	policy := &mockBalancePolicy{}
 	cfg := &config.Config{
 		Labels: map[string]string{"k1": "v1"},
 	}
-	router.Init(context.Background(), newMockBackendObserver(), policy, cfg, cfgCh)
+	cfgGetter := newMockConfigGetter(cfg)
+	p := &mockBalancePolicy{}
+	bpCreator := func(_ *zap.Logger) policy.BalancePolicy {
+		p.Init(cfg)
+		return p
+	}
+	bo := newMockBackendObserver()
+	router.Init(context.Background(), bo, bpCreator, cfgGetter, cfgCh)
 	t.Cleanup(router.Close)
 
-	require.Equal(t, "v1", policy.getConfig().Labels["k1"])
+	bo.addBackend("0", nil)
+	bo.notify(nil)
+	require.Eventually(t, func() bool {
+		return p.getConfig() != nil && p.getConfig().Labels["k1"] == "v1"
+	}, 30*time.Second, 10*time.Millisecond)
 	cfgCh <- &config.Config{
 		Labels: map[string]string{"k1": "v2"},
 	}
 	require.Eventually(t, func() bool {
-		return policy.getConfig().Labels["k1"] == "v2"
+		return p.getConfig().Labels["k1"] == "v2"
 	}, 3*time.Second, 10*time.Millisecond)
 }
 
@@ -911,11 +937,11 @@ func TestControlSpeed(t *testing.T) {
 		bp.backendsToBalance = func(bc []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
 			return tester.getBackendByIndex(0), tester.getBackendByIndex(1), test.balanceCount, "conn", nil
 		}
-		tester.router.lastRedirectTime = time.Time{}
+		tester.router.groups[0].lastRedirectTime = time.Time{}
 		require.Equal(t, total, tester.getBackendByIndex(0).connScore, "case %d", i)
 		for j := 0; j < test.rounds; j++ {
 			tester.router.rebalance(context.Background())
-			tester.router.lastRedirectTime = tester.router.lastRedirectTime.Add(-test.interval)
+			tester.router.groups[0].lastRedirectTime = tester.router.groups[0].lastRedirectTime.Add(-test.interval)
 		}
 		redirectingNum := total - tester.getBackendByIndex(0).connScore
 		// Define a bound because the test may be slow.
@@ -977,4 +1003,96 @@ func TestSkipRedirection(t *testing.T) {
 	require.True(t, tester.router.supportRedirection)
 	tester.rebalance(1)
 	require.NotEqual(t, 5, tester.getBackendByIndex(0).connScore)
+}
+
+func TestGroupBackends(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
+	cfgCh := make(chan *config.Config)
+	cfg := &config.Config{
+		Balance: config.Balance{
+			RoutingRule: "cidr",
+		},
+	}
+	cfgGetter := newMockConfigGetter(cfg)
+	p := &mockBalancePolicy{}
+	bpCreator := func(_ *zap.Logger) policy.BalancePolicy {
+		p.Init(cfg)
+		return p
+	}
+	bo := newMockBackendObserver()
+	router.Init(context.Background(), bo, bpCreator, cfgGetter, cfgCh)
+	t.Cleanup(bo.Close)
+	t.Cleanup(router.Close)
+
+	tests := []struct {
+		addr         string
+		labels       map[string]string
+		groupCount   int
+		backendCount int
+		cidrs        []string
+	}{
+		{
+			addr:         "0",
+			labels:       nil,
+			groupCount:   0,
+			backendCount: 1,
+			cidrs:        nil,
+		},
+		{
+			addr:         "1",
+			labels:       map[string]string{"cidr": "1.1.1.1/32"},
+			groupCount:   1,
+			backendCount: 2,
+			cidrs:        []string{"1.1.1.1/32"},
+		},
+		{
+			addr:         "2",
+			labels:       map[string]string{"cidr": "1.1.1.1/32 , "},
+			groupCount:   1,
+			backendCount: 3,
+			cidrs:        []string{"1.1.1.1/32"},
+		},
+		{
+			addr:         "3",
+			labels:       map[string]string{"cidr": "1.1.2.1/32, 1.1.3.1/32"},
+			groupCount:   2,
+			backendCount: 4,
+			cidrs:        []string{"1.1.2.1/32", "1.1.3.1/32"},
+		},
+		{
+			addr:         "4",
+			labels:       map[string]string{"cidr": "1.1.2.1/32,, 1.1.3.1/32 "},
+			groupCount:   2,
+			backendCount: 5,
+			cidrs:        []string{"1.1.2.1/32", "1.1.3.1/32"},
+		},
+		{
+			addr:         "0",
+			labels:       map[string]string{"cidr": " 1.1.1.1/32 "},
+			groupCount:   2,
+			backendCount: 5,
+			cidrs:        []string{"1.1.1.1/32"},
+		},
+	}
+
+	for i, test := range tests {
+		bo.addBackend(test.addr, test.labels)
+		bo.notify(nil)
+		require.Eventually(t, func() bool {
+			router.Lock()
+			defer router.Unlock()
+			if len(router.groups) != test.groupCount {
+				return false
+			}
+			if len(router.backends) != test.backendCount {
+				return false
+			}
+			group := router.backends[test.addr].group
+			if test.cidrs == nil {
+				return group == nil
+			}
+			return slices.Equal(test.cidrs, group.values)
+		}, 3*time.Second, 10*time.Millisecond, "test %d", i)
+	}
 }

@@ -5,17 +5,15 @@ package router
 
 import (
 	"context"
-	"net"
-	"reflect"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
-	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
-	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
@@ -30,20 +28,24 @@ var _ Router = &ScoreBasedRouter{}
 // It routes a connection based on score.
 type ScoreBasedRouter struct {
 	sync.Mutex
-	logger     *zap.Logger
-	policy     policy.BalancePolicy
+	logger *zap.Logger
+	// Tests may use a different balance policy.
+	bpCreator  func(lg *zap.Logger) policy.BalancePolicy
 	observer   observer.BackendObserver
 	healthCh   <-chan observer.HealthResult
+	cfgGetter  config.ConfigGetter
 	cfgCh      <-chan *config.Config
 	cancelFunc context.CancelFunc
 	wg         waitgroup.WaitGroup
-	// A list of *backendWrapper. The backends are in descending order of scores.
-	backends     map[string]*backendWrapper
+	// Some backends may not belonging to any group because their labels are not set yet.
+	backends map[string]*backendWrapper
+	// TODO: sort the groups to leverage binary search.
+	groups []*Group
+	// The routing rule for categorizing backends to groups.
+	matchType    MatchType
 	observeError error
 	// Only store the version of a random backend, so the client may see a wrong version when backends are upgrading.
 	serverVersion string
-	// To limit the speed of redirection.
-	lastRedirectTime time.Time
 	// The backend supports redirection only when they have signing certs.
 	supportRedirection bool
 }
@@ -53,17 +55,30 @@ func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 	return &ScoreBasedRouter{
 		logger:   logger,
 		backends: make(map[string]*backendWrapper),
+		groups:   make([]*Group, 0),
 	}
 }
 
-func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver, balancePolicy policy.BalancePolicy, cfg *config.Config, cfgCh <-chan *config.Config) {
+func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver, bpCreator func(lg *zap.Logger) policy.BalancePolicy,
+	cfgGetter config.ConfigGetter, cfgCh <-chan *config.Config) {
 	r.observer = ob
+	r.bpCreator = bpCreator
+	r.cfgGetter = cfgGetter
+	r.cfgCh = cfgCh
 	r.healthCh = r.observer.Subscribe("score_based_router")
-	r.policy = balancePolicy
-	balancePolicy.Init(cfg)
+	cfg := cfgGetter.GetConfig()
+
+	r.matchType = MatchAll
+	switch strings.ToLower(cfg.Balance.RoutingRule) {
+	case "cidr":
+		r.matchType = MatchCIDR
+	case "":
+	default:
+		r.logger.Error("unsupported routing rule, use the default rule", zap.String("rule", cfg.Balance.RoutingRule))
+	}
+
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
-	r.cfgCh = cfgCh
 	// Failing to route connections may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	r.wg.Run(func() {
 		r.rebalanceLoop(childCtx)
@@ -72,9 +87,40 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 
 // GetBackendSelector implements Router.GetBackendSelector interface.
 func (router *ScoreBasedRouter) GetBackendSelector() BackendSelector {
+	var group *Group
 	return BackendSelector{
-		routeOnce: router.routeOnce,
-		onCreate:  router.onCreateConn,
+		routeOnce: func(excluded []BackendInst) (backend BackendInst, err error) {
+			// Prevent the group from being removed after it's chosen. In that case,
+			// the connection will be on a orphan group.
+			router.Lock()
+			defer func() {
+				router.Unlock()
+				if errors.Is(err, ErrNoBackend) {
+					// No available backends, maybe the health check result is outdated during rolling restart.
+					// Refresh the backends asynchronously in this case.
+					if router.observer != nil {
+						router.observer.Refresh()
+					}
+				}
+			}()
+			if router.observeError != nil {
+				err = router.observeError
+				return
+			}
+			// The group may change from round to round because the backends are updated.
+			// TODO: fill ip
+			group = router.routeToGroup("")
+			if group == nil {
+				err = ErrNoBackend
+				return
+			}
+			// The router may remove this group concurrently, make sure the group can be accessed after it's removed.
+			backend, err = group.Route(excluded)
+			return
+		},
+		onCreate: func(backend BackendInst, conn RedirectableConn, succeed bool) {
+			group.onCreateConn(backend, conn, succeed)
+		},
 	}
 }
 
@@ -94,80 +140,15 @@ func (router *ScoreBasedRouter) HealthyBackendCount() int {
 	return count
 }
 
-func (router *ScoreBasedRouter) getConnWrapper(conn RedirectableConn) *glist.Element[*connWrapper] {
-	return conn.Value(_routerKey).(*glist.Element[*connWrapper])
-}
-
-func (router *ScoreBasedRouter) setConnWrapper(conn RedirectableConn, ce *glist.Element[*connWrapper]) {
-	conn.SetValue(_routerKey, ce)
-}
-
-func (router *ScoreBasedRouter) routeOnce(excluded []BackendInst) (BackendInst, error) {
-	router.Lock()
-	defer router.Unlock()
-	if router.observeError != nil {
-		return nil, router.observeError
+// called in the lock
+func (router *ScoreBasedRouter) routeToGroup(ip string) *Group {
+	// TODO: binary search
+	for _, group := range router.groups {
+		if group.Match(ip) {
+			return group
+		}
 	}
-
-	backends := make([]policy.BackendCtx, 0, len(router.backends))
-	for _, backend := range router.backends {
-		if !backend.Healthy() {
-			continue
-		}
-		// Exclude the backends that are already tried.
-		found := false
-		for _, e := range excluded {
-			if backend.Addr() == e.Addr() {
-				found = true
-				break
-			}
-		}
-		if found {
-			continue
-		}
-		backends = append(backends, backend)
-	}
-
-	idlestBackend := router.policy.BackendToRoute(backends)
-	if idlestBackend == nil || reflect.ValueOf(idlestBackend).IsNil() {
-		// No available backends, maybe the health check result is outdated during rolling restart.
-		// Refresh the backends asynchronously in this case.
-		if router.observer != nil {
-			router.observer.Refresh()
-		}
-		return nil, ErrNoBackend
-	}
-	backend := idlestBackend.(*backendWrapper)
-	backend.connScore++
-	return backend, nil
-}
-
-func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn RedirectableConn, succeed bool) {
-	router.Lock()
-	defer router.Unlock()
-	backend := router.ensureBackend(backendInst.Addr())
-	if succeed {
-		connWrapper := &connWrapper{
-			RedirectableConn: conn,
-			phase:            phaseNotRedirected,
-		}
-		router.addConn(backend, connWrapper)
-		conn.SetEventReceiver(router)
-	} else {
-		backend.connScore--
-	}
-}
-
-func (router *ScoreBasedRouter) removeConn(backend *backendWrapper, ce *glist.Element[*connWrapper]) {
-	backend.connList.Remove(ce)
-	setBackendConnMetrics(backend.addr, backend.connList.Len())
-	router.removeBackendIfEmpty(backend)
-}
-
-func (router *ScoreBasedRouter) addConn(backend *backendWrapper, conn *connWrapper) {
-	ce := backend.connList.PushBack(conn)
-	setBackendConnMetrics(backend.addr, backend.connList.Len())
-	router.setConnWrapper(conn, ce)
+	return nil
 }
 
 // RefreshBackend implements Router.GetBackendSelector interface.
@@ -180,95 +161,11 @@ func (router *ScoreBasedRouter) RefreshBackend() {
 func (router *ScoreBasedRouter) RedirectConnections() error {
 	router.Lock()
 	defer router.Unlock()
-	for _, backend := range router.backends {
-		for ce := backend.connList.Front(); ce != nil; ce = ce.Next() {
-			// This is only for test, so we allow it to reconnect to the same backend.
-			connWrapper := ce.Value
-			if connWrapper.phase != phaseRedirectNotify {
-				connWrapper.phase = phaseRedirectNotify
-				connWrapper.redirectReason = "test"
-				if connWrapper.Redirect(backend) {
-					metrics.PendingMigrateGuage.WithLabelValues(backend.addr, backend.addr, connWrapper.redirectReason).Inc()
-				}
-			}
+	for _, group := range router.groups {
+		if err := group.RedirectConnections(); err != nil {
+			return err
 		}
 	}
-	return nil
-}
-
-func (router *ScoreBasedRouter) ensureBackend(addr string) *backendWrapper {
-	backend, ok := router.backends[addr]
-	if ok {
-		return backend
-	}
-	// The backend should always exist if it will be needed. Add a warning and add it back.
-	router.logger.Warn("backend is not found in the router", zap.String("backend_addr", addr), zap.Stack("stack"))
-	ip, _, _ := net.SplitHostPort(addr)
-	backend = newBackendWrapper(addr, observer.BackendHealth{
-		BackendInfo: observer.BackendInfo{
-			IP:         ip,
-			StatusPort: 10080, // impossible anyway
-		},
-		SupportRedirection: true,
-		Healthy:            false,
-	})
-	router.backends[addr] = backend
-	return backend
-}
-
-// OnRedirectSucceed implements ConnEventReceiver.OnRedirectSucceed interface.
-func (router *ScoreBasedRouter) OnRedirectSucceed(from, to string, conn RedirectableConn) error {
-	router.onRedirectFinished(from, to, conn, true)
-	return nil
-}
-
-// OnRedirectFail implements ConnEventReceiver.OnRedirectFail interface.
-func (router *ScoreBasedRouter) OnRedirectFail(from, to string, conn RedirectableConn) error {
-	router.onRedirectFinished(from, to, conn, false)
-	return nil
-}
-
-func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn RedirectableConn, succeed bool) {
-	router.Lock()
-	defer router.Unlock()
-	fromBackend := router.ensureBackend(from)
-	toBackend := router.ensureBackend(to)
-	connWrapper := router.getConnWrapper(conn).Value
-	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
-	// The connection may be closed when this function is waiting for the lock.
-	if connWrapper.phase == phaseClosed {
-		return
-	}
-
-	if succeed {
-		router.removeConn(fromBackend, router.getConnWrapper(conn))
-		router.addConn(toBackend, connWrapper)
-		connWrapper.phase = phaseRedirectEnd
-	} else {
-		fromBackend.connScore++
-		toBackend.connScore--
-		router.removeBackendIfEmpty(toBackend)
-		connWrapper.phase = phaseRedirectFail
-	}
-}
-
-// OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
-func (router *ScoreBasedRouter) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
-	router.Lock()
-	defer router.Unlock()
-	backend := router.ensureBackend(addr)
-	connWrapper := router.getConnWrapper(conn)
-	// If this connection has not redirected yet, decrease the score of the target backend.
-	if redirectingAddr != "" {
-		redirectingBackend := router.ensureBackend(redirectingAddr)
-		redirectingBackend.connScore--
-		router.removeBackendIfEmpty(redirectingBackend)
-		metrics.PendingMigrateGuage.WithLabelValues(addr, redirectingAddr, connWrapper.Value.redirectReason).Dec()
-	} else {
-		backend.connScore--
-	}
-	router.removeConn(backend, connWrapper)
-	connWrapper.Value.phase = phaseClosed
 	return nil
 }
 
@@ -308,7 +205,6 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 				router.logger.Debug("update backend in router", zap.String("addr", addr), zap.Stringer("health", health))
 			}
 			backend.setHealth(*health)
-			router.removeBackendIfEmpty(backend)
 			if health.Healthy {
 				serverVersion = health.ServerVersion
 			}
@@ -317,12 +213,90 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 		}
 		supportRedirection = health.SupportRedirection && supportRedirection
 	}
+
+	router.updateGroups()
 	if len(serverVersion) > 0 {
 		router.serverVersion = serverVersion
 	}
 	if router.supportRedirection != supportRedirection {
 		router.logger.Info("updated supporting redirection", zap.Bool("support", supportRedirection))
 		router.supportRedirection = supportRedirection
+	}
+}
+
+// Update the groups after the backend list is updated.
+// called in the lock.
+func (router *ScoreBasedRouter) updateGroups() {
+	for _, backend := range router.backends {
+		// If connList.Len() == 0, there won't be any outgoing connections.
+		// And if also connScore == 0, there won't be any incoming connections.
+		if !backend.Healthy() && backend.connList.Len() == 0 && backend.connScore <= 0 {
+			delete(router.backends, backend.addr)
+			if backend.group != nil {
+				backend.group.RemoveBackend(backend.addr)
+				// remove empty groups
+				if backend.group.Empty() {
+					router.groups = slices.DeleteFunc(router.groups, func(g *Group) bool {
+						return g == backend.group
+					})
+				}
+			}
+			continue
+		}
+		// If the labels were correctly set, we won't update its group even if the labels change.
+		if backend.group != nil {
+			continue
+		}
+
+		// If the backend is not in any group, add it to a new group if its label is set.
+		// In operator deployment, the labels are set dynamically.
+		var group *Group
+		switch router.matchType {
+		case MatchAll:
+			if len(router.groups) == 0 {
+				group, _ = NewGroup(nil, router.bpCreator, router.matchType, router.logger)
+				router.groups = append(router.groups, group)
+			}
+			group = router.groups[0]
+		case MatchCIDR:
+			labels := backend.getHealth().Labels
+			if len(labels) == 0 {
+				break
+			}
+			cidr := labels["cidr"]
+			if len(cidr) == 0 {
+				break
+			}
+			cidrs := strings.Split(cidr, ",")
+			for i := len(cidrs) - 1; i >= 0; i-- {
+				cidr = strings.TrimSpace(cidrs[i])
+				if len(cidr) == 0 {
+					cidrs = append(cidrs[:i], cidrs[i+1:]...)
+				} else {
+					cidrs[i] = cidr
+				}
+			}
+			if len(cidrs) == 0 {
+				break
+			}
+			for _, g := range router.groups {
+				if g.EqualValues(cidrs) {
+					group = g
+					break
+				}
+			}
+			if group == nil {
+				g, err := NewGroup(cidrs, router.bpCreator, router.matchType, router.logger)
+				if err == nil {
+					group = g
+					router.groups = append(router.groups, group)
+				}
+				// maybe too many logs, ignore the error now
+			}
+		}
+		if group != nil {
+			group.AddBackend(backend.addr, backend)
+		}
 	}
 }
 
@@ -336,10 +310,18 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 		case healthResults := <-router.healthCh:
 			router.updateBackendHealth(healthResults)
 		case cfg := <-router.cfgCh:
-			router.policy.SetConfig(cfg)
+			router.setConfig(cfg)
 		case <-ticker.C:
 			router.rebalance(ctx)
 		}
+	}
+}
+
+func (router *ScoreBasedRouter) setConfig(cfg *config.Config) {
+	router.Lock()
+	defer router.Unlock()
+	for _, group := range router.groups {
+		group.SetConfig(cfg)
 	}
 }
 
@@ -353,99 +335,17 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	if !router.supportRedirection {
 		return
 	}
-	if len(router.backends) <= 1 {
-		return
+	for _, group := range router.groups {
+		group.Balance(ctx)
 	}
-	backends := make([]policy.BackendCtx, 0, len(router.backends))
-	for _, backend := range router.backends {
-		backends = append(backends, backend)
-	}
-
-	busiestBackend, idlestBackend, balanceCount, reason, logFields := router.policy.BackendsToBalance(backends)
-	if balanceCount == 0 {
-		return
-	}
-	fromBackend, toBackend := busiestBackend.(*backendWrapper), idlestBackend.(*backendWrapper)
-
-	// Control the speed of migration.
-	curTime := time.Now()
-	migrationInterval := time.Duration(float64(time.Second) / balanceCount)
-	count := 0
-	if migrationInterval < rebalanceInterval*2 {
-		// If we need to migrate multiple connections in each round, calculate the connection count for each round.
-		count = int((rebalanceInterval-1)/migrationInterval) + 1
-	} else {
-		// If we need to wait for multiple rounds to migrate a connection, calculate the interval for each connection.
-		if curTime.Sub(router.lastRedirectTime) >= migrationInterval {
-			count = 1
-		} else {
-			return
-		}
-	}
-	// Migrate balanceCount connections.
-	i := 0
-	for ele := fromBackend.connList.Front(); ele != nil && ctx.Err() == nil && i < count; ele = ele.Next() {
-		conn := ele.Value
-		switch conn.phase {
-		case phaseRedirectNotify:
-			// A connection cannot be redirected again when it has not finished redirecting.
-			continue
-		case phaseRedirectFail:
-			// If it failed recently, it will probably fail this time.
-			if conn.lastRedirect.Add(redirectFailMinInterval).After(curTime) {
-				continue
-			}
-		}
-		if router.redirectConn(conn, fromBackend, toBackend, reason, logFields, curTime) {
-			router.lastRedirectTime = curTime
-			i++
-		}
-	}
-}
-
-func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toBackend *backendWrapper,
-	reason string, logFields []zap.Field, curTime time.Time) bool {
-	// Skip the connection if it's closing.
-	fields := []zap.Field{
-		zap.Uint64("connID", conn.ConnectionID()),
-		zap.String("from", fromBackend.addr),
-		zap.String("to", toBackend.addr),
-	}
-	fields = append(fields, logFields...)
-	succeed := conn.Redirect(toBackend)
-	if succeed {
-		router.logger.Debug("begin redirect connection", fields...)
-		fromBackend.connScore--
-		router.removeBackendIfEmpty(fromBackend)
-		toBackend.connScore++
-		conn.phase = phaseRedirectNotify
-		conn.redirectReason = reason
-		metrics.PendingMigrateGuage.WithLabelValues(fromBackend.addr, toBackend.addr, reason).Inc()
-	} else {
-		// Avoid it to be redirected again immediately.
-		conn.phase = phaseRedirectFail
-		router.logger.Debug("skip redirecting because it's closing", fields...)
-	}
-	conn.lastRedirect = curTime
-	return succeed
-}
-
-func (router *ScoreBasedRouter) removeBackendIfEmpty(backend *backendWrapper) bool {
-	// If connList.Len() == 0, there won't be any outgoing connections.
-	// And if also connScore == 0, there won't be any incoming connections.
-	if !backend.Healthy() && backend.connList.Len() == 0 && backend.connScore <= 0 {
-		delete(router.backends, backend.addr)
-		return true
-	}
-	return false
 }
 
 func (router *ScoreBasedRouter) ConnCount() int {
 	router.Lock()
 	defer router.Unlock()
 	j := 0
-	for _, backend := range router.backends {
-		j += backend.connList.Len()
+	for _, group := range router.groups {
+		j += group.ConnCount()
 	}
 	return j
 }
@@ -467,5 +367,4 @@ func (router *ScoreBasedRouter) Close() {
 	if router.observer != nil {
 		router.observer.Unsubscribe("score_based_router")
 	}
-	// Router only refers to RedirectableConn, it doesn't manage RedirectableConn.
 }
