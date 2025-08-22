@@ -131,11 +131,14 @@ func (mbo *mockBackendObserver) toggleBackendHealth(addr string) {
 	health.Healthy = !health.Healthy
 }
 
-func (mbo *mockBackendObserver) addBackend(addr string) {
+func (mbo *mockBackendObserver) addBackend(addr string, labels map[string]string) {
 	mbo.healthLock.Lock()
 	defer mbo.healthLock.Unlock()
 	mbo.healths[addr] = &observer.BackendHealth{
 		Healthy: true,
+		BackendInfo: observer.BackendInfo{
+			Labels: labels,
+		},
 	}
 }
 
@@ -160,7 +163,7 @@ func (mbo *mockBackendObserver) Unsubscribe(name string) {
 }
 
 func (mbo *mockBackendObserver) Refresh() {
-	mbo.addBackend("0")
+	mbo.addBackend("0", nil)
 }
 
 func (mbo *mockBackendObserver) notify(err error) {
@@ -217,4 +220,20 @@ func (m *mockBalancePolicy) SetConfig(cfg *config.Config) {
 
 func (m *mockBalancePolicy) getConfig() *config.Config {
 	return m.cfg.Load()
+}
+
+var _ config.ConfigGetter = (*mockConfigGetter)(nil)
+
+type mockConfigGetter struct {
+	cfg *config.Config
+}
+
+func newMockConfigGetter(cfg *config.Config) *mockConfigGetter {
+	return &mockConfigGetter{
+		cfg: cfg,
+	}
+}
+
+func (cfgGetter *mockConfigGetter) GetConfig() *config.Config {
+	return cfgGetter.cfg
 }
