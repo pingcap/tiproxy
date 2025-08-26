@@ -49,6 +49,7 @@ func TestProxyReadWrite(t *testing.T) {
 		},
 		func(t *testing.T, c net.Conn) {
 			prw := newProxyServer(newBasicReadWriter(c, DefaultConnBufferSize))
+			require.Equal(t, c.RemoteAddr().String(), prw.RemoteAddr().String())
 			data := make([]byte, len(message))
 			n, err := prw.Read(data)
 			require.NoError(t, err)

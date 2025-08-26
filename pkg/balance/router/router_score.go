@@ -70,8 +70,10 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 
 	r.matchType = MatchAll
 	switch strings.ToLower(cfg.Balance.RoutingRule) {
-	case "cidr":
-		r.matchType = MatchCIDR
+	case MatchClientCIDRStr:
+		r.matchType = MatchClientCIDR
+	case MatchProxyCIDRStr:
+		r.matchType = MatchProxyCIDR
 	case "":
 	default:
 		r.logger.Error("unsupported routing rule, use the default rule", zap.String("rule", cfg.Balance.RoutingRule))
@@ -86,7 +88,7 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 }
 
 // GetBackendSelector implements Router.GetBackendSelector interface.
-func (router *ScoreBasedRouter) GetBackendSelector() BackendSelector {
+func (router *ScoreBasedRouter) GetBackendSelector(clientInfo ClientInfo) BackendSelector {
 	var group *Group
 	return BackendSelector{
 		routeOnce: func(excluded []BackendInst) (backend BackendInst, err error) {
@@ -108,8 +110,7 @@ func (router *ScoreBasedRouter) GetBackendSelector() BackendSelector {
 				return
 			}
 			// The group may change from round to round because the backends are updated.
-			// TODO: fill ip
-			group = router.routeToGroup("")
+			group = router.routeToGroup(clientInfo)
 			if group == nil {
 				err = ErrNoBackend
 				return
@@ -141,10 +142,10 @@ func (router *ScoreBasedRouter) HealthyBackendCount() int {
 }
 
 // called in the lock
-func (router *ScoreBasedRouter) routeToGroup(ip string) *Group {
+func (router *ScoreBasedRouter) routeToGroup(clientInfo ClientInfo) *Group {
 	// TODO: binary search
 	for _, group := range router.groups {
-		if group.Match(ip) {
+		if group.Match(clientInfo) {
 			return group
 		}
 	}
@@ -258,7 +259,7 @@ func (router *ScoreBasedRouter) updateGroups() {
 				router.groups = append(router.groups, group)
 			}
 			group = router.groups[0]
-		case MatchCIDR:
+		case MatchClientCIDR, MatchProxyCIDR:
 			labels := backend.getHealth().Labels
 			if len(labels) == 0 {
 				break

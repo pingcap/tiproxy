@@ -64,6 +64,7 @@ type packetReadWriter interface {
 	DirectWrite(p []byte) (int, error)
 	ReadFrom(r io.Reader) (int64, error)
 	Proxy() *proxyprotocol.Proxy
+	ProxyAddr() net.Addr
 	TLSConnectionState() tls.ConnectionState
 	InBytes() uint64
 	OutBytes() uint64
@@ -131,6 +132,10 @@ func (brw *basicReadWriter) Sequence() uint8 {
 
 func (brw *basicReadWriter) Proxy() *proxyprotocol.Proxy {
 	return nil
+}
+
+func (brw *basicReadWriter) ProxyAddr() net.Addr {
+	return brw.RemoteAddr()
 }
 
 func (brw *basicReadWriter) InBytes() uint64 {
@@ -212,6 +217,7 @@ type PacketIO interface {
 	EnableProxyClient(proxy *proxyprotocol.Proxy)
 	EnableProxyServer()
 	Proxy() *proxyprotocol.Proxy
+	ProxyAddr() net.Addr
 
 	// tls
 	ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error)
@@ -265,6 +271,10 @@ func (p *packetIO) RemoteAddr() net.Addr {
 		return p.remoteAddr
 	}
 	return p.readWriter.RemoteAddr()
+}
+
+func (p *packetIO) ProxyAddr() net.Addr {
+	return p.readWriter.ProxyAddr()
 }
 
 func (p *packetIO) ResetSequence() {
