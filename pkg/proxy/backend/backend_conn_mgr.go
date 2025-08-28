@@ -265,7 +265,12 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 	// - The TiDB instances may not be initialized yet
 	// - One TiDB may be just shut down and another is just started but not ready yet
 	bctx, cancel := context.WithTimeout(ctx, mgr.config.ConnectTimeout)
-	selector := r.GetBackendSelector()
+	ci := router.ClientInfo{}
+	if mgr.clientIO != nil {
+		ci.ClientAddr = mgr.clientIO.RemoteAddr()
+		ci.ProxyAddr = mgr.clientIO.ProxyAddr()
+	}
+	selector := r.GetBackendSelector(ci)
 	startTime := time.Now()
 	var addr string
 	var backend router.BackendInst

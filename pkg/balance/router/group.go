@@ -25,8 +25,17 @@ type MatchType int
 const (
 	// Match all connections, used when there is only one backend group.
 	MatchAll MatchType = iota
-	// Match connections based on CIDR.
-	MatchCIDR
+	// Match connections based on the client CIDR.
+	MatchClientCIDR
+	// Match connections based on proxy CIDR. If proxy-protocol is disabled, route by the client CIDR.
+	MatchProxyCIDR
+)
+
+const (
+	// MatchClientCIDRStr is used for MatchClientCIDR.
+	MatchClientCIDRStr = "client_cidr"
+	// MatchProxyCIDRStr is used for MatchProxyCIDR.
+	MatchProxyCIDRStr = "proxy_cidr"
 )
 
 var _ ConnEventReceiver = (*Group)(nil)
@@ -69,7 +78,7 @@ func NewGroup(values []string, bpCreator func(lg *zap.Logger) policy.BalancePoli
 func (g *Group) parseValues() error {
 	var parseErr error
 	switch g.matchType {
-	case MatchCIDR:
+	case MatchClientCIDR, MatchProxyCIDR:
 		cidrList := make([]*net.IPNet, 0, len(g.values))
 		for _, v := range g.values {
 			_, cidr, err := net.ParseCIDR(v)
@@ -84,10 +93,22 @@ func (g *Group) parseValues() error {
 	return parseErr
 }
 
-func (g *Group) Match(value string) bool {
+func (g *Group) Match(clientInfo ClientInfo) bool {
 	switch g.matchType {
-	case MatchCIDR:
-		ip := net.ParseIP(value)
+	case MatchClientCIDR, MatchProxyCIDR:
+		addr := clientInfo.ProxyAddr
+		if g.matchType == MatchClientCIDR {
+			addr = clientInfo.ClientAddr
+		}
+		if addr == nil || reflect.ValueOf(addr).IsNil() {
+			return false
+		}
+		value := addr.String()
+		ipStr, _, err := net.SplitHostPort(value)
+		if err == nil {
+			g.lg.Error("parsing address failed", zap.String("addr", value), zap.Error(err))
+		}
+		ip := net.ParseIP(ipStr)
 		if ip == nil {
 			g.lg.Error("parsing IP failed", zap.String("ip", value))
 			return false
@@ -104,7 +125,7 @@ func (g *Group) Match(value string) bool {
 
 func (g *Group) EqualValues(values []string) bool {
 	switch g.matchType {
-	case MatchCIDR:
+	case MatchClientCIDR, MatchProxyCIDR:
 		if len(g.values) != len(values) {
 			return false
 		}

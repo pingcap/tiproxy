@@ -156,3 +156,7 @@ func (prw *proxyReadWriter) RemoteAddr() net.Addr {
 func (prw *proxyReadWriter) Proxy() *proxyprotocol.Proxy {
 	return prw.proxy
 }
+
+func (prw *proxyReadWriter) ProxyAddr() net.Addr {
+	return prw.packetReadWriter.RemoteAddr()
+}

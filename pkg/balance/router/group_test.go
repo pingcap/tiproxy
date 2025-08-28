@@ -4,6 +4,7 @@
 package router
 
 import (
+	"net"
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
@@ -43,7 +44,7 @@ func TestParseCIDR(t *testing.T) {
 	for _, test := range tests {
 		g, err := NewGroup(test.cidrs, func(lg *zap.Logger) policy.BalancePolicy {
 			return nil
-		}, MatchCIDR, lg)
+		}, MatchClientCIDR, lg)
 		if test.success {
 			require.NoError(t, err)
 			require.Equal(t, len(test.cidrs), len(g.cidrList))
@@ -88,11 +89,63 @@ func TestMatchIP(t *testing.T) {
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
+	for _, matchType := range []MatchType{MatchClientCIDR, MatchProxyCIDR} {
+		for _, test := range tests {
+			g, err := NewGroup(test.cidrs, func(lg *zap.Logger) policy.BalancePolicy {
+				return nil
+			}, matchType, lg)
+			require.NoError(t, err)
+			ci := ClientInfo{}
+			addr := &net.TCPAddr{IP: net.ParseIP(test.ip), Port: 10000}
+			if matchType == MatchProxyCIDR {
+				ci.ProxyAddr = addr
+			} else {
+				ci.ClientAddr = addr
+			}
+			require.Equal(t, test.success, g.Match(ci))
+		}
+	}
+}
+
+func TestEqualCIDR(t *testing.T) {
+	tests := []struct {
+		cidrs1 []string
+		cidrs2 []string
+		equal  bool
+	}{
+		{
+			cidrs1: []string{"1.1.1.1/32"},
+			cidrs2: []string{"1.1.1.1/32"},
+			equal:  true,
+		},
+		{
+			cidrs1: []string{"1.1.1.1/32"},
+			cidrs2: []string{"1.1.1.2/32"},
+			equal:  false,
+		},
+		{
+			cidrs1: []string{"1.1.1.1/24", "1.1.2.1/24"},
+			cidrs2: []string{"1.1.1.1/24", "1.1.2.1/24"},
+			equal:  true,
+		},
+		{
+			cidrs1: []string{"1.1.1.1/24", "1.1.2.1/24"},
+			cidrs2: []string{"1.1.1.1/24"},
+			equal:  false,
+		},
+		{
+			cidrs1: []string{"1.1.1.1/24", "1.1.2.1/24"},
+			cidrs2: []string{"1.1.1.1/24", "1.1.3.1/24"},
+			equal:  false,
+		},
+	}
+
+	lg, _ := logger.CreateLoggerForTest(t)
 	for _, test := range tests {
-		g, err := NewGroup(test.cidrs, func(lg *zap.Logger) policy.BalancePolicy {
+		g1, err := NewGroup(test.cidrs1, func(lg *zap.Logger) policy.BalancePolicy {
 			return nil
-		}, MatchCIDR, lg)
+		}, MatchClientCIDR, lg)
 		require.NoError(t, err)
-		require.Equal(t, test.success, g.Match(test.ip))
+		require.Equal(t, test.equal, g1.EqualValues(test.cidrs2))
 	}
 }

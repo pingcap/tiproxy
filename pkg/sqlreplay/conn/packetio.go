@@ -125,6 +125,11 @@ func (p *packetIO) Proxy() *proxyprotocol.Proxy {
 	return nil
 }
 
+// ProxyAddr implements net.PacketIO.
+func (p *packetIO) ProxyAddr() net.Addr {
+	return &net.TCPAddr{}
+}
+
 // RemoteAddr implements net.PacketIO.
 func (p *packetIO) RemoteAddr() net.Addr {
 	return &net.TCPAddr{}

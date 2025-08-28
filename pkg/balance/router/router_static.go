@@ -20,7 +20,7 @@ func NewStaticRouter(addrs []string) *StaticRouter {
 	return &StaticRouter{backends: backends}
 }
 
-func (r *StaticRouter) GetBackendSelector() BackendSelector {
+func (r *StaticRouter) GetBackendSelector(_ ClientInfo) BackendSelector {
 	return BackendSelector{
 		routeOnce: func(excluded []BackendInst) (BackendInst, error) {
 			for _, backend := range r.backends {

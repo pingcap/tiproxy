@@ -26,7 +26,7 @@ type ConnEventReceiver interface {
 
 // Router routes client connections to backends.
 type Router interface {
-	GetBackendSelector() BackendSelector
+	GetBackendSelector(clientInfo ClientInfo) BackendSelector
 	HealthyBackendCount() int
 	RefreshBackend()
 	RedirectConnections() error

@@ -3,6 +3,14 @@
 
 package router
 
+import "net"
+
+type ClientInfo struct {
+	ClientAddr net.Addr
+	ProxyAddr  net.Addr
+	// TODO: username, database, etc.
+}
+
 type BackendSelector struct {
 	excluded  []BackendInst
 	cur       BackendInst

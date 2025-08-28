@@ -137,7 +137,7 @@ func (tester *routerTester) getBackendByIndex(index int) *backendWrapper {
 }
 
 func (tester *routerTester) simpleRoute(conn RedirectableConn) BackendInst {
-	selector := tester.router.GetBackendSelector()
+	selector := tester.router.GetBackendSelector(ClientInfo{})
 	backend, err := selector.Next()
 	if err != ErrNoBackend {
 		require.NoError(tester.t, err)
@@ -351,7 +351,7 @@ func TestNoBackends(t *testing.T) {
 func TestSelectorReturnOrder(t *testing.T) {
 	tester := newRouterTester(t, nil)
 	tester.addBackends(3)
-	selector := tester.router.GetBackendSelector()
+	selector := tester.router.GetBackendSelector(ClientInfo{})
 	for i := 0; i < 3; i++ {
 		addrs := make(map[string]struct{}, 3)
 		for j := 0; j < 3; j++ {
@@ -388,7 +388,7 @@ func TestRouteConcurrently(t *testing.T) {
 	selectors := make([]BackendSelector, 0, 30)
 	// All the clients are calling Next() but not yet Finish().
 	for i := 0; i < 30; i++ {
-		selector := tester.router.GetBackendSelector()
+		selector := tester.router.GetBackendSelector(ClientInfo{})
 		backend, err := selector.Next()
 		require.NoError(t, err)
 		addrs[backend.Addr()]++
@@ -618,7 +618,7 @@ func TestConcurrency(t *testing.T) {
 					if conn == nil {
 						// not connected, connect
 						conn = newMockRedirectableConn(t, connID)
-						selector := router.GetBackendSelector()
+						selector := router.GetBackendSelector(ClientInfo{})
 						backend, err := selector.Next()
 						if err == ErrNoBackend {
 							conn = nil
@@ -673,7 +673,7 @@ func TestRefresh(t *testing.T) {
 	t.Cleanup(bo.Close)
 	t.Cleanup(rt.Close)
 	// The initial backends are empty.
-	selector := rt.GetBackendSelector()
+	selector := rt.GetBackendSelector(ClientInfo{})
 	_, err := selector.Next()
 	require.Equal(t, ErrNoBackend, err)
 	// Refresh is called internally and there comes a new one.
@@ -696,7 +696,7 @@ func TestObserveError(t *testing.T) {
 	// Mock an observe error.
 	bo.notify(errors.New("mock observe error"))
 	require.Eventually(t, func() bool {
-		selector := rt.GetBackendSelector()
+		selector := rt.GetBackendSelector(ClientInfo{})
 		_, err := selector.Next()
 		return err != nil && err != ErrNoBackend
 	}, 3*time.Second, 10*time.Millisecond)
@@ -704,7 +704,7 @@ func TestObserveError(t *testing.T) {
 	bo.addBackend("0", nil)
 	bo.notify(nil)
 	require.Eventually(t, func() bool {
-		selector := rt.GetBackendSelector()
+		selector := rt.GetBackendSelector(ClientInfo{})
 		_, err := selector.Next()
 		return err == nil
 	}, 3*time.Second, 10*time.Millisecond)
@@ -1011,7 +1011,7 @@ func TestGroupBackends(t *testing.T) {
 	cfgCh := make(chan *config.Config)
 	cfg := &config.Config{
 		Balance: config.Balance{
-			RoutingRule: "cidr",
+			RoutingRule: MatchClientCIDRStr,
 		},
 	}
 	cfgGetter := newMockConfigGetter(cfg)
