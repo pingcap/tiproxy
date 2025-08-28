@@ -104,7 +104,11 @@ func (g *Group) Match(clientInfo ClientInfo) bool {
 			return false
 		}
 		value := addr.String()
-		ip := net.ParseIP(value)
+		ipStr, _, err := net.SplitHostPort(value)
+		if err == nil {
+			g.lg.Error("parsing address failed", zap.String("addr", value), zap.Error(err))
+		}
+		ip := net.ParseIP(ipStr)
 		if ip == nil {
 			g.lg.Error("parsing IP failed", zap.String("ip", value))
 			return false
