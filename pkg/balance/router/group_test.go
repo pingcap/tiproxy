@@ -96,7 +96,7 @@ func TestMatchIP(t *testing.T) {
 			}, matchType, lg)
 			require.NoError(t, err)
 			ci := ClientInfo{}
-			addr := &net.IPAddr{IP: net.ParseIP(test.ip)}
+			addr := &net.TCPAddr{IP: net.ParseIP(test.ip), Port: 10000}
 			if matchType == MatchProxyCIDR {
 				ci.ProxyAddr = addr
 			} else {
