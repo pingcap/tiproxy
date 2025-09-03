@@ -70,7 +70,7 @@ func TestExecuteCmd(t *testing.T) {
 		conn.Run(childCtx)
 	}, nil, lg)
 	cmds := 1000
-	for i := 0; i < cmds; i++ {
+	for range cmds {
 		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComFieldList})
 	}
 	require.Eventually(t, func() bool {

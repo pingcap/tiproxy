@@ -155,7 +155,7 @@ func TestConfigRemove(t *testing.T) {
 }
 
 func TestFilePath(t *testing.T) {
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		var cfgmgr *ConfigManager
 		tmpdir := t.TempDir()
 		pdAddr1, pdAddr2, pdAddr3 := "127.0.0.1:1000", "127.0.0.1:2000", "127.0.0.1:3000"
@@ -276,7 +276,7 @@ func TestFilePath(t *testing.T) {
 			require.Equal(t, pdAddr1, cfgmgr.GetConfig().Proxy.PDAddrs)
 
 			// Test write.
-			require.NoError(t, os.WriteFile(test.filename, []byte(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr2)), 0644))
+			require.NoError(t, os.WriteFile(test.filename, fmt.Appendf(nil, "proxy.pd-addrs = \"%s\"", pdAddr2), 0644))
 			require.Eventually(t, func() bool {
 				return pdAddr2 == cfgmgr.GetConfig().Proxy.PDAddrs
 			}, 3*time.Second, 10*time.Millisecond, cfgmgr.GetConfig().Proxy.PDAddrs)

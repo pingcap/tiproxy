@@ -30,7 +30,7 @@ func (db *mockReportDB) clear() {
 	db.Lock()
 	defer db.Unlock()
 	exceptions := make(map[conn.ExceptionType]map[string]*expCollection, conn.Total)
-	for i := 0; i < int(conn.Total); i++ {
+	for i := range int(conn.Total) {
 		exceptions[conn.ExceptionType(i)] = make(map[string]*expCollection)
 	}
 	db.exceptions = exceptions

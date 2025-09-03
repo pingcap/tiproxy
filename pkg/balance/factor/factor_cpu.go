@@ -135,7 +135,7 @@ func (fc *FactorCPU) UpdateScore(backends []scoredBackend) {
 		return
 	}
 
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		_, latestUsage := fc.getUsage(backends[i])
 		backends[i].addScore(int(latestUsage*100)/cpuScoreStep, fc.bitNum)
 	}

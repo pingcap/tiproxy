@@ -82,7 +82,7 @@ var (
 // 0: no risk
 func getRiskLevel(usage float64, timeToOOM time.Duration) int {
 	level := 0
-	for j := 0; j < len(oomRiskLevels); j++ {
+	for j := range oomRiskLevels {
 		if timeToOOM < oomRiskLevels[j].timeToOOM {
 			return len(oomRiskLevels) - j
 		}
@@ -153,7 +153,7 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 		return
 	}
 
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		addr := backends[i].Addr()
 		// If the backend is new or the backend misses metrics, take it safe.
 		score := fm.snapshot[addr].riskLevel

@@ -68,7 +68,7 @@ func (tester *routerTester) notifyHealth() {
 }
 
 func (tester *routerTester) addBackends(num int) {
-	for i := 0; i < num; i++ {
+	for range num {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
 		tester.backends[addr] = &observer.BackendHealth{
@@ -147,7 +147,7 @@ func (tester *routerTester) simpleRoute(conn RedirectableConn) BackendInst {
 }
 
 func (tester *routerTester) addConnections(num int) {
-	for i := 0; i < num; i++ {
+	for range num {
 		conn := tester.createConn()
 		backend := tester.simpleRoute(conn)
 		require.False(tester.t, backend == nil || reflect.ValueOf(backend).IsNil())
@@ -181,7 +181,7 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 }
 
 func (tester *routerTester) rebalance(num int) {
-	for i := 0; i < num; i++ {
+	for range num {
 		if len(tester.router.groups) > 0 {
 			tester.router.groups[0].lastRedirectTime = time.Time{}
 		}
@@ -352,9 +352,9 @@ func TestSelectorReturnOrder(t *testing.T) {
 	tester := newRouterTester(t, nil)
 	tester.addBackends(3)
 	selector := tester.router.GetBackendSelector(ClientInfo{})
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		addrs := make(map[string]struct{}, 3)
-		for j := 0; j < 3; j++ {
+		for range 3 {
 			backend, err := selector.Next()
 			require.NoError(t, err)
 			addrs[backend.Addr()] = struct{}{}
@@ -364,7 +364,7 @@ func TestSelectorReturnOrder(t *testing.T) {
 	}
 
 	tester.killBackends(1)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		_, err := selector.Next()
 		require.NoError(t, err)
 	}
@@ -372,7 +372,7 @@ func TestSelectorReturnOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	tester.addBackends(1)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := selector.Next()
 		require.NoError(t, err)
 	}
@@ -387,7 +387,7 @@ func TestRouteConcurrently(t *testing.T) {
 	addrs := make(map[string]int, 3)
 	selectors := make([]BackendSelector, 0, 30)
 	// All the clients are calling Next() but not yet Finish().
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		selector := tester.router.GetBackendSelector(ClientInfo{})
 		backend, err := selector.Next()
 		require.NoError(t, err)
@@ -398,14 +398,14 @@ func TestRouteConcurrently(t *testing.T) {
 	for _, num := range addrs {
 		require.Equal(t, 10, num)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		backend := tester.getBackendByIndex(i)
 		require.Equal(t, 10, backend.connScore)
 	}
 	for _, selector := range selectors {
 		selector.Finish(nil, false)
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		backend := tester.getBackendByIndex(i)
 		require.Equal(t, 0, backend.connScore)
 	}
@@ -420,7 +420,7 @@ func TestRollingRestart(t *testing.T) {
 	tester.checkBalanced()
 
 	backendAddrs := make([]string, 0, backendNum)
-	for i := 0; i < backendNum; i++ {
+	for i := range backendNum {
 		backendAddrs = append(backendAddrs, tester.getBackendByIndex(i).addr)
 	}
 
@@ -603,7 +603,7 @@ func TestConcurrency(t *testing.T) {
 	})
 
 	// Create 20 connections.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		func(connID uint64) {
 			wg.Run(func() {
 				var conn *mockRedirectableConn

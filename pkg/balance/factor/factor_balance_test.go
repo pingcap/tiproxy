@@ -56,7 +56,7 @@ func TestRouteWithOneFactor(t *testing.T) {
 	}
 	for tIdx, test := range tests {
 		factor.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores[i], factor.bitNum)
 			}
 		}
@@ -123,12 +123,12 @@ func TestRouteWith2Factors(t *testing.T) {
 	}
 	for tIdx, test := range tests {
 		factor1.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores1[i], factor1.bitNum)
 			}
 		}
 		factor2.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores2[i], factor2.bitNum)
 			}
 		}
@@ -176,7 +176,7 @@ func TestBalanceWithOneFactor(t *testing.T) {
 	}
 	for tIdx, test := range tests {
 		factor.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores[i], factor.bitNum)
 			}
 		}
@@ -259,12 +259,12 @@ func TestBalanceWith2Factors(t *testing.T) {
 	}
 	for tIdx, test := range tests {
 		factor1.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores1[i], factor1.bitNum)
 			}
 		}
 		factor2.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores2[i], factor2.bitNum)
 			}
 		}
@@ -313,7 +313,7 @@ func TestBalanceWith3Factors(t *testing.T) {
 			func(factorIdx int, factor *mockFactor) {
 				factor.balanceCount = float64(test.balanceCounts[factorIdx])
 				factor.updateScore = func(backends []scoredBackend) {
-					for i := 0; i < len(backends); i++ {
+					for i := range backends {
 						backends[i].addScore(test.scores[i][factorIdx], factor.bitNum)
 					}
 				}
@@ -340,7 +340,7 @@ func TestScoreAlwaysUpdated(t *testing.T) {
 	factors := []*mockFactor{{bitNum: 1, canBeRouted: true}, {bitNum: 2, canBeRouted: true}}
 	fm.factors = []Factor{factors[0], factors[1]}
 	factors[0].updateScore = func(backends []scoredBackend) {
-		for i := 0; i < len(backends); i++ {
+		for i := range backends {
 			backends[i].addScore(1, 1)
 		}
 	}
@@ -352,7 +352,7 @@ func TestScoreAlwaysUpdated(t *testing.T) {
 
 func createBackends(num int) []policy.BackendCtx {
 	backends := make([]policy.BackendCtx, 0, num)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		backend := newMockBackend(true, 100)
 		backend.addr = strconv.Itoa(i)
 		backends = append(backends, backend)
@@ -457,12 +457,12 @@ func TestCanBeRouted(t *testing.T) {
 	}
 	for tIdx, test := range tests {
 		factor1.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores1[i], factor1.bitNum)
 			}
 		}
 		factor2.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores2[i], factor2.bitNum)
 			}
 		}
@@ -505,12 +505,12 @@ func TestCanBalance(t *testing.T) {
 	}
 	for tIdx, test := range tests {
 		factor1.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores1[i], factor1.bitNum)
 			}
 		}
 		factor2.updateScore = func(backends []scoredBackend) {
-			for i := 0; i < len(backends); i++ {
+			for i := range backends {
 				backends[i].addScore(test.scores2[i], factor2.bitNum)
 			}
 		}
@@ -537,7 +537,7 @@ func TestSetFactorConcurrently(t *testing.T) {
 			fbb.SetConfig(cfg)
 		}
 	})
-	for i := 0; i < 9; i++ {
+	for range 9 {
 		wg.Run(func() {
 			defer wg.Done()
 			for ctx.Err() != nil {

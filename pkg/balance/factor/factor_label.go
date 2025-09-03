@@ -39,7 +39,7 @@ func (fl *FactorLabel) UpdateScore(backends []scoredBackend) {
 	if len(fl.labelName) == 0 || len(fl.selfLabelVal) == 0 {
 		return
 	}
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		score := 1
 		backendLabels := backends[i].GetBackendInfo().Labels
 		if backendLabels != nil && backendLabels[fl.labelName] == fl.selfLabelVal {

@@ -19,7 +19,7 @@ func TestGenerateSalt(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < len(buffers)-1; i++ {
+	for i := range len(buffers) - 1 {
 		for j := i + 1; j < len(buffers); j++ {
 			require.NotEqual(t, buffers[i], buffers[j])
 		}

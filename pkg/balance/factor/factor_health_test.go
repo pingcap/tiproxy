@@ -206,7 +206,7 @@ func TestNoHealthMetrics(t *testing.T) {
 	mmr := newMockMetricsReader()
 	fh := NewFactorHealth(mmr, zap.NewNop())
 	backends := make([]scoredBackend, 0, 2)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		backends = append(backends, createBackend(i, i*100, i*100))
 	}
 	for i, test := range tests {
@@ -408,7 +408,7 @@ func TestMissBackendInHealth(t *testing.T) {
 	backends := make([]scoredBackend, 0, 2)
 	errors := []float64{10000, 0}
 	var failureValues, totalValues []*model.Sample
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		backends = append(backends, createBackend(i, 100, 100))
 		failureValues = append(failureValues, createSample(errors[i], i))
 		totalValues = append(totalValues, createSample(10000, i))

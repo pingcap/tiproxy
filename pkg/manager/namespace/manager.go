@@ -9,6 +9,7 @@ package namespace
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
 	"sync"
 
@@ -85,9 +86,7 @@ func (mgr *namespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 func (mgr *namespaceManager) CommitNamespaces(nss []*config.Namespace, nssDelete []bool) error {
 	nsm := make(map[string]*Namespace)
 	mgr.RLock()
-	for k, v := range mgr.nsm {
-		nsm[k] = v
-	}
+	maps.Copy(nsm, mgr.nsm)
 	mgr.RUnlock()
 
 	for i, nsc := range nss {

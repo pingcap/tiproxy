@@ -33,7 +33,7 @@ func (fl *FactorLocation) UpdateScore(backends []scoredBackend) {
 	if len(backends) <= 1 {
 		return
 	}
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		score := 1
 		if backends[i].Local() {
 			score = 0

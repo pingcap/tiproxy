@@ -255,10 +255,7 @@ func (r *replay) readCommands(ctx context.Context) {
 			if r.cfg.Speed != 1 {
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
-			expectedInterval = time.Until(replayStartTs.Add(expectedInterval))
-			if expectedInterval < 0 {
-				expectedInterval = 0
-			}
+			expectedInterval = max(time.Until(replayStartTs.Add(expectedInterval)), 0)
 			// If there are too many pending commands, slow it down to reduce memory usage.
 			if pendingCmds > r.cfg.slowDownThreshold {
 				extraWait := time.Duration(pendingCmds-r.cfg.slowDownThreshold) * r.cfg.slowDownFactor
