@@ -66,18 +66,18 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	handler := sctx.Handler
 	ready := atomic.NewBool(false)
 
-	// set up logger
-	var lg *zap.Logger
-	if srv.loggerManager, lg, err = logger.NewLoggerManager(nil); err != nil {
-		return
-	}
-	srv.loggerManager.Init(srv.configManager.WatchConfig())
-
 	// setup config manager
-	if err = srv.configManager.Init(ctx, lg.Named("config"), sctx.ConfigFile, sctx.AdvertiseAddr); err != nil {
+	if err = srv.configManager.Init(ctx, sctx.ConfigFile, sctx.AdvertiseAddr); err != nil {
 		return
 	}
 	cfg := srv.configManager.GetConfig()
+
+	// set up logger
+	var lg *zap.Logger
+	if srv.loggerManager, lg, err = logger.NewLoggerManager(&cfg.Log); err != nil {
+		return
+	}
+	srv.loggerManager.Init(srv.configManager.WatchConfig())
 
 	// welcome messages must be printed after initialization of configmager, because
 	// logfile backended zaplogger is enabled after cfgmgr.Init(..).
@@ -88,7 +88,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	// Make sure the TiProxy info is always printed.
 	level := lg.Level()
 	srv.loggerManager.SetLoggerLevel(zap.InfoLevel)
-	printInfo(lg)
+	printInfo(lg, cfg)
 	srv.loggerManager.SetLoggerLevel(level)
 
 	// setup metrics
@@ -207,7 +207,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	return
 }
 
-func printInfo(lg *zap.Logger) {
+func printInfo(lg *zap.Logger, cfg *config.Config) {
 	fields := []zap.Field{
 		zap.String("Release Version", versioninfo.TiProxyVersion),
 		zap.String("Git Commit Hash", versioninfo.TiProxyGitHash),
@@ -218,6 +218,7 @@ func printInfo(lg *zap.Logger) {
 		zap.String("Arch", runtime.GOARCH),
 	}
 	lg.Info("Welcome to TiProxy.", fields...)
+	lg.Info("current config", zap.Any("cfg", cfg))
 }
 
 func (s *Server) preClose() {
