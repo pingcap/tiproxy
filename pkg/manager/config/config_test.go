@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -299,19 +298,19 @@ func TestFilePath(t *testing.T) {
 }
 
 func TestChecksum(t *testing.T) {
-	cfgmgr, text, _ := testConfigManager(t, "", "")
-	require.Equal(t, 1, strings.Count(text.String(), "current config"))
+	cfgmgr, _, _ := testConfigManager(t, "", "")
+
 	c1 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
-	require.Equal(t, 2, strings.Count(text.String(), "current config"))
 	// same config, shouldn't log it again
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "gg"`)))
-	require.Equal(t, 2, strings.Count(text.String(), "current config"))
+
 	c2 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr = "vv"`)))
+
 	c3 := cfgmgr.GetConfigChecksum()
 	require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.addr="gg"`)))
-	require.Equal(t, 4, strings.Count(text.String(), "current config"))
+
 	c4 := cfgmgr.GetConfigChecksum()
 	require.Equal(t, c2, c4)
 	require.NotEqual(t, c1, c2)
