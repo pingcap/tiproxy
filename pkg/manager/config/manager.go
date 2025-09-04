@@ -14,7 +14,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/tidwall/btree"
-	"go.uber.org/zap"
 )
 
 const (
@@ -36,7 +35,6 @@ type KVValue struct {
 type ConfigManager struct {
 	wg            waitgroup.WaitGroup
 	cancel        context.CancelFunc
-	logger        *zap.Logger
 	advertiseAddr string
 
 	kv *btree.BTreeG[KVValue]
