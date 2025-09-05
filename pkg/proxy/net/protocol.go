@@ -111,7 +111,7 @@ func ParseNullTermString(b []byte) (str []byte, remain []byte) {
 var tinyIntCache [251][]byte
 
 func init() {
-	for i := 0; i < len(tinyIntCache); i++ {
+	for i := range len(tinyIntCache) {
 		tinyIntCache[i] = []byte{byte(i)}
 	}
 }

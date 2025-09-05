@@ -72,7 +72,7 @@ func TestFactorConnSpeed(t *testing.T) {
 		backend2.connScore = test.score2
 		lastRedirectTime := 0
 		// Simulate rebalance for 5 minutes.
-		for j := 0; j < 30000; j++ {
+		for j := range 30000 {
 			advice, balanceCount, _ := factor.BalanceCount(scoredBackend1, scoredBackend2)
 			if advice != AdvicePositive || balanceCount < 0.0001 {
 				break

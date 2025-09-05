@@ -29,7 +29,7 @@ func TestTTLRefresh(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
 	var ttl, info string
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		require.Eventually(t, func() bool {
 			newTTL, newInfo := ts.getTTLAndInfo(tiproxyTopologyPath)
 			satisfied := newTTL != ttl && len(newInfo) > 0

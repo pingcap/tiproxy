@@ -39,7 +39,7 @@ func (fcc *FactorConnCount) Name() string {
 }
 
 func (fcc *FactorConnCount) UpdateScore(backends []scoredBackend) {
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		score := backends[i].ConnScore()
 		if score < 0 {
 			score = 0

@@ -26,18 +26,18 @@ func TestBase(t *testing.T) {
 	}
 
 	// test .set
-	for i := 0; i < nsNum; i++ {
+	for i := range nsNum {
 		ns := getNs(i)
-		for j := 0; j < valNum; j++ {
+		for j := range valNum {
 			k := getKey(j)
 			require.NoError(t, cfgmgr.set(ctx, ns, k, []byte(k)))
 		}
 	}
 
 	// test .get
-	for i := 0; i < nsNum; i++ {
+	for i := range nsNum {
 		ns := getNs(i)
-		for j := 0; j < valNum; j++ {
+		for j := range valNum {
 			k := getKey(j)
 			v, err := cfgmgr.get(ctx, ns, k)
 			require.NoError(t, err)
@@ -47,21 +47,21 @@ func TestBase(t *testing.T) {
 	}
 
 	// test .list
-	for i := 0; i < nsNum; i++ {
+	for i := range nsNum {
 		ns := getNs(i)
 		vals, err := cfgmgr.list(ctx, ns, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 		require.NoError(t, err)
 		require.Len(t, vals, valNum)
-		for j := 0; j < valNum; j++ {
+		for j := range valNum {
 			k := getKey(j)
 			require.Equal(t, string(vals[j].Value), k)
 		}
 	}
 
 	// test .del
-	for i := 0; i < nsNum; i++ {
+	for i := range nsNum {
 		ns := getNs(i)
-		for j := 0; j < valNum; j++ {
+		for j := range valNum {
 			k := getKey(j)
 			require.NoError(t, cfgmgr.set(ctx, ns, k, nil))
 
@@ -78,7 +78,7 @@ func TestBaseConcurrency(t *testing.T) {
 
 	var wg waitgroup.WaitGroup
 	batchNum := 16
-	for i := 0; i < batchNum; i++ {
+	for i := range batchNum {
 		k := fmt.Sprint(i)
 		wg.Run(func() {
 			require.NoError(t, cfgmgr.set(ctx, k, "1", []byte("1")))
@@ -91,13 +91,13 @@ func TestBaseConcurrency(t *testing.T) {
 	}
 	wg.Wait()
 
-	for i := 0; i < batchNum; i++ {
+	for i := range batchNum {
 		k := fmt.Sprint(i)
 
 		require.NoError(t, cfgmgr.set(ctx, k, "1", []byte("1")))
 	}
 
-	for i := 0; i < batchNum; i++ {
+	for i := range batchNum {
 		k := fmt.Sprint(i)
 
 		wg.Run(func() {

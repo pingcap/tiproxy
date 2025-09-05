@@ -6,6 +6,7 @@ package observer
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"sync"
 	"testing"
@@ -48,9 +49,7 @@ func (mbf *mockBackendFetcher) GetBackendList(context.Context) (map[string]*Back
 	mbf.Lock()
 	defer mbf.Unlock()
 	backends := make(map[string]*BackendInfo, len(mbf.backends))
-	for addr, backend := range mbf.backends {
-		backends[addr] = backend
-	}
+	maps.Copy(backends, mbf.backends)
 	return backends, nil
 }
 

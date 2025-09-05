@@ -21,8 +21,8 @@ func (w *WaitGroup) Run(exec func(), logger *zap.Logger) {
 	w.WaitGroup.RunWithLogger(exec, logger)
 }
 
-func (w *WaitGroup) RunWithRecover(exec func(), recoverFn func(r interface{}), logger *zap.Logger) {
-	w.WaitGroup.RunWithRecover(exec, func(r interface{}) {
+func (w *WaitGroup) RunWithRecover(exec func(), recoverFn func(r any), logger *zap.Logger) {
+	w.WaitGroup.RunWithRecover(exec, func(r any) {
 		metrics.ServerErrCounter.WithLabelValues("panic").Inc()
 		if r != nil && recoverFn != nil {
 			recoverFn(r)
@@ -40,8 +40,8 @@ func NewWaitGroupPool(n int, idleDuration time.Duration) *WaitGroupPool {
 	}
 }
 
-func (w *WaitGroupPool) RunWithRecover(exec func(), recoverFn func(r interface{}), logger *zap.Logger) {
-	w.WaitGroupPool.RunWithRecover(exec, func(r interface{}) {
+func (w *WaitGroupPool) RunWithRecover(exec func(), recoverFn func(r any), logger *zap.Logger) {
+	w.WaitGroupPool.RunWithRecover(exec, func(r any) {
 		metrics.ServerErrCounter.WithLabelValues("panic").Inc()
 		if r != nil && recoverFn != nil {
 			recoverFn(r)

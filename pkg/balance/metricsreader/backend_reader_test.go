@@ -831,7 +831,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	cfg := newHealthCheckConfigForTest()
 	const initialRules, initialBackends = 3, 3
 	var buf strings.Builder
-	for i := 0; i < initialRules+1; i++ {
+	for i := range initialRules + 1 {
 		buf.WriteString(fmt.Sprintf("name%d 100\n", i))
 	}
 	resp := buf.String()
@@ -839,7 +839,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	// create 3 backends
 	httpHandlers := make([]*mockHttpHandler, 0)
 	infos := make(map[string]*infosync.TiDBTopologyInfo)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		httpHandler := newMockHttpHandler(t)
 		f := func(reqBody string) string {
 			return resp
@@ -882,7 +882,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	removeRule := func(id int) {
 		br.RemoveQueryRule(strconv.Itoa(id))
 	}
-	for i := 0; i < initialRules; i++ {
+	for i := range initialRules {
 		addRule(i)
 	}
 
@@ -926,7 +926,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 		for childCtx.Err() == nil {
 			select {
 			case <-time.After(1 * time.Millisecond):
-				for i := 0; i < initialRules; i++ {
+				for i := range initialRules {
 					qr := br.GetQueryResult(strconv.Itoa(i))
 					require.False(t, qr.UpdateTime.IsZero())
 					require.NotNil(t, qr.Value)
@@ -934,13 +934,13 @@ func TestQueryBackendConcurrently(t *testing.T) {
 					if i%2 == 0 {
 						require.Equal(t, model.ValVector, qr.Value.Type())
 						require.Len(t, qr.Value.(model.Vector), initialBackends)
-						for j := 0; j < initialBackends; j++ {
+						for j := range initialBackends {
 							require.NotEmpty(t, qr.Value.(model.Vector)[j].Value)
 						}
 					} else {
 						require.Equal(t, model.ValMatrix, qr.Value.Type())
 						require.Len(t, qr.Value.(model.Matrix), initialBackends)
-						for j := 0; j < initialBackends; j++ {
+						for j := range initialBackends {
 							require.NotEmpty(t, qr.Value.(model.Matrix)[j].Values)
 							for k := 0; k < len(qr.Value.(model.Matrix)[j].Values); k++ {
 								require.NotEmpty(t, qr.Value.(model.Matrix)[j].Values[k].Value)

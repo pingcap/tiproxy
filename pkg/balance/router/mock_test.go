@@ -5,6 +5,7 @@ package router
 
 import (
 	"context"
+	"maps"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -169,9 +170,7 @@ func (mbo *mockBackendObserver) Refresh() {
 func (mbo *mockBackendObserver) notify(err error) {
 	mbo.healthLock.Lock()
 	healths := make(map[string]*observer.BackendHealth, len(mbo.healths))
-	for addr, health := range mbo.healths {
-		healths[addr] = health
-	}
+	maps.Copy(healths, mbo.healths)
 	mbo.healthLock.Unlock()
 	mbo.subscriberLock.Lock()
 	for _, subscriber := range mbo.subscribers {

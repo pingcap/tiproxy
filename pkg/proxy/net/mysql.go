@@ -772,7 +772,7 @@ func ParseExecuteStmtRequest(data []byte, paramNum int, paramTypes []byte) (stmt
 		pos += paramNum << 1
 	}
 
-	for i := 0; i < paramNum; i++ {
+	for i := range paramNum {
 		if nullBitmap[i/8]&(1<<(uint(i)%8)) > 0 {
 			args[i] = nil
 			continue

@@ -56,7 +56,7 @@ func TestPreparedStmt(t *testing.T) {
 			preparedStmts: map[uint32]preparedStmt{},
 		},
 		{
-			request:  append([]byte{pnet.ComQuery.Byte()}, []byte(fmt.Sprintf(`set session_states '%s'`, string(b)))...),
+			request:  append([]byte{pnet.ComQuery.Byte()}, fmt.Appendf(nil, `set session_states '%s'`, string(b))...),
 			response: pnet.MakeOKPacket(0, pnet.OKHeader),
 			preparedStmts: map[uint32]preparedStmt{
 				1: {

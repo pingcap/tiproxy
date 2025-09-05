@@ -143,13 +143,10 @@ func TestHistoryLen(t *testing.T) {
 	mgr.capture, mgr.replay = cpt, rep
 	require.Len(t, mgr.jobHistory, 0)
 
-	for i := 0; i < maxJobHistoryCount+1; i++ {
+	for i := range maxJobHistoryCount + 1 {
 		require.NoError(t, mgr.StartCapture(capture.CaptureConfig{}))
 		require.Contains(t, mgr.Stop(CancelConfig{Type: Capture}), "stopped")
-		expectedLen := i + 1
-		if expectedLen > maxJobHistoryCount {
-			expectedLen = maxJobHistoryCount
-		}
+		expectedLen := min(i+1, maxJobHistoryCount)
 		require.Len(t, mgr.jobHistory, expectedLen)
 	}
 }

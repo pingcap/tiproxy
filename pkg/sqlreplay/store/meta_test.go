@@ -17,7 +17,7 @@ func TestMeta(t *testing.T) {
 	storage, err := NewStorage(dir)
 	require.NoError(t, err)
 	defer storage.Close()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		m1 := Meta{
 			Duration: 10 * time.Second,
 			Cmds:     100,

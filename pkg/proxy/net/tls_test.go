@@ -38,7 +38,7 @@ func TestTLSReadWrite(t *testing.T) {
 			require.Equal(t, len(message), n)
 			require.Greater(t, trw.OutBytes(), outBytes+uint64(len(message)))
 			// check direct write
-			for i := 0; i < 2; i++ {
+			for range 2 {
 				n, err = trw.DirectWrite(message)
 				require.NoError(t, err)
 				require.Equal(t, len(message), n)

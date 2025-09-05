@@ -982,7 +982,7 @@ func TestBackendInactive(t *testing.T) {
 		// do some queries and the interval is less than checkBackendInterval
 		{
 			client: func(packetIO pnet.PacketIO) error {
-				for i := 0; i < 10; i++ {
+				for range 10 {
 					time.Sleep(5 * time.Millisecond)
 					if err := ts.mc.request(packetIO); err != nil {
 						return err
@@ -991,7 +991,7 @@ func TestBackendInactive(t *testing.T) {
 				return nil
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				for i := 0; i < 10; i++ {
+				for range 10 {
 					if err := ts.forwardCmd4Proxy(clientIO, backendIO); err != nil {
 						return err
 					}
@@ -999,7 +999,7 @@ func TestBackendInactive(t *testing.T) {
 				return nil
 			},
 			backend: func(packetIO pnet.PacketIO) error {
-				for i := 0; i < 10; i++ {
+				for range 10 {
 					if err := ts.respondWithNoTxn4Backend(packetIO); err != nil {
 						return err
 					}
@@ -1010,7 +1010,7 @@ func TestBackendInactive(t *testing.T) {
 		// do some queries and the interval is longer than checkBackendInterval
 		{
 			client: func(packetIO pnet.PacketIO) error {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					time.Sleep(30 * time.Millisecond)
 					if err := ts.mc.request(packetIO); err != nil {
 						return err
@@ -1019,7 +1019,7 @@ func TestBackendInactive(t *testing.T) {
 				return nil
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					if err := ts.forwardCmd4Proxy(clientIO, backendIO); err != nil {
 						return err
 					}
@@ -1027,7 +1027,7 @@ func TestBackendInactive(t *testing.T) {
 				return nil
 			},
 			backend: func(packetIO pnet.PacketIO) error {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					if err := ts.respondWithNoTxn4Backend(packetIO); err != nil {
 						return err
 					}

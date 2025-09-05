@@ -105,9 +105,7 @@ func NewHealthResult(backends map[string]*BackendHealth, err error) HealthResult
 
 func (hr HealthResult) Backends() map[string]*BackendHealth {
 	newMap := make(map[string]*BackendHealth, len(hr.backends))
-	for addr, health := range hr.backends {
-		newMap[addr] = health
-	}
+	maps.Copy(newMap, hr.backends)
 	return newMap
 }
 
