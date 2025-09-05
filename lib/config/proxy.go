@@ -97,9 +97,10 @@ type HA struct {
 }
 
 type Metering struct {
-	Region string `yaml:"region,omitempty" toml:"region,omitempty" json:"region,omitempty" reloadable:"false"`
-	Bucket string `yaml:"bucket,omitempty" toml:"bucket,omitempty" json:"bucket,omitempty" reloadable:"false"`
-	Prefix string `yaml:"prefix,omitempty" toml:"prefix,omitempty" json:"prefix,omitempty" reloadable:"false"`
+	Region  string `yaml:"region,omitempty" toml:"region,omitempty" json:"region,omitempty" reloadable:"false"`
+	Bucket  string `yaml:"bucket,omitempty" toml:"bucket,omitempty" json:"bucket,omitempty" reloadable:"false"`
+	Prefix  string `yaml:"prefix,omitempty" toml:"prefix,omitempty" json:"prefix,omitempty" reloadable:"false"`
+	RoleARN string `yaml:"role-arn,omitempty" toml:"role-arn,omitempty" json:"role-arn,omitempty" reloadable:"false"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {

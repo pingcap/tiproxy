@@ -5,7 +5,6 @@ package meter
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/pingcap/metering_sdk/storage"
 	meteringwriter "github.com/pingcap/metering_sdk/writer/metering"
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"go.uber.org/zap"
 )
 
@@ -37,8 +37,8 @@ type Meter struct {
 }
 
 func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
-	if len(cfg.Metering.Bucket) == 0 || len(cfg.Metering.Prefix) == 0 {
-		return nil, errors.New("bucket or prefix is empty")
+	if len(cfg.Metering.Bucket) == 0 {
+		return nil, nil
 	}
 
 	s3Config := &storage.ProviderConfig{
@@ -46,13 +46,16 @@ func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
 		Bucket: cfg.Metering.Bucket,
 		Region: cfg.Metering.Region,
 		Prefix: cfg.Metering.Prefix,
+		AWS: &storage.AWSConfig{
+			AssumeRoleARN: cfg.Metering.RoleARN,
+		},
 	}
 	provider, err := storage.NewObjectStorageProvider(s3Config)
 	if err != nil {
 		lg.Error("Failed to create storage provider", zap.Error(err))
 		return nil, err
 	}
-	meteringConfig := mconfig.DefaultConfig().WithDevelopmentLogger()
+	meteringConfig := mconfig.DefaultConfig().WithLogger(lg.Named("metering_sdk"))
 	writer := meteringwriter.NewMeteringWriter(provider, meteringConfig)
 	return &Meter{
 		lg:     lg,
@@ -99,18 +102,19 @@ func (m *Meter) flush(ctx context.Context, ts int64) {
 			"version":         "v1",
 			"cluster_id":      clusterID,
 			"source_name":     "tiproxy",
-			"timestamp":       ts,
 			"crossZone_bytes": &common.MeteringValue{Value: uint64(d.crossAZBytes), Unit: "bytes"},
 			"outBound_bytes":  &common.MeteringValue{Value: uint64(d.respBytes), Unit: "bytes"},
 		})
 	}
 
 	meteringData := &common.MeteringData{
-		SelfID:   m.uuid,
-		Category: "tiproxy",
-		Data:     array,
+		SelfID:    m.uuid,
+		Timestamp: ts,
+		Category:  "tiproxy",
+		Data:      array,
 	}
 	if err := m.writer.Write(ctx, meteringData); err != nil {
+		metrics.ServerErrCounter.WithLabelValues("metering").Inc()
 		m.lg.Error("Failed to write metering data", zap.Error(err))
 	}
 	m.lg.Debug("flushed metering data", zap.Int("clusters", len(data)))
