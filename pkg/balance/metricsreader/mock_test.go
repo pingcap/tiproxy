@@ -150,6 +150,10 @@ func (mb *mockBackend) Local() bool {
 	return true
 }
 
+func (mb *mockBackend) Keyspace() string {
+	return ""
+}
+
 func mockMfs() map[string]*dto.MetricFamily {
 	floats := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	return map[string]*dto.MetricFamily{

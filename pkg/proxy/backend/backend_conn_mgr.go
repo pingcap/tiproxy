@@ -110,6 +110,10 @@ func (cfg *BCConfig) check() {
 	}
 }
 
+type Meter interface {
+	IncTraffic(clusterID string, respBytes, crossAZBytes int64)
+}
+
 // BackendConnManager migrates a session from one BackendConnection to another.
 //
 // The signal processing goroutine tries to migrate the session once it receives a signal.
@@ -157,10 +161,12 @@ type BackendConnManager struct {
 	connectionID uint64
 	quitSource   ErrorSource
 	cpt          capture.Capture
+	meter        Meter
 }
 
 // NewBackendConnManager creates a BackendConnManager.
-func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler, cpt capture.Capture, connectionID uint64, config *BCConfig) *BackendConnManager {
+func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler, cpt capture.Capture, connectionID uint64,
+	config *BCConfig, meter Meter) *BackendConnManager {
 	config.check()
 	mgr := &BackendConnManager{
 		logger:           logger,
@@ -174,6 +180,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		redirectResCh:  make(chan *redirectResult, 1),
 		quitSource:     SrcNone,
 		cpt:            cpt,
+		meter:          meter,
 	}
 	mgr.ctxmap.m = make(map[any]any)
 	mgr.SetValue(ConnContextKeyConnID, connectionID)
@@ -427,6 +434,18 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO) {
 	inBytes, inPackets, outBytes, outPackets := backendIO.InBytes(), backendIO.InPackets(), backendIO.OutBytes(), backendIO.OutPackets()
 	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets, mgr.curBackend.Local())
+	// Update metering.
+	if mgr.meter != nil && !reflect.ValueOf(mgr.meter).IsNil() && mgr.curBackend != nil {
+		// The keyspace of one connection should not change.
+		keyspace := mgr.curBackend.Keyspace()
+		if len(keyspace) > 0 {
+			crossAZBytes := int64(0)
+			if !mgr.curBackend.Local() {
+				crossAZBytes = int64(outBytes - mgr.outBytes + inBytes - mgr.inBytes)
+			}
+			mgr.meter.IncTraffic(keyspace, int64(inBytes-mgr.inBytes), crossAZBytes)
+		}
+	}
 	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = inBytes, inPackets, outBytes, outPackets
 }
 
