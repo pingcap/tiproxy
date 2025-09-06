@@ -14,6 +14,7 @@ import (
 	meteringwriter "github.com/pingcap/metering_sdk/writer/metering"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,6 +53,63 @@ func TestNewMeter(t *testing.T) {
 }
 
 func TestWrite(t *testing.T) {
+	m, reader := createLocalMeter(t, t.TempDir())
+	ts := time.Now().Unix() / 60 * 60
+	m.IncTraffic("cluster-1", 100, 200)
+	m.IncTraffic("cluster-2", 200, 300)
+	m.flush(ts, time.Second)
+
+	data := readMeteringData(t, reader, ts)
+	require.True(t, len(data) > 0)
+	resp, crossAZ := getValuesFromData(t, data, "cluster-1")
+	require.Equal(t, int64(100), resp)
+	require.Equal(t, int64(200), crossAZ)
+
+	resp, crossAZ = getValuesFromData(t, data, "cluster-2")
+	require.Equal(t, int64(200), resp)
+	require.Equal(t, int64(300), crossAZ)
+}
+
+func TestLoop(t *testing.T) {
+	m, reader := createLocalMeter(t, t.TempDir())
+	// The SDK only allows writing with a timestamp that is a multiple of 60.
+	m.Start(context.Background())
+
+	startTime := time.Now().Unix()
+	var wg waitgroup.WaitGroup
+	for range 10 {
+		wg.Run(func() {
+			for range 100 {
+				m.IncTraffic("cluster-1", 1, 2)
+				m.IncTraffic("cluster-2", 1, 2)
+				time.Sleep(time.Millisecond)
+			}
+		}, nil)
+	}
+	wg.Wait()
+	require.NoError(t, m.Close())
+
+	totalResp, totalCrossAZ := make(map[string]int64), make(map[string]int64)
+	for ts := startTime / 60 * 60; ts <= startTime/60*60+60; ts += 60 {
+		data := readMeteringData(t, reader, ts)
+		if len(data) == 0 {
+			continue
+		}
+		resp, crossAZ := getValuesFromData(t, data, "cluster-1")
+		totalResp["cluster-1"] += resp
+		totalCrossAZ["cluster-1"] += crossAZ
+		resp, crossAZ = getValuesFromData(t, data, "cluster-2")
+		totalResp["cluster-2"] += resp
+		totalCrossAZ["cluster-2"] += crossAZ
+	}
+
+	require.Equal(t, int64(1000), totalResp["cluster-1"])
+	require.Equal(t, int64(2000), totalCrossAZ["cluster-1"])
+	require.Equal(t, int64(1000), totalResp["cluster-2"])
+	require.Equal(t, int64(2000), totalCrossAZ["cluster-2"])
+}
+
+func createLocalMeter(t *testing.T, dir string) (*Meter, *meteringreader.MeteringReader) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	m, err := NewMeter(&config.Config{
 		Metering: config.Metering{
@@ -59,59 +117,63 @@ func TestWrite(t *testing.T) {
 		},
 	}, lg)
 	require.NoError(t, err)
-	defer m.Close()
+	t.Cleanup(func() {
+		require.NoError(t, m.Close())
+	})
 
 	// Replace the S3 writer with the local writer.
-	dir := t.TempDir()
 	localConfig := &storage.ProviderConfig{
 		Type: storage.ProviderTypeLocalFS,
 		LocalFS: &storage.LocalFSConfig{
 			BasePath:   dir,
 			CreateDirs: true,
 		},
-		Prefix: "",
 	}
 	provider, err := storage.NewObjectStorageProvider(localConfig)
 	require.NoError(t, err)
 	meteringConfig := mconfig.DefaultConfig().WithLogger(lg)
 	m.writer = meteringwriter.NewMeteringWriter(provider, meteringConfig)
 	reader := meteringreader.NewMeteringReader(provider, meteringConfig)
-	defer reader.Close()
+	t.Cleanup(func() {
+		require.NoError(t, reader.Close())
+	})
+	return m, reader
+}
 
-	ts := time.Now().Unix() / 60 * 60
-	m.IncTraffic("cluster-1", 100, 200)
-	m.IncTraffic("cluster-2", 200, 300)
-	m.flush(context.Background(), ts)
-
-	timestampFiles, err := reader.ListFilesByTimestamp(context.Background(), ts)
+func readMeteringData(t *testing.T, reader *meteringreader.MeteringReader, ts int64) []map[string]any {
+	_, err := reader.ListFilesByTimestamp(context.Background(), ts)
 	require.NoError(t, err)
-	require.Len(t, timestampFiles.Files, 1)
 
 	categories, err := reader.GetCategories(context.Background(), ts)
 	require.NoError(t, err)
-	require.True(t, len(categories) > 0)
+	if len(categories) == 0 {
+		return nil
+	}
 
 	category := categories[0]
 	categoryFiles, err := reader.GetFilesByCategory(context.Background(), ts, category)
 	require.NoError(t, err)
-	require.True(t, len(categoryFiles) > 0)
+	if len(categoryFiles) == 0 {
+		return nil
+	}
 
 	filePath := categoryFiles[0]
 	meteringData, err := reader.ReadFile(context.Background(), filePath)
 	require.NoError(t, err)
+	return meteringData.Data
+}
 
-	found := []bool{false, false}
-	for i := range meteringData.Data {
-		if meteringData.Data[i]["cluster_id"] == "cluster-1" {
-			found[0] = true
-			require.Equal(t, map[string]any{"value": float64(100), "unit": "bytes"}, meteringData.Data[i]["outBound_bytes"])
-			require.Equal(t, map[string]any{"value": float64(200), "unit": "bytes"}, meteringData.Data[i]["crossZone_bytes"])
-		}
-		if meteringData.Data[i]["cluster_id"] == "cluster-2" {
-			found[1] = true
-			require.Equal(t, map[string]any{"value": float64(200), "unit": "bytes"}, meteringData.Data[i]["outBound_bytes"])
-			require.Equal(t, map[string]any{"value": float64(300), "unit": "bytes"}, meteringData.Data[i]["crossZone_bytes"])
+func getValuesFromData(t *testing.T, data []map[string]any, clusterID string) (int64, int64) {
+	for i := range data {
+		if data[i]["cluster_id"] == clusterID {
+			outBound, ok := data[i]["outBound_bytes"].(map[string]any)
+			require.True(t, ok)
+			crossZone, ok := data[i]["crossZone_bytes"].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, "bytes", outBound["unit"])
+			require.Equal(t, "bytes", crossZone["unit"])
+			return int64(outBound["value"].(float64)), int64(crossZone["value"].(float64))
 		}
 	}
-	require.Equal(t, []bool{true, true}, found)
+	return 0, 0
 }
