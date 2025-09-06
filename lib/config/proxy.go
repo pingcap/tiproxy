@@ -97,6 +97,7 @@ type HA struct {
 }
 
 type Metering struct {
+	Type    string `yaml:"type,omitempty" toml:"type,omitempty" json:"type,omitempty" reloadable:"false"`
 	Region  string `yaml:"region,omitempty" toml:"region,omitempty" json:"region,omitempty" reloadable:"false"`
 	Bucket  string `yaml:"bucket,omitempty" toml:"bucket,omitempty" json:"bucket,omitempty" reloadable:"false"`
 	Prefix  string `yaml:"prefix,omitempty" toml:"prefix,omitempty" json:"prefix,omitempty" reloadable:"false"`

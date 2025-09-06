@@ -125,7 +125,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	{
 		healthCheckCfg := config.NewDefaultHealthCheckConfig()
 		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), srv.infoSyncer, srv.infoSyncer, srv.httpCli, srv.etcdCli, healthCheckCfg, srv.configManager)
-		if err = srv.metricsReader.Start(context.Background()); err != nil {
+		if err = srv.metricsReader.Start(ctx); err != nil {
 			return
 		}
 	}
@@ -260,7 +260,7 @@ func (s *Server) Close() error {
 		errs = append(errs, s.proxy.Close())
 	}
 	if s.meter != nil {
-		s.meter.Close()
+		errs = append(errs, s.meter.Close())
 	}
 	if s.apiServer != nil {
 		errs = append(errs, s.apiServer.Close())

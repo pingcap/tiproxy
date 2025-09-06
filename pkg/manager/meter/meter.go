@@ -16,11 +16,15 @@ import (
 	meteringwriter "github.com/pingcap/metering_sdk/writer/metering"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
 
 const (
 	writeInterval = 60
+	// The timeout can not be too long because the pod grace termination period is fixed.
+	writeTimeout = 10 * time.Second
+	category     = "proxy"
 )
 
 type MeterData struct {
@@ -34,15 +38,21 @@ type Meter struct {
 	uuid   string
 	writer *meteringwriter.MeteringWriter
 	lg     *zap.Logger
+	wg     waitgroup.WaitGroup
+	cancel context.CancelFunc
 }
 
 func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
 	if len(cfg.Metering.Bucket) == 0 {
 		return nil, nil
 	}
+	providerType := storage.ProviderTypeS3
+	if len(cfg.Metering.Type) > 0 {
+		providerType = storage.ProviderType(cfg.Metering.Type)
+	}
 
 	s3Config := &storage.ProviderConfig{
-		Type:   storage.ProviderTypeS3,
+		Type:   providerType,
 		Bucket: cfg.Metering.Bucket,
 		Region: cfg.Metering.Region,
 		Prefix: cfg.Metering.Prefix,
@@ -75,33 +85,46 @@ func (m *Meter) IncTraffic(clusterID string, respBytes, crossAZBytes int64) {
 }
 
 func (m *Meter) Start(ctx context.Context) {
+	ctx, m.cancel = context.WithCancel(ctx)
+	m.wg.RunWithRecover(func() {
+		m.flushLoop(ctx)
+	}, nil, m.lg)
+}
+
+func (m *Meter) flushLoop(ctx context.Context) {
+	// Control the writing timestamp accurately enough so that the previous round won't be overwritten by the next round.
 	curTime := time.Now().Unix()
 	nextTime := curTime/writeInterval*writeInterval + writeInterval
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
-			return
+			break
 		case <-time.After(time.Duration(nextTime-curTime) * time.Second):
-			m.flush(ctx, nextTime)
+			m.flush(nextTime, writeTimeout)
 			nextTime += writeInterval
 			curTime = time.Now().Unix()
 		}
 	}
+	// Try our best to flush the final data even after closing.
+	m.flush(nextTime, writeTimeout)
 }
 
-func (m *Meter) flush(ctx context.Context, ts int64) {
+func (m *Meter) flush(ts int64, timeout time.Duration) {
 	var data map[string]MeterData
 	m.Lock()
 	data = m.data
 	m.data = make(map[string]MeterData, len(data))
 	m.Unlock()
 
+	if len(data) == 0 {
+		return
+	}
 	array := make([]map[string]any, len(data))
 	for clusterID, d := range data {
 		array = append(array, map[string]any{
 			"version":         "v1",
 			"cluster_id":      clusterID,
-			"source_name":     "tiproxy",
+			"source_name":     category,
 			"crossZone_bytes": &common.MeteringValue{Value: uint64(d.crossAZBytes), Unit: "bytes"},
 			"outBound_bytes":  &common.MeteringValue{Value: uint64(d.respBytes), Unit: "bytes"},
 		})
@@ -110,18 +133,27 @@ func (m *Meter) flush(ctx context.Context, ts int64) {
 	meteringData := &common.MeteringData{
 		SelfID:    m.uuid,
 		Timestamp: ts,
-		Category:  "tiproxy",
+		Category:  category,
 		Data:      array,
 	}
-	if err := m.writer.Write(ctx, meteringData); err != nil {
+	flushCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := m.writer.Write(flushCtx, meteringData); err != nil {
 		metrics.ServerErrCounter.WithLabelValues("metering").Inc()
 		m.lg.Error("Failed to write metering data", zap.Error(err))
 	}
 	m.lg.Debug("flushed metering data", zap.Int("clusters", len(data)))
 }
 
-func (m *Meter) Close() {
-	if m.writer != nil {
-		m.writer.Close()
+func (m *Meter) Close() error {
+	if m.cancel != nil {
+		m.cancel()
 	}
+	m.wg.Wait()
+	var err error
+	if m.writer != nil {
+		err = m.writer.Close()
+	}
+	m.lg.Debug("meter closed")
+	return err
 }
