@@ -60,6 +60,10 @@ func (mb *mockBackend) Local() bool {
 	return mb.local
 }
 
+func (mb *mockBackend) Keyspace() string {
+	return ""
+}
+
 var _ Factor = (*mockFactor)(nil)
 
 type mockFactor struct {

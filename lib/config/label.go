@@ -7,6 +7,7 @@ const (
 	// LocationLabelName indicates the label name that decides the location of TiProxy and backends.
 	// We use `zone` because the follower read in TiDB also uses `zone` to decide location.
 	LocationLabelName = "zone"
+	KeyspaceLabelName = "keyspace"
 )
 
 func (cfg *Config) GetLocation() string {

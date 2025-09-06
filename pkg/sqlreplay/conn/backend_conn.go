@@ -59,7 +59,7 @@ func NewBackendConn(lg *zap.Logger, connID uint64, hsHandler backend.HandshakeHa
 		clientIO:         newPacketIO(),
 		backendTLSConfig: backendTLSConfig,
 		lg:               lg,
-		backendConnMgr:   backend.NewBackendConnManager(lg.Named("be"), hsHandler, nil, connID, bcConfig),
+		backendConnMgr:   backend.NewBackendConnManager(lg.Named("be"), hsHandler, nil, connID, bcConfig, nil),
 	}
 }
 

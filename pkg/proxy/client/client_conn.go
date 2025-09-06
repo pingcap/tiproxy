@@ -25,8 +25,8 @@ type ClientConnection struct {
 }
 
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config,
-	hsHandler backend.HandshakeHandler, cpt capture.Capture, connID uint64, addr string, bcConfig *backend.BCConfig) *ClientConnection {
-	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, cpt, connID, bcConfig)
+	hsHandler backend.HandshakeHandler, cpt capture.Capture, connID uint64, addr string, bcConfig *backend.BCConfig, m backend.Meter) *ClientConnection {
+	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, cpt, connID, bcConfig, m)
 	bemgr.SetValue(backend.ConnContextKeyConnAddr, addr)
 	opts := make([]pnet.PacketIOption, 0, 2)
 	opts = append(opts, pnet.WithWrapError(backend.ErrClientConn))

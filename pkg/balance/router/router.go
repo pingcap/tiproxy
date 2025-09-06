@@ -8,6 +8,7 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"go.uber.org/zap"
@@ -75,6 +76,7 @@ type BackendInst interface {
 	Addr() string
 	Healthy() bool
 	Local() bool
+	Keyspace() string
 }
 
 // backendWrapper contains the connections on the backend.
@@ -161,6 +163,16 @@ func (b *backendWrapper) SupportRedirection() bool {
 	supportRedirection := b.mu.SupportRedirection
 	b.mu.RUnlock()
 	return supportRedirection
+}
+
+func (b *backendWrapper) Keyspace() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	labels := b.mu.BackendHealth.Labels
+	if labels == nil {
+		return ""
+	}
+	return labels[config.LocationLabelName]
 }
 
 func (b *backendWrapper) String() string {

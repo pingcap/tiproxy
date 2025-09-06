@@ -46,6 +46,7 @@ type SQLServer struct {
 	idMgr      *id.IDManager
 	hsHandler  backend.HandshakeHandler
 	cpt        capture.Capture
+	meter      backend.Meter
 	wg         waitgroup.WaitGroup
 	cancelFunc context.CancelFunc
 
@@ -53,7 +54,8 @@ type SQLServer struct {
 }
 
 // NewSQLServer creates a new SQLServer.
-func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
+func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture,
+	meter backend.Meter, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
 	var err error
 	s := &SQLServer{
 		logger:    logger,
@@ -61,6 +63,7 @@ func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMana
 		idMgr:     idMgr,
 		hsHandler: hsHandler,
 		cpt:       cpt,
+		meter:     meter,
 		mu: serverState{
 			clients: make(map[uint64]*client.ClientConnection),
 		},
@@ -161,7 +164,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				HealthyKeepAlive:   s.mu.healthyKeepAlive,
 				UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
 				ConnBufferSize:     s.mu.connBufferSize,
-			})
+			}, s.meter)
 		s.mu.clients[connID] = clientConn
 		logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
 		return s.mu.tcpKeepAlive, logger, connID, clientConn

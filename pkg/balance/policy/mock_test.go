@@ -39,6 +39,10 @@ func (mb *mockBackend) Local() bool {
 	return true
 }
 
+func (mb *mockBackend) Keyspace() string {
+	return ""
+}
+
 func (mb *mockBackend) GetBackendInfo() observer.BackendInfo {
 	return observer.BackendInfo{}
 }

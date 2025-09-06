@@ -25,5 +25,6 @@ type BackendCtx interface {
 	ConnScore() int
 	Healthy() bool
 	Local() bool
+	Keyspace() string
 	GetBackendInfo() observer.BackendInfo
 }
