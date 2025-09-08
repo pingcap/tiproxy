@@ -216,9 +216,10 @@ func (c *capture) collectCmds(bufCh chan<- *bytes.Buffer) {
 	defer close(bufCh)
 
 	buf := bytes.NewBuffer(make([]byte, 0, c.cfg.bufferCap))
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
 	// Flush all commands even if the context is timeout.
 	for command := range c.cmdCh {
-		if err := command.Encode(buf); err != nil {
+		if err := encoder.Encode(command, buf); err != nil {
 			c.stop(errors.Wrapf(err, "failed to encode command"))
 			continue
 		}

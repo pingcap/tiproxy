@@ -50,6 +50,7 @@ type Replay interface {
 }
 
 type ReplayConfig struct {
+	Format   string
 	Input    string
 	Username string
 	Password string
@@ -84,6 +85,11 @@ func (cfg *ReplayConfig) Validate() (storage.ExternalStorage, error) {
 		cfg.Speed = 1
 	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
 		return storage, errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
+	}
+	switch cfg.Format {
+	case cmd.FormatAuditLogPlugin, cmd.FormatNative, "":
+	default:
+		return storage, errors.Errorf("invalid traffic file format %s", cfg.Format)
 	}
 	// Maybe there's a time bias between TiDB and TiProxy, so add one minute.
 	now := time.Now()
@@ -214,6 +220,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	var err error
 	maxPendingCmds := int64(0)
 	totalWaitTime := time.Duration(0)
+	decoder := cmd.NewCmdDecoder(r.cfg.Format)
 	for ctx.Err() == nil {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
@@ -224,8 +231,8 @@ func (r *replay) readCommands(ctx context.Context) {
 			}
 		}
 
-		command := &cmd.Command{}
-		if err = command.Decode(reader); err != nil {
+		var command *cmd.Command
+		if command, err = decoder.Decode(reader); err != nil {
 			if errors.Is(err, io.EOF) {
 				r.lg.Info("replay reads EOF", zap.String("reader", reader.String()))
 				err = nil
@@ -304,7 +311,10 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map
 		}, nil, r.lg)
 	}
 	if conn != nil && !reflect.ValueOf(conn).IsNil() {
-		conn.ExecuteCmd(command)
+		// Deduplicate commands in audit logs.
+		if r.cfg.Format != cmd.FormatAuditLogPlugin || !command.Equal(conn.LastCmd()) {
+			conn.ExecuteCmd(command)
+		}
 	}
 	r.decodedCmds.Add(1)
 }
@@ -330,8 +340,10 @@ func (r *replay) Progress() (float64, time.Time, bool, error) {
 
 func (r *replay) readMeta() *store.Meta {
 	m := new(store.Meta)
-	if err := m.Read(r.storage); err != nil {
-		r.lg.Error("read meta failed", zap.Error(err))
+	if r.cfg.Format == cmd.FormatNative || r.cfg.Format == "" {
+		if err := m.Read(r.storage); err != nil {
+			r.lg.Error("read meta failed", zap.Error(err))
+		}
 	}
 	return m
 }

@@ -36,6 +36,10 @@ func (c *mockConn) Run(ctx context.Context) {
 	c.closeCh <- c.connID
 }
 
+func (c *mockConn) LastCmd() *cmd.Command {
+	return nil
+}
+
 func (c *mockConn) Stop() {
 	c.closed <- struct{}{}
 }
@@ -57,6 +61,10 @@ func (c *mockPendingConn) Run(ctx context.Context) {
 	<-c.closed
 	c.stats.PendingCmds.Add(-c.pendingCmds)
 	c.closeCh <- c.connID
+}
+
+func (c *mockPendingConn) LastCmd() *cmd.Command {
+	return nil
 }
 
 func (c *mockPendingConn) Stop() {
@@ -81,6 +89,7 @@ func (m *mockChLoader) writeCommand(cmd *cmd.Command) {
 }
 
 func (m *mockChLoader) Read(data []byte) (string, int, error) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
 	for {
 		_, err := m.buf.Read(data)
 		if errors.Is(err, io.EOF) {
@@ -88,7 +97,7 @@ func (m *mockChLoader) Read(data []byte) (string, int, error) {
 			if !ok {
 				return "", 0, io.EOF
 			}
-			_ = command.Encode(&m.buf)
+			_ = encoder.Encode(command, &m.buf)
 		} else {
 			return "", 0, err
 		}
@@ -96,6 +105,7 @@ func (m *mockChLoader) Read(data []byte) (string, int, error) {
 }
 
 func (m *mockChLoader) ReadLine() ([]byte, string, int, error) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
 	for {
 		line, err := m.buf.ReadBytes('\n')
 		if errors.Is(err, io.EOF) {
@@ -103,7 +113,7 @@ func (m *mockChLoader) ReadLine() ([]byte, string, int, error) {
 			if !ok {
 				return nil, "", 0, io.EOF
 			}
-			_ = command.Encode(&m.buf)
+			_ = encoder.Encode(command, &m.buf)
 		} else {
 			return line[:len(line)-1], "", 0, err
 		}
@@ -128,8 +138,9 @@ func newMockNormalLoader() *mockNormalLoader {
 	return &mockNormalLoader{}
 }
 
-func (m *mockNormalLoader) writeCommand(cmd *cmd.Command) {
-	_ = cmd.Encode(&m.buf)
+func (m *mockNormalLoader) writeCommand(command *cmd.Command) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
+	_ = encoder.Encode(command, &m.buf)
 }
 
 func (m *mockNormalLoader) Read(data []byte) (string, int, error) {

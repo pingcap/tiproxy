@@ -312,13 +312,13 @@ func TestLoadEncryptionKey(t *testing.T) {
 		StartTime: now,
 		reader:    loader,
 	}
-	for _, test := range tests {
+	for i, test := range tests {
 		cfg.KeyFile = test.keyFile
 		replay := NewReplay(zap.NewNop(), id.NewIDManager())
 		cfg.report = newMockReport(replay.exceptionCh)
 		err = replay.Start(cfg, nil, nil, &backend.BCConfig{})
 		if len(test.err) > 0 {
-			require.ErrorContains(t, err, test.err)
+			require.ErrorContains(t, err, test.err, "test %d", i)
 		} else {
 			require.NoError(t, err)
 			replay.Lock()
