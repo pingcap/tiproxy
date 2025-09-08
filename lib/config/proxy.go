@@ -30,6 +30,7 @@ type Config struct {
 	Balance             Balance           `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
 	Labels              map[string]string `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty" reloadable:"true"`
 	HA                  HA                `yaml:"ha,omitempty" toml:"ha,omitempty" json:"ha,omitempty"`
+	Metering            Metering          `yaml:"metering,omitempty" toml:"metering,omitempty" json:"metering,omitempty"`
 	EnableTrafficReplay bool              `yaml:"enable-traffic-replay,omitempty" toml:"enable-traffic-replay,omitempty" json:"enable-traffic-replay,omitempty" reloadable:"true"`
 }
 
@@ -93,6 +94,14 @@ type LogFile struct {
 type HA struct {
 	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
 	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
+}
+
+type Metering struct {
+	Type    string `yaml:"type,omitempty" toml:"type,omitempty" json:"type,omitempty" reloadable:"false"`
+	Region  string `yaml:"region,omitempty" toml:"region,omitempty" json:"region,omitempty" reloadable:"false"`
+	Bucket  string `yaml:"bucket,omitempty" toml:"bucket,omitempty" json:"bucket,omitempty" reloadable:"false"`
+	Prefix  string `yaml:"prefix,omitempty" toml:"prefix,omitempty" json:"prefix,omitempty" reloadable:"false"`
+	RoleARN string `yaml:"role-arn,omitempty" toml:"role-arn,omitempty" json:"role-arn,omitempty" reloadable:"false"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
