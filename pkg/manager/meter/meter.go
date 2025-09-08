@@ -98,7 +98,6 @@ func (m *Meter) flushLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
-			break
 		case <-time.After(time.Duration(nextTime-curTime) * time.Second):
 			m.flush(nextTime, writeTimeout)
 			nextTime += writeInterval
@@ -122,7 +121,7 @@ func (m *Meter) flush(ts int64, timeout time.Duration) {
 	array := make([]map[string]any, len(data))
 	for clusterID, d := range data {
 		array = append(array, map[string]any{
-			"version":         "v1",
+			"version":         "1",
 			"cluster_id":      clusterID,
 			"source_name":     category,
 			"crossZone_bytes": &common.MeteringValue{Value: uint64(d.crossAZBytes), Unit: "bytes"},
