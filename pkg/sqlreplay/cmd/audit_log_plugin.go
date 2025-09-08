@@ -189,7 +189,7 @@ func parseGeneralEvent(kvs map[string]string) (*Command, error) {
 			StmtType: kvs[auditPluginKeyStmtType],
 			Payload:  append([]byte{pnet.ComQuery.Byte()}, hack.Slice(sql)...),
 		}, nil
-		// Ignore StmtExecute since the params are not outputed.
+		// Ignore StmtExecute since the params are not outputted.
 		// Ignore Quit since disconnection is handled in parseConnectEvent.
 	}
 	// ignore the rest
@@ -215,5 +215,5 @@ func parseConnectEvent(kvs map[string]string) (*Command, error) {
 			Payload: []byte{pnet.ComQuit.Byte()},
 		}, nil
 	}
-	return nil, errors.Errorf("unknown subclass: %s", subclass)
+	return nil, nil
 }
