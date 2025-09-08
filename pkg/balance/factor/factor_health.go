@@ -266,7 +266,7 @@ func (fh *FactorHealth) UpdateScore(backends []scoredBackend) {
 	if needUpdateSnapshot {
 		fh.updateSnapshot(backends)
 	}
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		score := fh.caclErrScore(backends[i].Addr())
 		backends[i].addScore(score, fh.bitNum)
 	}

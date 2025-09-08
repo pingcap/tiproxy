@@ -29,7 +29,7 @@ func TestFileRotation(t *testing.T) {
 	})
 	require.NoError(t, err)
 	data := make([]byte, 100)
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		n, err := writer.Write(data)
 		require.NoError(t, err)
 		require.Equal(t, len(data), n)
@@ -225,7 +225,7 @@ func TestReadGZip(t *testing.T) {
 		})
 		require.NoError(t, err)
 		data := make([]byte, 100)
-		for i := 0; i < 12; i++ {
+		for range 12 {
 			n, err := writer.Write(data)
 			require.NoError(t, err)
 			require.Equal(t, len(data), n)
@@ -244,11 +244,11 @@ func TestReadGZip(t *testing.T) {
 		lg, _ := logger.CreateLoggerForTest(t)
 		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: tmpDir})
 		require.NoError(t, err)
-		for i := 0; i < 12; i++ {
+		for range 12 {
 			data = make([]byte, 100)
 			_, err := io.ReadFull(l, data)
 			require.NoError(t, err)
-			for j := 0; j < 100; j++ {
+			for j := range 100 {
 				require.Equal(t, byte(0), data[j])
 			}
 		}
@@ -276,14 +276,14 @@ func TestCompressAndEncrypt(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// write into 2 files
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		_, err = writer.Write([]byte("test"))
 		require.NoError(t, err)
 	}
 	require.NoError(t, writer.Close())
 
 	// make sure data is compressed after encryption
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		file, err := os.Open(filepath.Join(tmpDir, fmt.Sprintf("traffic-%d.log.gz", i+1)))
 		require.NoError(t, err)
 		greader, err := gzip.NewReader(file)

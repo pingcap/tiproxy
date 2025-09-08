@@ -60,6 +60,10 @@ func (mb *mockBackend) Local() bool {
 	return mb.local
 }
 
+func (mb *mockBackend) Keyspace() string {
+	return ""
+}
+
 var _ Factor = (*mockFactor)(nil)
 
 type mockFactor struct {
@@ -195,7 +199,7 @@ func createSample(value float64, backendIdx int) *model.Sample {
 }
 
 func updateScore(fc Factor, backends []scoredBackend) {
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		backends[i].scoreBits = 0
 	}
 	fc.UpdateScore(backends)

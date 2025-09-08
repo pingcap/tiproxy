@@ -53,7 +53,7 @@ func TestObserveInParallel(t *testing.T) {
 
 	var backend string
 	var info BackendInfo
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		backend, info = ts.addBackend()
 	}
 	ts.bo.Start(context.Background())
@@ -70,7 +70,7 @@ func TestCancelObserver(t *testing.T) {
 	ts := newObserverTestSuite(t)
 	t.Cleanup(ts.close)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		ts.addBackend()
 	}
 	info, err := ts.fetcher.GetBackendList(context.Background())
@@ -78,7 +78,7 @@ func TestCancelObserver(t *testing.T) {
 	require.Len(t, info, 10)
 
 	// Try 10 times.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		childCtx, cancelFunc := context.WithCancel(context.Background())
 		var wg waitgroup.WaitGroup
 		wg.Run(func() {

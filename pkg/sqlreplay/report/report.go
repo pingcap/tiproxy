@@ -65,7 +65,7 @@ type report struct {
 
 func NewReport(lg *zap.Logger, exceptionCh chan conn.Exception, connCreator BackendConnCreator) *report {
 	exceptions := make(map[conn.ExceptionType]map[string]*expCollection, conn.Total)
-	for i := 0; i < int(conn.Total); i++ {
+	for i := range int(conn.Total) {
 		exceptions[conn.ExceptionType(i)] = make(map[string]*expCollection)
 	}
 	return &report{

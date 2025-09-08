@@ -22,6 +22,7 @@ type proxyConfig struct {
 	backendTLSConfig  *tls.Config
 	handler           *CustomHandshakeHandler
 	bcConfig          *BCConfig
+	meter             Meter
 	capture           capture.Capture
 	username          string
 	password          string
@@ -59,7 +60,7 @@ func newMockProxy(t *testing.T, cfg *proxyConfig) *mockProxy {
 		proxyConfig:        cfg,
 		logger:             lg.Named("mockProxy"),
 		text:               text,
-		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.capture, cfg.connectionID, cfg.bcConfig),
+		BackendConnManager: NewBackendConnManager(lg, cfg.handler, cfg.capture, cfg.connectionID, cfg.bcConfig, cfg.meter),
 	}
 	mp.cmdProcessor.capability = cfg.capability
 	return mp
@@ -150,4 +151,23 @@ func (mc *mockCapture) Progress() (float64, time.Time, bool, error) {
 }
 
 func (mc *mockCapture) Close() {
+}
+
+var _ Meter = (*mockMeter)(nil)
+
+type mockMeter struct {
+	crossAZBytes map[string]int64
+	respBytes    map[string]int64
+}
+
+func newMeter() *mockMeter {
+	return &mockMeter{
+		crossAZBytes: make(map[string]int64),
+		respBytes:    make(map[string]int64),
+	}
+}
+
+func (m *mockMeter) IncTraffic(clusterID string, respBytes, crossAZBytes int64) {
+	m.crossAZBytes[clusterID] += crossAZBytes
+	m.respBytes[clusterID] += respBytes
 }

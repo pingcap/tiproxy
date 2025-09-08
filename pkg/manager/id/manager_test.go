@@ -16,9 +16,9 @@ func TestIDValue(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	mgr := NewIDManager()
 	m := make(map[uint64]struct{}, 1000)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Run(func() {
-			for j := 0; j < 100; j++ {
+			for range 100 {
 				id := mgr.NewID()
 				lock.Lock()
 				m[id] = struct{}{}

@@ -49,7 +49,7 @@ func (fs *FactorStatus) Name() string {
 
 func (fs *FactorStatus) UpdateScore(backends []scoredBackend) {
 	fs.updateSnapshot(backends)
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		score := 0
 		if !backends[i].Healthy() {
 			score = 1
@@ -60,7 +60,7 @@ func (fs *FactorStatus) UpdateScore(backends []scoredBackend) {
 
 func (fs *FactorStatus) updateSnapshot(backends []scoredBackend) {
 	now := time.Now()
-	for i := 0; i < len(backends); i++ {
+	for i := range backends {
 		addr := backends[i].Addr()
 		if backends[i].Healthy() {
 			delete(fs.snapshot, addr)

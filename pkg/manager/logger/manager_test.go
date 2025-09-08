@@ -64,7 +64,7 @@ func TestUpdateCfg(t *testing.T) {
 				cfg.LogFile.MaxBackups = 5
 			},
 			action: func(log *zap.Logger) {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					msg := strings.Repeat("a", 500*1024)
 					log.Info(msg)
 				}
@@ -81,7 +81,7 @@ func TestUpdateCfg(t *testing.T) {
 				cfg.LogFile.MaxBackups = 2
 			},
 			action: func(log *zap.Logger) {
-				for i := 0; i < 15; i++ {
+				for range 15 {
 					msg := strings.Repeat("a", 300*1024)
 					log.Info(msg)
 				}
@@ -205,7 +205,7 @@ func TestLogConcurrently(t *testing.T) {
 	lg, ch := setupLogManager(t, newCfg())
 	var wg waitgroup.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		wg.Run(func() {
 			for ctx.Err() == nil {
 				namedLg := lg.Named("test_name")

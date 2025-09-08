@@ -140,7 +140,7 @@ func TestReplaySpeed(t *testing.T) {
 		}
 
 		now := time.Now()
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			command := newMockCommand(1)
 			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
 			loader.writeCommand(command)
@@ -148,7 +148,7 @@ func TestReplaySpeed(t *testing.T) {
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
 		var firstTime, lastTime time.Time
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			<-cmdCh
 			if i == 0 {
 				firstTime = time.Now()
@@ -203,15 +203,15 @@ func TestProgress(t *testing.T) {
 		},
 	}
 
-	for i := 0; i < 2; i++ {
-		for j := 0; j < 10; j++ {
+	for i := range 2 {
+		for range 10 {
 			command := newMockCommand(1)
 			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
 			loader.writeCommand(command)
 		}
 
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
-		for j := 0; j < 10; j++ {
+		for range 10 {
 			<-cmdCh
 			progress, _, _, err := replay.Progress()
 			require.NoError(t, err)
@@ -256,7 +256,7 @@ func TestPendingCmds(t *testing.T) {
 	}
 
 	now := time.Now()
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		command := newMockCommand(1)
 		command.StartTs = now
 		loader.writeCommand(command)

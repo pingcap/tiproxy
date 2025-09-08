@@ -78,9 +78,10 @@ func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) event {
 }
 
 type mockBackendInst struct {
-	addr    string
-	healthy atomic.Bool
-	local   atomic.Bool
+	addr     string
+	keyspace string
+	healthy  atomic.Bool
+	local    atomic.Bool
 }
 
 func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
@@ -110,6 +111,14 @@ func (mbi *mockBackendInst) Local() bool {
 
 func (mbi *mockBackendInst) setLocal(local bool) {
 	mbi.local.Store(local)
+}
+
+func (mbi *mockBackendInst) Keyspace() string {
+	return mbi.keyspace
+}
+
+func (mbi *mockBackendInst) setKeyspace(k string) {
+	mbi.keyspace = k
 }
 
 type runner struct {
@@ -939,7 +948,7 @@ func TestGetBackendIO(t *testing.T) {
 		},
 	}
 	lg, _ := logger.CreateLoggerForTest(t)
-	mgr := NewBackendConnManager(lg, handler, &mockCapture{}, 0, &BCConfig{ConnectTimeout: time.Second})
+	mgr := NewBackendConnManager(lg, handler, &mockCapture{}, 0, &BCConfig{ConnectTimeout: time.Second}, nil)
 	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
 		wg.Run(func() {
@@ -982,7 +991,7 @@ func TestBackendInactive(t *testing.T) {
 		// do some queries and the interval is less than checkBackendInterval
 		{
 			client: func(packetIO pnet.PacketIO) error {
-				for i := 0; i < 10; i++ {
+				for range 10 {
 					time.Sleep(5 * time.Millisecond)
 					if err := ts.mc.request(packetIO); err != nil {
 						return err
@@ -991,7 +1000,7 @@ func TestBackendInactive(t *testing.T) {
 				return nil
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				for i := 0; i < 10; i++ {
+				for range 10 {
 					if err := ts.forwardCmd4Proxy(clientIO, backendIO); err != nil {
 						return err
 					}
@@ -999,7 +1008,7 @@ func TestBackendInactive(t *testing.T) {
 				return nil
 			},
 			backend: func(packetIO pnet.PacketIO) error {
-				for i := 0; i < 10; i++ {
+				for range 10 {
 					if err := ts.respondWithNoTxn4Backend(packetIO); err != nil {
 						return err
 					}
@@ -1010,7 +1019,7 @@ func TestBackendInactive(t *testing.T) {
 		// do some queries and the interval is longer than checkBackendInterval
 		{
 			client: func(packetIO pnet.PacketIO) error {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					time.Sleep(30 * time.Millisecond)
 					if err := ts.mc.request(packetIO); err != nil {
 						return err
@@ -1019,7 +1028,7 @@ func TestBackendInactive(t *testing.T) {
 				return nil
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					if err := ts.forwardCmd4Proxy(clientIO, backendIO); err != nil {
 						return err
 					}
@@ -1027,7 +1036,7 @@ func TestBackendInactive(t *testing.T) {
 				return nil
 			},
 			backend: func(packetIO pnet.PacketIO) error {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					if err := ts.respondWithNoTxn4Backend(packetIO); err != nil {
 						return err
 					}
@@ -1290,7 +1299,10 @@ func TestCloseWhileGracefulClose(t *testing.T) {
 }
 
 func TestTrafficMetrics(t *testing.T) {
-	ts := newBackendMgrTester(t)
+	meter := newMeter()
+	ts := newBackendMgrTester(t, func(cfg *testConfig) {
+		cfg.proxyConfig.meter = meter
+	})
 	var inBytes, inPackets, outBytes, outPackets int
 	runners := []runner{
 		// 1st handshake
@@ -1306,6 +1318,7 @@ func TestTrafficMetrics(t *testing.T) {
 				return ts.mc.request(packetIO)
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				ts.mp.curBackend.(*router.StaticBackend).SetKeyspace("key1")
 				addr := ts.tc.backendListener.Addr().String()
 				var err error
 				inBytes, inPackets, outBytes, outPackets, err = readTraffic(addr)
@@ -1318,11 +1331,13 @@ func TestTrafficMetrics(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, inBytes2 > inBytes && inPackets2 > inPackets && outBytes2 > outBytes && outPackets2 > outPackets)
 				require.True(t, inBytes2 > 4096 && inPackets2 > 1000)
+				require.True(t, meter.respBytes["key1"] > 4096)
 				inBytes, inPackets, outBytes, outPackets = inBytes2, inPackets2, outBytes2, outPackets2
 				// The first backend is local, so no cross-az traffic.
 				crossLocationBytes2, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
 				require.NoError(t, err)
 				require.True(t, crossLocationBytes2 == crossLocationBytes)
+				require.EqualValues(t, 0, meter.crossAZBytes["key1"])
 				return nil
 			},
 			backend: func(packetIO pnet.PacketIO) error {
@@ -1338,6 +1353,7 @@ func TestTrafficMetrics(t *testing.T) {
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				backendInst := newMockBackendInst(ts)
 				backendInst.setLocal(false)
+				backendInst.setKeyspace("key2")
 				ts.mp.Redirect(backendInst)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
 				return nil
@@ -1361,10 +1377,12 @@ func TestTrafficMetrics(t *testing.T) {
 				inBytes2, inPackets2, outBytes2, outPackets2, err := readTraffic(addr)
 				require.NoError(t, err)
 				require.True(t, inBytes2 > inBytes1 && inPackets2 > inPackets1 && outBytes2 > outBytes1 && outPackets2 > outPackets1)
+				require.True(t, meter.respBytes["key2"] > 0)
 				// The second backend is remote, so exists cross-az traffic.
 				crossLocationBytes2, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
 				require.NoError(t, err)
 				require.True(t, crossLocationBytes2 > crossLocationBytes)
+				require.True(t, meter.crossAZBytes["key2"] > 0)
 				return nil
 			},
 			backend: func(packetIO pnet.PacketIO) error {

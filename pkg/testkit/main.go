@@ -19,7 +19,7 @@ func TestPipeConn(t *testing.T, a, b func(*testing.T, net.Conn), loop int) {
 		require.NoError(t, cli.SetDeadline(ddl))
 		require.NoError(t, srv.SetDeadline(ddl))
 	}
-	for i := 0; i < loop; i++ {
+	for range loop {
 		wg.Run(func() {
 			a(t, cli)
 			require.NoError(t, cli.Close())
@@ -46,7 +46,7 @@ func TestTCPConnWithListener(t *testing.T, listen func(*testing.T, string, strin
 		require.NoError(t, listener.Close())
 	}()
 	var wg waitgroup.WaitGroup
-	for i := 0; i < loop; i++ {
+	for range loop {
 		wg.Run(func() {
 			cli, err := net.Dial("tcp", listener.Addr().String())
 			require.NoError(t, err)

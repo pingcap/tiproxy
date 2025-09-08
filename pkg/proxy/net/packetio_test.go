@@ -381,12 +381,12 @@ func TestPacketSequence(t *testing.T) {
 			write(cli, false)
 			write(cli, true)
 			// uncompressed sequence wraps around (1000 writes + 1 flush)
-			for i := 0; i < loops; i++ {
+			for range loops {
 				write(cli, false)
 			}
 			require.NoError(t, cli.Flush())
 			// compressed sequence wraps around (1000 writes + 1000 flushes)
-			for i := 0; i < loops; i++ {
+			for range loops {
 				write(cli, true)
 			}
 			// reset sequence
@@ -400,11 +400,11 @@ func TestPacketSequence(t *testing.T) {
 			read(srv)
 			read(srv)
 			// uncompressed sequence wraps around
-			for i := 0; i < loops; i++ {
+			for range loops {
 				read(srv)
 			}
 			// compressed sequence wraps around
-			for i := 0; i < loops; i++ {
+			for range loops {
 				read(srv)
 			}
 			// reset sequence
@@ -484,7 +484,7 @@ func TestForwardUntil(t *testing.T) {
 					testTCPConn(t,
 						func(t *testing.T, cli *packetIO) {
 							prepareClient(enableProxy, enableTLS, enableCompress, cli)
-							for i := 0; i < loops; i++ {
+							for i := range loops {
 								data, err := cli.ReadPacket()
 								require.NoError(t, err)
 								require.Equal(t, []byte{byte(i)}, data)
@@ -609,7 +609,7 @@ func BenchmarkReadPacket(b *testing.B) {
 func BenchmarkForwardWithReadWrite(b *testing.B) {
 	loops := 100
 	runForwardBenchmark(b, func(packetIO1, packetIO2 *packetIO) {
-		for j := 0; j < loops; j++ {
+		for j := range loops {
 			data, err := packetIO1.ReadPacket()
 			if err != nil {
 				b.Fatal(err)

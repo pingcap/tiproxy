@@ -6,6 +6,7 @@ package metricsreader
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"reflect"
 	"strconv"
@@ -53,9 +54,7 @@ func (pr *PromReader) ReadMetrics(ctx context.Context) error {
 
 	pr.Lock()
 	copyedMap := make(map[string]QueryExpr, len(pr.queryExprs))
-	for key, expr := range pr.queryExprs {
-		copyedMap[key] = expr
-	}
+	maps.Copy(copyedMap, pr.queryExprs)
 	pr.Unlock()
 	results := make(map[string]QueryResult, len(copyedMap))
 	now := time.Now()

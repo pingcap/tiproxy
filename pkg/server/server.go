@@ -16,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
+	"github.com/pingcap/tiproxy/pkg/manager/meter"
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/pingcap/tiproxy/pkg/manager/vip"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -45,6 +46,7 @@ type Server struct {
 	infoSyncer       *infosync.InfoSyncer
 	metricsReader    metricsreader.MetricsReader
 	replay           mgrrp.JobManager
+	meter            *meter.Meter
 	// etcd client
 	etcdCli *clientv3.Client
 	// HTTP client
@@ -123,7 +125,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	{
 		healthCheckCfg := config.NewDefaultHealthCheckConfig()
 		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), srv.infoSyncer, srv.infoSyncer, srv.httpCli, srv.etcdCli, healthCheckCfg, srv.configManager)
-		if err = srv.metricsReader.Start(context.Background()); err != nil {
+		if err = srv.metricsReader.Start(ctx); err != nil {
 			return
 		}
 	}
@@ -169,9 +171,16 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		srv.replay = mgrrp.NewJobManager(lg.Named("replay"), srv.configManager.GetConfig(), srv.certManager, idMgr, hsHandler)
 	}
 
+	{
+		srv.meter, err = meter.NewMeter(cfg, lg.Named("meter"))
+		if err != nil {
+			return
+		}
+	}
+
 	// setup proxy server
 	{
-		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), hsHandler)
+		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), srv.meter, hsHandler)
 		if err != nil {
 			return
 		}
@@ -250,6 +259,9 @@ func (s *Server) Close() error {
 	}
 	if s.proxy != nil {
 		errs = append(errs, s.proxy.Close())
+	}
+	if s.meter != nil {
+		errs = append(errs, s.meter.Close())
 	}
 	if s.apiServer != nil {
 		errs = append(errs, s.apiServer.Close())

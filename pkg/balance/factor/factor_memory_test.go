@@ -252,7 +252,7 @@ func TestNoMemMetrics(t *testing.T) {
 	mmr := newMockMetricsReader()
 	fm := NewFactorMemory(mmr, zap.NewNop())
 	backends := make([]scoredBackend, 0, 2)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		backends = append(backends, createBackend(i, i*100, i*100))
 	}
 	for i, test := range tests {
@@ -392,7 +392,7 @@ func TestMissBackendInMemory(t *testing.T) {
 	backends := make([]scoredBackend, 0, 2)
 	usages := [][]float64{{0.8, 0.8}, {0.1, 0.1}}
 	var values []*model.SampleStream
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		backends = append(backends, createBackend(i, 100, 100))
 		ss := createSampleStream(usages[i], i, model.Now())
 		ss.Values[0].Timestamp = model.TimeFromUnixNano(time.Now().Unix())
