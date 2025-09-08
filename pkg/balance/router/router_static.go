@@ -80,8 +80,9 @@ func (r *StaticRouter) OnConnClosed(addr, redirectingAddr string, conn Redirecta
 }
 
 type StaticBackend struct {
-	addr    string
-	healthy atomic.Bool
+	addr     string
+	keyspace string
+	healthy  atomic.Bool
 }
 
 func NewStaticBackend(addr string) *StaticBackend {
@@ -106,4 +107,12 @@ func (b *StaticBackend) SetHealthy(healthy bool) {
 
 func (b *StaticBackend) Local() bool {
 	return true
+}
+
+func (b *StaticBackend) Keyspace() string {
+	return b.keyspace
+}
+
+func (b *StaticBackend) SetKeyspace(k string) {
+	b.keyspace = k
 }
