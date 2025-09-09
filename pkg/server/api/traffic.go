@@ -99,6 +99,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	}
 	cfg.Username = c.PostForm("username")
 	cfg.Password = c.PostForm("password")
+	cfg.Format = c.PostForm("format")
 	cfg.ReadOnly = strings.EqualFold(c.PostForm("readonly"), "true")
 	cfg.KeyFile = globalCfg.Security.EncryptionKeyPath
 

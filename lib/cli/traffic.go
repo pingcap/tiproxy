@@ -63,6 +63,7 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 	username := replayCmd.PersistentFlags().String("username", "", "the username to connect to TiDB for replay")
 	password := replayCmd.PersistentFlags().String("password", "", "the password to connect to TiDB for replay")
 	readonly := replayCmd.PersistentFlags().Bool("read-only", false, "only replay read-only queries, default is false")
+	format := replayCmd.PersistentFlags().String("format", "", "the format of traffic files")
 	replayCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		username := *username
 		if len(username) == 0 {
@@ -83,6 +84,7 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 			"username": username,
 			"password": password,
 			"readonly": strconv.FormatBool(*readonly),
+			"format":   *format,
 		})
 		resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, "/api/traffic/replay", reader)
 		if err != nil {
