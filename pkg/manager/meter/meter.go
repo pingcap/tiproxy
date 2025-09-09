@@ -118,7 +118,7 @@ func (m *Meter) flush(ts int64, timeout time.Duration) {
 	if len(data) == 0 {
 		return
 	}
-	array := make([]map[string]any, len(data))
+	array := make([]map[string]any, 0, len(data))
 	for clusterID, d := range data {
 		array = append(array, map[string]any{
 			"version":         "1",

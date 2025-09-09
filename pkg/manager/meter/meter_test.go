@@ -60,7 +60,7 @@ func TestWrite(t *testing.T) {
 	m.flush(ts, time.Second)
 
 	data := readMeteringData(t, reader, ts)
-	require.True(t, len(data) > 0)
+	require.Len(t, data, 2)
 	resp, crossAZ := getValuesFromData(t, data, "cluster-1")
 	require.Equal(t, int64(100), resp)
 	require.Equal(t, int64(200), crossAZ)
@@ -95,6 +95,7 @@ func TestLoop(t *testing.T) {
 		if len(data) == 0 {
 			continue
 		}
+		require.Len(t, data, 2)
 		resp, crossAZ := getValuesFromData(t, data, "cluster-1")
 		totalResp["cluster-1"] += resp
 		totalCrossAZ["cluster-1"] += crossAZ
