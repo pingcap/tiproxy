@@ -311,10 +311,7 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map
 		}, nil, r.lg)
 	}
 	if conn != nil && !reflect.ValueOf(conn).IsNil() {
-		// Deduplicate commands in audit logs.
-		if r.cfg.Format != cmd.FormatAuditLogPlugin || !command.Equal(conn.LastCmd()) {
-			conn.ExecuteCmd(command)
-		}
+		conn.ExecuteCmd(command)
 	}
 	r.decodedCmds.Add(1)
 }

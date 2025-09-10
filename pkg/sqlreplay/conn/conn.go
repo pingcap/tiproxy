@@ -39,7 +39,6 @@ func (s *ReplayStats) Reset() {
 type Conn interface {
 	Run(ctx context.Context)
 	ExecuteCmd(command *cmd.Command)
-	LastCmd() *cmd.Command
 	Stop()
 }
 
@@ -57,7 +56,6 @@ type conn struct {
 	backendConn     BackendConn
 	connID          uint64 // capture ID, not replay ID
 	replayStats     *ReplayStats
-	lastCmd         *cmd.Command
 	lastPendingCmds int // last pending cmds reported to the stats
 	readonly        bool
 }
@@ -190,7 +188,6 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 func (c *conn) ExecuteCmd(command *cmd.Command) {
 	c.cmdLock.Lock()
 	c.cmdList.PushFront(command)
-	c.lastCmd = command
 	pendingCmds := c.cmdList.Len()
 	c.updatePendingCmds(pendingCmds)
 	c.cmdLock.Unlock()
@@ -198,13 +195,6 @@ func (c *conn) ExecuteCmd(command *cmd.Command) {
 	case c.cmdCh <- struct{}{}:
 	default:
 	}
-}
-
-// Used for deduplicate commands in audit logs.
-func (c *conn) LastCmd() *cmd.Command {
-	c.cmdLock.Lock()
-	defer c.cmdLock.Unlock()
-	return c.lastCmd
 }
 
 func (c *conn) Stop() {

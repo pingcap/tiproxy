@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
 	"time"
@@ -33,16 +34,24 @@ const (
 	timeLayout = "2006/01/02 15:04:05.999 -07:00"
 )
 
+type auditLogPluginConnCtx struct {
+	beginCmd *Command
+	inited   bool
+}
+
 func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
-	return &AuditLogPluginDecoder{}
+	return &AuditLogPluginDecoder{
+		connInfo: make(map[uint64]auditLogPluginConnCtx),
+	}
 }
 
 var _ CmdDecoder = (*AuditLogPluginDecoder)(nil)
 
 type AuditLogPluginDecoder struct {
+	connInfo map[uint64]auditLogPluginConnCtx
 }
 
-func (*AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error) {
+func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error) {
 	for {
 		line, filename, lineIdx, err := reader.ReadLine()
 		if err != nil {
@@ -72,9 +81,9 @@ func (*AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error) {
 		eventClass := kvs[auditPluginKeyClass]
 		switch eventClass {
 		case auditPluginClassGeneral, auditPluginClassTableAccess:
-			c, err = parseGeneralEvent(kvs)
+			c, err = decoder.parseGeneralEvent(kvs, connID)
 		case auditPluginClassConnect:
-			c, err = parseConnectEvent(kvs)
+			c, err = decoder.parseConnectEvent(kvs, connID)
 		default:
 			return nil, errors.Errorf("%s, line %d: unknown event class: %s", filename, lineIdx, eventClass)
 		}
@@ -177,29 +186,65 @@ func parseDB(value string) []string {
 	return strings.Split(value, ",")
 }
 
-func parseGeneralEvent(kvs map[string]string) (*Command, error) {
-	switch kvs[auditPluginKeyCommand] {
+// [COMMAND="Init DB"], [COMMAND=Query]
+func parseCommand(value string) string {
+	if len(value) == 0 {
+		return ""
+	}
+	if value[0] == '"' {
+		var err error
+		value, err = strconv.Unquote(value)
+		// impossible
+		if err != nil {
+			return ""
+		}
+	}
+	return value
+}
+
+func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, connID uint64) (*Command, error) {
+	connInfo := decoder.connInfo[connID]
+	var cmd *Command
+	cmdStr := parseCommand(kvs[auditPluginKeyCommand])
+	switch cmdStr {
 	case "Query", "Init DB":
 		sql, err := strconv.Unquote(kvs[auditPluginKeySQL])
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
+			// We also ignore "Quit" since disconnection is handled in parseConnectEvent.
 		}
-		return &Command{
+		cmd = &Command{
 			Type:     pnet.ComQuery,
 			StmtType: kvs[auditPluginKeyStmtType],
 			Payload:  append([]byte{pnet.ComQuery.Byte()}, hack.Slice(sql)...),
-		}, nil
+		}
 		// Ignore StmtExecute since the params are not outputted.
 		// Ignore Quit since disconnection is handled in parseConnectEvent.
 	}
-	// ignore the rest
-	return nil, nil
+	// Audit logs record both the beginning and end of each statement, but we only need the first one.
+	if cmd == nil {
+		return nil, nil
+	}
+	if connInfo.beginCmd != nil && bytes.Equal(cmd.Payload, connInfo.beginCmd.Payload) {
+		cmd = nil
+	} else if !connInfo.inited && cmd.StmtType == "Use" {
+		connInfo.inited = true
+	} else if kvs[auditPluginKeyClass] == auditPluginClassTableAccess && !connInfo.inited {
+		cmd = nil
+	}
+	connInfo.beginCmd = cmd
+	decoder.connInfo[connID] = connInfo
+	return cmd, nil
 }
 
-func parseConnectEvent(kvs map[string]string) (*Command, error) {
-	subclass := kvs[auditPluginKeySubClass]
-	switch subclass {
+func (decoder *AuditLogPluginDecoder) parseConnectEvent(kvs map[string]string, connID uint64) (*Command, error) {
+	switch kvs[auditPluginKeySubClass] {
 	case auditPluginSubClassConnected:
+		// The connection is treated as initialized no matter the current db is set or not.
+		connInfo := decoder.connInfo[connID]
+		connInfo.inited = true
+		decoder.connInfo[connID] = connInfo
+
 		db := kvs[auditPluginKeyDatabase]
 		dbs := parseDB(db)
 		if len(dbs) == 1 {
