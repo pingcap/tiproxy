@@ -36,10 +36,6 @@ func (c *mockConn) Run(ctx context.Context) {
 	c.closeCh <- c.connID
 }
 
-func (c *mockConn) LastCmd() *cmd.Command {
-	return nil
-}
-
 func (c *mockConn) Stop() {
 	c.closed <- struct{}{}
 }
@@ -61,10 +57,6 @@ func (c *mockPendingConn) Run(ctx context.Context) {
 	<-c.closed
 	c.stats.PendingCmds.Add(-c.pendingCmds)
 	c.closeCh <- c.connID
-}
-
-func (c *mockPendingConn) LastCmd() *cmd.Command {
-	return nil
 }
 
 func (c *mockPendingConn) Stop() {
