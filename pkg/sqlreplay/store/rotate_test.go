@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -99,7 +100,7 @@ func TestCompress(t *testing.T) {
 func TestParseFileIdx(t *testing.T) {
 	tests := []struct {
 		fileName string
-		fileIdx  int
+		fileIdx  int64
 	}{
 		{"traffic-1.log", 1},
 		{"traffic-2.log.gz", 2},
@@ -115,13 +116,38 @@ func TestParseFileIdx(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		idx := parseFileIdx(test.fileName)
+		idx := parseFileIdx(test.fileName, fileNamePrefix)
+		require.Equal(t, test.fileIdx, idx, "case %d", i)
+	}
+}
+
+func TestParseFileTime(t *testing.T) {
+	tests := []struct {
+		fileName string
+		fileIdx  int64
+	}{
+		{"tidb-audit-2025-09-10T17-01-56.073.log", 1757523716073},
+		{"tidb-audit-2025-09-10T17-01-56.172.log.gz", 1757523716172},
+		{"tidb-audit-2025-09-10T17-01-56.log.gz", 1757523716000},
+		{"traffic-2025-09-10T17-01-56.172.log", 0},
+		{"traffic-2025-09-10T17-01-56.172.log.gz", 0},
+		{"tidb-audit-.log", 0},
+		{"tidb-audit-.log.gz", 0},
+		{"tidb-audit.log", 0},
+		{"tidb-audit-100.gz", 0},
+		{"test", 0},
+		{"tidb-audit.log.gz", 0},
+	}
+
+	for i, test := range tests {
+		idx := parseFileTime(test.fileName, auditFileNamePrefix)
 		require.Equal(t, test.fileIdx, idx, "case %d", i)
 	}
 }
 
 func TestIterateFiles(t *testing.T) {
 	tests := []struct {
+		format    string
 		fileNames []string
 		order     []string
 	}{
@@ -170,6 +196,38 @@ func TestIterateFiles(t *testing.T) {
 				"traffic-2.log.gz",
 			},
 		},
+		{
+			format: cmd.FormatAuditLogPlugin,
+			fileNames: []string{
+				"tidb-audit-2025-09-10T17-01-56.073.log",
+			},
+			order: []string{
+				"tidb-audit-2025-09-10T17-01-56.073.log",
+			},
+		},
+		{
+			format: cmd.FormatAuditLogPlugin,
+			fileNames: []string{
+				"tidb-audit-2025-09-10T17-01-56.172.log",
+				"tidb-audit-2025-09-10T17-01-56.073.log",
+				"tidb-audit-2025-09-10T17-01-55.976.log",
+			},
+			order: []string{
+				"tidb-audit-2025-09-10T17-01-55.976.log",
+				"tidb-audit-2025-09-10T17-01-56.073.log",
+				"tidb-audit-2025-09-10T17-01-56.172.log",
+			},
+		},
+		{
+			format: cmd.FormatAuditLogPlugin,
+			fileNames: []string{
+				"tidb-audit.log",
+				"tidb-audit-2025-09-10T17-01-55.976.log",
+			},
+			order: []string{
+				"tidb-audit-2025-09-10T17-01-55.976.log",
+			},
+		},
 	}
 
 	dir := t.TempDir()
@@ -195,7 +253,7 @@ func TestIterateFiles(t *testing.T) {
 			}
 			require.NoError(t, f.Close())
 		}
-		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: test.format})
 		require.NoError(t, err)
 		fileOrder := make([]string, 0, len(test.order))
 		for {

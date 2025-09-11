@@ -203,6 +203,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	if reader == nil {
 		var err error
 		reader, err = store.NewReader(r.lg.Named("loader"), r.storage, store.ReaderCfg{
+			Format:           r.cfg.Format,
 			Dir:              r.cfg.Input,
 			EncryptionKey:    r.cfg.encryptionKey,
 			EncryptionMethod: r.meta.EncryptMethod,
