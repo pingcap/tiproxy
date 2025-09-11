@@ -66,9 +66,10 @@ const (
 )
 
 type redirectResult struct {
-	err  error
-	from string
-	to   string
+	err      error
+	from     string
+	to       string
+	duration time.Duration
 }
 
 const (
@@ -499,6 +500,7 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 // tryRedirect tries to migrate the session if the session is redirect-able.
 // NOTE: processLock should be held before calling this function.
 func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
+	start := time.Now()
 	if mgr.closeStatus.Load() >= statusNotifyClose || ctx.Err() != nil {
 		return
 	}
@@ -520,6 +522,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		// Notifying may block. Notify the receiver asynchronously to:
 		// - Reduce the latency of session migration
 		// - Avoid the risk of deadlock
+		rs.duration = time.Since(start)
 		mgr.redirectResCh <- rs
 	}()
 	// It may have been too long since the redirection signal was sent, and the target backend may be unhealthy now.
@@ -627,11 +630,12 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 	if rs.err != nil {
 		err := eventReceiver.OnRedirectFail(rs.from, rs.to, mgr)
 		mgr.logger.Warn("redirect connection failed", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.NamedError("redirect_err", rs.err), zap.NamedError("notify_err", err))
+			zap.String("to", rs.to), zap.NamedError("redirect_err", rs.err), zap.NamedError("notify_err", err),
+			zap.Duration("duration", rs.duration))
 	} else {
 		err := eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
 		mgr.logger.Debug("redirect connection succeeds", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.NamedError("notify_err", err))
+			zap.String("to", rs.to), zap.NamedError("notify_err", err), zap.Duration("duration", rs.duration))
 	}
 }
 

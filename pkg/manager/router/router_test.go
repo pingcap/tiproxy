@@ -313,7 +313,7 @@ func (tester *routerTester) checkBalanced() {
 		}
 	}
 	ratio := float64(maxNum) / float64(minNum+1)
-	require.LessOrEqual(tester.t, ratio, rebalanceMaxScoreRatio)
+	require.LessOrEqual(tester.t, ratio, defaultRebalanceMaxScoreRatio)
 }
 
 func (tester *routerTester) checkRedirectingNum(num int) {
