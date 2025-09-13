@@ -132,6 +132,7 @@ func (bc *backendConn) GetPreparedStmt(stmtID uint32) (string, int, []byte) {
 	return ps.text, ps.paramNum, ps.paramTypes
 }
 
+// ExecuteStmt is only used for reportDB now.
 func (bc *backendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error {
 	request, err := pnet.MakeExecuteStmtRequest(stmtID, args, true)
 	if err != nil {
@@ -142,6 +143,7 @@ func (bc *backendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []an
 	return err
 }
 
+// PrepareStmt is only used for reportDB now.
 func (bc *backendConn) PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error) {
 	request := pnet.MakePrepareStmtRequest(stmt)
 	err = bc.backendConnMgr.ExecuteCmd(ctx, request)
@@ -153,6 +155,7 @@ func (bc *backendConn) PrepareStmt(ctx context.Context, stmt string) (stmtID uin
 	return
 }
 
+// Query is only used for reportDB now.
 func (bc *backendConn) Query(ctx context.Context, stmt string) error {
 	request := pnet.MakeQueryPacket(stmt)
 	err := bc.backendConnMgr.ExecuteCmd(ctx, request)

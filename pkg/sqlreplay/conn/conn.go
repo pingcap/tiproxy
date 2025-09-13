@@ -154,6 +154,7 @@ func (c *conn) isReadOnly(command *cmd.Command) bool {
 	return true
 }
 
+// update the params and sql text for the ComStmtExecute for recording errors.
 func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 	// updated before
 	if command.PreparedStmt != "" {
