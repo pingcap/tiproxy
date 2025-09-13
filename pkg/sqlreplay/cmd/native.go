@@ -48,7 +48,7 @@ func (rw *NativeEncoder) Encode(c *Command, writer *bytes.Buffer) error {
 			return err
 		}
 	}
-	if !c.Succeess {
+	if !c.Success {
 		if err = writeString(nativeKeySuccess, "false", writer); err != nil {
 			return err
 		}
@@ -81,7 +81,7 @@ type NativeDecoder struct {
 
 func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 	c = &Command{}
-	c.Succeess = true
+	c.Success = true
 	c.Type = pnet.ComQuery
 	for {
 		line, filename, lineIdx, err := reader.ReadLine()
@@ -124,7 +124,7 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 			}
 			c.Type = pnet.CommandFromString(value)
 		case nativeKeySuccess:
-			c.Succeess = value == "true"
+			c.Success = value == "true"
 		case nativeKeyPayloadLen:
 			var payloadLen int
 			if payloadLen, err = strconv.Atoi(value); err != nil {

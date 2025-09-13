@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"io"
 	"testing"
 	"time"
 
@@ -294,98 +295,302 @@ func TestParseLog(t *testing.T) {
 	}
 }
 
-func TestParseDB(t *testing.T) {
+func TestCommand(t *testing.T) {
 	tests := []struct {
 		s      string
-		expect []string
+		expect string
 	}{
 		{
-			s:      `""`,
-			expect: nil,
+			s:      ``,
+			expect: "",
 		},
 		{
-			s:      `"[]"`,
-			expect: nil,
+			s:      `"Init DB"`,
+			expect: "Init DB",
 		},
 		{
-			s:      `"[test]"`,
-			expect: []string{"test"},
-		},
-		{
-			s:      `"[hello,world]"`,
-			expect: []string{"hello", "world"},
+			s:      `Query`,
+			expect: "Query",
 		},
 	}
 	for i, test := range tests {
-		dbs := parseDB(test.s)
-		if len(dbs) == 0 && len(test.expect) == 0 {
-			continue
-		}
-		require.EqualValues(t, test.expect, parseDB(test.s), "case %d", i)
+		cmd := parseCommand(test.s)
+		require.EqualValues(t, test.expect, cmd, "case %d", i)
 	}
 }
 
-func TestDecodeAuditLogPlugin(t *testing.T) {
+func TestParseStartTs(t *testing.T) {
 	tests := []struct {
-		line   string
-		cmd    *Command
+		kvs    map[string]string
+		ts     time.Time
 		errMsg string
 	}{
 		{
-			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
-			cmd: &Command{
-				Type:     pnet.ComQuery,
-				ConnID:   3695181836,
-				StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
-				Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
-				StmtType: "Select",
-				Succeess: true,
+			kvs: map[string]string{
+				auditPluginKeyTimeStamp: "2025/09/06 17:03:50.888 +08:10",
+				auditPluginKeyCostTime:  "666000",
+			},
+			ts: time.Date(2025, 9, 6, 17, 3, 50, 222000000, time.FixedZone("", 8*3600+600)),
+		},
+		{
+			kvs: map[string]string{
+				auditPluginKeyTimeStamp: "2025/09/06 17:03:53.717 +08:10",
+				auditPluginKeyCostTime:  "",
+			},
+			ts: time.Date(2025, 9, 6, 17, 3, 53, 717000000, time.FixedZone("", 8*3600+600)),
+		},
+		{
+			kvs: map[string]string{
+				auditPluginKeyTimeStamp: "2025/09/06 17:03:53.717 +08:10",
+			},
+			ts: time.Date(2025, 9, 6, 17, 3, 53, 717000000, time.FixedZone("", 8*3600+600)),
+		},
+		{
+			kvs: map[string]string{
+				auditPluginKeyTimeStamp: "2025/09/06",
+			},
+			errMsg: "parsing timestamp failed",
+		},
+	}
+
+	for i, test := range tests {
+		ts, err := parseStartTs(test.kvs)
+		if test.errMsg != "" {
+			require.Error(t, err, "case %d", i)
+			require.Contains(t, err.Error(), test.errMsg, "case %d", i)
+			continue
+		} else {
+			require.NoError(t, err, "case %d", i)
+		}
+		require.EqualValues(t, test.ts, ts, "case %d", i)
+	}
+}
+
+func TestParseParams(t *testing.T) {
+	tests := []struct {
+		s      string
+		expect []any
+		errMsg string
+	}{
+		{
+			s:      ``,
+			errMsg: "no quotes in params",
+		},
+		{
+			s:      `""`,
+			expect: []any{},
+		},
+		{
+			s:      `"[]"`,
+			expect: []any{},
+		},
+		{
+			s:      `"[\"KindInt64\"]"`,
+			errMsg: "no space in param",
+		},
+		{
+			s:      `"[\"KindInt64 \"]"`,
+			errMsg: "invalid syntax",
+		},
+		{
+			s:      `"[\"1\"]"`,
+			errMsg: "no space in param",
+		},
+		{
+			s:      `"[\"Unknown 1\"]"`,
+			errMsg: "unknown param type",
+		},
+		{
+			s: `"[\"KindInt64 1\"]"`,
+			expect: []any{
+				int64(1),
 			},
 		},
 		{
-			// connect with an initial database
+			s: `"[\"KindInt64 -9223372036854775808\"]"`,
+			expect: []any{
+				int64(-9223372036854775808),
+			},
+		},
+		{
+			s: `"[\"KindFloat64 -123.45600128173828\"]"`,
+			expect: []any{
+				float64(-123.45600128173828),
+			},
+		},
+		{
+			s: `"[\"KindString \"]"`,
+			expect: []any{
+				"",
+			},
+		},
+		{
+			s: `"[\"KindString '单引号' \\\\\\\"双引号\\\\\\\"\\\\\\\\n\\\\\\\\t😊\\\\x00\\\\x00\"]"`,
+			expect: []any{
+				"'单引号' \\\\\\\"双引号\\\\\\\"\\\\\\\\n\\\\\\\\t😊\\\\x00\\\\x00",
+			},
+		},
+		{
+			s: `"[\"KindNull <nil>\"]"`,
+			expect: []any{
+				nil,
+			},
+		},
+		{
+			s: `"[\"KindString 37\",\"KindInt64 2\",\"KindString user_5556\",\"KindInt64 1\"]"`,
+			expect: []any{
+				string("37"),
+				int64(2),
+				string("user_5556"),
+				int64(1),
+			},
+		},
+	}
+
+	for i, test := range tests {
+		params, err := parseExecuteParams(test.s)
+		if test.errMsg != "" {
+			require.Error(t, err, "case %d", i)
+			require.Contains(t, err.Error(), test.errMsg, "case %d", i)
+			continue
+		} else {
+			require.NoError(t, err, "case %d", i)
+		}
+		if len(params) == 0 && len(test.expect) == 0 {
+			continue
+		}
+		require.Equal(t, test.expect, params, "case %d", i)
+	}
+}
+
+func TestDecodeSingleLine(t *testing.T) {
+	tests := []struct {
+		line   string
+		cmds   []*Command
+		errMsg string
+	}{
+		{
+			// sql with current db
+			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
+				},
+				{
+					Type:     pnet.ComQuery,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
+					StmtType: "Select",
+					Success:  true,
+				},
+			},
+		},
+		{
+			// sql without current database
+			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:     pnet.ComQuery,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
+					StmtType: "Select",
+					Success:  true,
+				},
+			},
+		},
+		{
+			// prepared statement
+			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"?\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 1\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
+				},
+				{
+					Type:     pnet.ComStmtPrepare,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select \"?\"")...),
+					StmtType: "Select",
+					Success:  true,
+				},
+				{
+					Type:     pnet.ComStmtExecute,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtExecute.Byte()}, []byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 1, 0, 0, 0, 0, 0, 0, 0}...),
+					StmtType: "Select",
+					Success:  true,
+				},
+				{
+					Type:     pnet.ComStmtClose,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtClose.Byte()}, []byte{0, 0, 0, 0}...),
+					StmtType: "Select",
+					Success:  true,
+				},
+			},
+		},
+		{
+			// prepared statement without params field
+			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"?\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Execute] [SQL_STATEMENTS=Select] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
+				},
+			},
+		},
+		{
+			// ignore starting event
+			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=STARTING]`,
+			cmds: []*Command{},
+		},
+		{
+			// ignore new connection
 			line: `[2025/09/08 21:15:12.904 +08:00] [INFO] [logger.go:77] [ID=17573373120] [TIMESTAMP=2025/09/08 21:15:12.904 +08:10] [EVENT_CLASS=CONNECTION] [EVENT_SUBCLASS=Connected] [STATUS_CODE=0] [COST_TIME=0] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[]"] [SQL_TEXT=] [ROWS=0] [CLIENT_PORT=49278] [CONNECTION_ID=3552575510] [CONNECTION_TYPE=SSL/TLS] [SERVER_ID=1] [SERVER_PORT=4000] [DURATION=0] [SERVER_OS_LOGIN_USER=test] [OS_VERSION=darwin.arm64] [CLIENT_VERSION=] [SERVER_VERSION=v9.0.0] [AUDIT_VERSION=] [SSL_VERSION=TLSv1.3] [PID=89967] [Reason=]`,
-			cmd: &Command{
-				Type:     pnet.ComInitDB,
-				ConnID:   3552575510,
-				StartTs:  time.Date(2025, 9, 8, 21, 15, 12, 904000000, time.FixedZone("", 8*3600+600)),
-				Payload:  append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-				Succeess: true,
-			},
+			cmds: []*Command{},
 		},
 		{
-			// no initial database
-			line:   `[2025/09/08 21:15:12.904 +08:00] [INFO] [logger.go:77] [ID=17573373120] [TIMESTAMP=2025/09/08 21:15:12.904 +08:10] [EVENT_CLASS=CONNECTION] [EVENT_SUBCLASS=Connected] [STATUS_CODE=0] [COST_TIME=0] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT=] [ROWS=0] [CLIENT_PORT=49278] [CONNECTION_ID=3552575510] [CONNECTION_TYPE=SSL/TLS] [SERVER_ID=1] [SERVER_PORT=4000] [DURATION=0] [SERVER_OS_LOGIN_USER=test] [OS_VERSION=darwin.arm64] [CLIENT_VERSION=] [SERVER_VERSION=v9.0.0] [AUDIT_VERSION=] [SSL_VERSION=TLSv1.3] [PID=89967] [Reason=]`,
-			errMsg: "EOF",
-		},
-		{
+			// quit
 			line: `[2025/09/08 21:15:35.621 +08:00] [INFO] [logger.go:77] [ID=17573373350] [TIMESTAMP=2025/09/08 21:15:35.621 +08:10] [EVENT_CLASS=CONNECTION] [EVENT_SUBCLASS=Disconnect] [STATUS_CODE=0] [COST_TIME=0] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[]"] [SQL_TEXT=] [ROWS=0] [CLIENT_PORT=49278] [CONNECTION_ID=3552575510] [CONNECTION_TYPE=SSL/TLS] [SERVER_ID=1] [SERVER_PORT=4000] [DURATION=22716.871792] [SERVER_OS_LOGIN_USER=test] [OS_VERSION=darwin.arm64] [CLIENT_VERSION=] [SERVER_VERSION=v9.0.0] [AUDIT_VERSION=] [SSL_VERSION=TLSv1.3] [PID=89967] [Reason=]`,
-			cmd: &Command{
-				Type:     pnet.ComQuit,
-				ConnID:   3552575510,
-				StartTs:  time.Date(2025, 9, 8, 21, 15, 35, 621000000, time.FixedZone("", 8*3600+600)),
-				Payload:  []byte{pnet.ComQuit.Byte()},
-				Succeess: true,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComQuit,
+					ConnID:  3552575510,
+					StartTs: time.Date(2025, 9, 8, 21, 15, 35, 621000000, time.FixedZone("", 8*3600+600)),
+					Payload: []byte{pnet.ComQuit.Byte()},
+					Success: true,
+				},
 			},
 		},
 		{
-			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
-			errMsg: "no timestamp",
-		},
-		{
-			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
+			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			errMsg: "parsing timestamp failed",
 		},
 		{
-			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
+			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			errMsg: "no connection id",
 		},
 		{
-			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=abc] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
+			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=abc] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			errMsg: "parsing connection id failed",
 		},
 		{
-			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=HELLO] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
+			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=HELLO] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			errMsg: "unknown event class",
 		},
 	}
@@ -393,100 +598,91 @@ func TestDecodeAuditLogPlugin(t *testing.T) {
 	for i, test := range tests {
 		decoder := NewAuditLogPluginDecoder()
 		mr := mockReader{data: append([]byte(test.line), '\n')}
-		cmd, err := decoder.Decode(&mr)
+		cmds := make([]*Command, 0, 4)
+		var err error
+		for {
+			var cmd *Command
+			cmd, err = decoder.Decode(&mr)
+			if cmd == nil {
+				break
+			}
+			cmds = append(cmds, cmd)
+		}
+		require.Error(t, err, "case %d", i)
 		if len(test.errMsg) > 0 {
-			require.Error(t, err, "case %d", i)
 			require.ErrorContains(t, err, test.errMsg, "case %d", i)
 			continue
 		} else {
-			require.NoError(t, err, "case %d", i)
+			require.ErrorIs(t, err, io.EOF, "case %d", i)
 		}
-		require.Equal(t, test.cmd, cmd, "case %d", i)
+		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
 }
 
-func TestIgnoreCmds(t *testing.T) {
+func TestDecodeMultiLines(t *testing.T) {
 	tests := []struct {
 		lines string
 		cmds  []*Command
 	}{
 		{
-			// db not initialized, start with not a table access
-			lines: `[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/08 21:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="set sql_mode=''"] [ROWS=0] [CONNECTION_ID=3552575564] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set]`,
+			// db is changed in the second sql
+			lines: `[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="set sql_mode=''"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]
+[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=STARTING]
+[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					StartTs:  time.Date(2025, 9, 8, 21, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
-					ConnID:   3552575564,
+					StartTs:  time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					ConnID:   3695181836,
 					Type:     pnet.ComQuery,
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("set sql_mode=''")...),
 					StmtType: "Set",
-					Succeess: true,
+					Success:  true,
+				},
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
+				},
+				{
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					ConnID:   3695181836,
+					Type:     pnet.ComQuery,
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
+					StmtType: "Select",
+					Success:  true,
 				},
 			},
 		},
 		{
-			// db not initialized, start with a table access, ignore it
-			lines: `[2025/09/08 21:16:52.630 +08:00] [INFO] [logger.go:77] [ID=17573374120] [TIMESTAMP=2025/09/08 21:16:52.630 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Set] [STATUS_CODE=0] [COST_TIME=1509.417] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[t]"] [SQL_TEXT="insert t value(1)"] [ROWS=1] [CONNECTION_ID=3552575570] [CLIENT_PORT=52709] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Insert]`,
-			cmds:  []*Command{},
-		},
-		{
-			// start with a use statement, the duplicated sql is ignored
-			lines: `[2025/09/08 21:17:55.686 +08:00] [INFO] [logger.go:77] [ID=17573374751] [TIMESTAMP=2025/09/08 21:15:55.686 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=70.708] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="use tiproxy_traffic_replay"] [ROWS=0] [CONNECTION_ID=3552575570] [CLIENT_PORT=52709] [PID=89967] [COMMAND="Init DB"] [SQL_STATEMENTS=Use]
-		[2025/09/08 21:16:52.630 +08:00] [INFO] [logger.go:77] [ID=17573374120] [TIMESTAMP=2025/09/08 21:16:52.630 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1509.417] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[t]"] [SQL_TEXT="insert t value(1)"] [ROWS=1] [CONNECTION_ID=3552575570] [CLIENT_PORT=52709] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Insert]
-		[2025/09/08 21:16:52.634 +08:00] [INFO] [logger.go:77] [ID=17573374121] [TIMESTAMP=2025/09/08 21:16:52.634 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=5637.042] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[t]"] [SQL_TEXT="insert t value(1)"] [ROWS=1] [CONNECTION_ID=3552575570] [CLIENT_PORT=52709] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Insert]`,
+			// db stays the same in the second sql
+			lines: `[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="set sql_mode=''"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=STARTING]
+[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					StartTs:  time.Date(2025, 9, 8, 21, 15, 55, 686000000, time.FixedZone("", 8*3600+600)),
-					ConnID:   3552575570,
-					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("use tiproxy_traffic_replay")...),
-					Type:     pnet.ComQuery,
-					StmtType: "Use",
-					Succeess: true,
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
 				},
 				{
-					StartTs:  time.Date(2025, 9, 8, 21, 16, 52, 630000000, time.FixedZone("", 8*3600+600)),
-					ConnID:   3552575570,
-					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("insert t value(1)")...),
+					StartTs:  time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					ConnID:   3695181836,
 					Type:     pnet.ComQuery,
-					StmtType: "Insert",
-					Succeess: true,
-				},
-			},
-		},
-		{
-			// a new connection without current db
-			lines: `[2025/09/08 17:23:58.279 +08:00] [INFO] [logger.go:77] [ID=17574098380] [TIMESTAMP=2025/09/08 17:23:58.277 +08:10] [EVENT_CLASS=CONNECTION] [EVENT_SUBCLASS=Connected] [STATUS_CODE=0] [COST_TIME=0] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT=] [ROWS=0] [CLIENT_PORT=52797] [CONNECTION_ID=3552575570] [CONNECTION_TYPE=SSL/TLS] [SERVER_ID=1] [SERVER_PORT=4000] [DURATION=0] [SERVER_OS_LOGIN_USER=test] [OS_VERSION=darwin.arm64] [CLIENT_VERSION=] [SERVER_VERSION=v9.0.0] [AUDIT_VERSION=] [SSL_VERSION=TLSv1.3] [PID=89967] [Reason=]
-[2025/09/08 21:16:52.630 +08:00] [INFO] [logger.go:77] [ID=17573374120] [TIMESTAMP=2025/09/08 21:16:52.630 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1509.417] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[t]"] [SQL_TEXT="insert test.t value(1)"] [ROWS=1] [CONNECTION_ID=3552575570] [CLIENT_PORT=52709] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Insert]`,
-			cmds: []*Command{
-				{
-					StartTs:  time.Date(2025, 9, 8, 21, 16, 52, 630000000, time.FixedZone("", 8*3600+600)),
-					ConnID:   3552575570,
-					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("insert test.t value(1)")...),
-					Type:     pnet.ComQuery,
-					StmtType: "Insert",
-					Succeess: true,
-				},
-			},
-		},
-		{
-			// a new connection with current db
-			lines: `[2025/09/08 17:23:58.279 +08:00] [INFO] [logger.go:77] [ID=17574098380] [TIMESTAMP=2025/09/08 17:23:58.277 +08:10] [EVENT_CLASS=CONNECTION] [EVENT_SUBCLASS=Connected] [STATUS_CODE=0] [COST_TIME=0] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[]"] [SQL_TEXT=] [ROWS=0] [CLIENT_PORT=52797] [CONNECTION_ID=3552575570] [CONNECTION_TYPE=SSL/TLS] [SERVER_ID=1] [SERVER_PORT=4000] [DURATION=0] [SERVER_OS_LOGIN_USER=test] [OS_VERSION=darwin.arm64] [CLIENT_VERSION=] [SERVER_VERSION=v9.0.0] [AUDIT_VERSION=] [SSL_VERSION=TLSv1.3] [PID=89967] [Reason=]
-[2025/09/08 21:16:52.630 +08:00] [INFO] [logger.go:77] [ID=17573374120] [TIMESTAMP=2025/09/08 21:16:52.630 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1509.417] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[t]"] [SQL_TEXT="insert t value(1)"] [ROWS=1] [CONNECTION_ID=3552575570] [CLIENT_PORT=52709] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Insert]`,
-			cmds: []*Command{
-				{
-					StartTs:  time.Date(2025, 9, 8, 17, 23, 58, 277000000, time.FixedZone("", 8*3600+600)),
-					ConnID:   3552575570,
-					Payload:  append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Type:     pnet.ComInitDB,
-					Succeess: true,
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("set sql_mode=''")...),
+					StmtType: "Set",
+					Success:  true,
 				},
 				{
-					StartTs:  time.Date(2025, 9, 8, 21, 16, 52, 630000000, time.FixedZone("", 8*3600+600)),
-					ConnID:   3552575570,
-					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("insert t value(1)")...),
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					ConnID:   3695181836,
 					Type:     pnet.ComQuery,
-					StmtType: "Insert",
-					Succeess: true,
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
+					StmtType: "Select",
+					Success:  true,
 				},
 			},
 		},
@@ -496,18 +692,110 @@ func TestIgnoreCmds(t *testing.T) {
 [2025/09/08 21:16:52.630 +08:00] [INFO] [logger.go:77] [ID=17573374120] [TIMESTAMP=2025/09/08 21:16:52.630 +08:10] [EVENT_CLASS=CONNECTION] [EVENT_SUBCLASS=Disconnect] [STATUS_CODE=0] [COST_TIME=0] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT=] [ROWS=0] [CLIENT_PORT=52620] [CONNECTION_ID=3552575570] [CONNECTION_TYPE=SSL/TLS] [SERVER_ID=1] [SERVER_PORT=4000] [DURATION=0.0445] [SERVER_OS_LOGIN_USER=test] [OS_VERSION=darwin.arm64] [CLIENT_VERSION=] [SERVER_VERSION=v9.0.0] [AUDIT_VERSION=] [SSL_VERSION=TLSv1.3] [PID=89967] [Reason=]`,
 			cmds: []*Command{
 				{
-					StartTs:  time.Date(2025, 9, 8, 17, 23, 58, 277000000, time.FixedZone("", 8*3600+600)),
-					ConnID:   3552575570,
-					Payload:  append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Type:     pnet.ComInitDB,
-					Succeess: true,
+					StartTs: time.Date(2025, 9, 8, 21, 16, 52, 630000000, time.FixedZone("", 8*3600+600)),
+					ConnID:  3552575570,
+					Payload: []byte{pnet.ComQuit.Byte()},
+					Type:    pnet.ComQuit,
+					Success: true,
+				},
+			},
+		},
+		{
+			// 2 prepared statements
+			lines: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"?\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 1\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"?\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 1\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
 				},
 				{
-					StartTs:  time.Date(2025, 9, 8, 21, 16, 52, 630000000, time.FixedZone("", 8*3600+600)),
-					ConnID:   3552575570,
-					Payload:  []byte{pnet.ComQuit.Byte()},
-					Type:     pnet.ComQuit,
-					Succeess: true,
+					Type:     pnet.ComStmtPrepare,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select \"?\"")...),
+					StmtType: "Select",
+					Success:  true,
+				},
+				{
+					Type:     pnet.ComStmtExecute,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtExecute.Byte()}, []byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 1, 0, 0, 0, 0, 0, 0, 0}...),
+					StmtType: "Select",
+					Success:  true,
+				},
+				{
+					Type:     pnet.ComStmtClose,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtClose.Byte()}, []byte{0, 0, 0, 0}...),
+					StmtType: "Select",
+					Success:  true,
+				},
+				{
+					Type:     pnet.ComStmtPrepare,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select \"?\"")...),
+					StmtType: "Select",
+					Success:  true,
+				},
+				{
+					Type:     pnet.ComStmtExecute,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtExecute.Byte()}, []byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 1, 0, 0, 0, 0, 0, 0, 0}...),
+					StmtType: "Select",
+					Success:  true,
+				},
+				{
+					Type:     pnet.ComStmtClose,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComStmtClose.Byte()}, []byte{0, 0, 0, 0}...),
+					StmtType: "Select",
+					Success:  true,
+				},
+			},
+		},
+		{
+			// 2 different connections
+			lines: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181837] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
+				},
+				{
+					Type:     pnet.ComQuery,
+					ConnID:   3695181836,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
+					StmtType: "Select",
+					Success:  true,
+				},
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181837,
+					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
+				},
+				{
+					Type:     pnet.ComQuery,
+					ConnID:   3695181837,
+					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
+					StmtType: "Select",
+					Success:  true,
 				},
 			},
 		},
