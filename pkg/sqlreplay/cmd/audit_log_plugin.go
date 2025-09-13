@@ -39,7 +39,6 @@ const (
 )
 
 type auditLogPluginConnCtx struct {
-	// The current database.
 	currentDB string
 }
 
@@ -53,7 +52,7 @@ var _ CmdDecoder = (*AuditLogPluginDecoder)(nil)
 
 type AuditLogPluginDecoder struct {
 	connInfo map[uint64]auditLogPluginConnCtx
-	// pendingCmds is used for returning 3 times in a prepared statement.
+	// pendingCmds contains the commands that has not been returned yet.
 	pendingCmds []*Command
 }
 
