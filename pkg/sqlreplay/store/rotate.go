@@ -10,9 +10,11 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"go.uber.org/zap"
 )
 
@@ -102,7 +104,7 @@ var _ Reader = (*rotateReader)(nil)
 type rotateReader struct {
 	cfg          ReaderCfg
 	curFileName  string
-	curFileIdx   int
+	curFileIdx   int64
 	reader       io.Reader
 	externalFile storage.ExternalFileReader
 	storage      storage.ExternalStorage
@@ -163,17 +165,19 @@ func (r *rotateReader) Close() error {
 }
 
 func (r *rotateReader) nextReader() error {
-	var minFileIdx int
+	var minFileIdx int64
 	var minFileName string
+	fileNamePrefix := getFileNamePrefix(r.cfg.Format)
+	parseFunc := getParseFileNameFunc(r.cfg.Format)
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	err := r.storage.WalkDir(ctx, &storage.WalkOption{},
 		func(name string, size int64) error {
 			if !strings.HasPrefix(name, fileNamePrefix) {
 				return nil
 			}
-			fileIdx := parseFileIdx(name)
+			fileIdx := parseFunc(name, fileNamePrefix)
 			if fileIdx == 0 {
-				r.lg.Warn("traffic file name is invalid", zap.String("filename", name))
+				r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", r.cfg.Format))
 				return nil
 			}
 			if fileIdx <= r.curFileIdx {
@@ -215,9 +219,25 @@ func (r *rotateReader) nextReader() error {
 	return nil
 }
 
+func getFileNamePrefix(format string) string {
+	switch format {
+	case cmd.FormatAuditLogPlugin:
+		return auditFileNamePrefix
+	}
+	return fileNamePrefix
+}
+
+func getParseFileNameFunc(format string) func(string, string) int64 {
+	switch format {
+	case cmd.FormatAuditLogPlugin:
+		return parseFileTime
+	}
+	return parseFileIdx
+}
+
 // Parse the file name to get the file index.
 // filename pattern: traffic-1.log.gz
-func parseFileIdx(name string) int {
+func parseFileIdx(name, fileNamePrefix string) int64 {
 	if !strings.HasPrefix(name, fileNamePrefix) {
 		return 0
 	}
@@ -237,5 +257,30 @@ func parseFileIdx(name string) int {
 	if err != nil {
 		return 0
 	}
-	return fileIdx
+	return int64(fileIdx)
+}
+
+// Parse the file name to get the file timestamp.
+// filename pattern: tidb-audit-2025-09-10T17-01-56.073.log
+func parseFileTime(name, fileNamePrefix string) int64 {
+	if !strings.HasPrefix(name, fileNamePrefix) {
+		return 0
+	}
+	startIdx := len(fileNamePrefix)
+	if len(name) <= startIdx+len(fileNameSuffix) {
+		return 0
+	}
+	endIdx := len(name)
+	if strings.HasSuffix(name, fileCompressFormat) {
+		endIdx -= len(fileCompressFormat)
+	}
+	if !strings.HasSuffix(name[:endIdx], fileNameSuffix) {
+		return 0
+	}
+	endIdx -= len(fileNameSuffix)
+	ts, err := time.Parse(logTimeLayout, name[startIdx:endIdx])
+	if err != nil {
+		return 0
+	}
+	return ts.UnixNano() / 1000000
 }

@@ -29,6 +29,7 @@ func NewWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg Writ
 
 type ReaderCfg struct {
 	Dir              string
+	Format           string
 	EncryptionMethod string
 	EncryptionKey    []byte
 }
