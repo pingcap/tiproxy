@@ -60,7 +60,7 @@ type Command struct {
 	// Logged only in audit log.
 	StmtType string
 	// Logged only in native log.
-	Succeess bool
+	Success bool
 }
 
 func NewCommand(packet []byte, startTs time.Time, connID uint64) *Command {
@@ -69,11 +69,11 @@ func NewCommand(packet []byte, startTs time.Time, connID uint64) *Command {
 	}
 	// TODO: handle load infile specially
 	return &Command{
-		Payload:  packet,
-		StartTs:  startTs,
-		ConnID:   connID,
-		Type:     pnet.Command(packet[0]),
-		Succeess: true,
+		Payload: packet,
+		StartTs: startTs,
+		ConnID:  connID,
+		Type:    pnet.Command(packet[0]),
+		Success: true,
 	}
 }
 
@@ -84,7 +84,7 @@ func (c *Command) Equal(that *Command) bool {
 	return c.StartTs.Equal(that.StartTs) &&
 		c.ConnID == that.ConnID &&
 		c.Type == that.Type &&
-		c.Succeess == that.Succeess &&
+		c.Success == that.Success &&
 		bytes.Equal(c.Payload, that.Payload)
 }
 
