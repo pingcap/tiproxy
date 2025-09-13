@@ -43,23 +43,10 @@ type Meter struct {
 }
 
 func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
-	if len(cfg.Metering.Bucket) == 0 {
+	if len(cfg.Metering.Type) == 0 || len(cfg.Metering.Bucket) == 0 {
 		return nil, nil
 	}
-	providerType := storage.ProviderTypeS3
-	if len(cfg.Metering.Type) > 0 {
-		providerType = storage.ProviderType(cfg.Metering.Type)
-	}
-
-	s3Config := &storage.ProviderConfig{
-		Type:   providerType,
-		Bucket: cfg.Metering.Bucket,
-		Region: cfg.Metering.Region,
-		Prefix: cfg.Metering.Prefix,
-		AWS: &storage.AWSConfig{
-			AssumeRoleARN: cfg.Metering.RoleARN,
-		},
-	}
+	s3Config := cfg.Metering.ToProviderConfig()
 	provider, err := storage.NewObjectStorageProvider(s3Config)
 	if err != nil {
 		lg.Error("Failed to create storage provider", zap.Error(err))
