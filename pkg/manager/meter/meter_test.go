@@ -20,31 +20,48 @@ import (
 
 func TestNewMeter(t *testing.T) {
 	tests := []struct {
-		cfg   config.Config
-		isNil bool
+		cfg    config.Config
+		hasErr bool
+		isNil  bool
 	}{
 		{
-			cfg:   config.Config{},
-			isNil: true,
+			cfg:    config.Config{},
+			hasErr: false,
+			isNil:  true,
 		},
 		{
 			cfg: config.Config{
-				Metering: config.Metering{
+				Metering: mconfig.MeteringConfig{
+					Type: storage.ProviderTypeS3,
+				},
+			},
+			hasErr: false,
+			isNil:  true,
+		},
+		{
+			cfg: config.Config{
+				Metering: mconfig.MeteringConfig{
+					Type:   storage.ProviderTypeS3,
 					Bucket: "bucket",
 				},
 			},
-			isNil: false,
+			hasErr: false,
+			isNil:  false,
 		},
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
-	for _, test := range tests {
+	for i, test := range tests {
 		m, err := NewMeter(&test.cfg, lg)
-		require.NoError(t, err)
-		if test.isNil {
-			require.Nil(t, m)
+		if test.hasErr {
+			require.Error(t, err, "case %d", i)
 		} else {
-			require.NotNil(t, m)
+			require.NoError(t, err, "case %d", i)
+		}
+		if test.isNil {
+			require.Nil(t, m, "case %d", i)
+		} else {
+			require.NotNil(t, m, "case %d", i)
 			m.Close()
 			require.NotEmpty(t, m.uuid)
 			require.NotContains(t, m.uuid, "-")
@@ -113,7 +130,8 @@ func TestLoop(t *testing.T) {
 func createLocalMeter(t *testing.T, dir string) (*Meter, *meteringreader.MeteringReader) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	m, err := NewMeter(&config.Config{
-		Metering: config.Metering{
+		Metering: mconfig.MeteringConfig{
+			Type:   storage.ProviderTypeS3,
 			Bucket: "bucket",
 		},
 	}, lg)

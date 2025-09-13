@@ -16,7 +16,7 @@ require (
 	github.com/klauspost/compress v1.18.0
 	github.com/pelletier/go-toml/v2 v2.2.2
 	github.com/pingcap/kvproto v0.0.0-20250728031536-f08901d17bf4
-	github.com/pingcap/metering_sdk v0.0.0-20250905111028-81c1237b087f
+	github.com/pingcap/metering_sdk v0.0.0-20250910063513-219eaccb6f53
 	github.com/pingcap/sysutil v1.0.1-0.20240311050922-ae81ee01f3a5
 	github.com/pingcap/tidb v1.1.0-beta.0.20250826122210-36a2af4b10b4
 	github.com/pingcap/tidb/pkg/parser v0.0.0-20250828103858-8d1a00e351ad
