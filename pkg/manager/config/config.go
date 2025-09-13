@@ -11,7 +11,6 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"go.uber.org/zap"
 )
 
 func (e *ConfigManager) reloadConfigFile(file string) error {
@@ -68,7 +67,6 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	if originalData == nil || !bytes.Equal(originalData, newData) {
 		e.sts.checksum = crc32.ChecksumIEEE(newData)
 		e.sts.data = newData
-		e.logger.Info("current config", zap.Any("cfg", e.sts.current))
 		for _, list := range e.sts.listeners {
 			list <- base.Clone()
 		}
