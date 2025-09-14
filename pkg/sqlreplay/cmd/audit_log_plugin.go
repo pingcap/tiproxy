@@ -4,7 +4,6 @@
 package cmd
 
 import (
-	"bytes"
 	"strconv"
 	"strings"
 	"time"
@@ -16,13 +15,16 @@ import (
 
 const (
 	auditPluginKeyTimeStamp = "TIMESTAMP"
-	auditPluginKeyDatabase  = "DATABASES"
 	auditPluginKeySQL       = "SQL_TEXT"
 	auditPluginKeyConnID    = "CONNECTION_ID"
 	auditPluginKeyClass     = "EVENT_CLASS"
 	auditPluginKeySubClass  = "EVENT_SUBCLASS"
 	auditPluginKeyCommand   = "COMMAND"
 	auditPluginKeyStmtType  = "SQL_STATEMENTS"
+	auditPluginKeyParams    = "EXECUTE_PARAMS"
+	auditPluginKeyCurDB     = "CURRENT_DB"
+	auditPluginKeyEvent     = "EVENT"
+	auditPluginKeyCostTime  = "COST_TIME"
 
 	auditPluginClassGeneral     = "GENERAL"
 	auditPluginClassTableAccess = "TABLE_ACCESS"
@@ -31,12 +33,13 @@ const (
 	auditPluginSubClassConnected  = "Connected"
 	auditPluginSubClassDisconnect = "Disconnect"
 
+	auditPluginEventEnd = "COMPLETED"
+
 	timeLayout = "2006/01/02 15:04:05.999 -07:00"
 )
 
 type auditLogPluginConnCtx struct {
-	beginCmd *Command
-	inited   bool
+	currentDB string
 }
 
 func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
@@ -49,9 +52,16 @@ var _ CmdDecoder = (*AuditLogPluginDecoder)(nil)
 
 type AuditLogPluginDecoder struct {
 	connInfo map[uint64]auditLogPluginConnCtx
+	// pendingCmds contains the commands that has not been returned yet.
+	pendingCmds []*Command
 }
 
 func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error) {
+	if len(decoder.pendingCmds) > 0 {
+		cmd := decoder.pendingCmds[0]
+		decoder.pendingCmds = decoder.pendingCmds[1:]
+		return cmd, nil
+	}
 	for {
 		line, filename, lineIdx, err := reader.ReadLine()
 		if err != nil {
@@ -69,35 +79,42 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		if err != nil {
 			return nil, errors.Errorf("%s, line %d: parsing connection id failed: %s", filename, lineIdx, connStr)
 		}
-		tsStr := kvs[auditPluginKeyTimeStamp]
-		if len(tsStr) == 0 {
-			return nil, errors.Errorf("%s, line %d: no timestamp in line: '%s", filename, lineIdx, line)
-		}
-		startTs, err := time.Parse(timeLayout, tsStr)
-		if err != nil {
-			return nil, errors.Errorf("%s, line %d: parsing timestamp failed: %s", filename, lineIdx, tsStr)
-		}
-		var c *Command
+
+		var cmds []*Command
 		eventClass := kvs[auditPluginKeyClass]
 		switch eventClass {
 		case auditPluginClassGeneral, auditPluginClassTableAccess:
-			c, err = decoder.parseGeneralEvent(kvs, connID)
+			cmds, err = decoder.parseGeneralEvent(kvs, connID)
 		case auditPluginClassConnect:
+			var c *Command
 			c, err = decoder.parseConnectEvent(kvs, connID)
+			if c != nil {
+				cmds = []*Command{c}
+			}
 		default:
 			return nil, errors.Errorf("%s, line %d: unknown event class: %s", filename, lineIdx, eventClass)
 		}
 		if err != nil {
-			return c, err
+			return nil, errors.Wrapf(err, "%s, line %d", filename, lineIdx)
 		}
 		// The log is ignored, skip.
-		if c == nil {
+		if len(cmds) == 0 {
 			continue
 		}
-		c.Succeess = true
-		c.ConnID = connID
-		c.StartTs = startTs
-		return c, nil
+
+		startTs, err := parseStartTs(kvs)
+		if err != nil {
+			return nil, errors.Wrapf(err, "%s, line %d", filename, lineIdx)
+		}
+		for _, cmd := range cmds {
+			cmd.Success = true
+			cmd.ConnID = connID
+			cmd.StartTs = startTs
+		}
+		if len(cmds) > 1 {
+			decoder.pendingCmds = cmds[1:]
+		}
+		return cmds[0], nil
 	}
 }
 
@@ -165,27 +182,6 @@ func skipQuotes(line string, singleQuote bool) (endIdx int) {
 	return -1
 }
 
-// [DATABASES="[test]"]
-func parseDB(value string) []string {
-	var err error
-	value, err = strconv.Unquote(value)
-	if err != nil {
-		return nil
-	}
-	if len(value) == 0 {
-		return nil
-	}
-	if value[0] != '[' || value[len(value)-1] != ']' {
-		// impossible
-		return nil
-	}
-	value = value[1 : len(value)-1]
-	if len(value) == 0 {
-		return nil
-	}
-	return strings.Split(value, ",")
-}
-
 // [COMMAND="Init DB"], [COMMAND=Query]
 func parseCommand(value string) string {
 	if len(value) == 0 {
@@ -202,59 +198,160 @@ func parseCommand(value string) string {
 	return value
 }
 
-func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, connID uint64) (*Command, error) {
+func parseStartTs(kvs map[string]string) (time.Time, error) {
+	endTs, err := time.Parse(timeLayout, kvs[auditPluginKeyTimeStamp])
+	if err != nil {
+		return time.Time{}, errors.Errorf("parsing timestamp failed: %s", kvs[auditPluginKeyTimeStamp])
+	}
+	costTime := kvs[auditPluginKeyCostTime]
+	if len(costTime) == 0 {
+		return endTs, nil
+	}
+	millis, err := strconv.ParseFloat(costTime, 32)
+	if err != nil {
+		return endTs, errors.Errorf("parsing cost time failed: %s", costTime)
+	}
+	return endTs.Add(-time.Duration(millis * 1000)), nil
+}
+
+// "[\"KindInt64 1\",\"KindInt64 1\"]"
+func parseExecuteParams(value string) ([]any, error) {
+	v, err := strconv.Unquote(value)
+	if err != nil {
+		return nil, errors.Errorf("no quotes in params: %s", value)
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	if v[0] != '[' || v[len(v)-1] != ']' {
+		return nil, errors.Errorf("no brackets in params: %s", value)
+	}
+	v = v[1 : len(v)-1]
+	if len(v) == 0 {
+		return nil, nil
+	}
+	params := make([]any, 0, 10)
+	for idx := 0; idx < len(v); idx++ {
+		switch v[idx] {
+		case '"', '\'':
+			endIdx := skipQuotes(v[idx+1:], v[idx] == '\'')
+			if endIdx == -1 {
+				return nil, errors.Errorf("unterminated quote in params: %s", v[idx+1:])
+			}
+			param, err := parseSingleParam(v[idx+1 : idx+endIdx+1])
+			idx += endIdx + 1
+			if err != nil {
+				return nil, err
+			}
+			params = append(params, param)
+		case ',', ' ':
+		default:
+			return nil, errors.Errorf("expected char in params: %s", v[idx:])
+		}
+	}
+	return params, nil
+}
+
+func parseSingleParam(value string) (any, error) {
+	idx := strings.IndexByte(value, ' ')
+	if idx < 0 {
+		return nil, errors.Errorf("no space in param: %s", value)
+	}
+	tpStr := value[:idx]
+	value = value[idx+1:]
+	switch tpStr {
+	case "KindNull":
+		return nil, nil
+	case "KindInt64":
+		return strconv.ParseInt(value, 10, 64)
+	case "KindUint64":
+		return strconv.ParseUint(value, 10, 64)
+	case "KindFloat32":
+		return strconv.ParseFloat(value, 32)
+	case "KindFloat64", "KindMysqlDecimal":
+		return strconv.ParseFloat(value, 64)
+	case "KindString", "KindBinaryLiteral", "KindMysqlBit", "KindMysqlSet", "KindMysqlTime", "KindMysqlJSON":
+		return value, nil
+	case "KindBytes":
+		return hack.Slice(value), nil
+	case "KindMysqlDuration", "KindMysqlEnum", "KindInterface", "KindMinNotNull", "KindMaxValue", "KindRaw":
+		return nil, errors.Errorf("unsupported param type: %s", tpStr)
+	}
+	return nil, errors.Errorf("unknown param type: %s", tpStr)
+}
+
+func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, connID uint64) ([]*Command, error) {
 	connInfo := decoder.connInfo[connID]
-	var cmd *Command
+	event, ok := kvs[auditPluginKeyEvent]
+	if !ok || event != auditPluginEventEnd {
+		// Old version doesn't have the EVENT key.
+		// The STARTING event is wrong, we only care about the COMPLETED event.
+		return nil, nil
+	}
+
 	cmdStr := parseCommand(kvs[auditPluginKeyCommand])
+	cmds := make([]*Command, 0, 4)
+	db := kvs[auditPluginKeyCurDB]
+	if len(db) > 0 && db != connInfo.currentDB {
+		cmds = append(cmds, &Command{
+			Type:    pnet.ComInitDB,
+			Payload: pnet.MakeInitDBRequest(db),
+		})
+		connInfo.currentDB = db
+		decoder.connInfo[connID] = connInfo
+	}
+
 	switch cmdStr {
 	case "Query", "Init DB":
 		sql, err := strconv.Unquote(kvs[auditPluginKeySQL])
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
-			// We also ignore "Quit" since disconnection is handled in parseConnectEvent.
 		}
-		cmd = &Command{
+		cmds = append(cmds, &Command{
 			Type:     pnet.ComQuery,
 			StmtType: kvs[auditPluginKeyStmtType],
 			Payload:  append([]byte{pnet.ComQuery.Byte()}, hack.Slice(sql)...),
+		})
+	case "Execute":
+		params, ok := kvs[auditPluginKeyParams]
+		if !ok {
+			// the old format doesn't output params
+			break
 		}
-		// Ignore StmtExecute since the params are not outputted.
+		sql, err := strconv.Unquote(kvs[auditPluginKeySQL])
+		if err != nil {
+			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
+		}
+		args, err := parseExecuteParams(params)
+		if err != nil {
+			return nil, err
+		}
+		executeReq, err := pnet.MakeExecuteStmtRequest(0, args, true)
+		if err != nil {
+			return nil, errors.Wrapf(err, "make execute request failed")
+		}
+		cmds = append(cmds, &Command{
+			Type:     pnet.ComStmtPrepare,
+			StmtType: kvs[auditPluginKeyStmtType],
+			Payload:  append([]byte{pnet.ComStmtPrepare.Byte()}, hack.Slice(sql)...),
+		}, &Command{
+			Type:     pnet.ComStmtExecute,
+			StmtType: kvs[auditPluginKeyStmtType],
+			Payload:  executeReq,
+		}, &Command{
+			Type:     pnet.ComStmtClose,
+			StmtType: kvs[auditPluginKeyStmtType],
+			Payload:  pnet.MakeCloseStmtRequest(0),
+		})
 		// Ignore Quit since disconnection is handled in parseConnectEvent.
 	}
-	// Audit logs record both the beginning and end of each statement, but we only need the first one.
-	if cmd == nil {
-		return nil, nil
-	}
-	if connInfo.beginCmd != nil && bytes.Equal(cmd.Payload, connInfo.beginCmd.Payload) {
-		cmd = nil
-	} else if !connInfo.inited && cmd.StmtType == "Use" {
-		connInfo.inited = true
-	} else if kvs[auditPluginKeyClass] == auditPluginClassTableAccess && !connInfo.inited {
-		cmd = nil
-	}
-	connInfo.beginCmd = cmd
-	decoder.connInfo[connID] = connInfo
-	return cmd, nil
+	return cmds, nil
 }
 
 func (decoder *AuditLogPluginDecoder) parseConnectEvent(kvs map[string]string, connID uint64) (*Command, error) {
 	switch kvs[auditPluginKeySubClass] {
-	case auditPluginSubClassConnected:
-		// The connection is treated as initialized no matter the current db is set or not.
-		connInfo := decoder.connInfo[connID]
-		connInfo.inited = true
-		decoder.connInfo[connID] = connInfo
-
-		db := kvs[auditPluginKeyDatabase]
-		dbs := parseDB(db)
-		if len(dbs) == 1 {
-			return &Command{
-				Type:    pnet.ComInitDB,
-				Payload: append([]byte{pnet.ComInitDB.Byte()}, hack.Slice(dbs[0])...),
-			}, nil
-		}
-		return nil, nil
 	case auditPluginSubClassDisconnect:
+		delete(decoder.connInfo, connID)
 		return &Command{
 			Type:    pnet.ComQuit,
 			Payload: []byte{pnet.ComQuit.Byte()},
