@@ -39,6 +39,8 @@ const (
 type Capture interface {
 	// Start starts the capture
 	Start(cfg CaptureConfig) error
+	// Wait for the job done.
+	Wait()
 	// Stop stops the capture.
 	// err means the error that caused the capture to stop. nil means the capture stopped manually.
 	Stop(err error)
@@ -417,6 +419,10 @@ func (c *capture) stop(err error) {
 	c.Lock()
 	c.stopNoLock(err)
 	c.Unlock()
+}
+
+func (c *capture) Wait() {
+	c.wg.Wait()
 }
 
 func (c *capture) Stop(err error) {

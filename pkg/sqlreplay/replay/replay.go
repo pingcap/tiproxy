@@ -41,6 +41,8 @@ const (
 type Replay interface {
 	// Start starts the replay
 	Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error
+	// Wait for the job done.
+	Wait()
 	// Stop stops the replay
 	Stop(err error)
 	// Progress returns the progress of the replay job
@@ -144,7 +146,9 @@ func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
 	storage, err := cfg.Validate()
 	if err != nil {
-		storage.Close()
+		if storage != nil {
+			storage.Close()
+		}
 		return err
 	}
 
@@ -392,6 +396,10 @@ func (r *replay) stop(err error) {
 		r.storage.Close()
 		r.storage = nil
 	}
+}
+
+func (r *replay) Wait() {
+	r.wg.Wait()
 }
 
 func (r *replay) Stop(err error) {

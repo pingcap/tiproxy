@@ -201,6 +201,9 @@ func (m *mockReplayJobManager) StartReplay(replayCfg replay.ReplayConfig) error 
 	return nil
 }
 
+func (m *mockReplayJobManager) Wait() {
+}
+
 func (m *mockReplayJobManager) Stop(manager.CancelConfig) string {
 	m.curJob = ""
 	return "stopped"
