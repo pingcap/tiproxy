@@ -261,7 +261,7 @@ func (r *replay) readCommands(ctx context.Context) {
 				break
 			}
 
-			// Do not use calculate the wait time by the duration since last command because the go scheduler
+			// Do not calculate the wait time by the duration since last command because the go scheduler
 			// may wait a little bit longer than expected, and then the difference becomes larger and larger.
 			expectedInterval := command.StartTs.Sub(captureStartTs)
 			if r.cfg.Speed != 1 {
@@ -420,4 +420,7 @@ func (r *replay) Stop(err error) {
 
 func (r *replay) Close() {
 	r.Stop(errors.New("shutting down"))
+	if r.report != nil {
+		r.report.Close()
+	}
 }
