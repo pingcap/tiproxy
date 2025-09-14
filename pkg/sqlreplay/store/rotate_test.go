@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
@@ -140,7 +141,7 @@ func TestParseFileTime(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		idx := parseFileTime(test.fileName, auditFileNamePrefix)
+		idx := parseFileTimeToIdx(test.fileName, auditFileNamePrefix)
 		require.Equal(t, test.fileIdx, idx, "case %d", i)
 	}
 }
@@ -366,4 +367,92 @@ func TestCompressAndEncrypt(t *testing.T) {
 	require.Equal(t, 8, n)
 	require.Equal(t, []byte("testtest"), data[:8])
 	require.NoError(t, reader.Close())
+}
+
+func TestFilterFileNameByStartTime(t *testing.T) {
+	commandStartTime, err := time.Parse(logTimeLayout, "2025-09-10T17-01-56.050")
+	require.NoError(t, err)
+	tests := []struct {
+		fileName        string
+		expectToInclude bool
+	}{
+		// Files after start time should be included
+		{
+			fileName:        "tidb-audit-2025-09-10T17-01-56.073.log",
+			expectToInclude: true,
+		},
+		{
+			fileName:        "tidb-audit-2025-09-10T17-01-56.172.log.gz",
+			expectToInclude: true,
+		},
+		{
+			fileName:        "tidb-audit-2025-09-11T10-30-00.500.log",
+			expectToInclude: true,
+		},
+		// Files before or equal to start time should be excluded
+		{
+			fileName:        "tidb-audit-2025-09-10T17-01-55.073.log",
+			expectToInclude: false,
+		},
+		{
+			fileName:        "tidb-audit-2025-09-10T17-01-56.000.log",
+			expectToInclude: false,
+		},
+		// Invalid file names should be excluded
+		{
+			fileName:        "tidb-audit-invalid-timestamp.log",
+			expectToInclude: false,
+		},
+		{
+			fileName:        "traffic-1.log",
+			expectToInclude: false,
+		},
+		{
+			fileName:        "tidb-audit.log",
+			expectToInclude: false,
+		},
+		{
+			fileName:        "tidb-audit-2025-13-40T25-70-70.log",
+			expectToInclude: false,
+		},
+	}
+	expectedFileOrder := []string{
+		"tidb-audit-2025-09-10T17-01-56.073.log",
+		"tidb-audit-2025-09-10T17-01-56.172.log.gz",
+		"tidb-audit-2025-09-11T10-30-00.500.log",
+	}
+	for i, test := range tests {
+		included := filterFileByTime(test.fileName, auditFileNamePrefix, commandStartTime)
+		require.Equal(t, test.expectToInclude, included, "case %d", i)
+	}
+
+	dir := t.TempDir()
+	require.NoError(t, os.RemoveAll(dir))
+	require.NoError(t, os.MkdirAll(dir, 0777))
+	for _, test := range tests {
+		f, err := os.Create(filepath.Join(dir, test.fileName))
+		require.NoError(t, err)
+		if strings.HasSuffix(test.fileName, ".gz") {
+			w := gzip.NewWriter(f)
+			_, err := w.Write([]byte{})
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+		}
+		require.NoError(t, f.Close())
+	}
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	lg, _ := logger.CreateLoggerForTest(t)
+	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, CommandStartTime: commandStartTime})
+	require.NoError(t, err)
+	var fileOrder []string
+	for {
+		if err := l.nextReader(); err != nil {
+			require.True(t, errors.Is(err, io.EOF))
+			break
+		}
+		fileOrder = append(fileOrder, l.curFileName)
+	}
+	require.Equal(t, expectedFileOrder, fileOrder)
 }

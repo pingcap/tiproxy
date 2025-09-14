@@ -169,10 +169,14 @@ func (r *rotateReader) nextReader() error {
 	var minFileName string
 	fileNamePrefix := getFileNamePrefix(r.cfg.Format)
 	parseFunc := getParseFileNameFunc(r.cfg.Format)
+	fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	err := r.storage.WalkDir(ctx, &storage.WalkOption{},
 		func(name string, size int64) error {
 			if !strings.HasPrefix(name, fileNamePrefix) {
+				return nil
+			}
+			if !fileFilter(name, fileNamePrefix) {
 				return nil
 			}
 			fileIdx := parseFunc(name, fileNamePrefix)
@@ -230,9 +234,19 @@ func getFileNamePrefix(format string) string {
 func getParseFileNameFunc(format string) func(string, string) int64 {
 	switch format {
 	case cmd.FormatAuditLogPlugin:
-		return parseFileTime
+		return parseFileTimeToIdx
 	}
 	return parseFileIdx
+}
+
+func getFilterFileNameFunc(format string, commandStartTime time.Time) func(string, string) bool {
+	switch format {
+	case cmd.FormatAuditLogPlugin:
+		return func(name, fileNamePrefix string) bool {
+			return filterFileByTime(name, fileNamePrefix, commandStartTime)
+		}
+	}
+	return func(string, string) bool { return true }
 }
 
 // Parse the file name to get the file index.
@@ -262,25 +276,44 @@ func parseFileIdx(name, fileNamePrefix string) int64 {
 
 // Parse the file name to get the file timestamp.
 // filename pattern: tidb-audit-2025-09-10T17-01-56.073.log
-func parseFileTime(name, fileNamePrefix string) int64 {
+func parseFileTime(name, fileNamePrefix string) time.Time {
 	if !strings.HasPrefix(name, fileNamePrefix) {
-		return 0
+		return time.Time{}
 	}
 	startIdx := len(fileNamePrefix)
 	if len(name) <= startIdx+len(fileNameSuffix) {
-		return 0
+		return time.Time{}
 	}
 	endIdx := len(name)
 	if strings.HasSuffix(name, fileCompressFormat) {
 		endIdx -= len(fileCompressFormat)
 	}
 	if !strings.HasSuffix(name[:endIdx], fileNameSuffix) {
-		return 0
+		return time.Time{}
 	}
 	endIdx -= len(fileNameSuffix)
 	ts, err := time.Parse(logTimeLayout, name[startIdx:endIdx])
 	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
+func parseFileTimeToIdx(name, fileNamePrefix string) int64 {
+	ts := parseFileTime(name, fileNamePrefix)
+	if ts.IsZero() {
 		return 0
 	}
 	return ts.UnixNano() / 1000000
+}
+
+func filterFileByTime(name, fileNamePrefix string, commandStartTime time.Time) bool {
+	fileTime := parseFileTime(name, fileNamePrefix)
+	if fileTime.IsZero() {
+		return false
+	}
+	// Be careful that the log file name doesn't contain timezone info.
+	// We assume the log file time is the Local time. But anyway we could workaround it by
+	// adjusting the commandStartTime.
+	return fileTime.After(commandStartTime)
 }

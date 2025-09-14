@@ -214,6 +214,7 @@ func (r *replay) readCommands(ctx context.Context) {
 			Dir:              r.cfg.Input,
 			EncryptionKey:    r.cfg.encryptionKey,
 			EncryptionMethod: r.meta.EncryptMethod,
+			CommandStartTime: r.cfg.CommandStartTime,
 		})
 		if err != nil {
 			r.stop(err)
