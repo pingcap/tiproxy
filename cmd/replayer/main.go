@@ -59,6 +59,7 @@ func main() {
 		if err := r.start(replayCfg); err != nil {
 			return err
 		}
+		r.close()
 		return nil
 	}
 
@@ -68,7 +69,6 @@ func main() {
 type replayer struct {
 	lgMgr  *logger.LoggerManager
 	replay mgrrp.JobManager
-	idMgr  *id.IDManager
 }
 
 func (r *replayer) initComponents(addr, logFile string) error {
@@ -95,6 +95,11 @@ func (r *replayer) start(replayCfg replay.ReplayConfig) error {
 	}
 	r.replay.Wait()
 	return nil
+}
+
+func (r *replayer) close() {
+	r.replay.Close()
+	_ = r.lgMgr.Close()
 }
 
 var _ mgrrp.CertManager = &nopCertManager{}
