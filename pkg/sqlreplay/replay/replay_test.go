@@ -30,7 +30,7 @@ func TestManageConns(t *testing.T) {
 		Input:     t.TempDir(),
 		Username:  "u1",
 		StartTime: time.Now(),
-		reader:    loader,
+		readers:   []cmd.LineReader{loader},
 		connCreator: func(connID uint64) conn.Conn {
 			connCount++
 			return &mockConn{
@@ -109,7 +109,9 @@ func TestValidateCfg(t *testing.T) {
 		storage, err := cfg.Validate()
 		require.Error(t, err, "case %d", i)
 		if storage != nil && !reflect.ValueOf(storage).IsNil() {
-			storage.Close()
+			for _, s := range storage {
+				s.Close()
+			}
 		}
 	}
 }
@@ -127,7 +129,7 @@ func TestReplaySpeed(t *testing.T) {
 			Username:  "u1",
 			Speed:     speed,
 			StartTime: time.Now(),
-			reader:    loader,
+			readers:   []cmd.LineReader{loader},
 			report:    newMockReport(replay.exceptionCh),
 			connCreator: func(connID uint64) conn.Conn {
 				return &mockConn{
@@ -191,7 +193,7 @@ func TestProgress(t *testing.T) {
 		Input:     dir,
 		Username:  "u1",
 		StartTime: time.Now(),
-		reader:    loader,
+		readers:   []cmd.LineReader{loader},
 		report:    newMockReport(replay.exceptionCh),
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockConn{
@@ -240,7 +242,7 @@ func TestPendingCmds(t *testing.T) {
 		Input:     dir,
 		Username:  "u1",
 		StartTime: time.Now(),
-		reader:    loader,
+		readers:   []cmd.LineReader{loader},
 		report:    newMockReport(replay.exceptionCh),
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockPendingConn{
@@ -310,7 +312,7 @@ func TestLoadEncryptionKey(t *testing.T) {
 		Input:     dir,
 		Username:  "u1",
 		StartTime: now,
-		reader:    loader,
+		readers:   []cmd.LineReader{loader},
 	}
 	for i, test := range tests {
 		cfg.KeyFile = test.keyFile

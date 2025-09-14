@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"io"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -67,7 +68,7 @@ type ReplayConfig struct {
 	// which means the start time of the whole replay job.
 	CommandStartTime time.Time
 	// the following fields are for testing
-	reader            cmd.LineReader
+	readers           []cmd.LineReader
 	report            report.Report
 	connCreator       conn.ConnCreator
 	abortThreshold    int64
@@ -75,35 +76,48 @@ type ReplayConfig struct {
 	slowDownFactor    time.Duration
 }
 
-func (cfg *ReplayConfig) Validate() (storage.ExternalStorage, error) {
+func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	if cfg.Input == "" {
 		return nil, errors.New("input is required")
 	}
-	storage, err := store.NewStorage(cfg.Input)
-	if err != nil {
-		return storage, err
+	inputs := strings.Split(cfg.Input, ",")
+	if len(inputs) > 1 && cfg.Format != cmd.FormatAuditLogPlugin {
+		return nil, errors.New("only `audit_log_plugin` format supports multiple input files")
+	}
+	var storages []storage.ExternalStorage
+	var err error
+	for _, input := range inputs {
+		var storage storage.ExternalStorage
+		storage, err = store.NewStorage(input)
+		if err != nil {
+			for _, s := range storages {
+				s.Close()
+			}
+			return nil, errors.Wrapf(err, "invalid input %s", input)
+		}
+		storages = append(storages, storage)
 	}
 	if cfg.Username == "" {
-		return storage, errors.New("username is required")
+		return storages, errors.New("username is required")
 	}
 	if cfg.Speed == 0 {
 		cfg.Speed = 1
 	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
-		return storage, errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
+		return storages, errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
 	}
 	switch cfg.Format {
 	case cmd.FormatAuditLogPlugin, cmd.FormatNative, "":
 	default:
-		return storage, errors.Errorf("invalid traffic file format %s", cfg.Format)
+		return storages, errors.Errorf("invalid traffic file format %s", cfg.Format)
 	}
 	// Maybe there's a time bias between TiDB and TiProxy, so add one minute.
 	now := time.Now()
 	if cfg.StartTime.IsZero() {
-		return storage, errors.New("start time is not specified")
+		return storages, errors.New("start time is not specified")
 	} else if now.Add(time.Minute).Before(cfg.StartTime) {
-		return storage, errors.New("start time should not be in the future")
+		return storages, errors.New("start time should not be in the future")
 	} else if cfg.StartTime.Add(time.Minute).Before(now) {
-		return storage, errors.New("start time should not be in the past")
+		return storages, errors.New("start time should not be in the past")
 	}
 	if cfg.abortThreshold == 0 {
 		cfg.abortThreshold = abortThreshold
@@ -114,14 +128,14 @@ func (cfg *ReplayConfig) Validate() (storage.ExternalStorage, error) {
 	if cfg.slowDownFactor == 0 {
 		cfg.slowDownFactor = slowDownFactor
 	}
-	return storage, nil
+	return storages, nil
 }
 
 type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig
 	meta             store.Meta
-	storage          storage.ExternalStorage
+	storages         []storage.ExternalStorage
 	replayStats      conn.ReplayStats
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
@@ -147,10 +161,10 @@ func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 }
 
 func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
-	storage, err := cfg.Validate()
+	storages, err := cfg.Validate()
 	if err != nil {
-		if storage != nil {
-			storage.Close()
+		for _, s := range storages {
+			s.Close()
 		}
 		return err
 	}
@@ -158,7 +172,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.Lock()
 	defer r.Unlock()
 	r.cfg = cfg
-	r.storage = storage
+	r.storages = storages
 	r.meta = *r.readMeta()
 	r.startTime = cfg.StartTime
 	r.endTime = time.Time{}
@@ -205,36 +219,28 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 }
 
 func (r *replay) readCommands(ctx context.Context) {
-	// cfg.reader is set in tests
-	reader := r.cfg.reader
-	if reader == nil {
-		var err error
-		reader, err = store.NewReader(r.lg.Named("loader"), r.storage, store.ReaderCfg{
-			Format:           r.cfg.Format,
-			Dir:              r.cfg.Input,
-			EncryptionKey:    r.cfg.encryptionKey,
-			EncryptionMethod: r.meta.EncryptMethod,
-			CommandStartTime: r.cfg.CommandStartTime,
-		})
-		if err != nil {
-			r.stop(err)
-			return
-		}
+	// cfg.readers is set in tests
+	readers, err := r.constructReaders()
+	if err != nil {
+		r.stop(err)
+		return
 	}
-	defer reader.Close()
+	defer func() {
+		for _, r := range readers {
+			r.Close()
+		}
+	}()
+	decoder, err := r.constructDecoders(readers)
+	if err != nil {
+		r.stop(err)
+		return
+	}
 
 	var captureStartTs, replayStartTs time.Time
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
 	connCount := 0                      // alive connection count
-	var err error
 	maxPendingCmds := int64(0)
 	totalWaitTime := time.Duration(0)
-	decoder := cmd.NewCmdDecoder(r.cfg.Format)
-	// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
-	// the connection state is maintained in decoder. Filtering out commands here will make it'
-	// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
-	// the current session state correctly.
-	decoder.SetCommandStartTime(r.cfg.CommandStartTime)
 	for ctx.Err() == nil {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
@@ -246,9 +252,9 @@ func (r *replay) readCommands(ctx context.Context) {
 		}
 
 		var command *cmd.Command
-		if command, err = decoder.Decode(reader); err != nil {
+		if command, err = decoder.Decode(); err != nil {
 			if errors.Is(err, io.EOF) {
-				r.lg.Info("replay reads EOF", zap.String("reader", reader.String()))
+				r.lg.Info("replay reads EOF", zap.Stringers("reader", readers))
 				err = nil
 			}
 			break
@@ -314,6 +320,55 @@ func (r *replay) readCommands(ctx context.Context) {
 	r.stop(err)
 }
 
+func (r *replay) constructDecoders(readers []cmd.LineReader) (decoder, error) {
+	var decoders []decoder
+	for _, reader := range readers {
+		cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
+		// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
+		// the connection state is maintained in decoder. Filtering out commands here will make it'
+		// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
+		// the current session state correctly.
+		cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
+		decoders = append(decoders, newSingleDecoder(cmdDecoder, reader))
+	}
+	if len(decoders) == 0 {
+		return nil, errors.New("no decoder")
+	}
+	if len(decoders) == 1 {
+		return decoders[0], nil
+	}
+
+	return newMergeDecoder(decoders...), nil
+}
+
+func (r *replay) constructReaders() ([]cmd.LineReader, error) {
+	readers := r.cfg.readers
+	inputs := strings.Split(r.cfg.Input, ",")
+	if readers == nil {
+		if len(inputs) != len(r.storages) {
+			return nil, errors.Errorf("input count %d doesn't match storage count %d", len(inputs), len(r.storages))
+		}
+
+		for i, storage := range r.storages {
+			reader, err := store.NewReader(r.lg.Named("loader"), storage, store.ReaderCfg{
+				Format:           r.cfg.Format,
+				Dir:              inputs[i],
+				EncryptionKey:    r.cfg.encryptionKey,
+				EncryptionMethod: r.meta.EncryptMethod,
+				CommandStartTime: r.cfg.CommandStartTime,
+			})
+			if err != nil {
+				for _, r := range readers {
+					r.Close()
+				}
+				return nil, err
+			}
+			readers = append(readers, reader)
+		}
+	}
+	return readers, nil
+}
+
 func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map[uint64]conn.Conn, connCount *int) {
 	conn, ok := conns[command.ConnID]
 	if !ok {
@@ -352,7 +407,8 @@ func (r *replay) Progress() (float64, time.Time, bool, error) {
 func (r *replay) readMeta() *store.Meta {
 	m := new(store.Meta)
 	if r.cfg.Format == cmd.FormatNative || r.cfg.Format == "" {
-		if err := m.Read(r.storage); err != nil {
+		// The `native` format always has only one storage.
+		if err := m.Read(r.storages[0]); err != nil {
 			r.lg.Error("read meta failed", zap.Error(err))
 		}
 	}
@@ -401,9 +457,11 @@ func (r *replay) stop(err error) {
 	r.startTime = time.Time{}
 	metrics.ReplayPendingCmdsGauge.Set(0)
 	metrics.ReplayWaitTime.Set(0)
-	if r.storage != nil && !reflect.ValueOf(r.storage).IsNil() {
-		r.storage.Close()
-		r.storage = nil
+	if r.storages != nil && !reflect.ValueOf(r.storages).IsNil() {
+		for _, s := range r.storages {
+			s.Close()
+		}
+		r.storages = nil
 	}
 }
 
