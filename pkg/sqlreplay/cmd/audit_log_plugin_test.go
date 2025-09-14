@@ -858,3 +858,74 @@ func TestDecodeMultiLines(t *testing.T) {
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
 }
+
+func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
+	tests := []struct {
+		lines string
+		cmds  []*Command
+	}{
+		{
+			// db is changed in the second sql
+			lines: `[2025/09/14 16:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/14 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="set sql_mode=''"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+[2025/09/14 16:16:30.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=STARTING]
+[2025/09/14 16:16:31.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
+				},
+				{
+					StartTs:  time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					ConnID:   3695181836,
+					Type:     pnet.ComQuery,
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
+					StmtType: "Select",
+					Success:  true,
+				},
+			},
+		},
+		{
+			// The latest DB is used
+			lines: `[2025/09/14 16:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/14 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="set sql_mode=''"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=a] [EVENT=COMPLETED]
+[2025/09/14 16:16:30.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=b] [EVENT=STARTING]
+[2025/09/14 16:16:31.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=b] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3695181836,
+					StartTs: time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("b")...),
+					Success: true,
+				},
+				{
+					StartTs:  time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					ConnID:   3695181836,
+					Type:     pnet.ComQuery,
+					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
+					StmtType: "Select",
+					Success:  true,
+				},
+			},
+		},
+	}
+
+	commandStartTime := time.Date(2025, 9, 14, 16, 16, 53, 0, time.FixedZone("", 8*3600+600))
+	for i, test := range tests {
+		decoder := NewAuditLogPluginDecoder()
+		decoder.SetCommandStartTime(commandStartTime)
+		mr := mockReader{data: append([]byte(test.lines), '\n')}
+		cmds := make([]*Command, 0, len(test.cmds))
+		for {
+			cmd, err := decoder.Decode(&mr)
+			if err != nil {
+				require.ErrorContains(t, err, "EOF", "case %d", i)
+				break
+			}
+			cmds = append(cmds, cmd)
+		}
+		require.Equal(t, test.cmds, cmds, "case %d", i)
+	}
+}

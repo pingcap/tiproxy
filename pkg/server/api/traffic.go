@@ -102,6 +102,18 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	cfg.Format = c.PostForm("format")
 	cfg.ReadOnly = strings.EqualFold(c.PostForm("readonly"), "true")
 	cfg.KeyFile = globalCfg.Security.EncryptionKeyPath
+	// By default, if `cmdstarttime` is not specified, use zero time
+	if cmdStartTimeStr := c.PostForm("cmdstarttime"); cmdStartTimeStr != "" {
+		cmdStartTime, err := time.Parse(time.RFC3339, cmdStartTimeStr)
+		if err != nil {
+			cmdStartTime, err = time.Parse(time.RFC3339Nano, cmdStartTimeStr)
+			if err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		cfg.CommandStartTime = cmdStartTime
+	}
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

@@ -63,6 +63,9 @@ type ReplayConfig struct {
 	Speed         float64
 	ReadOnly      bool
 	encryptionKey []byte
+	// CommandStartTime is the start time of the command being replayed. It's different from StartTime,
+	// which means the start time of the whole replay job.
+	CommandStartTime time.Time
 	// the following fields are for testing
 	reader            cmd.LineReader
 	report            report.Report
@@ -226,6 +229,11 @@ func (r *replay) readCommands(ctx context.Context) {
 	maxPendingCmds := int64(0)
 	totalWaitTime := time.Duration(0)
 	decoder := cmd.NewCmdDecoder(r.cfg.Format)
+	// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
+	// the connection state is maintained in decoder. Filtering out commands here will make it'
+	// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
+	// the current session state correctly.
+	decoder.SetCommandStartTime(r.cfg.CommandStartTime)
 	for ctx.Err() == nil {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
