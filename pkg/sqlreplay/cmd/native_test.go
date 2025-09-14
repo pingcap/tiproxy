@@ -126,3 +126,43 @@ select 1
 		require.Error(t, err, test)
 	}
 }
+
+func TestDecodeNativeWithCommandStartTime(t *testing.T) {
+	tests := []struct {
+		lines string
+		cmds  []*Command
+	}{
+		{
+			lines: `# Time: 2024-08-28T18:51:20.477067+08:10
+# Conn_ID: 100
+# Payload_len: 8
+select 1
+# Time: 2024-08-28T18:51:21.477067+08:10
+# Conn_ID: 100
+# Payload_len: 8
+select 2
+`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComQuery,
+					ConnID:  100,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 2")...),
+					StartTs: time.Date(2024, 8, 28, 18, 51, 21, 477067000, time.FixedZone("", 8*3600+600)),
+					Success: true,
+				},
+			},
+		},
+	}
+
+	commandStartTime := time.Date(2024, 8, 28, 18, 51, 21, 0, time.FixedZone("", 8*3600+600))
+	for i, test := range tests {
+		decoder := NewCmdDecoder(FormatNative)
+		decoder.SetCommandStartTime(commandStartTime)
+		mr := mockReader{data: []byte(test.lines)}
+		for j, cmd := range test.cmds {
+			newCmd, err := decoder.Decode(&mr)
+			require.NoError(t, err, "case %d-%d", i, j)
+			require.True(t, cmd.Equal(newCmd), "case %d-%d", i, j)
+		}
+	}
+}

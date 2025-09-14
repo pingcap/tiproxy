@@ -64,6 +64,7 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 	password := replayCmd.PersistentFlags().String("password", "", "the password to connect to TiDB for replay")
 	readonly := replayCmd.PersistentFlags().Bool("read-only", false, "only replay read-only queries, default is false")
 	format := replayCmd.PersistentFlags().String("format", "", "the format of traffic files")
+	cmdStartTime := replayCmd.PersistentFlags().String("command-start-time", "", "the start time to replay the traffic, format is RFC3339 or RFC3339Nano. The command before this start time will be ignored.")
 	replayCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		username := *username
 		if len(username) == 0 {
@@ -79,12 +80,13 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 			password = string(bytePassword)
 		}
 		reader := GetFormReader(map[string]string{
-			"input":    *input,
-			"speed":    strconv.FormatFloat(*speed, 'f', -1, 64),
-			"username": username,
-			"password": password,
-			"readonly": strconv.FormatBool(*readonly),
-			"format":   *format,
+			"input":        *input,
+			"speed":        strconv.FormatFloat(*speed, 'f', -1, 64),
+			"username":     username,
+			"password":     password,
+			"readonly":     strconv.FormatBool(*readonly),
+			"format":       *format,
+			"cmdstarttime": *cmdStartTime,
 		})
 		resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, "/api/traffic/replay", reader)
 		if err != nil {
