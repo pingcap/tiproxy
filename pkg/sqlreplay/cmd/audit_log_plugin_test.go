@@ -366,6 +366,39 @@ func TestParseStartTs(t *testing.T) {
 	}
 }
 
+func TestParseSQL(t *testing.T) {
+	tests := []struct {
+		value  string
+		sql    string
+		errMsg string
+	}{
+		{
+			value: `COMMIT`,
+			sql:   `COMMIT`,
+		},
+		{
+			value: `"SELECT 1"`,
+			sql:   `SELECT 1`,
+		},
+		{
+			value:  ``,
+			errMsg: "empty",
+		},
+	}
+
+	for i, test := range tests {
+		sql, err := parseSQL(test.value)
+		if test.errMsg != "" {
+			require.Error(t, err, "case %d", i)
+			require.Contains(t, err.Error(), test.errMsg, "case %d", i)
+			continue
+		} else {
+			require.NoError(t, err, "case %d", i)
+		}
+		require.EqualValues(t, test.sql, sql, "case %d", i)
+	}
+}
+
 func TestParseParams(t *testing.T) {
 	tests := []struct {
 		s      string
