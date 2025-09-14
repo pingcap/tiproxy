@@ -77,12 +77,15 @@ func NewNativeDecoder() *NativeDecoder {
 var _ CmdDecoder = (*NativeDecoder)(nil)
 
 type NativeDecoder struct {
+	commandStartTime time.Time
 }
 
 func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 	c = &Command{}
 	c.Success = true
 	c.Type = pnet.ComQuery
+
+	var skipThisCommand bool
 	for {
 		line, filename, lineIdx, err := reader.ReadLine()
 		if err != nil {
@@ -109,6 +112,10 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 			c.StartTs, err = time.Parse(time.RFC3339Nano, value)
 			if err != nil {
 				return nil, errors.Errorf("%s, line %d: parsing Time failed: %s", filename, lineIdx, line)
+			}
+
+			if c.StartTs.Before(rw.commandStartTime) {
+				skipThisCommand = true
 			}
 		case nativeKeyConnID:
 			if c.ConnID > 0 {
@@ -148,12 +155,25 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 			if data[0] != '\n' {
 				return nil, errors.Errorf("%s, line %d: expected new line, but got: %s", filename, lineIdx, line)
 			}
+
+			if skipThisCommand {
+				c = &Command{}
+				c.Success = true
+				c.Type = pnet.ComQuery
+				skipThisCommand = false
+				// skip the payload
+				continue
+			}
 			if err = c.Validate(filename, lineIdx); err != nil {
 				return nil, err
 			}
 			return c, nil
 		}
 	}
+}
+
+func (rw *NativeDecoder) SetCommandStartTime(t time.Time) {
+	rw.commandStartTime = t
 }
 
 func writeString(key, value string, writer *bytes.Buffer) error {

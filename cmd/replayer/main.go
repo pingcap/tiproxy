@@ -40,16 +40,18 @@ func main() {
 	readonly := rootCmd.PersistentFlags().Bool("read-only", false, "only replay read-only queries, default is false")
 	format := rootCmd.PersistentFlags().String("format", "", "the format of traffic files")
 	logFile := rootCmd.PersistentFlags().String("log-file", "", "the output log file")
+	cmdStartTime := rootCmd.PersistentFlags().Time("command-start-time", time.Now(), []string{time.RFC3339, time.RFC3339Nano}, "the start time to replay the traffic, format is RFC3339. The command before this start time will be ignored.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		replayCfg := replay.ReplayConfig{
-			Input:     *input,
-			Speed:     *speed,
-			Username:  *username,
-			Password:  *password,
-			Format:    *format,
-			ReadOnly:  *readonly,
-			StartTime: time.Now(),
+			Input:            *input,
+			Speed:            *speed,
+			Username:         *username,
+			Password:         *password,
+			Format:           *format,
+			ReadOnly:         *readonly,
+			StartTime:        time.Now(),
+			CommandStartTime: *cmdStartTime,
 		}
 
 		r := &replayer{}

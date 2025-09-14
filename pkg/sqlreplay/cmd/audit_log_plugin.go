@@ -52,7 +52,8 @@ func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
 var _ CmdDecoder = (*AuditLogPluginDecoder)(nil)
 
 type AuditLogPluginDecoder struct {
-	connInfo map[uint64]auditLogPluginConnCtx
+	connInfo         map[uint64]auditLogPluginConnCtx
+	commandStartTime time.Time
 	// pendingCmds contains the commands that has not been returned yet.
 	pendingCmds []*Command
 }
@@ -81,6 +82,15 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			return nil, errors.Errorf("%s, line %d: parsing connection id failed: %s", filename, lineIdx, connStr)
 		}
 
+		startTs, err := parseStartTs(kvs)
+		if err != nil {
+			return nil, errors.Wrapf(err, "%s, line %d", filename, lineIdx)
+		}
+		if startTs.Before(decoder.commandStartTime) {
+			// Ignore the commands before CommandStartTime.
+			continue
+		}
+
 		var cmds []*Command
 		eventClass := kvs[auditPluginKeyClass]
 		switch eventClass {
@@ -103,10 +113,6 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			continue
 		}
 
-		startTs, err := parseStartTs(kvs)
-		if err != nil {
-			return nil, errors.Wrapf(err, "%s, line %d", filename, lineIdx)
-		}
 		for _, cmd := range cmds {
 			cmd.Success = true
 			cmd.ConnID = connID
@@ -117,6 +123,10 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		}
 		return cmds[0], nil
 	}
+}
+
+func (decoder *AuditLogPluginDecoder) SetCommandStartTime(t time.Time) {
+	decoder.commandStartTime = t
 }
 
 // All SQL_TEXT are converted into one line in audit log.

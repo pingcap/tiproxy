@@ -46,6 +46,8 @@ func NewCmdDecoder(format string) CmdDecoder {
 
 type CmdDecoder interface {
 	Decode(reader LineReader) (c *Command, err error)
+
+	SetCommandStartTime(t time.Time)
 }
 
 type Command struct {
