@@ -215,6 +215,16 @@ func parseStartTs(kvs map[string]string) (time.Time, error) {
 	return endTs.Add(-time.Duration(millis * 1000)), nil
 }
 
+func parseSQL(value string) (string, error) {
+	if len(value) == 0 {
+		return "", errors.New("empty sql")
+	}
+	if value[0] == '"' {
+		return strconv.Unquote(value)
+	}
+	return value, nil
+}
+
 // "[\"KindInt64 1\",\"KindInt64 1\"]"
 func parseExecuteParams(value string) ([]any, error) {
 	v, err := strconv.Unquote(value)
@@ -304,7 +314,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 
 	switch cmdStr {
 	case "Query", "Init DB":
-		sql, err := strconv.Unquote(kvs[auditPluginKeySQL])
+		sql, err := parseSQL(kvs[auditPluginKeySQL])
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
@@ -319,7 +329,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 			// the old format doesn't output params
 			break
 		}
-		sql, err := strconv.Unquote(kvs[auditPluginKeySQL])
+		sql, err := parseSQL(kvs[auditPluginKeySQL])
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
