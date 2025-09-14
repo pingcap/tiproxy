@@ -4,9 +4,12 @@
 package conn
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -47,9 +50,13 @@ type ConnCreator func(connID uint64) Conn
 var _ Conn = (*conn)(nil)
 
 type conn struct {
-	cmdLock         sync.Mutex
-	cmdCh           chan struct{}
-	cmdList         *glist.List[*cmd.Command]
+	cmdLock sync.Mutex
+	cmdCh   chan struct{}
+	cmdList *glist.List[*cmd.Command]
+	// Only stores binary encoded prepared statements. The id is the replayed ps id.
+	preparedStmts map[uint32]preparedStmt
+	// map capture prepared stmt ID to replay prepared stmt ID
+	psIDMapping     map[uint32]uint32
 	exceptionCh     chan<- Exception
 	closeCh         chan<- uint64
 	lg              *zap.Logger
@@ -66,15 +73,17 @@ func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Co
 	backendConnID := idMgr.NewID()
 	lg = lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID))
 	return &conn{
-		lg:          lg,
-		connID:      connID,
-		cmdList:     glist.New[*cmd.Command](),
-		cmdCh:       make(chan struct{}, 1),
-		exceptionCh: exceptionCh,
-		closeCh:     closeCh,
-		backendConn: NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
-		replayStats: replayStats,
-		readonly:    readonly,
+		lg:            lg,
+		connID:        connID,
+		cmdList:       glist.New[*cmd.Command](),
+		cmdCh:         make(chan struct{}, 1),
+		preparedStmts: make(map[uint32]preparedStmt),
+		psIDMapping:   make(map[uint32]uint32),
+		exceptionCh:   exceptionCh,
+		closeCh:       closeCh,
+		backendConn:   NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
+		replayStats:   replayStats,
+		readonly:      readonly,
 	}
 }
 
@@ -114,7 +123,8 @@ func (c *conn) Run(ctx context.Context) {
 					continue
 				}
 			}
-			if err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
+			c.updateExecuteStmt(command.Value)
+			if resp, err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
 				if pnet.IsDisconnectError(err) {
 					c.exceptionCh <- NewOtherException(err, c.connID)
 					c.lg.Debug("backend connection disconnected", zap.Error(err))
@@ -123,6 +133,8 @@ func (c *conn) Run(ctx context.Context) {
 				if c.updateCmdForExecuteStmt(command.Value) {
 					c.exceptionCh <- NewFailException(err, command.Value)
 				}
+			} else {
+				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
 			}
 			c.replayStats.ReplayedCmds.Add(1)
 			if command.Value.Type == pnet.ComQuit {
@@ -138,12 +150,12 @@ func (c *conn) isReadOnly(command *cmd.Command) bool {
 		return lex.IsReadOnly(hack.String(command.Payload[1:]))
 	case pnet.ComStmtExecute, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
 		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-		text, _, _ := c.backendConn.GetPreparedStmt(stmtID)
-		if len(text) == 0 {
+		ps := c.preparedStmts[stmtID]
+		if len(ps.text) == 0 {
 			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID), zap.Stringer("cmd_type", command.Type))
 			return false
 		}
-		return lex.IsReadOnly(text)
+		return lex.IsReadOnly(ps.text)
 	case pnet.ComCreateDB, pnet.ComDropDB, pnet.ComDelayedInsert:
 		return false
 	}
@@ -163,23 +175,85 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 	switch command.Type {
 	case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
 		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-		text, paramNum, paramTypes := c.backendConn.GetPreparedStmt(stmtID)
-		if len(text) == 0 {
+		ps := c.preparedStmts[stmtID]
+		if len(ps.text) == 0 {
 			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID), zap.Stringer("cmd_type", command.Type))
 			return false
 		}
 		if command.Type == pnet.ComStmtExecute {
-			_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, paramNum, paramTypes)
+			_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, ps.paramNum, ps.paramTypes)
 			if err != nil {
 				// Failing to parse the request is not critical, so don't return false.
-				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.String("sql", text),
-					zap.Int("param_num", paramNum), zap.ByteString("param_types", paramTypes), zap.Error(err))
+				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.String("sql", ps.text),
+					zap.Int("param_num", ps.paramNum), zap.ByteString("param_types", ps.paramTypes), zap.Error(err))
 			}
 			command.Params = args
 		}
-		command.PreparedStmt = text
+		command.PreparedStmt = ps.text
 	}
 	return true
+}
+
+// maintain prepared statement info so that we can find its info when:
+// - Judge whether an EXECUTE command is readonly
+// - Get the error message when an EXECUTE command fails
+func (c *conn) updatePreparedStmts(capturedPsID uint32, request, response []byte) {
+	switch request[0] {
+	case pnet.ComStmtPrepare.Byte():
+		stmtID, paramNum := pnet.ParsePrepareStmtResp(response)
+		stmt := hack.String(request[1:])
+		c.preparedStmts[stmtID] = preparedStmt{text: stmt, paramNum: paramNum}
+		c.psIDMapping[capturedPsID] = stmtID
+	case pnet.ComStmtExecute.Byte():
+		stmtID := binary.LittleEndian.Uint32(request[1:5])
+		ps, ok := c.preparedStmts[stmtID]
+		// paramNum is contained in the ComStmtPrepare while paramTypes is contained in the first ComStmtExecute.
+		// Following ComStmtExecute requests will reuse the paramTypes from the first ComStmtExecute.
+		if ok && ps.paramNum > 0 && len(ps.paramTypes) == 0 {
+			_, _, paramTypes, err := pnet.ParseExecuteStmtRequest(request, ps.paramNum, ps.paramTypes)
+			if err != nil {
+				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
+			} else {
+				ps.paramTypes = paramTypes
+				c.preparedStmts[stmtID] = ps
+			}
+		}
+	case pnet.ComStmtClose.Byte():
+		stmtID := binary.LittleEndian.Uint32(request[1:5])
+		delete(c.preparedStmts, stmtID)
+		delete(c.psIDMapping, capturedPsID)
+	case pnet.ComChangeUser.Byte(), pnet.ComResetConnection.Byte():
+		for stmtID := range c.preparedStmts {
+			delete(c.preparedStmts, stmtID)
+		}
+	case pnet.ComQuery.Byte():
+		if len(request[1:]) > len(setSessionStates) && strings.EqualFold(hack.String(request[1:len(setSessionStates)+1]), setSessionStates) {
+			query := request[len(setSessionStates)+1:]
+			query = bytes.TrimSpace(query)
+			query = bytes.Trim(query, "'\"")
+			query = bytes.ReplaceAll(query, []byte("\\\\"), []byte("\\"))
+			query = bytes.ReplaceAll(query, []byte("\\'"), []byte("'"))
+			var sessionStates sessionStates
+			if err := json.Unmarshal(query, &sessionStates); err != nil {
+				c.lg.Warn("failed to unmarshal session states", zap.Error(err))
+			}
+			for stmtID, stmt := range sessionStates.PreparedStmts {
+				c.preparedStmts[stmtID] = preparedStmt{text: stmt.StmtText, paramNum: len(stmt.ParamTypes) >> 1, paramTypes: stmt.ParamTypes}
+			}
+		}
+	}
+}
+
+func (c *conn) updateExecuteStmt(command *cmd.Command) {
+	// Native traffic replay doesn't set the CapturedPsID yet.
+	if command.CapturedPsID == 0 {
+		return
+	}
+	switch command.Type {
+	case pnet.ComStmtExecute, pnet.ComStmtFetch, pnet.ComStmtClose, pnet.ComStmtReset, pnet.ComStmtSendLongData:
+		replayID := c.psIDMapping[command.CapturedPsID]
+		binary.LittleEndian.PutUint32(command.Payload[1:], replayID)
+	}
 }
 
 // ExecuteCmd executes a command asynchronously by adding it to the list.

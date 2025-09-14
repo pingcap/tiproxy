@@ -40,6 +40,7 @@ const (
 
 type auditLogPluginConnCtx struct {
 	currentDB string
+	lastPsID  uint32
 }
 
 func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
@@ -326,22 +327,27 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 		if err != nil {
 			return nil, err
 		}
-		executeReq, err := pnet.MakeExecuteStmtRequest(0, args, true)
+		connInfo.lastPsID++
+		decoder.connInfo[connID] = connInfo
+		executeReq, err := pnet.MakeExecuteStmtRequest(connInfo.lastPsID, args, true)
 		if err != nil {
 			return nil, errors.Wrapf(err, "make execute request failed")
 		}
 		cmds = append(cmds, &Command{
-			Type:     pnet.ComStmtPrepare,
-			StmtType: kvs[auditPluginKeyStmtType],
-			Payload:  append([]byte{pnet.ComStmtPrepare.Byte()}, hack.Slice(sql)...),
+			CapturedPsID: connInfo.lastPsID,
+			Type:         pnet.ComStmtPrepare,
+			StmtType:     kvs[auditPluginKeyStmtType],
+			Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, hack.Slice(sql)...),
 		}, &Command{
-			Type:     pnet.ComStmtExecute,
-			StmtType: kvs[auditPluginKeyStmtType],
-			Payload:  executeReq,
+			CapturedPsID: connInfo.lastPsID,
+			Type:         pnet.ComStmtExecute,
+			StmtType:     kvs[auditPluginKeyStmtType],
+			Payload:      executeReq,
 		}, &Command{
-			Type:     pnet.ComStmtClose,
-			StmtType: kvs[auditPluginKeyStmtType],
-			Payload:  pnet.MakeCloseStmtRequest(0),
+			CapturedPsID: connInfo.lastPsID,
+			Type:         pnet.ComStmtClose,
+			StmtType:     kvs[auditPluginKeyStmtType],
+			Payload:      pnet.MakeCloseStmtRequest(connInfo.lastPsID),
 		})
 		// Ignore Quit since disconnection is handled in parseConnectEvent.
 	}

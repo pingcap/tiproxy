@@ -50,6 +50,9 @@ type CmdDecoder interface {
 
 type Command struct {
 	PreparedStmt string
+	// CapturedPsID is the prepared statement ID in capture.
+	// The Execute command needs to update the prepared statement ID in replay.
+	CapturedPsID uint32
 	Params       []any
 	digest       string
 	// Payload starts with command type so that replay can reuse this byte array.
