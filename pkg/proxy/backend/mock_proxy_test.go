@@ -128,6 +128,9 @@ func (mc *mockCapture) Start(cfg capture.CaptureConfig) error {
 	return nil
 }
 
+func (mc *mockCapture) Wait() {
+}
+
 func (mc *mockCapture) Stop(err error) {
 }
 
