@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -91,9 +90,8 @@ func main() {
 }
 
 type replayer struct {
-	closeOnce sync.Once
-	lgMgr     *logger.LoggerManager
-	replay    mgrrp.JobManager
+	lgMgr  *logger.LoggerManager
+	replay mgrrp.JobManager
 }
 
 func (r *replayer) initComponents(addr, logFile string) error {
@@ -127,10 +125,8 @@ func (r *replayer) stop() {
 }
 
 func (r *replayer) close() {
-	r.closeOnce.Do(func() {
-		r.replay.Close()
-		_ = r.lgMgr.Close()
-	})
+	r.replay.Close()
+	_ = r.lgMgr.Close()
 }
 
 var _ mgrrp.CertManager = &nopCertManager{}
