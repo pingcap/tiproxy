@@ -145,7 +145,7 @@ func TestReplaySpeed(t *testing.T) {
 		for i := range 10 {
 			command := newMockCommand(1)
 			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
-			loader.writeCommand(command)
+			loader.writeCommand(command, cmd.FormatNative)
 		}
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
@@ -209,7 +209,7 @@ func TestProgress(t *testing.T) {
 		for range 10 {
 			command := newMockCommand(1)
 			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
-			loader.writeCommand(command)
+			loader.writeCommand(command, cmd.FormatNative)
 		}
 
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
@@ -261,7 +261,7 @@ func TestPendingCmds(t *testing.T) {
 	for range 20 {
 		command := newMockCommand(1)
 		command.StartTs = now
-		loader.writeCommand(command)
+		loader.writeCommand(command, cmd.FormatNative)
 	}
 
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
@@ -329,4 +329,38 @@ func TestLoadEncryptionKey(t *testing.T) {
 			replay.Close()
 		}
 	}
+}
+
+func TestIgnoreErrors(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+	cmdCh := make(chan *cmd.Command, 10)
+	loader := newMockNormalLoader()
+	cfg := ReplayConfig{
+		Input:      t.TempDir(),
+		Username:   "u1",
+		StartTime:  time.Now(),
+		IgnoreErrs: true,
+		readers:    []cmd.LineReader{loader},
+		report:     newMockReport(replay.exceptionCh),
+		connCreator: func(connID uint64) conn.Conn {
+			return &mockConn{
+				connID:  connID,
+				cmdCh:   cmdCh,
+				closeCh: replay.closeCh,
+				closed:  make(chan struct{}),
+			}
+		},
+	}
+
+	loader.write([]byte("invalid command\n"))
+	now := time.Now()
+	command := newMockCommand(1)
+	command.StartTs = now
+	loader.writeCommand(command, cmd.FormatAuditLogPlugin)
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+
+	<-cmdCh
+	replay.Stop(nil)
+	loader.Close()
 }

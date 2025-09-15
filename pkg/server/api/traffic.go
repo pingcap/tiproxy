@@ -101,6 +101,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	cfg.Password = c.PostForm("password")
 	cfg.Format = c.PostForm("format")
 	cfg.ReadOnly = strings.EqualFold(c.PostForm("readonly"), "true")
+	cfg.IgnoreErrs = strings.EqualFold(c.PostForm("ignore-errs"), "true")
 	cfg.KeyFile = globalCfg.Security.EncryptionKeyPath
 	// By default, if `cmdstarttime` is not specified, use zero time
 	if cmdStartTimeStr := c.PostForm("cmdstarttime"); cmdStartTimeStr != "" {

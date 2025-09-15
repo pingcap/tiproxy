@@ -65,6 +65,7 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 	readonly := replayCmd.PersistentFlags().Bool("read-only", false, "only replay read-only queries, default is false")
 	format := replayCmd.PersistentFlags().String("format", "", "the format of traffic files")
 	cmdStartTime := replayCmd.PersistentFlags().String("command-start-time", "", "the start time to replay the traffic, format is RFC3339 or RFC3339Nano. The command before this start time will be ignored.")
+	ignoreErrors := replayCmd.PersistentFlags().Bool("ignore-errs", false, "ignore errors when replaying")
 	replayCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		username := *username
 		if len(username) == 0 {
@@ -87,6 +88,7 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 			"readonly":     strconv.FormatBool(*readonly),
 			"format":       *format,
 			"cmdstarttime": *cmdStartTime,
+			"ignore-errs":  strconv.FormatBool(*ignoreErrors),
 		})
 		resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, "/api/traffic/replay", reader)
 		if err != nil {
