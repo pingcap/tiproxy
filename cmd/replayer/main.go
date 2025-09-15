@@ -4,9 +4,12 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
@@ -58,9 +61,27 @@ func main() {
 		if err := r.initComponents(*addr, *logFile); err != nil {
 			return err
 		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			sc := make(chan os.Signal, 1)
+			signal.Notify(sc,
+				syscall.SIGINT,
+				syscall.SIGTERM,
+				syscall.SIGQUIT,
+			)
+
+			select {
+			case <-sc:
+				r.stop()
+			case <-ctx.Done():
+			}
+		}()
 		if err := r.start(replayCfg); err != nil {
+			cancel()
 			return err
 		}
+		cancel()
 		r.close()
 		return nil
 	}
@@ -97,6 +118,10 @@ func (r *replayer) start(replayCfg replay.ReplayConfig) error {
 	}
 	r.replay.Wait()
 	return nil
+}
+
+func (r *replayer) stop() {
+	r.replay.Stop(mgrrp.CancelConfig{Type: mgrrp.Replay})
 }
 
 func (r *replayer) close() {
