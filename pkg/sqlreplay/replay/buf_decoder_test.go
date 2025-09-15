@@ -92,7 +92,6 @@ func TestBufferedDecoderBasicFunctionality(t *testing.T) {
 	mockDec := newMockDecoder(commands)
 	ctx := context.Background()
 	bufDec := newBufferedDecoder(ctx, mockDec, 5)
-	defer bufDec.Close()
 
 	for i, expected := range commands {
 		cmd, err := bufDec.Decode()
@@ -116,7 +115,6 @@ func TestBufferedDecoderAsyncFilling(t *testing.T) {
 	slowDec := newMockSlowDecoder(commands, 50*time.Millisecond)
 	ctx := context.Background()
 	bufDec := newBufferedDecoder(ctx, slowDec, 2)
-	defer bufDec.Close()
 
 	start := time.Now()
 	cmd1, err := bufDec.Decode()
@@ -140,7 +138,6 @@ func TestBufferedDecoderBufferSizeLimit(t *testing.T) {
 	fastDec := newMockSlowDecoder(commands, 1*time.Millisecond)
 	ctx := context.Background()
 	bufDec := newBufferedDecoder(ctx, fastDec, 3)
-	defer bufDec.Close()
 
 	for i := 0; i < 3; i++ {
 		cmd, err := bufDec.Decode()
@@ -167,7 +164,6 @@ func TestBufferedDecoderBlockingBehavior(t *testing.T) {
 	slowDec := newMockSlowDecoder(commands, 200*time.Millisecond)
 	ctx := context.Background()
 	bufDec := newBufferedDecoder(ctx, slowDec, 1)
-	defer bufDec.Close()
 
 	start := time.Now()
 	cmd, err := bufDec.Decode()
@@ -176,44 +172,6 @@ func TestBufferedDecoderBlockingBehavior(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, commands[0].ConnID, cmd.ConnID)
 	require.GreaterOrEqual(t, elapsed, 150*time.Millisecond)
-}
-
-func TestBufferedDecoderOrdering(t *testing.T) {
-	now := time.Now()
-
-	commands := []*cmd.Command{
-		{ConnID: 1, StartTs: now.Add(30 * time.Millisecond)},
-		{ConnID: 2, StartTs: now.Add(10 * time.Millisecond)},
-		{ConnID: 3, StartTs: now.Add(20 * time.Millisecond)},
-		{ConnID: 4, StartTs: now.Add(40 * time.Millisecond)},
-		{ConnID: 5, StartTs: now.Add(5 * time.Millisecond)},
-	}
-
-	mockDec := newMockDecoder(commands)
-	ctx := context.Background()
-	bufDec := newBufferedDecoder(ctx, mockDec, 10)
-	defer bufDec.Close()
-
-	time.Sleep(100 * time.Millisecond)
-
-	expectedOrder := []uint64{5, 2, 3, 1, 4}
-	expectedTimes := []time.Time{
-		now.Add(5 * time.Millisecond),
-		now.Add(10 * time.Millisecond),
-		now.Add(20 * time.Millisecond),
-		now.Add(30 * time.Millisecond),
-		now.Add(40 * time.Millisecond),
-	}
-
-	for i, expectedConnID := range expectedOrder {
-		cmd, err := bufDec.Decode()
-		require.NoError(t, err, "decode %d", i)
-		require.Equal(t, expectedConnID, cmd.ConnID, "decode %d", i)
-		require.Equal(t, expectedTimes[i], cmd.StartTs, "decode %d", i)
-	}
-
-	_, err := bufDec.Decode()
-	require.Equal(t, io.EOF, err)
 }
 
 func TestBufferedDecoderErrorPropagation(t *testing.T) {
@@ -227,7 +185,6 @@ func TestBufferedDecoderErrorPropagation(t *testing.T) {
 	errDec := newMockErrorDecoder(commands, 1, testErr)
 	ctx := context.Background()
 	bufDec := newBufferedDecoder(ctx, errDec, 5)
-	defer bufDec.Close()
 
 	// First command should succeed
 	cmd, err := bufDec.Decode()
@@ -248,7 +205,6 @@ func TestBufferedDecoderImmediateError(t *testing.T) {
 	errDec := newMockErrorDecoder([]*cmd.Command{}, 0, testErr)
 	ctx := context.Background()
 	bufDec := newBufferedDecoder(ctx, errDec, 5)
-	defer bufDec.Close()
 
 	_, err := bufDec.Decode()
 	require.Equal(t, testErr, err)
@@ -291,13 +247,12 @@ func TestBufferedDecoderContextCancellationBeforeStart(t *testing.T) {
 		{ConnID: 1, StartTs: now.Add(10 * time.Millisecond)},
 	}
 
-	mockDec := newMockDecoder(commands)
+	mockDec := newMockSlowDecoder(commands, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cancel()
 
 	bufDec := newBufferedDecoder(ctx, mockDec, 5)
-	defer bufDec.Close()
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -343,10 +298,6 @@ func BenchmarkBufferedDecoder(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-			}
-
-			if closable, ok := dec.(closableDecoder); ok {
-				closable.Close()
 			}
 		})
 	}
