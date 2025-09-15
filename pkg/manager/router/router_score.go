@@ -22,12 +22,18 @@ const (
 var _ Router = &ScoreBasedRouter{}
 
 type RouterConfig struct {
-	EnablePause bool
+	EnablePause            bool
+	RebalanceInterval      time.Duration
+	RebalanceConnsPerLoop  int
+	RebalanceMaxScoreRatio float64
 }
 
 func NewDefaultRouterConfig() *RouterConfig {
 	return &RouterConfig{
-		EnablePause: false,
+		EnablePause:            false,
+		RebalanceInterval:      defaultRebalanceInterval,
+		RebalanceConnsPerLoop:  defaultRebalanceConnsPerLoop,
+		RebalanceMaxScoreRatio: defaultRebalanceMaxScoreRatio,
 	}
 }
 
@@ -36,6 +42,30 @@ type RouterConfigFunc func(*RouterConfig)
 func WithPauseEnabled() RouterConfigFunc {
 	return func(cfg *RouterConfig) {
 		cfg.EnablePause = true
+	}
+}
+
+func WithRebalanceInterval(d time.Duration) RouterConfigFunc {
+	return func(cfg *RouterConfig) {
+		if d > 0 {
+			cfg.RebalanceInterval = d
+		}
+	}
+}
+
+func WithRebalanceConnsPerLoop(n int) RouterConfigFunc {
+	return func(cfg *RouterConfig) {
+		if n > 0 {
+			cfg.RebalanceConnsPerLoop = n
+		}
+	}
+}
+
+func WithRebalanceMaxScoreRatio(r float64) RouterConfigFunc {
+	return func(cfg *RouterConfig) {
+		if r > 1 {
+			cfg.RebalanceMaxScoreRatio = r
+		}
 	}
 }
 
@@ -429,14 +459,14 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 }
 
 func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
-	ticker := time.NewTicker(rebalanceInterval)
+	ticker := time.NewTicker(router.config.RebalanceInterval)
 	for {
 		select {
 		case <-ctx.Done():
 			ticker.Stop()
 			return
 		case <-ticker.C:
-			router.rebalance(rebalanceConnsPerLoop)
+			router.rebalance(router.config.RebalanceConnsPerLoop)
 		}
 	}
 }
@@ -460,7 +490,7 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 		busiestBackend := busiestEle.Value
 		idlestEle := router.backends.Back()
 		idlestBackend := idlestEle.Value
-		if float64(busiestBackend.score())/float64(idlestBackend.score()+1) < rebalanceMaxScoreRatio {
+		if float64(busiestBackend.score())/float64(idlestBackend.score()+1) < router.config.RebalanceMaxScoreRatio {
 			break
 		}
 		var ce *glist.Element[*connWrapper]
