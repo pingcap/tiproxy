@@ -96,7 +96,7 @@ func (f Capability) String() string {
 			if cnt > 0 {
 				str.WriteByte('|')
 			}
-			fmt.Fprintf(str, c.Str)
+			fmt.Fprint(str, c.Str)
 			cnt++
 		}
 	}
