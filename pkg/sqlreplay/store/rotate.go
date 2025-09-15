@@ -292,7 +292,10 @@ func parseFileTime(name, fileNamePrefix string) time.Time {
 		return time.Time{}
 	}
 	endIdx -= len(fileNameSuffix)
-	ts, err := time.Parse(logTimeLayout, name[startIdx:endIdx])
+	// The `TimeZone` part is not included in the audit log file name, so we use the `time.Local` here.
+	// It's always possible to workaround it by adjusting the commandStartTime, so just using `time.Local`
+	// here is acceptable. Using the timezone from `commandStartTime` is another option, but it's a bit tricky.
+	ts, err := time.ParseInLocation(logTimeLayout, name[startIdx:endIdx], time.Local)
 	if err != nil {
 		return time.Time{}
 	}

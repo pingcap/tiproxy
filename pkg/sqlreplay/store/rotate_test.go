@@ -123,13 +123,16 @@ func TestParseFileIdx(t *testing.T) {
 }
 
 func TestParseFileTime(t *testing.T) {
+	// Calculate the current timezone shift
+	_, offset := time.Now().Zone()
+
 	tests := []struct {
 		fileName string
 		fileIdx  int64
 	}{
-		{"tidb-audit-2025-09-10T17-01-56.073.log", 1757523716073},
-		{"tidb-audit-2025-09-10T17-01-56.172.log.gz", 1757523716172},
-		{"tidb-audit-2025-09-10T17-01-56.log.gz", 1757523716000},
+		{"tidb-audit-2025-09-10T17-01-56.073.log", 1757523716073 - int64(offset*1000)},
+		{"tidb-audit-2025-09-10T17-01-56.172.log.gz", 1757523716172 - int64(offset*1000)},
+		{"tidb-audit-2025-09-10T17-01-56.log.gz", 1757523716000 - int64(offset*1000)},
 		{"traffic-2025-09-10T17-01-56.172.log", 0},
 		{"traffic-2025-09-10T17-01-56.172.log.gz", 0},
 		{"tidb-audit-.log", 0},
@@ -370,7 +373,7 @@ func TestCompressAndEncrypt(t *testing.T) {
 }
 
 func TestFilterFileNameByStartTime(t *testing.T) {
-	commandStartTime, err := time.Parse(logTimeLayout, "2025-09-10T17-01-56.050")
+	commandStartTime, err := time.ParseInLocation(logTimeLayout, "2025-09-10T17-01-56.050", time.Local)
 	require.NoError(t, err)
 	tests := []struct {
 		fileName        string
