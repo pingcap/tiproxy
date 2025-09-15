@@ -240,9 +240,6 @@ func (r *replay) readCommands(ctx context.Context) {
 		r.stop(err)
 		return
 	}
-	if c, ok := decoder.(closableDecoder); ok {
-		defer c.Close()
-	}
 
 	var captureStartTs, replayStartTs time.Time
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
