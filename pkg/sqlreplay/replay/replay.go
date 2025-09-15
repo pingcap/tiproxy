@@ -67,6 +67,9 @@ type ReplayConfig struct {
 	// CommandStartTime is the start time of the command being replayed. It's different from StartTime,
 	// which means the start time of the whole replay job.
 	CommandStartTime time.Time
+	// IgnoreErrs indicates whether to ignore decoding errors.
+	// The errors are just printed if true, otherwise the replayer stops.
+	IgnoreErrs bool
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -256,8 +259,15 @@ func (r *replay) readCommands(ctx context.Context) {
 			if errors.Is(err, io.EOF) {
 				r.lg.Info("replay reads EOF", zap.Stringers("reader", readers))
 				err = nil
+				break
 			}
-			break
+			if r.cfg.IgnoreErrs {
+				r.lg.Error("failed to decode command", zap.Error(err))
+				err = nil
+				continue
+			} else {
+				break
+			}
 		}
 		if captureStartTs.IsZero() {
 			// first command
