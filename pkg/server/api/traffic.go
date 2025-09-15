@@ -115,6 +115,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 		}
 		cfg.CommandStartTime = cmdStartTime
 	}
+	cfg.BufSize, _ = strconv.Atoi(c.PostForm("bufsize"))
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

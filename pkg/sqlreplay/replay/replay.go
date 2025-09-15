@@ -70,6 +70,8 @@ type ReplayConfig struct {
 	// IgnoreErrs indicates whether to ignore decoding errors.
 	// The errors are just printed if true, otherwise the replayer stops.
 	IgnoreErrs bool
+	// BufSize is the size of the buffer for reordering commands from audit files. 0 means no buffering.
+	BufSize int
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -233,10 +235,13 @@ func (r *replay) readCommands(ctx context.Context) {
 			r.Close()
 		}
 	}()
-	decoder, err := r.constructDecoders(readers)
+	decoder, err := r.constructDecoder(ctx, readers)
 	if err != nil {
 		r.stop(err)
 		return
+	}
+	if c, ok := decoder.(closableDecoder); ok {
+		defer c.Close()
 	}
 
 	var captureStartTs, replayStartTs time.Time
@@ -330,7 +335,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	r.stop(err)
 }
 
-func (r *replay) constructDecoders(readers []cmd.LineReader) (decoder, error) {
+func (r *replay) constructMergeDecoders(readers []cmd.LineReader) (decoder, error) {
 	var decoders []decoder
 	for _, reader := range readers {
 		cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
@@ -349,6 +354,18 @@ func (r *replay) constructDecoders(readers []cmd.LineReader) (decoder, error) {
 	}
 
 	return newMergeDecoder(decoders...), nil
+}
+
+func (r *replay) constructDecoder(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
+	decoder, err := r.constructMergeDecoders(readers)
+	if err != nil {
+		return nil, err
+	}
+
+	if r.cfg.BufSize > 0 {
+		decoder = newBufferedDecoder(ctx, decoder, r.cfg.BufSize)
+	}
+	return decoder, nil
 }
 
 func (r *replay) constructReaders() ([]cmd.LineReader, error) {
