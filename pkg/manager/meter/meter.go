@@ -79,6 +79,7 @@ func (m *Meter) Start(ctx context.Context) {
 }
 
 func (m *Meter) flushLoop(ctx context.Context) {
+	m.lg.Info("metering is started")
 	// Control the writing timestamp accurately enough so that the previous round won't be overwritten by the next round.
 	curTime := time.Now().Unix()
 	nextTime := curTime/writeInterval*writeInterval + writeInterval
