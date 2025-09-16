@@ -5,6 +5,7 @@ package store
 
 import (
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,9 +15,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/service/s3"
+	backuppb "github.com/pingcap/kvproto/pkg/brpb"
+	"github.com/pingcap/tidb/br/pkg/mock"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
 
@@ -458,4 +465,39 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 		fileOrder = append(fileOrder, l.curFileName)
 	}
 	require.Equal(t, expectedFileOrder, fileOrder)
+}
+
+func TestWalkS3ForAuditLogFile(t *testing.T) {
+	controller := gomock.NewController(t)
+	s3api := mock.NewMockS3API(controller)
+
+	s3api.EXPECT().ListObjectsWithContext(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, req *s3.ListObjectsInput, _ ...request.Option) (*s3.ListObjectsOutput, error) {
+			require.Equal(t, "bucket", *req.Bucket)
+			require.Equal(t, "prefix/tidb-audit-", *req.Prefix)
+
+			return &s3.ListObjectsOutput{
+				Contents: []*s3.Object{
+					{Key: aws.String("prefix/tidb-audit-2025-09-15T16-54-44.939.log"), Size: aws.Int64(200)},
+				},
+			}, nil
+		},
+	)
+
+	r := &rotateReader{
+		cfg: ReaderCfg{
+			Format:           cmd.FormatAuditLogPlugin,
+			CommandStartTime: time.Time{},
+		},
+		curFileName: "",
+	}
+	err := r.walkS3ForAuditLogFile(context.Background(), s3api, &backuppb.S3{
+		Bucket: "bucket",
+		Prefix: "prefix/",
+	}, func(fileName string, size int64) error {
+		require.Equal(t, fileName, "tidb-audit-2025-09-15T16-54-44.939.log")
+
+		return nil
+	})
+	require.NoError(t, err)
 }

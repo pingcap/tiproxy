@@ -12,6 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
@@ -171,7 +175,8 @@ func (r *rotateReader) nextReader() error {
 	parseFunc := getParseFileNameFunc(r.cfg.Format)
 	fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-	err := r.storage.WalkDir(ctx, &storage.WalkOption{},
+	// TODO: stop walking the files once we found the next file to read.
+	err := r.walkFile(ctx,
 		func(name string, size int64) error {
 			if !strings.HasPrefix(name, fileNamePrefix) {
 				return nil
@@ -220,6 +225,70 @@ func (r *rotateReader) nextReader() error {
 		return err
 	}
 	r.lg.Info("reading next file", zap.String("file", minFileName))
+	return nil
+}
+
+func (r *rotateReader) walkFile(ctx context.Context, fn func(string, int64) error) error {
+	if s3, ok := r.storage.(*storage.S3Storage); ok && r.cfg.Format == cmd.FormatAuditLogPlugin {
+		return r.walkS3ForAuditLogFile(ctx, s3.GetS3APIHandle(), s3.GetOptions(), fn)
+	}
+	return r.storage.WalkDir(ctx, &storage.WalkOption{}, fn)
+}
+
+// walkS3ForAuditLogFile is a special implementation to list files from S3 for audit log format.
+// The reason is that the audit log file name contains timestamp info, and we may
+// want to start from a specific time point. The normal WalkDir implementation
+// just lists all files in the directory, which is not efficient when there are
+// many files.
+// Most of the code is copied from storage/s3.go's WalkDir implementation.
+func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) error) error {
+	prefix := options.Prefix
+	if len(prefix) > 0 && !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+
+	prefix += getFileNamePrefix(r.cfg.Format)
+
+	var marker string
+	if r.curFileName != "" {
+		marker = r.curFileName
+	} else if !r.cfg.CommandStartTime.IsZero() {
+		t := r.cfg.CommandStartTime.In(time.Local)
+		marker = fmt.Sprintf("%s%s", prefix, t.Format(logTimeLayout))
+	}
+
+	req := &s3.ListObjectsInput{
+		Bucket:  aws.String(options.Bucket),
+		Prefix:  aws.String(prefix),
+		MaxKeys: aws.Int64(1000),
+		Marker:  aws.String(marker),
+	}
+	// The first result of `ListObjects` may include the `marker` file itself, so
+	// we still need to walk and filter it. It's possible to further optimize to
+	// skip the first file and take the second one if the file name is exactly the
+	// same with the `marker`.
+	res, err := s3api.ListObjectsWithContext(ctx, req)
+	if err != nil {
+		return err
+	}
+	for _, r := range res.Contents {
+		// when walk on specify directory, the result include storage.Prefix,
+		// which can not be reuse in other API(Open/Read) directly.
+		// so we use TrimPrefix to filter Prefix for next Open/Read.
+		path := strings.TrimPrefix(*r.Key, options.Prefix)
+		// trim the prefix '/' to ensure that the path returned is consistent with the local storage
+		path = strings.TrimPrefix(path, "/")
+		itemSize := *r.Size
+
+		// filter out s3's empty directory items
+		if itemSize <= 0 && strings.HasSuffix(path, "/") {
+			continue
+		}
+		if err = fn(path, itemSize); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
