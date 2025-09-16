@@ -224,7 +224,7 @@ func (r *rotateReader) nextReader() error {
 	if err != nil {
 		return err
 	}
-	r.lg.Info("reading next file", zap.String("file", minFileName))
+	r.lg.Info("reading next file", zap.String("prefix", r.storage.URI()), zap.String("file", minFileName))
 	return nil
 }
 
