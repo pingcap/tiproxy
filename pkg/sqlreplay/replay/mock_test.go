@@ -189,3 +189,25 @@ func (mr *mockReport) Stop(err error) {
 
 func (mr *mockReport) Close() {
 }
+
+// endlessReader always returns the same line.
+// The `Read` implementations is not correct, so use it only with audit log format.
+type endlessReader struct {
+	line string
+}
+
+func (er *endlessReader) ReadLine() ([]byte, string, int, error) {
+	return []byte(er.line), "", 0, nil
+}
+
+func (er *endlessReader) Read(data []byte) (string, int, error) {
+	n := copy(data, []byte(er.line))
+	return "", n, nil
+}
+
+func (er *endlessReader) Close() {
+}
+
+func (er *endlessReader) String() string {
+	return "endlessReader"
+}
