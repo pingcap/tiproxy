@@ -40,6 +40,12 @@ const (
 	reportLogInterval = 10 * time.Second
 )
 
+var (
+	// chanBufForEachDecoder is the buffer size for each reader's channel. If it's set to -1,
+	// it'll use synchronized implementation for each reader.
+	chanBufForEachDecoder = 64
+)
+
 type Replay interface {
 	// Start starts the replay
 	Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error
@@ -343,7 +349,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	r.stop(err)
 }
 
-func (r *replay) constructMergeDecoders(readers []cmd.LineReader) (decoder, error) {
+func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
 	var decoders []decoder
 	for _, reader := range readers {
 		cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
@@ -352,7 +358,13 @@ func (r *replay) constructMergeDecoders(readers []cmd.LineReader) (decoder, erro
 		// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
 		// the current session state correctly.
 		cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
-		decoders = append(decoders, newSingleDecoder(cmdDecoder, reader))
+
+		var decoder decoder
+		decoder = newSingleDecoder(cmdDecoder, reader)
+		if chanBufForEachDecoder >= 0 {
+			decoder = newBufferedDecoder(ctx, decoder, chanBufForEachDecoder, r.cfg.IgnoreErrs)
+		}
+		decoders = append(decoders, decoder)
 	}
 	if len(decoders) == 0 {
 		return nil, errors.New("no decoder")
@@ -365,13 +377,13 @@ func (r *replay) constructMergeDecoders(readers []cmd.LineReader) (decoder, erro
 }
 
 func (r *replay) constructDecoder(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
-	decoder, err := r.constructMergeDecoders(readers)
+	decoder, err := r.constructMergeDecoders(ctx, readers)
 	if err != nil {
 		return nil, err
 	}
 
 	if r.cfg.BufSize > 0 {
-		decoder = newBufferedDecoder(ctx, decoder, r.cfg.BufSize)
+		decoder = newBufferedDecoder(ctx, decoder, r.cfg.BufSize, r.cfg.IgnoreErrs)
 	}
 	return decoder, nil
 }

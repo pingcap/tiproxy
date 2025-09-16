@@ -281,7 +281,9 @@ func TestParseLog(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		kvs, err := parseLog(test.line)
+		var err error
+		kvs := make(map[string]string)
+		err = parseLog(kvs, test.line)
 		if test.hasErr {
 			require.Error(t, err, "case %d", i)
 			continue
@@ -927,5 +929,18 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 			cmds = append(cmds, cmd)
 		}
 		require.Equal(t, test.cmds, cmds, "case %d", i)
+	}
+}
+
+func BenchmarkAuditLogPluginDecoder(b *testing.B) {
+	decoder := NewAuditLogPluginDecoder()
+	reader := &endlessReader{
+		line: `[2025/09/14 16:16:31.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=b] [EVENT=COMPLETED]`,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := decoder.Decode(reader)
+		require.NoError(b, err)
 	}
 }

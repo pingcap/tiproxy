@@ -5,7 +5,9 @@ package replay
 
 import (
 	"context"
+	"io"
 
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 )
 
@@ -15,7 +17,8 @@ var _ decoder = (*bufferedDecoder)(nil)
 // The returned commands are ordered by StartTs, but the order is not strictly
 // guaranteed if the `reorder` happens longer than the buffer size.
 type bufferedDecoder struct {
-	decoder decoder
+	decoder    decoder
+	ignoreErrs bool
 
 	ctx context.Context
 	ch  chan *cmd.Command
@@ -23,11 +26,12 @@ type bufferedDecoder struct {
 	err error
 }
 
-func newBufferedDecoder(ctx context.Context, decoder decoder, bufSize int) *bufferedDecoder {
+func newBufferedDecoder(ctx context.Context, decoder decoder, bufSize int, ignoreErrs bool) *bufferedDecoder {
 	bufferedDecoder := &bufferedDecoder{
-		decoder: decoder,
-		ctx:     ctx,
-		ch:      make(chan *cmd.Command, bufSize),
+		decoder:    decoder,
+		ignoreErrs: ignoreErrs,
+		ctx:        ctx,
+		ch:         make(chan *cmd.Command, bufSize),
 	}
 
 	go bufferedDecoder.fillBuffer()
@@ -41,7 +45,14 @@ func (d *bufferedDecoder) fillBuffer() {
 		cmd, err := d.decoder.Decode()
 		if err != nil {
 			d.err = err
-			return
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if !d.ignoreErrs {
+				break
+			}
+			// If ignoreErrs is true, we just ignore the error and continue.
+			continue
 		}
 
 		select {

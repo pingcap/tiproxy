@@ -46,6 +46,7 @@ type auditLogPluginConnCtx struct {
 func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
 	return &AuditLogPluginDecoder{
 		connInfo: make(map[uint64]auditLogPluginConnCtx),
+		kvs:      make(map[string]string, 25),
 	}
 }
 
@@ -56,6 +57,10 @@ type AuditLogPluginDecoder struct {
 	commandStartTime time.Time
 	// pendingCmds contains the commands that has not been returned yet.
 	pendingCmds []*Command
+
+	// kvs is a reusable map to avoid too many allocations to store the KV
+	// for each line.
+	kvs map[string]string
 }
 
 func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error) {
@@ -64,12 +69,14 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		decoder.pendingCmds = decoder.pendingCmds[1:]
 		return cmd, nil
 	}
+	kvs := decoder.kvs
 	for {
 		line, filename, lineIdx, err := reader.ReadLine()
 		if err != nil {
 			return nil, err
 		}
-		kvs, err := parseLog(hack.String(line))
+		clear(kvs)
+		err = parseLog(kvs, hack.String(line))
 		if err != nil {
 			return nil, errors.Errorf("%s, line %d: %s", filename, lineIdx, err.Error())
 		}
@@ -130,14 +137,13 @@ func (decoder *AuditLogPluginDecoder) SetCommandStartTime(t time.Time) {
 }
 
 // All SQL_TEXT are converted into one line in audit log.
-func parseLog(line string) (map[string]string, error) {
-	kv := make(map[string]string)
+func parseLog(kv map[string]string, line string) error {
 	for idx := 0; idx < len(line); idx++ {
 		switch line[idx] {
 		case '[':
 			key, value, endIdx, err := parseInBracket(line[idx+1:])
 			if err != nil {
-				return kv, err
+				return err
 			}
 			idx += endIdx + 1
 			if len(key) > 0 {
@@ -145,7 +151,7 @@ func parseLog(line string) (map[string]string, error) {
 			}
 		}
 	}
-	return kv, nil
+	return nil
 }
 
 func parseInBracket(line string) (key, value string, idx int, err error) {
