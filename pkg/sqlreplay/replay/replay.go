@@ -37,7 +37,7 @@ const (
 	abortThreshold    = 1 << 21
 	minSpeed          = 0.1
 	maxSpeed          = 10.0
-	reportLogInterval = time.Second
+	reportLogInterval = 10 * time.Second
 )
 
 type Replay interface {
