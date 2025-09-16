@@ -277,8 +277,9 @@ func TestPendingCmds(t *testing.T) {
 	require.True(t, done)
 	require.Contains(t, err.Error(), "too many pending commands")
 	logs := text.String()
-	require.Contains(t, logs, `"total_wait_time": "150ms"`)
+	require.Contains(t, logs, `"extra_wait_time": "150ms"`)
 	require.Contains(t, logs, "too many pending commands")
+	require.Greater(t, replay.replayStats.PendingCmds.Load(), 15)
 }
 
 func TestLoadEncryptionKey(t *testing.T) {
