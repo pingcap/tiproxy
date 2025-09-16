@@ -91,7 +91,7 @@ func TestBufferedDecoderBasicFunctionality(t *testing.T) {
 
 	mockDec := newMockDecoder(commands)
 	ctx := context.Background()
-	bufDec := newBufferedDecoder(ctx, mockDec, 5)
+	bufDec := newBufferedDecoder(ctx, mockDec, 5, false)
 
 	for i, expected := range commands {
 		cmd, err := bufDec.Decode()
@@ -114,7 +114,7 @@ func TestBufferedDecoderAsyncFilling(t *testing.T) {
 
 	slowDec := newMockSlowDecoder(commands, 50*time.Millisecond)
 	ctx := context.Background()
-	bufDec := newBufferedDecoder(ctx, slowDec, 2)
+	bufDec := newBufferedDecoder(ctx, slowDec, 2, false)
 
 	start := time.Now()
 	cmd1, err := bufDec.Decode()
@@ -137,7 +137,7 @@ func TestBufferedDecoderBufferSizeLimit(t *testing.T) {
 
 	fastDec := newMockSlowDecoder(commands, 1*time.Millisecond)
 	ctx := context.Background()
-	bufDec := newBufferedDecoder(ctx, fastDec, 3)
+	bufDec := newBufferedDecoder(ctx, fastDec, 3, false)
 
 	for i := 0; i < 3; i++ {
 		cmd, err := bufDec.Decode()
@@ -163,7 +163,7 @@ func TestBufferedDecoderBlockingBehavior(t *testing.T) {
 
 	slowDec := newMockSlowDecoder(commands, 200*time.Millisecond)
 	ctx := context.Background()
-	bufDec := newBufferedDecoder(ctx, slowDec, 1)
+	bufDec := newBufferedDecoder(ctx, slowDec, 1, false)
 
 	start := time.Now()
 	cmd, err := bufDec.Decode()
@@ -184,7 +184,7 @@ func TestBufferedDecoderErrorPropagation(t *testing.T) {
 	testErr := errors.New("test decoder error")
 	errDec := newMockErrorDecoder(commands, 1, testErr)
 	ctx := context.Background()
-	bufDec := newBufferedDecoder(ctx, errDec, 5)
+	bufDec := newBufferedDecoder(ctx, errDec, 5, false)
 
 	// First command should succeed
 	cmd, err := bufDec.Decode()
@@ -204,7 +204,7 @@ func TestBufferedDecoderImmediateError(t *testing.T) {
 	testErr := errors.New("immediate error")
 	errDec := newMockErrorDecoder([]*cmd.Command{}, 0, testErr)
 	ctx := context.Background()
-	bufDec := newBufferedDecoder(ctx, errDec, 5)
+	bufDec := newBufferedDecoder(ctx, errDec, 5, false)
 
 	_, err := bufDec.Decode()
 	require.Equal(t, testErr, err)
@@ -222,7 +222,7 @@ func TestBufferedDecoderContextCancellation(t *testing.T) {
 
 	slowDec := newMockSlowDecoder(commands, time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
-	bufDec := newBufferedDecoder(ctx, slowDec, 5)
+	bufDec := newBufferedDecoder(ctx, slowDec, 5, false)
 
 	done := make(chan struct{})
 	go func() {
@@ -252,7 +252,7 @@ func TestBufferedDecoderContextCancellationBeforeStart(t *testing.T) {
 
 	cancel()
 
-	bufDec := newBufferedDecoder(ctx, mockDec, 5)
+	bufDec := newBufferedDecoder(ctx, mockDec, 5, false)
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -289,7 +289,7 @@ func BenchmarkBufferedDecoder(b *testing.B) {
 				connID: 1,
 			}
 			if bufSize > 0 {
-				dec = newBufferedDecoder(ctx, dec, bufSize)
+				dec = newBufferedDecoder(ctx, dec, bufSize, false)
 			}
 
 			b.ResetTimer()

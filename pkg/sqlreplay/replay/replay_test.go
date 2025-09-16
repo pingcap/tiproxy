@@ -4,6 +4,8 @@
 package replay
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -222,6 +224,7 @@ func TestProgress(t *testing.T) {
 			// Maybe unstable due to goroutine schedule.
 			// require.LessOrEqual(t, progress, float64(i+2)/10)
 		}
+		replay.Wait()
 	}
 }
 
@@ -363,4 +366,36 @@ func TestIgnoreErrors(t *testing.T) {
 	<-cmdCh
 	replay.Stop(nil)
 	loader.Close()
+}
+
+func BenchmarkMultiBufferedDecoder(b *testing.B) {
+	bufferSizes := []int{-1, 0, 1, 2, 4, 8, 16, 32, 64, 128, 256}
+	readerCounts := []int{1, 2, 4, 8, 16, 32}
+
+	for _, bufSize := range bufferSizes {
+		for _, readerCount := range readerCounts {
+			b.Run(fmt.Sprintf("BufSize%d/ReaderCount%d", bufSize, readerCount), func(b *testing.B) {
+				ctx := context.Background()
+				readers := make([]cmd.LineReader, readerCount)
+				for i := range readers {
+					readers[i] = &endlessReader{
+						line: `[2025/09/14 16:16:31.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=b] [EVENT=COMPLETED]`,
+					}
+				}
+				r := &replay{
+					cfg: ReplayConfig{
+						Format: cmd.FormatAuditLogPlugin,
+					},
+				}
+				decoder, err := r.constructMergeDecoders(ctx, readers)
+				require.NoError(b, err)
+
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					_, err := decoder.Decode()
+					require.NoError(b, err)
+				}
+			})
+		}
+	}
 }
