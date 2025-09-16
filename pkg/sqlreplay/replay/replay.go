@@ -34,9 +34,10 @@ const (
 	// slowDownFactor is the factor to slow down when there are too many pending commands.
 	slowDownFactor = 100 * time.Nanosecond
 	// abortThreshold is the threshold of pending commands to abort.
-	abortThreshold = 1 << 21
-	minSpeed       = 0.1
-	maxSpeed       = 10.0
+	abortThreshold    = 1 << 21
+	minSpeed          = 0.1
+	maxSpeed          = 10.0
+	reportLogInterval = 10 * time.Second
 )
 
 var (
@@ -85,6 +86,7 @@ type ReplayConfig struct {
 	abortThreshold    int64
 	slowDownThreshold int64
 	slowDownFactor    time.Duration
+	reportLogInterval time.Duration
 }
 
 func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
@@ -138,6 +140,9 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	}
 	if cfg.slowDownFactor == 0 {
 		cfg.slowDownFactor = slowDownFactor
+	}
+	if cfg.reportLogInterval == 0 {
+		cfg.reportLogInterval = reportLogInterval
 	}
 	return storages, nil
 }
@@ -226,6 +231,9 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.wg.RunWithRecover(func() {
 		r.readCommands(childCtx)
 	}, nil, r.lg)
+	r.wg.RunWithRecover(func() {
+		r.reportLoop(childCtx)
+	}, nil, r.lg)
 	return nil
 }
 
@@ -251,7 +259,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
 	connCount := 0                      // alive connection count
 	maxPendingCmds := int64(0)
-	totalWaitTime := time.Duration(0)
+	extraWaitTime := time.Duration(0)
 	for ctx.Err() == nil {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
@@ -277,10 +285,12 @@ func (r *replay) readCommands(ctx context.Context) {
 				break
 			}
 		}
+		r.replayStats.CurCmdTs.Store(command.StartTs.UnixNano())
 		if captureStartTs.IsZero() {
 			// first command
 			captureStartTs = command.StartTs
 			replayStartTs = time.Now()
+			r.replayStats.FirstCmdTs.Store(command.StartTs.UnixNano())
 		} else {
 			pendingCmds := r.replayStats.PendingCmds.Load()
 			if pendingCmds > maxPendingCmds {
@@ -304,11 +314,12 @@ func (r *replay) readCommands(ctx context.Context) {
 			// If there are too many pending commands, slow it down to reduce memory usage.
 			if pendingCmds > r.cfg.slowDownThreshold {
 				extraWait := time.Duration(pendingCmds-r.cfg.slowDownThreshold) * r.cfg.slowDownFactor
-				totalWaitTime += extraWait
+				extraWaitTime += extraWait
 				expectedInterval += extraWait
-				metrics.ReplayWaitTime.Set(float64(totalWaitTime.Nanoseconds()))
+				metrics.ReplayWaitTime.Set(float64(extraWaitTime.Nanoseconds()))
 			}
 			if expectedInterval > time.Microsecond {
+				r.replayStats.TotalWaitTime.Add(expectedInterval.Nanoseconds())
 				select {
 				case <-ctx.Done():
 				case <-time.After(expectedInterval):
@@ -320,7 +331,7 @@ func (r *replay) readCommands(ctx context.Context) {
 		}
 	}
 	r.lg.Info("finished decoding commands, draining connections", zap.Int64("max_pending_cmds", maxPendingCmds),
-		zap.Duration("total_wait_time", totalWaitTime), zap.Int("alive_conns", connCount))
+		zap.Duration("extra_wait_time", extraWaitTime), zap.Int("alive_conns", connCount))
 
 	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
@@ -449,6 +460,31 @@ func (r *replay) readMeta() *store.Meta {
 		}
 	}
 	return m
+}
+
+func (r *replay) reportLoop(ctx context.Context) {
+	ticker := time.NewTicker(r.cfg.reportLogInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			replayedCmds := r.replayStats.ReplayedCmds.Load()
+			pendingCmds := r.replayStats.PendingCmds.Load()
+			filteredCmds := r.replayStats.FilteredCmds.Load()
+			decodedCmds := r.decodedCmds.Load()
+			totalWaitTime := time.Duration(r.replayStats.TotalWaitTime.Load())
+			decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
+			r.lg.Info("replay progress", zap.Uint64("replayed_cmds", replayedCmds),
+				zap.Int64("pending_cmds", pendingCmds), // if too many, replay is slower than decode
+				zap.Uint64("filtered_cmds", filteredCmds),
+				zap.Uint64("decoded_cmds", decodedCmds),
+				zap.Duration("total_wait_time", totalWaitTime), // if too short, decode is low
+				zap.Duration("replay_elapsed", time.Since(r.startTime)),
+				zap.Duration("decode_elapsed", time.Duration(decodeElapsed))) // if shorter than replay_elapsed, decode is slow
+		}
+	}
 }
 
 func (r *replay) stop(err error) {
