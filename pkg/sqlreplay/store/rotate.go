@@ -242,16 +242,16 @@ func (r *rotateReader) walkFile(ctx context.Context, fn func(string, int64) erro
 // many files.
 // Most of the code is copied from storage/s3.go's WalkDir implementation.
 func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) error) error {
-	prefix := options.Prefix
-	if len(prefix) > 0 && !strings.HasSuffix(prefix, "/") {
-		prefix += "/"
+	pathPrefix := options.Prefix
+	if len(pathPrefix) > 0 && !strings.HasSuffix(pathPrefix, "/") {
+		pathPrefix += "/"
 	}
 
-	prefix += getFileNamePrefix(r.cfg.Format)
+	prefix := pathPrefix + getFileNamePrefix(r.cfg.Format)
 
 	var marker string
 	if r.curFileName != "" {
-		marker = r.curFileName
+		marker = pathPrefix + r.curFileName
 	} else if !r.cfg.CommandStartTime.IsZero() {
 		t := r.cfg.CommandStartTime.In(time.Local)
 		marker = fmt.Sprintf("%s%s", prefix, t.Format(logTimeLayout))
