@@ -105,6 +105,11 @@ type Reader interface {
 
 var _ Reader = (*rotateReader)(nil)
 
+type fileMeta struct {
+	fileName string
+	fileSize int64
+}
+
 type rotateReader struct {
 	cfg          ReaderCfg
 	curFileName  string
@@ -114,6 +119,11 @@ type rotateReader struct {
 	storage      storage.ExternalStorage
 	lg           *zap.Logger
 	eof          bool
+
+	// fileMetaCache and fileMetaCacheIdx are used to access and cache file metadata.
+	// The fileMeta in the cache should be sorted by file index in ascending order.
+	fileMetaCache    []fileMeta
+	fileMetaCacheIdx int
 }
 
 func newRotateReader(lg *zap.Logger, storage storage.ExternalStorage, cfg ReaderCfg) (*rotateReader, error) {
@@ -175,28 +185,28 @@ func (r *rotateReader) nextReader() error {
 	parseFunc := getParseFileNameFunc(r.cfg.Format)
 	fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-	// TODO: stop walking the files once we found the next file to read.
 	err := r.walkFile(ctx,
-		func(name string, size int64) error {
+		func(name string, size int64) (bool, error) {
 			if !strings.HasPrefix(name, fileNamePrefix) {
-				return nil
+				return false, nil
 			}
 			if !fileFilter(name, fileNamePrefix) {
-				return nil
+				return false, nil
 			}
 			fileIdx := parseFunc(name, fileNamePrefix)
 			if fileIdx == 0 {
 				r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", r.cfg.Format))
-				return nil
+				return false, nil
 			}
 			if fileIdx <= r.curFileIdx {
-				return nil
+				return false, nil
 			}
 			if minFileName == "" || fileIdx < minFileIdx {
 				minFileIdx = fileIdx
 				minFileName = name
+				return true, nil
 			}
-			return nil
+			return false, nil
 		})
 	cancel()
 	if err != nil {
@@ -233,11 +243,17 @@ func (r *rotateReader) nextReader() error {
 	return nil
 }
 
-func (r *rotateReader) walkFile(ctx context.Context, fn func(string, int64) error) error {
+// walkFile walks through the files in the storage and applies the given function to each file.
+// The return value of the function indicates whether this file is valid or not.
+// For S3 storage and audit log format, it'll stop walking once the fn returns true.
+func (r *rotateReader) walkFile(ctx context.Context, fn func(string, int64) (bool, error)) error {
 	if s3, ok := r.storage.(*storage.S3Storage); ok && r.cfg.Format == cmd.FormatAuditLogPlugin {
 		return r.walkS3ForAuditLogFile(ctx, s3.GetS3APIHandle(), s3.GetOptions(), fn)
 	}
-	return r.storage.WalkDir(ctx, &storage.WalkOption{}, fn)
+	return r.storage.WalkDir(ctx, &storage.WalkOption{}, func(name string, size int64) error {
+		_, err := fn(name, size)
+		return err
+	})
 }
 
 // walkS3ForAuditLogFile is a special implementation to list files from S3 for audit log format.
@@ -246,7 +262,20 @@ func (r *rotateReader) walkFile(ctx context.Context, fn func(string, int64) erro
 // just lists all files in the directory, which is not efficient when there are
 // many files.
 // Most of the code is copied from storage/s3.go's WalkDir implementation.
-func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) error) error {
+func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
+	for ; r.fileMetaCacheIdx < len(r.fileMetaCache); r.fileMetaCacheIdx++ {
+		meta := r.fileMetaCache[r.fileMetaCacheIdx]
+		valid, err := fn(meta.fileName, meta.fileSize)
+		if err != nil {
+			return err
+		}
+		if valid {
+			r.fileMetaCacheIdx++
+			return nil
+		}
+	}
+
+	// The cache is used up, and we didn't find the valid file yet.
 	pathPrefix := options.Prefix
 	if len(pathPrefix) > 0 && !strings.HasSuffix(pathPrefix, "/") {
 		pathPrefix += "/"
@@ -276,21 +305,41 @@ func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, s3api s3iface.
 	if err != nil {
 		return err
 	}
-	for _, r := range res.Contents {
+
+	startAppendingFileToCache := false
+	for _, file := range res.Contents {
 		// when walk on specify directory, the result include storage.Prefix,
 		// which can not be reuse in other API(Open/Read) directly.
 		// so we use TrimPrefix to filter Prefix for next Open/Read.
-		path := strings.TrimPrefix(*r.Key, options.Prefix)
+		path := strings.TrimPrefix(*file.Key, options.Prefix)
 		// trim the prefix '/' to ensure that the path returned is consistent with the local storage
 		path = strings.TrimPrefix(path, "/")
-		itemSize := *r.Size
+		itemSize := *file.Size
 
 		// filter out s3's empty directory items
 		if itemSize <= 0 && strings.HasSuffix(path, "/") {
 			continue
 		}
-		if err = fn(path, itemSize); err != nil {
+		if startAppendingFileToCache {
+			r.fileMetaCache = append(r.fileMetaCache, fileMeta{
+				fileName: path,
+				fileSize: itemSize,
+			})
+			continue
+		}
+
+		valid, err := fn(path, itemSize)
+		if err != nil {
 			return err
+		}
+		if valid {
+			startAppendingFileToCache = true
+			if r.fileMetaCache == nil {
+				r.fileMetaCache = make([]fileMeta, 0, 1000)
+			} else {
+				r.fileMetaCache = r.fileMetaCache[:0]
+			}
+			r.fileMetaCacheIdx = 0
 		}
 	}
 

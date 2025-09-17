@@ -471,22 +471,29 @@ func TestWalkS3ForAuditLogFile(t *testing.T) {
 	controller := gomock.NewController(t)
 	s3api := mock.NewMockS3API(controller)
 
-	files := []*s3.Object{
-		{Key: aws.String("prefix/tidb-audit-2025-09-15T16-54-44.939.log"), Size: aws.Int64(200)},
-		{Key: aws.String("prefix/tidb-audit-2025-09-16T16-54-44.939.log"), Size: aws.Int64(200)},
-		{Key: aws.String("prefix/tidb-audit-2025-09-17T16-54-44.939.log"), Size: aws.Int64(200)},
-		{Key: aws.String("prefix/tidb-audit-2025-09-18T16-54-44.939.log"), Size: aws.Int64(200)},
+	var files []*s3.Object
+	// Append 1000 files
+	for i := range 1000 {
+		files = append(files, &s3.Object{
+			Key:  aws.String(fmt.Sprintf("prefix/tidb-audit-2025-09-19T16-54-44.%03d.log", i)),
+			Size: aws.Int64(200),
+		})
 	}
-	apiCallCount := 0
-	s3api.EXPECT().ListObjectsWithContext(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(
+	for i := range 1000 {
+		files = append(files, &s3.Object{
+			Key:  aws.String(fmt.Sprintf("prefix/tidb-audit-2025-09-19T16-54-45.%03d.log", i)),
+			Size: aws.Int64(200),
+		})
+	}
+
+	// First request: return first 1000 files
+	// Second request: from 44.999 to 45.999, return next 1000 files
+	// Third request: from 45.998 to end, return 2 files
+	// Fourth request: from 45.999 end, return 1 file
+	s3api.EXPECT().ListObjectsWithContext(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
 		func(ctx context.Context, req *s3.ListObjectsInput, _ ...request.Option) (*s3.ListObjectsOutput, error) {
 			require.Equal(t, "bucket", *req.Bucket)
 			require.Equal(t, "prefix/tidb-audit-", *req.Prefix)
-			if apiCallCount > 0 {
-				require.Equal(t, *files[apiCallCount-1].Key, *req.Marker)
-			}
-
-			apiCallCount++
 			retFiles := files
 			for i := range files {
 				if *files[i].Key >= *req.Marker {
@@ -494,6 +501,10 @@ func TestWalkS3ForAuditLogFile(t *testing.T) {
 					break
 				}
 			}
+			if len(retFiles) > int(*req.MaxKeys) {
+				retFiles = retFiles[:*req.MaxKeys]
+			}
+
 			return &s3.ListObjectsOutput{
 				Contents: retFiles,
 			}, nil
@@ -507,36 +518,32 @@ func TestWalkS3ForAuditLogFile(t *testing.T) {
 		},
 		curFileName: "",
 	}
-	for i := range 4 {
-		iterResultIdx := 0
+	selectedFileCount := 0
+	for {
 		selected := false
-
-		expectedFiles := files[max(i-1, 0):]
 		err := r.walkS3ForAuditLogFile(context.Background(), s3api, &backuppb.S3{
 			Bucket: "bucket",
 			Prefix: "prefix/",
-		}, func(fileName string, size int64) error {
-			require.Equal(t, *expectedFiles[iterResultIdx].Key, "prefix/"+fileName)
-			iterResultIdx++
-
+		}, func(fileName string, size int64) (bool, error) {
 			fileIdx := parseFileTimeToIdx(fileName, auditFileNamePrefix)
-			if fileIdx == 0 {
-				return nil
-			}
+			require.GreaterOrEqual(t, fileIdx, r.curFileIdx)
+
 			if fileIdx <= r.curFileIdx {
-				return nil
+				return false, nil
 			}
 
-			if !selected {
-				selected = true
-				r.curFileIdx = fileIdx
-				r.curFileName = fileName
-			}
-			return nil
+			r.curFileIdx = fileIdx
+			r.curFileName = fileName
+			selected = true
+			return true, nil
 		})
 		require.NoError(t, err)
 
-		require.Equal(t, min(5-i, 4), iterResultIdx)
-		require.Equal(t, "prefix/"+r.curFileName, *files[i].Key)
+		if !selected {
+			break
+		}
+		selectedFileCount++
 	}
+	// Iterate through the whole 2000 files
+	require.Equal(t, 2000, selectedFileCount)
 }
