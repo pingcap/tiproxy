@@ -290,6 +290,7 @@ func (r *replay) readCommands(ctx context.Context) {
 			// first command
 			captureStartTs = command.StartTs
 			replayStartTs = time.Now()
+			r.replayStats.ReplayStartTs.Store(replayStartTs.UnixNano())
 			r.replayStats.FirstCmdTs.Store(command.StartTs.UnixNano())
 		} else {
 			pendingCmds := r.replayStats.PendingCmds.Load()
@@ -317,6 +318,7 @@ func (r *replay) readCommands(ctx context.Context) {
 				extraWaitTime += extraWait
 				expectedInterval += extraWait
 				metrics.ReplayWaitTime.Set(float64(extraWaitTime.Nanoseconds()))
+				r.replayStats.ExtraWaitTime.Store(extraWaitTime.Nanoseconds())
 			}
 			if expectedInterval > time.Microsecond {
 				r.replayStats.TotalWaitTime.Add(expectedInterval.Nanoseconds())
@@ -470,17 +472,13 @@ func (r *replay) reportLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			replayedCmds := r.replayStats.ReplayedCmds.Load()
-			pendingCmds := r.replayStats.PendingCmds.Load()
-			filteredCmds := r.replayStats.FilteredCmds.Load()
-			decodedCmds := r.decodedCmds.Load()
-			totalWaitTime := time.Duration(r.replayStats.TotalWaitTime.Load())
 			decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
-			r.lg.Info("replay progress", zap.Uint64("replayed_cmds", replayedCmds),
-				zap.Int64("pending_cmds", pendingCmds), // if too many, replay is slower than decode
-				zap.Uint64("filtered_cmds", filteredCmds),
-				zap.Uint64("decoded_cmds", decodedCmds),
-				zap.Duration("total_wait_time", totalWaitTime), // if too short, decode is low
+			r.lg.Info("replay progress", zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
+				zap.Int64("pending_cmds", r.replayStats.PendingCmds.Load()), // if too many, replay is slower than decode
+				zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
+				zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
+				zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
+				zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 				zap.Duration("replay_elapsed", time.Since(r.startTime)),
 				zap.Duration("decode_elapsed", time.Duration(decodeElapsed))) // if shorter than replay_elapsed, decode is slow
 		}
@@ -498,19 +496,27 @@ func (r *replay) stop(err error) {
 	r.endTime = time.Now()
 	// decodedCmds - pendingCmds may be greater than replayedCmds because if a connection is closed unexpectedly,
 	// the pending commands of that connection are discarded. We calculate the progress based on decodedCmds - pendingCmds.
-	replayedCmds := r.replayStats.ReplayedCmds.Load()
 	pendingCmds := r.replayStats.PendingCmds.Load()
-	filteredCmds := r.replayStats.FilteredCmds.Load()
 	decodedCmds := r.decodedCmds.Load()
 	if pendingCmds != 0 {
 		r.lg.Warn("pending command count is not 0", zap.Int64("pending_cmds", pendingCmds))
 	}
+	decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
 	fields := []zap.Field{
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
+		zap.Time("command_start_time", r.cfg.CommandStartTime),
+		zap.String("format", r.cfg.Format),
+		zap.String("username", r.cfg.Username),
+		zap.Bool("ignore_errs", r.cfg.IgnoreErrs),
+		zap.Float64("speed", r.cfg.Speed),
+		zap.Bool("read_only", r.cfg.ReadOnly),
 		zap.Uint64("decoded_cmds", decodedCmds),
-		zap.Uint64("replayed_cmds", replayedCmds),
-		zap.Uint64("filtered_cmds", filteredCmds),
+		zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
+		zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
+		zap.Duration("replay_elapsed", time.Since(r.startTime)),
+		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
+		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
 	}
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
