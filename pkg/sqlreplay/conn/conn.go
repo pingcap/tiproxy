@@ -31,9 +31,13 @@ type ReplayStats struct {
 	PendingCmds atomic.Int64
 	// FilteredCmds is the number of filtered commands.
 	FilteredCmds atomic.Uint64
-	// TotalWaitTime is the total wait time of all commands.
+	// TotalWaitTime is the total wait time (ns) of all commands.
 	TotalWaitTime atomic.Int64
-	// The timestamp of the first command.
+	// ReplayStartTs is the start time (ns) of replay.
+	ReplayStartTs atomic.Int64
+	// ExtraWaitTime is the extra wait time (ns) of replay.
+	ExtraWaitTime atomic.Int64
+	// The timestamp (ns) of the first command.
 	FirstCmdTs atomic.Int64
 	// The current decoded command timestamp.
 	CurCmdTs atomic.Int64
