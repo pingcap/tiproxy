@@ -7,6 +7,9 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
+	"net/http"
+	_ "net/http/pprof" // #nosec G108: Profiling endpoint intentionally exposed for debugging
 	"os"
 	"os/signal"
 	"syscall"
@@ -46,8 +49,23 @@ func main() {
 	cmdStartTime := rootCmd.PersistentFlags().Time("command-start-time", time.Time{}, []string{time.RFC3339, time.RFC3339Nano}, "the start time to replay the traffic, format is RFC3339. The command before this start time will be ignored.")
 	ignoreErrs := rootCmd.PersistentFlags().Bool("ignore-errs", false, "ignore errors when replaying")
 	bufSize := rootCmd.PersistentFlags().Int("bufsize", 100000, "the size of buffer for reordering commands from audit files. 0 means no buffering.")
+	pprofAddr := rootCmd.PersistentFlags().String("pprof-addr", "", "the address to listen on for pprof, e.g. localhost:6060. By default pprof is disabled.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		if pprofAddr != nil && *pprofAddr != "" {
+			go func() {
+				server := &http.Server{
+					Addr:         *pprofAddr,
+					ReadTimeout:  time.Hour,
+					WriteTimeout: time.Hour,
+				}
+				err := server.ListenAndServe()
+				if err != nil {
+					log.Printf("start pprof failed: %v", err)
+				}
+			}()
+		}
+
 		replayCfg := replay.ReplayConfig{
 			Input:            *input,
 			Speed:            *speed,
