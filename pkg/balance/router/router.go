@@ -172,7 +172,7 @@ func (b *backendWrapper) Keyspace() string {
 	if labels == nil {
 		return ""
 	}
-	return labels[config.LocationLabelName]
+	return labels[config.KeyspaceLabelName]
 }
 
 func (b *backendWrapper) String() string {
