@@ -216,12 +216,7 @@ func (r *rotateReader) nextReader() error {
 		return io.EOF
 	}
 	// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
-	fileReader, err := r.storage.Open(context.Background(), minFileName, &storage.ReaderOption{
-		// Add `PrefetchSize` will start a goroutine in the background to prefetch data, which will make
-		// reading asynchronous and improve performance.
-		// 4MB might not be a perfect value, need to tune it in the real world.
-		PrefetchSize: 4 * 1024 * 1024,
-	})
+	fileReader, err := r.storage.Open(context.Background(), minFileName, &storage.ReaderOption{})
 	if err != nil {
 		return errors.WithStack(err)
 	}
