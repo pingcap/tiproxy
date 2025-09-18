@@ -130,7 +130,7 @@ func (r *replayer) initComponents(addr, logFile string) error {
 	hsHandler := newStaticHandshakeHandler(addr)
 	idMgr := id.NewIDManager()
 	cfg := config.NewConfig()
-	r.replay = mgrrp.NewJobManager(lg.Named("replay"), cfg, &nopCertManager{}, idMgr, hsHandler)
+	r.replay = mgrrp.NewJobManager(lg, cfg, &nopCertManager{}, idMgr, hsHandler)
 	return nil
 }
 
