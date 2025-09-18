@@ -53,7 +53,7 @@ func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
 		return nil, err
 	}
 	meteringConfig := mconfig.DefaultConfig().WithLogger(lg.Named("metering_sdk"))
-	writer := meteringwriter.NewMeteringWriter(provider, meteringConfig)
+	writer := meteringwriter.NewMeteringWriterFromConfig(provider, meteringConfig, &cfg.Metering)
 	return &Meter{
 		lg:     lg,
 		data:   make(map[string]MeterData),
