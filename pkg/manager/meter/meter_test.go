@@ -129,11 +129,12 @@ func TestLoop(t *testing.T) {
 
 func createLocalMeter(t *testing.T, dir string) (*Meter, *meteringreader.MeteringReader) {
 	lg, _ := logger.CreateLoggerForTest(t)
+	meteringConfig := mconfig.MeteringConfig{
+		Type:   storage.ProviderTypeS3,
+		Bucket: "bucket",
+	}
 	m, err := NewMeter(&config.Config{
-		Metering: mconfig.MeteringConfig{
-			Type:   storage.ProviderTypeS3,
-			Bucket: "bucket",
-		},
+		Metering: meteringConfig,
 	}, lg)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -150,9 +151,9 @@ func createLocalMeter(t *testing.T, dir string) (*Meter, *meteringreader.Meterin
 	}
 	provider, err := storage.NewObjectStorageProvider(localConfig)
 	require.NoError(t, err)
-	meteringConfig := mconfig.DefaultConfig().WithLogger(lg)
-	m.writer = meteringwriter.NewMeteringWriter(provider, meteringConfig)
-	reader := meteringreader.NewMeteringReader(provider, meteringConfig)
+	mConfig := mconfig.DefaultConfig().WithLogger(lg)
+	m.writer = meteringwriter.NewMeteringWriterFromConfig(provider, mConfig, &meteringConfig)
+	reader := meteringreader.NewMeteringReader(provider, mConfig)
 	t.Cleanup(func() {
 		require.NoError(t, reader.Close())
 	})
