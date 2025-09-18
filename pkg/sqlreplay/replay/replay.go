@@ -477,6 +477,7 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Int64("pending_cmds", r.replayStats.PendingCmds.Load()), // if too many, replay is slower than decode
 				zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
 				zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
+				zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
 				zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
 				zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 				zap.Duration("replay_elapsed", time.Since(r.startTime)),
@@ -514,6 +515,7 @@ func (r *replay) stop(err error) {
 		zap.Uint64("decoded_cmds", decodedCmds),
 		zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
 		zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
+		zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
 		zap.Duration("replay_elapsed", time.Since(r.startTime)),
 		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),

@@ -80,6 +80,7 @@ func TestExecuteCmd(t *testing.T) {
 		return stats.ReplayedCmds.Load() == uint64(cmds)
 	}, 3*time.Second, time.Millisecond)
 	require.EqualValues(t, 0, stats.PendingCmds.Load())
+	require.EqualValues(t, 0, stats.ExceptionCmds.Load())
 	cancel()
 	wg.Wait()
 }
@@ -133,7 +134,8 @@ func TestExecuteError(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
+	stats := &ReplayStats{}
+	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
 	backendConn := newMockBackendConn()
 	backendConn.execErr = errors.New("mock error")
 	conn.backendConn = backendConn
@@ -149,6 +151,7 @@ func TestExecuteError(t *testing.T) {
 		require.Equal(t, "mock error", exp.(*FailException).Error(), "case %d", i)
 		require.Equal(t, test.digest, exp.(*FailException).command.Digest(), "case %d", i)
 		require.Equal(t, test.queryText, exp.(*FailException).command.QueryText(), "case %d", i)
+		require.EqualValues(t, i+1, stats.ExceptionCmds.Load(), "case %d", i)
 	}
 	cancel()
 	wg.Wait()

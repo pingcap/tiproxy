@@ -33,14 +33,16 @@ type ReplayStats struct {
 	FilteredCmds atomic.Uint64
 	// TotalWaitTime is the total wait time (ns) of all commands.
 	TotalWaitTime atomic.Int64
-	// ReplayStartTs is the start time (ns) of replay.
-	ReplayStartTs atomic.Int64
 	// ExtraWaitTime is the extra wait time (ns) of replay.
 	ExtraWaitTime atomic.Int64
+	// ReplayStartTs is the start time (ns) of replay.
+	ReplayStartTs atomic.Int64
 	// The timestamp (ns) of the first command.
 	FirstCmdTs atomic.Int64
 	// The current decoded command timestamp.
 	CurCmdTs atomic.Int64
+	// The number of exception commands.
+	ExceptionCmds atomic.Uint64
 }
 
 func (s *ReplayStats) Reset() {
@@ -48,8 +50,11 @@ func (s *ReplayStats) Reset() {
 	s.PendingCmds.Store(0)
 	s.FilteredCmds.Store(0)
 	s.TotalWaitTime.Store(0)
+	s.ExtraWaitTime.Store(0)
+	s.ReplayStartTs.Store(0)
 	s.FirstCmdTs.Store(0)
 	s.CurCmdTs.Store(0)
+	s.ExceptionCmds.Store(0)
 }
 
 type Conn interface {
@@ -103,6 +108,7 @@ func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Co
 func (c *conn) Run(ctx context.Context) {
 	defer c.close()
 	if err := c.backendConn.Connect(ctx); err != nil {
+		c.replayStats.ExceptionCmds.Add(1)
 		c.exceptionCh <- NewOtherException(err, c.connID)
 		return
 	}
@@ -139,11 +145,13 @@ func (c *conn) Run(ctx context.Context) {
 			c.updateExecuteStmt(command.Value)
 			if resp, err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
 				if pnet.IsDisconnectError(err) {
+					c.replayStats.ExceptionCmds.Add(1)
 					c.exceptionCh <- NewOtherException(err, c.connID)
 					c.lg.Debug("backend connection disconnected", zap.Error(err))
 					return
 				}
 				if c.updateCmdForExecuteStmt(command.Value) {
+					c.replayStats.ExceptionCmds.Add(1)
 					c.exceptionCh <- NewFailException(err, command.Value)
 				}
 			} else {
