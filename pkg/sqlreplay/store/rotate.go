@@ -185,6 +185,7 @@ func (r *rotateReader) nextReader() error {
 	parseFunc := getParseFileNameFunc(r.cfg.Format)
 	fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	startTime := time.Now()
 	err := r.walkFile(ctx,
 		func(name string, size int64) (bool, error) {
 			if !strings.HasPrefix(name, fileNamePrefix) {
@@ -234,7 +235,10 @@ func (r *rotateReader) nextReader() error {
 	if err != nil {
 		return err
 	}
-	r.lg.Info("reading next file", zap.String("prefix", r.storage.URI()), zap.String("file", minFileName))
+	r.lg.Info("reading next file", zap.String("prefix", r.storage.URI()),
+		zap.String("file", minFileName),
+		zap.Duration("open_time", time.Since(startTime)),
+		zap.Int("files_in_cache", len(r.fileMetaCache)-r.fileMetaCacheIdx))
 	return nil
 }
 
