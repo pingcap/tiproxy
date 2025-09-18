@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	replaycmd "github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
@@ -50,6 +51,7 @@ func main() {
 	ignoreErrs := rootCmd.PersistentFlags().Bool("ignore-errs", false, "ignore errors when replaying")
 	bufSize := rootCmd.PersistentFlags().Int("bufsize", 100000, "the size of buffer for reordering commands from audit files. 0 means no buffering.")
 	pprofAddr := rootCmd.PersistentFlags().String("pprof-addr", "", "the address to listen on for pprof, e.g. localhost:6060. By default pprof is disabled.")
+	psCloseStrategy := rootCmd.PersistentFlags().String("ps-close", "directed", "the strategy to close prepared statements. Supported values: directed (close when the original prepared statement closed), always (close the prepared statement right after it's executed), never (never close prepared statements). Default is directed.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		if pprofAddr != nil && *pprofAddr != "" {
@@ -77,6 +79,7 @@ func main() {
 			CommandStartTime: *cmdStartTime,
 			IgnoreErrs:       *ignoreErrs,
 			BufSize:          *bufSize,
+			PSCloseStrategy:  replaycmd.PSCloseStrategy(*psCloseStrategy),
 		}
 
 		r := &replayer{}

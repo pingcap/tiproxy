@@ -14,17 +14,18 @@ import (
 )
 
 const (
-	auditPluginKeyTimeStamp = "TIMESTAMP"
-	auditPluginKeySQL       = "SQL_TEXT"
-	auditPluginKeyConnID    = "CONNECTION_ID"
-	auditPluginKeyClass     = "EVENT_CLASS"
-	auditPluginKeySubClass  = "EVENT_SUBCLASS"
-	auditPluginKeyCommand   = "COMMAND"
-	auditPluginKeyStmtType  = "SQL_STATEMENTS"
-	auditPluginKeyParams    = "EXECUTE_PARAMS"
-	auditPluginKeyCurDB     = "CURRENT_DB"
-	auditPluginKeyEvent     = "EVENT"
-	auditPluginKeyCostTime  = "COST_TIME"
+	auditPluginKeyTimeStamp      = "TIMESTAMP"
+	auditPluginKeySQL            = "SQL_TEXT"
+	auditPluginKeyConnID         = "CONNECTION_ID"
+	auditPluginKeyClass          = "EVENT_CLASS"
+	auditPluginKeySubClass       = "EVENT_SUBCLASS"
+	auditPluginKeyCommand        = "COMMAND"
+	auditPluginKeyStmtType       = "SQL_STATEMENTS"
+	auditPluginKeyParams         = "EXECUTE_PARAMS"
+	auditPluginKeyCurDB          = "CURRENT_DB"
+	auditPluginKeyEvent          = "EVENT"
+	auditPluginKeyCostTime       = "COST_TIME"
+	auditPluginKeyPreparedStmtID = "PREPARED_STMT_ID"
 
 	auditPluginClassGeneral     = "GENERAL"
 	auditPluginClassTableAccess = "TABLE_ACCESS"
@@ -41,22 +42,41 @@ const (
 type auditLogPluginConnCtx struct {
 	currentDB string
 	lastPsID  uint32
+
+	// preparedStmt contains the prepared statement IDs that are not closed yet.
+	preparedStmt map[uint32]struct{}
 }
 
 func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
 	return &AuditLogPluginDecoder{
-		connInfo: make(map[uint64]auditLogPluginConnCtx),
-		kvs:      make(map[string]string, 25),
+		connInfo:        make(map[uint64]auditLogPluginConnCtx),
+		kvs:             make(map[string]string, 25),
+		psCloseStrategy: PSCloseStrategyDirected,
 	}
 }
 
 var _ CmdDecoder = (*AuditLogPluginDecoder)(nil)
 
+// PSCloseStrategy defines when to close the prepared statements.
+type PSCloseStrategy string
+
+const (
+	// PSCloseStrategyAlways means a prepared statement is closed right after it's executed.
+	PSCloseStrategyAlways PSCloseStrategy = "always"
+	// PSCloseStrategyNever means a prepared statement is never closed. It's re-used if the same statement
+	// occurs again in the connection.
+	PSCloseStrategyNever PSCloseStrategy = "never"
+	// PSCloseStrategyDirected means a prepared statement is closed only when there's close command in the
+	// traffic file.
+	PSCloseStrategyDirected PSCloseStrategy = "directed"
+)
+
 type AuditLogPluginDecoder struct {
 	connInfo         map[uint64]auditLogPluginConnCtx
 	commandStartTime time.Time
 	// pendingCmds contains the commands that has not been returned yet.
-	pendingCmds []*Command
+	pendingCmds     []*Command
+	psCloseStrategy PSCloseStrategy
 
 	// kvs is a reusable map to avoid too many allocations to store the KV
 	// for each line.
@@ -134,6 +154,10 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 
 func (decoder *AuditLogPluginDecoder) SetCommandStartTime(t time.Time) {
 	decoder.commandStartTime = t
+}
+
+func (decoder *AuditLogPluginDecoder) SetPSCloseStrategy(s PSCloseStrategy) {
+	decoder.psCloseStrategy = s
 }
 
 // All SQL_TEXT are converted into one line in audit log.
@@ -309,6 +333,9 @@ func parseSingleParam(value string) (any, error) {
 
 func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, connID uint64) ([]*Command, error) {
 	connInfo := decoder.connInfo[connID]
+	if connInfo.preparedStmt == nil {
+		connInfo.preparedStmt = make(map[uint32]struct{})
+	}
 	event, ok := kvs[auditPluginKeyEvent]
 	if !ok || event != auditPluginEventEnd {
 		// Old version doesn't have the EVENT key.
@@ -339,6 +366,25 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 			StmtType: kvs[auditPluginKeyStmtType],
 			Payload:  append([]byte{pnet.ComQuery.Byte()}, hack.Slice(sql)...),
 		})
+	case "Close stmt":
+		if decoder.psCloseStrategy == PSCloseStrategyAlways {
+			// always close prepared statement, so it doesn't need to care the close command.
+			break
+		}
+		stmtID, err := parseStmtID(kvs[auditPluginKeyPreparedStmtID])
+		if err != nil {
+			return nil, err
+		}
+
+		delete(connInfo.preparedStmt, stmtID)
+		decoder.connInfo[connID] = connInfo
+
+		cmds = append(cmds, &Command{
+			CapturedPsID: stmtID,
+			Type:         pnet.ComStmtClose,
+			StmtType:     kvs[auditPluginKeyStmtType],
+			Payload:      pnet.MakeCloseStmtRequest(stmtID),
+		})
 	case "Execute":
 		params, ok := kvs[auditPluginKeyParams]
 		if !ok {
@@ -353,28 +399,60 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 		if err != nil {
 			return nil, err
 		}
-		connInfo.lastPsID++
-		decoder.connInfo[connID] = connInfo
-		executeReq, err := pnet.MakeExecuteStmtRequest(connInfo.lastPsID, args, true)
+
+		var stmtID uint32
+		var shouldPrepare bool
+
+		switch decoder.psCloseStrategy {
+		case PSCloseStrategyAlways:
+			connInfo.lastPsID++
+			decoder.connInfo[connID] = connInfo
+			stmtID = connInfo.lastPsID
+			shouldPrepare = true
+		case PSCloseStrategyDirected:
+			stmtID, err = parseStmtID(kvs[auditPluginKeyPreparedStmtID])
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := connInfo.preparedStmt[stmtID]; !ok {
+				shouldPrepare = true
+				connInfo.preparedStmt[stmtID] = struct{}{}
+				decoder.connInfo[connID] = connInfo
+			}
+		}
+
+		// Append PREPARE command if needed.
+		if shouldPrepare {
+			cmds = append(cmds, &Command{
+				CapturedPsID: stmtID,
+				Type:         pnet.ComStmtPrepare,
+				StmtType:     kvs[auditPluginKeyStmtType],
+				Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, hack.Slice(sql)...),
+			})
+		}
+
+		// Append EXECUTE command
+		executeReq, err := pnet.MakeExecuteStmtRequest(stmtID, args, true)
 		if err != nil {
 			return nil, errors.Wrapf(err, "make execute request failed")
 		}
 		cmds = append(cmds, &Command{
-			CapturedPsID: connInfo.lastPsID,
-			Type:         pnet.ComStmtPrepare,
-			StmtType:     kvs[auditPluginKeyStmtType],
-			Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, hack.Slice(sql)...),
-		}, &Command{
-			CapturedPsID: connInfo.lastPsID,
+			CapturedPsID: stmtID,
 			Type:         pnet.ComStmtExecute,
 			StmtType:     kvs[auditPluginKeyStmtType],
 			Payload:      executeReq,
-		}, &Command{
-			CapturedPsID: connInfo.lastPsID,
-			Type:         pnet.ComStmtClose,
-			StmtType:     kvs[auditPluginKeyStmtType],
-			Payload:      pnet.MakeCloseStmtRequest(connInfo.lastPsID),
 		})
+
+		// Append CLOSE command if needed.
+		if decoder.psCloseStrategy == PSCloseStrategyAlways {
+			// close the prepared statement right after it's executed.
+			cmds = append(cmds, &Command{
+				CapturedPsID: stmtID,
+				Type:         pnet.ComStmtClose,
+				StmtType:     kvs[auditPluginKeyStmtType],
+				Payload:      pnet.MakeCloseStmtRequest(stmtID),
+			})
+		}
 		// Ignore Quit since disconnection is handled in parseConnectEvent.
 	}
 	return cmds, nil
@@ -390,4 +468,15 @@ func (decoder *AuditLogPluginDecoder) parseConnectEvent(kvs map[string]string, c
 		}, nil
 	}
 	return nil, nil
+}
+
+func parseStmtID(value string) (uint32, error) {
+	if len(value) == 0 {
+		return 0, errors.New("empty prepared stmt id")
+	}
+	id, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, errors.Errorf("parsing prepared stmt id failed: %s", value)
+	}
+	return uint32(id), nil
 }

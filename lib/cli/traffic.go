@@ -67,6 +67,7 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 	cmdStartTime := replayCmd.PersistentFlags().String("command-start-time", "", "the start time to replay the traffic, format is RFC3339 or RFC3339Nano. The command before this start time will be ignored.")
 	ignoreErrors := replayCmd.PersistentFlags().Bool("ignore-errs", false, "ignore errors when replaying")
 	bufSize := replayCmd.PersistentFlags().Int("bufsize", 100000, "the size of buffer for reordering commands from audit files. 0 means no buffering.")
+	psCloseStrategy := replayCmd.PersistentFlags().String("ps-close", "directed", "the strategy to close prepared statements. Supported values: directed (close when the original prepared statement closed), always (close the prepared statement right after it's executed), never (never close prepared statements). Default is directed.")
 	replayCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		username := *username
 		if len(username) == 0 {
@@ -91,6 +92,7 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 			"cmdstarttime": *cmdStartTime,
 			"ignore-errs":  strconv.FormatBool(*ignoreErrors),
 			"bufsize":      strconv.Itoa(*bufSize),
+			"ps-close":     *psCloseStrategy,
 		})
 		resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, "/api/traffic/replay", reader)
 		if err != nil {

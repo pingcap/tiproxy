@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"go.uber.org/zap"
@@ -116,6 +117,11 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 		cfg.CommandStartTime = cmdStartTime
 	}
 	cfg.BufSize, _ = strconv.Atoi(c.PostForm("bufsize"))
+	cfg.PSCloseStrategy = cmd.PSCloseStrategy(c.PostForm("ps-close"))
+	if cfg.PSCloseStrategy == "" {
+		// set the default value to `directed`
+		cfg.PSCloseStrategy = cmd.PSCloseStrategyDirected
+	}
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

@@ -41,7 +41,8 @@ func TestManageConns(t *testing.T) {
 				closed:  make(chan struct{}),
 			}
 		},
-		report: newMockReport(replay.exceptionCh),
+		report:          newMockReport(replay.exceptionCh),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
@@ -141,6 +142,7 @@ func TestReplaySpeed(t *testing.T) {
 					closed:  make(chan struct{}),
 				}
 			},
+			PSCloseStrategy: cmd.PSCloseStrategyDirected,
 		}
 
 		now := time.Now()
@@ -205,6 +207,7 @@ func TestProgress(t *testing.T) {
 				closed:  make(chan struct{}),
 			}
 		},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
 
 	for i := range 2 {
@@ -258,6 +261,7 @@ func TestPendingCmds(t *testing.T) {
 		abortThreshold:    15,
 		slowDownThreshold: 10,
 		slowDownFactor:    10 * time.Millisecond,
+		PSCloseStrategy:   cmd.PSCloseStrategyDirected,
 	}
 
 	now := time.Now()
@@ -312,10 +316,11 @@ func TestLoadEncryptionKey(t *testing.T) {
 	loader := newMockNormalLoader()
 	defer loader.Close()
 	cfg := ReplayConfig{
-		Input:     dir,
-		Username:  "u1",
-		StartTime: now,
-		readers:   []cmd.LineReader{loader},
+		Input:           dir,
+		Username:        "u1",
+		StartTime:       now,
+		readers:         []cmd.LineReader{loader},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
 	for i, test := range tests {
 		cfg.KeyFile = test.keyFile
@@ -354,6 +359,7 @@ func TestIgnoreErrors(t *testing.T) {
 				closed:  make(chan struct{}),
 			}
 		},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
 
 	loader.write([]byte("invalid command\n"))
