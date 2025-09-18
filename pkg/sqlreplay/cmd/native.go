@@ -176,6 +176,10 @@ func (rw *NativeDecoder) SetCommandStartTime(t time.Time) {
 	rw.commandStartTime = t
 }
 
+func (rw *NativeDecoder) SetPSCloseStrategy(s PSCloseStrategy) {
+	// just ignore. `NativeDecoder` only supports `directed` yet.
+}
+
 func writeString(key, value string, writer *bytes.Buffer) error {
 	var err error
 	if _, err = writer.WriteString(key); err != nil {

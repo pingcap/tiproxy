@@ -12,6 +12,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/cli"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/stretchr/testify/require"
@@ -110,7 +111,7 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, "replay", mgr.curJob)
 		startTime := mgr.replayCfg.StartTime
 		require.False(t, startTime.IsZero())
-		require.Equal(t, replay.ReplayConfig{Input: "/tmp", Username: "u1", Password: "p1", Speed: 2.0, StartTime: startTime}, mgr.replayCfg)
+		require.Equal(t, replay.ReplayConfig{Input: "/tmp", Username: "u1", Password: "p1", Speed: 2.0, StartTime: startTime, PSCloseStrategy: cmd.PSCloseStrategyDirected}, mgr.replayCfg)
 	})
 	// show succeeds
 	doHTTP(t, http.MethodGet, "/api/traffic/show", httpOpts{}, func(t *testing.T, r *http.Response) {

@@ -48,6 +48,7 @@ type CmdDecoder interface {
 	Decode(reader LineReader) (c *Command, err error)
 
 	SetCommandStartTime(t time.Time)
+	SetPSCloseStrategy(strategy PSCloseStrategy)
 }
 
 type Command struct {

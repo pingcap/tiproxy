@@ -79,6 +79,8 @@ type ReplayConfig struct {
 	IgnoreErrs bool
 	// BufSize is the size of the buffer for reordering commands from audit files. 0 means no buffering.
 	BufSize int
+	// PSCloseStrategy defines when to close the prepared statements.
+	PSCloseStrategy cmd.PSCloseStrategy
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -143,6 +145,16 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	}
 	if cfg.reportLogInterval == 0 {
 		cfg.reportLogInterval = reportLogInterval
+	}
+	if cfg.Format == cmd.FormatNative && cfg.PSCloseStrategy != cmd.PSCloseStrategyDirected {
+		return storages, errors.New("only `directed` prepared statement close strategy is supported for `native` format")
+	}
+	switch cfg.PSCloseStrategy {
+	case cmd.PSCloseStrategyAlways, cmd.PSCloseStrategyDirected:
+	case cmd.PSCloseStrategyNever:
+		return storages, errors.New("`never` prepared statement close strategy is not supported yet")
+	default:
+		return storages, errors.Errorf("invalid prepared statement close strategy %s", cfg.PSCloseStrategy)
 	}
 	return storages, nil
 }
@@ -355,6 +367,7 @@ func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineR
 	var decoders []decoder
 	for _, reader := range readers {
 		cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
+		cmdDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
 		// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
 		// the connection state is maintained in decoder. Filtering out commands here will make it'
 		// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
