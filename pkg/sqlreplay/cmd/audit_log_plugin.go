@@ -45,6 +45,9 @@ type auditLogPluginConnCtx struct {
 
 	// preparedStmt contains the prepared statement IDs that are not closed yet.
 	preparedStmt map[uint32]struct{}
+	// preparedStmtSql contains the prepared statement SQLs, only used for `ps-close=never`.
+	// It doesn't require the prepared statement IDs to be contained in the audit logs.
+	preparedStmtSql map[string]uint32
 }
 
 func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
@@ -335,6 +338,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 	connInfo := decoder.connInfo[connID]
 	if connInfo.preparedStmt == nil {
 		connInfo.preparedStmt = make(map[uint32]struct{})
+		connInfo.preparedStmtSql = make(map[string]uint32)
 	}
 	event, ok := kvs[auditPluginKeyEvent]
 	if !ok || event != auditPluginEventEnd {
@@ -418,6 +422,17 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 				shouldPrepare = true
 				connInfo.preparedStmt[stmtID] = struct{}{}
 				decoder.connInfo[connID] = connInfo
+			}
+		case PSCloseStrategyNever:
+			if id, ok := connInfo.preparedStmtSql[sql]; ok {
+				shouldPrepare = false
+				stmtID = id
+			} else {
+				connInfo.lastPsID++
+				connInfo.preparedStmtSql[sql] = connInfo.lastPsID
+				decoder.connInfo[connID] = connInfo
+				stmtID = connInfo.lastPsID
+				shouldPrepare = true
 			}
 		}
 

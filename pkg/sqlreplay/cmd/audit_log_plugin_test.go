@@ -1129,3 +1129,69 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
 }
+
+func TestDecodeAuditLogInNeverMode(t *testing.T) {
+	tests := []struct {
+		lines string
+		cmds  []*Command
+	}{
+		{
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=48.86] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT c FROM sbtest1 WHERE id=?"] [ROWS=0] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=48.86] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT c FROM sbtest1 WHERE id=?"] [ROWS=0] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmds: []*Command{
+				{
+					Type:    pnet.ComInitDB,
+					ConnID:  3807050215081378201,
+					StartTs: time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Success: true,
+				},
+				{
+					Type:         pnet.ComStmtPrepare,
+					ConnID:       3807050215081378201,
+					StartTs:      time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					CapturedPsID: 1,
+					Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
+					StmtType:     "Select",
+					Success:      true,
+				},
+				{
+					Type:         pnet.ComStmtExecute,
+					ConnID:       3807050215081378201,
+					StartTs:      time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					CapturedPsID: 1,
+					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
+					StmtType:     "Select",
+					Success:      true,
+				},
+				{
+					Type:         pnet.ComStmtExecute,
+					ConnID:       3807050215081378201,
+					StartTs:      time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					CapturedPsID: 1,
+					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
+					StmtType:     "Select",
+					Success:      true,
+				},
+			},
+		},
+	}
+
+	for i, test := range tests {
+		decoder := NewAuditLogPluginDecoder()
+		decoder.SetPSCloseStrategy(PSCloseStrategyNever)
+		mr := mockReader{data: append([]byte(test.lines), '\n')}
+		cmds := make([]*Command, 0, 4)
+		var err error
+		for {
+			var cmd *Command
+			cmd, err = decoder.Decode(&mr)
+			if cmd == nil {
+				break
+			}
+			cmds = append(cmds, cmd)
+		}
+		require.Error(t, err, "case %d", i)
+		require.Equal(t, test.cmds, cmds, "case %d", i)
+	}
+}
