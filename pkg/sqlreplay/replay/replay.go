@@ -150,9 +150,7 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 		return storages, errors.New("only `directed` prepared statement close strategy is supported for `native` format")
 	}
 	switch cfg.PSCloseStrategy {
-	case cmd.PSCloseStrategyAlways, cmd.PSCloseStrategyDirected:
-	case cmd.PSCloseStrategyNever:
-		return storages, errors.New("`never` prepared statement close strategy is not supported yet")
+	case cmd.PSCloseStrategyAlways, cmd.PSCloseStrategyDirected, cmd.PSCloseStrategyNever:
 	default:
 		return storages, errors.Errorf("invalid prepared statement close strategy %s", cfg.PSCloseStrategy)
 	}
