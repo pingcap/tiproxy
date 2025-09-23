@@ -4,6 +4,8 @@
 package replay
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -30,7 +32,7 @@ func TestManageConns(t *testing.T) {
 		Input:     t.TempDir(),
 		Username:  "u1",
 		StartTime: time.Now(),
-		reader:    loader,
+		readers:   []cmd.LineReader{loader},
 		connCreator: func(connID uint64) conn.Conn {
 			connCount++
 			return &mockConn{
@@ -39,7 +41,8 @@ func TestManageConns(t *testing.T) {
 				closed:  make(chan struct{}),
 			}
 		},
-		report: newMockReport(replay.exceptionCh),
+		report:          newMockReport(replay.exceptionCh),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
@@ -109,7 +112,9 @@ func TestValidateCfg(t *testing.T) {
 		storage, err := cfg.Validate()
 		require.Error(t, err, "case %d", i)
 		if storage != nil && !reflect.ValueOf(storage).IsNil() {
-			storage.Close()
+			for _, s := range storage {
+				s.Close()
+			}
 		}
 	}
 }
@@ -127,7 +132,7 @@ func TestReplaySpeed(t *testing.T) {
 			Username:  "u1",
 			Speed:     speed,
 			StartTime: time.Now(),
-			reader:    loader,
+			readers:   []cmd.LineReader{loader},
 			report:    newMockReport(replay.exceptionCh),
 			connCreator: func(connID uint64) conn.Conn {
 				return &mockConn{
@@ -137,13 +142,14 @@ func TestReplaySpeed(t *testing.T) {
 					closed:  make(chan struct{}),
 				}
 			},
+			PSCloseStrategy: cmd.PSCloseStrategyDirected,
 		}
 
 		now := time.Now()
 		for i := range 10 {
 			command := newMockCommand(1)
 			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
-			loader.writeCommand(command)
+			loader.writeCommand(command, cmd.FormatNative)
 		}
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
@@ -191,7 +197,7 @@ func TestProgress(t *testing.T) {
 		Input:     dir,
 		Username:  "u1",
 		StartTime: time.Now(),
-		reader:    loader,
+		readers:   []cmd.LineReader{loader},
 		report:    newMockReport(replay.exceptionCh),
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockConn{
@@ -201,13 +207,14 @@ func TestProgress(t *testing.T) {
 				closed:  make(chan struct{}),
 			}
 		},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
 
 	for i := range 2 {
 		for range 10 {
 			command := newMockCommand(1)
 			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
-			loader.writeCommand(command)
+			loader.writeCommand(command, cmd.FormatNative)
 		}
 
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
@@ -220,6 +227,7 @@ func TestProgress(t *testing.T) {
 			// Maybe unstable due to goroutine schedule.
 			// require.LessOrEqual(t, progress, float64(i+2)/10)
 		}
+		replay.Wait()
 	}
 }
 
@@ -240,7 +248,7 @@ func TestPendingCmds(t *testing.T) {
 		Input:     dir,
 		Username:  "u1",
 		StartTime: time.Now(),
-		reader:    loader,
+		readers:   []cmd.LineReader{loader},
 		report:    newMockReport(replay.exceptionCh),
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockPendingConn{
@@ -253,13 +261,14 @@ func TestPendingCmds(t *testing.T) {
 		abortThreshold:    15,
 		slowDownThreshold: 10,
 		slowDownFactor:    10 * time.Millisecond,
+		PSCloseStrategy:   cmd.PSCloseStrategyDirected,
 	}
 
 	now := time.Now()
 	for range 20 {
 		command := newMockCommand(1)
 		command.StartTs = now
-		loader.writeCommand(command)
+		loader.writeCommand(command, cmd.FormatNative)
 	}
 
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
@@ -272,7 +281,7 @@ func TestPendingCmds(t *testing.T) {
 	require.True(t, done)
 	require.Contains(t, err.Error(), "too many pending commands")
 	logs := text.String()
-	require.Contains(t, logs, `"total_wait_time": "150ms"`)
+	require.Contains(t, logs, `"extra_wait_time": "150ms"`)
 	require.Contains(t, logs, "too many pending commands")
 }
 
@@ -307,24 +316,92 @@ func TestLoadEncryptionKey(t *testing.T) {
 	loader := newMockNormalLoader()
 	defer loader.Close()
 	cfg := ReplayConfig{
-		Input:     dir,
-		Username:  "u1",
-		StartTime: now,
-		reader:    loader,
+		Input:           dir,
+		Username:        "u1",
+		StartTime:       now,
+		readers:         []cmd.LineReader{loader},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
-	for _, test := range tests {
+	for i, test := range tests {
 		cfg.KeyFile = test.keyFile
 		replay := NewReplay(zap.NewNop(), id.NewIDManager())
 		cfg.report = newMockReport(replay.exceptionCh)
 		err = replay.Start(cfg, nil, nil, &backend.BCConfig{})
 		if len(test.err) > 0 {
-			require.ErrorContains(t, err, test.err)
+			require.ErrorContains(t, err, test.err, "test %d", i)
 		} else {
 			require.NoError(t, err)
 			replay.Lock()
 			require.Equal(t, key, replay.cfg.encryptionKey)
 			replay.Unlock()
 			replay.Close()
+		}
+	}
+}
+
+func TestIgnoreErrors(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+	cmdCh := make(chan *cmd.Command, 10)
+	loader := newMockNormalLoader()
+	cfg := ReplayConfig{
+		Input:      t.TempDir(),
+		Username:   "u1",
+		StartTime:  time.Now(),
+		IgnoreErrs: true,
+		readers:    []cmd.LineReader{loader},
+		report:     newMockReport(replay.exceptionCh),
+		connCreator: func(connID uint64) conn.Conn {
+			return &mockConn{
+				connID:  connID,
+				cmdCh:   cmdCh,
+				closeCh: replay.closeCh,
+				closed:  make(chan struct{}),
+			}
+		},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+
+	loader.write([]byte("invalid command\n"))
+	now := time.Now()
+	command := newMockCommand(1)
+	command.StartTs = now
+	loader.writeCommand(command, cmd.FormatAuditLogPlugin)
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+
+	<-cmdCh
+	replay.Stop(nil)
+	loader.Close()
+}
+
+func BenchmarkMultiBufferedDecoder(b *testing.B) {
+	bufferSizes := []int{-1, 0, 1, 2, 4, 8, 16, 32, 64, 128, 256}
+	readerCounts := []int{1, 2, 4, 8, 16, 32}
+
+	for _, bufSize := range bufferSizes {
+		for _, readerCount := range readerCounts {
+			b.Run(fmt.Sprintf("BufSize%d/ReaderCount%d", bufSize, readerCount), func(b *testing.B) {
+				ctx := context.Background()
+				readers := make([]cmd.LineReader, readerCount)
+				for i := range readers {
+					readers[i] = &endlessReader{
+						line: `[2025/09/14 16:16:31.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=b] [EVENT=COMPLETED]`,
+					}
+				}
+				r := &replay{
+					cfg: ReplayConfig{
+						Format: cmd.FormatAuditLogPlugin,
+					},
+				}
+				decoder, err := r.constructMergeDecoders(ctx, readers)
+				require.NoError(b, err)
+
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					_, err := decoder.Decode()
+					require.NoError(b, err)
+				}
+			})
 		}
 	}
 }

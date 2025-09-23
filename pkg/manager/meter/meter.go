@@ -43,30 +43,17 @@ type Meter struct {
 }
 
 func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
-	if len(cfg.Metering.Bucket) == 0 {
+	if len(cfg.Metering.Type) == 0 || len(cfg.Metering.Bucket) == 0 {
 		return nil, nil
 	}
-	providerType := storage.ProviderTypeS3
-	if len(cfg.Metering.Type) > 0 {
-		providerType = storage.ProviderType(cfg.Metering.Type)
-	}
-
-	s3Config := &storage.ProviderConfig{
-		Type:   providerType,
-		Bucket: cfg.Metering.Bucket,
-		Region: cfg.Metering.Region,
-		Prefix: cfg.Metering.Prefix,
-		AWS: &storage.AWSConfig{
-			AssumeRoleARN: cfg.Metering.RoleARN,
-		},
-	}
+	s3Config := cfg.Metering.ToProviderConfig()
 	provider, err := storage.NewObjectStorageProvider(s3Config)
 	if err != nil {
 		lg.Error("Failed to create storage provider", zap.Error(err))
 		return nil, err
 	}
 	meteringConfig := mconfig.DefaultConfig().WithLogger(lg.Named("metering_sdk"))
-	writer := meteringwriter.NewMeteringWriter(provider, meteringConfig)
+	writer := meteringwriter.NewMeteringWriterFromConfig(provider, meteringConfig, &cfg.Metering)
 	return &Meter{
 		lg:     lg,
 		data:   make(map[string]MeterData),
@@ -92,6 +79,7 @@ func (m *Meter) Start(ctx context.Context) {
 }
 
 func (m *Meter) flushLoop(ctx context.Context) {
+	m.lg.Info("metering is started")
 	// Control the writing timestamp accurately enough so that the previous round won't be overwritten by the next round.
 	curTime := time.Now().Unix()
 	nextTime := curTime/writeInterval*writeInterval + writeInterval
@@ -118,7 +106,7 @@ func (m *Meter) flush(ts int64, timeout time.Duration) {
 	if len(data) == 0 {
 		return
 	}
-	array := make([]map[string]any, len(data))
+	array := make([]map[string]any, 0, len(data))
 	for clusterID, d := range data {
 		array = append(array, map[string]any{
 			"version":         "1",

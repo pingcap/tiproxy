@@ -42,6 +42,9 @@ func (m *mockCapture) Progress() (float64, time.Time, bool, error) {
 	return m.progress, time.Time{}, m.done, m.err
 }
 
+func (m *mockCapture) Wait() {
+}
+
 func (m *mockCapture) Stop(err error) {
 	m.err = err
 }
@@ -66,6 +69,9 @@ func (m *mockReplay) Close() {
 
 func (m *mockReplay) Progress() (float64, time.Time, bool, error) {
 	return m.progress, time.Time{}, m.done, m.err
+}
+
+func (m *mockReplay) Wait() {
 }
 
 func (m *mockReplay) Start(cfg replay.ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {

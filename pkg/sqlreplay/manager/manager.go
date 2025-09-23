@@ -33,6 +33,7 @@ type JobManager interface {
 	StartCapture(capture.CaptureConfig) error
 	StartReplay(replay.ReplayConfig) error
 	GetCapture() capture.Capture
+	Wait()
 	Stop(CancelConfig) string
 	Jobs() string
 	Close()
@@ -160,6 +161,19 @@ func (jm *jobManager) Jobs() string {
 		return err.Error()
 	}
 	return hack.String(b)
+}
+
+func (jm *jobManager) Wait() {
+	job := jm.runningJob()
+	if job == nil {
+		return
+	}
+	switch job.Type() {
+	case Capture:
+		jm.capture.Wait()
+	case Replay:
+		jm.replay.Wait()
+	}
 }
 
 func (jm *jobManager) Stop(cfg CancelConfig) string {

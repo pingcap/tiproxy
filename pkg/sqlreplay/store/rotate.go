@@ -10,9 +10,15 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"go.uber.org/zap"
 )
 
@@ -99,15 +105,25 @@ type Reader interface {
 
 var _ Reader = (*rotateReader)(nil)
 
+type fileMeta struct {
+	fileName string
+	fileSize int64
+}
+
 type rotateReader struct {
 	cfg          ReaderCfg
 	curFileName  string
-	curFileIdx   int
+	curFileIdx   int64
 	reader       io.Reader
 	externalFile storage.ExternalFileReader
 	storage      storage.ExternalStorage
 	lg           *zap.Logger
 	eof          bool
+
+	// fileMetaCache and fileMetaCacheIdx are used to access and cache file metadata.
+	// The fileMeta in the cache should be sorted by file index in ascending order.
+	fileMetaCache    []fileMeta
+	fileMetaCacheIdx int
 }
 
 func newRotateReader(lg *zap.Logger, storage storage.ExternalStorage, cfg ReaderCfg) (*rotateReader, error) {
@@ -163,27 +179,35 @@ func (r *rotateReader) Close() error {
 }
 
 func (r *rotateReader) nextReader() error {
-	var minFileIdx int
+	var minFileIdx int64
 	var minFileName string
+	fileNamePrefix := getFileNamePrefix(r.cfg.Format)
+	parseFunc := getParseFileNameFunc(r.cfg.Format)
+	fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-	err := r.storage.WalkDir(ctx, &storage.WalkOption{},
-		func(name string, size int64) error {
+	startTime := time.Now()
+	err := r.walkFile(ctx,
+		func(name string, size int64) (bool, error) {
 			if !strings.HasPrefix(name, fileNamePrefix) {
-				return nil
+				return false, nil
 			}
-			fileIdx := parseFileIdx(name)
+			if !fileFilter(name, fileNamePrefix) {
+				return false, nil
+			}
+			fileIdx := parseFunc(name, fileNamePrefix)
 			if fileIdx == 0 {
-				r.lg.Warn("traffic file name is invalid", zap.String("filename", name))
-				return nil
+				r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", r.cfg.Format))
+				return false, nil
 			}
 			if fileIdx <= r.curFileIdx {
-				return nil
+				return false, nil
 			}
 			if minFileName == "" || fileIdx < minFileIdx {
 				minFileIdx = fileIdx
 				minFileName = name
+				return true, nil
 			}
-			return nil
+			return false, nil
 		})
 	cancel()
 	if err != nil {
@@ -211,13 +235,145 @@ func (r *rotateReader) nextReader() error {
 	if err != nil {
 		return err
 	}
-	r.lg.Info("reading next file", zap.String("file", minFileName))
+	r.lg.Info("reading next file", zap.String("prefix", r.storage.URI()),
+		zap.String("file", minFileName),
+		zap.Duration("open_time", time.Since(startTime)),
+		zap.Int("files_in_cache", len(r.fileMetaCache)-r.fileMetaCacheIdx))
 	return nil
+}
+
+// walkFile walks through the files in the storage and applies the given function to each file.
+// The return value of the function indicates whether this file is valid or not.
+// For S3 storage and audit log format, it'll stop walking once the fn returns true.
+func (r *rotateReader) walkFile(ctx context.Context, fn func(string, int64) (bool, error)) error {
+	if s3, ok := r.storage.(*storage.S3Storage); ok && r.cfg.Format == cmd.FormatAuditLogPlugin {
+		return r.walkS3ForAuditLogFile(ctx, s3.GetS3APIHandle(), s3.GetOptions(), fn)
+	}
+	return r.storage.WalkDir(ctx, &storage.WalkOption{}, func(name string, size int64) error {
+		_, err := fn(name, size)
+		return err
+	})
+}
+
+// walkS3ForAuditLogFile is a special implementation to list files from S3 for audit log format.
+// The reason is that the audit log file name contains timestamp info, and we may
+// want to start from a specific time point. The normal WalkDir implementation
+// just lists all files in the directory, which is not efficient when there are
+// many files.
+// Most of the code is copied from storage/s3.go's WalkDir implementation.
+func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
+	for ; r.fileMetaCacheIdx < len(r.fileMetaCache); r.fileMetaCacheIdx++ {
+		meta := r.fileMetaCache[r.fileMetaCacheIdx]
+		valid, err := fn(meta.fileName, meta.fileSize)
+		if err != nil {
+			return err
+		}
+		if valid {
+			r.fileMetaCacheIdx++
+			return nil
+		}
+	}
+
+	// The cache is used up, and we didn't find the valid file yet.
+	pathPrefix := options.Prefix
+	if len(pathPrefix) > 0 && !strings.HasSuffix(pathPrefix, "/") {
+		pathPrefix += "/"
+	}
+
+	prefix := pathPrefix + getFileNamePrefix(r.cfg.Format)
+
+	var marker string
+	if r.curFileName != "" {
+		marker = pathPrefix + r.curFileName
+	} else if !r.cfg.CommandStartTime.IsZero() {
+		t := r.cfg.CommandStartTime.In(time.Local)
+		marker = fmt.Sprintf("%s%s", prefix, t.Format(logTimeLayout))
+	}
+
+	req := &s3.ListObjectsInput{
+		Bucket:  aws.String(options.Bucket),
+		Prefix:  aws.String(prefix),
+		MaxKeys: aws.Int64(1000),
+		Marker:  aws.String(marker),
+	}
+	// The first result of `ListObjects` may include the `marker` file itself, so
+	// we still need to walk and filter it. It's possible to further optimize to
+	// skip the first file and take the second one if the file name is exactly the
+	// same with the `marker`.
+	res, err := s3api.ListObjectsWithContext(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	startAppendingFileToCache := false
+	for _, file := range res.Contents {
+		// when walk on specify directory, the result include storage.Prefix,
+		// which can not be reuse in other API(Open/Read) directly.
+		// so we use TrimPrefix to filter Prefix for next Open/Read.
+		path := strings.TrimPrefix(*file.Key, options.Prefix)
+		// trim the prefix '/' to ensure that the path returned is consistent with the local storage
+		path = strings.TrimPrefix(path, "/")
+		itemSize := *file.Size
+
+		// filter out s3's empty directory items
+		if itemSize <= 0 && strings.HasSuffix(path, "/") {
+			continue
+		}
+		if startAppendingFileToCache {
+			r.fileMetaCache = append(r.fileMetaCache, fileMeta{
+				fileName: path,
+				fileSize: itemSize,
+			})
+			continue
+		}
+
+		valid, err := fn(path, itemSize)
+		if err != nil {
+			return err
+		}
+		if valid {
+			startAppendingFileToCache = true
+			if r.fileMetaCache == nil {
+				r.fileMetaCache = make([]fileMeta, 0, 1000)
+			} else {
+				r.fileMetaCache = r.fileMetaCache[:0]
+			}
+			r.fileMetaCacheIdx = 0
+		}
+	}
+
+	return nil
+}
+
+func getFileNamePrefix(format string) string {
+	switch format {
+	case cmd.FormatAuditLogPlugin:
+		return auditFileNamePrefix
+	}
+	return fileNamePrefix
+}
+
+func getParseFileNameFunc(format string) func(string, string) int64 {
+	switch format {
+	case cmd.FormatAuditLogPlugin:
+		return parseFileTimeToIdx
+	}
+	return parseFileIdx
+}
+
+func getFilterFileNameFunc(format string, commandStartTime time.Time) func(string, string) bool {
+	switch format {
+	case cmd.FormatAuditLogPlugin:
+		return func(name, fileNamePrefix string) bool {
+			return filterFileByTime(name, fileNamePrefix, commandStartTime)
+		}
+	}
+	return func(string, string) bool { return true }
 }
 
 // Parse the file name to get the file index.
 // filename pattern: traffic-1.log.gz
-func parseFileIdx(name string) int {
+func parseFileIdx(name, fileNamePrefix string) int64 {
 	if !strings.HasPrefix(name, fileNamePrefix) {
 		return 0
 	}
@@ -237,5 +393,52 @@ func parseFileIdx(name string) int {
 	if err != nil {
 		return 0
 	}
-	return fileIdx
+	return int64(fileIdx)
+}
+
+// Parse the file name to get the file timestamp.
+// filename pattern: tidb-audit-2025-09-10T17-01-56.073.log
+func parseFileTime(name, fileNamePrefix string) time.Time {
+	if !strings.HasPrefix(name, fileNamePrefix) {
+		return time.Time{}
+	}
+	startIdx := len(fileNamePrefix)
+	if len(name) <= startIdx+len(fileNameSuffix) {
+		return time.Time{}
+	}
+	endIdx := len(name)
+	if strings.HasSuffix(name, fileCompressFormat) {
+		endIdx -= len(fileCompressFormat)
+	}
+	if !strings.HasSuffix(name[:endIdx], fileNameSuffix) {
+		return time.Time{}
+	}
+	endIdx -= len(fileNameSuffix)
+	// The `TimeZone` part is not included in the audit log file name, so we use the `time.Local` here.
+	// It's always possible to workaround it by adjusting the commandStartTime, so just using `time.Local`
+	// here is acceptable. Using the timezone from `commandStartTime` is another option, but it's a bit tricky.
+	ts, err := time.ParseInLocation(logTimeLayout, name[startIdx:endIdx], time.Local)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
+func parseFileTimeToIdx(name, fileNamePrefix string) int64 {
+	ts := parseFileTime(name, fileNamePrefix)
+	if ts.IsZero() {
+		return 0
+	}
+	return ts.UnixNano() / 1000000
+}
+
+func filterFileByTime(name, fileNamePrefix string, commandStartTime time.Time) bool {
+	fileTime := parseFileTime(name, fileNamePrefix)
+	if fileTime.IsZero() {
+		return false
+	}
+	// Be careful that the log file name doesn't contain timezone info.
+	// We assume the log file time is the Local time. But anyway we could workaround it by
+	// adjusting the commandStartTime.
+	return fileTime.After(commandStartTime)
 }

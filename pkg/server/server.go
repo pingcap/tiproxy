@@ -176,6 +176,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		if err != nil {
 			return
 		}
+		if srv.meter != nil {
+			srv.meter.Start(ctx)
+		}
 	}
 
 	// setup proxy server

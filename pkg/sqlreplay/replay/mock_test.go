@@ -81,6 +81,7 @@ func (m *mockChLoader) writeCommand(cmd *cmd.Command) {
 }
 
 func (m *mockChLoader) Read(data []byte) (string, int, error) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
 	for {
 		_, err := m.buf.Read(data)
 		if errors.Is(err, io.EOF) {
@@ -88,7 +89,7 @@ func (m *mockChLoader) Read(data []byte) (string, int, error) {
 			if !ok {
 				return "", 0, io.EOF
 			}
-			_ = command.Encode(&m.buf)
+			_ = encoder.Encode(command, &m.buf)
 		} else {
 			return "", 0, err
 		}
@@ -96,6 +97,7 @@ func (m *mockChLoader) Read(data []byte) (string, int, error) {
 }
 
 func (m *mockChLoader) ReadLine() ([]byte, string, int, error) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
 	for {
 		line, err := m.buf.ReadBytes('\n')
 		if errors.Is(err, io.EOF) {
@@ -103,7 +105,7 @@ func (m *mockChLoader) ReadLine() ([]byte, string, int, error) {
 			if !ok {
 				return nil, "", 0, io.EOF
 			}
-			_ = command.Encode(&m.buf)
+			_ = encoder.Encode(command, &m.buf)
 		} else {
 			return line[:len(line)-1], "", 0, err
 		}
@@ -128,8 +130,13 @@ func newMockNormalLoader() *mockNormalLoader {
 	return &mockNormalLoader{}
 }
 
-func (m *mockNormalLoader) writeCommand(cmd *cmd.Command) {
-	_ = cmd.Encode(&m.buf)
+func (m *mockNormalLoader) writeCommand(command *cmd.Command, format string) {
+	encoder := cmd.NewCmdEncoder(format)
+	_ = encoder.Encode(command, &m.buf)
+}
+
+func (m *mockNormalLoader) write(data []byte) {
+	_, _ = m.buf.Write(data)
 }
 
 func (m *mockNormalLoader) Read(data []byte) (string, int, error) {
@@ -181,4 +188,26 @@ func (mr *mockReport) Stop(err error) {
 }
 
 func (mr *mockReport) Close() {
+}
+
+// endlessReader always returns the same line.
+// The `Read` implementations is not correct, so use it only with audit log format.
+type endlessReader struct {
+	line string
+}
+
+func (er *endlessReader) ReadLine() ([]byte, string, int, error) {
+	return []byte(er.line), "", 0, nil
+}
+
+func (er *endlessReader) Read(data []byte) (string, int, error) {
+	n := copy(data, []byte(er.line))
+	return "", n, nil
+}
+
+func (er *endlessReader) Close() {
+}
+
+func (er *endlessReader) String() string {
+	return "endlessReader"
 }

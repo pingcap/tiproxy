@@ -877,3 +877,7 @@ func MakeCloseStmtRequest(stmtID uint32) []byte {
 	binary.LittleEndian.PutUint32(request[1:], stmtID)
 	return request
 }
+
+func MakeInitDBRequest(db string) []byte {
+	return append([]byte{ComInitDB.Byte()}, hack.Slice(db)...)
+}

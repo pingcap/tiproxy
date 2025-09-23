@@ -68,8 +68,8 @@ func (c *mockBackendConn) ConnID() uint64 {
 	return 1
 }
 
-func (c *mockBackendConn) ExecuteCmd(ctx context.Context, request []byte) (err error) {
-	return c.execErr
+func (c *mockBackendConn) ExecuteCmd(ctx context.Context, request []byte) (resp []byte, err error) {
+	return nil, c.execErr
 }
 
 func (c *mockBackendConn) Query(ctx context.Context, stmt string) error {

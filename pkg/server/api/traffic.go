@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"go.uber.org/zap"
@@ -99,8 +100,28 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	}
 	cfg.Username = c.PostForm("username")
 	cfg.Password = c.PostForm("password")
+	cfg.Format = c.PostForm("format")
 	cfg.ReadOnly = strings.EqualFold(c.PostForm("readonly"), "true")
+	cfg.IgnoreErrs = strings.EqualFold(c.PostForm("ignore-errs"), "true")
 	cfg.KeyFile = globalCfg.Security.EncryptionKeyPath
+	// By default, if `cmdstarttime` is not specified, use zero time
+	if cmdStartTimeStr := c.PostForm("cmdstarttime"); cmdStartTimeStr != "" {
+		cmdStartTime, err := time.Parse(time.RFC3339, cmdStartTimeStr)
+		if err != nil {
+			cmdStartTime, err = time.Parse(time.RFC3339Nano, cmdStartTimeStr)
+			if err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		cfg.CommandStartTime = cmdStartTime
+	}
+	cfg.BufSize, _ = strconv.Atoi(c.PostForm("bufsize"))
+	cfg.PSCloseStrategy = cmd.PSCloseStrategy(c.PostForm("ps-close"))
+	if cfg.PSCloseStrategy == "" {
+		// set the default value to `directed`
+		cfg.PSCloseStrategy = cmd.PSCloseStrategyDirected
+	}
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

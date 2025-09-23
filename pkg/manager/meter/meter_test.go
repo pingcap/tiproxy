@@ -20,31 +20,48 @@ import (
 
 func TestNewMeter(t *testing.T) {
 	tests := []struct {
-		cfg   config.Config
-		isNil bool
+		cfg    config.Config
+		hasErr bool
+		isNil  bool
 	}{
 		{
-			cfg:   config.Config{},
-			isNil: true,
+			cfg:    config.Config{},
+			hasErr: false,
+			isNil:  true,
 		},
 		{
 			cfg: config.Config{
-				Metering: config.Metering{
+				Metering: mconfig.MeteringConfig{
+					Type: storage.ProviderTypeS3,
+				},
+			},
+			hasErr: false,
+			isNil:  true,
+		},
+		{
+			cfg: config.Config{
+				Metering: mconfig.MeteringConfig{
+					Type:   storage.ProviderTypeS3,
 					Bucket: "bucket",
 				},
 			},
-			isNil: false,
+			hasErr: false,
+			isNil:  false,
 		},
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
-	for _, test := range tests {
+	for i, test := range tests {
 		m, err := NewMeter(&test.cfg, lg)
-		require.NoError(t, err)
-		if test.isNil {
-			require.Nil(t, m)
+		if test.hasErr {
+			require.Error(t, err, "case %d", i)
 		} else {
-			require.NotNil(t, m)
+			require.NoError(t, err, "case %d", i)
+		}
+		if test.isNil {
+			require.Nil(t, m, "case %d", i)
+		} else {
+			require.NotNil(t, m, "case %d", i)
 			m.Close()
 			require.NotEmpty(t, m.uuid)
 			require.NotContains(t, m.uuid, "-")
@@ -60,7 +77,7 @@ func TestWrite(t *testing.T) {
 	m.flush(ts, time.Second)
 
 	data := readMeteringData(t, reader, ts)
-	require.True(t, len(data) > 0)
+	require.Len(t, data, 2)
 	resp, crossAZ := getValuesFromData(t, data, "cluster-1")
 	require.Equal(t, int64(100), resp)
 	require.Equal(t, int64(200), crossAZ)
@@ -95,6 +112,7 @@ func TestLoop(t *testing.T) {
 		if len(data) == 0 {
 			continue
 		}
+		require.Len(t, data, 2)
 		resp, crossAZ := getValuesFromData(t, data, "cluster-1")
 		totalResp["cluster-1"] += resp
 		totalCrossAZ["cluster-1"] += crossAZ
@@ -111,10 +129,12 @@ func TestLoop(t *testing.T) {
 
 func createLocalMeter(t *testing.T, dir string) (*Meter, *meteringreader.MeteringReader) {
 	lg, _ := logger.CreateLoggerForTest(t)
+	meteringConfig := mconfig.MeteringConfig{
+		Type:   storage.ProviderTypeS3,
+		Bucket: "bucket",
+	}
 	m, err := NewMeter(&config.Config{
-		Metering: config.Metering{
-			Bucket: "bucket",
-		},
+		Metering: meteringConfig,
 	}, lg)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -131,9 +151,9 @@ func createLocalMeter(t *testing.T, dir string) (*Meter, *meteringreader.Meterin
 	}
 	provider, err := storage.NewObjectStorageProvider(localConfig)
 	require.NoError(t, err)
-	meteringConfig := mconfig.DefaultConfig().WithLogger(lg)
-	m.writer = meteringwriter.NewMeteringWriter(provider, meteringConfig)
-	reader := meteringreader.NewMeteringReader(provider, meteringConfig)
+	mConfig := mconfig.DefaultConfig().WithLogger(lg)
+	m.writer = meteringwriter.NewMeteringWriterFromConfig(provider, mConfig, &meteringConfig)
+	reader := meteringreader.NewMeteringReader(provider, mConfig)
 	t.Cleanup(func() {
 		require.NoError(t, reader.Close())
 	})

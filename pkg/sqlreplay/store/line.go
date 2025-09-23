@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
@@ -29,8 +30,11 @@ func NewWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg Writ
 
 type ReaderCfg struct {
 	Dir              string
+	Format           string
 	EncryptionMethod string
 	EncryptionKey    []byte
+	// Reader will skip the files whose end time is before CommandStartTime.
+	CommandStartTime time.Time
 }
 
 var _ cmd.LineReader = (*loader)(nil)

@@ -5,6 +5,7 @@ package store
 
 import (
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,9 +13,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/service/s3"
+	backuppb "github.com/pingcap/kvproto/pkg/brpb"
+	"github.com/pingcap/tidb/br/pkg/mock"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
 
@@ -99,7 +108,7 @@ func TestCompress(t *testing.T) {
 func TestParseFileIdx(t *testing.T) {
 	tests := []struct {
 		fileName string
-		fileIdx  int
+		fileIdx  int64
 	}{
 		{"traffic-1.log", 1},
 		{"traffic-2.log.gz", 2},
@@ -115,13 +124,41 @@ func TestParseFileIdx(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		idx := parseFileIdx(test.fileName)
+		idx := parseFileIdx(test.fileName, fileNamePrefix)
+		require.Equal(t, test.fileIdx, idx, "case %d", i)
+	}
+}
+
+func TestParseFileTime(t *testing.T) {
+	// Calculate the current timezone shift
+	_, offset := time.Now().Zone()
+
+	tests := []struct {
+		fileName string
+		fileIdx  int64
+	}{
+		{"tidb-audit-2025-09-10T17-01-56.073.log", 1757523716073 - int64(offset*1000)},
+		{"tidb-audit-2025-09-10T17-01-56.172.log.gz", 1757523716172 - int64(offset*1000)},
+		{"tidb-audit-2025-09-10T17-01-56.log.gz", 1757523716000 - int64(offset*1000)},
+		{"traffic-2025-09-10T17-01-56.172.log", 0},
+		{"traffic-2025-09-10T17-01-56.172.log.gz", 0},
+		{"tidb-audit-.log", 0},
+		{"tidb-audit-.log.gz", 0},
+		{"tidb-audit.log", 0},
+		{"tidb-audit-100.gz", 0},
+		{"test", 0},
+		{"tidb-audit.log.gz", 0},
+	}
+
+	for i, test := range tests {
+		idx := parseFileTimeToIdx(test.fileName, auditFileNamePrefix)
 		require.Equal(t, test.fileIdx, idx, "case %d", i)
 	}
 }
 
 func TestIterateFiles(t *testing.T) {
 	tests := []struct {
+		format    string
 		fileNames []string
 		order     []string
 	}{
@@ -170,6 +207,38 @@ func TestIterateFiles(t *testing.T) {
 				"traffic-2.log.gz",
 			},
 		},
+		{
+			format: cmd.FormatAuditLogPlugin,
+			fileNames: []string{
+				"tidb-audit-2025-09-10T17-01-56.073.log",
+			},
+			order: []string{
+				"tidb-audit-2025-09-10T17-01-56.073.log",
+			},
+		},
+		{
+			format: cmd.FormatAuditLogPlugin,
+			fileNames: []string{
+				"tidb-audit-2025-09-10T17-01-56.172.log",
+				"tidb-audit-2025-09-10T17-01-56.073.log",
+				"tidb-audit-2025-09-10T17-01-55.976.log",
+			},
+			order: []string{
+				"tidb-audit-2025-09-10T17-01-55.976.log",
+				"tidb-audit-2025-09-10T17-01-56.073.log",
+				"tidb-audit-2025-09-10T17-01-56.172.log",
+			},
+		},
+		{
+			format: cmd.FormatAuditLogPlugin,
+			fileNames: []string{
+				"tidb-audit.log",
+				"tidb-audit-2025-09-10T17-01-55.976.log",
+			},
+			order: []string{
+				"tidb-audit-2025-09-10T17-01-55.976.log",
+			},
+		},
 	}
 
 	dir := t.TempDir()
@@ -195,7 +264,7 @@ func TestIterateFiles(t *testing.T) {
 			}
 			require.NoError(t, f.Close())
 		}
-		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: test.format})
 		require.NoError(t, err)
 		fileOrder := make([]string, 0, len(test.order))
 		for {
@@ -308,4 +377,173 @@ func TestCompressAndEncrypt(t *testing.T) {
 	require.Equal(t, 8, n)
 	require.Equal(t, []byte("testtest"), data[:8])
 	require.NoError(t, reader.Close())
+}
+
+func TestFilterFileNameByStartTime(t *testing.T) {
+	commandStartTime, err := time.ParseInLocation(logTimeLayout, "2025-09-10T17-01-56.050", time.Local)
+	require.NoError(t, err)
+	tests := []struct {
+		fileName        string
+		expectToInclude bool
+	}{
+		// Files after start time should be included
+		{
+			fileName:        "tidb-audit-2025-09-10T17-01-56.073.log",
+			expectToInclude: true,
+		},
+		{
+			fileName:        "tidb-audit-2025-09-10T17-01-56.172.log.gz",
+			expectToInclude: true,
+		},
+		{
+			fileName:        "tidb-audit-2025-09-11T10-30-00.500.log",
+			expectToInclude: true,
+		},
+		// Files before or equal to start time should be excluded
+		{
+			fileName:        "tidb-audit-2025-09-10T17-01-55.073.log",
+			expectToInclude: false,
+		},
+		{
+			fileName:        "tidb-audit-2025-09-10T17-01-56.000.log",
+			expectToInclude: false,
+		},
+		// Invalid file names should be excluded
+		{
+			fileName:        "tidb-audit-invalid-timestamp.log",
+			expectToInclude: false,
+		},
+		{
+			fileName:        "traffic-1.log",
+			expectToInclude: false,
+		},
+		{
+			fileName:        "tidb-audit.log",
+			expectToInclude: false,
+		},
+		{
+			fileName:        "tidb-audit-2025-13-40T25-70-70.log",
+			expectToInclude: false,
+		},
+	}
+	expectedFileOrder := []string{
+		"tidb-audit-2025-09-10T17-01-56.073.log",
+		"tidb-audit-2025-09-10T17-01-56.172.log.gz",
+		"tidb-audit-2025-09-11T10-30-00.500.log",
+	}
+	for i, test := range tests {
+		included := filterFileByTime(test.fileName, auditFileNamePrefix, commandStartTime)
+		require.Equal(t, test.expectToInclude, included, "case %d", i)
+	}
+
+	dir := t.TempDir()
+	require.NoError(t, os.RemoveAll(dir))
+	require.NoError(t, os.MkdirAll(dir, 0777))
+	for _, test := range tests {
+		f, err := os.Create(filepath.Join(dir, test.fileName))
+		require.NoError(t, err)
+		if strings.HasSuffix(test.fileName, ".gz") {
+			w := gzip.NewWriter(f)
+			_, err := w.Write([]byte{})
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+		}
+		require.NoError(t, f.Close())
+	}
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	lg, _ := logger.CreateLoggerForTest(t)
+	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, CommandStartTime: commandStartTime})
+	require.NoError(t, err)
+	var fileOrder []string
+	for {
+		if err := l.nextReader(); err != nil {
+			require.True(t, errors.Is(err, io.EOF))
+			break
+		}
+		fileOrder = append(fileOrder, l.curFileName)
+	}
+	require.Equal(t, expectedFileOrder, fileOrder)
+}
+
+func TestWalkS3ForAuditLogFile(t *testing.T) {
+	controller := gomock.NewController(t)
+	s3api := mock.NewMockS3API(controller)
+
+	var files []*s3.Object
+	// Append 1000 files
+	for i := range 1000 {
+		files = append(files, &s3.Object{
+			Key:  aws.String(fmt.Sprintf("prefix/tidb-audit-2025-09-19T16-54-44.%03d.log", i)),
+			Size: aws.Int64(200),
+		})
+	}
+	for i := range 1000 {
+		files = append(files, &s3.Object{
+			Key:  aws.String(fmt.Sprintf("prefix/tidb-audit-2025-09-19T16-54-45.%03d.log", i)),
+			Size: aws.Int64(200),
+		})
+	}
+
+	// First request: return first 1000 files
+	// Second request: from 44.999 to 45.999, return next 1000 files
+	// Third request: from 45.998 to end, return 2 files
+	// Fourth request: from 45.999 end, return 1 file
+	s3api.EXPECT().ListObjectsWithContext(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
+		func(ctx context.Context, req *s3.ListObjectsInput, _ ...request.Option) (*s3.ListObjectsOutput, error) {
+			require.Equal(t, "bucket", *req.Bucket)
+			require.Equal(t, "prefix/tidb-audit-", *req.Prefix)
+			retFiles := files
+			for i := range files {
+				if *files[i].Key >= *req.Marker {
+					retFiles = files[i:]
+					break
+				}
+			}
+			if len(retFiles) > int(*req.MaxKeys) {
+				retFiles = retFiles[:*req.MaxKeys]
+			}
+
+			return &s3.ListObjectsOutput{
+				Contents: retFiles,
+			}, nil
+		},
+	)
+
+	r := &rotateReader{
+		cfg: ReaderCfg{
+			Format:           cmd.FormatAuditLogPlugin,
+			CommandStartTime: time.Time{},
+		},
+		curFileName: "",
+	}
+	selectedFileCount := 0
+	for {
+		selected := false
+		err := r.walkS3ForAuditLogFile(context.Background(), s3api, &backuppb.S3{
+			Bucket: "bucket",
+			Prefix: "prefix/",
+		}, func(fileName string, size int64) (bool, error) {
+			fileIdx := parseFileTimeToIdx(fileName, auditFileNamePrefix)
+			require.GreaterOrEqual(t, fileIdx, r.curFileIdx)
+
+			if fileIdx <= r.curFileIdx {
+				return false, nil
+			}
+
+			r.curFileIdx = fileIdx
+			r.curFileName = fileName
+			selected = true
+			return true, nil
+		})
+		require.NoError(t, err)
+
+		if !selected {
+			break
+		}
+		selectedFileCount++
+	}
+	// Iterate through the whole 2000 files
+	require.Equal(t, 2000, selectedFileCount)
 }
