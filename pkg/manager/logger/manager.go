@@ -77,6 +77,7 @@ func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Conf
 					zap.NamedError("cfg marshal error", merr),
 				)
 			}
+			lm.logger.Info("current config", zap.Any("cfg", acfg))
 		}
 	}
 }

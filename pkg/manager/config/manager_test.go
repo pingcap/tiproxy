@@ -14,7 +14,7 @@ import (
 )
 
 func testConfigManager(t *testing.T, configFile string, advertiseAddr string) (*ConfigManager, fmt.Stringer, context.Context) {
-	logger, text := logger.CreateLoggerForTest(t)
+	_, text := logger.CreateLoggerForTest(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if ddl, ok := t.Deadline(); ok {
@@ -23,7 +23,7 @@ func testConfigManager(t *testing.T, configFile string, advertiseAddr string) (*
 
 	cfgmgr := NewConfigManager()
 	cfgmgr.checkFileInterval = 20 * time.Millisecond
-	require.NoError(t, cfgmgr.Init(ctx, logger, configFile, advertiseAddr))
+	require.NoError(t, cfgmgr.Init(ctx, configFile, advertiseAddr))
 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())
