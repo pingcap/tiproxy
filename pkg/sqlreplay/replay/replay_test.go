@@ -37,7 +37,7 @@ func TestManageConns(t *testing.T) {
 			connCount++
 			return &mockConn{
 				connID:  connID,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -62,8 +62,8 @@ func TestManageConns(t *testing.T) {
 		return connCount == 2
 	}, 3*time.Second, 10*time.Millisecond)
 
-	replay.closeCh <- 1
-	replay.closeCh <- 2
+	replay.closeConnCh <- 1
+	replay.closeConnCh <- 2
 	loader.Close()
 	require.Eventually(t, func() bool {
 		replay.Lock()
@@ -138,7 +138,7 @@ func TestReplaySpeed(t *testing.T) {
 				return &mockConn{
 					connID:  connID,
 					cmdCh:   cmdCh,
-					closeCh: replay.closeCh,
+					closeCh: replay.closeConnCh,
 					closed:  make(chan struct{}),
 				}
 			},
@@ -172,7 +172,7 @@ func TestReplaySpeed(t *testing.T) {
 		require.Greater(t, totalTime, lastTotalTime, "speed: %f", speed)
 		lastTotalTime = totalTime
 
-		replay.Stop(nil)
+		replay.Stop(nil, false)
 		loader.Close()
 	}
 }
@@ -203,7 +203,7 @@ func TestProgress(t *testing.T) {
 			return &mockConn{
 				connID:  connID,
 				cmdCh:   cmdCh,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -253,7 +253,7 @@ func TestPendingCmds(t *testing.T) {
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockPendingConn{
 				connID:  connID,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 				stats:   &replay.replayStats,
 			}
@@ -355,7 +355,7 @@ func TestIgnoreErrors(t *testing.T) {
 			return &mockConn{
 				connID:  connID,
 				cmdCh:   cmdCh,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -370,7 +370,7 @@ func TestIgnoreErrors(t *testing.T) {
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
 	<-cmdCh
-	replay.Stop(nil)
+	replay.Stop(nil, false)
 	loader.Close()
 }
 

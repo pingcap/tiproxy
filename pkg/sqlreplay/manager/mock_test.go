@@ -81,6 +81,6 @@ func (m *mockReplay) Start(cfg replay.ReplayConfig, backendTLSConfig *tls.Config
 	return nil
 }
 
-func (m *mockReplay) Stop(err error) {
+func (m *mockReplay) Stop(err error, _ bool) {
 	m.err = err
 }

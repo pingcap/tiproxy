@@ -52,7 +52,7 @@ type Replay interface {
 	// Wait for the job done.
 	Wait()
 	// Stop stops the replay
-	Stop(err error)
+	Stop(err error, graceful bool)
 	// Progress returns the progress of the replay job
 	Progress() (float64, time.Time, bool, error)
 	// Close closes the replay
@@ -165,7 +165,8 @@ type replay struct {
 	replayStats      conn.ReplayStats
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
-	closeCh          chan uint64
+	closeConnCh      chan uint64
+	gracefulStop     atomic.Bool
 	wg               waitgroup.WaitGroup
 	cancel           context.CancelFunc
 	connCreator      conn.ConnCreator
@@ -207,7 +208,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.err = nil
 	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
-	r.closeCh = make(chan uint64, maxPendingExceptions)
+	r.closeConnCh = make(chan uint64, maxPendingExceptions)
 	key, err := store.LoadEncryptionKey(r.meta.EncryptMethod, cfg.KeyFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load encryption key")
@@ -219,7 +220,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	if r.connCreator == nil {
 		r.connCreator = func(connID uint64) conn.Conn {
 			return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
-				connID, bcConfig, r.exceptionCh, r.closeCh, cfg.ReadOnly, &r.replayStats)
+				connID, bcConfig, r.exceptionCh, r.closeConnCh, cfg.ReadOnly, &r.replayStats)
 		}
 	}
 	r.report = cfg.report
@@ -270,10 +271,10 @@ func (r *replay) readCommands(ctx context.Context) {
 	connCount := 0                      // alive connection count
 	maxPendingCmds := int64(0)
 	extraWaitTime := time.Duration(0)
-	for ctx.Err() == nil {
+	for ctx.Err() == nil && !r.gracefulStop.Load() {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
-			case id := <-r.closeCh:
+			case id := <-r.closeConnCh:
 				r.closeConn(id, conns, &connCount)
 			default:
 				hasCloseEvent = false
@@ -343,7 +344,9 @@ func (r *replay) readCommands(ctx context.Context) {
 		}
 	}
 	r.lg.Info("finished decoding commands, draining connections", zap.Int64("max_pending_cmds", maxPendingCmds),
-		zap.Duration("extra_wait_time", extraWaitTime), zap.Int("alive_conns", connCount))
+		zap.Duration("extra_wait_time", extraWaitTime),
+		zap.Int("alive_conns", connCount),
+		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())))
 
 	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
@@ -355,7 +358,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	// Wait until all connections are closed before logging the finished message.
 	// Besides, drain all close events to avoid blocking connections at writing to channels.
 	for connCount > 0 {
-		id := <-r.closeCh
+		id := <-r.closeConnCh
 		r.closeConn(id, conns, &connCount)
 	}
 	r.stop(err)
@@ -492,7 +495,8 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
 				zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 				zap.Duration("replay_elapsed", time.Since(r.startTime)),
-				zap.Duration("decode_elapsed", time.Duration(decodeElapsed))) // if shorter than replay_elapsed, decode is slow
+				zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
+				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())))
 		}
 	}
 }
@@ -530,6 +534,7 @@ func (r *replay) stop(err error) {
 		zap.Duration("replay_elapsed", time.Since(r.startTime)),
 		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
+		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 	}
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
@@ -560,7 +565,7 @@ func (r *replay) Wait() {
 	r.wg.Wait()
 }
 
-func (r *replay) Stop(err error) {
+func (r *replay) Stop(err error, graceful bool) {
 	r.Lock()
 	// already stopped
 	if r.startTime.IsZero() {
@@ -568,7 +573,9 @@ func (r *replay) Stop(err error) {
 		return
 	}
 	r.err = err
-	if r.cancel != nil {
+	if graceful {
+		r.gracefulStop.Store(true)
+	} else if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
 	}
@@ -577,7 +584,7 @@ func (r *replay) Stop(err error) {
 }
 
 func (r *replay) Close() {
-	r.Stop(errors.New("shutting down"))
+	r.Stop(errors.New("shutting down"), false)
 	if r.report != nil {
 		r.report.Close()
 	}

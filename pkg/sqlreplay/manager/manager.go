@@ -22,7 +22,8 @@ const (
 )
 
 type CancelConfig struct {
-	Type JobType
+	Type     JobType
+	Graceful bool
 }
 
 type CertManager interface {
@@ -188,7 +189,7 @@ func (jm *jobManager) Stop(cfg CancelConfig) string {
 	case Capture:
 		jm.capture.Stop(errors.Errorf("manually stopped"))
 	case Replay:
-		jm.replay.Stop(errors.Errorf("manually stopped"))
+		jm.replay.Stop(errors.Errorf("manually stopped, graceful: %v", cfg.Graceful), cfg.Graceful)
 	}
 	jm.updateProgress()
 	return "stopped: " + job.String()
