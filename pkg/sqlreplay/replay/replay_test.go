@@ -222,7 +222,7 @@ func TestProgress(t *testing.T) {
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 		for range 10 {
 			<-cmdCh
-			progress, _, _, err := replay.Progress()
+			progress, _, _, _, err := replay.Progress()
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, progress, float64(i)/10)
 			require.LessOrEqual(t, progress, 1.0)
@@ -275,10 +275,10 @@ func TestPendingCmds(t *testing.T) {
 
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 	require.Eventually(t, func() bool {
-		_, _, _, err := replay.Progress()
+		_, _, _, _, err := replay.Progress()
 		return err != nil
 	}, 5*time.Second, 10*time.Millisecond)
-	progress, _, done, err := replay.Progress()
+	progress, _, _, done, err := replay.Progress()
 	require.NotEqualValues(t, 1, progress)
 	require.True(t, done)
 	require.Contains(t, err.Error(), "too many pending commands")
@@ -383,7 +383,7 @@ func TestGracefulStop(t *testing.T) {
 	i := 0
 	loader := &customizedReader{
 		getCmd: func() *cmd.Command {
-			j := rand.Uint64N(100)
+			j := rand.Uint64N(100) + 1
 			command := newMockCommand(j)
 			i++
 			command.StartTs = time.Unix(0, int64(i)*int64(time.Microsecond))
@@ -414,6 +414,9 @@ func TestGracefulStop(t *testing.T) {
 	curCmdTs := replay.replayStats.CurCmdTs.Load()
 	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
 	require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Microsecond))
+	_, _, lastTs, _, err := replay.Progress()
+	require.ErrorContains(t, err, "graceful stop")
+	require.Equal(t, curCmdTs, lastTs.UnixNano())
 }
 
 func BenchmarkMultiBufferedDecoder(b *testing.B) {

@@ -122,16 +122,18 @@ var _ Job = (*replayJob)(nil)
 
 type replayJob struct {
 	job
-	cfg replay.ReplayConfig
+	cfg       replay.ReplayConfig
+	lastCmdTs time.Time
 }
 
 type replayJob4Marshal struct {
 	job4Marshal
-	Input    string  `json:"input,omitempty"`
-	Username string  `json:"username,omitempty"`
-	Format   string  `json:"format,omitempty"`
-	Speed    float64 `json:"speed,omitempty"`
-	ReadOnly bool    `json:"readonly,omitempty"`
+	LastCmdTs string  `json:"last_cmd_ts,omitempty"`
+	Input     string  `json:"input,omitempty"`
+	Username  string  `json:"username,omitempty"`
+	Format    string  `json:"format,omitempty"`
+	Speed     float64 `json:"speed,omitempty"`
+	ReadOnly  bool    `json:"readonly,omitempty"`
 }
 
 func (job *replayJob) Type() JobType {
@@ -143,6 +145,7 @@ func (job *replayJob) MarshalJSON() ([]byte, error) {
 	job4Marshal.Type = "replay"
 	r := replayJob4Marshal{
 		job4Marshal: *job4Marshal,
+		LastCmdTs:   job.lastCmdTs.Format(time.RFC3339Nano),
 		Input:       ast.RedactURL(job.cfg.Input),
 		Username:    job.cfg.Username,
 		Speed:       job.cfg.Speed,

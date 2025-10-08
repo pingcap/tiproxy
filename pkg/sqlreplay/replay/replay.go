@@ -54,7 +54,7 @@ type Replay interface {
 	// Stop stops the replay
 	Stop(err error, graceful bool)
 	// Progress returns the progress of the replay job
-	Progress() (float64, time.Time, bool, error)
+	Progress() (float64, time.Time, time.Time, bool, error)
 	// Close closes the replay
 	Close()
 }
@@ -457,14 +457,15 @@ func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount 
 	}
 }
 
-func (r *replay) Progress() (float64, time.Time, bool, error) {
+func (r *replay) Progress() (float64, time.Time, time.Time, bool, error) {
 	pendingCmds := r.replayStats.PendingCmds.Load()
 	r.Lock()
 	defer r.Unlock()
 	if r.meta.Cmds > 0 {
 		r.progress = float64(r.decodedCmds.Load()-uint64(pendingCmds)) / float64(r.meta.Cmds)
 	}
-	return r.progress, r.endTime, r.startTime.IsZero(), r.err
+	curCmdTs := time.Unix(0, r.replayStats.CurCmdTs.Load())
+	return r.progress, r.endTime, curCmdTs, r.startTime.IsZero(), r.err
 }
 
 func (r *replay) readMeta() *store.Meta {
