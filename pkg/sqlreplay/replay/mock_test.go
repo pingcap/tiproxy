@@ -83,10 +83,12 @@ func (c *mockDelayConn) Run(ctx context.Context) {
 			c.cmdCount.Add(-1)
 			c.stats.ReplayedCmds.Add(1)
 			c.stats.PendingCmds.Add(-1)
-		} else if c.stop.Load() {
+		}
+		if c.stop.Load() && c.cmdCount.Load() == 0 {
 			break
 		}
-		// time.Sleep(time.Millisecond)
+		// simulate execution delay
+		time.Sleep(time.Microsecond)
 	}
 	c.closeCh <- c.connID
 }

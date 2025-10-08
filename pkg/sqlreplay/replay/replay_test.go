@@ -386,7 +386,7 @@ func TestGracefulStop(t *testing.T) {
 			j := rand.Uint64N(100)
 			command := newMockCommand(j)
 			i++
-			command.StartTs = time.Unix(0, int64(i)*int64(time.Millisecond))
+			command.StartTs = time.Unix(0, int64(i)*int64(time.Microsecond))
 			return command
 		},
 	}
@@ -410,9 +410,10 @@ func TestGracefulStop(t *testing.T) {
 
 	time.Sleep(2 * time.Second)
 	replay.Stop(errors.New("graceful stop"), true)
+	// check that all the pending commands are replayed
 	curCmdTs := replay.replayStats.CurCmdTs.Load()
 	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
-	require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Millisecond))
+	require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Microsecond))
 }
 
 func BenchmarkMultiBufferedDecoder(b *testing.B) {
