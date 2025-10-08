@@ -120,7 +120,18 @@ func TestTraffic(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "replay", string(all))
 	})
-	cancelJob(t, doHTTP)
+	// gracefully cancel succeeds
+	doHTTP(t, http.MethodPost, "/api/traffic/cancel", httpOpts{
+		reader: cli.GetFormReader(map[string]string{"type": "replay", "graceful": "true"}),
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, "stopped", string(all))
+		require.Equal(t, "", mgr.curJob)
+		require.Equal(t, manager.CancelConfig{Type: manager.Replay, Graceful: true}, mgr.cancelCfg)
+	})
 }
 
 func cancelJob(t *testing.T, doHTTP doHTTPFunc) {
@@ -171,6 +182,7 @@ type mockReplayJobManager struct {
 	curJob     string
 	captureCfg capture.CaptureConfig
 	replayCfg  replay.ReplayConfig
+	cancelCfg  manager.CancelConfig
 }
 
 func (m *mockReplayJobManager) Close() {
@@ -205,7 +217,8 @@ func (m *mockReplayJobManager) StartReplay(replayCfg replay.ReplayConfig) error 
 func (m *mockReplayJobManager) Wait() {
 }
 
-func (m *mockReplayJobManager) Stop(manager.CancelConfig) string {
+func (m *mockReplayJobManager) Stop(cancelCfg manager.CancelConfig) string {
 	m.curJob = ""
+	m.cancelCfg = cancelCfg
 	return "stopped"
 }
