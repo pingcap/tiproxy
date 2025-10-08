@@ -147,6 +147,8 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			cmd.Success = true
 			cmd.ConnID = connID
 			cmd.StartTs = startTs
+			cmd.FileName = filename
+			cmd.Line = lineIdx
 		}
 		if len(cmds) > 1 {
 			decoder.pendingCmds = cmds[1:]

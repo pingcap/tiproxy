@@ -102,7 +102,7 @@ func (rdb *reportDB) InsertExceptions(startTime time.Time, tp conn.ExceptionType
 			sample := value.sample.(*conn.FailException)
 			command := sample.Command()
 			args = []any{startTime.String(), command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(),
-				command.StartTs.String(), sample.Time().String(), value.count, value.count}
+				command.FileName, command.Line, command.StartTs.String(), sample.Time().String(), value.count, value.count}
 		case conn.Other:
 			sample := value.sample.(*conn.OtherException)
 			args = []any{startTime.String(), sample.Key(), sample.Error(), sample.Time().String(), value.count, value.count}

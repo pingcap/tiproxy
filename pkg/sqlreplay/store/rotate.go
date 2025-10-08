@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
@@ -113,6 +114,7 @@ type fileMeta struct {
 type rotateReader struct {
 	cfg          ReaderCfg
 	curFileName  string
+	absolutePath string
 	curFileIdx   int64
 	reader       io.Reader
 	externalFile storage.ExternalFileReader
@@ -164,7 +166,7 @@ func (r *rotateReader) Read(data []byte) (int, error) {
 }
 
 func (r *rotateReader) CurFile() string {
-	return r.curFileName
+	return r.absolutePath
 }
 
 func (r *rotateReader) Close() error {
@@ -225,6 +227,7 @@ func (r *rotateReader) nextReader() error {
 	r.reader = fileReader
 	r.curFileIdx = minFileIdx
 	r.curFileName = minFileName
+	r.absolutePath = path.Join(r.storage.URI(), minFileName)
 	// rotateReader -> encryptReader -> compressReader -> file
 	if strings.HasSuffix(minFileName, fileCompressFormat) {
 		if r.reader, err = newCompressReader(r.reader); err != nil {
@@ -235,8 +238,7 @@ func (r *rotateReader) nextReader() error {
 	if err != nil {
 		return err
 	}
-	r.lg.Info("reading next file", zap.String("prefix", r.storage.URI()),
-		zap.String("file", minFileName),
+	r.lg.Info("reading next file", zap.String("file", r.absolutePath),
 		zap.Duration("open_time", time.Since(startTime)),
 		zap.Int("files_in_cache", len(r.fileMetaCache)-r.fileMetaCacheIdx))
 	return nil

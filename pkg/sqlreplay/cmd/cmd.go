@@ -63,6 +63,9 @@ type Command struct {
 	StartTs time.Time
 	ConnID  uint64
 	Type    pnet.Command
+	// The place in the traffic file, used to report.
+	FileName string
+	Line     int
 	// Logged only in audit log.
 	StmtType string
 	// Logged only in native log.
