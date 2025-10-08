@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"testing"
 
@@ -110,7 +111,7 @@ func TestReadLine(t *testing.T) {
 				data, filename, idx, err := l.ReadLine()
 				require.NoError(t, err)
 				require.Equal(t, test.lines[fileIdx][lineIdx], string(data), "case %d file %d line %d", i, fileIdx, lineIdx)
-				require.Equal(t, fileNames[fileIdx], filename, "case %d file %d", i, fileIdx)
+				require.Equal(t, path.Join("file:/", dir, fileNames[fileIdx]), filename, "case %d file %d", i, fileIdx)
 				require.Equal(t, lineIdx+1, idx, "case %d file %d", i, fileIdx)
 			}
 		}
@@ -213,7 +214,7 @@ func TestRead(t *testing.T) {
 			filename, idx, err := l.Read(data)
 			require.NoError(t, err)
 			require.Equal(t, test.str[j], string(data), "case %d", i)
-			require.Equal(t, fileNames[test.fileIdx[j]], filename, "case %d", i)
+			require.Equal(t, path.Join("file:/", dir, fileNames[test.fileIdx[j]]), filename, "case %d", i)
 			require.Equal(t, test.lineIdx[j], idx, "case %d", i)
 		}
 		_, _, err = l.Read(data)
