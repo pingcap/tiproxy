@@ -6,12 +6,14 @@ package replay
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
@@ -37,7 +39,7 @@ func TestManageConns(t *testing.T) {
 			connCount++
 			return &mockConn{
 				connID:  connID,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -62,8 +64,8 @@ func TestManageConns(t *testing.T) {
 		return connCount == 2
 	}, 3*time.Second, 10*time.Millisecond)
 
-	replay.closeCh <- 1
-	replay.closeCh <- 2
+	replay.closeConnCh <- 1
+	replay.closeConnCh <- 2
 	loader.Close()
 	require.Eventually(t, func() bool {
 		replay.Lock()
@@ -138,7 +140,7 @@ func TestReplaySpeed(t *testing.T) {
 				return &mockConn{
 					connID:  connID,
 					cmdCh:   cmdCh,
-					closeCh: replay.closeCh,
+					closeCh: replay.closeConnCh,
 					closed:  make(chan struct{}),
 				}
 			},
@@ -172,7 +174,7 @@ func TestReplaySpeed(t *testing.T) {
 		require.Greater(t, totalTime, lastTotalTime, "speed: %f", speed)
 		lastTotalTime = totalTime
 
-		replay.Stop(nil)
+		replay.Stop(nil, false)
 		loader.Close()
 	}
 }
@@ -203,7 +205,7 @@ func TestProgress(t *testing.T) {
 			return &mockConn{
 				connID:  connID,
 				cmdCh:   cmdCh,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -220,7 +222,7 @@ func TestProgress(t *testing.T) {
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 		for range 10 {
 			<-cmdCh
-			progress, _, _, err := replay.Progress()
+			progress, _, _, _, err := replay.Progress()
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, progress, float64(i)/10)
 			require.LessOrEqual(t, progress, 1.0)
@@ -253,7 +255,7 @@ func TestPendingCmds(t *testing.T) {
 		connCreator: func(connID uint64) conn.Conn {
 			return &mockPendingConn{
 				connID:  connID,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 				stats:   &replay.replayStats,
 			}
@@ -273,10 +275,10 @@ func TestPendingCmds(t *testing.T) {
 
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 	require.Eventually(t, func() bool {
-		_, _, _, err := replay.Progress()
+		_, _, _, _, err := replay.Progress()
 		return err != nil
 	}, 5*time.Second, 10*time.Millisecond)
-	progress, _, done, err := replay.Progress()
+	progress, _, _, done, err := replay.Progress()
 	require.NotEqualValues(t, 1, progress)
 	require.True(t, done)
 	require.Contains(t, err.Error(), "too many pending commands")
@@ -355,7 +357,7 @@ func TestIgnoreErrors(t *testing.T) {
 			return &mockConn{
 				connID:  connID,
 				cmdCh:   cmdCh,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -370,8 +372,51 @@ func TestIgnoreErrors(t *testing.T) {
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
 	<-cmdCh
-	replay.Stop(nil)
+	replay.Stop(nil, false)
 	loader.Close()
+}
+
+func TestGracefulStop(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+
+	i := 0
+	loader := &customizedReader{
+		getCmd: func() *cmd.Command {
+			j := rand.Uint64N(100) + 1
+			command := newMockCommand(j)
+			i++
+			command.StartTs = time.Unix(0, int64(i)*int64(time.Microsecond))
+			return command
+		},
+	}
+
+	cfg := ReplayConfig{
+		Input:     t.TempDir(),
+		Username:  "u1",
+		StartTime: time.Now(),
+		readers:   []cmd.LineReader{loader},
+		connCreator: func(connID uint64) conn.Conn {
+			return &mockDelayConn{
+				stats:   &replay.replayStats,
+				closeCh: replay.closeConnCh,
+				connID:  connID,
+			}
+		},
+		report:          newMockReport(replay.exceptionCh),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+
+	time.Sleep(2 * time.Second)
+	replay.Stop(errors.New("graceful stop"), true)
+	// check that all the pending commands are replayed
+	curCmdTs := replay.replayStats.CurCmdTs.Load()
+	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
+	require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Microsecond))
+	_, _, lastTs, _, err := replay.Progress()
+	require.ErrorContains(t, err, "graceful stop")
+	require.Equal(t, curCmdTs, lastTs.UnixNano())
 }
 
 func BenchmarkMultiBufferedDecoder(b *testing.B) {

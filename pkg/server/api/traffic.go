@@ -147,6 +147,7 @@ func (h *Server) TrafficCancel(c *gin.Context) {
 			cfg.Type = manager.Replay
 		}
 	}
+	cfg.Graceful = strings.EqualFold(c.PostForm("graceful"), "true")
 	result := h.mgr.ReplayJobMgr.Stop(cfg)
 	c.String(http.StatusOK, result)
 }

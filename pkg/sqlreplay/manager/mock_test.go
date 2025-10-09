@@ -67,8 +67,8 @@ type mockReplay struct {
 func (m *mockReplay) Close() {
 }
 
-func (m *mockReplay) Progress() (float64, time.Time, bool, error) {
-	return m.progress, time.Time{}, m.done, m.err
+func (m *mockReplay) Progress() (float64, time.Time, time.Time, bool, error) {
+	return m.progress, time.Time{}, time.Time{}, m.done, m.err
 }
 
 func (m *mockReplay) Wait() {
@@ -81,6 +81,6 @@ func (m *mockReplay) Start(cfg replay.ReplayConfig, backendTLSConfig *tls.Config
 	return nil
 }
 
-func (m *mockReplay) Stop(err error) {
+func (m *mockReplay) Stop(err error, _ bool) {
 	m.err = err
 }

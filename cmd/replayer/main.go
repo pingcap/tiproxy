@@ -7,9 +7,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"log"
-	"net/http"
-	_ "net/http/pprof" // #nosec G108: Profiling endpoint intentionally exposed for debugging
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,15 +16,18 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/cmd"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
+	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/server/api"
 	replaycmd "github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	"github.com/spf13/cobra"
+	"go.uber.org/atomic"
 )
 
 func main() {
@@ -54,20 +54,62 @@ func main() {
 	psCloseStrategy := rootCmd.PersistentFlags().String("ps-close", "directed", "the strategy to close prepared statements. Supported values: directed (close when the original prepared statement closed), always (close the prepared statement right after it's executed), never (never close prepared statements). Default is directed.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		if pprofAddr != nil && *pprofAddr != "" {
-			go func() {
-				server := &http.Server{
-					Addr:         *pprofAddr,
-					ReadTimeout:  time.Hour,
-					WriteTimeout: time.Hour,
-				}
-				err := server.ListenAndServe()
-				if err != nil {
-					log.Printf("start pprof failed: %v", err)
-				}
-			}()
+		// set up general managers
+		cfg := &config.Config{
+			Log: config.Log{
+				LogOnline: config.LogOnline{
+					Level:   "info",
+					LogFile: config.LogFile{Filename: *logFile},
+				},
+			},
+			API: config.API{
+				Addr: *pprofAddr,
+			},
+			EnableTrafficReplay: true,
+		}
+		lgMgr, lg, err := logger.NewLoggerManager(&cfg.Log)
+		if err != nil {
+			return err
 		}
 
+		// create replay job manager
+		hsHandler := newStaticHandshakeHandler(*addr)
+		idMgr := id.NewIDManager()
+		r := mgrrp.NewJobManager(lg, cfg, &nopCertManager{}, idMgr, hsHandler)
+
+		// start api server
+		mgrs := api.Managers{
+			CfgMgr:        &nopConfigManager{cfg: cfg},
+			NsMgr:         nil,
+			CertMgr:       cert.NewCertManager(),
+			BackendReader: nil,
+			ReplayJobMgr:  r,
+		}
+		var ready atomic.Bool
+		ready.Store(true)
+		apiServer, err := api.NewServer(cfg.API, lg.Named("api"), mgrs, nil, &ready)
+		if err != nil {
+			return err
+		}
+
+		// set up signal handler
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			sc := make(chan os.Signal, 1)
+			signal.Notify(sc,
+				syscall.SIGINT,
+				syscall.SIGTERM,
+				syscall.SIGQUIT,
+			)
+
+			select {
+			case <-sc:
+				r.Stop(mgrrp.CancelConfig{Type: mgrrp.Replay})
+			case <-ctx.Done():
+			}
+		}()
+
+		// start replay
 		replayCfg := replay.ReplayConfig{
 			Input:            *input,
 			Speed:            *speed,
@@ -81,77 +123,20 @@ func main() {
 			BufSize:          *bufSize,
 			PSCloseStrategy:  replaycmd.PSCloseStrategy(*psCloseStrategy),
 		}
-
-		r := &replayer{}
-		if err := r.initComponents(*addr, *logFile); err != nil {
-			return err
-		}
-
-		ctx, cancel := context.WithCancel(context.Background())
-		go func() {
-			sc := make(chan os.Signal, 1)
-			signal.Notify(sc,
-				syscall.SIGINT,
-				syscall.SIGTERM,
-				syscall.SIGQUIT,
-			)
-
-			select {
-			case <-sc:
-				r.stop()
-			case <-ctx.Done():
-			}
-		}()
-		if err := r.start(replayCfg); err != nil {
+		if err := r.StartReplay(replayCfg); err != nil {
 			cancel()
 			return err
 		}
+		r.Wait()
+
 		cancel()
-		r.close()
+		r.Close()
+		_ = apiServer.Close()
+		_ = lgMgr.Close()
 		return nil
 	}
 
 	cmd.RunRootCommand(rootCmd)
-}
-
-type replayer struct {
-	lgMgr  *logger.LoggerManager
-	replay mgrrp.JobManager
-}
-
-func (r *replayer) initComponents(addr, logFile string) error {
-	lgMgr, lg, err := logger.NewLoggerManager(&config.Log{
-		LogOnline: config.LogOnline{
-			Level:   "info",
-			LogFile: config.LogFile{Filename: logFile},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	r.lgMgr = lgMgr
-	hsHandler := newStaticHandshakeHandler(addr)
-	idMgr := id.NewIDManager()
-	cfg := config.NewConfig()
-	r.replay = mgrrp.NewJobManager(lg, cfg, &nopCertManager{}, idMgr, hsHandler)
-	return nil
-}
-
-func (r *replayer) start(replayCfg replay.ReplayConfig) error {
-	if err := r.replay.StartReplay(replayCfg); err != nil {
-		return err
-	}
-	r.replay.Wait()
-	return nil
-}
-
-func (r *replayer) stop() {
-	r.replay.Stop(mgrrp.CancelConfig{Type: mgrrp.Replay})
-}
-
-func (r *replayer) close() {
-	r.replay.Close()
-	_ = r.lgMgr.Close()
 }
 
 var _ mgrrp.CertManager = &nopCertManager{}
@@ -200,4 +185,15 @@ func (handler *staticHandshakeHandler) GetCapability() pnet.Capability {
 
 func (handler *staticHandshakeHandler) GetServerVersion() string {
 	return pnet.ServerVersion
+}
+
+var _ api.ConfigManager = (*nopConfigManager)(nil)
+
+type nopConfigManager struct {
+	api.ConfigManager
+	cfg *config.Config
+}
+
+func (n *nopConfigManager) GetConfig() *config.Config {
+	return n.cfg
 }
