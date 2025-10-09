@@ -13,6 +13,8 @@ const (
     sample_stmt text,
     sample_err_msg text,
     sample_conn_id bigint,
+    sample_filename text,
+    sample_fileline int,
     sample_capture_time timestamp,
     sample_replay_time timestamp,
     count bigint,
@@ -24,16 +26,20 @@ const (
     sample_stmt,
     sample_err_msg,
     sample_conn_id,
+    sample_filename,
+    sample_fileline,
     sample_capture_time,
     sample_replay_time,
     count)
-	values(?, ?, ?, ?, ?, ?, ?, ?, ?) on duplicate key update count = count + ?`
+	values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on duplicate key update count = count + ?`
 	checkFailTable = `select replay_start_time,
     cmd_type,
     digest,
     sample_stmt,
     sample_err_msg,
     sample_conn_id,
+    sample_filename,
+    sample_fileline,
     sample_capture_time,
     sample_replay_time,
     count from tiproxy_traffic_replay.fail limit 0`

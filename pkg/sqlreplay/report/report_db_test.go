@@ -53,8 +53,10 @@ func TestInitDB(t *testing.T) {
 
 func TestInsertExceptions(t *testing.T) {
 	now := time.Now()
-	failSample := conn.NewFailException(errors.New("mock error"),
-		cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), now, 1))
+	cmd := cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), now, 1)
+	cmd.FileName = "my/file"
+	cmd.Line = 100
+	failSample := conn.NewFailException(errors.New("mock error"), cmd)
 	otherSample1 := conn.NewOtherException(errors.Wrapf(errors.New("mock error"), "wrap"), 1)
 	otherSample2 := conn.NewOtherException(errors.New("mock error"), 1)
 	otherSample3 := conn.NewOtherException(errors.New("another error"), 2)
@@ -101,7 +103,7 @@ func TestInsertExceptions(t *testing.T) {
 			},
 			stmtID: []uint32{1},
 			args: [][]any{{now.String(), "Query", "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471", "select 1", "mock error",
-				uint64(1), now.String(), failSample.Time().String(), uint64(1), uint64(1)}},
+				uint64(1), "my/file", 100, now.String(), failSample.Time().String(), uint64(1), uint64(1)}},
 		},
 	}
 

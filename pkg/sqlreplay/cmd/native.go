@@ -167,6 +167,8 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 			if err = c.Validate(filename, lineIdx); err != nil {
 				return nil, err
 			}
+			c.FileName = filename
+			c.Line = lineIdx
 			return c, nil
 		}
 	}

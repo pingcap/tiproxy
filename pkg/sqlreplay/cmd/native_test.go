@@ -148,6 +148,7 @@ select 2
 					ConnID:  100,
 					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 2")...),
 					StartTs: time.Date(2024, 8, 28, 18, 51, 21, 477067000, time.FixedZone("", 8*3600+600)),
+					Line:    1,
 					Success: true,
 				},
 			},
@@ -158,10 +159,11 @@ select 2
 	for i, test := range tests {
 		decoder := NewCmdDecoder(FormatNative)
 		decoder.SetCommandStartTime(commandStartTime)
-		mr := mockReader{data: []byte(test.lines)}
+		mr := mockReader{data: []byte(test.lines), filename: "my/file"}
 		for j, cmd := range test.cmds {
 			newCmd, err := decoder.Decode(&mr)
 			require.NoError(t, err, "case %d-%d", i, j)
+			cmd.FileName = "my/file"
 			require.True(t, cmd.Equal(newCmd), "case %d-%d", i, j)
 		}
 	}
