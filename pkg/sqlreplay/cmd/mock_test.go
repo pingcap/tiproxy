@@ -9,8 +9,10 @@ import (
 )
 
 type mockReader struct {
-	data   []byte
-	curIdx int
+	filename string
+	data     []byte
+	curLine  int
+	curIdx   int
 }
 
 func (mr *mockReader) ReadLine() ([]byte, string, int, error) {
@@ -24,7 +26,8 @@ func (mr *mockReader) ReadLine() ([]byte, string, int, error) {
 	idx += mr.curIdx
 	line := mr.data[mr.curIdx:idx]
 	mr.curIdx = idx + 1
-	return line, "", 0, nil
+	mr.curLine++
+	return line, mr.filename, mr.curLine, nil
 }
 
 func (mr *mockReader) Read(data []byte) (string, int, error) {
@@ -34,7 +37,7 @@ func (mr *mockReader) Read(data []byte) (string, int, error) {
 	}
 	copy(data, mr.data[mr.curIdx:mr.curIdx+n])
 	mr.curIdx += n
-	return "", 0, nil
+	return mr.filename, mr.curLine, nil
 }
 
 func (mr *mockReader) Close() {

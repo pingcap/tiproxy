@@ -636,7 +636,7 @@ func TestDecodeSingleLine(t *testing.T) {
 	for i, test := range tests {
 		decoder := NewAuditLogPluginDecoder()
 		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
-		mr := mockReader{data: append([]byte(test.line), '\n')}
+		mr := mockReader{data: append([]byte(test.line), '\n'), filename: "my/file"}
 		cmds := make([]*Command, 0, 4)
 		var err error
 		for {
@@ -653,6 +653,10 @@ func TestDecodeSingleLine(t *testing.T) {
 			continue
 		} else {
 			require.ErrorIs(t, err, io.EOF, "case %d", i)
+		}
+		for _, cmd := range test.cmds {
+			cmd.FileName = "my/file"
+			cmd.Line = 1
 		}
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
@@ -675,6 +679,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					Type:     pnet.ComQuery,
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("set sql_mode=''")...),
 					StmtType: "Set",
+					Line:     1,
 					Success:  true,
 				},
 				{
@@ -682,6 +687,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:  3695181836,
 					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Line:    3,
 					Success: true,
 				},
 				{
@@ -690,6 +696,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					Type:     pnet.ComQuery,
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType: "Select",
+					Line:     3,
 					Success:  true,
 				},
 			},
@@ -705,6 +712,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:  3695181836,
 					StartTs: time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
 					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Line:    1,
 					Success: true,
 				},
 				{
@@ -713,6 +721,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					Type:     pnet.ComQuery,
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("set sql_mode=''")...),
 					StmtType: "Set",
+					Line:     1,
 					Success:  true,
 				},
 				{
@@ -721,6 +730,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					Type:     pnet.ComQuery,
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType: "Select",
+					Line:     3,
 					Success:  true,
 				},
 			},
@@ -735,6 +745,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:  3552575570,
 					Payload: []byte{pnet.ComQuit.Byte()},
 					Type:    pnet.ComQuit,
+					Line:    2,
 					Success: true,
 				},
 			},
@@ -749,6 +760,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:  3695181836,
 					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Line:    1,
 					Success: true,
 				},
 				{
@@ -758,6 +770,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select \"?\"")...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -767,6 +780,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 1, 0, 0, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -776,6 +790,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -785,6 +800,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					CapturedPsID: 2,
 					Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select \"?\"")...),
 					StmtType:     "Select",
+					Line:         2,
 					Success:      true,
 				},
 				{
@@ -794,6 +810,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					CapturedPsID: 2,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 1, 0, 0, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         2,
 					Success:      true,
 				},
 				{
@@ -803,6 +820,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					CapturedPsID: 2,
 					Payload:      append([]byte{pnet.ComStmtClose.Byte()}, []byte{2, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         2,
 					Success:      true,
 				},
 			},
@@ -817,6 +835,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:  3695181836,
 					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Line:    1,
 					Success: true,
 				},
 				{
@@ -825,6 +844,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType: "Select",
+					Line:     1,
 					Success:  true,
 				},
 				{
@@ -832,6 +852,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:  3695181837,
 					StartTs: time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Line:    2,
 					Success: true,
 				},
 				{
@@ -840,6 +861,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					StartTs:  time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType: "Select",
+					Line:     2,
 					Success:  true,
 				},
 			},
@@ -849,7 +871,7 @@ func TestDecodeMultiLines(t *testing.T) {
 	for i, test := range tests {
 		decoder := NewAuditLogPluginDecoder()
 		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
-		mr := mockReader{data: append([]byte(test.lines), '\n')}
+		mr := mockReader{data: append([]byte(test.lines), '\n'), filename: "my/file"}
 		cmds := make([]*Command, 0, len(test.cmds))
 		for {
 			cmd, err := decoder.Decode(&mr)
@@ -858,6 +880,9 @@ func TestDecodeMultiLines(t *testing.T) {
 				break
 			}
 			cmds = append(cmds, cmd)
+		}
+		for _, cmd := range test.cmds {
+			cmd.FileName = "my/file"
 		}
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
@@ -879,6 +904,7 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 					ConnID:  3695181836,
 					StartTs: time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Line:    3,
 					Success: true,
 				},
 				{
@@ -887,6 +913,7 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 					Type:     pnet.ComQuery,
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType: "Select",
+					Line:     3,
 					Success:  true,
 				},
 			},
@@ -902,6 +929,7 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 					ConnID:  3695181836,
 					StartTs: time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("b")...),
+					Line:    3,
 					Success: true,
 				},
 				{
@@ -910,6 +938,7 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 					Type:     pnet.ComQuery,
 					Payload:  append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType: "Select",
+					Line:     3,
 					Success:  true,
 				},
 			},
@@ -965,6 +994,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					StartTs:      time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
 					Payload:      append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					CapturedPsID: 0,
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -974,6 +1004,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -983,6 +1014,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -992,6 +1024,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         2,
 					Success:      true,
 				},
 			},
@@ -1008,6 +1041,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					StartTs:      time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
 					Payload:      append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					CapturedPsID: 0,
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -1017,6 +1051,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -1026,6 +1061,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -1035,6 +1071,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xf9, 0xe4, 0x01, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         2,
 					Success:      true,
 				},
 				{
@@ -1044,6 +1081,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         3,
 					Success:      true,
 				},
 			},
@@ -1060,6 +1098,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					StartTs:      time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
 					Payload:      append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					CapturedPsID: 0,
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -1069,6 +1108,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -1078,6 +1118,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -1087,6 +1128,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         2,
 					Success:      true,
 				},
 				{
@@ -1096,6 +1138,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:     "Select",
+					Line:         3,
 					Success:      true,
 				},
 				{
@@ -1105,6 +1148,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xf9, 0xe4, 0x01, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         3,
 					Success:      true,
 				},
 			},
@@ -1144,6 +1188,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 					ConnID:  3807050215081378201,
 					StartTs: time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
 					Payload: append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					Line:    1,
 					Success: true,
 				},
 				{
@@ -1153,6 +1198,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -1162,6 +1208,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         1,
 					Success:      true,
 				},
 				{
@@ -1171,6 +1218,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 					CapturedPsID: 1,
 					Payload:      append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:     "Select",
+					Line:         2,
 					Success:      true,
 				},
 			},
