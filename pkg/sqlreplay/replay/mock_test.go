@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync/atomic"
 	"time"
 
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -61,6 +62,39 @@ func (c *mockPendingConn) Run(ctx context.Context) {
 
 func (c *mockPendingConn) Stop() {
 	c.closed <- struct{}{}
+}
+
+type mockDelayConn struct {
+	closeCh  chan uint64
+	connID   uint64
+	cmdCount atomic.Int64
+	stats    *conn.ReplayStats
+	stop     atomic.Bool
+}
+
+func (c *mockDelayConn) ExecuteCmd(command *cmd.Command) {
+	c.cmdCount.Add(1)
+	c.stats.PendingCmds.Add(1)
+}
+
+func (c *mockDelayConn) Run(ctx context.Context) {
+	for {
+		if c.cmdCount.Load() > 0 {
+			c.cmdCount.Add(-1)
+			c.stats.ReplayedCmds.Add(1)
+			c.stats.PendingCmds.Add(-1)
+		}
+		if c.stop.Load() && c.cmdCount.Load() == 0 {
+			break
+		}
+		// simulate execution delay
+		time.Sleep(time.Microsecond)
+	}
+	c.closeCh <- c.connID
+}
+
+func (c *mockDelayConn) Stop() {
+	c.stop.Store(true)
 }
 
 var _ cmd.LineReader = (*mockChLoader)(nil)
@@ -210,4 +244,42 @@ func (er *endlessReader) Close() {
 
 func (er *endlessReader) String() string {
 	return "endlessReader"
+}
+
+type customizedReader struct {
+	buf    bytes.Buffer
+	getCmd func() *cmd.Command
+}
+
+func (cr *customizedReader) ReadLine() ([]byte, string, int, error) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
+	for {
+		line, err := cr.buf.ReadBytes('\n')
+		if errors.Is(err, io.EOF) {
+			command := cr.getCmd()
+			_ = encoder.Encode(command, &cr.buf)
+		} else {
+			return line[:len(line)-1], "", 0, err
+		}
+	}
+}
+
+func (cr *customizedReader) Read(data []byte) (string, int, error) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
+	for {
+		_, err := cr.buf.Read(data)
+		if errors.Is(err, io.EOF) {
+			command := cr.getCmd()
+			_ = encoder.Encode(command, &cr.buf)
+		} else {
+			return "", 0, err
+		}
+	}
+}
+
+func (cr *customizedReader) Close() {
+}
+
+func (cr *customizedReader) String() string {
+	return "customizedReader"
 }

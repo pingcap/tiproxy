@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
@@ -18,7 +19,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	mgrcrt "github.com/pingcap/tiproxy/pkg/manager/cert"
-	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
@@ -42,8 +42,18 @@ type HTTPHandler interface {
 	RegisterHTTP(c *gin.Engine) error
 }
 
+type ConfigManager interface {
+	GetConfig() *config.Config
+	SetTOMLConfig(data []byte) error
+	GetConfigChecksum() uint32
+	GetNamespace(ctx context.Context, ns string) (*config.Namespace, error)
+	ListAllNamespace(ctx context.Context) ([]*config.Namespace, error)
+	SetNamespace(ctx context.Context, ns string, nsc *config.Namespace) error
+	DelNamespace(ctx context.Context, ns string) error
+}
+
 type Managers struct {
-	CfgMgr        *mgrcfg.ConfigManager
+	CfgMgr        ConfigManager
 	NsMgr         mgrns.NamespaceManager
 	CertMgr       *mgrcrt.CertManager
 	BackendReader BackendReader
@@ -174,7 +184,7 @@ func (h *Server) readyState(c *gin.Context) {
 	}
 }
 
-func (h *Server) registerGrpc(cfgmgr *mgrcfg.ConfigManager) {
+func (h *Server) registerGrpc(cfgmgr ConfigManager) {
 	diagnosticspb.RegisterDiagnosticsServer(h.grpc, sysutil.NewDiagnosticsServer(cfgmgr.GetConfig().Log.LogFile.Filename))
 }
 
