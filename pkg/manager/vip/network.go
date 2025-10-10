@@ -5,6 +5,7 @@ package vip
 
 import (
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/j-keck/arping"
@@ -109,6 +110,6 @@ func (no *networkOperation) Addr() string {
 
 func (no *networkOperation) execCmd(args ...string) error {
 	output, err := cmd.ExecCmd(args[0], args[1:]...)
-	no.lg.Info("executed cmd", zap.Any("cmd", args), zap.String("output", output), zap.Error(err))
+	no.lg.Info("executed cmd", zap.String("cmd", strings.Join(args, " ")), zap.String("output", output), zap.Error(err))
 	return err
 }
