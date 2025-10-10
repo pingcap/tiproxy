@@ -43,7 +43,7 @@ type auditLogPluginConnCtx struct {
 	currentDB string
 	lastPsID  uint32
 
-	// preparedStmt contains the prepared statement IDs that are not closed yet.
+	// preparedStmt contains the prepared statement IDs that are not closed yet, only used for `ps-close=directed`.
 	preparedStmt map[uint32]struct{}
 	// preparedStmtSql contains the prepared statement SQLs, only used for `ps-close=never`.
 	// It doesn't require the prepared statement IDs to be contained in the audit logs.
@@ -373,8 +373,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 			Payload:  append([]byte{pnet.ComQuery.Byte()}, hack.Slice(sql)...),
 		})
 	case "Close stmt":
-		if decoder.psCloseStrategy == PSCloseStrategyAlways {
-			// always close prepared statement, so it doesn't need to care the close command.
+		if decoder.psCloseStrategy != PSCloseStrategyDirected {
 			break
 		}
 		stmtID, err := parseStmtID(kvs[auditPluginKeyPreparedStmtID])
