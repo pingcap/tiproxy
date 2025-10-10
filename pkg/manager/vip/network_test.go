@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestAddDelIP(t *testing.T) {
@@ -48,7 +49,7 @@ func TestAddDelIP(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		operation, err := NewNetworkOperation(test.virtualIP, test.link)
+		operation, err := NewNetworkOperation(test.virtualIP, test.link, zap.NewNop())
 		if test.initErr != "" {
 			require.Error(t, err, "case %d", i)
 			require.Contains(t, err.Error(), test.initErr, "case %d", i)
