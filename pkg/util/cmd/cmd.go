@@ -8,26 +8,24 @@ import (
 	"strings"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/siddontang/go/hack"
 )
 
 // ExecCmd executes commands with checking potential tainted input.
-func ExecCmd(cmd string, args ...string) error {
-	cmds := make([]string, 0, len(args)+1)
+func ExecCmd(cmd string, args ...string) (string, error) {
 	if !isValidArg(cmd) {
-		return errors.Errorf("invalid cmd: %s", cmd)
+		return "", errors.Errorf("invalid cmd: %s", cmd)
 	}
-	cmds = append(cmds, cmd)
 	for _, arg := range args {
 		if !isValidArg(arg) {
-			return errors.Errorf("invalid argument: %s", arg)
+			return "", errors.Errorf("invalid argument: %s", arg)
 		}
-		cmds = append(cmds, arg)
 	}
-	output, err := exec.Command(cmds[0], cmds[1:]...).CombinedOutput()
+	output, err := exec.Command(cmd, args...).CombinedOutput()
 	if err != nil {
-		return errors.Wrapf(errors.WithStack(err), "output: %s", string(output))
+		return hack.String(output), errors.Wrapf(errors.WithStack(err), "output: %s", string(output))
 	}
-	return nil
+	return hack.String(output), nil
 }
 
 func isValidArg(arg string) bool {
