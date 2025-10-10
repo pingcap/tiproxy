@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/rand"
 	"reflect"
-	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -1074,6 +1073,20 @@ func TestGroupBackends(t *testing.T) {
 			backendCount: 5,
 			cidrs:        []string{"1.1.1.1/32"},
 		},
+		{
+			addr:         "1",
+			labels:       map[string]string{"cidr": "1.1.1.1/32, 1.1.4.1/32"},
+			groupCount:   2,
+			backendCount: 5,
+			cidrs:        []string{"1.1.1.1/32", "1.1.4.1/32"},
+		},
+		{
+			addr:         "3",
+			labels:       map[string]string{"cidr": "1.1.2.1/32"},
+			groupCount:   2,
+			backendCount: 5,
+			cidrs:        []string{"1.1.2.1/32", "1.1.3.1/32"},
+		},
 	}
 
 	for i, test := range tests {
@@ -1092,7 +1105,7 @@ func TestGroupBackends(t *testing.T) {
 			if test.cidrs == nil {
 				return group == nil
 			}
-			return slices.Equal(test.cidrs, group.values)
+			return group.EqualValues(test.cidrs)
 		}, 3*time.Second, 10*time.Millisecond, "test %d", i)
 	}
 }

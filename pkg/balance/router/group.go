@@ -140,6 +140,46 @@ func (g *Group) EqualValues(values []string) bool {
 	return false
 }
 
+// Intersect returns if any cidrs are the same.
+// In next-gen, backend cidrs may increase or decrease but they stay in the same group.
+// E.g. enable public endpoint (3 cidrs) -> enable private endpoint (6 cidrs) -> disable public endpoint (3 cidrs).
+func (g *Group) Intersect(values []string) bool {
+	switch g.matchType {
+	case MatchClientCIDR, MatchProxyCIDR:
+		for _, v := range g.values {
+			if slices.Contains(values, v) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// Backend CIDRs may change anytime.
+func (g *Group) RefreshCidr() {
+	g.Lock()
+	defer g.Unlock()
+	switch g.matchType {
+	case MatchClientCIDR, MatchProxyCIDR:
+		valueMap := make(map[string]struct{}, len(g.values))
+		for _, b := range g.backends {
+			cidrs := b.Cidr()
+			for _, cidr := range cidrs {
+				valueMap[cidr] = struct{}{}
+			}
+		}
+		values := make([]string, 0, len(valueMap))
+		for k := range valueMap {
+			values = append(values, k)
+		}
+		g.values = values
+		if err := g.parseValues(); err != nil {
+			g.lg.Error("failed to parse values", zap.Error(err))
+		}
+	}
+}
+
 func (g *Group) AddBackend(addr string, backend *backendWrapper) {
 	g.Lock()
 	defer g.Unlock()
