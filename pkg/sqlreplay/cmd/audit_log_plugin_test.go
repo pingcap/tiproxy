@@ -1153,6 +1153,21 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 			},
 		},
+		{
+			// CLOSE
+			lines: `[2025/09/18 17:51:56.999 +08:10] [INFO] [logger.go:77] [ID=175818911610038] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=48.86] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT c FROM sbtest1 WHERE id=?"] [ROWS=0] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND="Close stmt"] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 500350\"]"] [CURRENT_DB=test] [EVENT=COMPLETED] [PREPARED_STMT_ID=1]`,
+			cmds: []*Command{
+				{
+					Type:         pnet.ComInitDB,
+					ConnID:       3807050215081378201,
+					StartTs:      time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					Payload:      append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
+					CapturedPsID: 0,
+					Line:         1,
+					Success:      true,
+				},
+			},
+		},
 	}
 
 	for i, test := range tests {

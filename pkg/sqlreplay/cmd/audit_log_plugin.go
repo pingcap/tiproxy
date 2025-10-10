@@ -382,15 +382,17 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 			return nil, err
 		}
 
-		delete(connInfo.preparedStmt, stmtID)
-		decoder.connInfo[connID] = connInfo
-
-		cmds = append(cmds, &Command{
-			CapturedPsID: stmtID,
-			Type:         pnet.ComStmtClose,
-			StmtType:     kvs[auditPluginKeyStmtType],
-			Payload:      pnet.MakeCloseStmtRequest(stmtID),
-		})
+		// If the statement was prepared before the command-start-time, do not close it.
+		if _, ok := connInfo.preparedStmt[stmtID]; ok {
+			delete(connInfo.preparedStmt, stmtID)
+			decoder.connInfo[connID] = connInfo
+			cmds = append(cmds, &Command{
+				CapturedPsID: stmtID,
+				Type:         pnet.ComStmtClose,
+				StmtType:     kvs[auditPluginKeyStmtType],
+				Payload:      pnet.MakeCloseStmtRequest(stmtID),
+			})
+		}
 	case "Execute":
 		params, ok := kvs[auditPluginKeyParams]
 		if !ok {
