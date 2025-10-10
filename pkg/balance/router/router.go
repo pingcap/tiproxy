@@ -4,6 +4,7 @@
 package router
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -173,6 +174,27 @@ func (b *backendWrapper) Keyspace() string {
 		return ""
 	}
 	return labels[config.KeyspaceLabelName]
+}
+
+func (b *backendWrapper) Cidr() []string {
+	labels := b.getHealth().Labels
+	if len(labels) == 0 {
+		return nil
+	}
+	cidr := labels[config.CidrLabelName]
+	if len(cidr) == 0 {
+		return nil
+	}
+	cidrs := strings.Split(cidr, ",")
+	for i := len(cidrs) - 1; i >= 0; i-- {
+		cidr = strings.TrimSpace(cidrs[i])
+		if len(cidr) == 0 {
+			cidrs = append(cidrs[:i], cidrs[i+1:]...)
+		} else {
+			cidrs[i] = cidr
+		}
+	}
+	return cidrs
 }
 
 func (b *backendWrapper) String() string {

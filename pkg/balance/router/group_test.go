@@ -5,13 +5,19 @@ package router
 
 import (
 	"net"
+	"strings"
 	"testing"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
+
+var nopBpCreator = func(*zap.Logger) policy.BalancePolicy {
+	return nil
+}
 
 func TestParseCIDR(t *testing.T) {
 	tests := []struct {
@@ -42,13 +48,11 @@ func TestParseCIDR(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	for _, test := range tests {
-		g, err := NewGroup(test.cidrs, func(lg *zap.Logger) policy.BalancePolicy {
-			return nil
-		}, MatchClientCIDR, lg)
+		g, err := NewGroup(test.cidrs, nopBpCreator, MatchClientCIDR, lg)
 		if test.success {
 			require.NoError(t, err)
 			require.Equal(t, len(test.cidrs), len(g.cidrList))
-			require.True(t, g.EqualValues(test.cidrs))
+			require.EqualValues(t, test.cidrs, g.values)
 		} else {
 			require.Error(t, err)
 		}
@@ -91,9 +95,7 @@ func TestMatchIP(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	for _, matchType := range []MatchType{MatchClientCIDR, MatchProxyCIDR} {
 		for _, test := range tests {
-			g, err := NewGroup(test.cidrs, func(lg *zap.Logger) policy.BalancePolicy {
-				return nil
-			}, matchType, lg)
+			g, err := NewGroup(test.cidrs, nopBpCreator, matchType, lg)
 			require.NoError(t, err)
 			ci := ClientInfo{}
 			addr := &net.TCPAddr{IP: net.ParseIP(test.ip), Port: 10000}
@@ -107,45 +109,66 @@ func TestMatchIP(t *testing.T) {
 	}
 }
 
-func TestEqualCIDR(t *testing.T) {
+func TestRefreshCidr(t *testing.T) {
 	tests := []struct {
-		cidrs1 []string
-		cidrs2 []string
-		equal  bool
+		cidrs1    []string
+		cidrs2    []string
+		final     []string
+		intersect bool
 	}{
 		{
-			cidrs1: []string{"1.1.1.1/32"},
-			cidrs2: []string{"1.1.1.1/32"},
-			equal:  true,
+			cidrs1:    []string{"1.1.1.1/32"},
+			cidrs2:    []string{"1.1.1.1/32"},
+			final:     []string{"1.1.1.1/32"},
+			intersect: true,
 		},
 		{
-			cidrs1: []string{"1.1.1.1/32"},
-			cidrs2: []string{"1.1.1.2/32"},
-			equal:  false,
+			cidrs1:    []string{"1.1.1.1/32"},
+			cidrs2:    []string{"1.1.1.2/32"},
+			intersect: false,
 		},
 		{
-			cidrs1: []string{"1.1.1.1/24", "1.1.2.1/24"},
-			cidrs2: []string{"1.1.1.1/24", "1.1.2.1/24"},
-			equal:  true,
+			cidrs1:    []string{"1.1.1.1/24", "1.1.2.1/24"},
+			cidrs2:    []string{"1.1.1.1/24", "1.1.2.1/24"},
+			final:     []string{"1.1.1.1/24", "1.1.2.1/24"},
+			intersect: true,
 		},
 		{
-			cidrs1: []string{"1.1.1.1/24", "1.1.2.1/24"},
-			cidrs2: []string{"1.1.1.1/24"},
-			equal:  false,
+			cidrs1:    []string{"1.1.1.1/24", "1.1.2.1/24"},
+			cidrs2:    []string{"1.1.1.1/24"},
+			final:     []string{"1.1.1.1/24", "1.1.2.1/24"},
+			intersect: true,
 		},
 		{
-			cidrs1: []string{"1.1.1.1/24", "1.1.2.1/24"},
-			cidrs2: []string{"1.1.1.1/24", "1.1.3.1/24"},
-			equal:  false,
+			cidrs1:    []string{"1.1.1.1/24"},
+			cidrs2:    []string{"1.1.1.1/24", "1.1.2.1/24"},
+			final:     []string{"1.1.1.1/24", "1.1.2.1/24"},
+			intersect: true,
+		},
+		{
+			cidrs1:    []string{"1.1.1.1/24", "1.1.2.1/24"},
+			cidrs2:    []string{"1.1.1.1/24", "1.1.3.1/24"},
+			final:     []string{"1.1.1.1/24", "1.1.2.1/24", "1.1.3.1/24"},
+			intersect: true,
 		},
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	for _, test := range tests {
-		g1, err := NewGroup(test.cidrs1, func(lg *zap.Logger) policy.BalancePolicy {
-			return nil
-		}, MatchClientCIDR, lg)
+		g1, err := NewGroup(test.cidrs1, nopBpCreator, MatchClientCIDR, lg)
 		require.NoError(t, err)
-		require.Equal(t, test.equal, g1.EqualValues(test.cidrs2))
+		require.Equal(t, test.intersect, g1.Intersect(test.cidrs2))
+		if !test.intersect {
+			continue
+		}
+
+		b1, b2 := &backendWrapper{}, &backendWrapper{}
+		b1.mu.BackendHealth.Labels = map[string]string{config.CidrLabelName: strings.Join(test.cidrs1, ",")}
+		b2.mu.BackendHealth.Labels = map[string]string{config.CidrLabelName: strings.Join(test.cidrs2, ",")}
+		g1.AddBackend("1", b1)
+		g1.AddBackend("2", b2)
+		g1.RefreshCidr()
+		require.True(t, g1.EqualValues(test.final))
+		require.Equal(t, len(g1.values), len(g1.cidrList))
 	}
 }

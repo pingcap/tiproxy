@@ -215,6 +215,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 		// fake client, used for replaying traffic
 		err = mgr.authenticator.handshakeWithBackend(ctx, mgr.logger.Named("authenticator"), mgr, mgr.handshakeHandler, username, password, mgr.getBackendIO, backendTLSConfig)
 	}
+	mgr.logger = mgr.logger.With(zap.Stringer("client_addr", clientIO.RemoteAddr()), zap.Stringer("proxy_addr", clientIO.ProxyAddr()))
 	if err != nil {
 		src := Error2Source(err)
 		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err, src)
@@ -581,7 +582,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
 			mgr.quitSource = SrcBackendNetwork
 			if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
-				mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
+				mgr.logger.Warn("graceful close client IO error", zap.Error(ignoredErr))
 			}
 		}
 		return
@@ -695,7 +696,7 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 	mgr.quitSource = SrcProxyQuit
 	// Closing clientIO will cause the whole connection to be closed.
 	if err := mgr.clientIO.GracefulClose(); err != nil {
-		mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+		mgr.logger.Warn("graceful close client IO error", zap.Error(err))
 	}
 	mgr.closeStatus.CompareAndSwap(statusNotifyClose, statusClosing)
 }
@@ -714,11 +715,11 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	backendIO := *mgr.backendIO.Load()
 	if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection",
-			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()),
+			zap.Stringer("backend_addr", backendIO.RemoteAddr()),
 			zap.Bool("backend_healthy", mgr.curBackend.Healthy()))
 		mgr.quitSource = SrcBackendNetwork
 		if err := mgr.clientIO.GracefulClose(); err != nil {
-			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+			mgr.logger.Warn("graceful close client IO error", zap.Error(err))
 		}
 		mgr.closeStatus.CompareAndSwap(statusActive, statusClosing)
 	} else {

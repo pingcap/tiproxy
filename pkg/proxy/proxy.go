@@ -150,7 +150,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		maxConns := s.mu.maxConnections
 		// 'maxConns == 0' => unlimited connections
 		if maxConns != 0 && conns >= maxConns {
-			s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+			s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.Stringer("client_addr", conn.RemoteAddr()), zap.Error(conn.Close()))
 			return false, nil, 0, nil
 		}
 
