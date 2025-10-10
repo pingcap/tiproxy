@@ -43,7 +43,7 @@ type auditLogPluginConnCtx struct {
 	currentDB string
 	lastPsID  uint32
 
-	// preparedStmt contains the prepared statement IDs that are not closed yet.
+	// preparedStmt contains the prepared statement IDs that are not closed yet, only used for `ps-close=directed`.
 	preparedStmt map[uint32]struct{}
 	// preparedStmtSql contains the prepared statement SQLs, only used for `ps-close=never`.
 	// It doesn't require the prepared statement IDs to be contained in the audit logs.
@@ -373,8 +373,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 			Payload:  append([]byte{pnet.ComQuery.Byte()}, hack.Slice(sql)...),
 		})
 	case "Close stmt":
-		if decoder.psCloseStrategy == PSCloseStrategyAlways {
-			// always close prepared statement, so it doesn't need to care the close command.
+		if decoder.psCloseStrategy != PSCloseStrategyDirected {
 			break
 		}
 		stmtID, err := parseStmtID(kvs[auditPluginKeyPreparedStmtID])
@@ -382,15 +381,17 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 			return nil, err
 		}
 
-		delete(connInfo.preparedStmt, stmtID)
-		decoder.connInfo[connID] = connInfo
-
-		cmds = append(cmds, &Command{
-			CapturedPsID: stmtID,
-			Type:         pnet.ComStmtClose,
-			StmtType:     kvs[auditPluginKeyStmtType],
-			Payload:      pnet.MakeCloseStmtRequest(stmtID),
-		})
+		// If the statement was prepared before the command-start-time, do not close it.
+		if _, ok := connInfo.preparedStmt[stmtID]; ok {
+			delete(connInfo.preparedStmt, stmtID)
+			decoder.connInfo[connID] = connInfo
+			cmds = append(cmds, &Command{
+				CapturedPsID: stmtID,
+				Type:         pnet.ComStmtClose,
+				StmtType:     kvs[auditPluginKeyStmtType],
+				Payload:      pnet.MakeCloseStmtRequest(stmtID),
+			})
+		}
 	case "Execute":
 		params, ok := kvs[auditPluginKeyParams]
 		if !ok {
