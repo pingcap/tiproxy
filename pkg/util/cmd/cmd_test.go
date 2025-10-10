@@ -12,6 +12,7 @@ import (
 func TestExecCmd(t *testing.T) {
 	tests := []struct {
 		cmds   []string
+		output string
 		hasErr bool
 	}{
 		{
@@ -19,7 +20,8 @@ func TestExecCmd(t *testing.T) {
 			hasErr: true,
 		},
 		{
-			cmds: []string{"echo", "abc"},
+			cmds:   []string{"echo", "abc"},
+			output: "abc\n",
 		},
 		{
 			cmds: []string{"cd", "."},
@@ -31,7 +33,8 @@ func TestExecCmd(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		err := ExecCmd(test.cmds[0], test.cmds[1:]...)
+		output, err := ExecCmd(test.cmds[0], test.cmds[1:]...)
 		require.Equal(t, test.hasErr, err != nil, "case %d", i)
+		require.Equal(t, test.output, output)
 	}
 }
