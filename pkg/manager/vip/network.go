@@ -11,6 +11,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/util/cmd"
 	"github.com/vishvananda/netlink"
+	"go.uber.org/zap"
 )
 
 // NetworkOperation is the interface for adding, deleting, and broadcasting VIP.
@@ -30,10 +31,13 @@ type networkOperation struct {
 	address *netlink.Addr
 	// the network interface
 	link netlink.Link
+	lg   *zap.Logger
 }
 
-func NewNetworkOperation(addressStr, linkStr string) (NetworkOperation, error) {
-	no := &networkOperation{}
+func NewNetworkOperation(addressStr, linkStr string, lg *zap.Logger) (NetworkOperation, error) {
+	no := &networkOperation{
+		lg: lg,
+	}
 	if err := no.initAddr(addressStr, linkStr); err != nil {
 		return nil, err
 	}
@@ -74,7 +78,7 @@ func (no *networkOperation) AddIP() error {
 	err := netlink.AddrAdd(no.link, no.address)
 	// If TiProxy is deployed by TiUP, the user that runs TiProxy only has the sudo permission.
 	if err != nil && errors.Is(err, syscall.EPERM) {
-		err = cmd.ExecCmd("sudo", "ip", "addr", "add", no.address.String(), "dev", no.link.Attrs().Name)
+		err = no.execCmd("sudo", "ip", "addr", "add", no.address.String(), "dev", no.link.Attrs().Name)
 	}
 	return errors.WithStack(err)
 }
@@ -82,16 +86,17 @@ func (no *networkOperation) AddIP() error {
 func (no *networkOperation) DeleteIP() error {
 	err := netlink.AddrDel(no.link, no.address)
 	if err != nil && errors.Is(err, syscall.EPERM) {
-		err = cmd.ExecCmd("sudo", "ip", "addr", "del", no.address.String(), "dev", no.link.Attrs().Name)
+		err = no.execCmd("sudo", "ip", "addr", "del", no.address.String(), "dev", no.link.Attrs().Name)
 	}
 	return errors.WithStack(err)
 }
 
 func (no *networkOperation) SendARP() error {
-	err := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
-	if err != nil && errors.Is(err, syscall.EPERM) {
-		err = cmd.ExecCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
+	if err := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name); err != nil {
+		no.lg.Warn("gratuitous arping failed", zap.Stringer("ip", no.address.IP), zap.String("iface", no.link.Attrs().Name), zap.Error(err))
 	}
+	// GratuitousArpOverIfaceByName may not work properly even if it returns nil, so always run a command.
+	err := no.execCmd("sudo", "arping", "-c", "3", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
 	return errors.WithStack(err)
 }
 
@@ -100,4 +105,10 @@ func (no *networkOperation) Addr() string {
 		return ""
 	}
 	return no.address.IP.String()
+}
+
+func (no *networkOperation) execCmd(args ...string) error {
+	output, err := cmd.ExecCmd(args[0], args[1:]...)
+	no.lg.Info("executed cmd", zap.Any("cmd", args), zap.String("output", output), zap.Error(err))
+	return err
 }
