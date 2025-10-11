@@ -148,7 +148,6 @@ func newRotateReader(lg *zap.Logger, store storage.ExternalStorage, cfg ReaderCf
 		if err := r.openFileLoop(childCtx); err != nil && !errors.Is(err, io.EOF) {
 			r.lg.Error("open file loop failed", zap.Error(err))
 		}
-		close(r.fileCh)
 	}, lg)
 	return r, nil
 }
@@ -260,6 +259,7 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			zap.Int("files_in_cache", len(r.fileMetaCache)-r.fileMetaCacheIdx))
 		r.fileCh <- fileReader{fileName: minFileName, reader: fr}
 	}
+	close(r.fileCh)
 	for fr := range r.fileCh {
 		if err := fr.reader.Close(); err != nil {
 			r.lg.Warn("failed to close file", zap.Error(err))
