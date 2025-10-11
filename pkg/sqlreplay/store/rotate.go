@@ -213,9 +213,9 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		fileNamePrefix := getFileNamePrefix(r.cfg.Format)
 		parseFunc := getParseFileNameFunc(r.cfg.Format)
 		fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
-		ctx, cancel := context.WithTimeout(ctx, opTimeout)
+		childCtx, cancel := context.WithTimeout(ctx, opTimeout)
 		startTime := time.Now()
-		err = r.walkFile(ctx, curFileName,
+		err = r.walkFile(childCtx, curFileName,
 			func(name string, size int64) (bool, error) {
 				if !strings.HasPrefix(name, fileNamePrefix) {
 					return false, nil
@@ -239,7 +239,6 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 				return false, nil
 			})
 		cancel()
-		r.lg.Info("found next file", zap.String("file", path.Join(r.storage.URI(), minFileName)), zap.Error(err))
 		if err != nil {
 			break
 		}
@@ -248,9 +247,9 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			break
 		}
 		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
-		fr, err := r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
+		var fr storage.ExternalFileReader
+		fr, err = r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
 		if err != nil {
-			r.lg.Info("failed to open file", zap.String("file", path.Join(r.storage.URI(), minFileName)), zap.Error(err))
 			err = errors.WithStack(err)
 			break
 		}
