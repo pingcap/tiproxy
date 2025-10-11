@@ -308,6 +308,7 @@ func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func
 // many files.
 // Most of the code is copied from storage/s3.go's WalkDir implementation.
 func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, curFileName string, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
+	r.lg.Info("walking files in S3", zap.String("bucket", options.Bucket), zap.String("prefix", options.Prefix))
 	for ; r.fileMetaCacheIdx < len(r.fileMetaCache); r.fileMetaCacheIdx++ {
 		meta := r.fileMetaCache[r.fileMetaCacheIdx]
 		valid, err := fn(meta.fileName, meta.fileSize)
@@ -336,6 +337,7 @@ func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, curFileName st
 		marker = fmt.Sprintf("%s%s", prefix, t.Format(logTimeLayout))
 	}
 
+	r.lg.Info("listing files in S3", zap.String("bucket", options.Bucket), zap.String("prefix", prefix), zap.String("marker", marker))
 	req := &s3.ListObjectsInput{
 		Bucket:  aws.String(options.Bucket),
 		Prefix:  aws.String(prefix),
