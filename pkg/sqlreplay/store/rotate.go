@@ -239,6 +239,7 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 				return false, nil
 			})
 		cancel()
+		r.lg.Info("found next file", zap.String("file", path.Join(r.storage.URI(), minFileName)), zap.Error(err))
 		if err != nil {
 			break
 		}
@@ -347,7 +348,6 @@ func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, curFileName st
 	// skip the first file and take the second one if the file name is exactly the
 	// same with the `marker`.
 	res, err := s3api.ListObjectsWithContext(ctx, req)
-	r.lg.Info("listed files in S3", zap.String("prefix", prefix), zap.String("marker", marker), zap.Int("count", len(res.Contents)), zap.Error(err))
 	if err != nil {
 		return err
 	}
@@ -388,7 +388,6 @@ func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, curFileName st
 			r.fileMetaCacheIdx = 0
 		}
 	}
-	r.lg.Info("walk files in S3 done", zap.String("bucket", options.Bucket), zap.Int("file count", len(r.fileMetaCache)))
 
 	return nil
 }
