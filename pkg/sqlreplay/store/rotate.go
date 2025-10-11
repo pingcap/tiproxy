@@ -250,6 +250,7 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
 		fr, err := r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
 		if err != nil {
+			r.lg.Info("failed to open file", zap.String("file", path.Join(r.storage.URI(), minFileName)), zap.Error(err))
 			err = errors.WithStack(err)
 			break
 		}
