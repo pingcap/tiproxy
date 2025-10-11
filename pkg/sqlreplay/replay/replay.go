@@ -81,6 +81,8 @@ type ReplayConfig struct {
 	BufSize int
 	// PSCloseStrategy defines when to close the prepared statements.
 	PSCloseStrategy cmd.PSCloseStrategy
+	// DryRun indicates whether to actually execute the commands.
+	DryRun bool
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -112,7 +114,7 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 		}
 		storages = append(storages, storage)
 	}
-	if cfg.Username == "" {
+	if !cfg.DryRun && cfg.Username == "" {
 		return storages, errors.New("username is required")
 	}
 	if cfg.Speed == 0 {
@@ -218,17 +220,31 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	hsHandler = NewHandshakeHandler(hsHandler)
 	r.connCreator = cfg.connCreator
 	if r.connCreator == nil {
-		r.connCreator = func(connID uint64) conn.Conn {
-			return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
-				connID, bcConfig, r.exceptionCh, r.closeConnCh, cfg.ReadOnly, &r.replayStats)
+		if cfg.DryRun {
+			r.connCreator = func(connID uint64) conn.Conn {
+				return &nopConn{
+					connID:  connID,
+					closeCh: r.closeConnCh,
+					stats:   &r.replayStats,
+				}
+			}
+		} else {
+			r.connCreator = func(connID uint64) conn.Conn {
+				return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
+					connID, bcConfig, r.exceptionCh, r.closeConnCh, cfg.ReadOnly, &r.replayStats)
+			}
 		}
 	}
 	r.report = cfg.report
 	if r.report == nil {
-		backendConnCreator := func() conn.BackendConn {
-			return conn.NewBackendConn(r.lg.Named("be"), r.idMgr.NewID(), hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
+		if cfg.DryRun {
+			r.report = &mockReport{exceptionCh: r.exceptionCh}
+		} else {
+			backendConnCreator := func() conn.BackendConn {
+				return conn.NewBackendConn(r.lg.Named("be"), r.idMgr.NewID(), hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
+			}
+			r.report = report.NewReport(r.lg.Named("report"), r.exceptionCh, backendConnCreator)
 		}
-		r.report = report.NewReport(r.lg.Named("report"), r.exceptionCh, backendConnCreator)
 	}
 
 	childCtx, cancel := context.WithCancel(context.Background())
