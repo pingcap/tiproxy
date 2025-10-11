@@ -450,3 +450,24 @@ func BenchmarkMultiBufferedDecoder(b *testing.B) {
 		}
 	}
 }
+
+func TestDryRun(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+	loader := newMockNormalLoader()
+	cfg := ReplayConfig{
+		DryRun:          true,
+		Input:           t.TempDir(),
+		StartTime:       time.Now(),
+		readers:         []cmd.LineReader{loader},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+
+	loader.write([]byte("invalid command\n"))
+	now := time.Now()
+	command := newMockCommand(1)
+	command.StartTs = now
+	loader.writeCommand(command, cmd.FormatAuditLogPlugin)
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	loader.Close()
+}

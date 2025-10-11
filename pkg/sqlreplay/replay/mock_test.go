@@ -14,7 +14,6 @@ import (
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
-	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 )
 
 var _ conn.Conn = (*mockConn)(nil)
@@ -200,28 +199,6 @@ func newMockCommand(connID uint64) *cmd.Command {
 		Type:    pnet.ComQuery,
 		Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...),
 	}
-}
-
-var _ report.Report = (*mockReport)(nil)
-
-type mockReport struct {
-	exceptionCh chan conn.Exception
-}
-
-func newMockReport(exceptionCh chan conn.Exception) *mockReport {
-	return &mockReport{
-		exceptionCh: exceptionCh,
-	}
-}
-
-func (mr *mockReport) Start(ctx context.Context, cfg report.ReportConfig) error {
-	return nil
-}
-
-func (mr *mockReport) Stop(err error) {
-}
-
-func (mr *mockReport) Close() {
 }
 
 // endlessReader always returns the same line.
