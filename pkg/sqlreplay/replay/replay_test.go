@@ -74,6 +74,43 @@ func TestManageConns(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 }
 
+func TestCloseConns(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+
+	i := 1
+	loader := &customizedReader{
+		getCmd: func() *cmd.Command {
+			if i >= 2000 {
+				return nil
+			}
+			command := newMockCommand(uint64(i))
+			command.StartTs = time.Unix(0, 1)
+			i++
+			return command
+		},
+	}
+	defer loader.Close()
+
+	cfg := ReplayConfig{
+		Input:     t.TempDir(),
+		Username:  "u1",
+		StartTime: time.Now(),
+		readers:   []cmd.LineReader{loader},
+		connCreator: func(connID uint64) conn.Conn {
+			return &nopConn{
+				connID:  connID,
+				closeCh: replay.closeConnCh,
+				stats:   &replay.replayStats,
+			}
+		},
+		report:          newMockReport(replay.exceptionCh),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	replay.Wait()
+}
+
 func TestValidateCfg(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()

@@ -29,6 +29,9 @@ import (
 const (
 	// maxPendingExceptions is the maximum number of pending exceptions for all connections.
 	maxPendingExceptions = 1024
+	// maxPendingCloseRequests is the maximum number of pending connection close requests.
+	// Make it big enough in case all the connections are closed all at once.
+	maxPendingCloseRequests = 1 << 16
 	// slowDownThreshold is the threshold of pending commands to slow down. Following constants are tested with TPCC.
 	slowDownThreshold = 1 << 18
 	// slowDownFactor is the factor to slow down when there are too many pending commands.
@@ -210,7 +213,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.err = nil
 	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
-	r.closeConnCh = make(chan uint64, maxPendingExceptions)
+	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
 	key, err := store.LoadEncryptionKey(r.meta.EncryptMethod, cfg.KeyFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load encryption key")
@@ -368,6 +371,16 @@ func (r *replay) readCommands(ctx context.Context) {
 	for _, conn := range conns {
 		if conn != nil && !reflect.ValueOf(conn).IsNil() {
 			conn.Stop()
+		}
+		// Avoid the channel to be full.
+		for closed := true; closed; {
+			closed = false
+			select {
+			case id := <-r.closeConnCh:
+				r.closeConn(id, conns, &connCount)
+				closed = true
+			default:
+			}
 		}
 	}
 
