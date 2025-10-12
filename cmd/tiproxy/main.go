@@ -29,10 +29,8 @@ func main() {
 
 	sctx := &sctx.Context{}
 
-	var deprecatedStr, configInfo string
+	var configInfo string
 	rootCmd.PersistentFlags().StringVar(&sctx.ConfigFile, "config", "", "proxy config file path")
-	rootCmd.PersistentFlags().StringVar(&deprecatedStr, "log_encoder", "", "deprecated and will be removed")
-	rootCmd.PersistentFlags().StringVar(&deprecatedStr, "log_level", "", "deprecated and will be removed")
 	rootCmd.PersistentFlags().StringVar(&sctx.AdvertiseAddr, "advertise-addr", "", "advertise address")
 	rootCmd.PersistentFlags().StringVar(&configInfo, "config-info", "", "output config info and exit")
 
