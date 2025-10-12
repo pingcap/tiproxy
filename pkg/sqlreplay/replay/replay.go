@@ -30,7 +30,7 @@ const (
 	// maxPendingExceptions is the maximum number of pending exceptions for all connections.
 	maxPendingExceptions = 1024
 	// maxPendingCloseRequests is the maximum number of pending connection close requests.
-	// It should be greater than the connection number because all the connections are stopped all at once before shutting down.
+	// Make it big enough in case all the connections are closed all at once.
 	maxPendingCloseRequests = 1 << 16
 	// slowDownThreshold is the threshold of pending commands to slow down. Following constants are tested with TPCC.
 	slowDownThreshold = 1 << 18
@@ -371,6 +371,16 @@ func (r *replay) readCommands(ctx context.Context) {
 	for _, conn := range conns {
 		if conn != nil && !reflect.ValueOf(conn).IsNil() {
 			conn.Stop()
+		}
+		// Avoid the channel to be full.
+		for closed := true; closed; {
+			closed = false
+			select {
+			case id := <-r.closeConnCh:
+				r.closeConn(id, conns, &connCount)
+				closed = true
+			default:
+			}
 		}
 	}
 

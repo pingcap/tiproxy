@@ -188,6 +188,11 @@ func (r *rotateReader) CurFile() string {
 func (r *rotateReader) Close() error {
 	r.cancel()
 	r.wg.Wait()
+	for fr := range r.fileCh {
+		if err := fr.reader.Close(); err != nil {
+			r.lg.Warn("failed to close file", zap.Error(err))
+		}
+	}
 	return r.closeFile()
 }
 
@@ -261,11 +266,6 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		r.fileCh <- fileReader{fileName: minFileName, reader: fr}
 	}
 	close(r.fileCh)
-	for fr := range r.fileCh {
-		if err := fr.reader.Close(); err != nil {
-			r.lg.Warn("failed to close file", zap.Error(err))
-		}
-	}
 	return err
 }
 
