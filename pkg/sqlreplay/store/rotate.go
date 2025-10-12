@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
 
@@ -111,15 +112,21 @@ type fileMeta struct {
 	fileSize int64
 }
 
+type fileReader struct {
+	fileName string
+	reader   storage.ExternalFileReader
+}
+
 type rotateReader struct {
 	cfg          ReaderCfg
-	curFileName  string
 	absolutePath string
-	curFileIdx   int64
 	reader       io.Reader
-	externalFile storage.ExternalFileReader
+	externalFile fileReader
 	storage      storage.ExternalStorage
 	lg           *zap.Logger
+	fileCh       chan fileReader
+	wg           waitgroup.WaitGroup
+	cancel       context.CancelFunc
 	eof          bool
 
 	// fileMetaCache and fileMetaCacheIdx are used to access and cache file metadata.
@@ -128,12 +135,21 @@ type rotateReader struct {
 	fileMetaCacheIdx int
 }
 
-func newRotateReader(lg *zap.Logger, storage storage.ExternalStorage, cfg ReaderCfg) (*rotateReader, error) {
-	return &rotateReader{
+func newRotateReader(lg *zap.Logger, store storage.ExternalStorage, cfg ReaderCfg) (*rotateReader, error) {
+	r := &rotateReader{
 		cfg:     cfg,
 		lg:      lg,
-		storage: storage,
-	}, nil
+		storage: store,
+		fileCh:  make(chan fileReader, 1),
+	}
+	childCtx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	r.wg.Run(func() {
+		if err := r.openFileLoop(childCtx); err != nil && !errors.Is(err, io.EOF) {
+			r.lg.Error("open file loop failed", zap.Error(err))
+		}
+	}, lg)
+	return r, nil
 }
 
 func (r *rotateReader) Read(data []byte) (int, error) {
@@ -154,7 +170,7 @@ func (r *rotateReader) Read(data []byte) (int, error) {
 		if !errors.Is(err, io.EOF) {
 			return m, errors.WithStack(err)
 		}
-		_ = r.Close()
+		_ = r.closeFile()
 		if err := r.nextReader(); err != nil {
 			r.eof = true
 			return m, err
@@ -170,86 +186,118 @@ func (r *rotateReader) CurFile() string {
 }
 
 func (r *rotateReader) Close() error {
-	if r.externalFile != nil && !reflect.ValueOf(r.externalFile).IsNil() {
-		if err := r.externalFile.Close(); err != nil {
-			r.lg.Warn("failed to close file", zap.String("filename", r.curFileName), zap.Error(err))
+	r.cancel()
+	r.wg.Wait()
+	for fr := range r.fileCh {
+		if err := fr.reader.Close(); err != nil {
+			r.lg.Warn("failed to close file", zap.Error(err))
+		}
+	}
+	return r.closeFile()
+}
+
+func (r *rotateReader) closeFile() error {
+	if r.externalFile.reader != nil && !reflect.ValueOf(r.externalFile.reader).IsNil() {
+		if err := r.externalFile.reader.Close(); err != nil {
+			r.lg.Warn("failed to close file", zap.String("filename", r.externalFile.fileName), zap.Error(err))
 			return err
 		}
-		r.externalFile = nil
+		r.externalFile.reader = nil
+		r.externalFile.fileName = ""
 	}
 	return nil
 }
 
-func (r *rotateReader) nextReader() error {
-	var minFileIdx int64
-	var minFileName string
-	fileNamePrefix := getFileNamePrefix(r.cfg.Format)
-	parseFunc := getParseFileNameFunc(r.cfg.Format)
-	fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
-	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-	startTime := time.Now()
-	err := r.walkFile(ctx,
-		func(name string, size int64) (bool, error) {
-			if !strings.HasPrefix(name, fileNamePrefix) {
+func (r *rotateReader) openFileLoop(ctx context.Context) error {
+	var curFileIdx int64
+	var curFileName string
+	var err error
+	for ctx.Err() == nil {
+		var minFileIdx int64
+		var minFileName string
+		fileNamePrefix := getFileNamePrefix(r.cfg.Format)
+		parseFunc := getParseFileNameFunc(r.cfg.Format)
+		fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
+		childCtx, cancel := context.WithTimeout(ctx, opTimeout)
+		startTime := time.Now()
+		err = r.walkFile(childCtx, curFileName,
+			func(name string, size int64) (bool, error) {
+				if !strings.HasPrefix(name, fileNamePrefix) {
+					return false, nil
+				}
+				if !fileFilter(name, fileNamePrefix) {
+					return false, nil
+				}
+				fileIdx := parseFunc(name, fileNamePrefix)
+				if fileIdx == 0 {
+					r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", r.cfg.Format))
+					return false, nil
+				}
+				if fileIdx <= curFileIdx {
+					return false, nil
+				}
+				if minFileName == "" || fileIdx < minFileIdx {
+					minFileIdx = fileIdx
+					minFileName = name
+					return true, nil
+				}
 				return false, nil
-			}
-			if !fileFilter(name, fileNamePrefix) {
-				return false, nil
-			}
-			fileIdx := parseFunc(name, fileNamePrefix)
-			if fileIdx == 0 {
-				r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", r.cfg.Format))
-				return false, nil
-			}
-			if fileIdx <= r.curFileIdx {
-				return false, nil
-			}
-			if minFileName == "" || fileIdx < minFileIdx {
-				minFileIdx = fileIdx
-				minFileName = name
-				return true, nil
-			}
-			return false, nil
-		})
-	cancel()
-	if err != nil {
-		return err
+			})
+		cancel()
+		if err != nil {
+			break
+		}
+		if minFileName == "" {
+			err = io.EOF
+			break
+		}
+		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
+		var fr storage.ExternalFileReader
+		fr, err = r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
+		if err != nil {
+			err = errors.WithStack(err)
+			break
+		}
+		curFileIdx = minFileIdx
+		curFileName = minFileName
+		r.lg.Info("opening next file", zap.String("file", path.Join(r.storage.URI(), minFileName)),
+			zap.Duration("open_time", time.Since(startTime)),
+			zap.Int("files_in_cache", len(r.fileMetaCache)-r.fileMetaCacheIdx))
+		select {
+		case r.fileCh <- fileReader{fileName: minFileName, reader: fr}:
+		case <-ctx.Done():
+		}
 	}
-	if minFileName == "" {
+	close(r.fileCh)
+	return err
+}
+
+func (r *rotateReader) nextReader() error {
+	fileReader, ok := <-r.fileCh
+	if !ok {
 		return io.EOF
 	}
-	// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
-	fileReader, err := r.storage.Open(context.Background(), minFileName, &storage.ReaderOption{})
-	if err != nil {
-		return errors.WithStack(err)
-	}
+	r.reader = fileReader.reader
 	r.externalFile = fileReader
-	r.reader = fileReader
-	r.curFileIdx = minFileIdx
-	r.curFileName = minFileName
-	r.absolutePath = path.Join(r.storage.URI(), minFileName)
+	r.absolutePath = path.Join(r.storage.URI(), fileReader.fileName)
+	r.lg.Info("reading file", zap.String("file", r.absolutePath))
 	// rotateReader -> encryptReader -> compressReader -> file
-	if strings.HasSuffix(minFileName, fileCompressFormat) {
+	var err error
+	if strings.HasSuffix(fileReader.fileName, fileCompressFormat) {
 		if r.reader, err = newCompressReader(r.reader); err != nil {
 			return err
 		}
 	}
 	r.reader, err = newReaderWithEncryptOpts(r.reader, r.cfg.EncryptionMethod, r.cfg.EncryptionKey)
-	if err != nil {
-		return err
-	}
-	r.lg.Info("reading next file", zap.String("file", r.absolutePath),
-		zap.Duration("open_time", time.Since(startTime)),
-		zap.Int("files_in_cache", len(r.fileMetaCache)-r.fileMetaCacheIdx))
-	return nil
+	return err
 }
 
 // walkFile walks through the files in the storage and applies the given function to each file.
 // The return value of the function indicates whether this file is valid or not.
 // For S3 storage and audit log format, it'll stop walking once the fn returns true.
-func (r *rotateReader) walkFile(ctx context.Context, fn func(string, int64) (bool, error)) error {
+func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func(string, int64) (bool, error)) error {
 	if s3, ok := r.storage.(*storage.S3Storage); ok && r.cfg.Format == cmd.FormatAuditLogPlugin {
-		return r.walkS3ForAuditLogFile(ctx, s3.GetS3APIHandle(), s3.GetOptions(), fn)
+		return r.walkS3ForAuditLogFile(ctx, curfileName, s3.GetS3APIHandle(), s3.GetOptions(), fn)
 	}
 	return r.storage.WalkDir(ctx, &storage.WalkOption{}, func(name string, size int64) error {
 		_, err := fn(name, size)
@@ -263,7 +311,7 @@ func (r *rotateReader) walkFile(ctx context.Context, fn func(string, int64) (boo
 // just lists all files in the directory, which is not efficient when there are
 // many files.
 // Most of the code is copied from storage/s3.go's WalkDir implementation.
-func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
+func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, curFileName string, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
 	for ; r.fileMetaCacheIdx < len(r.fileMetaCache); r.fileMetaCacheIdx++ {
 		meta := r.fileMetaCache[r.fileMetaCacheIdx]
 		valid, err := fn(meta.fileName, meta.fileSize)
@@ -285,8 +333,8 @@ func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, s3api s3iface.
 	prefix := pathPrefix + getFileNamePrefix(r.cfg.Format)
 
 	var marker string
-	if r.curFileName != "" {
-		marker = pathPrefix + r.curFileName
+	if curFileName != "" {
+		marker = pathPrefix + curFileName
 	} else if !r.cfg.CommandStartTime.IsZero() {
 		t := r.cfg.CommandStartTime.In(time.Local)
 		marker = fmt.Sprintf("%s%s", prefix, t.Format(logTimeLayout))
