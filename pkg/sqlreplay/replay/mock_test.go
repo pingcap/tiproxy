@@ -234,9 +234,6 @@ func (cr *customizedReader) ReadLine() ([]byte, string, int, error) {
 		line, err := cr.buf.ReadBytes('\n')
 		if errors.Is(err, io.EOF) {
 			command := cr.getCmd()
-			if command == nil {
-				return nil, "", 0, io.EOF
-			}
 			_ = encoder.Encode(command, &cr.buf)
 		} else {
 			return line[:len(line)-1], "", 0, err
@@ -250,9 +247,6 @@ func (cr *customizedReader) Read(data []byte) (string, int, error) {
 		_, err := cr.buf.Read(data)
 		if errors.Is(err, io.EOF) {
 			command := cr.getCmd()
-			if command == nil {
-				return "", 0, io.EOF
-			}
 			_ = encoder.Encode(command, &cr.buf)
 		} else {
 			return "", 0, err
