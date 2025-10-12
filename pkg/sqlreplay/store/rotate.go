@@ -263,7 +263,10 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		r.lg.Info("opening next file", zap.String("file", path.Join(r.storage.URI(), minFileName)),
 			zap.Duration("open_time", time.Since(startTime)),
 			zap.Int("files_in_cache", len(r.fileMetaCache)-r.fileMetaCacheIdx))
-		r.fileCh <- fileReader{fileName: minFileName, reader: fr}
+		select {
+		case r.fileCh <- fileReader{fileName: minFileName, reader: fr}:
+		case <-ctx.Done():
+		}
 	}
 	close(r.fileCh)
 	return err
