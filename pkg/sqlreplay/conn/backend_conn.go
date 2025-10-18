@@ -4,7 +4,6 @@
 package conn
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
@@ -23,10 +22,16 @@ type BackendConnManager interface {
 
 var _ BackendConnManager = (*backend.BackendConnManager)(nil)
 
+type ExecuteResp struct {
+	Err      error
+	StmtID   uint32
+	ParamNum int
+}
+
 type BackendConn interface {
 	Connect(ctx context.Context) error
 	ConnID() uint64
-	ExecuteCmd(ctx context.Context, request []byte) ([]byte, error)
+	ExecuteCmd(ctx context.Context, request []byte) ExecuteResp
 	Query(ctx context.Context, stmt string) error
 	PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error)
 	ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error
@@ -57,20 +62,27 @@ func NewBackendConn(lg *zap.Logger, connID uint64, hsHandler backend.HandshakeHa
 }
 
 func (bc *backendConn) Connect(ctx context.Context) error {
-	err := bc.backendConnMgr.Connect(ctx, bc.clientIO, nil, bc.backendTLSConfig, bc.username, bc.password)
-	bc.clientIO.Reset()
-	return err
+	return bc.backendConnMgr.Connect(ctx, bc.clientIO, nil, bc.backendTLSConfig, bc.username, bc.password)
 }
 
 func (bc *backendConn) ConnID() uint64 {
 	return bc.backendConnMgr.ConnectionID()
 }
 
-func (bc *backendConn) ExecuteCmd(ctx context.Context, request []byte) ([]byte, error) {
-	err := bc.backendConnMgr.ExecuteCmd(ctx, request)
-	resp := bytes.Clone(bc.clientIO.GetResp())
-	bc.clientIO.Reset()
-	return resp, err
+func (bc *backendConn) ExecuteCmd(ctx context.Context, request []byte) (execResp ExecuteResp) {
+	switch request[0] {
+	case pnet.ComStmtPrepare.Byte():
+		bc.clientIO.saveResp = true
+		execResp.Err = bc.backendConnMgr.ExecuteCmd(ctx, request)
+		if execResp.Err == nil {
+			resp := bc.clientIO.GetResp()
+			execResp.StmtID, execResp.ParamNum = pnet.ParsePrepareStmtResp(resp)
+		}
+		bc.clientIO.Reset()
+	default:
+		execResp.Err = bc.backendConnMgr.ExecuteCmd(ctx, request)
+	}
+	return
 }
 
 // ExecuteStmt is only used for reportDB now.
@@ -87,6 +99,7 @@ func (bc *backendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []an
 // PrepareStmt is only used for reportDB now.
 func (bc *backendConn) PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error) {
 	request := pnet.MakePrepareStmtRequest(stmt)
+	bc.clientIO.saveResp = true
 	err = bc.backendConnMgr.ExecuteCmd(ctx, request)
 	if err == nil {
 		resp := bc.clientIO.GetResp()

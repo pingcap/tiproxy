@@ -17,7 +17,8 @@ import (
 var _ pnet.PacketIO = (*packetIO)(nil)
 
 type packetIO struct {
-	resp bytes.Buffer
+	resp     bytes.Buffer
+	saveResp bool // Discard responses by default because the result may be huge and causes OOM.
 }
 
 func newPacketIO() *packetIO {
@@ -31,7 +32,10 @@ func (p *packetIO) ReadPacket() (data []byte, err error) {
 }
 
 // WritePacket implements net.PacketIO.
-func (p *packetIO) WritePacket(data []byte, flush bool) (err error) {
+func (p *packetIO) WritePacket(data []byte, flush bool) error {
+	if !p.saveResp {
+		return nil
+	}
 	if _, err := p.resp.Write(data); err != nil {
 		return err
 	}
@@ -45,6 +49,7 @@ func (p *packetIO) Flush() error {
 
 func (p *packetIO) Reset() {
 	p.resp.Reset()
+	p.saveResp = false
 }
 
 func (p *packetIO) GetResp() []byte {

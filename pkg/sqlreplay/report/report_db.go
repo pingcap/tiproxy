@@ -68,8 +68,8 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 		return err
 	}
 	// Set sql_mode to non-strict mode so that inserted data can be truncated automatically.
-	_, err := rdb.conn.ExecuteCmd(ctx, append([]byte{pnet.ComQuery.Byte()}, hack.Slice("set sql_mode=''")...))
-	return err
+	resp := rdb.conn.ExecuteCmd(ctx, append([]byte{pnet.ComQuery.Byte()}, hack.Slice("set sql_mode=''")...))
+	return resp.Err
 }
 
 func (rdb *reportDB) initTables(ctx context.Context) error {

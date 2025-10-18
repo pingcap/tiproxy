@@ -143,16 +143,16 @@ func (c *conn) Run(ctx context.Context) {
 				}
 			}
 			c.updateExecuteStmt(command.Value)
-			if resp, err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
-				if pnet.IsDisconnectError(err) {
+			if resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); resp.Err != nil {
+				if pnet.IsDisconnectError(resp.Err) {
 					c.replayStats.ExceptionCmds.Add(1)
-					c.exceptionCh <- NewOtherException(err, c.connID)
-					c.lg.Debug("backend connection disconnected", zap.Error(err))
+					c.exceptionCh <- NewOtherException(resp.Err, c.connID)
+					c.lg.Debug("backend connection disconnected", zap.Error(resp.Err))
 					return
 				}
 				if c.updateCmdForExecuteStmt(command.Value) {
 					c.replayStats.ExceptionCmds.Add(1)
-					c.exceptionCh <- NewFailException(err, command.Value)
+					c.exceptionCh <- NewFailException(resp.Err, command.Value)
 				}
 			} else {
 				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
@@ -218,13 +218,12 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 // maintain prepared statement info so that we can find its info when:
 // - Judge whether an EXECUTE command is readonly
 // - Get the error message when an EXECUTE command fails
-func (c *conn) updatePreparedStmts(capturedPsID uint32, request, response []byte) {
+func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp ExecuteResp) {
 	switch request[0] {
 	case pnet.ComStmtPrepare.Byte():
-		stmtID, paramNum := pnet.ParsePrepareStmtResp(response)
 		stmt := hack.String(request[1:])
-		c.preparedStmts[stmtID] = preparedStmt{text: stmt, paramNum: paramNum}
-		c.psIDMapping[capturedPsID] = stmtID
+		c.preparedStmts[resp.StmtID] = preparedStmt{text: stmt, paramNum: resp.ParamNum}
+		c.psIDMapping[capturedPsID] = resp.StmtID
 	case pnet.ComStmtExecute.Byte():
 		stmtID := binary.LittleEndian.Uint32(request[1:5])
 		ps, ok := c.preparedStmts[stmtID]
