@@ -59,14 +59,16 @@ func (c *mockBackendConn) ConnID() uint64 {
 	return 1
 }
 
-func (c *mockBackendConn) ExecuteCmd(ctx context.Context, request []byte) (resp []byte, err error) {
+func (c *mockBackendConn) ExecuteCmd(ctx context.Context, request []byte) (resp ExecuteResp) {
 	c.lastReq = request
 	switch request[0] {
-	case byte(pnet.ComStmtPrepare):
+	case pnet.ComStmtPrepare.Byte():
 		c.stmtID++
-		return pnet.MakePrepareStmtResp(c.stmtID, 1), c.execErr
+		resp.StmtID = c.stmtID
+		resp.ParamNum = 1
 	}
-	return pnet.MakeOKPacket(0, pnet.OKHeader), c.execErr
+	resp.Err = c.execErr
+	return
 }
 
 func (c *mockBackendConn) Query(ctx context.Context, stmt string) error {

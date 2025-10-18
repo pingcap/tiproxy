@@ -310,17 +310,17 @@ func TestPreparedStmt(t *testing.T) {
 
 	tests := []struct {
 		request       []byte
-		response      []byte
+		response      ExecuteResp
 		preparedStmts map[uint32]preparedStmt
 	}{
 		{
 			request:       append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...),
-			response:      pnet.MakeOKPacket(0, pnet.OKHeader),
+			response:      ExecuteResp{},
 			preparedStmts: map[uint32]preparedStmt{},
 		},
 		{
 			request:  append([]byte{pnet.ComQuery.Byte()}, fmt.Appendf(nil, `set session_states '%s'`, string(b))...),
-			response: pnet.MakeOKPacket(0, pnet.OKHeader),
+			response: ExecuteResp{},
 			preparedStmts: map[uint32]preparedStmt{
 				1: {
 					text:       "select ?",
@@ -331,7 +331,7 @@ func TestPreparedStmt(t *testing.T) {
 		},
 		{
 			request:  append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("insert into t values(?), (?)")...),
-			response: pnet.MakePrepareStmtResp(2, 2),
+			response: ExecuteResp{StmtID: 2, ParamNum: 2},
 			preparedStmts: map[uint32]preparedStmt{
 				1: {
 					text:       "select ?",
@@ -346,7 +346,7 @@ func TestPreparedStmt(t *testing.T) {
 		},
 		{
 			request:  pnet.MakeCloseStmtRequest(1),
-			response: pnet.MakeOKPacket(0, pnet.OKHeader),
+			response: ExecuteResp{},
 			preparedStmts: map[uint32]preparedStmt{
 				2: {
 					text:     "insert into t values(?), (?)",
@@ -356,7 +356,7 @@ func TestPreparedStmt(t *testing.T) {
 		},
 		{
 			request:       []byte{pnet.ComResetConnection.Byte()},
-			response:      pnet.MakeOKPacket(0, pnet.OKHeader),
+			response:      ExecuteResp{},
 			preparedStmts: map[uint32]preparedStmt{},
 		},
 	}
