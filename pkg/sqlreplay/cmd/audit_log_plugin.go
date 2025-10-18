@@ -294,7 +294,14 @@ func parseExecuteParams(value string) ([]any, error) {
 			if endIdx == -1 {
 				return nil, errors.Errorf("unterminated quote in params: %s", v[idx+1:])
 			}
-			param, err := parseSingleParam(v[idx+1 : idx+endIdx+1])
+			// The maximum possible value of `endIdx` is len(v[idx+1:]) - 1 = len(v) - idx - 2
+			// So `v[idx : idx+endIdx+2]` will never cause out-of-bound error and it is correct
+			// to contain the first and last quotes.
+			paramEncodedStr, err := strconv.Unquote(v[idx : idx+endIdx+2])
+			if err != nil {
+				return nil, errors.Errorf("unquote param failed: %s", v[idx:idx+endIdx+2])
+			}
+			param, err := parseSingleParam(paramEncodedStr)
 			idx += endIdx + 1
 			if err != nil {
 				return nil, err
@@ -326,10 +333,16 @@ func parseSingleParam(value string) (any, error) {
 		return strconv.ParseFloat(value, 32)
 	case "KindFloat64", "KindMysqlDecimal":
 		return strconv.ParseFloat(value, 64)
-	case "KindString", "KindBinaryLiteral", "KindMysqlBit", "KindMysqlSet", "KindMysqlTime", "KindMysqlJSON":
+	case "KindString":
+		return strconv.Unquote(`"` + value + `"`)
+	case "KindBinaryLiteral", "KindMysqlBit", "KindMysqlSet", "KindMysqlTime", "KindMysqlJSON":
 		return value, nil
 	case "KindBytes":
-		return hack.Slice(value), nil
+		str, err := strconv.Unquote(`"` + value + `"`)
+		if err != nil {
+			return nil, err
+		}
+		return hack.Slice(str), nil
 	case "KindMysqlDuration", "KindMysqlEnum", "KindInterface", "KindMinNotNull", "KindMaxValue", "KindRaw":
 		return nil, errors.Errorf("unsupported param type: %s", tpStr)
 	}

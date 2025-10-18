@@ -462,7 +462,25 @@ func TestParseParams(t *testing.T) {
 		{
 			s: `"[\"KindString '单引号' \\\\\\\"双引号\\\\\\\"\\\\\\\\n\\\\\\\\t😊\\\\x00\\\\x00\"]"`,
 			expect: []any{
-				"'单引号' \\\\\\\"双引号\\\\\\\"\\\\\\\\n\\\\\\\\t😊\\\\x00\\\\x00",
+				"'单引号' \"双引号\"\\n\\t😊\x00\x00",
+			},
+		},
+		{
+			s: `"[\"KindString {\\\\\\\"key\\\\\\\": \\\\\\\"value\\\\\\\\nwith\\\\\\\\tescaped\\\\\\\\\\\\\\\"chars\\\\\\\"}\"]"`,
+			expect: []any{
+				`{"key": "value\nwith\tescaped\"chars"}`,
+			},
+		},
+		{
+			s: `"[\"KindString hello\\\\nworld\\\\t\\\\\\\"quoted\\\\\\\"\"]"`,
+			expect: []any{
+				"hello\nworld\t\"quoted\"",
+			},
+		},
+		{
+			s: `"[\"KindBytes hello\\\\nworld\\\\t\\\\\\\"quoted\\\\\\\"\"]"`,
+			expect: []any{
+				[]byte("hello\nworld\t\"quoted\""),
 			},
 		},
 		{
@@ -1257,4 +1275,29 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 		require.Error(t, err, "case %d", i)
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
+}
+
+func TestStringUnquoteForParam(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected any
+	}{
+		{"KindString hello", "hello"},
+		{"KindString hello\\nworld\\t\\\"quoted\\\"", "hello\nworld\t\"quoted\""},
+		{`KindString {\"key\": \"value\\nwith\\tescaped\\\"chars\"}`, `{"key": "value\nwith\tescaped\"chars"}`},
+		{"KindBytes hello\\nworld\\t\\\"quoted\\\"", []byte("hello\nworld\t\"quoted\"")},
+	}
+
+	for _, test := range tests {
+		result, err := parseSingleParam(test.input)
+		require.NoError(t, err)
+		require.Equal(t, test.expected, result)
+	}
+
+	params, err := parseExecuteParams(`"[\"KindString {\\\\\\\"key\\\\\\\": \\\\\\\"value\\\\\\\"}\"]"`)
+	require.NoError(t, err)
+	expectedParams := []any{
+		"{\"key\": \"value\"}",
+	}
+	require.Equal(t, expectedParams, params)
 }
