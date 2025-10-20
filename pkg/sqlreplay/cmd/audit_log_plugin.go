@@ -6,6 +6,7 @@ package cmd
 import (
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -40,6 +41,8 @@ const (
 )
 
 type auditLogPluginConnCtx struct {
+	connID uint64
+
 	currentDB string
 	lastPsID  uint32
 
@@ -80,10 +83,34 @@ type AuditLogPluginDecoder struct {
 	// pendingCmds contains the commands that has not been returned yet.
 	pendingCmds     []*Command
 	psCloseStrategy PSCloseStrategy
+	idAllocator     *ConnIDAllocator
 
 	// kvs is a reusable map to avoid too many allocations to store the KV
 	// for each line.
 	kvs map[string]string
+}
+
+// ConnIDAllocator allocates connection IDs for new connections.
+// It uses the first 10bits to distinguish different decoders, and the last 54bits are auto-incremented.
+type ConnIDAllocator struct {
+	nextConnID atomic.Uint64
+}
+
+// NewConnIDAllocator creates a new ConnIDAllocator.
+func NewConnIDAllocator(decoderID int) (*ConnIDAllocator, error) {
+	if decoderID >= 1024 {
+		return nil, errors.Errorf("decoderID %d is too large, must be less than 1024", decoderID)
+	}
+	alloc := &ConnIDAllocator{}
+	alloc.nextConnID.Store(uint64(decoderID) << 54)
+	return alloc, nil
+}
+
+func (c *ConnIDAllocator) alloc() uint64 {
+	// TODO: handle the overflow case.
+	// However, it may never happen in practice, because 54bits can represent 1.8e16 connections. If the connections
+	// are created at a rate of 5k per second, it'll take 114k years to exhaust the IDs.
+	return c.nextConnID.Add(1)
 }
 
 func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error) {
@@ -107,7 +134,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		if len(connStr) == 0 {
 			return nil, errors.Errorf("%s, line %d: no connection id in line: %s", filename, lineIdx, line)
 		}
-		connID, err := strconv.ParseUint(connStr, 10, 64)
+		upstreamConnID, err := strconv.ParseUint(connStr, 10, 64)
 		if err != nil {
 			return nil, errors.Errorf("%s, line %d: parsing connection id failed: %s", filename, lineIdx, connStr)
 		}
@@ -121,14 +148,28 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			continue
 		}
 
+		var connID uint64
+		if connCtx, ok := decoder.connInfo[upstreamConnID]; ok {
+			connID = connCtx.connID
+		} else {
+			// New connection, allocate a new connection ID.
+			if decoder.idAllocator == nil {
+				connID = upstreamConnID
+			} else {
+				connID = decoder.idAllocator.alloc()
+			}
+			connCtx.connID = connID
+			decoder.connInfo[upstreamConnID] = connCtx
+		}
+
 		var cmds []*Command
 		eventClass := kvs[auditPluginKeyClass]
 		switch eventClass {
 		case auditPluginClassGeneral, auditPluginClassTableAccess:
-			cmds, err = decoder.parseGeneralEvent(kvs, connID)
+			cmds, err = decoder.parseGeneralEvent(kvs, upstreamConnID)
 		case auditPluginClassConnect:
 			var c *Command
-			c, err = decoder.parseConnectEvent(kvs, connID)
+			c, err = decoder.parseConnectEvent(kvs, upstreamConnID)
 			if c != nil {
 				cmds = []*Command{c}
 			}
@@ -145,6 +186,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 
 		for _, cmd := range cmds {
 			cmd.Success = true
+			cmd.UpstreamConnID = upstreamConnID
 			cmd.ConnID = connID
 			cmd.StartTs = startTs
 			cmd.FileName = filename
@@ -163,6 +205,10 @@ func (decoder *AuditLogPluginDecoder) SetCommandStartTime(t time.Time) {
 
 func (decoder *AuditLogPluginDecoder) SetPSCloseStrategy(s PSCloseStrategy) {
 	decoder.psCloseStrategy = s
+}
+
+func (decoder *AuditLogPluginDecoder) SetIDAllocator(alloc *ConnIDAllocator) {
+	decoder.idAllocator = alloc
 }
 
 // All SQL_TEXT are converted into one line in audit log.

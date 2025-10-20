@@ -56,6 +56,7 @@ func TestInsertExceptions(t *testing.T) {
 	cmd := cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), now, 1)
 	cmd.FileName = "my/file"
 	cmd.Line = 100
+	cmd.UpstreamConnID = 1
 	failSample := conn.NewFailException(errors.New("mock error"), cmd)
 	otherSample1 := conn.NewOtherException(errors.Wrapf(errors.New("mock error"), "wrap"), 1)
 	otherSample2 := conn.NewOtherException(errors.New("mock error"), 1)

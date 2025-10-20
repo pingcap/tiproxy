@@ -226,7 +226,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.connCreator = cfg.connCreator
 	if r.connCreator == nil {
 		if cfg.DryRun {
-			r.connCreator = func(connID uint64) conn.Conn {
+			r.connCreator = func(connID uint64, _ uint64) conn.Conn {
 				return &nopConn{
 					connID:  connID,
 					closeCh: r.closeConnCh,
@@ -234,9 +234,9 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 				}
 			}
 		} else {
-			r.connCreator = func(connID uint64) conn.Conn {
+			r.connCreator = func(connID uint64, upstreamConnID uint64) conn.Conn {
 				return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
-					connID, bcConfig, r.exceptionCh, r.closeConnCh, cfg.ReadOnly, &r.replayStats)
+					connID, upstreamConnID, bcConfig, r.exceptionCh, r.closeConnCh, cfg.ReadOnly, &r.replayStats)
 			}
 		}
 	}
@@ -397,14 +397,23 @@ func (r *replay) readCommands(ctx context.Context) {
 
 func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
 	var decoders []decoder
-	for _, reader := range readers {
+
+	for i, reader := range readers {
+		idAllocator, err := cmd.NewConnIDAllocator(i)
+		if err != nil {
+			return nil, err
+		}
+
 		cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
-		cmdDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
 		// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
 		// the connection state is maintained in decoder. Filtering out commands here will make it'
 		// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
 		// the current session state correctly.
 		cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
+		if auditLogDecoder, ok := cmdDecoder.(*cmd.AuditLogPluginDecoder); ok {
+			auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
+			auditLogDecoder.SetIDAllocator(idAllocator)
+		}
 
 		var decoder decoder
 		decoder = newSingleDecoder(cmdDecoder, reader)
@@ -466,7 +475,7 @@ func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map[uint64]conn.Conn, connCount *int) {
 	conn, ok := conns[command.ConnID]
 	if !ok {
-		conn = r.connCreator(command.ConnID)
+		conn = r.connCreator(command.ConnID, command.UpstreamConnID)
 		conns[command.ConnID] = conn
 		*connCount++
 		r.wg.RunWithRecover(func() {
@@ -483,7 +492,7 @@ func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount 
 	// Keep the disconnected connections in the map to reject subsequent commands with the same connID,
 	// but release memory as much as possible.
 	if conn, ok := conns[connID]; ok && conn != nil && !reflect.ValueOf(conn).IsNil() {
-		conns[connID] = nil
+		delete(conns, connID)
 		*connCount--
 	}
 }
