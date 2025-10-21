@@ -112,7 +112,7 @@ func (fe *FailException) Key() string {
 }
 
 func (fe *FailException) ConnID() uint64 {
-	return fe.command.ConnID
+	return fe.command.UpstreamConnID
 }
 
 func (fe *FailException) Time() time.Time {

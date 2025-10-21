@@ -35,7 +35,7 @@ func TestManageConns(t *testing.T) {
 		Username:  "u1",
 		StartTime: time.Now(),
 		readers:   []cmd.LineReader{loader},
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			connCount++
 			return &mockConn{
 				connID:  connID,
@@ -97,7 +97,7 @@ func TestCloseConns(t *testing.T) {
 		Username:  "u1",
 		StartTime: time.Now(),
 		readers:   []cmd.LineReader{loader},
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &nopConn{
 				connID:  connID,
 				closeCh: replay.closeConnCh,
@@ -173,7 +173,7 @@ func TestReplaySpeed(t *testing.T) {
 			StartTime: time.Now(),
 			readers:   []cmd.LineReader{loader},
 			report:    newMockReport(replay.exceptionCh),
-			connCreator: func(connID uint64) conn.Conn {
+			connCreator: func(connID uint64, _ uint64) conn.Conn {
 				return &mockConn{
 					connID:  connID,
 					cmdCh:   cmdCh,
@@ -238,7 +238,7 @@ func TestProgress(t *testing.T) {
 		StartTime: time.Now(),
 		readers:   []cmd.LineReader{loader},
 		report:    newMockReport(replay.exceptionCh),
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &mockConn{
 				connID:  connID,
 				cmdCh:   cmdCh,
@@ -289,7 +289,7 @@ func TestPendingCmds(t *testing.T) {
 		StartTime: time.Now(),
 		readers:   []cmd.LineReader{loader},
 		report:    newMockReport(replay.exceptionCh),
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &mockPendingConn{
 				connID:  connID,
 				closeCh: replay.closeConnCh,
@@ -390,7 +390,7 @@ func TestIgnoreErrors(t *testing.T) {
 		IgnoreErrs: true,
 		readers:    []cmd.LineReader{loader},
 		report:     newMockReport(replay.exceptionCh),
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &mockConn{
 				connID:  connID,
 				cmdCh:   cmdCh,
@@ -433,7 +433,7 @@ func TestGracefulStop(t *testing.T) {
 		Username:  "u1",
 		StartTime: time.Now(),
 		readers:   []cmd.LineReader{loader},
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &mockDelayConn{
 				stats:   &replay.replayStats,
 				closeCh: replay.closeConnCh,

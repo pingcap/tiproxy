@@ -19,23 +19,23 @@ func TestFailException(t *testing.T) {
 		key string
 	}{
 		{
-			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComFieldList},
+			cmd: &cmd.Command{ConnID: 2, UpstreamConnID: 1, Type: pnet.ComFieldList},
 			key: "\x04",
 		},
 		{
-			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComQuery, Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)},
+			cmd: &cmd.Command{ConnID: 2, UpstreamConnID: 1, Type: pnet.ComQuery, Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)},
 			key: "\x03e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
 		},
 		{
-			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)},
+			cmd: &cmd.Command{ConnID: 2, UpstreamConnID: 1, Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)},
 			key: "\x16e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
 		},
 		{
-			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte()}, PreparedStmt: "select ?", Params: []any{uint64(100), "abc", nil}},
+			cmd: &cmd.Command{ConnID: 2, UpstreamConnID: 1, Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte()}, PreparedStmt: "select ?", Params: []any{uint64(100), "abc", nil}},
 			key: "\x17e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
 		},
 		{
-			cmd: &cmd.Command{ConnID: 1, Type: pnet.ComStmtFetch, Payload: []byte{pnet.ComStmtFetch.Byte()}, PreparedStmt: "select ?"},
+			cmd: &cmd.Command{ConnID: 2, UpstreamConnID: 1, Type: pnet.ComStmtFetch, Payload: []byte{pnet.ComStmtFetch.Byte()}, PreparedStmt: "select ?"},
 			key: "\x1ce1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
 		},
 	}
