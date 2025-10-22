@@ -54,6 +54,7 @@ func main() {
 	pprofAddr := rootCmd.PersistentFlags().String("pprof-addr", "", "the address to listen on for pprof, e.g. localhost:6060. By default pprof is disabled.")
 	psCloseStrategy := rootCmd.PersistentFlags().String("ps-close", "directed", "the strategy to close prepared statements. Supported values: directed (close when the original prepared statement closed), always (close the prepared statement right after it's executed), never (never close prepared statements). Default is directed.")
 	dryRun := rootCmd.PersistentFlags().Bool("dry-run", false, "dry run, don't connect to TiDB")
+	checkPointFilePath := rootCmd.PersistentFlags().String("checkpoint-path", "", "the file path to store replay checkpoint information. If the file exists and not empty, the internal state will be loaded from the file to resume replaying.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
@@ -113,19 +114,20 @@ func main() {
 
 		// start replay
 		replayCfg := replay.ReplayConfig{
-			Input:            *input,
-			Speed:            *speed,
-			Username:         *username,
-			Password:         *password,
-			Format:           *format,
-			ReadOnly:         *readonly,
-			StartTime:        time.Now(),
-			CommandStartTime: *cmdStartTime,
-			CommandEndTime:   *cmdEndTime,
-			IgnoreErrs:       *ignoreErrs,
-			BufSize:          *bufSize,
-			PSCloseStrategy:  replaycmd.PSCloseStrategy(*psCloseStrategy),
-			DryRun:           *dryRun,
+			Input:              *input,
+			Speed:              *speed,
+			Username:           *username,
+			Password:           *password,
+			Format:             *format,
+			ReadOnly:           *readonly,
+			StartTime:          time.Now(),
+			CommandStartTime:   *cmdStartTime,
+			CommandEndTime:     *cmdEndTime,
+			IgnoreErrs:         *ignoreErrs,
+			BufSize:            *bufSize,
+			PSCloseStrategy:    replaycmd.PSCloseStrategy(*psCloseStrategy),
+			DryRun:             *dryRun,
+			CheckPointFilePath: *checkPointFilePath,
 		}
 		if err := r.StartReplay(replayCfg); err != nil {
 			cancel()

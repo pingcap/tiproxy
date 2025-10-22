@@ -135,6 +135,8 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 		cfg.PSCloseStrategy = cmd.PSCloseStrategyDirected
 	}
 
+	cfg.CheckPointFilePath = c.PostForm("checkpointpath")
+
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return

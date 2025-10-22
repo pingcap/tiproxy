@@ -5,11 +5,14 @@ package replay
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -512,4 +515,183 @@ func TestDryRun(t *testing.T) {
 	loader.writeCommand(command, cmd.FormatAuditLogPlugin)
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 	loader.Close()
+}
+
+func TestLoadFromCheckpoint(t *testing.T) {
+	tests := []struct {
+		checkpointData string
+		setupFile      bool
+		fileNotExists  bool
+		expectedError  bool
+		cmdTs          int64
+		cmdEndTs       int64
+	}{
+		{
+			checkpointData: "",
+			setupFile:      false,
+			expectedError:  false,
+		},
+		{
+			checkpointData: "",
+			setupFile:      false,
+			expectedError:  false,
+			fileNotExists:  true,
+		},
+		{
+			checkpointData: `{"cur_cmd_ts":1640995200000000000,"cur_cmd_end_ts":1640995300000000000}`,
+			setupFile:      true,
+			expectedError:  false,
+			cmdTs:          1640995200000000000,
+			cmdEndTs:       1640995300000000000,
+		},
+		{
+			checkpointData: `{"cur_cmd_ts":1640995200000000000,"cur_cmd_end_ts":0}`,
+			setupFile:      true,
+			expectedError:  false,
+			cmdTs:          1640995200000000000,
+		},
+		{
+			checkpointData: `{"cur_cmd_ts":0,"cur_cmd_end_ts":1640995300000000000}`,
+			setupFile:      true,
+			expectedError:  false,
+			cmdEndTs:       1640995300000000000,
+		},
+		{
+			checkpointData: `{invalid json}`,
+			setupFile:      true,
+			expectedError:  true,
+		},
+		{
+			checkpointData: "",
+			setupFile:      true,
+			expectedError:  true,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("case %d", i), func(t *testing.T) {
+			cfg := &ReplayConfig{Format: cmd.FormatAuditLogPlugin}
+
+			if tt.fileNotExists {
+				cfg.CheckPointFilePath = filepath.Join(t.TempDir(), "nonexistent.json")
+			} else if tt.setupFile {
+				tmpDir := t.TempDir()
+				checkpointFile := filepath.Join(tmpDir, "checkpoint.json")
+				err := os.WriteFile(checkpointFile, []byte(tt.checkpointData), 0644)
+				require.NoError(t, err)
+				cfg.CheckPointFilePath = checkpointFile
+			}
+
+			err := cfg.LoadFromCheckpoint()
+
+			if tt.expectedError {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+
+			if tt.cmdTs > 0 {
+				expectedStartTime := time.Unix(0, tt.cmdTs)
+				require.Equal(t, expectedStartTime, cfg.CommandStartTime)
+			} else {
+				require.True(t, cfg.CommandStartTime.IsZero())
+			}
+
+			if tt.cmdEndTs > 0 {
+				expectedEndTime := time.Unix(0, tt.cmdEndTs)
+				require.Equal(t, expectedEndTime, cfg.CommandEndTime)
+			} else {
+				require.True(t, cfg.CommandEndTime.IsZero())
+			}
+		})
+	}
+}
+
+func TestSaveCurrentStateLoop(t *testing.T) {
+	t.Run("stops when context is cancelled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		checkpointFile := filepath.Join(tmpDir, "checkpoint.json")
+
+		replay := &replay{
+			lg: zap.NewNop(),
+			cfg: ReplayConfig{
+				CheckPointFilePath: checkpointFile,
+			},
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			replay.saveCheckpointLoop(ctx)
+		}()
+
+		replay.replayStats.CurCmdTs.Store(1234567890)
+		replay.replayStats.CurCmdEndTs.Store(9876543210)
+
+		require.Eventually(t, func() bool {
+			cfg := &ReplayConfig{CheckPointFilePath: checkpointFile, Format: cmd.FormatAuditLogPlugin}
+			_ = cfg.LoadFromCheckpoint()
+
+			return cfg.CommandStartTime.UnixNano() == 1234567890 &&
+				cfg.CommandEndTime.UnixNano() == 9876543210
+		}, 1*time.Second, 10*time.Millisecond, "checkpoint file should be updated with current state")
+
+		cancel()
+		wg.Wait()
+	})
+
+	t.Run("file truncation on overwrite", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		checkpointFile := filepath.Join(tmpDir, "checkpoint.json")
+
+		largeData := `{"cur_cmd_ts":1640995200000000000,"cur_cmd_end_ts":1640995300000000000,"large_field":"` + strings.Repeat("x", 1000) + `"}`
+		err := os.WriteFile(checkpointFile, []byte(largeData), 0644)
+		require.NoError(t, err)
+
+		replay := &replay{
+			lg: zap.NewNop(),
+			cfg: ReplayConfig{
+				CheckPointFilePath: checkpointFile,
+			},
+		}
+
+		testCmdTs := time.Now().UnixNano()
+		testCmdEndTs := time.Now().Add(time.Second).UnixNano()
+		replay.replayStats.CurCmdTs.Store(testCmdTs)
+		replay.replayStats.CurCmdEndTs.Store(testCmdEndTs)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			replay.saveCheckpointLoop(ctx)
+		}()
+
+		require.Eventually(t, func() bool {
+			data, err := os.ReadFile(checkpointFile)
+			if err != nil {
+				return false
+			}
+			return len(data) < len(largeData) && len(data) > 0
+		}, 1*time.Second, 10*time.Millisecond, "checkpoint file should be overwritten with smaller data")
+
+		data, err := os.ReadFile(checkpointFile)
+		require.NoError(t, err)
+
+		var state replayCheckpoint
+		err = json.Unmarshal(data, &state)
+		require.NoError(t, err)
+		require.Equal(t, testCmdTs, state.CurCmdTs)
+		require.Equal(t, testCmdEndTs, state.CurCmdEndTs)
+
+		cancel()
+		wg.Wait()
+	})
 }
