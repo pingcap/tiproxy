@@ -108,6 +108,13 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	if err != nil {
 		return err
 	}
+	// The first packet is either `HandshakeResponse` or `SSLRequest`. They are both at least 32 bytes.
+	// Ref https://dev.mysql.com/doc/dev/mysql-server/8.0.44/page_protocol_connection_phase_packets_protocol_handshake_response.html
+	// Ref https://dev.mysql.com/doc/dev/mysql-server/8.0.44/page_protocol_connection_phase_packets_protocol_ssl_request.html
+	// The following logic will panic if the length is less than 32, so we check it here.
+	if len(pkt) < 32 {
+		return errors.Wrap(ErrClientHandshake, mysql.ErrMalformPacket)
+	}
 	isSSL := pnet.ParseSSLRequestOrHandshakeResp(pkt)
 	frontendCapability := pnet.Capability(binary.LittleEndian.Uint32(pkt))
 	if isSSL {
