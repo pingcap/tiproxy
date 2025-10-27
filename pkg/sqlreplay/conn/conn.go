@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 
 	glist "github.com/bahlo/generic-list-go"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -160,7 +161,7 @@ func (c *conn) Run(ctx context.Context) {
 			}
 			c.updateExecuteStmt(command.Value)
 			if resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); resp.Err != nil {
-				if pnet.IsDisconnectError(resp.Err) {
+				if errors.Is(resp.Err, backend.ErrClosing) || pnet.IsDisconnectError(resp.Err) {
 					c.replayStats.ExceptionCmds.Add(1)
 					c.exceptionCh <- NewOtherException(resp.Err, c.upstreamConnID)
 					c.lg.Debug("backend connection disconnected", zap.Error(resp.Err))

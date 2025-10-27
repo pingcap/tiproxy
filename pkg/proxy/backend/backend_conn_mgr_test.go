@@ -602,36 +602,67 @@ func TestSpecialCmds(t *testing.T) {
 // Test that ExecuteCmd may return a mysql error, which is required by traffic replay.
 func TestReturnMySQLError(t *testing.T) {
 	ts := newBackendMgrTester(t)
-	runners := []runner{
-		// 1st handshake
+	tests := []struct {
+		runner  runner
+		checker checker
+	}{
 		{
-			client:  ts.mc.authenticate,
-			proxy:   ts.firstHandshake4Proxy,
-			backend: ts.handshake4Backend,
+			runner: runner{
+				client:  ts.mc.authenticate,
+				proxy:   ts.firstHandshake4Proxy,
+				backend: ts.handshake4Backend,
+			},
 		},
-		// mysql error
 		{
-			client: func(packetIO pnet.PacketIO) error {
-				ts.mc.cmd = pnet.ComQuery
-				ts.mc.sql = "select $$"
-				return ts.mc.request(packetIO)
+			// mysql error
+			runner: runner{
+				client: func(packetIO pnet.PacketIO) error {
+					ts.mc.cmd = pnet.ComQuery
+					ts.mc.sql = "select $$"
+					return ts.mc.request(packetIO)
+				},
+				proxy: func(clientIO, backendIO pnet.PacketIO) error {
+					clientIO.ResetSequence()
+					request, err := clientIO.ReadPacket()
+					require.NoError(ts.t, err)
+					rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+					require.True(ts.t, pnet.IsMySQLError(rsErr))
+					require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
+					return nil
+				},
+				backend: func(packetIO pnet.PacketIO) error {
+					ts.mb.respondType = responseTypeErr
+					return ts.mb.respond(packetIO)
+				},
 			},
-			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				clientIO.ResetSequence()
-				request, err := clientIO.ReadPacket()
-				require.NoError(ts.t, err)
-				rsErr := ts.mp.ExecuteCmd(context.Background(), request)
-				require.True(ts.t, pnet.IsMySQLError(rsErr))
-				require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
-				return nil
+		},
+		{
+			// ErrClosing
+			runner: runner{
+				client: func(packetIO pnet.PacketIO) error {
+					ts.mc.cmd = pnet.ComQuery
+					ts.mc.sql = "select $$"
+					return ts.mc.request(packetIO)
+				},
+				proxy: func(clientIO, backendIO pnet.PacketIO) error {
+					ts.mp.closeStatus.Store(statusClosing)
+					clientIO.ResetSequence()
+					request, err := clientIO.ReadPacket()
+					require.NoError(ts.t, err)
+					rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+					require.Error(ts.t, rsErr)
+					return rsErr
+				},
 			},
-			backend: func(packetIO pnet.PacketIO) error {
-				ts.mb.respondType = responseTypeErr
-				return ts.mb.respond(packetIO)
+			checker: func(t *testing.T, ts *testSuite) {
+				require.True(t, pnet.IsDisconnectError(ts.mc.err))
+				require.ErrorIs(t, ts.mp.err, ErrClosing)
 			},
 		},
 	}
-	ts.runTests(runners)
+	for _, test := range tests {
+		ts.runAndCheck(ts.t, test.checker, test.runner.client, test.runner.backend, test.runner.proxy)
+	}
 }
 
 // Test that closing the BackendConnMgr while it's receiving a redirection signal is OK.

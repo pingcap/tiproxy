@@ -203,7 +203,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 
 	if mgr.closeStatus.Load() >= statusNotifyClose {
 		mgr.quitSource = SrcProxyQuit
-		return errors.New("graceful shutdown before connecting")
+		return ErrClosing
 	}
 	startTime := time.Now()
 	mgr.createTime = startTime
@@ -374,6 +374,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 
 	// Once the request is accepted, it's treated in the transaction, so we don't check graceful shutdown here.
 	if mgr.closeStatus.Load() >= statusClosing {
+		err = ErrClosing
 		return
 	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
