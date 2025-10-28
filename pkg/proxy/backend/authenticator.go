@@ -19,10 +19,12 @@ import (
 	"go.uber.org/zap"
 )
 
-const unknownAuthPlugin = "auth_unknown_plugin"
-const requiredFrontendCaps = pnet.ClientProtocol41
-const defRequiredBackendCaps = pnet.ClientDeprecateEOF
-const ER_INVALID_SEQUENCE = 8052
+const (
+	unknownAuthPlugin      = "auth_unknown_plugin"
+	requiredFrontendCaps   = pnet.ClientProtocol41
+	defRequiredBackendCaps = pnet.ClientDeprecateEOF
+	ER_INVALID_SEQUENCE    = 8052
+)
 
 // SupportedServerCapabilities is the default supported capabilities. Other server capabilities are not supported.
 // TiDB supports ClientDeprecateEOF since v6.3.0.
@@ -89,7 +91,8 @@ func (auth *Authenticator) verifyBackendCaps(logger *zap.Logger, backendCapabili
 type backendIOGetter func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (*pnet.PacketIO, error)
 
 func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.Logger, cctx ConnContext, clientIO *pnet.PacketIO, handshakeHandler HandshakeHandler,
-	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
+	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config,
+) error {
 	clientIO.ResetSequence()
 
 	proxyCapability := handshakeHandler.GetCapability()
@@ -151,6 +154,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	} else if err != nil {
 		return err
 	}
+	cctx.SetValue(ConnContextKeyAuthSalt, auth.salt)
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
 		return errors.Wrap(ErrProxyErr, err)
 	}
