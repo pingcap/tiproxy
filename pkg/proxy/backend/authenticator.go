@@ -151,6 +151,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	} else if err != nil {
 		return err
 	}
+	cctx.SetValue(ConnContextKeyAuthSalt, auth.salt)
 	if err = handshakeHandler.HandleHandshakeResp(cctx, clientResp); err != nil {
 		return errors.Wrap(ErrProxyErr, err)
 	}
