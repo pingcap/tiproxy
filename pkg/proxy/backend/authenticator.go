@@ -19,10 +19,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const unknownAuthPlugin      = "auth_unknown_plugin"
-const requiredFrontendCaps   = pnet.ClientProtocol41
+const unknownAuthPlugin = "auth_unknown_plugin"
+const requiredFrontendCaps = pnet.ClientProtocol41
 const defRequiredBackendCaps = pnet.ClientDeprecateEOF
-const ER_INVALID_SEQUENCE    = 8052
+const ER_INVALID_SEQUENCE = 8052
 
 // SupportedServerCapabilities is the default supported capabilities. Other server capabilities are not supported.
 // TiDB supports ClientDeprecateEOF since v6.3.0.
