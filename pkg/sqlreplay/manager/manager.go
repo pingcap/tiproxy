@@ -6,6 +6,7 @@ package manager
 import (
 	"crypto/tls"
 	"encoding/json"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -19,6 +20,8 @@ import (
 
 const (
 	maxJobHistoryCount = 10
+	connectTimeout     = 60 * time.Second
+	dialTimeout        = 5 * time.Second
 )
 
 type CancelConfig struct {
@@ -133,6 +136,8 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 		HealthyKeepAlive:   jm.cfg.Proxy.BackendHealthyKeepalive,
 		UnhealthyKeepAlive: jm.cfg.Proxy.BackendUnhealthyKeepalive,
 		ConnBufferSize:     jm.cfg.Proxy.ConnBufferSize,
+		DialTimeout:        dialTimeout,
+		ConnectTimeout:     connectTimeout,
 	})
 	if err != nil {
 		jm.lg.Warn("start replay failed", zap.String("job", newJob.String()), zap.Error(err))
