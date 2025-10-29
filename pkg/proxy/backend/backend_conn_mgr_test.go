@@ -281,6 +281,42 @@ func (ts *backendMgrTester) runTests(runners []runner) {
 	}
 }
 
+func TestBCCheck(t *testing.T) {
+	tests := []struct {
+		orginal *BCConfig
+		final   *BCConfig
+	}{
+		{
+			orginal: &BCConfig{},
+			final: &BCConfig{
+				TickerInterval:       TickerInterval,
+				CheckBackendInterval: CheckBackendInterval,
+				DialTimeout:          DialTimeout,
+				ConnectTimeout:       ConnectTimeout,
+			},
+		},
+		{
+			orginal: &BCConfig{
+				TickerInterval:       10 * time.Second,
+				CheckBackendInterval: 10 * time.Second,
+				DialTimeout:          10 * time.Second,
+				ConnectTimeout:       10 * time.Second,
+			},
+			final: &BCConfig{
+				TickerInterval:       10 * time.Second,
+				CheckBackendInterval: 10 * time.Second,
+				DialTimeout:          10 * time.Second,
+				ConnectTimeout:       10 * time.Second,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		test.orginal.check()
+		require.Equal(t, *test.final, *test.orginal)
+	}
+}
+
 // Test that redirection succeeds immediately if the session is redirect-able.
 func TestNormalRedirect(t *testing.T) {
 	ts := newBackendMgrTester(t)

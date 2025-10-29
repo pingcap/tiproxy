@@ -92,6 +92,7 @@ type BCConfig struct {
 	UnhealthyKeepAlive   config.KeepAlive
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
+	DialTimeout          time.Duration
 	ConnectTimeout       time.Duration
 	ConnBufferSize       int
 	ProxyProtocol        bool
@@ -104,6 +105,9 @@ func (cfg *BCConfig) check() {
 	}
 	if cfg.CheckBackendInterval == time.Duration(0) {
 		cfg.CheckBackendInterval = CheckBackendInterval
+	}
+	if cfg.DialTimeout == time.Duration(0) {
+		cfg.DialTimeout = DialTimeout
 	}
 	if cfg.ConnectTimeout == time.Duration(0) {
 		cfg.ConnectTimeout = ConnectTimeout
@@ -283,8 +287,10 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 	var addr string
 	var backend router.BackendInst
 	var origErr error
+	var retryCount int
 	io, err := backoff.RetryNotifyWithData(
 		func() (pnet.PacketIO, error) {
+			retryCount++
 			addr = ""
 			// Try to connect to all backup backends one by one.
 			if backend, err = selector.Next(); err == router.ErrNoBackend {
@@ -295,7 +301,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 
 			var cn net.Conn
 			addr = backend.Addr()
-			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
+			cn, err = net.DialTimeout("tcp", addr, mgr.config.DialTimeout)
 			selector.Finish(mgr, err == nil)
 			if err != nil {
 				metrics.DialBackendFailCounter.WithLabelValues(addr).Inc()
@@ -322,9 +328,9 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 	duration := time.Since(startTime)
 	addGetBackendMetrics(duration, err == nil)
 	if err != nil {
-		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.NamedError("last_err", origErr))
+		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.Int("retry_count", retryCount), zap.NamedError("last_err", origErr))
 	} else if duration >= time.Second {
-		mgr.logger.Warn("get backend slow", zap.Duration("duration", duration), zap.NamedError("last_err", origErr),
+		mgr.logger.Warn("get backend slow", zap.Duration("duration", duration), zap.Int("retry_count", retryCount), zap.NamedError("last_err", origErr),
 			zap.String("backend_addr", mgr.ServerAddr()))
 	}
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {
@@ -603,7 +609,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	var cn net.Conn
-	cn, rs.err = net.DialTimeout("tcp", rs.to, DialTimeout)
+	cn, rs.err = net.DialTimeout("tcp", rs.to, mgr.config.DialTimeout)
 	if rs.err != nil {
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err, SrcBackendNetwork)
 		return
