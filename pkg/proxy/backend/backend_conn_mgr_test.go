@@ -283,11 +283,11 @@ func (ts *backendMgrTester) runTests(runners []runner) {
 
 func TestBCCheck(t *testing.T) {
 	tests := []struct {
-		orginal *BCConfig
-		final   *BCConfig
+		original *BCConfig
+		final    *BCConfig
 	}{
 		{
-			orginal: &BCConfig{},
+			original: &BCConfig{},
 			final: &BCConfig{
 				TickerInterval:       TickerInterval,
 				CheckBackendInterval: CheckBackendInterval,
@@ -296,7 +296,7 @@ func TestBCCheck(t *testing.T) {
 			},
 		},
 		{
-			orginal: &BCConfig{
+			original: &BCConfig{
 				TickerInterval:       10 * time.Second,
 				CheckBackendInterval: 10 * time.Second,
 				DialTimeout:          10 * time.Second,
@@ -312,8 +312,8 @@ func TestBCCheck(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test.orginal.check()
-		require.Equal(t, *test.final, *test.orginal)
+		test.original.check()
+		require.Equal(t, *test.final, *test.original)
 	}
 }
 
