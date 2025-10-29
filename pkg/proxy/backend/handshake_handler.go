@@ -21,6 +21,7 @@ const (
 	ConnContextKeyTLSState ConnContextKey = "tls-state"
 	ConnContextKeyConnID   ConnContextKey = "conn-id"
 	ConnContextKeyConnAddr ConnContextKey = "conn-addr"
+	ConnContextKeyAuthSalt ConnContextKey = "auth-salt"
 )
 
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
