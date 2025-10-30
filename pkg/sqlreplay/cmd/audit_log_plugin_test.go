@@ -323,29 +323,33 @@ func TestCommand(t *testing.T) {
 
 func TestParseStartTs(t *testing.T) {
 	tests := []struct {
-		kvs    map[string]string
-		ts     time.Time
-		errMsg string
+		kvs     map[string]string
+		startTS time.Time
+		endTS   time.Time
+		errMsg  string
 	}{
 		{
 			kvs: map[string]string{
 				auditPluginKeyTimeStamp: "2025/09/06 17:03:50.888 +08:10",
 				auditPluginKeyCostTime:  "666000",
 			},
-			ts: time.Date(2025, 9, 6, 17, 3, 50, 222000000, time.FixedZone("", 8*3600+600)),
+			startTS: time.Date(2025, 9, 6, 17, 3, 50, 222000000, time.FixedZone("", 8*3600+600)),
+			endTS:   time.Date(2025, 9, 6, 17, 3, 50, 888000000, time.FixedZone("", 8*3600+600)),
 		},
 		{
 			kvs: map[string]string{
 				auditPluginKeyTimeStamp: "2025/09/06 17:03:53.717 +08:10",
 				auditPluginKeyCostTime:  "",
 			},
-			ts: time.Date(2025, 9, 6, 17, 3, 53, 717000000, time.FixedZone("", 8*3600+600)),
+			startTS: time.Date(2025, 9, 6, 17, 3, 53, 717000000, time.FixedZone("", 8*3600+600)),
+			endTS:   time.Date(2025, 9, 6, 17, 3, 53, 717000000, time.FixedZone("", 8*3600+600)),
 		},
 		{
 			kvs: map[string]string{
 				auditPluginKeyTimeStamp: "2025/09/06 17:03:53.717 +08:10",
 			},
-			ts: time.Date(2025, 9, 6, 17, 3, 53, 717000000, time.FixedZone("", 8*3600+600)),
+			startTS: time.Date(2025, 9, 6, 17, 3, 53, 717000000, time.FixedZone("", 8*3600+600)),
+			endTS:   time.Date(2025, 9, 6, 17, 3, 53, 717000000, time.FixedZone("", 8*3600+600)),
 		},
 		{
 			kvs: map[string]string{
@@ -356,7 +360,7 @@ func TestParseStartTs(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		ts, err := parseStartTs(test.kvs)
+		startTS, endTS, err := parseStartAndEndTs(test.kvs)
 		if test.errMsg != "" {
 			require.Error(t, err, "case %d", i)
 			require.Contains(t, err.Error(), test.errMsg, "case %d", i)
@@ -364,7 +368,8 @@ func TestParseStartTs(t *testing.T) {
 		} else {
 			require.NoError(t, err, "case %d", i)
 		}
-		require.EqualValues(t, test.ts, ts, "case %d", i)
+		require.EqualValues(t, test.startTS, startTS, "case %d", i)
+		require.EqualValues(t, test.endTS, endTS, "case %d", i)
 	}
 }
 
@@ -531,6 +536,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Success:        true,
 				},
@@ -539,6 +545,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType:       "Select",
 					Success:        true,
@@ -554,6 +561,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType:       "Select",
 					Success:        true,
@@ -569,6 +577,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Success:        true,
 				},
@@ -577,6 +586,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select \"?\"")...),
 					StmtType:       "Select",
@@ -587,6 +597,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 1, 0, 0, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -597,6 +608,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -613,6 +625,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Success:        true,
 				},
@@ -637,6 +650,7 @@ func TestDecodeSingleLine(t *testing.T) {
 					ConnID:         3552575510,
 					UpstreamConnID: 3552575510,
 					StartTs:        time.Date(2025, 9, 8, 21, 15, 35, 621000000, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 8, 21, 15, 35, 621000000, time.FixedZone("", 8*3600+600)),
 					Payload:        []byte{pnet.ComQuit.Byte()},
 					Success:        true,
 				},
@@ -702,6 +716,7 @@ func TestDecodeMultiLines(t *testing.T) {
 			cmds: []*Command{
 				{
 					StartTs:        time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					Type:           pnet.ComQuery,
@@ -715,12 +730,14 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           3,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					Type:           pnet.ComQuery,
@@ -742,12 +759,14 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           1,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					Type:           pnet.ComQuery,
@@ -758,6 +777,7 @@ func TestDecodeMultiLines(t *testing.T) {
 				},
 				{
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					Type:           pnet.ComQuery,
@@ -775,6 +795,7 @@ func TestDecodeMultiLines(t *testing.T) {
 			cmds: []*Command{
 				{
 					StartTs:        time.Date(2025, 9, 8, 21, 16, 52, 630000000, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 8, 21, 16, 52, 630000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3552575570,
 					UpstreamConnID: 3552575570,
 					Payload:        []byte{pnet.ComQuit.Byte()},
@@ -794,6 +815,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           1,
 					Success:        true,
@@ -803,6 +825,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select \"?\"")...),
 					StmtType:       "Select",
@@ -814,6 +837,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 1, 0, 0, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -825,6 +849,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -836,6 +861,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   2,
 					Payload:        append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select \"?\"")...),
 					StmtType:       "Select",
@@ -847,6 +873,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   2,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 1, 0, 0, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -858,6 +885,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   2,
 					Payload:        append([]byte{pnet.ComStmtClose.Byte()}, []byte{2, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -876,6 +904,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           1,
 					Success:        true,
@@ -885,6 +914,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType:       "Select",
 					Line:           1,
@@ -895,6 +925,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181837,
 					UpstreamConnID: 3695181837,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           2,
 					Success:        true,
@@ -904,6 +935,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					ConnID:         3695181837,
 					UpstreamConnID: 3695181837,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComQuery.Byte()}, []byte("select \"[=]\"")...),
 					StmtType:       "Select",
 					Line:           2,
@@ -949,12 +981,14 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           3,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					Type:           pnet.ComQuery,
@@ -976,12 +1010,14 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("b")...),
 					Line:           3,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					Type:           pnet.ComQuery,
@@ -1042,6 +1078,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					CapturedPsID:   0,
 					Line:           1,
@@ -1052,6 +1089,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:       "Select",
@@ -1063,6 +1101,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1074,6 +1113,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 51, 56, 998880311, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 51, 56, 999000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1093,6 +1133,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					CapturedPsID:   0,
 					Line:           1,
@@ -1103,6 +1144,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:       "Select",
@@ -1114,6 +1156,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1125,6 +1168,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xf9, 0xe4, 0x01, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1136,6 +1180,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 51, 56, 998880311, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 51, 56, 999000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1155,6 +1200,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					CapturedPsID:   0,
 					Line:           1,
@@ -1165,6 +1211,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:       "Select",
@@ -1176,6 +1223,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1187,6 +1235,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 51, 56, 998880311, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 51, 56, 999000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtClose.Byte()}, []byte{1, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1198,6 +1247,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:       "Select",
@@ -1209,6 +1259,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xf9, 0xe4, 0x01, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1226,6 +1277,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					CapturedPsID:   0,
 					Line:           1,
@@ -1268,6 +1320,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           1,
 					Success:        true,
@@ -1277,6 +1330,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("SELECT c FROM sbtest1 WHERE id=?")...),
 					StmtType:       "Select",
@@ -1288,6 +1342,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1299,6 +1354,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
 					CapturedPsID:   1,
 					Payload:        append([]byte{pnet.ComStmtExecute.Byte()}, []byte{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 8, 0, 0xe8, 0xaf, 0x07, 0, 0, 0, 0, 0}...),
 					StmtType:       "Select",
@@ -1369,12 +1425,14 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					ConnID:         (uint64(123) << 54) + 1, // First allocated connection ID with decoder ID 123
 					UpstreamConnID: 1001,
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           1,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(123) << 54) + 1,
 					UpstreamConnID: 1001,
 					Type:           pnet.ComQuery,
@@ -1396,12 +1454,14 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					ConnID:         (uint64(456) << 54) + 1,
 					UpstreamConnID: 2001,
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           1,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(456) << 54) + 1,
 					UpstreamConnID: 2001,
 					Type:           pnet.ComQuery,
@@ -1412,6 +1472,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 30, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 30, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(456) << 54) + 1,
 					UpstreamConnID: 2001,
 					Type:           pnet.ComQuery,
@@ -1433,12 +1494,14 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					ConnID:         (uint64(789) << 54) + 1,
 					UpstreamConnID: 3001,
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           1,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(789) << 54) + 1,
 					UpstreamConnID: 3001,
 					Type:           pnet.ComQuery,
@@ -1452,12 +1515,14 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					ConnID:         (uint64(789) << 54) + 2,
 					UpstreamConnID: 3002,
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 30, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 30, 585000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           2,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 30, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 30, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(789) << 54) + 2,
 					UpstreamConnID: 3002,
 					Type:           pnet.ComQuery,
@@ -1480,12 +1545,14 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					ConnID:         (uint64(100) << 54) + 1,
 					UpstreamConnID: 4001,
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           1,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(100) << 54) + 1,
 					UpstreamConnID: 4001,
 					Type:           pnet.ComQuery,
@@ -1496,6 +1563,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 30, 585000000, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 30, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(100) << 54) + 1,
 					UpstreamConnID: 4001,
 					Type:           pnet.ComQuit,
@@ -1508,12 +1576,14 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					ConnID:         (uint64(100) << 54) + 2,
 					UpstreamConnID: 4001,
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 31, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 31, 585000000, time.FixedZone("", 8*3600+600)),
 					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
 					Line:           3,
 					Success:        true,
 				},
 				{
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 31, 583942167, time.FixedZone("", 8*3600+600)),
+					EndTs:          time.Date(2025, 9, 14, 16, 16, 31, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(100) << 54) + 2,
 					UpstreamConnID: 4001,
 					Type:           pnet.ComQuery,
@@ -1579,4 +1649,65 @@ func TestConnIDAllocator(t *testing.T) {
 	// Check that IDs are sequential
 	require.Equal(t, id1+1, id2)
 	require.Equal(t, id2+1, id3)
+}
+
+func TestDecoderCommandEndTimeFiltering(t *testing.T) {
+	tests := []struct {
+		name      string
+		line      string
+		startTime string
+		endTime   string
+		shouldGet bool
+	}{
+		{
+			name:      "command before endTime should be filtered out",
+			line:      `[2025/09/14 16:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:29.585 +08:00] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT 1"] [ROWS=0] [CONNECTION_ID=1] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			startTime: "2025/09/14 16:16:28.585 +08:00",
+			endTime:   "2025/09/14 16:16:30.585 +08:00",
+			shouldGet: false,
+		},
+		{
+			name:      "command ending after end time should be decoded",
+			line:      `[2025/09/14 16:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:29.585 +08:00] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT 1"] [ROWS=0] [CONNECTION_ID=1] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			startTime: "2025/09/14 16:16:27.585 +08:00",
+			endTime:   "2025/09/14 16:16:28.585 +08:00",
+			shouldGet: true,
+		},
+		{
+			name:      "if the endTime is not specified, command ending after end time should be decoded",
+			line:      `[2025/09/14 16:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:29.585 +08:00] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT 1"] [ROWS=0] [CONNECTION_ID=1] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			startTime: "",
+			endTime:   "2025/09/14 16:16:28.585 +08:00",
+			shouldGet: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			auditDecoder := NewAuditLogPluginDecoder()
+			if len(tt.startTime) > 0 {
+				startTime, err := time.Parse(timeLayout, tt.startTime)
+				require.NoError(t, err)
+				auditDecoder.SetCommandStartTime(startTime)
+			}
+			if len(tt.endTime) > 0 {
+				endTime, err := time.Parse(timeLayout, tt.endTime)
+				require.NoError(t, err)
+				auditDecoder.SetCommandEndTime(endTime)
+			}
+
+			reader := mockReader{data: append([]byte(tt.line), '\n')}
+
+			command, err := auditDecoder.Decode(&reader)
+			if tt.shouldGet {
+				require.NoError(t, err)
+				require.NotNil(t, command)
+			} else {
+				// Should either return EOF or nil command due to filtering
+				if err == nil {
+					require.Nil(t, command)
+				}
+			}
+		})
+	}
 }

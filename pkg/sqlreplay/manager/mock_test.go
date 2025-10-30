@@ -67,8 +67,8 @@ type mockReplay struct {
 func (m *mockReplay) Close() {
 }
 
-func (m *mockReplay) Progress() (float64, time.Time, time.Time, bool, error) {
-	return m.progress, time.Time{}, time.Time{}, m.done, m.err
+func (m *mockReplay) Progress() (float64, time.Time, time.Time, time.Time, bool, error) {
+	return m.progress, time.Time{}, time.Time{}, time.Time{}, m.done, m.err
 }
 
 func (m *mockReplay) Wait() {

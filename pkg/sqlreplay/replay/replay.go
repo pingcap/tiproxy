@@ -59,7 +59,7 @@ type Replay interface {
 	// Stop stops the replay
 	Stop(err error, graceful bool)
 	// Progress returns the progress of the replay job
-	Progress() (float64, time.Time, time.Time, bool, error)
+	Progress() (float64, time.Time, time.Time, time.Time, bool, error)
 	// Close closes the replay
 	Close()
 }
@@ -79,6 +79,9 @@ type ReplayConfig struct {
 	// CommandStartTime is the start time of the command being replayed. It's different from StartTime,
 	// which means the start time of the whole replay job.
 	CommandStartTime time.Time
+	// CommandEndTime is the end time of the command being replayed. This config is only valid for audit
+	// log plugin format.
+	CommandEndTime time.Time
 	// IgnoreErrs indicates whether to ignore decoding errors.
 	// The errors are just printed if true, otherwise the replayer stops.
 	IgnoreErrs bool
@@ -160,6 +163,9 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	case cmd.PSCloseStrategyAlways, cmd.PSCloseStrategyDirected, cmd.PSCloseStrategyNever:
 	default:
 		return storages, errors.Errorf("invalid prepared statement close strategy %s", cfg.PSCloseStrategy)
+	}
+	if cfg.Format != cmd.FormatAuditLogPlugin && !cfg.CommandEndTime.IsZero() {
+		return storages, errors.New("command end time is only supported for `audit_log_plugin` format")
 	}
 	return storages, nil
 }
@@ -318,6 +324,12 @@ func (r *replay) readCommands(ctx context.Context) {
 			}
 		}
 		r.replayStats.CurCmdTs.Store(command.StartTs.UnixNano())
+		if !command.EndTs.IsZero() {
+			r.replayStats.CurCmdEndTs.Store(command.EndTs.UnixNano())
+		} else {
+			// fallback to StartTs if EndTs is not available.
+			r.replayStats.CurCmdEndTs.Store(command.StartTs.UnixNano())
+		}
 		if captureStartTs.IsZero() {
 			// first command
 			captureStartTs = command.StartTs
@@ -367,7 +379,8 @@ func (r *replay) readCommands(ctx context.Context) {
 	r.lg.Info("finished decoding commands, draining connections", zap.Int64("max_pending_cmds", maxPendingCmds),
 		zap.Duration("extra_wait_time", extraWaitTime),
 		zap.Int("alive_conns", connCount),
-		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())))
+		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
+		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())))
 
 	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
@@ -413,6 +426,7 @@ func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineR
 		if auditLogDecoder, ok := cmdDecoder.(*cmd.AuditLogPluginDecoder); ok {
 			auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
 			auditLogDecoder.SetIDAllocator(idAllocator)
+			auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)
 		}
 
 		var decoder decoder
@@ -453,13 +467,17 @@ func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 		}
 
 		for i, storage := range r.storages {
-			reader, err := store.NewReader(r.lg.Named("loader"), storage, store.ReaderCfg{
-				Format:           r.cfg.Format,
-				Dir:              inputs[i],
-				EncryptionKey:    r.cfg.encryptionKey,
-				EncryptionMethod: r.meta.EncryptMethod,
-				CommandStartTime: r.cfg.CommandStartTime,
-			})
+			cfg := store.ReaderCfg{
+				Format:             r.cfg.Format,
+				Dir:                inputs[i],
+				EncryptionKey:      r.cfg.encryptionKey,
+				EncryptionMethod:   r.meta.EncryptMethod,
+				FileNameFilterTime: r.cfg.CommandEndTime,
+			}
+			if r.cfg.CommandEndTime.IsZero() {
+				cfg.FileNameFilterTime = r.cfg.CommandStartTime
+			}
+			reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
 			if err != nil {
 				for _, r := range readers {
 					r.Close()
@@ -497,7 +515,7 @@ func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount 
 	}
 }
 
-func (r *replay) Progress() (float64, time.Time, time.Time, bool, error) {
+func (r *replay) Progress() (float64, time.Time, time.Time, time.Time, bool, error) {
 	pendingCmds := r.replayStats.PendingCmds.Load()
 	r.Lock()
 	defer r.Unlock()
@@ -505,7 +523,8 @@ func (r *replay) Progress() (float64, time.Time, time.Time, bool, error) {
 		r.progress = float64(r.decodedCmds.Load()-uint64(pendingCmds)) / float64(r.meta.Cmds)
 	}
 	curCmdTs := time.Unix(0, r.replayStats.CurCmdTs.Load())
-	return r.progress, r.endTime, curCmdTs, r.startTime.IsZero(), r.err
+	curCmdEndTs := time.Unix(0, r.replayStats.CurCmdEndTs.Load())
+	return r.progress, r.endTime, curCmdTs, curCmdEndTs, r.startTime.IsZero(), r.err
 }
 
 func (r *replay) readMeta() *store.Meta {
@@ -540,6 +559,7 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Duration("replay_elapsed", time.Since(r.startTime)),
 				zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
 				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
+				zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
 				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)))
 		}
 	}
@@ -566,6 +586,7 @@ func (r *replay) stop(err error) {
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
 		zap.Time("command_start_time", r.cfg.CommandStartTime),
+		zap.Time("command_end_time", r.cfg.CommandEndTime),
 		zap.String("format", r.cfg.Format),
 		zap.String("username", r.cfg.Username),
 		zap.Bool("ignore_errs", r.cfg.IgnoreErrs),
@@ -579,6 +600,7 @@ func (r *replay) stop(err error) {
 		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
+		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
 	}
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)

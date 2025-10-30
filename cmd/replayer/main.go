@@ -48,6 +48,7 @@ func main() {
 	format := rootCmd.PersistentFlags().String("format", "", "the format of traffic files")
 	logFile := rootCmd.PersistentFlags().String("log-file", "", "the output log file")
 	cmdStartTime := rootCmd.PersistentFlags().Time("command-start-time", time.Time{}, []string{time.RFC3339, time.RFC3339Nano}, "the start time to replay the traffic, format is RFC3339. The command before this start time will be ignored.")
+	cmdEndTime := rootCmd.PersistentFlags().Time("command-end-time", time.Time{}, []string{time.RFC3339, time.RFC3339Nano}, "the end time to replay the traffic, format is RFC3339. The command whose end ts is before this end time will be ignored.")
 	ignoreErrs := rootCmd.PersistentFlags().Bool("ignore-errs", false, "ignore errors when replaying")
 	bufSize := rootCmd.PersistentFlags().Int("bufsize", 100000, "the size of buffer for reordering commands from audit files. 0 means no buffering.")
 	pprofAddr := rootCmd.PersistentFlags().String("pprof-addr", "", "the address to listen on for pprof, e.g. localhost:6060. By default pprof is disabled.")
@@ -120,6 +121,7 @@ func main() {
 			ReadOnly:         *readonly,
 			StartTime:        time.Now(),
 			CommandStartTime: *cmdStartTime,
+			CommandEndTime:   *cmdEndTime,
 			IgnoreErrs:       *ignoreErrs,
 			BufSize:          *bufSize,
 			PSCloseStrategy:  replaycmd.PSCloseStrategy(*psCloseStrategy),

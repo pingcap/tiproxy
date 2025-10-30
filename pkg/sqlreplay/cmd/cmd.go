@@ -70,6 +70,7 @@ type Command struct {
 	Line     int
 	// Logged only in audit log.
 	StmtType string
+	EndTs    time.Time
 	// Logged only in native log.
 	Success bool
 }

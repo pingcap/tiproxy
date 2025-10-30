@@ -80,6 +80,7 @@ const (
 type AuditLogPluginDecoder struct {
 	connInfo         map[uint64]auditLogPluginConnCtx
 	commandStartTime time.Time
+	commandEndTime   time.Time
 	// pendingCmds contains the commands that has not been returned yet.
 	pendingCmds     []*Command
 	psCloseStrategy PSCloseStrategy
@@ -139,12 +140,16 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			return nil, errors.Errorf("%s, line %d: parsing connection id failed: %s", filename, lineIdx, connStr)
 		}
 
-		startTs, err := parseStartTs(kvs)
+		startTs, endTs, err := parseStartAndEndTs(kvs)
 		if err != nil {
 			return nil, errors.Wrapf(err, "%s, line %d", filename, lineIdx)
 		}
 		if startTs.Before(decoder.commandStartTime) {
 			// Ignore the commands before CommandStartTime.
+			continue
+		}
+		if endTs.Before(decoder.commandEndTime) {
+			// Ignore the commands before CommandEndTime.
 			continue
 		}
 
@@ -191,6 +196,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			cmd.StartTs = startTs
 			cmd.FileName = filename
 			cmd.Line = lineIdx
+			cmd.EndTs = endTs
 		}
 		if len(cmds) > 1 {
 			decoder.pendingCmds = cmds[1:]
@@ -201,6 +207,10 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 
 func (decoder *AuditLogPluginDecoder) SetCommandStartTime(t time.Time) {
 	decoder.commandStartTime = t
+}
+
+func (decoder *AuditLogPluginDecoder) SetCommandEndTime(t time.Time) {
+	decoder.commandEndTime = t
 }
 
 func (decoder *AuditLogPluginDecoder) SetPSCloseStrategy(s PSCloseStrategy) {
@@ -290,20 +300,20 @@ func parseCommand(value string) string {
 	return value
 }
 
-func parseStartTs(kvs map[string]string) (time.Time, error) {
+func parseStartAndEndTs(kvs map[string]string) (time.Time, time.Time, error) {
 	endTs, err := time.Parse(timeLayout, kvs[auditPluginKeyTimeStamp])
 	if err != nil {
-		return time.Time{}, errors.Errorf("parsing timestamp failed: %s", kvs[auditPluginKeyTimeStamp])
+		return time.Time{}, time.Time{}, errors.Errorf("parsing timestamp failed: %s", kvs[auditPluginKeyTimeStamp])
 	}
 	costTime := kvs[auditPluginKeyCostTime]
 	if len(costTime) == 0 {
-		return endTs, nil
+		return endTs, endTs, nil
 	}
 	millis, err := strconv.ParseFloat(costTime, 32)
 	if err != nil {
-		return endTs, errors.Errorf("parsing cost time failed: %s", costTime)
+		return endTs, endTs, errors.Errorf("parsing cost time failed: %s", costTime)
 	}
-	return endTs.Add(-time.Duration(millis * 1000)), nil
+	return endTs.Add(-time.Duration(millis * 1000)), endTs, nil
 }
 
 func parseSQL(value string) (string, error) {
