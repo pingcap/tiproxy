@@ -6,8 +6,10 @@ package replay
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
@@ -43,6 +45,9 @@ const (
 	minSpeed          = 0.1
 	maxSpeed          = 10.0
 	reportLogInterval = 10 * time.Second
+
+	checkpointSaveInterval = 100 * time.Millisecond
+	stateSaveRetryInterval = 10 * time.Second
 )
 
 var (
@@ -99,6 +104,8 @@ type ReplayConfig struct {
 	slowDownThreshold int64
 	slowDownFactor    time.Duration
 	reportLogInterval time.Duration
+	// CheckPointFilePath is the path to the file that stores the current state of the replay
+	CheckPointFilePath string
 }
 
 func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
@@ -170,6 +177,38 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	return storages, nil
 }
 
+// LoadFromCheckpoint loads the config from the checkpoint file.
+func (cfg *ReplayConfig) LoadFromCheckpoint() error {
+	if len(cfg.CheckPointFilePath) == 0 {
+		return nil
+	}
+
+	file, err := os.Open(cfg.CheckPointFilePath)
+	if err != nil {
+		// Allow the file to not exist.
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	var state replayCheckpoint
+	if err := decoder.Decode(&state); err != nil {
+		return errors.Wrapf(err, "failed to decode checkpoint file %s", cfg.CheckPointFilePath)
+	}
+
+	if state.CurCmdTs > 0 {
+		cfg.CommandStartTime = time.Unix(0, state.CurCmdTs)
+	}
+	// Only load `CommandEndTime` for `audit_log_plugin` format, or it'll not pass validation.
+	if state.CurCmdEndTs > 0 && cfg.Format == cmd.FormatAuditLogPlugin {
+		cfg.CommandEndTime = time.Unix(0, state.CurCmdEndTs)
+	}
+	return nil
+}
+
 type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig
@@ -201,6 +240,10 @@ func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 }
 
 func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
+	err := cfg.LoadFromCheckpoint()
+	if err != nil {
+		return err
+	}
 	storages, err := cfg.Validate()
 	if err != nil {
 		for _, s := range storages {
@@ -272,6 +315,11 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.wg.RunWithRecover(func() {
 		r.reportLoop(childCtx)
 	}, nil, r.lg)
+	if len(r.cfg.CheckPointFilePath) > 0 {
+		r.wg.RunWithRecover(func() {
+			r.saveCheckpointLoop(childCtx)
+		}, nil, r.lg)
+	}
 	return nil
 }
 
@@ -565,6 +613,80 @@ func (r *replay) reportLoop(ctx context.Context) {
 	}
 }
 
+// replayCheckpoint is a struct to serialize and save the current state of replay
+// on disk, so that the following execution can resume from the saved state.
+type replayCheckpoint struct {
+	CurCmdTs    int64 `json:"cur_cmd_ts"`
+	CurCmdEndTs int64 `json:"cur_cmd_end_ts"`
+}
+
+func (r *replay) saveCheckpointLoop(ctx context.Context) {
+	ticker := time.NewTicker(checkpointSaveInterval)
+	defer ticker.Stop()
+
+	file, err := os.OpenFile(r.cfg.CheckPointFilePath, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		r.lg.Error("open checkpoint file failed", zap.Error(err))
+		return
+	}
+	defer file.Close()
+
+	for {
+		// Add an interval here to avoid printing too many logs when error occurs.
+		if err != nil {
+			time.Sleep(stateSaveRetryInterval)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			err = r.saveCheckpointToFile(file)
+			if err != nil {
+				r.lg.Error("save current checkpoint failed", zap.Error(err))
+				time.Sleep(stateSaveRetryInterval)
+				continue
+			}
+		}
+	}
+}
+
+func (r *replay) saveCheckpointToFile(file *os.File) error {
+	state := r.fetchCurrentCheckpoint()
+	err := file.Truncate(0)
+	if err != nil {
+		return errors.Wrapf(err, "truncate checkpoint file")
+	}
+
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return errors.Wrapf(err, "seek checkpoint file")
+	}
+
+	err = json.NewEncoder(file).Encode(state)
+	if err != nil {
+		return errors.Wrapf(err, "save current checkpoint")
+	}
+	return nil
+}
+
+func (r *replay) saveCurrentStateToFilePath(filePath string) error {
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return errors.Wrapf(err, "open state file %s", filePath)
+	}
+	defer file.Close()
+
+	return r.saveCheckpointToFile(file)
+}
+
+func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
+	return replayCheckpoint{
+		CurCmdTs:    r.replayStats.CurCmdTs.Load(),
+		CurCmdEndTs: r.replayStats.CurCmdEndTs.Load(),
+	}
+}
+
 func (r *replay) stop(err error) {
 	r.Lock()
 	defer r.Unlock()
@@ -653,5 +775,13 @@ func (r *replay) Close() {
 	r.Stop(errors.New("shutting down"), false)
 	if r.report != nil {
 		r.report.Close()
+	}
+	// at this time, the save checkpoint loop and replay loop have exited. It's safe to update the latest
+	// checkpoint file.
+	if len(r.cfg.CheckPointFilePath) > 0 {
+		err := r.saveCurrentStateToFilePath(r.cfg.CheckPointFilePath)
+		if err != nil {
+			r.lg.Error("save current state failed on close", zap.Error(err))
+		}
 	}
 }
