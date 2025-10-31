@@ -114,7 +114,7 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 				return nil, errors.Errorf("%s, line %d: parsing Time failed: %s", filename, lineIdx, line)
 			}
 
-			if c.StartTs.Before(rw.commandStartTime) {
+			if c.StartTs.Before(rw.commandStartTime) || c.StartTs.Equal(rw.commandStartTime) {
 				skipThisCommand = true
 			}
 		case nativeKeyConnID:

@@ -217,7 +217,7 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		var minFileName string
 		fileNamePrefix := getFileNamePrefix(r.cfg.Format)
 		parseFunc := getParseFileNameFunc(r.cfg.Format)
-		fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.CommandStartTime)
+		fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.FileNameFilterTime)
 		childCtx, cancel := context.WithTimeout(ctx, opTimeout)
 		startTime := time.Now()
 		err = r.walkFile(childCtx, curFileName,
@@ -335,8 +335,8 @@ func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, curFileName st
 	var marker string
 	if curFileName != "" {
 		marker = pathPrefix + curFileName
-	} else if !r.cfg.CommandStartTime.IsZero() {
-		t := r.cfg.CommandStartTime.In(time.Local)
+	} else if !r.cfg.FileNameFilterTime.IsZero() {
+		t := r.cfg.FileNameFilterTime.In(time.Local)
 		marker = fmt.Sprintf("%s%s", prefix, t.Format(logTimeLayout))
 	}
 
@@ -411,11 +411,11 @@ func getParseFileNameFunc(format string) func(string, string) int64 {
 	return parseFileIdx
 }
 
-func getFilterFileNameFunc(format string, commandStartTime time.Time) func(string, string) bool {
+func getFilterFileNameFunc(format string, fileNameFilterTime time.Time) func(string, string) bool {
 	switch format {
 	case cmd.FormatAuditLogPlugin:
 		return func(name, fileNamePrefix string) bool {
-			return filterFileByTime(name, fileNamePrefix, commandStartTime)
+			return filterFileByTime(name, fileNamePrefix, fileNameFilterTime)
 		}
 	}
 	return func(string, string) bool { return true }
@@ -482,7 +482,7 @@ func parseFileTimeToIdx(name, fileNamePrefix string) int64 {
 	return ts.UnixNano() / 1000000
 }
 
-func filterFileByTime(name, fileNamePrefix string, commandStartTime time.Time) bool {
+func filterFileByTime(name, fileNamePrefix string, fileNameFilterTime time.Time) bool {
 	fileTime := parseFileTime(name, fileNamePrefix)
 	if fileTime.IsZero() {
 		return false
@@ -490,5 +490,5 @@ func filterFileByTime(name, fileNamePrefix string, commandStartTime time.Time) b
 	// Be careful that the log file name doesn't contain timezone info.
 	// We assume the log file time is the Local time. But anyway we could workaround it by
 	// adjusting the commandStartTime.
-	return fileTime.After(commandStartTime)
+	return fileTime.After(fileNameFilterTime)
 }

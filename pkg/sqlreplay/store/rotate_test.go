@@ -454,7 +454,7 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 	require.NoError(t, err)
 	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
-	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, CommandStartTime: commandStartTime})
+	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, FileNameFilterTime: commandStartTime})
 	require.NoError(t, err)
 	var fileOrder []string
 	for {
@@ -513,8 +513,8 @@ func TestWalkS3ForAuditLogFile(t *testing.T) {
 
 	r := &rotateReader{
 		cfg: ReaderCfg{
-			Format:           cmd.FormatAuditLogPlugin,
-			CommandStartTime: time.Time{},
+			Format:             cmd.FormatAuditLogPlugin,
+			FileNameFilterTime: time.Time{},
 		},
 	}
 	selectedFileCount := 0

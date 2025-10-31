@@ -42,6 +42,8 @@ type ReplayStats struct {
 	FirstCmdTs atomic.Int64
 	// The current decoded command timestamp.
 	CurCmdTs atomic.Int64
+	// The end timestamp of the current decoded command.
+	CurCmdEndTs atomic.Int64
 	// The number of exception commands.
 	ExceptionCmds atomic.Uint64
 }

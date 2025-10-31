@@ -122,8 +122,9 @@ var _ Job = (*replayJob)(nil)
 
 type replayJob struct {
 	job
-	cfg       replay.ReplayConfig
-	lastCmdTs time.Time
+	cfg          replay.ReplayConfig
+	lastCmdTs    time.Time
+	lastCmdEndTs time.Time
 }
 
 type replayJob4Marshal struct {

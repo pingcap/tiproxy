@@ -33,8 +33,8 @@ type ReaderCfg struct {
 	Format           string
 	EncryptionMethod string
 	EncryptionKey    []byte
-	// Reader will skip the files whose end time is before CommandStartTime.
-	CommandStartTime time.Time
+	// Reader will skip the files whose end time is before FileNameFilterTime.
+	FileNameFilterTime time.Time
 }
 
 var _ cmd.LineReader = (*loader)(nil)
