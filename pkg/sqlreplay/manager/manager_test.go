@@ -17,7 +17,7 @@ import (
 )
 
 func TestStartAndStop(t *testing.T) {
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil)
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, false)
 	defer mgr.Close()
 	cpt, rep := &mockCapture{}, &mockReplay{}
 	mgr.capture, mgr.replay = cpt, rep
@@ -64,7 +64,7 @@ func TestMarshalJobHistory(t *testing.T) {
 	require.NoError(t, err)
 	endTime, err := time.Parse("2006-01-02 15:04:05", "2020-01-01 02:01:01")
 	require.NoError(t, err)
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil)
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, false)
 	mgr.jobHistory = []Job{
 		&captureJob{
 			job: job{
@@ -104,6 +104,20 @@ func TestMarshalJobHistory(t *testing.T) {
 			},
 			lastCmdTs: endTime,
 		},
+		&replayJob{
+			job: job{
+				startTime: startTime,
+				endTime:   endTime,
+				progress:  0,
+				done:      true,
+			},
+			cfg: replay.ReplayConfig{
+				Input:    "/tmp/traffic",
+				Username: "root",
+				Addr:     "127.0.0.100:10000",
+			},
+			lastCmdTs: endTime,
+		},
 	}
 	t.Log(mgr.Jobs())
 	require.Equal(t, `[
@@ -136,12 +150,23 @@ func TestMarshalJobHistory(t *testing.T) {
     "input": "/tmp/traffic",
     "username": "root",
     "speed": 0.5
+  },
+  {
+    "type": "replay",
+    "status": "done",
+    "start_time": "2020-01-01T00:00:00Z",
+    "end_time": "2020-01-01T02:01:01Z",
+    "progress": "0%",
+    "last_cmd_ts": "2020-01-01T02:01:01Z",
+    "input": "/tmp/traffic",
+    "username": "root",
+    "addr": "127.0.0.100:10000"
   }
 ]`, mgr.Jobs())
 }
 
 func TestHistoryLen(t *testing.T) {
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, nil, nil)
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, nil, nil, false)
 	defer mgr.Close()
 	cpt, rep := &mockCapture{}, &mockReplay{}
 	mgr.capture, mgr.replay = cpt, rep
@@ -153,4 +178,23 @@ func TestHistoryLen(t *testing.T) {
 		expectedLen := min(i+1, maxJobHistoryCount)
 		require.Len(t, mgr.jobHistory, expectedLen)
 	}
+}
+
+func TestAllowAddrOnlyForStandaloneService(t *testing.T) {
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, false)
+	defer mgr.Close()
+
+	err := mgr.StartReplay(replay.ReplayConfig{
+		Addr: "127.0.0.100:10000",
+	})
+	require.ErrorContains(t, err, "Addr is not allowed in replay config in a TiProxy node")
+
+	mgr2 := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, true)
+	defer mgr2.Close()
+	mgr2.capture, mgr2.replay = &mockCapture{}, &mockReplay{}
+
+	err = mgr2.StartReplay(replay.ReplayConfig{
+		Addr: "127.0.0.100:10000",
+	})
+	require.NoError(t, err)
 }
