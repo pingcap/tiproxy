@@ -260,28 +260,12 @@ func (router *ScoreBasedRouter) updateGroups() {
 			}
 			group = router.groups[0]
 		case MatchClientCIDR, MatchProxyCIDR:
-			labels := backend.getHealth().Labels
-			if len(labels) == 0 {
-				break
-			}
-			cidr := labels["cidr"]
-			if len(cidr) == 0 {
-				break
-			}
-			cidrs := strings.Split(cidr, ",")
-			for i := len(cidrs) - 1; i >= 0; i-- {
-				cidr = strings.TrimSpace(cidrs[i])
-				if len(cidr) == 0 {
-					cidrs = append(cidrs[:i], cidrs[i+1:]...)
-				} else {
-					cidrs[i] = cidr
-				}
-			}
+			cidrs := backend.Cidr()
 			if len(cidrs) == 0 {
 				break
 			}
 			for _, g := range router.groups {
-				if g.EqualValues(cidrs) {
+				if g.Intersect(cidrs) {
 					group = g
 					break
 				}
@@ -298,6 +282,9 @@ func (router *ScoreBasedRouter) updateGroups() {
 		if group != nil {
 			group.AddBackend(backend.addr, backend)
 		}
+	}
+	for _, group := range router.groups {
+		group.RefreshCidr()
 	}
 }
 

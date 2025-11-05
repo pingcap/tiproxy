@@ -68,8 +68,8 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 		return err
 	}
 	// Set sql_mode to non-strict mode so that inserted data can be truncated automatically.
-	_, err := rdb.conn.ExecuteCmd(ctx, append([]byte{pnet.ComQuery.Byte()}, hack.Slice("set sql_mode=''")...))
-	return err
+	resp := rdb.conn.ExecuteCmd(ctx, append([]byte{pnet.ComQuery.Byte()}, hack.Slice("set sql_mode=''")...))
+	return resp.Err
 }
 
 func (rdb *reportDB) initTables(ctx context.Context) error {
@@ -102,7 +102,7 @@ func (rdb *reportDB) InsertExceptions(startTime time.Time, tp conn.ExceptionType
 			sample := value.sample.(*conn.FailException)
 			command := sample.Command()
 			args = []any{startTime.String(), command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(),
-				command.StartTs.String(), sample.Time().String(), value.count, value.count}
+				command.FileName, command.Line, command.StartTs.String(), sample.Time().String(), value.count, value.count}
 		case conn.Other:
 			sample := value.sample.(*conn.OtherException)
 			args = []any{startTime.String(), sample.Key(), sample.Error(), sample.Time().String(), value.count, value.count}

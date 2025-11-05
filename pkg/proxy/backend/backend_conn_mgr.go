@@ -92,6 +92,7 @@ type BCConfig struct {
 	UnhealthyKeepAlive   config.KeepAlive
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
+	DialTimeout          time.Duration
 	ConnectTimeout       time.Duration
 	ConnBufferSize       int
 	ProxyProtocol        bool
@@ -104,6 +105,9 @@ func (cfg *BCConfig) check() {
 	}
 	if cfg.CheckBackendInterval == time.Duration(0) {
 		cfg.CheckBackendInterval = CheckBackendInterval
+	}
+	if cfg.DialTimeout == time.Duration(0) {
+		cfg.DialTimeout = DialTimeout
 	}
 	if cfg.ConnectTimeout == time.Duration(0) {
 		cfg.ConnectTimeout = ConnectTimeout
@@ -203,7 +207,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 
 	if mgr.closeStatus.Load() >= statusNotifyClose {
 		mgr.quitSource = SrcProxyQuit
-		return errors.New("graceful shutdown before connecting")
+		return ErrClosing
 	}
 	startTime := time.Now()
 	mgr.createTime = startTime
@@ -215,6 +219,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 		// fake client, used for replaying traffic
 		err = mgr.authenticator.handshakeWithBackend(ctx, mgr.logger.Named("authenticator"), mgr, mgr.handshakeHandler, username, password, mgr.getBackendIO, backendTLSConfig)
 	}
+	mgr.logger = mgr.logger.With(zap.Stringer("client_addr", clientIO.RemoteAddr()), zap.Stringer("proxy_addr", clientIO.ProxyAddr()))
 	if err != nil {
 		src := Error2Source(err)
 		mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), err, src)
@@ -282,8 +287,10 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 	var addr string
 	var backend router.BackendInst
 	var origErr error
+	var retryCount int
 	io, err := backoff.RetryNotifyWithData(
 		func() (pnet.PacketIO, error) {
+			retryCount++
 			addr = ""
 			// Try to connect to all backup backends one by one.
 			if backend, err = selector.Next(); err == router.ErrNoBackend {
@@ -294,7 +301,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 
 			var cn net.Conn
 			addr = backend.Addr()
-			cn, err = net.DialTimeout("tcp", addr, DialTimeout)
+			cn, err = net.DialTimeout("tcp", addr, mgr.config.DialTimeout)
 			selector.Finish(mgr, err == nil)
 			if err != nil {
 				metrics.DialBackendFailCounter.WithLabelValues(addr).Inc()
@@ -321,9 +328,9 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 	duration := time.Since(startTime)
 	addGetBackendMetrics(duration, err == nil)
 	if err != nil {
-		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.NamedError("last_err", origErr))
+		mgr.logger.Error("get backend failed", zap.Duration("duration", duration), zap.Int("retry_count", retryCount), zap.NamedError("last_err", origErr))
 	} else if duration >= time.Second {
-		mgr.logger.Warn("get backend slow", zap.Duration("duration", duration), zap.NamedError("last_err", origErr),
+		mgr.logger.Warn("get backend slow", zap.Duration("duration", duration), zap.Int("retry_count", retryCount), zap.NamedError("last_err", origErr),
 			zap.String("backend_addr", mgr.ServerAddr()))
 	}
 	if err != nil && errors.Is(err, context.DeadlineExceeded) {
@@ -373,6 +380,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 
 	// Once the request is accepted, it's treated in the transaction, so we don't check graceful shutdown here.
 	if mgr.closeStatus.Load() >= statusClosing {
+		err = ErrClosing
 		return
 	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
@@ -581,7 +589,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
 			mgr.quitSource = SrcBackendNetwork
 			if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
-				mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
+				mgr.logger.Warn("graceful close client IO error", zap.Error(ignoredErr))
 			}
 		}
 		return
@@ -601,7 +609,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	var cn net.Conn
-	cn, rs.err = net.DialTimeout("tcp", rs.to, DialTimeout)
+	cn, rs.err = net.DialTimeout("tcp", rs.to, mgr.config.DialTimeout)
 	if rs.err != nil {
 		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err, SrcBackendNetwork)
 		return
@@ -695,7 +703,7 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 	mgr.quitSource = SrcProxyQuit
 	// Closing clientIO will cause the whole connection to be closed.
 	if err := mgr.clientIO.GracefulClose(); err != nil {
-		mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+		mgr.logger.Warn("graceful close client IO error", zap.Error(err))
 	}
 	mgr.closeStatus.CompareAndSwap(statusNotifyClose, statusClosing)
 }
@@ -714,11 +722,11 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	backendIO := *mgr.backendIO.Load()
 	if !backendIO.IsPeerActive() {
 		mgr.logger.Info("backend connection is closed, close client connection",
-			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()),
+			zap.Stringer("backend_addr", backendIO.RemoteAddr()),
 			zap.Bool("backend_healthy", mgr.curBackend.Healthy()))
 		mgr.quitSource = SrcBackendNetwork
 		if err := mgr.clientIO.GracefulClose(); err != nil {
-			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
+			mgr.logger.Warn("graceful close client IO error", zap.Error(err))
 		}
 		mgr.closeStatus.CompareAndSwap(statusActive, statusClosing)
 	} else {

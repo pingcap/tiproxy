@@ -88,6 +88,7 @@ func TestMarshalJobHistory(t *testing.T) {
 				Input:    "/tmp/traffic",
 				Username: "root",
 			},
+			lastCmdTs: endTime,
 		},
 		&replayJob{
 			job: job{
@@ -101,6 +102,7 @@ func TestMarshalJobHistory(t *testing.T) {
 				Username: "root",
 				Speed:    0.5,
 			},
+			lastCmdTs: endTime,
 		},
 	}
 	t.Log(mgr.Jobs())
@@ -120,6 +122,7 @@ func TestMarshalJobHistory(t *testing.T) {
     "status": "running",
     "start_time": "2020-01-01T00:00:00Z",
     "progress": "0%",
+    "last_cmd_ts": "2020-01-01T02:01:01Z",
     "input": "/tmp/traffic",
     "username": "root"
   },
@@ -129,6 +132,7 @@ func TestMarshalJobHistory(t *testing.T) {
     "start_time": "2020-01-01T00:00:00Z",
     "end_time": "2020-01-01T02:01:01Z",
     "progress": "100%",
+    "last_cmd_ts": "2020-01-01T02:01:01Z",
     "input": "/tmp/traffic",
     "username": "root",
     "speed": 0.5

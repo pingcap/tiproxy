@@ -17,9 +17,14 @@ func TestPacketIO(t *testing.T) {
 	require.Error(t, err)
 	// test write
 	require.NoError(t, pkt.WritePacket([]byte("hello"), true))
+	require.Empty(t, pkt.GetResp())
+	// test write with save resp
+	pkt.saveResp = true
+	require.NoError(t, pkt.WritePacket([]byte("hello"), true))
 	require.Equal(t, "hello", string(pkt.GetResp()))
 	pkt.Reset()
 	require.Equal(t, "", string(pkt.GetResp()))
+	pkt.saveResp = true
 	require.NoError(t, pkt.WritePacket([]byte("world"), false))
 	require.Equal(t, "world", string(pkt.GetResp()))
 	// test flush

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 
 	glist "github.com/bahlo/generic-list-go"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -41,6 +42,8 @@ type ReplayStats struct {
 	FirstCmdTs atomic.Int64
 	// The current decoded command timestamp.
 	CurCmdTs atomic.Int64
+	// The end timestamp of the current decoded command.
+	CurCmdEndTs atomic.Int64
 	// The number of exception commands.
 	ExceptionCmds atomic.Uint64
 }
@@ -63,7 +66,7 @@ type Conn interface {
 	Stop()
 }
 
-type ConnCreator func(connID uint64) Conn
+type ConnCreator func(connID uint64, upstreamConnID uint64) Conn
 
 var _ Conn = (*conn)(nil)
 
@@ -79,29 +82,35 @@ type conn struct {
 	closeCh         chan<- uint64
 	lg              *zap.Logger
 	backendConn     BackendConn
-	connID          uint64 // capture ID, not replay ID
+	connID          uint64 // logical connection ID, not replay ID and also not capture ID. It's the same with the `ConnID` of the first command.
+	upstreamConnID  uint64 // the original upstream connection ID in capture
 	replayStats     *ReplayStats
 	lastPendingCmds int // last pending cmds reported to the stats
 	readonly        bool
+	// waitForQuitMode indicates that the downstream connection is already closed because
+	// of error, but the upstream connection is still sending commands. In this case,
+	// all commands except ComQuit should be ignored.
+	waitForQuitMode bool
 }
 
 func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
-	idMgr *id.IDManager, connID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64,
+	idMgr *id.IDManager, connID uint64, upstreamConnID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64,
 	readonly bool, replayStats *ReplayStats) *conn {
 	backendConnID := idMgr.NewID()
 	lg = lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID))
 	return &conn{
-		lg:            lg,
-		connID:        connID,
-		cmdList:       glist.New[*cmd.Command](),
-		cmdCh:         make(chan struct{}, 1),
-		preparedStmts: make(map[uint32]preparedStmt),
-		psIDMapping:   make(map[uint32]uint32),
-		exceptionCh:   exceptionCh,
-		closeCh:       closeCh,
-		backendConn:   NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
-		replayStats:   replayStats,
-		readonly:      readonly,
+		lg:             lg,
+		connID:         connID,
+		upstreamConnID: upstreamConnID,
+		cmdList:        glist.New[*cmd.Command](),
+		cmdCh:          make(chan struct{}, 1),
+		preparedStmts:  make(map[uint32]preparedStmt),
+		psIDMapping:    make(map[uint32]uint32),
+		exceptionCh:    exceptionCh,
+		closeCh:        closeCh,
+		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
+		replayStats:    replayStats,
+		readonly:       readonly,
 	}
 }
 
@@ -109,8 +118,8 @@ func (c *conn) Run(ctx context.Context) {
 	defer c.close()
 	if err := c.backendConn.Connect(ctx); err != nil {
 		c.replayStats.ExceptionCmds.Add(1)
-		c.exceptionCh <- NewOtherException(err, c.connID)
-		return
+		c.exceptionCh <- NewOtherException(err, c.upstreamConnID)
+		c.waitForQuitMode = true
 	}
 	// context is canceled when the replay is interrupted.
 	// cmdCh is closed when the replay is finished.
@@ -118,6 +127,8 @@ func (c *conn) Run(ctx context.Context) {
 	for !finished {
 		select {
 		case <-ctx.Done():
+			// after the context is canceled, it's expected to close immediately. Don't need
+			// to wait for `COM_QUIT` in this case.
 			return
 		case _, ok := <-c.cmdCh:
 			if !ok {
@@ -136,6 +147,14 @@ func (c *conn) Run(ctx context.Context) {
 			if command == nil {
 				break
 			}
+			if c.waitForQuitMode {
+				if command.Value.Type == pnet.ComQuit {
+					return
+				}
+
+				c.replayStats.ExceptionCmds.Add(1)
+				continue
+			}
 			if c.readonly {
 				if !c.isReadOnly(command.Value) {
 					c.replayStats.FilteredCmds.Add(1)
@@ -143,16 +162,17 @@ func (c *conn) Run(ctx context.Context) {
 				}
 			}
 			c.updateExecuteStmt(command.Value)
-			if resp, err := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); err != nil {
-				if pnet.IsDisconnectError(err) {
+			if resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); resp.Err != nil {
+				if errors.Is(resp.Err, backend.ErrClosing) || pnet.IsDisconnectError(resp.Err) {
 					c.replayStats.ExceptionCmds.Add(1)
-					c.exceptionCh <- NewOtherException(err, c.connID)
-					c.lg.Debug("backend connection disconnected", zap.Error(err))
-					return
+					c.exceptionCh <- NewOtherException(resp.Err, c.upstreamConnID)
+					c.lg.Debug("backend connection disconnected", zap.Error(resp.Err))
+					c.waitForQuitMode = true
+					continue
 				}
 				if c.updateCmdForExecuteStmt(command.Value) {
 					c.replayStats.ExceptionCmds.Add(1)
-					c.exceptionCh <- NewFailException(err, command.Value)
+					c.exceptionCh <- NewFailException(resp.Err, command.Value)
 				}
 			} else {
 				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
@@ -218,13 +238,12 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 // maintain prepared statement info so that we can find its info when:
 // - Judge whether an EXECUTE command is readonly
 // - Get the error message when an EXECUTE command fails
-func (c *conn) updatePreparedStmts(capturedPsID uint32, request, response []byte) {
+func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp ExecuteResp) {
 	switch request[0] {
 	case pnet.ComStmtPrepare.Byte():
-		stmtID, paramNum := pnet.ParsePrepareStmtResp(response)
 		stmt := hack.String(request[1:])
-		c.preparedStmts[stmtID] = preparedStmt{text: stmt, paramNum: paramNum}
-		c.psIDMapping[capturedPsID] = stmtID
+		c.preparedStmts[resp.StmtID] = preparedStmt{text: stmt, paramNum: resp.ParamNum}
+		c.psIDMapping[capturedPsID] = resp.StmtID
 	case pnet.ComStmtExecute.Byte():
 		stmtID := binary.LittleEndian.Uint32(request[1:5])
 		ps, ok := c.preparedStmts[stmtID]

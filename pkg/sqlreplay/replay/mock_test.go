@@ -8,12 +8,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync/atomic"
 	"time"
 
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
-	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 )
 
 var _ conn.Conn = (*mockConn)(nil)
@@ -61,6 +61,39 @@ func (c *mockPendingConn) Run(ctx context.Context) {
 
 func (c *mockPendingConn) Stop() {
 	c.closed <- struct{}{}
+}
+
+type mockDelayConn struct {
+	closeCh  chan uint64
+	connID   uint64
+	cmdCount atomic.Int64
+	stats    *conn.ReplayStats
+	stop     atomic.Bool
+}
+
+func (c *mockDelayConn) ExecuteCmd(command *cmd.Command) {
+	c.cmdCount.Add(1)
+	c.stats.PendingCmds.Add(1)
+}
+
+func (c *mockDelayConn) Run(ctx context.Context) {
+	for {
+		if c.cmdCount.Load() > 0 {
+			c.cmdCount.Add(-1)
+			c.stats.ReplayedCmds.Add(1)
+			c.stats.PendingCmds.Add(-1)
+		}
+		if c.stop.Load() && c.cmdCount.Load() == 0 {
+			break
+		}
+		// simulate execution delay
+		time.Sleep(time.Microsecond)
+	}
+	c.closeCh <- c.connID
+}
+
+func (c *mockDelayConn) Stop() {
+	c.stop.Store(true)
 }
 
 var _ cmd.LineReader = (*mockChLoader)(nil)
@@ -168,28 +201,6 @@ func newMockCommand(connID uint64) *cmd.Command {
 	}
 }
 
-var _ report.Report = (*mockReport)(nil)
-
-type mockReport struct {
-	exceptionCh chan conn.Exception
-}
-
-func newMockReport(exceptionCh chan conn.Exception) *mockReport {
-	return &mockReport{
-		exceptionCh: exceptionCh,
-	}
-}
-
-func (mr *mockReport) Start(ctx context.Context, cfg report.ReportConfig) error {
-	return nil
-}
-
-func (mr *mockReport) Stop(err error) {
-}
-
-func (mr *mockReport) Close() {
-}
-
 // endlessReader always returns the same line.
 // The `Read` implementations is not correct, so use it only with audit log format.
 type endlessReader struct {
@@ -210,4 +221,48 @@ func (er *endlessReader) Close() {
 
 func (er *endlessReader) String() string {
 	return "endlessReader"
+}
+
+type customizedReader struct {
+	buf    bytes.Buffer
+	getCmd func() *cmd.Command
+}
+
+func (cr *customizedReader) ReadLine() ([]byte, string, int, error) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
+	for {
+		line, err := cr.buf.ReadBytes('\n')
+		if errors.Is(err, io.EOF) {
+			command := cr.getCmd()
+			if command == nil {
+				return nil, "", 0, io.EOF
+			}
+			_ = encoder.Encode(command, &cr.buf)
+		} else {
+			return line[:len(line)-1], "", 0, err
+		}
+	}
+}
+
+func (cr *customizedReader) Read(data []byte) (string, int, error) {
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
+	for {
+		_, err := cr.buf.Read(data)
+		if errors.Is(err, io.EOF) {
+			command := cr.getCmd()
+			if command == nil {
+				return "", 0, io.EOF
+			}
+			_ = encoder.Encode(command, &cr.buf)
+		} else {
+			return "", 0, err
+		}
+	}
+}
+
+func (cr *customizedReader) Close() {
+}
+
+func (cr *customizedReader) String() string {
+	return "customizedReader"
 }

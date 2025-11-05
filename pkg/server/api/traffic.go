@@ -116,12 +116,26 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 		}
 		cfg.CommandStartTime = cmdStartTime
 	}
+	// By default, if `cmdendtime` is not specified, use zero time
+	if cmdEndTimeStr := c.PostForm("cmdendtime"); cmdEndTimeStr != "" {
+		cmdEndTime, err := time.Parse(time.RFC3339, cmdEndTimeStr)
+		if err != nil {
+			cmdEndTime, err = time.Parse(time.RFC3339Nano, cmdEndTimeStr)
+			if err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		cfg.CommandEndTime = cmdEndTime
+	}
 	cfg.BufSize, _ = strconv.Atoi(c.PostForm("bufsize"))
 	cfg.PSCloseStrategy = cmd.PSCloseStrategy(c.PostForm("ps-close"))
 	if cfg.PSCloseStrategy == "" {
 		// set the default value to `directed`
 		cfg.PSCloseStrategy = cmd.PSCloseStrategyDirected
 	}
+
+	cfg.CheckPointFilePath = c.PostForm("checkpointpath")
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
@@ -147,6 +161,7 @@ func (h *Server) TrafficCancel(c *gin.Context) {
 			cfg.Type = manager.Replay
 		}
 	}
+	cfg.Graceful = strings.EqualFold(c.PostForm("graceful"), "true")
 	result := h.mgr.ReplayJobMgr.Stop(cfg)
 	c.String(http.StatusOK, result)
 }

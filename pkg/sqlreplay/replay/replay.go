@@ -6,8 +6,12 @@ package replay
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +33,9 @@ import (
 const (
 	// maxPendingExceptions is the maximum number of pending exceptions for all connections.
 	maxPendingExceptions = 1024
+	// maxPendingCloseRequests is the maximum number of pending connection close requests.
+	// Make it big enough in case all the connections are closed all at once.
+	maxPendingCloseRequests = 1 << 16
 	// slowDownThreshold is the threshold of pending commands to slow down. Following constants are tested with TPCC.
 	slowDownThreshold = 1 << 18
 	// slowDownFactor is the factor to slow down when there are too many pending commands.
@@ -38,6 +45,9 @@ const (
 	minSpeed          = 0.1
 	maxSpeed          = 10.0
 	reportLogInterval = 10 * time.Second
+
+	checkpointSaveInterval = 100 * time.Millisecond
+	stateSaveRetryInterval = 10 * time.Second
 )
 
 var (
@@ -52,9 +62,9 @@ type Replay interface {
 	// Wait for the job done.
 	Wait()
 	// Stop stops the replay
-	Stop(err error)
+	Stop(err error, graceful bool)
 	// Progress returns the progress of the replay job
-	Progress() (float64, time.Time, bool, error)
+	Progress() (float64, time.Time, time.Time, time.Time, bool, error)
 	// Close closes the replay
 	Close()
 }
@@ -74,6 +84,9 @@ type ReplayConfig struct {
 	// CommandStartTime is the start time of the command being replayed. It's different from StartTime,
 	// which means the start time of the whole replay job.
 	CommandStartTime time.Time
+	// CommandEndTime is the end time of the command being replayed. This config is only valid for audit
+	// log plugin format.
+	CommandEndTime time.Time
 	// IgnoreErrs indicates whether to ignore decoding errors.
 	// The errors are just printed if true, otherwise the replayer stops.
 	IgnoreErrs bool
@@ -81,6 +94,8 @@ type ReplayConfig struct {
 	BufSize int
 	// PSCloseStrategy defines when to close the prepared statements.
 	PSCloseStrategy cmd.PSCloseStrategy
+	// DryRun indicates whether to actually execute the commands.
+	DryRun bool
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -89,6 +104,8 @@ type ReplayConfig struct {
 	slowDownThreshold int64
 	slowDownFactor    time.Duration
 	reportLogInterval time.Duration
+	// CheckPointFilePath is the path to the file that stores the current state of the replay
+	CheckPointFilePath string
 }
 
 func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
@@ -112,7 +129,7 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 		}
 		storages = append(storages, storage)
 	}
-	if cfg.Username == "" {
+	if !cfg.DryRun && cfg.Username == "" {
 		return storages, errors.New("username is required")
 	}
 	if cfg.Speed == 0 {
@@ -154,7 +171,42 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	default:
 		return storages, errors.Errorf("invalid prepared statement close strategy %s", cfg.PSCloseStrategy)
 	}
+	if cfg.Format != cmd.FormatAuditLogPlugin && !cfg.CommandEndTime.IsZero() {
+		return storages, errors.New("command end time is only supported for `audit_log_plugin` format")
+	}
 	return storages, nil
+}
+
+// LoadFromCheckpoint loads the config from the checkpoint file.
+func (cfg *ReplayConfig) LoadFromCheckpoint() error {
+	if len(cfg.CheckPointFilePath) == 0 {
+		return nil
+	}
+
+	file, err := os.Open(cfg.CheckPointFilePath)
+	if err != nil {
+		// Allow the file to not exist.
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	var state replayCheckpoint
+	if err := decoder.Decode(&state); err != nil {
+		return errors.Wrapf(err, "failed to decode checkpoint file %s", cfg.CheckPointFilePath)
+	}
+
+	if state.CurCmdTs > 0 {
+		cfg.CommandStartTime = time.Unix(0, state.CurCmdTs)
+	}
+	// Only load `CommandEndTime` for `audit_log_plugin` format, or it'll not pass validation.
+	if state.CurCmdEndTs > 0 && cfg.Format == cmd.FormatAuditLogPlugin {
+		cfg.CommandEndTime = time.Unix(0, state.CurCmdEndTs)
+	}
+	return nil
 }
 
 type replay struct {
@@ -165,7 +217,8 @@ type replay struct {
 	replayStats      conn.ReplayStats
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
-	closeCh          chan uint64
+	closeConnCh      chan uint64
+	gracefulStop     atomic.Bool
 	wg               waitgroup.WaitGroup
 	cancel           context.CancelFunc
 	connCreator      conn.ConnCreator
@@ -187,6 +240,10 @@ func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 }
 
 func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
+	err := cfg.LoadFromCheckpoint()
+	if err != nil {
+		return err
+	}
 	storages, err := cfg.Validate()
 	if err != nil {
 		for _, s := range storages {
@@ -207,7 +264,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.err = nil
 	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
-	r.closeCh = make(chan uint64, maxPendingExceptions)
+	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
 	key, err := store.LoadEncryptionKey(r.meta.EncryptMethod, cfg.KeyFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load encryption key")
@@ -217,17 +274,31 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	hsHandler = NewHandshakeHandler(hsHandler)
 	r.connCreator = cfg.connCreator
 	if r.connCreator == nil {
-		r.connCreator = func(connID uint64) conn.Conn {
-			return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
-				connID, bcConfig, r.exceptionCh, r.closeCh, cfg.ReadOnly, &r.replayStats)
+		if cfg.DryRun {
+			r.connCreator = func(connID uint64, _ uint64) conn.Conn {
+				return &nopConn{
+					connID:  connID,
+					closeCh: r.closeConnCh,
+					stats:   &r.replayStats,
+				}
+			}
+		} else {
+			r.connCreator = func(connID uint64, upstreamConnID uint64) conn.Conn {
+				return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
+					connID, upstreamConnID, bcConfig, r.exceptionCh, r.closeConnCh, cfg.ReadOnly, &r.replayStats)
+			}
 		}
 	}
 	r.report = cfg.report
 	if r.report == nil {
-		backendConnCreator := func() conn.BackendConn {
-			return conn.NewBackendConn(r.lg.Named("be"), r.idMgr.NewID(), hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
+		if cfg.DryRun {
+			r.report = &mockReport{exceptionCh: r.exceptionCh}
+		} else {
+			backendConnCreator := func() conn.BackendConn {
+				return conn.NewBackendConn(r.lg.Named("be"), r.idMgr.NewID(), hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
+			}
+			r.report = report.NewReport(r.lg.Named("report"), r.exceptionCh, backendConnCreator)
 		}
-		r.report = report.NewReport(r.lg.Named("report"), r.exceptionCh, backendConnCreator)
 	}
 
 	childCtx, cancel := context.WithCancel(context.Background())
@@ -244,6 +315,11 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.wg.RunWithRecover(func() {
 		r.reportLoop(childCtx)
 	}, nil, r.lg)
+	if len(r.cfg.CheckPointFilePath) > 0 {
+		r.wg.RunWithRecover(func() {
+			r.saveCheckpointLoop(childCtx)
+		}, nil, r.lg)
+	}
 	return nil
 }
 
@@ -270,10 +346,10 @@ func (r *replay) readCommands(ctx context.Context) {
 	connCount := 0                      // alive connection count
 	maxPendingCmds := int64(0)
 	extraWaitTime := time.Duration(0)
-	for ctx.Err() == nil {
+	for ctx.Err() == nil && !r.gracefulStop.Load() {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
-			case id := <-r.closeCh:
+			case id := <-r.closeConnCh:
 				r.closeConn(id, conns, &connCount)
 			default:
 				hasCloseEvent = false
@@ -296,6 +372,12 @@ func (r *replay) readCommands(ctx context.Context) {
 			}
 		}
 		r.replayStats.CurCmdTs.Store(command.StartTs.UnixNano())
+		if !command.EndTs.IsZero() {
+			r.replayStats.CurCmdEndTs.Store(command.EndTs.UnixNano())
+		} else {
+			// fallback to StartTs if EndTs is not available.
+			r.replayStats.CurCmdEndTs.Store(command.StartTs.UnixNano())
+		}
 		if captureStartTs.IsZero() {
 			// first command
 			captureStartTs = command.StartTs
@@ -343,19 +425,32 @@ func (r *replay) readCommands(ctx context.Context) {
 		}
 	}
 	r.lg.Info("finished decoding commands, draining connections", zap.Int64("max_pending_cmds", maxPendingCmds),
-		zap.Duration("extra_wait_time", extraWaitTime), zap.Int("alive_conns", connCount))
+		zap.Duration("extra_wait_time", extraWaitTime),
+		zap.Int("alive_conns", connCount),
+		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
+		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())))
 
 	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
 		if conn != nil && !reflect.ValueOf(conn).IsNil() {
 			conn.Stop()
 		}
+		// Avoid the channel to be full.
+		for closed := true; closed; {
+			closed = false
+			select {
+			case id := <-r.closeConnCh:
+				r.closeConn(id, conns, &connCount)
+				closed = true
+			default:
+			}
+		}
 	}
 
 	// Wait until all connections are closed before logging the finished message.
 	// Besides, drain all close events to avoid blocking connections at writing to channels.
 	for connCount > 0 {
-		id := <-r.closeCh
+		id := <-r.closeConnCh
 		r.closeConn(id, conns, &connCount)
 	}
 	r.stop(err)
@@ -363,14 +458,24 @@ func (r *replay) readCommands(ctx context.Context) {
 
 func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
 	var decoders []decoder
-	for _, reader := range readers {
+
+	for i, reader := range readers {
+		idAllocator, err := cmd.NewConnIDAllocator(i)
+		if err != nil {
+			return nil, err
+		}
+
 		cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
-		cmdDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
 		// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
 		// the connection state is maintained in decoder. Filtering out commands here will make it'
 		// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
 		// the current session state correctly.
 		cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
+		if auditLogDecoder, ok := cmdDecoder.(*cmd.AuditLogPluginDecoder); ok {
+			auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
+			auditLogDecoder.SetIDAllocator(idAllocator)
+			auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)
+		}
 
 		var decoder decoder
 		decoder = newSingleDecoder(cmdDecoder, reader)
@@ -410,13 +515,17 @@ func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 		}
 
 		for i, storage := range r.storages {
-			reader, err := store.NewReader(r.lg.Named("loader"), storage, store.ReaderCfg{
-				Format:           r.cfg.Format,
-				Dir:              inputs[i],
-				EncryptionKey:    r.cfg.encryptionKey,
-				EncryptionMethod: r.meta.EncryptMethod,
-				CommandStartTime: r.cfg.CommandStartTime,
-			})
+			cfg := store.ReaderCfg{
+				Format:             r.cfg.Format,
+				Dir:                inputs[i],
+				EncryptionKey:      r.cfg.encryptionKey,
+				EncryptionMethod:   r.meta.EncryptMethod,
+				FileNameFilterTime: r.cfg.CommandEndTime,
+			}
+			if r.cfg.CommandEndTime.IsZero() {
+				cfg.FileNameFilterTime = r.cfg.CommandStartTime
+			}
+			reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
 			if err != nil {
 				for _, r := range readers {
 					r.Close()
@@ -432,7 +541,7 @@ func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map[uint64]conn.Conn, connCount *int) {
 	conn, ok := conns[command.ConnID]
 	if !ok {
-		conn = r.connCreator(command.ConnID)
+		conn = r.connCreator(command.ConnID, command.UpstreamConnID)
 		conns[command.ConnID] = conn
 		*connCount++
 		r.wg.RunWithRecover(func() {
@@ -449,19 +558,21 @@ func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount 
 	// Keep the disconnected connections in the map to reject subsequent commands with the same connID,
 	// but release memory as much as possible.
 	if conn, ok := conns[connID]; ok && conn != nil && !reflect.ValueOf(conn).IsNil() {
-		conns[connID] = nil
+		delete(conns, connID)
 		*connCount--
 	}
 }
 
-func (r *replay) Progress() (float64, time.Time, bool, error) {
+func (r *replay) Progress() (float64, time.Time, time.Time, time.Time, bool, error) {
 	pendingCmds := r.replayStats.PendingCmds.Load()
 	r.Lock()
 	defer r.Unlock()
 	if r.meta.Cmds > 0 {
 		r.progress = float64(r.decodedCmds.Load()-uint64(pendingCmds)) / float64(r.meta.Cmds)
 	}
-	return r.progress, r.endTime, r.startTime.IsZero(), r.err
+	curCmdTs := time.Unix(0, r.replayStats.CurCmdTs.Load())
+	curCmdEndTs := time.Unix(0, r.replayStats.CurCmdEndTs.Load())
+	return r.progress, r.endTime, curCmdTs, curCmdEndTs, r.startTime.IsZero(), r.err
 }
 
 func (r *replay) readMeta() *store.Meta {
@@ -484,6 +595,8 @@ func (r *replay) reportLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
 			r.lg.Info("replay progress", zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
 				zap.Int64("pending_cmds", r.replayStats.PendingCmds.Load()), // if too many, replay is slower than decode
 				zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
@@ -492,8 +605,85 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
 				zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 				zap.Duration("replay_elapsed", time.Since(r.startTime)),
-				zap.Duration("decode_elapsed", time.Duration(decodeElapsed))) // if shorter than replay_elapsed, decode is slow
+				zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
+				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
+				zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
+				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)))
 		}
+	}
+}
+
+// replayCheckpoint is a struct to serialize and save the current state of replay
+// on disk, so that the following execution can resume from the saved state.
+type replayCheckpoint struct {
+	CurCmdTs    int64 `json:"cur_cmd_ts"`
+	CurCmdEndTs int64 `json:"cur_cmd_end_ts"`
+}
+
+func (r *replay) saveCheckpointLoop(ctx context.Context) {
+	ticker := time.NewTicker(checkpointSaveInterval)
+	defer ticker.Stop()
+
+	file, err := os.OpenFile(r.cfg.CheckPointFilePath, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		r.lg.Error("open checkpoint file failed", zap.Error(err))
+		return
+	}
+	defer file.Close()
+
+	for {
+		// Add an interval here to avoid printing too many logs when error occurs.
+		if err != nil {
+			time.Sleep(stateSaveRetryInterval)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			err = r.saveCheckpointToFile(file)
+			if err != nil {
+				r.lg.Error("save current checkpoint failed", zap.Error(err))
+				time.Sleep(stateSaveRetryInterval)
+				continue
+			}
+		}
+	}
+}
+
+func (r *replay) saveCheckpointToFile(file *os.File) error {
+	state := r.fetchCurrentCheckpoint()
+	err := file.Truncate(0)
+	if err != nil {
+		return errors.Wrapf(err, "truncate checkpoint file")
+	}
+
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return errors.Wrapf(err, "seek checkpoint file")
+	}
+
+	err = json.NewEncoder(file).Encode(state)
+	if err != nil {
+		return errors.Wrapf(err, "save current checkpoint")
+	}
+	return nil
+}
+
+func (r *replay) saveCurrentStateToFilePath(filePath string) error {
+	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return errors.Wrapf(err, "open state file %s", filePath)
+	}
+	defer file.Close()
+
+	return r.saveCheckpointToFile(file)
+}
+
+func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
+	return replayCheckpoint{
+		CurCmdTs:    r.replayStats.CurCmdTs.Load(),
+		CurCmdEndTs: r.replayStats.CurCmdEndTs.Load(),
 	}
 }
 
@@ -518,6 +708,7 @@ func (r *replay) stop(err error) {
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
 		zap.Time("command_start_time", r.cfg.CommandStartTime),
+		zap.Time("command_end_time", r.cfg.CommandEndTime),
 		zap.String("format", r.cfg.Format),
 		zap.String("username", r.cfg.Username),
 		zap.Bool("ignore_errs", r.cfg.IgnoreErrs),
@@ -530,6 +721,8 @@ func (r *replay) stop(err error) {
 		zap.Duration("replay_elapsed", time.Since(r.startTime)),
 		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
+		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
+		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
 	}
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
@@ -560,7 +753,7 @@ func (r *replay) Wait() {
 	r.wg.Wait()
 }
 
-func (r *replay) Stop(err error) {
+func (r *replay) Stop(err error, graceful bool) {
 	r.Lock()
 	// already stopped
 	if r.startTime.IsZero() {
@@ -568,7 +761,9 @@ func (r *replay) Stop(err error) {
 		return
 	}
 	r.err = err
-	if r.cancel != nil {
+	if graceful {
+		r.gracefulStop.Store(true)
+	} else if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
 	}
@@ -577,8 +772,16 @@ func (r *replay) Stop(err error) {
 }
 
 func (r *replay) Close() {
-	r.Stop(errors.New("shutting down"))
+	r.Stop(errors.New("shutting down"), false)
 	if r.report != nil {
 		r.report.Close()
+	}
+	// at this time, the save checkpoint loop and replay loop have exited. It's safe to update the latest
+	// checkpoint file.
+	if len(r.cfg.CheckPointFilePath) > 0 {
+		err := r.saveCurrentStateToFilePath(r.cfg.CheckPointFilePath)
+		if err != nil {
+			r.lg.Error("save current state failed on close", zap.Error(err))
+		}
 	}
 }

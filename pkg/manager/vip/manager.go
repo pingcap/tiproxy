@@ -54,7 +54,7 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 		vm.lg.Warn("Both address and link must be specified to enable VIP. VIP is disabled")
 		return nil, nil
 	}
-	operation, err := NewNetworkOperation(cfg.HA.VirtualIP, cfg.HA.Interface)
+	operation, err := NewNetworkOperation(cfg.HA.VirtualIP, cfg.HA.Interface, lg)
 	if err != nil {
 		vm.lg.Error("init network operation failed", zap.Error(err))
 		return nil, err

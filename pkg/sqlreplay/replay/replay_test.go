@@ -5,13 +5,18 @@ package replay
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
@@ -33,11 +38,11 @@ func TestManageConns(t *testing.T) {
 		Username:  "u1",
 		StartTime: time.Now(),
 		readers:   []cmd.LineReader{loader},
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			connCount++
 			return &mockConn{
 				connID:  connID,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -62,14 +67,51 @@ func TestManageConns(t *testing.T) {
 		return connCount == 2
 	}, 3*time.Second, 10*time.Millisecond)
 
-	replay.closeCh <- 1
-	replay.closeCh <- 2
+	replay.closeConnCh <- 1
+	replay.closeConnCh <- 2
 	loader.Close()
 	require.Eventually(t, func() bool {
 		replay.Lock()
 		defer replay.Unlock()
 		return replay.startTime.IsZero()
 	}, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestCloseConns(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+
+	i := 1
+	loader := &customizedReader{
+		getCmd: func() *cmd.Command {
+			if i >= 2000 {
+				return nil
+			}
+			command := newMockCommand(uint64(i))
+			command.StartTs = time.Unix(0, 1)
+			i++
+			return command
+		},
+	}
+	defer loader.Close()
+
+	cfg := ReplayConfig{
+		Input:     t.TempDir(),
+		Username:  "u1",
+		StartTime: time.Now(),
+		readers:   []cmd.LineReader{loader},
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
+			return &nopConn{
+				connID:  connID,
+				closeCh: replay.closeConnCh,
+				stats:   &replay.replayStats,
+			}
+		},
+		report:          newMockReport(replay.exceptionCh),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	replay.Wait()
 }
 
 func TestValidateCfg(t *testing.T) {
@@ -106,6 +148,11 @@ func TestValidateCfg(t *testing.T) {
 			Username:  "u1",
 			StartTime: now.Add(-time.Hour),
 		},
+		{
+			Input:          dir,
+			CommandEndTime: time.Now(),
+			Format:         cmd.FormatNative,
+		},
 	}
 
 	for i, cfg := range cfgs {
@@ -134,11 +181,11 @@ func TestReplaySpeed(t *testing.T) {
 			StartTime: time.Now(),
 			readers:   []cmd.LineReader{loader},
 			report:    newMockReport(replay.exceptionCh),
-			connCreator: func(connID uint64) conn.Conn {
+			connCreator: func(connID uint64, _ uint64) conn.Conn {
 				return &mockConn{
 					connID:  connID,
 					cmdCh:   cmdCh,
-					closeCh: replay.closeCh,
+					closeCh: replay.closeConnCh,
 					closed:  make(chan struct{}),
 				}
 			},
@@ -172,7 +219,7 @@ func TestReplaySpeed(t *testing.T) {
 		require.Greater(t, totalTime, lastTotalTime, "speed: %f", speed)
 		lastTotalTime = totalTime
 
-		replay.Stop(nil)
+		replay.Stop(nil, false)
 		loader.Close()
 	}
 }
@@ -199,11 +246,11 @@ func TestProgress(t *testing.T) {
 		StartTime: time.Now(),
 		readers:   []cmd.LineReader{loader},
 		report:    newMockReport(replay.exceptionCh),
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &mockConn{
 				connID:  connID,
 				cmdCh:   cmdCh,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -220,7 +267,7 @@ func TestProgress(t *testing.T) {
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 		for range 10 {
 			<-cmdCh
-			progress, _, _, err := replay.Progress()
+			progress, _, _, _, _, err := replay.Progress()
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, progress, float64(i)/10)
 			require.LessOrEqual(t, progress, 1.0)
@@ -250,10 +297,10 @@ func TestPendingCmds(t *testing.T) {
 		StartTime: time.Now(),
 		readers:   []cmd.LineReader{loader},
 		report:    newMockReport(replay.exceptionCh),
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &mockPendingConn{
 				connID:  connID,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 				stats:   &replay.replayStats,
 			}
@@ -273,10 +320,10 @@ func TestPendingCmds(t *testing.T) {
 
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 	require.Eventually(t, func() bool {
-		_, _, _, err := replay.Progress()
+		_, _, _, _, _, err := replay.Progress()
 		return err != nil
 	}, 5*time.Second, 10*time.Millisecond)
-	progress, _, done, err := replay.Progress()
+	progress, _, _, _, done, err := replay.Progress()
 	require.NotEqualValues(t, 1, progress)
 	require.True(t, done)
 	require.Contains(t, err.Error(), "too many pending commands")
@@ -351,11 +398,11 @@ func TestIgnoreErrors(t *testing.T) {
 		IgnoreErrs: true,
 		readers:    []cmd.LineReader{loader},
 		report:     newMockReport(replay.exceptionCh),
-		connCreator: func(connID uint64) conn.Conn {
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &mockConn{
 				connID:  connID,
 				cmdCh:   cmdCh,
-				closeCh: replay.closeCh,
+				closeCh: replay.closeConnCh,
 				closed:  make(chan struct{}),
 			}
 		},
@@ -370,8 +417,51 @@ func TestIgnoreErrors(t *testing.T) {
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
 	<-cmdCh
-	replay.Stop(nil)
+	replay.Stop(nil, false)
 	loader.Close()
+}
+
+func TestGracefulStop(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+
+	i := 0
+	loader := &customizedReader{
+		getCmd: func() *cmd.Command {
+			j := rand.Uint64N(100) + 1
+			command := newMockCommand(j)
+			i++
+			command.StartTs = time.Unix(0, int64(i)*int64(time.Microsecond))
+			return command
+		},
+	}
+
+	cfg := ReplayConfig{
+		Input:     t.TempDir(),
+		Username:  "u1",
+		StartTime: time.Now(),
+		readers:   []cmd.LineReader{loader},
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
+			return &mockDelayConn{
+				stats:   &replay.replayStats,
+				closeCh: replay.closeConnCh,
+				connID:  connID,
+			}
+		},
+		report:          newMockReport(replay.exceptionCh),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+
+	time.Sleep(2 * time.Second)
+	replay.Stop(errors.New("graceful stop"), true)
+	// check that all the pending commands are replayed
+	curCmdTs := replay.replayStats.CurCmdTs.Load()
+	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
+	require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Microsecond))
+	_, _, lastTs, _, _, err := replay.Progress()
+	require.ErrorContains(t, err, "graceful stop")
+	require.Equal(t, curCmdTs, lastTs.UnixNano())
 }
 
 func BenchmarkMultiBufferedDecoder(b *testing.B) {
@@ -404,4 +494,204 @@ func BenchmarkMultiBufferedDecoder(b *testing.B) {
 			})
 		}
 	}
+}
+
+func TestDryRun(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+	loader := newMockNormalLoader()
+	cfg := ReplayConfig{
+		DryRun:          true,
+		Input:           t.TempDir(),
+		StartTime:       time.Now(),
+		readers:         []cmd.LineReader{loader},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+
+	loader.write([]byte("invalid command\n"))
+	now := time.Now()
+	command := newMockCommand(1)
+	command.StartTs = now
+	loader.writeCommand(command, cmd.FormatAuditLogPlugin)
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	loader.Close()
+}
+
+func TestLoadFromCheckpoint(t *testing.T) {
+	tests := []struct {
+		checkpointData string
+		setupFile      bool
+		fileNotExists  bool
+		expectedError  bool
+		cmdTs          int64
+		cmdEndTs       int64
+	}{
+		{
+			checkpointData: "",
+			setupFile:      false,
+			expectedError:  false,
+		},
+		{
+			checkpointData: "",
+			setupFile:      false,
+			expectedError:  false,
+			fileNotExists:  true,
+		},
+		{
+			checkpointData: `{"cur_cmd_ts":1640995200000000000,"cur_cmd_end_ts":1640995300000000000}`,
+			setupFile:      true,
+			expectedError:  false,
+			cmdTs:          1640995200000000000,
+			cmdEndTs:       1640995300000000000,
+		},
+		{
+			checkpointData: `{"cur_cmd_ts":1640995200000000000,"cur_cmd_end_ts":0}`,
+			setupFile:      true,
+			expectedError:  false,
+			cmdTs:          1640995200000000000,
+		},
+		{
+			checkpointData: `{"cur_cmd_ts":0,"cur_cmd_end_ts":1640995300000000000}`,
+			setupFile:      true,
+			expectedError:  false,
+			cmdEndTs:       1640995300000000000,
+		},
+		{
+			checkpointData: `{invalid json}`,
+			setupFile:      true,
+			expectedError:  true,
+		},
+		{
+			checkpointData: "",
+			setupFile:      true,
+			expectedError:  true,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("case %d", i), func(t *testing.T) {
+			cfg := &ReplayConfig{Format: cmd.FormatAuditLogPlugin}
+
+			if tt.fileNotExists {
+				cfg.CheckPointFilePath = filepath.Join(t.TempDir(), "nonexistent.json")
+			} else if tt.setupFile {
+				tmpDir := t.TempDir()
+				checkpointFile := filepath.Join(tmpDir, "checkpoint.json")
+				err := os.WriteFile(checkpointFile, []byte(tt.checkpointData), 0644)
+				require.NoError(t, err)
+				cfg.CheckPointFilePath = checkpointFile
+			}
+
+			err := cfg.LoadFromCheckpoint()
+
+			if tt.expectedError {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+
+			if tt.cmdTs > 0 {
+				expectedStartTime := time.Unix(0, tt.cmdTs)
+				require.Equal(t, expectedStartTime, cfg.CommandStartTime)
+			} else {
+				require.True(t, cfg.CommandStartTime.IsZero())
+			}
+
+			if tt.cmdEndTs > 0 {
+				expectedEndTime := time.Unix(0, tt.cmdEndTs)
+				require.Equal(t, expectedEndTime, cfg.CommandEndTime)
+			} else {
+				require.True(t, cfg.CommandEndTime.IsZero())
+			}
+		})
+	}
+}
+
+func TestSaveCurrentStateLoop(t *testing.T) {
+	t.Run("stops when context is cancelled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		checkpointFile := filepath.Join(tmpDir, "checkpoint.json")
+
+		replay := &replay{
+			lg: zap.NewNop(),
+			cfg: ReplayConfig{
+				CheckPointFilePath: checkpointFile,
+			},
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			replay.saveCheckpointLoop(ctx)
+		}()
+
+		replay.replayStats.CurCmdTs.Store(1234567890)
+		replay.replayStats.CurCmdEndTs.Store(9876543210)
+
+		require.Eventually(t, func() bool {
+			cfg := &ReplayConfig{CheckPointFilePath: checkpointFile, Format: cmd.FormatAuditLogPlugin}
+			_ = cfg.LoadFromCheckpoint()
+
+			return cfg.CommandStartTime.UnixNano() == 1234567890 &&
+				cfg.CommandEndTime.UnixNano() == 9876543210
+		}, 1*time.Second, 10*time.Millisecond, "checkpoint file should be updated with current state")
+
+		cancel()
+		wg.Wait()
+	})
+
+	t.Run("file truncation on overwrite", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		checkpointFile := filepath.Join(tmpDir, "checkpoint.json")
+
+		largeData := `{"cur_cmd_ts":1640995200000000000,"cur_cmd_end_ts":1640995300000000000,"large_field":"` + strings.Repeat("x", 1000) + `"}`
+		err := os.WriteFile(checkpointFile, []byte(largeData), 0644)
+		require.NoError(t, err)
+
+		replay := &replay{
+			lg: zap.NewNop(),
+			cfg: ReplayConfig{
+				CheckPointFilePath: checkpointFile,
+			},
+		}
+
+		testCmdTs := time.Now().UnixNano()
+		testCmdEndTs := time.Now().Add(time.Second).UnixNano()
+		replay.replayStats.CurCmdTs.Store(testCmdTs)
+		replay.replayStats.CurCmdEndTs.Store(testCmdEndTs)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		wg := &sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			replay.saveCheckpointLoop(ctx)
+		}()
+
+		require.Eventually(t, func() bool {
+			data, err := os.ReadFile(checkpointFile)
+			if err != nil {
+				return false
+			}
+			return len(data) < len(largeData) && len(data) > 0
+		}, 1*time.Second, 10*time.Millisecond, "checkpoint file should be overwritten with smaller data")
+
+		data, err := os.ReadFile(checkpointFile)
+		require.NoError(t, err)
+
+		var state replayCheckpoint
+		err = json.Unmarshal(data, &state)
+		require.NoError(t, err)
+		require.Equal(t, testCmdTs, state.CurCmdTs)
+		require.Equal(t, testCmdEndTs, state.CurCmdEndTs)
+
+		cancel()
+		wg.Wait()
+	})
 }

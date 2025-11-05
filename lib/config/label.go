@@ -8,6 +8,7 @@ const (
 	// We use `zone` because the follower read in TiDB also uses `zone` to decide location.
 	LocationLabelName = "zone"
 	KeyspaceLabelName = "keyspace"
+	CidrLabelName     = "cidr"
 )
 
 func (cfg *Config) GetLocation() string {

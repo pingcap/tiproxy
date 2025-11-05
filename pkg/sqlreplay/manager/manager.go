@@ -6,6 +6,7 @@ package manager
 import (
 	"crypto/tls"
 	"encoding/json"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -19,10 +20,13 @@ import (
 
 const (
 	maxJobHistoryCount = 10
+	connectTimeout     = 60 * time.Second
+	dialTimeout        = 5 * time.Second
 )
 
 type CancelConfig struct {
-	Type JobType
+	Type     JobType
+	Graceful bool
 }
 
 type CertManager interface {
@@ -73,8 +77,10 @@ func (jm *jobManager) updateProgress() {
 			progress, endTime, done, err := jm.capture.Progress()
 			job.SetProgress(progress, endTime, done, err)
 		case Replay:
-			progress, endTime, done, err := jm.replay.Progress()
+			progress, endTime, curCmdTs, curCmdEndTs, done, err := jm.replay.Progress()
 			job.SetProgress(progress, endTime, done, err)
+			job.(*replayJob).lastCmdTs = curCmdTs
+			job.(*replayJob).lastCmdEndTs = curCmdEndTs
 		}
 	}
 }
@@ -131,6 +137,8 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 		HealthyKeepAlive:   jm.cfg.Proxy.BackendHealthyKeepalive,
 		UnhealthyKeepAlive: jm.cfg.Proxy.BackendUnhealthyKeepalive,
 		ConnBufferSize:     jm.cfg.Proxy.ConnBufferSize,
+		DialTimeout:        dialTimeout,
+		ConnectTimeout:     connectTimeout,
 	})
 	if err != nil {
 		jm.lg.Warn("start replay failed", zap.String("job", newJob.String()), zap.Error(err))
@@ -188,7 +196,7 @@ func (jm *jobManager) Stop(cfg CancelConfig) string {
 	case Capture:
 		jm.capture.Stop(errors.Errorf("manually stopped"))
 	case Replay:
-		jm.replay.Stop(errors.Errorf("manually stopped"))
+		jm.replay.Stop(errors.Errorf("manually stopped, graceful: %v", cfg.Graceful), cfg.Graceful)
 	}
 	jm.updateProgress()
 	return "stopped: " + job.String()

@@ -272,7 +272,7 @@ func TestIterateFiles(t *testing.T) {
 				require.True(t, errors.Is(err, io.EOF))
 				break
 			}
-			fileOrder = append(fileOrder, l.curFileName)
+			fileOrder = append(fileOrder, l.externalFile.fileName)
 		}
 		require.Equal(t, test.order, fileOrder)
 	}
@@ -454,7 +454,7 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 	require.NoError(t, err)
 	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
-	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, CommandStartTime: commandStartTime})
+	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, FileNameFilterTime: commandStartTime})
 	require.NoError(t, err)
 	var fileOrder []string
 	for {
@@ -462,7 +462,7 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 			require.True(t, errors.Is(err, io.EOF))
 			break
 		}
-		fileOrder = append(fileOrder, l.curFileName)
+		fileOrder = append(fileOrder, l.externalFile.fileName)
 	}
 	require.Equal(t, expectedFileOrder, fileOrder)
 }
@@ -513,27 +513,25 @@ func TestWalkS3ForAuditLogFile(t *testing.T) {
 
 	r := &rotateReader{
 		cfg: ReaderCfg{
-			Format:           cmd.FormatAuditLogPlugin,
-			CommandStartTime: time.Time{},
+			Format:             cmd.FormatAuditLogPlugin,
+			FileNameFilterTime: time.Time{},
 		},
-		curFileName: "",
 	}
 	selectedFileCount := 0
+	curFilename := ""
 	for {
 		selected := false
-		err := r.walkS3ForAuditLogFile(context.Background(), s3api, &backuppb.S3{
+		cFileName := curFilename
+		err := r.walkS3ForAuditLogFile(context.Background(), cFileName, s3api, &backuppb.S3{
 			Bucket: "bucket",
 			Prefix: "prefix/",
 		}, func(fileName string, size int64) (bool, error) {
-			fileIdx := parseFileTimeToIdx(fileName, auditFileNamePrefix)
-			require.GreaterOrEqual(t, fileIdx, r.curFileIdx)
-
-			if fileIdx <= r.curFileIdx {
+			require.GreaterOrEqual(t, fileName, cFileName)
+			if fileName <= cFileName {
 				return false, nil
 			}
 
-			r.curFileIdx = fileIdx
-			r.curFileName = fileName
+			curFilename = fileName
 			selected = true
 			return true, nil
 		})

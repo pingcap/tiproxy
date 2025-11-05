@@ -48,7 +48,6 @@ type CmdDecoder interface {
 	Decode(reader LineReader) (c *Command, err error)
 
 	SetCommandStartTime(t time.Time)
-	SetPSCloseStrategy(strategy PSCloseStrategy)
 }
 
 type Command struct {
@@ -61,10 +60,17 @@ type Command struct {
 	// Payload starts with command type so that replay can reuse this byte array.
 	Payload []byte
 	StartTs time.Time
-	ConnID  uint64
-	Type    pnet.Command
+	// For audit log plugin, the decoder will allocate a new id to avoid id collision. To make it easier
+	// to debug, we keep the upstream connection id here to store it in the exception report.
+	UpstreamConnID uint64
+	ConnID         uint64
+	Type           pnet.Command
+	// The place in the traffic file, used to report.
+	FileName string
+	Line     int
 	// Logged only in audit log.
 	StmtType string
+	EndTs    time.Time
 	// Logged only in native log.
 	Success bool
 }
