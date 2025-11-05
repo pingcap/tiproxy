@@ -46,23 +46,25 @@ type JobManager interface {
 var _ JobManager = (*jobManager)(nil)
 
 type jobManager struct {
-	jobHistory  []Job
-	capture     capture.Capture
-	replay      replay.Replay
-	hsHandler   backend.HandshakeHandler
-	certManager CertManager
-	cfg         *config.Config
-	lg          *zap.Logger
+	jobHistory         []Job
+	capture            capture.Capture
+	replay             replay.Replay
+	hsHandler          backend.HandshakeHandler
+	certManager        CertManager
+	cfg                *config.Config
+	lg                 *zap.Logger
+	isStandalonePlayer bool
 }
 
-func NewJobManager(lg *zap.Logger, cfg *config.Config, certMgr CertManager, idMgr *id.IDManager, hsHandler backend.HandshakeHandler) *jobManager {
+func NewJobManager(lg *zap.Logger, cfg *config.Config, certMgr CertManager, idMgr *id.IDManager, hsHandler backend.HandshakeHandler, isStandalonePlayer bool) *jobManager {
 	return &jobManager{
-		lg:          lg,
-		capture:     capture.NewCapture(lg.Named("capture")),
-		replay:      replay.NewReplay(lg.Named("replay"), idMgr),
-		hsHandler:   hsHandler,
-		cfg:         cfg,
-		certManager: certMgr,
+		lg:                 lg,
+		capture:            capture.NewCapture(lg.Named("capture")),
+		replay:             replay.NewReplay(lg.Named("replay"), idMgr),
+		hsHandler:          hsHandler,
+		cfg:                cfg,
+		certManager:        certMgr,
+		isStandalonePlayer: isStandalonePlayer,
 	}
 }
 
@@ -123,6 +125,15 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 	if running != nil {
 		return errors.Errorf("a job is running: %s", running.String())
 	}
+
+	if len(cfg.Addr) > 0 {
+		if !jm.isStandalonePlayer {
+			return errors.Errorf("Addr is not allowed in replay config in a TiProxy node")
+		}
+		// override the hsHandler
+		jm.hsHandler = backend.NewStaticHandshakeHandler(cfg.Addr)
+	}
+
 	newJob := &replayJob{
 		job: job{
 			// cfg.StartTime may act as the job ID in a TiProxy cluster.
