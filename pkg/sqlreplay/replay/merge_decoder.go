@@ -63,7 +63,10 @@ func (d *mergeDecoder) Decode() (*cmd.Command, error) {
 
 	for d, cmd := range d.buf {
 		if cmd != nil {
-			if minCmd == nil || cmd.StartTs.Before(minCmd.StartTs) {
+			// The condition `(cmd.StartTs.Equal(minCmd.StartTs) && cmd.ConnID < minCmd.ConnID)` is used to
+			// have a stable order when StartTs are the same, which will help in testing.
+			if minCmd == nil || cmd.StartTs.Before(minCmd.StartTs) ||
+				(cmd.StartTs.Equal(minCmd.StartTs) && cmd.ConnID < minCmd.ConnID) {
 				minCmd = cmd
 				minIdx = d
 			}

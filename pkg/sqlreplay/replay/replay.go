@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -130,8 +131,10 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	for _, input := range inputs {
 		var storage storage.ExternalStorage
 		if cfg.DynamicInput {
-			// For dynamic input, the last part of the input is the path prefix.
-			input = filepath.Base(input)
+			input, err = getDirForInput(input)
+			if err != nil {
+				return nil, errors.Wrapf(err, "invalid input url %s", input)
+			}
 		}
 		storage, err = store.NewStorage(input)
 		if err != nil {
@@ -188,8 +191,16 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 		return storages, errors.New("command end time is only supported for `audit_log_plugin` format")
 	}
 
-	if cfg.DynamicInput && len(storages) != 1 {
-		return storages, errors.New("dynamic input cannot be enabled with more than one input")
+	if cfg.DynamicInput {
+		if len(storages) != 1 {
+			return storages, errors.New("dynamic input cannot be enabled with more than one input")
+		}
+		if cfg.ReplayerCount <= 0 {
+			return storages, errors.New("dynamic input requires a valid replayer count")
+		}
+		if cfg.ReplayerIndex < 0 || cfg.ReplayerIndex >= cfg.ReplayerCount {
+			return storages, errors.New("dynamic input requires a valid replayer index")
+		}
 	}
 	return storages, nil
 }
@@ -344,7 +355,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	var decoder decoder
 	var err error
 
-	if r.cfg.DynamicInput {
+	if !r.cfg.DynamicInput {
 		// cfg.readers is set in tests
 		readers, err := r.constructReaders()
 		if err != nil {
@@ -362,7 +373,7 @@ func (r *replay) readCommands(ctx context.Context) {
 			return
 		}
 	} else {
-		decoder, err = r.constructDynamicReaderAndDecoder(ctx)
+		decoder, err = r.constructDynamicDecoder(ctx)
 		if err != nil {
 			r.stop(err)
 			return
@@ -524,7 +535,7 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 
 	var decoder decoder
 	decoder = newSingleDecoder(cmdDecoder, reader)
-	if chanBufForEachDecoder >= 0 {
+	if chanBufForEachDecoder > 0 {
 		decoder = newBufferedDecoder(ctx, decoder, chanBufForEachDecoder, r.cfg.IgnoreErrs)
 	}
 
@@ -543,15 +554,23 @@ func (r *replay) constructStaticDecoder(ctx context.Context, readers []cmd.LineR
 	return decoder, nil
 }
 
-func (r *replay) constructDynamicReaderAndDecoder(ctx context.Context) (decoder, error) {
+func (r *replay) constructDynamicDecoder(ctx context.Context) (decoder, error) {
 	decoder := newMergeDecoder()
 
-	watcher := store.NewDirWatcher(r.lg.Named("dir_watcher"), r.cfg.Input, func(filename string) error {
+	parsedURL, err := url.Parse(r.cfg.Input)
+	if err != nil {
+		return nil, err
+	}
+	watcher := store.NewDirWatcher(r.lg.Named("dir_watcher"), strings.TrimLeft(parsedURL.Path, "/"), func(filename string) error {
 		h := fnv.New64a()
 		// error is never returned for Hash
 		_, _ = h.Write([]byte(filename))
 		sum := h.Sum64()
-		if int(sum)%r.cfg.ReplayerCount != r.cfg.ReplayerCount {
+		expectedReplayerIndex := int(sum) % r.cfg.ReplayerCount
+		if expectedReplayerIndex != r.cfg.ReplayerIndex {
+			r.lg.Info("dir watcher skip new directory for other replayer", zap.String("dir", filename),
+				zap.Int("expected_replayer_index", expectedReplayerIndex),
+				zap.Int("replayer_index", r.cfg.ReplayerIndex))
 			return nil
 		}
 
@@ -569,11 +588,27 @@ func (r *replay) constructDynamicReaderAndDecoder(ctx context.Context) (decoder,
 		}
 
 		r.lg.Info("dir watcher found new directory", zap.String("dir", filename), zap.Time("filter_time", filterTime))
-		reader, err := r.constructReaderForDir(r.storages[0], filename, filterTime)
+		// We'll need to setup a new storage, because the `r.storages[0]` has a wrong path
+		url, err := url.Parse(r.cfg.Input)
 		if err != nil {
 			return err
 		}
-		newDecoder, err := r.constructDecoderForReader(ctx, reader, 0)
+		url.Path = filename
+		s, err := store.NewStorage(url.String())
+		if err != nil {
+			return err
+		}
+
+		// Append the new storage to the list for closing later.
+		r.Lock()
+		defer r.Unlock()
+
+		r.storages = append(r.storages, s)
+		reader, err := r.constructReaderForDir(s, filename, filterTime)
+		if err != nil {
+			return err
+		}
+		newDecoder, err := r.constructDecoderForReader(ctx, reader, len(r.storages)-1)
 		if err != nil {
 			return err
 		}
@@ -583,19 +618,25 @@ func (r *replay) constructDynamicReaderAndDecoder(ctx context.Context) (decoder,
 	}, r.storages[0])
 
 	// Initial walk. We have to make sure the decoder is not empty before returning this function.
-	err := watcher.WalkFiles(ctx)
+	err = watcher.WalkFiles(ctx)
 	// If the first walk fails, return error directly.
 	if err != nil {
 		return nil, err
 	}
 
+	r.wg.Add(1)
 	go func() {
+		defer r.wg.Done()
+
 		err := watcher.Watch(ctx)
 		if err != nil {
 			r.lg.Info("dir watcher exited", zap.Error(err))
 		}
 	}()
 
+	if r.cfg.BufSize > 0 {
+		return newBufferedDecoder(ctx, decoder, r.cfg.BufSize, r.cfg.IgnoreErrs), nil
+	}
 	return decoder, nil
 }
 
@@ -888,4 +929,13 @@ func (r *replay) Close() {
 			r.lg.Error("save current state failed on close", zap.Error(err))
 		}
 	}
+}
+
+func getDirForInput(input string) (string, error) {
+	parsedURL, err := url.Parse(input)
+	if err != nil {
+		return "", err
+	}
+	parsedURL.Path = filepath.Dir(parsedURL.Path)
+	return parsedURL.String(), nil
 }

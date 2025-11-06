@@ -130,7 +130,9 @@ func (c *dirWatcher) listFilesForLocal() ([]string, error) {
 			return nil
 		}
 
-		if !strings.HasPrefix(path, c.pathPrefix) {
+		// For local storage, the `path` has '/' prefix. However, the pathPrefix may not
+		// have '/' prefix. So we trim the left '/' from path before comparison.
+		if !strings.HasPrefix(strings.TrimLeft(path, "/"), strings.TrimLeft(c.pathPrefix, "/")) {
 			return nil
 		}
 		relPath, err := filepath.Rel(s.Base(), path)
@@ -141,6 +143,10 @@ func (c *dirWatcher) listFilesForLocal() ([]string, error) {
 			// Only watch first-level directories under the prefix.
 			return filepath.SkipDir
 		}
+		// Add trailing slash to indicate it's a directory and keep consistent with S3 storage.
+		if !strings.HasSuffix(path, string(os.PathSeparator)) {
+			path += string(os.PathSeparator)
+		}
 		dirs = append(dirs, path)
 		return nil
 	})
@@ -149,4 +155,9 @@ func (c *dirWatcher) listFilesForLocal() ([]string, error) {
 	}
 
 	return dirs, nil
+}
+
+// SetDirWatcherPollIntervalForTest sets the polling interval for dirWatcher.
+func SetDirWatcherPollIntervalForTest(d time.Duration) {
+	dirWatcherPollInterval = d
 }
