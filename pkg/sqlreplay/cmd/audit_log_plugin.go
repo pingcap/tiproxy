@@ -189,11 +189,13 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			continue
 		}
 
+		db := kvs[auditPluginKeyCurDB]
 		for _, cmd := range cmds {
 			cmd.Success = true
 			cmd.UpstreamConnID = upstreamConnID
 			cmd.ConnID = connID
 			cmd.StartTs = startTs
+			cmd.CurDB = db
 			cmd.FileName = filename
 			cmd.Line = lineIdx
 			cmd.EndTs = endTs
@@ -419,19 +421,9 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 	}
 
 	cmdStr := parseCommand(kvs[auditPluginKeyCommand])
-	cmds := make([]*Command, 0, 4)
-	db := kvs[auditPluginKeyCurDB]
-	if len(db) > 0 && db != connInfo.currentDB {
-		cmds = append(cmds, &Command{
-			Type:    pnet.ComInitDB,
-			Payload: pnet.MakeInitDBRequest(db),
-		})
-		connInfo.currentDB = db
-		decoder.connInfo[connID] = connInfo
-	}
-
+	cmds := make([]*Command, 0, 3)
 	switch cmdStr {
-	case "Query", "Init DB":
+	case "Query":
 		sql, err := parseSQL(kvs[auditPluginKeySQL])
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])

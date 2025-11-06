@@ -285,7 +285,7 @@ func forwardMsg(srcIO, destIO pnet.PacketIO) (data []byte, err error) {
 
 // handshake with backend directly without the clientIO
 func (auth *Authenticator) handshakeWithBackend(ctx context.Context, logger *zap.Logger, cctx ConnContext, handshakeHandler HandshakeHandler,
-	username, password string, getBackendIO backendIOGetter, backendTLSConfig *tls.Config) error {
+	username, password, dbName string, getBackendIO backendIOGetter, backendTLSConfig *tls.Config) error {
 	backendIO, err := getBackendIO(ctx, cctx, &pnet.HandshakeResp{User: username})
 	if err != nil {
 		return err
@@ -300,6 +300,7 @@ func (auth *Authenticator) handshakeWithBackend(ctx context.Context, logger *zap
 		return err
 	}
 	auth.user = username
+	auth.dbname = dbName
 	auth.capability = handshakeHandler.GetCapability()
 	auth.collation = pnet.Collation
 	if err = auth.writeAuthHandshake(backendIO, backendTLSConfig, initialHandshake.Capability, initialHandshake.AuthPlugin, authData, 0); err != nil {

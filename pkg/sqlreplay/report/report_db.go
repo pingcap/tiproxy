@@ -64,7 +64,7 @@ func (rdb *reportDB) connect(ctx context.Context) error {
 	// Connect to the backend using backendConn instead of the go driver,
 	// because the backend host is assigned by the router and adapting to the router needs some work.
 	rdb.conn = rdb.connCreator()
-	if err := rdb.conn.Connect(ctx); err != nil {
+	if err := rdb.conn.Connect(ctx, ""); err != nil {
 		return err
 	}
 	// Set sql_mode to non-strict mode so that inserted data can be truncated automatically.
