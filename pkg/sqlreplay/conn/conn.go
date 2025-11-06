@@ -82,7 +82,6 @@ type conn struct {
 	closeCh         chan<- uint64
 	lg              *zap.Logger
 	backendConn     BackendConn
-	curDB           string
 	connID          uint64 // logical connection ID, not replay ID and also not capture ID. It's the same with the `ConnID` of the first command.
 	upstreamConnID  uint64 // the original upstream connection ID in capture
 	replayStats     *ReplayStats
