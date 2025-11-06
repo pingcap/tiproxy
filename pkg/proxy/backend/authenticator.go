@@ -301,7 +301,7 @@ func (auth *Authenticator) handshakeWithBackend(ctx context.Context, logger *zap
 	}
 	auth.user = username
 	auth.dbname = dbName
-	auth.capability = handshakeHandler.GetCapability()
+	auth.capability = handshakeHandler.GetCapability() | pnet.ClientConnectWithDB
 	auth.collation = pnet.Collation
 	if err = auth.writeAuthHandshake(backendIO, backendTLSConfig, initialHandshake.Capability, initialHandshake.AuthPlugin, authData, 0); err != nil {
 		return err

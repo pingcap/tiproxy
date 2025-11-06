@@ -155,7 +155,7 @@ func (c *conn) Run(ctx context.Context) {
 			// If the backend is upgrading, the connections may drop but the QPS should not drop too much.
 			if !connected && command.Value.Type != pnet.ComQuit {
 				if err := c.backendConn.Connect(ctx, command.Value.CurDB); err != nil {
-					c.lg.Debug("failed to connect backend", zap.Error(err))
+					c.lg.Debug("failed to connect backend", zap.String("db", command.Value.CurDB), zap.Error(err))
 					c.replayStats.ExceptionCmds.Add(1)
 					c.exceptionCh <- NewOtherException(err, c.upstreamConnID)
 					continue
@@ -169,10 +169,11 @@ func (c *conn) Run(ctx context.Context) {
 				if resp := c.backendConn.ExecuteCmd(ctx, pnet.MakeInitDBRequest(command.Value.CurDB)); resp.Err != nil {
 					c.replayStats.ExceptionCmds.Add(1)
 					c.exceptionCh <- NewFailException(resp.Err, command.Value)
+					c.lg.Info("failed to use database", zap.String("db", command.Value.CurDB), zap.Error(resp.Err))
 					continue
-				} else {
-					curDB = command.Value.CurDB
 				}
+				c.lg.Info("succeeded to use database", zap.String("db", command.Value.CurDB))
+				curDB = command.Value.CurDB
 			}
 			if !c.updateExecuteStmt(command.Value) {
 				c.replayStats.ExceptionCmds.Add(1)
