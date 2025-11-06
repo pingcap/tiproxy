@@ -88,10 +88,6 @@ type conn struct {
 	replayStats     *ReplayStats
 	lastPendingCmds int // last pending cmds reported to the stats
 	readonly        bool
-	// waitForQuitMode indicates that the downstream connection is already closed because
-	// of error, but the upstream connection is still sending commands. In this case,
-	// all commands except ComQuit should be ignored.
-	waitForQuitMode bool
 }
 
 func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,

@@ -41,10 +41,8 @@ const (
 )
 
 type auditLogPluginConnCtx struct {
-	connID uint64
-
-	currentDB string
-	lastPsID  uint32
+	connID   uint64
+	lastPsID uint32
 
 	// preparedStmt contains the prepared statement IDs that are not closed yet, only used for `ps-close=directed`.
 	preparedStmt map[uint32]struct{}
