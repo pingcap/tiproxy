@@ -26,6 +26,7 @@ type proxyConfig struct {
 	capture           capture.Capture
 	username          string
 	password          string
+	dbName            string
 	sessionToken      string
 	capability        pnet.Capability
 	waitRedirect      bool
@@ -83,7 +84,7 @@ func (mp *mockProxy) authenticateSecondTime(clientIO, backendIO pnet.PacketIO) e
 
 func (mp *mockProxy) authenticateWithBackend(_, backendIO pnet.PacketIO) error {
 	if err := mp.authenticator.handshakeWithBackend(context.Background(), mp.logger, mp, mp.handshakeHandler,
-		mp.username, mp.password, func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
+		mp.username, mp.password, mp.dbName, func(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
 			return backendIO, nil
 		}, mp.backendTLSConfig); err != nil {
 		return err

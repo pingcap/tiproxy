@@ -65,6 +65,8 @@ type Command struct {
 	UpstreamConnID uint64
 	ConnID         uint64
 	Type           pnet.Command
+	// When the replay connection disconnects, the replayer reconnects based on the current DB of the next command.
+	CurDB string
 	// The place in the traffic file, used to report.
 	FileName string
 	Line     int

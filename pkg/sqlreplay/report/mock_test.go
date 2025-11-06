@@ -60,7 +60,7 @@ type mockBackendConn struct {
 	args    [][]any
 }
 
-func (c *mockBackendConn) Connect(ctx context.Context) error {
+func (c *mockBackendConn) Connect(ctx context.Context, dbName string) error {
 	return c.connErr
 }
 

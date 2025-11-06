@@ -532,16 +532,8 @@ func TestDecodeSingleLine(t *testing.T) {
 			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComQuery,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -558,6 +550,7 @@ func TestDecodeSingleLine(t *testing.T) {
 			cmds: []*Command{
 				{
 					Type:           pnet.ComQuery,
+					CurDB:          "",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -573,16 +566,8 @@ func TestDecodeSingleLine(t *testing.T) {
 			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"?\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 1\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComStmtPrepare,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -594,6 +579,7 @@ func TestDecodeSingleLine(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -605,6 +591,7 @@ func TestDecodeSingleLine(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtClose,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -617,19 +604,9 @@ func TestDecodeSingleLine(t *testing.T) {
 			},
 		},
 		{
-			// prepared statement without params field
+			// prepared statement without params field, ignore
 			line: `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"?\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Execute] [SQL_STATEMENTS=Select] [CURRENT_DB=test] [EVENT=COMPLETED]`,
-			cmds: []*Command{
-				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Success:        true,
-				},
-			},
+			cmds: []*Command{},
 		},
 		{
 			// ignore starting event
@@ -726,16 +703,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					Success:        true,
 				},
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           3,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
@@ -755,16 +723,7 @@ func TestDecodeMultiLines(t *testing.T) {
 [2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 6, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           1,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 6, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 6, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
@@ -776,6 +735,7 @@ func TestDecodeMultiLines(t *testing.T) {
 					Success:        true,
 				},
 				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
@@ -811,17 +771,8 @@ func TestDecodeMultiLines(t *testing.T) {
 [2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"?\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 1\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           1,
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComStmtPrepare,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -834,6 +785,7 @@ func TestDecodeMultiLines(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -846,6 +798,7 @@ func TestDecodeMultiLines(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtClose,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -858,6 +811,7 @@ func TestDecodeMultiLines(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtPrepare,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -870,6 +824,7 @@ func TestDecodeMultiLines(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -882,6 +837,7 @@ func TestDecodeMultiLines(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtClose,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -900,17 +856,8 @@ func TestDecodeMultiLines(t *testing.T) {
 [2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181837] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           1,
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComQuery,
+					CurDB:          "test",
 					ConnID:         3695181836,
 					UpstreamConnID: 3695181836,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -921,17 +868,8 @@ func TestDecodeMultiLines(t *testing.T) {
 					Success:        true,
 				},
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181837,
-					UpstreamConnID: 3695181837,
-					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 6, 17, 3, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           2,
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComQuery,
+					CurDB:          "test",
 					ConnID:         3695181837,
 					UpstreamConnID: 3695181837,
 					StartTs:        time.Date(2025, 9, 6, 17, 3, 53, 718663917, time.FixedZone("", 8*3600+600)),
@@ -977,16 +915,7 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 [2025/09/14 16:16:31.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 14, 16, 16, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           3,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
@@ -1006,16 +935,7 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 [2025/09/14 16:16:31.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=b] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3695181836,
-					UpstreamConnID: 3695181836,
-					StartTs:        time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 14, 16, 16, 53, 720000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("b")...),
-					Line:           3,
-					Success:        true,
-				},
-				{
+					CurDB:          "b",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 53, 718663917, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 53, 720000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         3695181836,
@@ -1074,18 +994,8 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 			[2025/09/18 17:51:56.999 +08:10] [INFO] [logger.go:77] [ID=175818911610038] [TIMESTAMP=2025/09/18 17:51:56.999 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=119.689] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT c FROM sbtest1 WHERE id=?"] [ROWS=0] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND="Close stmt"] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 500350\"]"] [CURRENT_DB=test] [EVENT=COMPLETED] [PREPARED_STMT_ID=1]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3807050215081378201,
-					UpstreamConnID: 3807050215081378201,
-					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					CapturedPsID:   0,
-					Line:           1,
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComStmtPrepare,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1098,6 +1008,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1110,6 +1021,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtClose,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 51, 56, 998880311, time.FixedZone("", 8*3600+600)),
@@ -1129,18 +1041,8 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 			[2025/09/18 17:51:56.999 +08:10] [INFO] [logger.go:77] [ID=175818911610038] [TIMESTAMP=2025/09/18 17:51:56.999 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=119.689] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT c FROM sbtest1 WHERE id=?"] [ROWS=0] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND="Close stmt"] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 500350\"]"] [CURRENT_DB=test] [EVENT=COMPLETED] [PREPARED_STMT_ID=1]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3807050215081378201,
-					UpstreamConnID: 3807050215081378201,
-					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					CapturedPsID:   0,
-					Line:           1,
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComStmtPrepare,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1153,6 +1055,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1165,6 +1068,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1177,6 +1081,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtClose,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 51, 56, 998880311, time.FixedZone("", 8*3600+600)),
@@ -1196,18 +1101,8 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 			[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=48.86] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT c FROM sbtest1 WHERE id=?"] [ROWS=0] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 124153\"]"] [CURRENT_DB=test] [EVENT=COMPLETED] [PREPARED_STMT_ID=1]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3807050215081378201,
-					UpstreamConnID: 3807050215081378201,
-					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					CapturedPsID:   0,
-					Line:           1,
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComStmtPrepare,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1220,6 +1115,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1232,6 +1128,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtClose,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 51, 56, 998880311, time.FixedZone("", 8*3600+600)),
@@ -1244,6 +1141,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtPrepare,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1256,6 +1154,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1271,19 +1170,7 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 		{
 			// CLOSE
 			lines: `[2025/09/18 17:51:56.999 +08:10] [INFO] [logger.go:77] [ID=175818911610038] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=48.86] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT c FROM sbtest1 WHERE id=?"] [ROWS=0] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND="Close stmt"] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 500350\"]"] [CURRENT_DB=test] [EVENT=COMPLETED] [PREPARED_STMT_ID=1]`,
-			cmds: []*Command{
-				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3807050215081378201,
-					UpstreamConnID: 3807050215081378201,
-					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					CapturedPsID:   0,
-					Line:           1,
-					Success:        true,
-				},
-			},
+			cmds:  []*Command{},
 		},
 	}
 
@@ -1316,17 +1203,8 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 [2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=48.86] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT c FROM sbtest1 WHERE id=?"] [ROWS=0] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         3807050215081378201,
-					UpstreamConnID: 3807050215081378201,
-					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 18, 17, 48, 20, 614000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           1,
-					Success:        true,
-				},
-				{
 					Type:           pnet.ComStmtPrepare,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1339,6 +1217,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1351,6 +1230,7 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 				},
 				{
 					Type:           pnet.ComStmtExecute,
+					CurDB:          "test",
 					ConnID:         3807050215081378201,
 					UpstreamConnID: 3807050215081378201,
 					StartTs:        time.Date(2025, 9, 18, 17, 48, 20, 613951140, time.FixedZone("", 8*3600+600)),
@@ -1421,16 +1301,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 			lines:     `[2025/09/14 16:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/14 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=1001] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         (uint64(123) << 54) + 1, // First allocated connection ID with decoder ID 123
-					UpstreamConnID: 1001,
-					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           1,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(123) << 54) + 1,
@@ -1450,16 +1321,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 [2025/09/14 16:16:30.585 +08:00] [INFO] [logger.go:77] [ID=17573373892] [TIMESTAMP=2025/09/14 16:16:30.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 2"] [ROWS=0] [CONNECTION_ID=2001] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         (uint64(456) << 54) + 1,
-					UpstreamConnID: 2001,
-					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           1,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(456) << 54) + 1,
@@ -1471,6 +1333,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					Success:        true,
 				},
 				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 30, 583942167, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 30, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(456) << 54) + 1,
@@ -1490,16 +1353,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 [2025/09/14 16:16:30.585 +08:00] [INFO] [logger.go:77] [ID=17573373892] [TIMESTAMP=2025/09/14 16:16:30.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 2"] [ROWS=0] [CONNECTION_ID=3002] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         (uint64(789) << 54) + 1,
-					UpstreamConnID: 3001,
-					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           1,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(789) << 54) + 1,
@@ -1511,16 +1365,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					Success:        true,
 				},
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         (uint64(789) << 54) + 2,
-					UpstreamConnID: 3002,
-					StartTs:        time.Date(2025, 9, 14, 16, 16, 30, 583942167, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 14, 16, 16, 30, 585000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           2,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 30, 583942167, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 30, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(789) << 54) + 2,
@@ -1541,16 +1386,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 [2025/09/14 16:16:31.585 +08:00] [INFO] [logger.go:77] [ID=17573373893] [TIMESTAMP=2025/09/14 16:16:31.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=4001] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
 			cmds: []*Command{
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         (uint64(100) << 54) + 1,
-					UpstreamConnID: 4001,
-					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           1,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 29, 583942167, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 29, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(100) << 54) + 1,
@@ -1572,16 +1408,7 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 					Success:        true,
 				},
 				{
-					Type:           pnet.ComInitDB,
-					ConnID:         (uint64(100) << 54) + 2,
-					UpstreamConnID: 4001,
-					StartTs:        time.Date(2025, 9, 14, 16, 16, 31, 583942167, time.FixedZone("", 8*3600+600)),
-					EndTs:          time.Date(2025, 9, 14, 16, 16, 31, 585000000, time.FixedZone("", 8*3600+600)),
-					Payload:        append([]byte{pnet.ComInitDB.Byte()}, []byte("test")...),
-					Line:           3,
-					Success:        true,
-				},
-				{
+					CurDB:          "test",
 					StartTs:        time.Date(2025, 9, 14, 16, 16, 31, 583942167, time.FixedZone("", 8*3600+600)),
 					EndTs:          time.Date(2025, 9, 14, 16, 16, 31, 585000000, time.FixedZone("", 8*3600+600)),
 					ConnID:         (uint64(100) << 54) + 2,

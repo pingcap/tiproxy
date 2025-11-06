@@ -16,8 +16,10 @@ import (
 func TestBackendConn(t *testing.T) {
 	backendConn := NewBackendConn(zap.NewNop(), 1, nil, &backend.BCConfig{}, nil, "u1", "")
 	backendConnMgr := &mockBackendConnMgr{}
-	backendConn.backendConnMgr = backendConnMgr
-	require.NoError(t, backendConn.Connect(context.Background()))
+	backendConn.connCreator = func() BackendConnManager {
+		return backendConnMgr
+	}
+	require.NoError(t, backendConn.Connect(context.Background(), ""))
 	resp := backendConn.ExecuteCmd(context.Background(), []byte{pnet.ComQuit.Byte()})
 	require.NoError(t, resp.Err)
 	require.NoError(t, backendConn.Query(context.Background(), "select 1"))
@@ -27,7 +29,6 @@ func TestBackendConn(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint32(1), stmtID)
 	require.NoError(t, backendConn.ExecuteStmt(context.Background(), 1, []any{uint64(1), "abc", float64(1.0)}))
-	backendConn.ConnID()
 	backendConn.Close()
 	require.True(t, backendConnMgr.closed)
 }
