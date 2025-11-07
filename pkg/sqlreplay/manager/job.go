@@ -135,6 +135,7 @@ type replayJob4Marshal struct {
 	Format    string  `json:"format,omitempty"`
 	Speed     float64 `json:"speed,omitempty"`
 	ReadOnly  bool    `json:"readonly,omitempty"`
+	Addr      string  `json:"addr,omitempty"`
 }
 
 func (job *replayJob) Type() JobType {
@@ -152,6 +153,7 @@ func (job *replayJob) MarshalJSON() ([]byte, error) {
 		Speed:       job.cfg.Speed,
 		ReadOnly:    job.cfg.ReadOnly,
 		Format:      job.cfg.Format,
+		Addr:        job.cfg.Addr,
 	}
 	return json.Marshal(r)
 }

@@ -106,6 +106,8 @@ type ReplayConfig struct {
 	reportLogInterval time.Duration
 	// CheckPointFilePath is the path to the file that stores the current state of the replay
 	CheckPointFilePath string
+	// Addr is the downstream address to connect to
+	Addr string
 }
 
 func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {

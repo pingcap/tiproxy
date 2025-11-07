@@ -136,6 +136,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	}
 
 	cfg.CheckPointFilePath = c.PostForm("checkpointpath")
+	cfg.Addr = c.PostForm("addr")
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
