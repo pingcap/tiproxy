@@ -58,6 +58,7 @@ func main() {
 	dynamicInput := rootCmd.PersistentFlags().Bool("dynamic-input", false, "enable dynamic input mode, which watches the input directory for new traffic folders and replays them automatically.")
 	replayerCount := rootCmd.PersistentFlags().Int("replayer-count", 1, "the total number of replayer instances running concurrently. Used only when dynamic-input is enabled.")
 	replayerIndex := rootCmd.PersistentFlags().Int("replayer-index", 0, "the index of this replayer instance. Used only when dynamic-input is enabled.")
+	outputPath := rootCmd.PersistentFlags().String("output-path", "", "the file path to store replayed sql. Empty indicates do not output replayed sql.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
@@ -134,6 +135,7 @@ func main() {
 			DynamicInput:       *dynamicInput,
 			ReplayerCount:      *replayerCount,
 			ReplayerIndex:      *replayerIndex,
+			OutputPath:         *outputPath,
 		}
 		if err := r.StartReplay(replayCfg); err != nil {
 			cancel()

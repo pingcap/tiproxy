@@ -76,8 +76,10 @@ type API struct {
 }
 
 type LogOnline struct {
-	Level   string  `yaml:"level,omitempty" toml:"level,omitempty" json:"level,omitempty" reloadable:"true"`
-	LogFile LogFile `yaml:"log-file,omitempty" toml:"log-file,omitempty" json:"log-file,omitempty"`
+	Level      string        `yaml:"level,omitempty" toml:"level,omitempty" json:"level,omitempty" reloadable:"true"`
+	LogFile    LogFile       `yaml:"log-file,omitempty" toml:"log-file,omitempty" json:"log-file,omitempty"`
+	BufferSize int           `yaml:"buffer-size,omitempty" toml:"buffer-size,omitempty" json:"buffer-size,omitempty" reloadable:"false"`
+	FlushIntvl time.Duration `yaml:"flush-intvl,omitempty" toml:"flush-intvl,omitempty" json:"flush-intvl,omitempty" reloadable:"false"`
 }
 
 type Log struct {

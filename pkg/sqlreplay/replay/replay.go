@@ -21,7 +21,9 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
@@ -51,6 +53,13 @@ const (
 
 	checkpointSaveInterval = 100 * time.Millisecond
 	stateSaveRetryInterval = 10 * time.Second
+
+	// The output log size in MB.
+	outputLogSize = 10
+	// The buffer size of the output log.
+	outputBufferSize = 4 * 1024
+	// The flush interval of the output log.
+	outputLogFlushIntvl = 10 * time.Second
 )
 
 var (
@@ -99,14 +108,6 @@ type ReplayConfig struct {
 	PSCloseStrategy cmd.PSCloseStrategy
 	// DryRun indicates whether to actually execute the commands.
 	DryRun bool
-	// the following fields are for testing
-	readers           []cmd.LineReader
-	report            report.Report
-	connCreator       conn.ConnCreator
-	abortThreshold    int64
-	slowDownThreshold int64
-	slowDownFactor    time.Duration
-	reportLogInterval time.Duration
 	// CheckPointFilePath is the path to the file that stores the current state of the replay
 	CheckPointFilePath string
 	// Dynamic defines whether the input is dynamic, e.g. a path prefix.
@@ -116,6 +117,16 @@ type ReplayConfig struct {
 	ReplayerCount int
 	// ReplayerIndex is the index of this replayer among all replayers.
 	ReplayerIndex int
+	// OutputPath is the path to output replayed sql.
+	OutputPath string
+	// the following fields are for testing
+	readers           []cmd.LineReader
+	report            report.Report
+	connCreator       conn.ConnCreator
+	abortThreshold    int64
+	slowDownThreshold int64
+	slowDownFactor    time.Duration
+	reportLogInterval time.Duration
 }
 
 func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
@@ -258,6 +269,7 @@ type replay struct {
 	decodedCmds      atomic.Uint64
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
+	outputLg         *zap.Logger
 }
 
 func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
@@ -299,6 +311,25 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	}
 	r.cfg.encryptionKey = key
 
+	if len(cfg.OutputPath) > 0 {
+		lg, _, _, err := logger.BuildLogger(&config.Log{
+			Encoder: "json",
+			LogOnline: config.LogOnline{
+				Level: "info",
+				LogFile: config.LogFile{
+					Filename: cfg.OutputPath,
+					MaxSize:  outputLogSize,
+				},
+				BufferSize: outputBufferSize,
+				FlushIntvl: outputLogFlushIntvl,
+			},
+		})
+		if err != nil {
+			return errors.Wrapf(err, "failed to build logger")
+		}
+		r.outputLg = lg
+	}
+
 	hsHandler = NewHandshakeHandler(hsHandler)
 	r.connCreator = cfg.connCreator
 	if r.connCreator == nil {
@@ -312,8 +343,21 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 			}
 		} else {
 			r.connCreator = func(connID uint64, upstreamConnID uint64) conn.Conn {
-				return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
-					connID, upstreamConnID, bcConfig, r.exceptionCh, r.closeConnCh, cfg.ReadOnly, &r.replayStats)
+				return conn.NewConn(r.lg.Named("conn"), conn.ConnOpts{
+					OutputLg:         r.outputLg,
+					Username:         r.cfg.Username,
+					Password:         r.cfg.Password,
+					BackendTLSConfig: backendTLSConfig,
+					HsHandler:        hsHandler,
+					IdMgr:            r.idMgr,
+					ConnID:           connID,
+					UpstreamConnID:   upstreamConnID,
+					BcConfig:         bcConfig,
+					ExceptionCh:      r.exceptionCh,
+					CloseCh:          r.closeConnCh,
+					ReplayStats:      &r.replayStats,
+					Readonly:         cfg.ReadOnly,
+				})
 			}
 		}
 	}

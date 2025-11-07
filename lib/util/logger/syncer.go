@@ -44,6 +44,14 @@ func (lg *stdoutLogger) Close() error {
 	return nil
 }
 
+type bufferedLogger struct {
+	zapcore.WriteSyncer
+}
+
+func (lg *bufferedLogger) Close() error {
+	return lg.Sync()
+}
+
 // AtomicWriteSyncer is a WriteSyncer that can be updated online.
 type AtomicWriteSyncer struct {
 	sync.RWMutex
@@ -65,6 +73,15 @@ func (ws *AtomicWriteSyncer) Rebuild(cfg *config.LogOnline) error {
 			return err
 		}
 		output = &stdoutLogger{stdLogger}
+	}
+	if cfg.BufferSize > 0 && cfg.FlushIntvl > 0 {
+		output = &bufferedLogger{
+			&zapcore.BufferedWriteSyncer{
+				WS:            output,
+				Size:          cfg.BufferSize,
+				FlushInterval: cfg.FlushIntvl,
+			},
+		}
 	}
 	return ws.setOutput(output)
 }

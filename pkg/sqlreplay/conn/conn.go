@@ -81,6 +81,7 @@ type conn struct {
 	exceptionCh     chan<- Exception
 	closeCh         chan<- uint64
 	lg              *zap.Logger
+	outputLg        *zap.Logger
 	backendConn     BackendConn
 	connID          uint64 // logical connection ID, not replay ID and also not capture ID. It's the same with the `ConnID` of the first command.
 	upstreamConnID  uint64 // the original upstream connection ID in capture
@@ -89,25 +90,44 @@ type conn struct {
 	readonly        bool
 }
 
-func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
-	idMgr *id.IDManager, connID uint64, upstreamConnID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64,
-	readonly bool, replayStats *ReplayStats) *conn {
-	backendConnID := idMgr.NewID()
-	lg = lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID))
-	return &conn{
+type ConnOpts struct {
+	OutputLg         *zap.Logger
+	Username         string
+	Password         string
+	BackendTLSConfig *tls.Config
+	HsHandler        backend.HandshakeHandler
+	IdMgr            *id.IDManager
+	ConnID           uint64
+	UpstreamConnID   uint64
+	BcConfig         *backend.BCConfig
+	ExceptionCh      chan<- Exception
+	CloseCh          chan<- uint64
+	ReplayStats      *ReplayStats
+	Readonly         bool
+}
+
+func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
+	backendConnID := opts.IdMgr.NewID()
+	lg = lg.With(zap.Uint64("captureID", opts.ConnID), zap.Uint64("replayID", backendConnID))
+	c := &conn{
 		lg:             lg,
-		connID:         connID,
-		upstreamConnID: upstreamConnID,
+		outputLg:       opts.OutputLg,
+		connID:         opts.ConnID,
+		upstreamConnID: opts.UpstreamConnID,
 		cmdList:        glist.New[*cmd.Command](),
 		cmdCh:          make(chan struct{}, 1),
 		preparedStmts:  make(map[uint32]preparedStmt),
 		psIDMapping:    make(map[uint32]uint32),
-		exceptionCh:    exceptionCh,
-		closeCh:        closeCh,
-		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
-		replayStats:    replayStats,
-		readonly:       readonly,
+		exceptionCh:    opts.ExceptionCh,
+		closeCh:        opts.CloseCh,
+		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, opts.HsHandler, opts.BcConfig, opts.BackendTLSConfig, opts.Username, opts.Password),
+		replayStats:    opts.ReplayStats,
+		readonly:       opts.Readonly,
 	}
+	if c.outputLg == nil {
+		c.outputLg = zap.NewNop()
+	}
+	return c
 }
 
 func (c *conn) Run(ctx context.Context) {

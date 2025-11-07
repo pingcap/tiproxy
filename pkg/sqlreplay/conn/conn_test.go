@@ -42,7 +42,16 @@ func TestConnectError(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	for i, test := range tests {
 		exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-		conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 555, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
+		conn := NewConn(lg, ConnOpts{
+			Username:       "u1",
+			IdMgr:          id.NewIDManager(),
+			ConnID:         1,
+			UpstreamConnID: 555,
+			BcConfig:       &backend.BCConfig{},
+			ExceptionCh:    exceptionCh,
+			CloseCh:        closeCh,
+			ReplayStats:    &ReplayStats{},
+		})
 		backendConn := newMockBackendConn()
 		backendConn.setConnErr(test.connErr)
 		backendConn.setExecErr(test.execErr)
@@ -68,7 +77,16 @@ func TestExecuteCmd(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ReplayStats:    stats,
+	})
 	backendConn := newMockBackendConn()
 	conn.backendConn = backendConn
 	childCtx, cancel := context.WithCancel(context.Background())
@@ -92,7 +110,16 @@ func TestStopExecution(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ReplayStats:    &ReplayStats{},
+	})
 	conn.backendConn = newMockBackendConn()
 	wg.RunWithRecover(func() {
 		conn.Run(context.Background())
@@ -138,7 +165,16 @@ func TestExecuteError(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ReplayStats:    stats,
+	})
 	backendConn := newMockBackendConn()
 	backendConn.setExecErr(errors.New("mock error"))
 	conn.backendConn = backendConn
@@ -212,7 +248,17 @@ func TestSkipReadOnly(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, true, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ReplayStats:    stats,
+		Readonly:       true,
+	})
 	conn.backendConn = newMockBackendConn()
 	childCtx, cancel := context.WithCancel(context.Background())
 	wg.RunWithRecover(func() {
@@ -372,7 +418,17 @@ func TestPreparedStmt(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, true, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ReplayStats:    stats,
+		Readonly:       true,
+	})
 	for i, test := range tests {
 		conn.updatePreparedStmts(uint32(i), test.request, test.response)
 		require.Equal(t, test.preparedStmts, conn.preparedStmts, "case %d", i)
@@ -388,7 +444,16 @@ func TestPreparedStmtMapId(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ReplayStats:    stats,
+	})
 	backendConn := newMockBackendConn()
 	conn.backendConn = backendConn
 	var wg waitgroup.WaitGroup
@@ -443,7 +508,16 @@ func TestReconnect(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	exceptionCh, closeCh := make(chan Exception, 10), make(chan uint64, 1)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 555, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 555,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ReplayStats:    stats,
+	})
 	backendConn := newMockBackendConn()
 	conn.backendConn = backendConn
 	wg.RunWithRecover(func() {
@@ -567,8 +641,16 @@ func TestExceptionUsesUpstreamConnID(t *testing.T) {
 			var wg waitgroup.WaitGroup
 			exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
 			stats := &ReplayStats{}
-
-			conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), test.connID, test.upstreamConnID, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+			conn := NewConn(lg, ConnOpts{
+				Username:       "u1",
+				IdMgr:          id.NewIDManager(),
+				ConnID:         test.connID,
+				UpstreamConnID: test.upstreamConnID,
+				BcConfig:       &backend.BCConfig{},
+				ExceptionCh:    exceptionCh,
+				CloseCh:        closeCh,
+				ReplayStats:    stats,
+			})
 			backendConn := newMockBackendConn()
 			test.setupError(backendConn)
 			conn.backendConn = backendConn
