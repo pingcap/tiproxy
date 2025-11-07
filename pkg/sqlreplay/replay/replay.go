@@ -8,8 +8,11 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
+	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -106,6 +109,13 @@ type ReplayConfig struct {
 	reportLogInterval time.Duration
 	// CheckPointFilePath is the path to the file that stores the current state of the replay
 	CheckPointFilePath string
+	// Dynamic defines whether the input is dynamic, e.g. a path prefix.
+	DynamicInput bool
+	// ReplayerCount is the total number of replayers which share the same dynamic input. The count
+	// and index is used to determine whether this replayer should process a new
+	ReplayerCount int
+	// ReplayerIndex is the index of this replayer among all replayers.
+	ReplayerIndex int
 }
 
 func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
@@ -120,6 +130,12 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	var err error
 	for _, input := range inputs {
 		var storage storage.ExternalStorage
+		if cfg.DynamicInput {
+			input, err = getDirForInput(input)
+			if err != nil {
+				return nil, errors.Wrapf(err, "invalid input url %s", input)
+			}
+		}
 		storage, err = store.NewStorage(input)
 		if err != nil {
 			for _, s := range storages {
@@ -173,6 +189,18 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	}
 	if cfg.Format != cmd.FormatAuditLogPlugin && !cfg.CommandEndTime.IsZero() {
 		return storages, errors.New("command end time is only supported for `audit_log_plugin` format")
+	}
+
+	if cfg.DynamicInput {
+		if len(storages) != 1 {
+			return storages, errors.New("dynamic input cannot be enabled with more than one input")
+		}
+		if cfg.ReplayerCount <= 0 {
+			return storages, errors.New("dynamic input requires a valid replayer count")
+		}
+		if cfg.ReplayerIndex < 0 || cfg.ReplayerIndex >= cfg.ReplayerCount {
+			return storages, errors.New("dynamic input requires a valid replayer index")
+		}
 	}
 	return storages, nil
 }
@@ -324,21 +352,32 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 }
 
 func (r *replay) readCommands(ctx context.Context) {
-	// cfg.readers is set in tests
-	readers, err := r.constructReaders()
-	if err != nil {
-		r.stop(err)
-		return
-	}
-	defer func() {
-		for _, r := range readers {
-			r.Close()
+	var decoder decoder
+	var err error
+
+	if !r.cfg.DynamicInput {
+		// cfg.readers is set in tests
+		readers, err := r.constructReaders()
+		if err != nil {
+			r.stop(err)
+			return
 		}
-	}()
-	decoder, err := r.constructDecoder(ctx, readers)
-	if err != nil {
-		r.stop(err)
-		return
+		defer func() {
+			for _, r := range readers {
+				r.Close()
+			}
+		}()
+		decoder, err = r.constructStaticDecoder(ctx, readers)
+		if err != nil {
+			r.stop(err)
+			return
+		}
+	} else {
+		decoder, err = r.constructDynamicDecoder(ctx)
+		if err != nil {
+			r.stop(err)
+			return
+		}
 	}
 
 	var captureStartTs, replayStartTs time.Time
@@ -359,7 +398,7 @@ func (r *replay) readCommands(ctx context.Context) {
 		var command *cmd.Command
 		if command, err = decoder.Decode(); err != nil {
 			if errors.Is(err, io.EOF) {
-				r.lg.Info("replay reads EOF", zap.Stringers("reader", readers))
+				r.lg.Info("replay reads EOF")
 				err = nil
 				break
 			}
@@ -460,27 +499,9 @@ func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineR
 	var decoders []decoder
 
 	for i, reader := range readers {
-		idAllocator, err := cmd.NewConnIDAllocator(i)
+		decoder, err := r.constructDecoderForReader(ctx, reader, i)
 		if err != nil {
 			return nil, err
-		}
-
-		cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
-		// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
-		// the connection state is maintained in decoder. Filtering out commands here will make it'
-		// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
-		// the current session state correctly.
-		cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
-		if auditLogDecoder, ok := cmdDecoder.(*cmd.AuditLogPluginDecoder); ok {
-			auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
-			auditLogDecoder.SetIDAllocator(idAllocator)
-			auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)
-		}
-
-		var decoder decoder
-		decoder = newSingleDecoder(cmdDecoder, reader)
-		if chanBufForEachDecoder >= 0 {
-			decoder = newBufferedDecoder(ctx, decoder, chanBufForEachDecoder, r.cfg.IgnoreErrs)
 		}
 		decoders = append(decoders, decoder)
 	}
@@ -494,7 +515,34 @@ func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineR
 	return newMergeDecoder(decoders...), nil
 }
 
-func (r *replay) constructDecoder(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
+func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineReader, id int) (decoder, error) {
+	idAllocator, err := cmd.NewConnIDAllocator(id)
+	if err != nil {
+		return nil, err
+	}
+
+	cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
+	// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
+	// the connection state is maintained in decoder. Filtering out commands here will make it'
+	// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
+	// the current session state correctly.
+	cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
+	if auditLogDecoder, ok := cmdDecoder.(*cmd.AuditLogPluginDecoder); ok {
+		auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
+		auditLogDecoder.SetIDAllocator(idAllocator)
+		auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)
+	}
+
+	var decoder decoder
+	decoder = newSingleDecoder(cmdDecoder, reader)
+	if chanBufForEachDecoder > 0 {
+		decoder = newBufferedDecoder(ctx, decoder, chanBufForEachDecoder, r.cfg.IgnoreErrs)
+	}
+
+	return decoder, nil
+}
+
+func (r *replay) constructStaticDecoder(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
 	decoder, err := r.constructMergeDecoders(ctx, readers)
 	if err != nil {
 		return nil, err
@@ -506,6 +554,112 @@ func (r *replay) constructDecoder(ctx context.Context, readers []cmd.LineReader)
 	return decoder, nil
 }
 
+func (r *replay) constructDynamicDecoder(ctx context.Context) (decoder, error) {
+	decoder := newMergeDecoder()
+
+	parsedURL, err := url.Parse(r.cfg.Input)
+	if err != nil {
+		return nil, err
+	}
+	watcher := store.NewDirWatcher(r.lg.Named("dir_watcher"), strings.TrimLeft(parsedURL.Path, "/"), func(filename string) error {
+		h := fnv.New64a()
+		// error is never returned for Hash
+		_, _ = h.Write([]byte(filename))
+		sum := h.Sum64()
+		expectedReplayerIndex := int(sum) % r.cfg.ReplayerCount
+		if expectedReplayerIndex != r.cfg.ReplayerIndex {
+			r.lg.Info("dir watcher skip new directory for other replayer", zap.String("dir", filename),
+				zap.Int("expected_replayer_index", expectedReplayerIndex),
+				zap.Int("replayer_index", r.cfg.ReplayerIndex))
+			return nil
+		}
+
+		// determine the start time filter for the new reader
+		filterTime := time.Time{}
+		if !r.cfg.CommandEndTime.IsZero() {
+			filterTime = r.cfg.CommandEndTime
+		}
+		curCmdEndTs := r.replayStats.CurCmdEndTs.Load()
+		if curCmdEndTs > 0 {
+			t := time.Unix(0, curCmdEndTs)
+			if t.After(filterTime) {
+				filterTime = t
+			}
+		}
+
+		r.lg.Info("dir watcher found new directory", zap.String("dir", filename), zap.Time("filter_time", filterTime))
+		// We'll need to setup a new storage, because the `r.storages[0]` has a wrong path
+		url, err := url.Parse(r.cfg.Input)
+		if err != nil {
+			return err
+		}
+		url.Path = filename
+		s, err := store.NewStorage(url.String())
+		if err != nil {
+			return err
+		}
+
+		// Append the new storage to the list for closing later.
+		r.Lock()
+		defer r.Unlock()
+
+		r.storages = append(r.storages, s)
+		reader, err := r.constructReaderForDir(s, filename, filterTime)
+		if err != nil {
+			return err
+		}
+		newDecoder, err := r.constructDecoderForReader(ctx, reader, len(r.storages)-1)
+		if err != nil {
+			return err
+		}
+
+		decoder.AddDecoder(newDecoder)
+		return nil
+	}, r.storages[0])
+
+	// Initial walk. We have to make sure the decoder is not empty before returning this function.
+	err = watcher.WalkFiles(ctx)
+	// If the first walk fails, return error directly.
+	if err != nil {
+		return nil, err
+	}
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+
+		err := watcher.Watch(ctx)
+		if err != nil {
+			r.lg.Info("dir watcher exited", zap.Error(err))
+		}
+	}()
+
+	if r.cfg.BufSize > 0 {
+		return newBufferedDecoder(ctx, decoder, r.cfg.BufSize, r.cfg.IgnoreErrs), nil
+	}
+	return decoder, nil
+}
+
+func (r *replay) constructReaderForDir(storage storage.ExternalStorage, dir string, filterTime time.Time) (cmd.LineReader, error) {
+	cfg := store.ReaderCfg{
+		Format:             r.cfg.Format,
+		Dir:                dir,
+		EncryptionKey:      r.cfg.encryptionKey,
+		EncryptionMethod:   r.meta.EncryptMethod,
+		FileNameFilterTime: filterTime,
+	}
+	if r.cfg.CommandEndTime.IsZero() {
+		cfg.FileNameFilterTime = r.cfg.CommandStartTime
+	}
+	reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
+	if err != nil {
+		reader.Close()
+		return nil, err
+	}
+
+	return reader, nil
+}
+
 func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 	readers := r.cfg.readers
 	inputs := strings.Split(r.cfg.Input, ",")
@@ -515,23 +669,14 @@ func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 		}
 
 		for i, storage := range r.storages {
-			cfg := store.ReaderCfg{
-				Format:             r.cfg.Format,
-				Dir:                inputs[i],
-				EncryptionKey:      r.cfg.encryptionKey,
-				EncryptionMethod:   r.meta.EncryptMethod,
-				FileNameFilterTime: r.cfg.CommandEndTime,
-			}
-			if r.cfg.CommandEndTime.IsZero() {
-				cfg.FileNameFilterTime = r.cfg.CommandStartTime
-			}
-			reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
+			reader, err := r.constructReaderForDir(storage, inputs[i], r.cfg.CommandEndTime)
 			if err != nil {
 				for _, r := range readers {
 					r.Close()
 				}
 				return nil, err
 			}
+
 			readers = append(readers, reader)
 		}
 	}
@@ -784,4 +929,13 @@ func (r *replay) Close() {
 			r.lg.Error("save current state failed on close", zap.Error(err))
 		}
 	}
+}
+
+func getDirForInput(input string) (string, error) {
+	parsedURL, err := url.Parse(input)
+	if err != nil {
+		return "", err
+	}
+	parsedURL.Path = filepath.Dir(parsedURL.Path)
+	return parsedURL.String(), nil
 }

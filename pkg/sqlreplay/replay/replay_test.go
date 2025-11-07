@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"io"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -16,10 +18,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
@@ -694,4 +698,170 @@ func TestSaveCurrentStateLoop(t *testing.T) {
 		cancel()
 		wg.Wait()
 	})
+}
+
+func TestDynamicInput(t *testing.T) {
+	// To run this test on S3, please set the S3_URL_FOR_TEST environment variable.
+	// Example: s3://test-bucket/tidb-?force-path-style=true&endpoint=http://127.0.0.1:9000&access-key=minioadmin&secret-access-key=minioadmin&provider=minio
+	// Or any valid S3 URL.
+
+	tempDir := t.TempDir()
+	url := tempDir + "/tidb-"
+
+	if s3Addr, ok := os.LookupEnv("S3_URL_FOR_TEST"); ok {
+		url = s3Addr
+	}
+
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+
+	replay.cfg = ReplayConfig{
+		Input:           url + "," + url,
+		Username:        "u1",
+		StartTime:       time.Now(),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+		DynamicInput:    true,
+		ReplayerCount:   3,
+		ReplayerIndex:   1,
+		Format:          cmd.FormatAuditLogPlugin,
+	}
+	// Validate should fail because we have multiple inputs
+	_, err := replay.cfg.Validate()
+	require.Error(t, err)
+
+	replay.cfg.Input = url
+	storages, err := replay.cfg.Validate()
+	require.NoError(t, err)
+	replay.storages = storages
+	defer func() {
+		for _, s := range storages {
+			s.Close()
+		}
+	}()
+
+	dirWatcherInterval := 10 * time.Millisecond
+	store.SetDirWatcherPollIntervalForTest(dirWatcherInterval)
+
+	auditLog := `[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]
+		[2025/09/09 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/07 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 2"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]
+		[2025/09/10 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/08 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 3"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Get a list of files whose hash locates in 0
+	locateZeroDirs := []string{}
+	otherDirs := []string{}
+	for i := 0; len(locateZeroDirs) < 2 || len(otherDirs) < 1; i++ {
+		filename := fmt.Sprintf("tidb-%d/", i)
+		if _, ok := storages[0].(*storage.LocalStorage); ok {
+			filename = tempDir + "/" + filename
+		}
+
+		h := fnv.New64a()
+		// error is never returned for Hash
+		_, _ = h.Write([]byte(filename))
+		sum := h.Sum64()
+
+		if int(sum)%replay.cfg.ReplayerCount == replay.cfg.ReplayerIndex {
+			if len(locateZeroDirs) < 2 {
+				fmt.Println("locate zero dir:", filename)
+				locateZeroDirs = append(locateZeroDirs, fmt.Sprintf("tidb-%d", i))
+			}
+		} else {
+			if len(otherDirs) < 1 {
+				otherDirs = append(otherDirs, fmt.Sprintf("tidb-%d", i))
+			}
+		}
+	}
+
+	// This decoder should be able to read the files in locateZeroDirs[0], locateZeroDirs[1], ...
+	err = storages[0].WriteFile(ctx, fmt.Sprintf("%s/tidb-audit-2006-01-02T15-04-05.log", locateZeroDirs[0]), []byte(auditLog))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, storages[0].DeleteFile(ctx, fmt.Sprintf("%s/tidb-audit-2006-01-02T15-04-05.log", locateZeroDirs[0])))
+	}()
+
+	// don't use buffer to avoid exhausting S3 file too fast
+	chanBufForEachDecoder = 0
+	decoder, err := replay.constructDynamicDecoder(ctx)
+	require.NoError(t, err)
+
+	// Decode the first command `SELECT 1` from tidb-0
+	command, err := decoder.Decode()
+	require.NoError(t, err)
+	require.Equal(t, append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), command.Payload)
+	require.NoError(t, err)
+
+	// Add a new log to otherDirs[0], which should not be read by this replayer
+	err = storages[0].WriteFile(ctx, fmt.Sprintf("%s/tidb-audit-2006-01-02T15-04-05.log", otherDirs[0]), []byte(auditLog))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, storages[0].DeleteFile(ctx, fmt.Sprintf("%s/tidb-audit-2006-01-02T15-04-05.log", otherDirs[0])))
+	}()
+	time.Sleep(3 * dirWatcherInterval)
+
+	// Still decode the second command `SELECT 2` from tidb-0
+	command, err = decoder.Decode()
+	require.NoError(t, err)
+	require.Equal(t, append([]byte{pnet.ComQuery.Byte()}, []byte("select 2")...), command.Payload)
+
+	// Add a new log to locateZeroDirs[1], which should be read by this replayer
+	err = storages[0].WriteFile(ctx, fmt.Sprintf("%s/tidb-audit-2006-01-02T15-04-05.log", locateZeroDirs[1]), []byte(auditLog))
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, storages[0].DeleteFile(ctx, fmt.Sprintf("%s/tidb-audit-2006-01-02T15-04-05.log", locateZeroDirs[1])))
+	}()
+	time.Sleep(3 * dirWatcherInterval)
+
+	// Decode the command `SELECT 1` from locateZeroDirs[1]
+	command, err = decoder.Decode()
+	require.NoError(t, err)
+	require.Equal(t, append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), command.Payload)
+
+	// Then, the following commands should be `SELECT 2`, `SELECT 3`, `SELECT 3`, EOF
+	for _, expectedSQL := range []string{"select 2", "select 3", "select 3"} {
+		command, err = decoder.Decode()
+		require.NoError(t, err)
+		require.Equal(t, append([]byte{pnet.ComQuery.Byte()}, []byte(expectedSQL)...), command.Payload)
+	}
+
+	_, err = decoder.Decode()
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestGetDirForInput(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    "/path/to/dir",
+			expected: "/path/to",
+		},
+		{
+			input:    "/path/to/dir/",
+			expected: "/path/to/dir",
+		},
+		{
+			input:    "s3://bucket/prefix-xyz?param=1",
+			expected: "s3://bucket/?param=1",
+		},
+		{
+			input:    "s3://bucket/prefix-xyz/",
+			expected: "s3://bucket/prefix-xyz",
+		},
+		{
+			input:    "s3://bucket/prefix-xyz/subdir",
+			expected: "s3://bucket/prefix-xyz",
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(fmt.Sprintf("case %d", i), func(t *testing.T) {
+			result, err := getDirForInput(tt.input)
+			require.NoError(t, err)
+			require.Equal(t, tt.expected, result)
+		})
+	}
 }

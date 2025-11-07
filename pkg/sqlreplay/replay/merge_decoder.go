@@ -5,6 +5,7 @@ package replay
 
 import (
 	"io"
+	"sync"
 
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 )
@@ -18,49 +19,56 @@ type decoder interface {
 // However, if the commands read from decoder are not sorted, the order is not
 // strictly guaranteed.
 type mergeDecoder struct {
-	decoders []decoder
-	buf      []*cmd.Command
+	sync.Mutex
+
+	decoders map[decoder]struct{}
+	buf      map[decoder]*cmd.Command
 }
 
 func newMergeDecoder(decoders ...decoder) *mergeDecoder {
+	decodersMap := make(map[decoder]struct{})
+	buf := make(map[decoder]*cmd.Command)
+	for _, d := range decoders {
+		decodersMap[d] = struct{}{}
+		buf[d] = nil
+	}
 	return &mergeDecoder{
-		decoders: decoders,
+		decoders: decodersMap,
+		buf:      buf,
 	}
 }
 
 // Decode returns the command with the smallest StartTS from multiple decoders.
 func (d *mergeDecoder) Decode() (*cmd.Command, error) {
-	for i, decoder := range d.decoders {
-		if decoder == nil {
-			continue
-		}
+	d.Lock()
+	defer d.Unlock()
 
-		if i >= len(d.buf) {
-			d.buf = append(d.buf, nil)
-		}
-
-		if d.buf[i] == nil {
+	for decoder := range d.decoders {
+		if d.buf[decoder] == nil {
 			cmd, err := decoder.Decode()
 			if err != nil {
 				if err == io.EOF {
 					// Mark decoder as exhausted
-					d.decoders[i] = nil
+					delete(d.decoders, decoder)
 					continue
 				}
 				return nil, err
 			}
-			d.buf[i] = cmd
+			d.buf[decoder] = cmd
 		}
 	}
 
-	var minIdx = -1
+	var minIdx decoder
 	var minCmd *cmd.Command
 
-	for i, cmd := range d.buf {
+	for d, cmd := range d.buf {
 		if cmd != nil {
-			if minCmd == nil || cmd.StartTs.Before(minCmd.StartTs) {
+			// The condition `(cmd.StartTs.Equal(minCmd.StartTs) && cmd.ConnID < minCmd.ConnID)` is used to
+			// have a stable order when StartTs are the same, which will help in testing.
+			if minCmd == nil || cmd.StartTs.Before(minCmd.StartTs) ||
+				(cmd.StartTs.Equal(minCmd.StartTs) && cmd.ConnID < minCmd.ConnID) {
 				minCmd = cmd
-				minIdx = i
+				minIdx = d
 			}
 		}
 	}
@@ -71,6 +79,14 @@ func (d *mergeDecoder) Decode() (*cmd.Command, error) {
 	d.buf[minIdx] = nil
 
 	return minCmd, nil
+}
+
+func (d *mergeDecoder) AddDecoder(decoder decoder) {
+	d.Lock()
+	defer d.Unlock()
+
+	d.decoders[decoder] = struct{}{}
+	d.buf[decoder] = nil
 }
 
 type singleDecoder struct {
