@@ -153,6 +153,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 		}
 		cfg.ReplayerIndex = replayerIndex
 	}
+	cfg.OutputPath = c.PostForm("outputpath")
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
