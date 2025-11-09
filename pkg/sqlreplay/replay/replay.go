@@ -780,6 +780,7 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 				zap.Duration("replay_elapsed", time.Since(r.startTime)),
 				zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
+				zap.Int("pending_exec_info", len(r.execInfoCh)),              // if too many, recording sql is slow
 				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 				zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
 				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)))
@@ -937,7 +938,6 @@ func (r *replay) stop(err error) {
 		zap.Duration("replay_elapsed", time.Since(r.startTime)),
 		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
-		zap.Int("pending_exec_info", len(r.execInfoCh)),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
 	}
