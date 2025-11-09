@@ -937,6 +937,7 @@ func (r *replay) stop(err error) {
 		zap.Duration("replay_elapsed", time.Since(r.startTime)),
 		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
+		zap.Int("pending_exec_info", len(r.execInfoCh)),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
 	}
