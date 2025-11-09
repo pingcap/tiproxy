@@ -57,6 +57,8 @@ const (
 
 	checkpointSaveInterval = 100 * time.Millisecond
 	stateSaveRetryInterval = 10 * time.Second
+
+	outputTimeFormat = "20060102 15:04:05"
 )
 
 var (
@@ -860,25 +862,20 @@ func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
 }
 
 func (r *replay) recordExecInfoLoop() {
-	var storage storage.ExternalStorage
 	var writer io.WriteCloser
 	if len(r.cfg.OutputPath) > 0 {
-		var err error
-		if storage, err = store.NewStorage(r.cfg.OutputPath); err != nil {
+		storage, err := store.NewStorage(r.cfg.OutputPath)
+		if err != nil {
 			r.lg.Error("failed to create storage for recording execution info", zap.Error(err))
-		}
-		if writer, err = store.NewWriter(r.lg.Named("writer"), storage, store.WriterCfg{Dir: r.cfg.OutputPath}); err != nil {
-			r.lg.Error("failed to create writer for recording execution info", zap.Error(err))
+		} else {
+			defer storage.Close()
+			if writer, err = store.NewWriter(r.lg.Named("writer"), storage, store.WriterCfg{Dir: r.cfg.OutputPath}); err != nil {
+				r.lg.Error("failed to create writer for recording execution info", zap.Error(err))
+			} else {
+				defer writer.Close()
+			}
 		}
 	}
-	defer func() {
-		if writer != nil && !reflect.ValueOf(writer).IsNil() {
-			writer.Close()
-		}
-		if storage != nil && !reflect.ValueOf(storage).IsNil() {
-			storage.Close()
-		}
-	}()
 
 	// Iterate until the channel is closed, even if the context has been canceled.
 	for info := range r.execInfoCh {
@@ -893,13 +890,14 @@ func (r *replay) recordExecInfoLoop() {
 			sql = hack.String(info.Command.Payload[1:])
 			sql = parser.Normalize(sql, "ON")
 		}
-		if len(sql) > 0 {
-			sql = strconv.Quote(sql)
-			t := time.Now().Format("20060102 15:04:05")
-			jsonStr := fmt.Sprintf("{\"sql\": %s, \"db\": \"%s\", \"cost\": \"%d\", \"ex_time\": \"%s\"}\n", sql, info.Command.CurDB, info.CostTime.Milliseconds()/1000000.0, t)
-			if _, err := writer.Write(hack.Slice(jsonStr)); err != nil {
-				r.lg.Warn("failed to record execution info", zap.Error(err))
-			}
+		if len(sql) == 0 {
+			continue
+		}
+		sql = strconv.Quote(sql)
+		t := time.Now().Format(outputTimeFormat)
+		jsonStr := fmt.Sprintf("{\"sql\": %s, \"db\": \"%s\", \"cost\": \"%d\", \"ex_time\": \"%s\"}\n", sql, info.Command.CurDB, info.CostTime.Milliseconds()/1000000.0, t)
+		if _, err := writer.Write(hack.Slice(jsonStr)); err != nil {
+			r.lg.Warn("failed to record execution info", zap.Error(err))
 		}
 	}
 }
