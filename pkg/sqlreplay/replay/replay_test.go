@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
+	"github.com/siddontang/go/hack"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -106,9 +107,10 @@ func TestCloseConns(t *testing.T) {
 		readers:   []cmd.LineReader{loader},
 		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &nopConn{
-				connID:  connID,
-				closeCh: replay.closeConnCh,
-				stats:   &replay.replayStats,
+				connID:     connID,
+				closeCh:    replay.closeConnCh,
+				execInfoCh: replay.execInfoCh,
+				stats:      &replay.replayStats,
 			}
 		},
 		report:          newMockReport(replay.exceptionCh),
@@ -863,5 +865,55 @@ func TestGetDirForInput(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+func TestRecordExecInfoLoop(t *testing.T) {
+	tests := []struct {
+		execInfo conn.ExecInfo
+		log      string
+	}{
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					CurDB:   "db1",
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...),
+				},
+				CostTime: time.Second,
+			},
+			log: "{\"sql\": \"select ?\", \"db\": \"db1\", \"cost\": \"1000\",",
+		},
+	}
+
+	for i, test := range tests {
+		// The log is only written after the buffer size is reached, so each time we check the log after closing the writer.
+		replay := NewReplay(zap.NewNop(), id.NewIDManager())
+		dir := t.TempDir()
+		replay.cfg = ReplayConfig{
+			OutputPath: dir,
+		}
+		replay.execInfoCh = make(chan conn.ExecInfo, 10)
+		replay.wg.Run(replay.recordExecInfoLoop, zap.NewNop())
+		replay.execInfoCh <- test.execInfo
+		close(replay.execInfoCh)
+		replay.Close()
+
+		if len(test.log) > 0 {
+			var log string
+			require.Eventually(t, func() bool {
+				data, _ := os.ReadFile(filepath.Join(dir, "traffic-1.log"))
+				if len(data) == 0 {
+					return false
+				}
+				log = hack.String(data)
+				return true
+			}, 3*time.Second, 10*time.Millisecond)
+			require.True(t, strings.HasPrefix(log, test.log), "case %d", i)
+		} else {
+			time.Sleep(100 * time.Millisecond)
+			data, _ := os.ReadFile(filepath.Join(dir, fmt.Sprintf("%d.log", i)))
+			require.Empty(t, data)
+		}
 	}
 }
