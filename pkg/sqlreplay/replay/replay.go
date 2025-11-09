@@ -57,13 +57,6 @@ const (
 
 	checkpointSaveInterval = 100 * time.Millisecond
 	stateSaveRetryInterval = 10 * time.Second
-
-	// The output log size in MB.
-	outputLogSize = 10
-	// The buffer size of the output log.
-	outputBufferSize = 4 * 1024
-	// The flush interval of the output log.
-	outputLogFlushIntvl = 10 * time.Second
 )
 
 var (
