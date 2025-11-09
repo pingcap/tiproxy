@@ -15,23 +15,25 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
-	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
+	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +43,8 @@ const (
 	// maxPendingCloseRequests is the maximum number of pending connection close requests.
 	// Make it big enough in case all the connections are closed all at once.
 	maxPendingCloseRequests = 1 << 16
+	// maxPendingExecInfo is the maximum number of pending exec info for all connections.
+	maxPendingExecInfo = 1 << 16
 	// slowDownThreshold is the threshold of pending commands to slow down. Following constants are tested with TPCC.
 	slowDownThreshold = 1 << 18
 	// slowDownFactor is the factor to slow down when there are too many pending commands.
@@ -257,6 +261,7 @@ type replay struct {
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
 	closeConnCh      chan uint64
+	execInfoCh       chan conn.ExecInfo
 	gracefulStop     atomic.Bool
 	wg               waitgroup.WaitGroup
 	cancel           context.CancelFunc
@@ -269,7 +274,6 @@ type replay struct {
 	decodedCmds      atomic.Uint64
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
-	outputLg         *zap.Logger
 }
 
 func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
@@ -305,30 +309,12 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
+	r.execInfoCh = make(chan conn.ExecInfo, maxPendingExecInfo)
 	key, err := store.LoadEncryptionKey(r.meta.EncryptMethod, cfg.KeyFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load encryption key")
 	}
 	r.cfg.encryptionKey = key
-
-	if len(cfg.OutputPath) > 0 {
-		lg, _, _, err := logger.BuildLogger(&config.Log{
-			Encoder: "json",
-			LogOnline: config.LogOnline{
-				Level: "info",
-				LogFile: config.LogFile{
-					Filename: cfg.OutputPath,
-					MaxSize:  outputLogSize,
-				},
-				BufferSize: outputBufferSize,
-				FlushIntvl: outputLogFlushIntvl,
-			},
-		})
-		if err != nil {
-			return errors.Wrapf(err, "failed to build logger")
-		}
-		r.outputLg = lg
-	}
 
 	hsHandler = NewHandshakeHandler(hsHandler)
 	r.connCreator = cfg.connCreator
@@ -336,15 +322,15 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 		if cfg.DryRun {
 			r.connCreator = func(connID uint64, _ uint64) conn.Conn {
 				return &nopConn{
-					connID:  connID,
-					closeCh: r.closeConnCh,
-					stats:   &r.replayStats,
+					connID:     connID,
+					closeCh:    r.closeConnCh,
+					execInfoCh: r.execInfoCh,
+					stats:      &r.replayStats,
 				}
 			}
 		} else {
 			r.connCreator = func(connID uint64, upstreamConnID uint64) conn.Conn {
 				return conn.NewConn(r.lg.Named("conn"), conn.ConnOpts{
-					OutputLg:         r.outputLg,
 					Username:         r.cfg.Username,
 					Password:         r.cfg.Password,
 					BackendTLSConfig: backendTLSConfig,
@@ -355,6 +341,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 					BcConfig:         bcConfig,
 					ExceptionCh:      r.exceptionCh,
 					CloseCh:          r.closeConnCh,
+					ExecInfoCh:       r.execInfoCh,
 					ReplayStats:      &r.replayStats,
 					Readonly:         cfg.ReadOnly,
 				})
@@ -392,6 +379,9 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 			r.saveCheckpointLoop(childCtx)
 		}, nil, r.lg)
 	}
+	r.wg.RunWithRecover(func() {
+		r.recordExecInfoLoop()
+	}, nil, r.lg)
 	return nil
 }
 
@@ -876,6 +866,51 @@ func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
 	}
 }
 
+func (r *replay) recordExecInfoLoop() {
+	var storage storage.ExternalStorage
+	var writer io.WriteCloser
+	if len(r.cfg.OutputPath) > 0 {
+		var err error
+		if storage, err = store.NewStorage(r.cfg.OutputPath); err != nil {
+			r.lg.Error("failed to create storage for recording execution info", zap.Error(err))
+		}
+		if writer, err = store.NewWriter(r.lg.Named("writer"), storage, store.WriterCfg{Dir: r.cfg.OutputPath}); err != nil {
+			r.lg.Error("failed to create writer for recording execution info", zap.Error(err))
+		}
+	}
+	defer func() {
+		if writer != nil && !reflect.ValueOf(writer).IsNil() {
+			writer.Close()
+		}
+		if storage != nil && !reflect.ValueOf(storage).IsNil() {
+			storage.Close()
+		}
+	}()
+
+	// Iterate until the channel is closed, even if the context has been canceled.
+	for info := range r.execInfoCh {
+		if writer == nil || reflect.ValueOf(writer).IsNil() {
+			continue
+		}
+		var sql string
+		switch info.Command.Type {
+		case pnet.ComStmtExecute:
+			sql = info.Command.PreparedStmt
+		case pnet.ComQuery:
+			sql = hack.String(info.Command.Payload[1:])
+			sql = parser.Normalize(sql, "ON")
+		}
+		if len(sql) > 0 {
+			sql = strconv.Quote(sql)
+			t := time.Now().Format("20060102 15:04:05")
+			jsonStr := fmt.Sprintf("{\"sql\": \"%s\", \"db\": \"%s\", \"cost\": \"%d\", \"ex_time\": \"%s\"}\n", sql, info.Command.CurDB, info.CostTime.Milliseconds()/1000000.0, t)
+			if _, err := writer.Write(hack.Slice(jsonStr)); err != nil {
+				r.lg.Warn("failed to record execution info", zap.Error(err))
+			}
+		}
+	}
+}
+
 func (r *replay) stop(err error) {
 	r.Lock()
 	defer r.Unlock()
@@ -884,6 +919,7 @@ func (r *replay) stop(err error) {
 		r.cancel()
 		r.cancel = nil
 	}
+	close(r.execInfoCh)
 	r.endTime = time.Now()
 	// decodedCmds - pendingCmds may be greater than replayedCmds because if a connection is closed unexpectedly,
 	// the pending commands of that connection are discarded. We calculate the progress based on decodedCmds - pendingCmds.
