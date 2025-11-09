@@ -896,7 +896,7 @@ func (r *replay) recordExecInfoLoop() {
 		if len(sql) > 0 {
 			sql = strconv.Quote(sql)
 			t := time.Now().Format("20060102 15:04:05")
-			jsonStr := fmt.Sprintf("{\"sql\": \"%s\", \"db\": \"%s\", \"cost\": \"%d\", \"ex_time\": \"%s\"}\n", sql, info.Command.CurDB, info.CostTime.Milliseconds()/1000000.0, t)
+			jsonStr := fmt.Sprintf("{\"sql\": %s, \"db\": \"%s\", \"cost\": \"%d\", \"ex_time\": \"%s\"}\n", sql, info.Command.CurDB, info.CostTime.Milliseconds()/1000000.0, t)
 			if _, err := writer.Write(hack.Slice(jsonStr)); err != nil {
 				r.lg.Warn("failed to record execution info", zap.Error(err))
 			}
