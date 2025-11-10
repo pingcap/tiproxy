@@ -882,19 +882,81 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				},
 				CostTime: time.Second,
 			},
-			log: "{\"sql\": \"select ?\", \"db\": \"db1\", \"cost\": \"1000\",",
+			log: "{\"sql\":\"select ?\",\"db\":\"db1\",\"cost\":\"1000.000\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					CurDB:   "db1",
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("insert into t values(1)")...),
+				},
+				CostTime: time.Millisecond,
+			},
+			log: "{\"sql\":\"insert into `t` values ( ? )\",\"db\":\"db1\",\"cost\":\"1.000\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					CurDB:   "db1",
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("insert into t values(1, 2)")...),
+				},
+				CostTime: 1234567,
+			},
+			log: "{\"sql\":\"insert into `t` values ( ... )\",\"db\":\"db1\",\"cost\":\"1.235\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:         pnet.ComStmtExecute,
+					PreparedStmt: "select ?",
+				},
+				CostTime: 9999 * time.Microsecond,
+			},
+			log: "{\"sql\":\"select ?\",\"db\":\"\",\"cost\":\"9.999\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:         pnet.ComStmtExecute,
+					PreparedStmt: "select \n\"\"",
+				},
+				CostTime: 9999 * time.Microsecond,
+			},
+			log: "{\"sql\":\"select \\n\\\"\\\"\",\"db\":\"\",\"cost\":\"9.999\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:    pnet.ComInitDB,
+					Payload: []byte{pnet.ComInitDB.Byte()},
+				},
+				CostTime: time.Millisecond,
+			},
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:         pnet.ComStmtPrepare,
+					PreparedStmt: "select ?",
+					Payload:      pnet.MakePrepareStmtRequest("select ?"),
+				},
+				CostTime: time.Millisecond,
+			},
 		},
 	}
 
+	startTime := time.Date(2025, 9, 6, 17, 3, 50, 222000000, time.UTC)
 	for i, test := range tests {
-		// The log is only written after the buffer size is reached, so each time we check the log after closing the writer.
 		replay := NewReplay(zap.NewNop(), id.NewIDManager())
 		dir := t.TempDir()
 		replay.cfg = ReplayConfig{
-			OutputPath: dir,
+			OutputPath: filepath.Join(dir, "replay.log"),
 		}
-		replay.execInfoCh = make(chan conn.ExecInfo, 10)
+		replay.execInfoCh = make(chan conn.ExecInfo, 1)
 		replay.wg.Run(replay.recordExecInfoLoop, zap.NewNop())
+		test.execInfo.StartTime = startTime
 		replay.execInfoCh <- test.execInfo
 		close(replay.execInfoCh)
 		replay.Close()
@@ -902,17 +964,17 @@ func TestRecordExecInfoLoop(t *testing.T) {
 		if len(test.log) > 0 {
 			var log string
 			require.Eventually(t, func() bool {
-				data, _ := os.ReadFile(filepath.Join(dir, "traffic-1.log"))
+				data, _ := os.ReadFile(replay.cfg.OutputPath)
 				if len(data) == 0 {
 					return false
 				}
 				log = hack.String(data)
 				return true
 			}, 3*time.Second, 10*time.Millisecond)
-			require.True(t, strings.HasPrefix(log, test.log), "case %d", i)
+			require.Equal(t, test.log, log, "case %d", i)
 		} else {
 			time.Sleep(100 * time.Millisecond)
-			data, _ := os.ReadFile(filepath.Join(dir, fmt.Sprintf("%d.log", i)))
+			data, _ := os.ReadFile(replay.cfg.OutputPath)
 			require.Empty(t, data)
 		}
 	}

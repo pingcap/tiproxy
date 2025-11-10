@@ -62,8 +62,9 @@ func (s *ReplayStats) Reset() {
 }
 
 type ExecInfo struct {
-	Command  *cmd.Command
-	CostTime time.Duration
+	Command   *cmd.Command
+	StartTime time.Time
+	CostTime  time.Duration
 }
 
 type Conn interface {
@@ -221,8 +222,9 @@ func (c *conn) Run(ctx context.Context) {
 				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
 			}
 			c.execInfoCh <- ExecInfo{
-				Command:  command.Value,
-				CostTime: time.Since(startTime),
+				Command:   command.Value,
+				StartTime: startTime,
+				CostTime:  time.Since(startTime),
 			}
 			c.replayStats.ReplayedCmds.Add(1)
 		}

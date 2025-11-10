@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,7 +60,7 @@ const (
 	checkpointSaveInterval = 100 * time.Millisecond
 	stateSaveRetryInterval = 10 * time.Second
 
-	outputTimeFormat = "20060102 15:04:05"
+	outputTimeFormat = "20060102 15:04:05.999"
 )
 
 var (
@@ -898,8 +899,10 @@ func (r *replay) recordExecInfoLoop() {
 		if len(sql) == 0 {
 			continue
 		}
-		t := time.Now().Format(outputTimeFormat)
-		lg.Info("exec info", zap.String("sql", sql), zap.String("db", info.Command.CurDB), zap.Float64("cost", float64(info.CostTime)/1000000.0), zap.String("ex_time", t))
+		lg.Info("exec info", zap.String("sql", sql),
+			zap.String("db", info.Command.CurDB),
+			zap.String("cost", strconv.FormatFloat(float64(info.CostTime)/1000000.0, 'f', 3, 64)),
+			zap.String("ex_time", info.StartTime.Format(outputTimeFormat)))
 	}
 }
 
