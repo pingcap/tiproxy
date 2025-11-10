@@ -249,6 +249,7 @@ func TestHandshakeWithBackend(t *testing.T) {
 	cfg := func(cfg *testConfig) {
 		cfg.proxyConfig.username = "u1"
 		cfg.proxyConfig.password = "fake_password"
+		cfg.proxyConfig.dbName = "db1"
 	}
 	for i, test := range tests {
 		cfgs := []cfgOverrider{cfg}
@@ -262,6 +263,8 @@ func TestHandshakeWithBackend(t *testing.T) {
 			require.Contains(t, ts.mp.err.Error(), test.errMsg, "case %d", i)
 		} else {
 			require.NoError(t, ts.mp.err, "case %d", i)
+			require.Equal(t, "u1", ts.mb.username, "case %d", i)
+			require.Equal(t, "db1", ts.mb.db, "case %d", i)
 		}
 		clean()
 	}

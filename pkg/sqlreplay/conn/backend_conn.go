@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"reflect"
 
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -14,7 +15,7 @@ import (
 )
 
 type BackendConnManager interface {
-	Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password string) error
+	Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password, dbName string) error
 	ExecuteCmd(ctx context.Context, request []byte) error
 	ConnectionID() uint64
 	Close() error
@@ -29,8 +30,7 @@ type ExecuteResp struct {
 }
 
 type BackendConn interface {
-	Connect(ctx context.Context) error
-	ConnID() uint64
+	Connect(ctx context.Context, dbName string) error
 	ExecuteCmd(ctx context.Context, request []byte) ExecuteResp
 	Query(ctx context.Context, stmt string) error
 	PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error)
@@ -47,6 +47,7 @@ type backendConn struct {
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
 	backendConnMgr   BackendConnManager
+	connCreator      func() BackendConnManager
 }
 
 func NewBackendConn(lg *zap.Logger, connID uint64, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig,
@@ -57,16 +58,16 @@ func NewBackendConn(lg *zap.Logger, connID uint64, hsHandler backend.HandshakeHa
 		clientIO:         newPacketIO(),
 		backendTLSConfig: backendTLSConfig,
 		lg:               lg,
-		backendConnMgr:   backend.NewBackendConnManager(lg.Named("be"), hsHandler, nil, connID, bcConfig, nil),
+		connCreator: func() BackendConnManager {
+			return backend.NewBackendConnManager(lg.Named("be"), hsHandler, nil, connID, bcConfig, nil)
+		},
 	}
 }
 
-func (bc *backendConn) Connect(ctx context.Context) error {
-	return bc.backendConnMgr.Connect(ctx, bc.clientIO, nil, bc.backendTLSConfig, bc.username, bc.password)
-}
-
-func (bc *backendConn) ConnID() uint64 {
-	return bc.backendConnMgr.ConnectionID()
+func (bc *backendConn) Connect(ctx context.Context, dbName string) error {
+	// Recreate a BackendConnManager after the previous one is closed.
+	bc.backendConnMgr = bc.connCreator()
+	return bc.backendConnMgr.Connect(ctx, bc.clientIO, nil, bc.backendTLSConfig, bc.username, bc.password, dbName)
 }
 
 func (bc *backendConn) ExecuteCmd(ctx context.Context, request []byte) (execResp ExecuteResp) {
@@ -121,7 +122,9 @@ func (bc *backendConn) Close() {
 	if err := bc.clientIO.Close(); err != nil {
 		bc.lg.Warn("failed to close client connection", zap.Error(err))
 	}
-	if err := bc.backendConnMgr.Close(); err != nil {
-		bc.lg.Warn("failed to close backend connection", zap.Error(err))
+	if bc.backendConnMgr != nil && !reflect.ValueOf(bc.backendConnMgr).IsNil() {
+		if err := bc.backendConnMgr.Close(); err != nil {
+			bc.lg.Warn("failed to close backend connection", zap.Error(err))
+		}
 	}
 }

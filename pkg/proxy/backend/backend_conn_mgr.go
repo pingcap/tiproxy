@@ -198,7 +198,7 @@ func (mgr *BackendConnManager) ConnectionID() uint64 {
 }
 
 // Connect connects to the first backend and then start watching redirection signals.
-func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password string) error {
+func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password, dbName string) error {
 	mgr.processLock.Lock()
 	defer mgr.processLock.Unlock()
 
@@ -217,7 +217,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 		err = mgr.authenticator.handshakeFirstTime(ctx, mgr.logger.Named("authenticator"), mgr, clientIO, mgr.handshakeHandler, mgr.getBackendIO, frontendTLSConfig, backendTLSConfig)
 	} else {
 		// fake client, used for replaying traffic
-		err = mgr.authenticator.handshakeWithBackend(ctx, mgr.logger.Named("authenticator"), mgr, mgr.handshakeHandler, username, password, mgr.getBackendIO, backendTLSConfig)
+		err = mgr.authenticator.handshakeWithBackend(ctx, mgr.logger.Named("authenticator"), mgr, mgr.handshakeHandler, username, password, dbName, mgr.getBackendIO, backendTLSConfig)
 	}
 	mgr.logger = mgr.logger.With(zap.Stringer("client_addr", clientIO.RemoteAddr()), zap.Stringer("proxy_addr", clientIO.ProxyAddr()))
 	if err != nil {

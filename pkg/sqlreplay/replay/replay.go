@@ -8,25 +8,34 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
+	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/parser"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
+	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +45,8 @@ const (
 	// maxPendingCloseRequests is the maximum number of pending connection close requests.
 	// Make it big enough in case all the connections are closed all at once.
 	maxPendingCloseRequests = 1 << 16
+	// maxPendingExecInfo is the maximum number of pending exec info for all connections.
+	maxPendingExecInfo = 1 << 16
 	// slowDownThreshold is the threshold of pending commands to slow down. Following constants are tested with TPCC.
 	slowDownThreshold = 1 << 18
 	// slowDownFactor is the factor to slow down when there are too many pending commands.
@@ -48,6 +59,8 @@ const (
 
 	checkpointSaveInterval = 100 * time.Millisecond
 	stateSaveRetryInterval = 10 * time.Second
+
+	outputTimeFormat = "20060102 15:04:05.999"
 )
 
 var (
@@ -96,6 +109,17 @@ type ReplayConfig struct {
 	PSCloseStrategy cmd.PSCloseStrategy
 	// DryRun indicates whether to actually execute the commands.
 	DryRun bool
+	// CheckPointFilePath is the path to the file that stores the current state of the replay
+	CheckPointFilePath string
+	// Dynamic defines whether the input is dynamic, e.g. a path prefix.
+	DynamicInput bool
+	// ReplayerCount is the total number of replayers which share the same dynamic input. The count
+	// and index is used to determine whether this replayer should process a new
+	ReplayerCount uint64
+	// ReplayerIndex is the index of this replayer among all replayers.
+	ReplayerIndex uint64
+	// OutputPath is the path to output replayed sql.
+	OutputPath string
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -104,8 +128,6 @@ type ReplayConfig struct {
 	slowDownThreshold int64
 	slowDownFactor    time.Duration
 	reportLogInterval time.Duration
-	// CheckPointFilePath is the path to the file that stores the current state of the replay
-	CheckPointFilePath string
 }
 
 func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
@@ -120,6 +142,12 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	var err error
 	for _, input := range inputs {
 		var storage storage.ExternalStorage
+		if cfg.DynamicInput {
+			input, err = getDirForInput(input)
+			if err != nil {
+				return nil, errors.Wrapf(err, "invalid input url %s", input)
+			}
+		}
 		storage, err = store.NewStorage(input)
 		if err != nil {
 			for _, s := range storages {
@@ -174,6 +202,18 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	if cfg.Format != cmd.FormatAuditLogPlugin && !cfg.CommandEndTime.IsZero() {
 		return storages, errors.New("command end time is only supported for `audit_log_plugin` format")
 	}
+
+	if cfg.DynamicInput {
+		if len(storages) != 1 {
+			return storages, errors.New("dynamic input cannot be enabled with more than one input")
+		}
+		if cfg.ReplayerCount <= 0 {
+			return storages, errors.New("dynamic input requires a valid replayer count")
+		}
+		if cfg.ReplayerIndex >= cfg.ReplayerCount {
+			return storages, errors.New("dynamic input requires a valid replayer index")
+		}
+	}
 	return storages, nil
 }
 
@@ -218,6 +258,7 @@ type replay struct {
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
 	closeConnCh      chan uint64
+	execInfoCh       chan conn.ExecInfo
 	gracefulStop     atomic.Bool
 	wg               waitgroup.WaitGroup
 	cancel           context.CancelFunc
@@ -265,6 +306,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.replayStats.Reset()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
+	r.execInfoCh = make(chan conn.ExecInfo, maxPendingExecInfo)
 	key, err := store.LoadEncryptionKey(r.meta.EncryptMethod, cfg.KeyFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load encryption key")
@@ -277,15 +319,29 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 		if cfg.DryRun {
 			r.connCreator = func(connID uint64, _ uint64) conn.Conn {
 				return &nopConn{
-					connID:  connID,
-					closeCh: r.closeConnCh,
-					stats:   &r.replayStats,
+					connID:     connID,
+					closeCh:    r.closeConnCh,
+					execInfoCh: r.execInfoCh,
+					stats:      &r.replayStats,
 				}
 			}
 		} else {
 			r.connCreator = func(connID uint64, upstreamConnID uint64) conn.Conn {
-				return conn.NewConn(r.lg.Named("conn"), r.cfg.Username, r.cfg.Password, backendTLSConfig, hsHandler, r.idMgr,
-					connID, upstreamConnID, bcConfig, r.exceptionCh, r.closeConnCh, cfg.ReadOnly, &r.replayStats)
+				return conn.NewConn(r.lg.Named("conn"), conn.ConnOpts{
+					Username:         r.cfg.Username,
+					Password:         r.cfg.Password,
+					BackendTLSConfig: backendTLSConfig,
+					HsHandler:        hsHandler,
+					IdMgr:            r.idMgr,
+					ConnID:           connID,
+					UpstreamConnID:   upstreamConnID,
+					BcConfig:         bcConfig,
+					ExceptionCh:      r.exceptionCh,
+					CloseCh:          r.closeConnCh,
+					ExecInfoCh:       r.execInfoCh,
+					ReplayStats:      &r.replayStats,
+					Readonly:         cfg.ReadOnly,
+				})
 			}
 		}
 	}
@@ -320,25 +376,39 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 			r.saveCheckpointLoop(childCtx)
 		}, nil, r.lg)
 	}
+	r.wg.RunWithRecover(func() {
+		r.recordExecInfoLoop()
+	}, nil, r.lg)
 	return nil
 }
 
 func (r *replay) readCommands(ctx context.Context) {
-	// cfg.readers is set in tests
-	readers, err := r.constructReaders()
-	if err != nil {
-		r.stop(err)
-		return
-	}
-	defer func() {
-		for _, r := range readers {
-			r.Close()
+	var decoder decoder
+	var err error
+
+	if !r.cfg.DynamicInput {
+		// cfg.readers is set in tests
+		readers, err := r.constructReaders()
+		if err != nil {
+			r.stop(err)
+			return
 		}
-	}()
-	decoder, err := r.constructDecoder(ctx, readers)
-	if err != nil {
-		r.stop(err)
-		return
+		defer func() {
+			for _, r := range readers {
+				r.Close()
+			}
+		}()
+		decoder, err = r.constructStaticDecoder(ctx, readers)
+		if err != nil {
+			r.stop(err)
+			return
+		}
+	} else {
+		decoder, err = r.constructDynamicDecoder(ctx)
+		if err != nil {
+			r.stop(err)
+			return
+		}
 	}
 
 	var captureStartTs, replayStartTs time.Time
@@ -359,7 +429,7 @@ func (r *replay) readCommands(ctx context.Context) {
 		var command *cmd.Command
 		if command, err = decoder.Decode(); err != nil {
 			if errors.Is(err, io.EOF) {
-				r.lg.Info("replay reads EOF", zap.Stringers("reader", readers))
+				r.lg.Info("replay reads EOF")
 				err = nil
 				break
 			}
@@ -460,27 +530,9 @@ func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineR
 	var decoders []decoder
 
 	for i, reader := range readers {
-		idAllocator, err := cmd.NewConnIDAllocator(i)
+		decoder, err := r.constructDecoderForReader(ctx, reader, i)
 		if err != nil {
 			return nil, err
-		}
-
-		cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
-		// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
-		// the connection state is maintained in decoder. Filtering out commands here will make it'
-		// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
-		// the current session state correctly.
-		cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
-		if auditLogDecoder, ok := cmdDecoder.(*cmd.AuditLogPluginDecoder); ok {
-			auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
-			auditLogDecoder.SetIDAllocator(idAllocator)
-			auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)
-		}
-
-		var decoder decoder
-		decoder = newSingleDecoder(cmdDecoder, reader)
-		if chanBufForEachDecoder >= 0 {
-			decoder = newBufferedDecoder(ctx, decoder, chanBufForEachDecoder, r.cfg.IgnoreErrs)
 		}
 		decoders = append(decoders, decoder)
 	}
@@ -494,7 +546,34 @@ func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineR
 	return newMergeDecoder(decoders...), nil
 }
 
-func (r *replay) constructDecoder(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
+func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineReader, id int) (decoder, error) {
+	idAllocator, err := cmd.NewConnIDAllocator(id)
+	if err != nil {
+		return nil, err
+	}
+
+	cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
+	// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
+	// the connection state is maintained in decoder. Filtering out commands here will make it'
+	// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
+	// the current session state correctly.
+	cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
+	if auditLogDecoder, ok := cmdDecoder.(*cmd.AuditLogPluginDecoder); ok {
+		auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
+		auditLogDecoder.SetIDAllocator(idAllocator)
+		auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)
+	}
+
+	var decoder decoder
+	decoder = newSingleDecoder(cmdDecoder, reader)
+	if chanBufForEachDecoder > 0 {
+		decoder = newBufferedDecoder(ctx, decoder, chanBufForEachDecoder, r.cfg.IgnoreErrs)
+	}
+
+	return decoder, nil
+}
+
+func (r *replay) constructStaticDecoder(ctx context.Context, readers []cmd.LineReader) (decoder, error) {
 	decoder, err := r.constructMergeDecoders(ctx, readers)
 	if err != nil {
 		return nil, err
@@ -506,6 +585,112 @@ func (r *replay) constructDecoder(ctx context.Context, readers []cmd.LineReader)
 	return decoder, nil
 }
 
+func (r *replay) constructDynamicDecoder(ctx context.Context) (decoder, error) {
+	decoder := newMergeDecoder()
+
+	parsedURL, err := url.Parse(r.cfg.Input)
+	if err != nil {
+		return nil, err
+	}
+	watcher := store.NewDirWatcher(r.lg.Named("dir_watcher"), strings.TrimLeft(parsedURL.Path, "/"), func(filename string) error {
+		h := fnv.New64a()
+		// error is never returned for Hash
+		_, _ = h.Write([]byte(filename))
+		sum := h.Sum64()
+		expectedReplayerIndex := sum % r.cfg.ReplayerCount
+		if expectedReplayerIndex != r.cfg.ReplayerIndex {
+			r.lg.Info("dir watcher skip new directory for other replayer", zap.String("dir", filename),
+				zap.Uint64("expected_replayer_index", expectedReplayerIndex),
+				zap.Uint64("replayer_index", r.cfg.ReplayerIndex))
+			return nil
+		}
+
+		// determine the start time filter for the new reader
+		filterTime := time.Time{}
+		if !r.cfg.CommandEndTime.IsZero() {
+			filterTime = r.cfg.CommandEndTime
+		}
+		curCmdEndTs := r.replayStats.CurCmdEndTs.Load()
+		if curCmdEndTs > 0 {
+			t := time.Unix(0, curCmdEndTs)
+			if t.After(filterTime) {
+				filterTime = t
+			}
+		}
+
+		r.lg.Info("dir watcher found new directory", zap.String("dir", filename), zap.Time("filter_time", filterTime))
+		// We'll need to setup a new storage, because the `r.storages[0]` has a wrong path
+		url, err := url.Parse(r.cfg.Input)
+		if err != nil {
+			return err
+		}
+		url.Path = filename
+		s, err := store.NewStorage(url.String())
+		if err != nil {
+			return err
+		}
+
+		// Append the new storage to the list for closing later.
+		r.Lock()
+		defer r.Unlock()
+
+		r.storages = append(r.storages, s)
+		reader, err := r.constructReaderForDir(s, filename, filterTime)
+		if err != nil {
+			return err
+		}
+		newDecoder, err := r.constructDecoderForReader(ctx, reader, len(r.storages)-1)
+		if err != nil {
+			return err
+		}
+
+		decoder.AddDecoder(newDecoder)
+		return nil
+	}, r.storages[0])
+
+	// Initial walk. We have to make sure the decoder is not empty before returning this function.
+	err = watcher.WalkFiles(ctx)
+	// If the first walk fails, return error directly.
+	if err != nil {
+		return nil, err
+	}
+
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+
+		err := watcher.Watch(ctx)
+		if err != nil {
+			r.lg.Info("dir watcher exited", zap.Error(err))
+		}
+	}()
+
+	if r.cfg.BufSize > 0 {
+		return newBufferedDecoder(ctx, decoder, r.cfg.BufSize, r.cfg.IgnoreErrs), nil
+	}
+	return decoder, nil
+}
+
+func (r *replay) constructReaderForDir(storage storage.ExternalStorage, dir string, filterTime time.Time) (cmd.LineReader, error) {
+	cfg := store.ReaderCfg{
+		Format:             r.cfg.Format,
+		Dir:                dir,
+		EncryptionKey:      r.cfg.encryptionKey,
+		EncryptionMethod:   r.meta.EncryptMethod,
+		FileNameFilterTime: filterTime,
+	}
+	if r.cfg.CommandEndTime.IsZero() {
+		cfg.FileNameFilterTime = r.cfg.CommandStartTime
+	}
+	reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
+	if err != nil {
+		reader.Close()
+		return nil, err
+	}
+
+	return reader, nil
+}
+
 func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 	readers := r.cfg.readers
 	inputs := strings.Split(r.cfg.Input, ",")
@@ -515,23 +700,14 @@ func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 		}
 
 		for i, storage := range r.storages {
-			cfg := store.ReaderCfg{
-				Format:             r.cfg.Format,
-				Dir:                inputs[i],
-				EncryptionKey:      r.cfg.encryptionKey,
-				EncryptionMethod:   r.meta.EncryptMethod,
-				FileNameFilterTime: r.cfg.CommandEndTime,
-			}
-			if r.cfg.CommandEndTime.IsZero() {
-				cfg.FileNameFilterTime = r.cfg.CommandStartTime
-			}
-			reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
+			reader, err := r.constructReaderForDir(storage, inputs[i], r.cfg.CommandEndTime)
 			if err != nil {
 				for _, r := range readers {
 					r.Close()
 				}
 				return nil, err
 			}
+
 			readers = append(readers, reader)
 		}
 	}
@@ -606,6 +782,7 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 				zap.Duration("replay_elapsed", time.Since(r.startTime)),
 				zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
+				zap.Int("pending_exec_info", len(r.execInfoCh)),              // if too many, recording sql is slow
 				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 				zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
 				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)))
@@ -687,6 +864,48 @@ func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
 	}
 }
 
+func (r *replay) recordExecInfoLoop() {
+	var lg *zap.Logger
+	if len(r.cfg.OutputPath) > 0 {
+		var err error
+		lg, _, _, err = logger.BuildLogger(&config.Log{
+			Encoder: "json",
+			Simple:  true,
+			LogOnline: config.LogOnline{
+				LogFile: config.LogFile{
+					Filename: r.cfg.OutputPath,
+					MaxSize:  100,
+				},
+			},
+		})
+		if err != nil {
+			r.lg.Error("build logger failed", zap.Error(err))
+		}
+	}
+
+	// Iterate until the channel is closed, even if the context has been canceled.
+	for info := range r.execInfoCh {
+		if lg == nil {
+			continue
+		}
+		var sql string
+		switch info.Command.Type {
+		case pnet.ComStmtExecute:
+			sql = info.Command.PreparedStmt
+		case pnet.ComQuery:
+			sql = hack.String(info.Command.Payload[1:])
+			sql = parser.Normalize(sql, "ON")
+		}
+		if len(sql) == 0 {
+			continue
+		}
+		lg.Info("exec info", zap.String("sql", sql),
+			zap.String("db", info.Command.CurDB),
+			zap.String("cost", strconv.FormatFloat(float64(info.CostTime)/1000000.0, 'f', 3, 64)),
+			zap.String("ex_time", info.StartTime.Format(outputTimeFormat)))
+	}
+}
+
 func (r *replay) stop(err error) {
 	r.Lock()
 	defer r.Unlock()
@@ -695,6 +914,7 @@ func (r *replay) stop(err error) {
 		r.cancel()
 		r.cancel = nil
 	}
+	close(r.execInfoCh)
 	r.endTime = time.Now()
 	// decodedCmds - pendingCmds may be greater than replayedCmds because if a connection is closed unexpectedly,
 	// the pending commands of that connection are discarded. We calculate the progress based on decodedCmds - pendingCmds.
@@ -784,4 +1004,13 @@ func (r *replay) Close() {
 			r.lg.Error("save current state failed on close", zap.Error(err))
 		}
 	}
+}
+
+func getDirForInput(input string) (string, error) {
+	parsedURL, err := url.Parse(input)
+	if err != nil {
+		return "", err
+	}
+	parsedURL.Path = filepath.Dir(parsedURL.Path)
+	return parsedURL.String(), nil
 }

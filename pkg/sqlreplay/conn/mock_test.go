@@ -6,6 +6,7 @@ package conn
 import (
 	"context"
 	"crypto/tls"
+	"sync"
 	"sync/atomic"
 
 	"github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -19,7 +20,7 @@ type mockBackendConnMgr struct {
 	closed   bool
 }
 
-func (m *mockBackendConnMgr) Connect(ctx context.Context, clientIO net.PacketIO, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, username string, password string) error {
+func (m *mockBackendConnMgr) Connect(ctx context.Context, clientIO net.PacketIO, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, username, password, dbName string) error {
 	m.clientIO = clientIO
 	return nil
 }
@@ -40,18 +41,23 @@ func (m *mockBackendConnMgr) Close() error {
 var _ BackendConn = (*mockBackendConn)(nil)
 
 type mockBackendConn struct {
-	connErr error
-	execErr error
-	close   atomic.Bool
-	stmtID  uint32
-	lastReq []byte
+	sync.Mutex
+	connErr  error
+	execErr  error
+	close    atomic.Bool
+	stmtID   uint32
+	requests [][]byte
 }
 
 func newMockBackendConn() *mockBackendConn {
-	return &mockBackendConn{}
+	return &mockBackendConn{
+		requests: make([][]byte, 0, 10),
+	}
 }
 
-func (c *mockBackendConn) Connect(ctx context.Context) error {
+func (c *mockBackendConn) Connect(ctx context.Context, dbName string) error {
+	c.Lock()
+	defer c.Unlock()
 	return c.connErr
 }
 
@@ -60,7 +66,9 @@ func (c *mockBackendConn) ConnID() uint64 {
 }
 
 func (c *mockBackendConn) ExecuteCmd(ctx context.Context, request []byte) (resp ExecuteResp) {
-	c.lastReq = request
+	c.Lock()
+	defer c.Unlock()
+	c.requests = append(c.requests, request)
 	switch request[0] {
 	case pnet.ComStmtPrepare.Byte():
 		c.stmtID++
@@ -72,18 +80,51 @@ func (c *mockBackendConn) ExecuteCmd(ctx context.Context, request []byte) (resp 
 }
 
 func (c *mockBackendConn) Query(ctx context.Context, stmt string) error {
+	c.Lock()
+	defer c.Unlock()
 	return c.execErr
 }
 
 func (c *mockBackendConn) PrepareStmt(ctx context.Context, stmt string) (uint32, error) {
+	c.Lock()
+	defer c.Unlock()
 	c.stmtID++
 	return c.stmtID, c.execErr
 }
 
 func (c *mockBackendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []any) error {
+	c.Lock()
+	defer c.Unlock()
 	return c.execErr
 }
 
 func (c *mockBackendConn) Close() {
 	c.close.Store(true)
+}
+
+func (c *mockBackendConn) setConnErr(err error) {
+	c.Lock()
+	defer c.Unlock()
+	c.connErr = err
+}
+
+func (c *mockBackendConn) setExecErr(err error) {
+	c.Lock()
+	defer c.Unlock()
+	c.execErr = err
+}
+
+func (c *mockBackendConn) lastReq() []byte {
+	c.Lock()
+	defer c.Unlock()
+	if len(c.requests) == 0 {
+		return nil
+	}
+	return c.requests[len(c.requests)-1]
+}
+
+func (c *mockBackendConn) allRequests() [][]byte {
+	c.Lock()
+	defer c.Unlock()
+	return c.requests
 }

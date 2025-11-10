@@ -154,6 +154,7 @@ func newRotateReader(lg *zap.Logger, store storage.ExternalStorage, cfg ReaderCf
 
 func (r *rotateReader) Read(data []byte) (int, error) {
 	if r.eof {
+		r.lg.Info("rotateReader reached EOF", zap.String("file", r.absolutePath))
 		return 0, io.EOF
 	}
 	if r.reader == nil || reflect.ValueOf(r.reader).IsNil() {

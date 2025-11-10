@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -60,6 +61,12 @@ func (s *ReplayStats) Reset() {
 	s.ExceptionCmds.Store(0)
 }
 
+type ExecInfo struct {
+	Command   *cmd.Command
+	StartTime time.Time
+	CostTime  time.Duration
+}
+
 type Conn interface {
 	Run(ctx context.Context)
 	ExecuteCmd(command *cmd.Command)
@@ -80,6 +87,7 @@ type conn struct {
 	psIDMapping     map[uint32]uint32
 	exceptionCh     chan<- Exception
 	closeCh         chan<- uint64
+	execInfoCh      chan<- ExecInfo
 	lg              *zap.Logger
 	backendConn     BackendConn
 	connID          uint64 // logical connection ID, not replay ID and also not capture ID. It's the same with the `ConnID` of the first command.
@@ -87,43 +95,52 @@ type conn struct {
 	replayStats     *ReplayStats
 	lastPendingCmds int // last pending cmds reported to the stats
 	readonly        bool
-	// waitForQuitMode indicates that the downstream connection is already closed because
-	// of error, but the upstream connection is still sending commands. In this case,
-	// all commands except ComQuit should be ignored.
-	waitForQuitMode bool
 }
 
-func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
-	idMgr *id.IDManager, connID uint64, upstreamConnID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64,
-	readonly bool, replayStats *ReplayStats) *conn {
-	backendConnID := idMgr.NewID()
-	lg = lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID))
-	return &conn{
+type ConnOpts struct {
+	Username         string
+	Password         string
+	BackendTLSConfig *tls.Config
+	HsHandler        backend.HandshakeHandler
+	IdMgr            *id.IDManager
+	ConnID           uint64
+	UpstreamConnID   uint64
+	BcConfig         *backend.BCConfig
+	ExceptionCh      chan<- Exception
+	CloseCh          chan<- uint64
+	ExecInfoCh       chan<- ExecInfo
+	ReplayStats      *ReplayStats
+	Readonly         bool
+}
+
+func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
+	backendConnID := opts.IdMgr.NewID()
+	lg = lg.With(zap.Uint64("captureID", opts.ConnID), zap.Uint64("replayID", backendConnID))
+	c := &conn{
 		lg:             lg,
-		connID:         connID,
-		upstreamConnID: upstreamConnID,
+		execInfoCh:     opts.ExecInfoCh,
+		connID:         opts.ConnID,
+		upstreamConnID: opts.UpstreamConnID,
 		cmdList:        glist.New[*cmd.Command](),
 		cmdCh:          make(chan struct{}, 1),
 		preparedStmts:  make(map[uint32]preparedStmt),
 		psIDMapping:    make(map[uint32]uint32),
-		exceptionCh:    exceptionCh,
-		closeCh:        closeCh,
-		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
-		replayStats:    replayStats,
-		readonly:       readonly,
+		exceptionCh:    opts.ExceptionCh,
+		closeCh:        opts.CloseCh,
+		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, opts.HsHandler, opts.BcConfig, opts.BackendTLSConfig, opts.Username, opts.Password),
+		replayStats:    opts.ReplayStats,
+		readonly:       opts.Readonly,
 	}
+	return c
 }
 
 func (c *conn) Run(ctx context.Context) {
 	defer c.close()
-	if err := c.backendConn.Connect(ctx); err != nil {
-		c.replayStats.ExceptionCmds.Add(1)
-		c.exceptionCh <- NewOtherException(err, c.upstreamConnID)
-		c.waitForQuitMode = true
-	}
 	// context is canceled when the replay is interrupted.
 	// cmdCh is closed when the replay is finished.
 	finished := false
+	connected := false
+	var curDB string
 	for !finished {
 		select {
 		case <-ctx.Done():
@@ -147,27 +164,54 @@ func (c *conn) Run(ctx context.Context) {
 			if command == nil {
 				break
 			}
-			if c.waitForQuitMode {
-				if command.Value.Type == pnet.ComQuit {
-					return
-				}
-
-				c.replayStats.ExceptionCmds.Add(1)
-				continue
-			}
 			if c.readonly {
 				if !c.isReadOnly(command.Value) {
 					c.replayStats.FilteredCmds.Add(1)
 					continue
 				}
 			}
-			c.updateExecuteStmt(command.Value)
+			// Quit the connection in the next round no matter what exception happens (like disconnection).
+			if command.Value.Type == pnet.ComQuit {
+				finished = true
+			}
+
+			// Connect to the backend for the first time or after unexpected disconnection.
+			// If the backend is upgrading, the connections may drop but the QPS should not drop too much.
+			if !connected && command.Value.Type != pnet.ComQuit {
+				if err := c.backendConn.Connect(ctx, command.Value.CurDB); err != nil {
+					c.lg.Debug("failed to connect backend", zap.String("db", command.Value.CurDB), zap.Error(err))
+					c.replayStats.ExceptionCmds.Add(1)
+					c.exceptionCh <- NewOtherException(err, c.upstreamConnID)
+					continue
+				}
+				connected = true
+				curDB = command.Value.CurDB
+			}
+
+			if curDB != command.Value.CurDB && command.Value.CurDB != "" {
+				// Maybe there's a USE statement already, never mind.
+				if resp := c.backendConn.ExecuteCmd(ctx, pnet.MakeInitDBRequest(command.Value.CurDB)); resp.Err != nil {
+					c.replayStats.ExceptionCmds.Add(1)
+					c.exceptionCh <- NewFailException(resp.Err, command.Value)
+					c.lg.Info("failed to use database", zap.String("db", command.Value.CurDB), zap.Error(resp.Err))
+					continue
+				}
+				c.lg.Info("succeeded to use database", zap.String("db", command.Value.CurDB))
+				curDB = command.Value.CurDB
+			}
+			if !c.updateExecuteStmt(command.Value) {
+				c.replayStats.ExceptionCmds.Add(1)
+				c.exceptionCh <- NewFailException(errors.Errorf("prepared statement ID %d not found", command.Value.CapturedPsID), command.Value)
+				continue
+			}
+			startTime := time.Now()
 			if resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); resp.Err != nil {
 				if errors.Is(resp.Err, backend.ErrClosing) || pnet.IsDisconnectError(resp.Err) {
 					c.replayStats.ExceptionCmds.Add(1)
 					c.exceptionCh <- NewOtherException(resp.Err, c.upstreamConnID)
 					c.lg.Debug("backend connection disconnected", zap.Error(resp.Err))
-					c.waitForQuitMode = true
+					connected = false
+					curDB = ""
 					continue
 				}
 				if c.updateCmdForExecuteStmt(command.Value) {
@@ -177,10 +221,12 @@ func (c *conn) Run(ctx context.Context) {
 			} else {
 				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
 			}
-			c.replayStats.ReplayedCmds.Add(1)
-			if command.Value.Type == pnet.ComQuit {
-				return
+			c.execInfoCh <- ExecInfo{
+				Command:   command.Value,
+				StartTime: startTime,
+				CostTime:  time.Since(startTime),
 			}
+			c.replayStats.ReplayedCmds.Add(1)
 		}
 	}
 }
@@ -193,7 +239,7 @@ func (c *conn) isReadOnly(command *cmd.Command) bool {
 		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
 		ps := c.preparedStmts[stmtID]
 		if len(ps.text) == 0 {
-			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID), zap.Stringer("cmd_type", command.Type))
+			// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
 			return false
 		}
 		return lex.IsReadOnly(ps.text)
@@ -218,7 +264,7 @@ func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
 		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
 		ps := c.preparedStmts[stmtID]
 		if len(ps.text) == 0 {
-			c.lg.Error("prepared stmt not found", zap.Uint32("stmt_id", stmtID), zap.Stringer("cmd_type", command.Type))
+			// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
 			return false
 		}
 		if command.Type == pnet.ComStmtExecute {
@@ -284,16 +330,23 @@ func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp Exe
 	}
 }
 
-func (c *conn) updateExecuteStmt(command *cmd.Command) {
+// Update the prepared statement ID in the EXECUTE/FETCH/RESET/SEND_LONG_DATA/CLOSE command.
+// If the prepared statement is not found, maybe the previous PREPARE failed or the connection
+// is reconnected after disconnection, so return false and do not continue.
+func (c *conn) updateExecuteStmt(command *cmd.Command) bool {
 	// Native traffic replay doesn't set the CapturedPsID yet.
 	if command.CapturedPsID == 0 {
-		return
+		return true
 	}
 	switch command.Type {
 	case pnet.ComStmtExecute, pnet.ComStmtFetch, pnet.ComStmtClose, pnet.ComStmtReset, pnet.ComStmtSendLongData:
-		replayID := c.psIDMapping[command.CapturedPsID]
+		replayID, ok := c.psIDMapping[command.CapturedPsID]
+		if !ok {
+			return false
+		}
 		binary.LittleEndian.PutUint32(command.Payload[1:], replayID)
 	}
+	return true
 }
 
 // ExecuteCmd executes a command asynchronously by adding it to the list.

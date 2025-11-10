@@ -136,6 +136,24 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	}
 
 	cfg.CheckPointFilePath = c.PostForm("checkpointpath")
+	cfg.DynamicInput = strings.EqualFold(c.PostForm("dynamicinput"), "true")
+	if replayerCountStr := c.PostForm("replayercount"); replayerCountStr != "" {
+		replayerCount, err := strconv.ParseUint(replayerCountStr, 10, 64)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.ReplayerCount = replayerCount
+	}
+	if replayerIndexStr := c.PostForm("replayerindex"); replayerIndexStr != "" {
+		replayerIndex, err := strconv.ParseUint(replayerIndexStr, 10, 64)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.ReplayerIndex = replayerIndex
+	}
+	cfg.OutputPath = c.PostForm("outputpath")
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

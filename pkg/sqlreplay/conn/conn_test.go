@@ -41,18 +41,27 @@ func TestConnectError(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
 	for i, test := range tests {
-		exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-		conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 555, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
+		exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 10)
+		conn := NewConn(lg, ConnOpts{
+			Username:       "u1",
+			IdMgr:          id.NewIDManager(),
+			ConnID:         1,
+			UpstreamConnID: 555,
+			BcConfig:       &backend.BCConfig{},
+			ExceptionCh:    exceptionCh,
+			CloseCh:        closeCh,
+			ExecInfoCh:     execInfoCh,
+			ReplayStats:    &ReplayStats{},
+		})
 		backendConn := newMockBackendConn()
-		backendConn.connErr, backendConn.execErr = test.connErr, test.execErr
+		backendConn.setConnErr(test.connErr)
+		backendConn.setExecErr(test.execErr)
 		conn.backendConn = backendConn
 		wg.RunWithRecover(func() {
 			conn.Run(context.Background())
 		}, nil, lg)
-		if test.connErr == nil {
-			command := &cmd.Command{ConnID: 1, UpstreamConnID: 555, Type: pnet.ComPing, Payload: []byte{pnet.ComPing.Byte()}}
-			conn.ExecuteCmd(command)
-		}
+		command := &cmd.Command{ConnID: 1, UpstreamConnID: 555, Type: pnet.ComPing, Payload: []byte{pnet.ComPing.Byte()}}
+		conn.ExecuteCmd(command)
 		exp := <-exceptionCh
 		require.Equal(t, test.tp, exp.Type(), "case %d", i)
 		require.Equal(t, uint64(555), exp.ConnID(), "case %d: execution error should report UpstreamConnID", i)
@@ -67,9 +76,19 @@ func TestConnectError(t *testing.T) {
 func TestExecuteCmd(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
-	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 2000)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
 	backendConn := newMockBackendConn()
 	conn.backendConn = backendConn
 	childCtx, cancel := context.WithCancel(context.Background())
@@ -85,6 +104,7 @@ func TestExecuteCmd(t *testing.T) {
 	}, 3*time.Second, time.Millisecond)
 	require.EqualValues(t, 0, stats.PendingCmds.Load())
 	require.EqualValues(t, 0, stats.ExceptionCmds.Load())
+	require.Equal(t, 1000, len(execInfoCh))
 	cancel()
 	wg.Wait()
 }
@@ -92,8 +112,18 @@ func TestExecuteCmd(t *testing.T) {
 func TestStopExecution(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
-	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 10)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    &ReplayStats{},
+	})
 	conn.backendConn = newMockBackendConn()
 	wg.RunWithRecover(func() {
 		conn.Run(context.Background())
@@ -137,11 +167,21 @@ func TestExecuteError(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
-	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 3*len(tests))
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
 	backendConn := newMockBackendConn()
-	backendConn.execErr = errors.New("mock error")
+	backendConn.setExecErr(errors.New("mock error"))
 	conn.backendConn = backendConn
 	childCtx, cancel := context.WithCancel(context.Background())
 	wg.RunWithRecover(func() {
@@ -159,6 +199,7 @@ func TestExecuteError(t *testing.T) {
 		require.Equal(t, test.digest, exp.(*FailException).command.Digest(), "case %d", i)
 		require.Equal(t, test.queryText, exp.(*FailException).command.QueryText(), "case %d", i)
 		require.EqualValues(t, i+1, stats.ExceptionCmds.Load(), "case %d", i)
+		require.Equal(t, command, (<-execInfoCh).Command)
 		// Verify exception reports UpstreamConnID (999) instead of ConnID (100)
 		require.Equal(t, uint64(999), exp.ConnID(), "case %d: exception should report UpstreamConnID", i)
 	}
@@ -211,9 +252,20 @@ func TestSkipReadOnly(t *testing.T) {
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup
-	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 3*len(tests))
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, true, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+		Readonly:       true,
+	})
 	conn.backendConn = newMockBackendConn()
 	childCtx, cancel := context.WithCancel(context.Background())
 	wg.RunWithRecover(func() {
@@ -371,9 +423,20 @@ func TestPreparedStmt(t *testing.T) {
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
-	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 3*len(tests))
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, true, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+		Readonly:       true,
+	})
 	for i, test := range tests {
 		conn.updatePreparedStmts(uint32(i), test.request, test.response)
 		require.Equal(t, test.preparedStmts, conn.preparedStmts, "case %d", i)
@@ -387,9 +450,19 @@ func TestPreparedStmt(t *testing.T) {
 
 func TestPreparedStmtMapId(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 10)
 	stats := &ReplayStats{}
-	conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
 	backendConn := newMockBackendConn()
 	conn.backendConn = backendConn
 	var wg waitgroup.WaitGroup
@@ -419,7 +492,7 @@ func TestPreparedStmtMapId(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return stats.PendingCmds.Load() == 0
 	}, 3*time.Second, 10*time.Millisecond)
-	stmtID := binary.LittleEndian.Uint32(backendConn.lastReq[1:5])
+	stmtID := binary.LittleEndian.Uint32(backendConn.lastReq()[1:5])
 	require.Equal(t, uint32(1), stmtID)
 
 	// The stmtID in the CLOSE command is updated and the mapping is empty.
@@ -431,7 +504,7 @@ func TestPreparedStmtMapId(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return stats.PendingCmds.Load() == 0
 	}, 3*time.Second, 10*time.Millisecond)
-	stmtID = binary.LittleEndian.Uint32(backendConn.lastReq[1:5])
+	stmtID = binary.LittleEndian.Uint32(backendConn.lastReq()[1:5])
 	require.Equal(t, uint32(1), stmtID)
 	require.Len(t, conn.psIDMapping, 0)
 
@@ -439,107 +512,109 @@ func TestPreparedStmtMapId(t *testing.T) {
 	wg.Wait()
 }
 
-func TestWaitForQuitMode(t *testing.T) {
+func TestReconnect(t *testing.T) {
+	req, err := pnet.MakeExecuteStmtRequest(1, []any{}, true)
+	require.NoError(t, err)
+	tests := []struct {
+		connErr    bool
+		command    *cmd.Command
+		exceptions int
+		replayed   int
+		requests   []pnet.Command
+	}{
+		{
+			connErr: true,
+			command: &cmd.Command{
+				ConnID:         1,
+				UpstreamConnID: 555,
+				CapturedPsID:   1,
+				Type:           pnet.ComStmtPrepare,
+				Payload:        pnet.MakePrepareStmtRequest("select 1"),
+				CurDB:          "db1",
+			},
+			exceptions: 1,
+			requests:   []pnet.Command{},
+		},
+		{
+			command: &cmd.Command{
+				ConnID:         1,
+				UpstreamConnID: 555,
+				CapturedPsID:   1,
+				Type:           pnet.ComStmtExecute,
+				Payload:        req,
+				CurDB:          "db1",
+			},
+			exceptions: 2,
+			requests:   []pnet.Command{},
+		},
+		{
+			command: &cmd.Command{
+				ConnID:         1,
+				UpstreamConnID: 555,
+				Type:           pnet.ComQuery,
+				Payload:        pnet.MakeQueryPacket("select 1"),
+				CurDB:          "db2",
+			},
+			exceptions: 2,
+			replayed:   1,
+			requests:   []pnet.Command{pnet.ComInitDB, pnet.ComQuery},
+		},
+		{
+			command: &cmd.Command{
+				ConnID:         1,
+				UpstreamConnID: 555,
+				Type:           pnet.ComQuit,
+				Payload:        []byte{pnet.ComQuit.Byte()},
+			},
+			exceptions: 2,
+			replayed:   2,
+			requests:   []pnet.Command{pnet.ComInitDB, pnet.ComQuery, pnet.ComQuit},
+		},
+	}
+
 	lg, _ := logger.CreateLoggerForTest(t)
+	var wg waitgroup.WaitGroup
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 10), make(chan uint64, 1), make(chan ExecInfo, 3*len(tests))
+	stats := &ReplayStats{}
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 555,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+	wg.RunWithRecover(func() {
+		conn.Run(context.Background())
+	}, nil, lg)
 
-	setupConnWithError := func(connErr, execErr error) (*conn, *mockBackendConn, chan Exception, chan uint64, *waitgroup.WaitGroup, context.CancelFunc) {
-		var wg waitgroup.WaitGroup
-		exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
-		conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), 1, 1, &backend.BCConfig{}, exceptionCh, closeCh, false, &ReplayStats{})
-		backendConn := newMockBackendConn()
-		backendConn.connErr = connErr
-		backendConn.execErr = execErr
-		conn.backendConn = backendConn
-
-		ctx := context.Background()
-		var cancel context.CancelFunc
-		if execErr != nil {
-			ctx, cancel = context.WithCancel(ctx)
+	for i, test := range tests {
+		fmt.Println("test", i)
+		var connErr error
+		if test.connErr {
+			connErr = errors.New("conn err")
 		}
+		backendConn.setConnErr(connErr)
+		conn.ExecuteCmd(test.command)
 
-		wg.RunWithRecover(func() {
-			conn.Run(ctx)
-		}, nil, lg)
-
-		return conn, backendConn, exceptionCh, closeCh, &wg, cancel
+		require.Eventually(t, func() bool {
+			return stats.ReplayedCmds.Load() == uint64(test.replayed) && stats.ExceptionCmds.Load() == uint64(test.exceptions)
+		}, 3*time.Second, 10*time.Millisecond, "test %d", i)
+		requests := backendConn.allRequests()
+		require.Equal(t, len(test.requests), len(requests), "test %d", i)
+		for j, req := range requests {
+			require.Equal(t, test.requests[j].Byte(), req[0], "test %d %d", i, j)
+		}
 	}
 
-	setupCloseMonitor := func(closeCh chan uint64, backendConn *mockBackendConn, wg *waitgroup.WaitGroup) chan time.Time {
-		closeTimeCh := make(chan time.Time)
-		go func() {
-			require.Equal(t, uint64(1), <-closeCh)
-			require.True(t, backendConn.close.Load())
-			wg.Wait()
-			closeTimeCh <- time.Now()
-		}()
-		return closeTimeCh
-	}
-
-	verifyWaitForTermination := func(t *testing.T, closeTimeCh chan time.Time, actionTime time.Time) {
-		closeTime := <-closeTimeCh
-		require.True(t, closeTime.After(actionTime))
-	}
-
-	t.Run("connect failed", func(t *testing.T) {
-		conn, backendConn, exceptionCh, closeCh, wg, _ := setupConnWithError(errors.New("mock error"), nil)
-
-		exp := <-exceptionCh
-		require.Equal(t, Other, exp.Type())
-
-		closeTimeCh := setupCloseMonitor(closeCh, backendConn, wg)
-
-		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComPing, Payload: []byte{pnet.ComPing.Byte()}})
-		require.Empty(t, backendConn.lastReq, "the ping command should be ignored")
-
-		time.Sleep(10 * time.Millisecond)
-		quitTime := time.Now()
-		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComQuit, Payload: []byte{pnet.ComQuit.Byte()}})
-
-		verifyWaitForTermination(t, closeTimeCh, quitTime)
-	})
-
-	t.Run("Execute error", func(t *testing.T) {
-		conn, backendConn, exceptionCh, closeCh, wg, _ := setupConnWithError(nil, io.EOF)
-
-		closeTimeCh := setupCloseMonitor(closeCh, backendConn, wg)
-
-		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComPing, Payload: []byte{pnet.ComPing.Byte()}})
-		exp := <-exceptionCh
-		require.Equal(t, Other, exp.Type())
-		require.Equal(t, backendConn.lastReq, []byte{pnet.ComPing.Byte()})
-
-		// then other commands should be ignored except COM_QUIT
-		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComQuery, Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)})
-		require.Equal(t, backendConn.lastReq, []byte{pnet.ComPing.Byte()})
-
-		time.Sleep(10 * time.Millisecond)
-		quitTime := time.Now()
-		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComQuit, Payload: []byte{pnet.ComQuit.Byte()}})
-
-		verifyWaitForTermination(t, closeTimeCh, quitTime)
-	})
-
-	t.Run("context canceled", func(t *testing.T) {
-		conn, backendConn, exceptionCh, closeCh, wg, cancel := setupConnWithError(nil, io.EOF)
-
-		closeTimeCh := setupCloseMonitor(closeCh, backendConn, wg)
-
-		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComPing, Payload: []byte{pnet.ComPing.Byte()}})
-		exp := <-exceptionCh
-		require.Equal(t, Other, exp.Type())
-		require.Equal(t, backendConn.lastReq, []byte{pnet.ComPing.Byte()})
-
-		// then other commands should be ignored except COM_QUIT
-		conn.ExecuteCmd(&cmd.Command{ConnID: 1, Type: pnet.ComQuery, Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)})
-		require.Equal(t, backendConn.lastReq, []byte{pnet.ComPing.Byte()})
-
-		// cancel the context directly, no need to wait for COM_QUIT
-		time.Sleep(10 * time.Millisecond)
-		cancelTime := time.Now()
-		cancel()
-
-		verifyWaitForTermination(t, closeTimeCh, cancelTime)
-	})
+	require.EqualValues(t, 1, <-closeCh)
+	require.True(t, backendConn.close.Load())
+	wg.Wait()
 }
 
 func TestExceptionUsesUpstreamConnID(t *testing.T) {
@@ -555,7 +630,7 @@ func TestExceptionUsesUpstreamConnID(t *testing.T) {
 			connID:         100,
 			upstreamConnID: 200,
 			setupError: func(bc *mockBackendConn) {
-				bc.connErr = errors.New("connection failed")
+				bc.setConnErr(errors.New("connection failed"))
 			},
 			expectedType: Other,
 		},
@@ -564,7 +639,7 @@ func TestExceptionUsesUpstreamConnID(t *testing.T) {
 			connID:         300,
 			upstreamConnID: 400,
 			setupError: func(bc *mockBackendConn) {
-				bc.execErr = errors.New("execution failed")
+				bc.setExecErr(errors.New("execution failed"))
 			},
 			expectedType: Fail,
 		},
@@ -574,10 +649,19 @@ func TestExceptionUsesUpstreamConnID(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			lg, _ := logger.CreateLoggerForTest(t)
 			var wg waitgroup.WaitGroup
-			exceptionCh, closeCh := make(chan Exception, 1), make(chan uint64, 1)
+			exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 10)
 			stats := &ReplayStats{}
-
-			conn := NewConn(lg, "u1", "", nil, nil, id.NewIDManager(), test.connID, test.upstreamConnID, &backend.BCConfig{}, exceptionCh, closeCh, false, stats)
+			conn := NewConn(lg, ConnOpts{
+				Username:       "u1",
+				IdMgr:          id.NewIDManager(),
+				ConnID:         test.connID,
+				UpstreamConnID: test.upstreamConnID,
+				BcConfig:       &backend.BCConfig{},
+				ExceptionCh:    exceptionCh,
+				CloseCh:        closeCh,
+				ExecInfoCh:     execInfoCh,
+				ReplayStats:    stats,
+			})
 			backendConn := newMockBackendConn()
 			test.setupError(backendConn)
 			conn.backendConn = backendConn

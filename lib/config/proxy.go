@@ -82,6 +82,7 @@ type LogOnline struct {
 
 type Log struct {
 	Encoder   string `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty" reloadable:"false"`
+	Simple    bool   `yaml:"simple,omitempty" toml:"simple,omitempty" json:"simple,omitempty" reloadable:"false"`
 	LogOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
