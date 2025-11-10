@@ -900,11 +900,22 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				Command: &cmd.Command{
 					CurDB:   "db1",
 					Type:    pnet.ComQuery,
-					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("insert into t values(1, 2)")...),
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("insert into t values(1, 2),(3,4)")...),
 				},
 				CostTime: 1234567,
 			},
 			log: "{\"sql\":\"insert into `t` values ( ... )\",\"db\":\"db1\",\"cost\":\"1.235\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					CurDB:   "db1",
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select * from where id in (1, 2)")...),
+				},
+				CostTime: 1234567,
+			},
+			log: "{\"sql\":\"select * from where `id` in ( ... )\",\"db\":\"db1\",\"cost\":\"1.235\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
 		},
 		{
 			execInfo: conn.ExecInfo{
