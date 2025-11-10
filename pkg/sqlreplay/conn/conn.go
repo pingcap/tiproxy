@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	glist "github.com/bahlo/generic-list-go"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -60,6 +61,12 @@ func (s *ReplayStats) Reset() {
 	s.ExceptionCmds.Store(0)
 }
 
+type ExecInfo struct {
+	Command   *cmd.Command
+	StartTime time.Time
+	CostTime  time.Duration
+}
+
 type Conn interface {
 	Run(ctx context.Context)
 	ExecuteCmd(command *cmd.Command)
@@ -80,6 +87,7 @@ type conn struct {
 	psIDMapping     map[uint32]uint32
 	exceptionCh     chan<- Exception
 	closeCh         chan<- uint64
+	execInfoCh      chan<- ExecInfo
 	lg              *zap.Logger
 	backendConn     BackendConn
 	connID          uint64 // logical connection ID, not replay ID and also not capture ID. It's the same with the `ConnID` of the first command.
@@ -89,25 +97,41 @@ type conn struct {
 	readonly        bool
 }
 
-func NewConn(lg *zap.Logger, username, password string, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler,
-	idMgr *id.IDManager, connID uint64, upstreamConnID uint64, bcConfig *backend.BCConfig, exceptionCh chan<- Exception, closeCh chan<- uint64,
-	readonly bool, replayStats *ReplayStats) *conn {
-	backendConnID := idMgr.NewID()
-	lg = lg.With(zap.Uint64("captureID", connID), zap.Uint64("replayID", backendConnID))
-	return &conn{
+type ConnOpts struct {
+	Username         string
+	Password         string
+	BackendTLSConfig *tls.Config
+	HsHandler        backend.HandshakeHandler
+	IdMgr            *id.IDManager
+	ConnID           uint64
+	UpstreamConnID   uint64
+	BcConfig         *backend.BCConfig
+	ExceptionCh      chan<- Exception
+	CloseCh          chan<- uint64
+	ExecInfoCh       chan<- ExecInfo
+	ReplayStats      *ReplayStats
+	Readonly         bool
+}
+
+func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
+	backendConnID := opts.IdMgr.NewID()
+	lg = lg.With(zap.Uint64("captureID", opts.ConnID), zap.Uint64("replayID", backendConnID))
+	c := &conn{
 		lg:             lg,
-		connID:         connID,
-		upstreamConnID: upstreamConnID,
+		execInfoCh:     opts.ExecInfoCh,
+		connID:         opts.ConnID,
+		upstreamConnID: opts.UpstreamConnID,
 		cmdList:        glist.New[*cmd.Command](),
 		cmdCh:          make(chan struct{}, 1),
 		preparedStmts:  make(map[uint32]preparedStmt),
 		psIDMapping:    make(map[uint32]uint32),
-		exceptionCh:    exceptionCh,
-		closeCh:        closeCh,
-		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, hsHandler, bcConfig, backendTLSConfig, username, password),
-		replayStats:    replayStats,
-		readonly:       readonly,
+		exceptionCh:    opts.ExceptionCh,
+		closeCh:        opts.CloseCh,
+		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, opts.HsHandler, opts.BcConfig, opts.BackendTLSConfig, opts.Username, opts.Password),
+		replayStats:    opts.ReplayStats,
+		readonly:       opts.Readonly,
 	}
+	return c
 }
 
 func (c *conn) Run(ctx context.Context) {
@@ -180,6 +204,7 @@ func (c *conn) Run(ctx context.Context) {
 				c.exceptionCh <- NewFailException(errors.Errorf("prepared statement ID %d not found", command.Value.CapturedPsID), command.Value)
 				continue
 			}
+			startTime := time.Now()
 			if resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); resp.Err != nil {
 				if errors.Is(resp.Err, backend.ErrClosing) || pnet.IsDisconnectError(resp.Err) {
 					c.replayStats.ExceptionCmds.Add(1)
@@ -195,6 +220,11 @@ func (c *conn) Run(ctx context.Context) {
 				}
 			} else {
 				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
+			}
+			c.execInfoCh <- ExecInfo{
+				Command:   command.Value,
+				StartTime: startTime,
+				CostTime:  time.Since(startTime),
 			}
 			c.replayStats.ReplayedCmds.Add(1)
 		}

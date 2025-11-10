@@ -12,13 +12,17 @@ import (
 )
 
 type nopConn struct {
-	closeCh chan uint64
-	connID  uint64
-	stats   *conn.ReplayStats
+	closeCh    chan uint64
+	execInfoCh chan<- conn.ExecInfo
+	connID     uint64
+	stats      *conn.ReplayStats
 }
 
 func (c *nopConn) ExecuteCmd(command *cmd.Command) {
 	c.stats.ReplayedCmds.Add(1)
+	c.execInfoCh <- conn.ExecInfo{
+		Command: command,
+	}
 }
 
 func (c *nopConn) Run(ctx context.Context) {

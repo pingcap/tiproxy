@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
+	"github.com/siddontang/go/hack"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -106,9 +107,10 @@ func TestCloseConns(t *testing.T) {
 		readers:   []cmd.LineReader{loader},
 		connCreator: func(connID uint64, _ uint64) conn.Conn {
 			return &nopConn{
-				connID:  connID,
-				closeCh: replay.closeConnCh,
-				stats:   &replay.replayStats,
+				connID:     connID,
+				closeCh:    replay.closeConnCh,
+				execInfoCh: replay.execInfoCh,
+				stats:      &replay.replayStats,
 			}
 		},
 		report:          newMockReport(replay.exceptionCh),
@@ -863,5 +865,128 @@ func TestGetDirForInput(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, result)
 		})
+	}
+}
+
+func TestRecordExecInfoLoop(t *testing.T) {
+	tests := []struct {
+		execInfo conn.ExecInfo
+		log      string
+	}{
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					CurDB:   "db1",
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...),
+				},
+				CostTime: time.Second,
+			},
+			log: "{\"sql\":\"select ?\",\"db\":\"db1\",\"cost\":\"1000.000\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					CurDB:   "db1",
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("insert into t values(1)")...),
+				},
+				CostTime: time.Millisecond,
+			},
+			log: "{\"sql\":\"insert into `t` values ( ? )\",\"db\":\"db1\",\"cost\":\"1.000\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					CurDB:   "db1",
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("insert into t values(1, 2),(3,4)")...),
+				},
+				CostTime: 1234567,
+			},
+			log: "{\"sql\":\"insert into `t` values ( ... )\",\"db\":\"db1\",\"cost\":\"1.235\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					CurDB:   "db1",
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select * from where id in (1, 2)")...),
+				},
+				CostTime: 1234567,
+			},
+			log: "{\"sql\":\"select * from where `id` in ( ... )\",\"db\":\"db1\",\"cost\":\"1.235\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:         pnet.ComStmtExecute,
+					PreparedStmt: "select ?",
+				},
+				CostTime: 9999 * time.Microsecond,
+			},
+			log: "{\"sql\":\"select ?\",\"db\":\"\",\"cost\":\"9.999\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:         pnet.ComStmtExecute,
+					PreparedStmt: "select \n\"\"",
+				},
+				CostTime: 9999 * time.Microsecond,
+			},
+			log: "{\"sql\":\"select \\n\\\"\\\"\",\"db\":\"\",\"cost\":\"9.999\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:    pnet.ComInitDB,
+					Payload: []byte{pnet.ComInitDB.Byte()},
+				},
+				CostTime: time.Millisecond,
+			},
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:         pnet.ComStmtPrepare,
+					PreparedStmt: "select ?",
+					Payload:      pnet.MakePrepareStmtRequest("select ?"),
+				},
+				CostTime: time.Millisecond,
+			},
+		},
+	}
+
+	startTime := time.Date(2025, 9, 6, 17, 3, 50, 222000000, time.UTC)
+	for i, test := range tests {
+		replay := NewReplay(zap.NewNop(), id.NewIDManager())
+		dir := t.TempDir()
+		replay.cfg = ReplayConfig{
+			OutputPath: filepath.Join(dir, "replay.log"),
+		}
+		replay.execInfoCh = make(chan conn.ExecInfo, 1)
+		replay.wg.Run(replay.recordExecInfoLoop, zap.NewNop())
+		test.execInfo.StartTime = startTime
+		replay.execInfoCh <- test.execInfo
+		close(replay.execInfoCh)
+		replay.Close()
+
+		if len(test.log) > 0 {
+			var log string
+			require.Eventually(t, func() bool {
+				data, _ := os.ReadFile(replay.cfg.OutputPath)
+				if len(data) == 0 {
+					return false
+				}
+				log = hack.String(data)
+				return true
+			}, 3*time.Second, 10*time.Millisecond)
+			require.Equal(t, test.log, log, "case %d", i)
+		} else {
+			time.Sleep(100 * time.Millisecond)
+			data, _ := os.ReadFile(replay.cfg.OutputPath)
+			require.Empty(t, data)
+		}
 	}
 }
