@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,7 +22,9 @@ import (
 
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tidb/pkg/parser"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
@@ -863,24 +864,27 @@ func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
 }
 
 func (r *replay) recordExecInfoLoop() {
-	var writer io.WriteCloser
+	var lg *zap.Logger
 	if len(r.cfg.OutputPath) > 0 {
-		storage, err := store.NewStorage(r.cfg.OutputPath)
+		var err error
+		lg, _, _, err = logger.BuildLogger(&config.Log{
+			Encoder: "json",
+			Simple:  true,
+			LogOnline: config.LogOnline{
+				LogFile: config.LogFile{
+					Filename: r.cfg.OutputPath,
+					MaxSize:  100,
+				},
+			},
+		})
 		if err != nil {
-			r.lg.Error("failed to create storage for recording execution info", zap.Error(err))
-		} else {
-			defer storage.Close()
-			if writer, err = store.NewWriter(r.lg.Named("writer"), storage, store.WriterCfg{Dir: r.cfg.OutputPath}); err != nil {
-				r.lg.Error("failed to create writer for recording execution info", zap.Error(err))
-			} else {
-				defer writer.Close()
-			}
+			r.lg.Error("build logger failed", zap.Error(err))
 		}
 	}
 
 	// Iterate until the channel is closed, even if the context has been canceled.
 	for info := range r.execInfoCh {
-		if writer == nil || reflect.ValueOf(writer).IsNil() {
+		if lg == nil {
 			continue
 		}
 		var sql string
@@ -894,12 +898,8 @@ func (r *replay) recordExecInfoLoop() {
 		if len(sql) == 0 {
 			continue
 		}
-		sql = strconv.Quote(sql)
 		t := time.Now().Format(outputTimeFormat)
-		jsonStr := fmt.Sprintf("{\"sql\": %s, \"db\": \"%s\", \"cost\": \"%d\", \"ex_time\": \"%s\"}\n", sql, info.Command.CurDB, info.CostTime/1000000.0, t)
-		if _, err := writer.Write(hack.Slice(jsonStr)); err != nil {
-			r.lg.Warn("failed to record execution info", zap.Error(err))
-		}
+		lg.Info("exec info", zap.String("sql", sql), zap.String("db", info.Command.CurDB), zap.Float64("cost", float64(info.CostTime)/1000000.0), zap.String("ex_time", t))
 	}
 }
 

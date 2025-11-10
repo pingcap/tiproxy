@@ -23,6 +23,12 @@ func buildEncoder(cfg *config.Log) (zapcore.Encoder, error) {
 	encfg.EncodeLevel = func(l zapcore.Level, pae zapcore.PrimitiveArrayEncoder) {
 		pae.AppendString(l.CapitalString())
 	}
+	if cfg.Simple {
+		encfg.LevelKey = ""
+		encfg.CallerKey = ""
+		encfg.TimeKey = ""
+		encfg.MessageKey = ""
+	}
 	switch cfg.Encoder {
 	case "json":
 		return zapcore.NewJSONEncoder(encfg), nil
