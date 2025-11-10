@@ -115,9 +115,9 @@ type ReplayConfig struct {
 	DynamicInput bool
 	// ReplayerCount is the total number of replayers which share the same dynamic input. The count
 	// and index is used to determine whether this replayer should process a new
-	ReplayerCount int
+	ReplayerCount uint64
 	// ReplayerIndex is the index of this replayer among all replayers.
-	ReplayerIndex int
+	ReplayerIndex uint64
 	// OutputPath is the path to output replayed sql.
 	OutputPath string
 	// the following fields are for testing
@@ -210,7 +210,7 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 		if cfg.ReplayerCount <= 0 {
 			return storages, errors.New("dynamic input requires a valid replayer count")
 		}
-		if cfg.ReplayerIndex < 0 || cfg.ReplayerIndex >= cfg.ReplayerCount {
+		if cfg.ReplayerIndex >= cfg.ReplayerCount {
 			return storages, errors.New("dynamic input requires a valid replayer index")
 		}
 	}
@@ -597,11 +597,11 @@ func (r *replay) constructDynamicDecoder(ctx context.Context) (decoder, error) {
 		// error is never returned for Hash
 		_, _ = h.Write([]byte(filename))
 		sum := h.Sum64()
-		expectedReplayerIndex := int(sum) % r.cfg.ReplayerCount
+		expectedReplayerIndex := sum % r.cfg.ReplayerCount
 		if expectedReplayerIndex != r.cfg.ReplayerIndex {
 			r.lg.Info("dir watcher skip new directory for other replayer", zap.String("dir", filename),
-				zap.Int("expected_replayer_index", expectedReplayerIndex),
-				zap.Int("replayer_index", r.cfg.ReplayerIndex))
+				zap.Uint64("expected_replayer_index", expectedReplayerIndex),
+				zap.Uint64("replayer_index", r.cfg.ReplayerIndex))
 			return nil
 		}
 

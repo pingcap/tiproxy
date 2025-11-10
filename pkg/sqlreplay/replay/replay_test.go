@@ -765,9 +765,8 @@ func TestDynamicInput(t *testing.T) {
 		_, _ = h.Write([]byte(filename))
 		sum := h.Sum64()
 
-		if int(sum)%replay.cfg.ReplayerCount == replay.cfg.ReplayerIndex {
+		if sum%replay.cfg.ReplayerCount == replay.cfg.ReplayerIndex {
 			if len(locateZeroDirs) < 2 {
-				fmt.Println("locate zero dir:", filename)
 				locateZeroDirs = append(locateZeroDirs, fmt.Sprintf("tidb-%d", i))
 			}
 		} else {
@@ -989,4 +988,114 @@ func TestRecordExecInfoLoop(t *testing.T) {
 			require.Empty(t, data)
 		}
 	}
+}
+
+func TestDynamicInputCoverAllDirectories(t *testing.T) {
+	const maxDirectoriesCount = 50
+	const maxCommandsPerFile = 20
+	const auditlogFileName = "tidb-audit-2025-12-16T13-42-55.511.log"
+
+	tempDir := t.TempDir()
+	url := tempDir + "/tidb-"
+
+	directoriesCount := rand.Uint64N(maxDirectoriesCount) + 1
+	for i := range directoriesCount {
+		dir := fmt.Sprintf("%s%d", url, i)
+		require.NoError(t, os.MkdirAll(dir, 0755))
+	}
+
+	expectCommandCount := 0
+	for i := range directoriesCount {
+		dir := fmt.Sprintf("%s%d", url, i)
+		logFile, err := os.OpenFile(filepath.Join(dir, auditlogFileName), os.O_CREATE|os.O_WRONLY, 0644)
+		require.NoError(t, err)
+
+		commandCount := rand.Uint64N(maxCommandsPerFile) + 1
+		for range commandCount {
+			expectCommandCount += 1
+			_, err := logFile.WriteString(`[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`)
+			require.NoError(t, err)
+			_, err = logFile.WriteString("\n")
+			require.NoError(t, err)
+		}
+	}
+
+	// For static replayer
+	staticReplayer := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer staticReplayer.Close()
+
+	staticUrl := ""
+	for i := range directoriesCount {
+		if i > 0 {
+			staticUrl += ","
+		}
+		staticUrl += fmt.Sprintf("%s%d", url, i)
+	}
+
+	staticReplayer.cfg = ReplayConfig{
+		Input:           staticUrl,
+		Username:        "u1",
+		StartTime:       time.Now(),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+		Format:          cmd.FormatAuditLogPlugin,
+	}
+	storages, err := staticReplayer.cfg.Validate()
+	require.NoError(t, err)
+	staticReplayer.storages = storages
+
+	readers, err := staticReplayer.constructReaders()
+	require.NoError(t, err)
+	staticDecoder, err := staticReplayer.constructStaticDecoder(context.Background(), readers)
+	require.NoError(t, err)
+
+	actualCommandCount := 0
+	for {
+		cmd, err := staticDecoder.Decode()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		require.NoError(t, err)
+		require.Equal(t, append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), cmd.Payload)
+
+		actualCommandCount++
+	}
+	require.Equal(t, expectCommandCount, actualCommandCount)
+
+	// For dynamic input
+	replayerCount := rand.Uint64N(maxDirectoriesCount) + 1
+	actualCommandCount = 0
+	for replayerIndex := range replayerCount {
+		dynamicReplayer := NewReplay(zap.NewNop(), id.NewIDManager())
+
+		dynamicReplayer.cfg = ReplayConfig{
+			Input:           url,
+			Username:        "u1",
+			StartTime:       time.Now(),
+			PSCloseStrategy: cmd.PSCloseStrategyDirected,
+			DynamicInput:    true,
+			ReplayerCount:   replayerCount,
+			ReplayerIndex:   replayerIndex,
+			Format:          cmd.FormatAuditLogPlugin,
+		}
+		storages, err := dynamicReplayer.cfg.Validate()
+		require.NoError(t, err)
+		dynamicReplayer.storages = storages
+
+		decoder, err := dynamicReplayer.constructDynamicDecoder(context.Background())
+		require.NoError(t, err)
+
+		for {
+			cmd, err := decoder.Decode()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			require.NoError(t, err)
+			require.Equal(t, append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), cmd.Payload)
+
+			actualCommandCount++
+		}
+
+		dynamicReplayer.Close()
+	}
+	require.Equal(t, expectCommandCount, actualCommandCount)
 }

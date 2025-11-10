@@ -56,8 +56,8 @@ func main() {
 	dryRun := rootCmd.PersistentFlags().Bool("dry-run", false, "dry run, don't connect to TiDB")
 	checkPointFilePath := rootCmd.PersistentFlags().String("checkpoint-path", "", "the file path to store replay checkpoint information. If the file exists and not empty, the internal state will be loaded from the file to resume replaying.")
 	dynamicInput := rootCmd.PersistentFlags().Bool("dynamic-input", false, "enable dynamic input mode, which watches the input directory for new traffic folders and replays them automatically.")
-	replayerCount := rootCmd.PersistentFlags().Int("replayer-count", 1, "the total number of replayer instances running concurrently. Used only when dynamic-input is enabled.")
-	replayerIndex := rootCmd.PersistentFlags().Int("replayer-index", 0, "the index of this replayer instance. Used only when dynamic-input is enabled.")
+	replayerCount := rootCmd.PersistentFlags().Uint64("replayer-count", 1, "the total number of replayer instances running concurrently. Used only when dynamic-input is enabled.")
+	replayerIndex := rootCmd.PersistentFlags().Uint64("replayer-index", 0, "the index of this replayer instance. Used only when dynamic-input is enabled.")
 	outputPath := rootCmd.PersistentFlags().String("output-path", "", "the file path to store replayed sql. Empty indicates do not output replayed sql.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
