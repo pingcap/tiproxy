@@ -29,7 +29,7 @@ const (
 )
 
 // MemManager is a manager for memory usage.
-// Although the continous profiling collects profiles periodically, when TiProxy runs in the replayer mode,
+// Although the continuous profiling collects profiles periodically, when TiProxy runs in the replayer mode,
 // the profiles are not collected.
 type MemManager struct {
 	lg                *zap.Logger
@@ -131,6 +131,7 @@ func (m *MemManager) recordGoroutine(fileName string) {
 	if n >= len(buf) {
 		m.lg.Warn("goroutine stack trace is too large, truncating", zap.Int("size", n))
 	}
+	//nolint: gosec
 	if err := os.WriteFile(fileName, buf[:n], 0644); err != nil {
 		m.lg.Error("failed to write goroutine profile file", zap.Error(err))
 	}
