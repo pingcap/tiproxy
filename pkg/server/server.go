@@ -17,6 +17,11 @@ import (
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
+<<<<<<< HEAD
+=======
+	"github.com/pingcap/tiproxy/pkg/manager/memory"
+	"github.com/pingcap/tiproxy/pkg/manager/meter"
+>>>>>>> 5bd470cf (memory, server: output heap and goroutine profiles when memory usage is high (#980))
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/pingcap/tiproxy/pkg/manager/vip"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -45,6 +50,11 @@ type Server struct {
 	infoSyncer       *infosync.InfoSyncer
 	metricsReader    metricsreader.MetricsReader
 	replay           mgrrp.JobManager
+<<<<<<< HEAD
+=======
+	meter            *meter.Meter
+	memManager       *memory.MemManager
+>>>>>>> 5bd470cf (memory, server: output heap and goroutine profiles when memory usage is high (#980))
 	// etcd client
 	etcdCli *clientv3.Client
 	// HTTP client
@@ -94,6 +104,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	// setup metrics
 	srv.metricsManager.Init(ctx, lg.Named("metrics"))
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
+
+	srv.memManager = memory.NewMemManager(lg, srv.configManager)
+	srv.memManager.Start(ctx)
 
 	// setup certs
 	if err = srv.certManager.Init(cfg, lg.Named("cert"), srv.configManager.WatchConfig()); err != nil {
@@ -258,6 +271,9 @@ func (s *Server) Close() error {
 	}
 	if s.metricsReader != nil && !reflect.ValueOf(s.metricsReader).IsNil() {
 		s.metricsReader.Close()
+	}
+	if s.memManager != nil {
+		s.memManager.Close()
 	}
 	if s.infoSyncer != nil {
 		errs = append(errs, s.infoSyncer.Close())
