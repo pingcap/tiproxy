@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
+	"github.com/pingcap/tiproxy/pkg/manager/memory"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/server/api"
@@ -78,6 +79,9 @@ func main() {
 		if err != nil {
 			return err
 		}
+		cfgMgr := &nopConfigManager{cfg: cfg}
+		memMgr := memory.NewMemManager(lg, cfgMgr)
+		memMgr.Start(context.Background())
 
 		// create replay job manager
 		hsHandler := newStaticHandshakeHandler(*addr)
@@ -86,7 +90,7 @@ func main() {
 
 		// start api server
 		mgrs := api.Managers{
-			CfgMgr:        &nopConfigManager{cfg: cfg},
+			CfgMgr:        cfgMgr,
 			NsMgr:         nil,
 			CertMgr:       cert.NewCertManager(),
 			BackendReader: nil,
@@ -146,6 +150,7 @@ func main() {
 		cancel()
 		r.Close()
 		_ = apiServer.Close()
+		memMgr.Close()
 		_ = lgMgr.Close()
 		return nil
 	}
