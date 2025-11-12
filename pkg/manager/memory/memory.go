@@ -55,6 +55,7 @@ func NewMemManager(lg *zap.Logger, cfgGetter config.ConfigGetter) *MemManager {
 }
 
 func (m *MemManager) Start(ctx context.Context) {
+	// Call the memory.MemTotal and memory.MemUsed in TiDB repo because they have considered cgroup.
 	limit, err := memory.MemTotal()
 	if err != nil || limit == 0 {
 		m.lg.Error("get memory limit failed", zap.Uint64("limit", limit), zap.Error(err))
