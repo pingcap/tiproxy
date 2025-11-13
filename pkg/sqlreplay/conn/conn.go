@@ -187,6 +187,9 @@ func (c *conn) Run(ctx context.Context) {
 				connected = true
 				curDB = command.Value.CurDB
 			}
+			if !connected {
+				continue
+			}
 
 			if curDB != command.Value.CurDB && command.Value.CurDB != "" {
 				// Maybe there's a USE statement already, never mind.
