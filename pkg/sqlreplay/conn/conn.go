@@ -173,11 +173,14 @@ func (c *conn) Run(ctx context.Context) {
 			// Quit the connection in the next round no matter what exception happens (like disconnection).
 			if command.Value.Type == pnet.ComQuit {
 				finished = true
+				if !connected {
+					continue
+				}
 			}
 
 			// Connect to the backend for the first time or after unexpected disconnection.
 			// If the backend is upgrading, the connections may drop but the QPS should not drop too much.
-			if !connected && command.Value.Type != pnet.ComQuit {
+			if !connected {
 				if err := c.backendConn.Connect(ctx, command.Value.CurDB); err != nil {
 					c.lg.Debug("failed to connect backend", zap.String("db", command.Value.CurDB), zap.Error(err))
 					c.replayStats.ExceptionCmds.Add(1)
@@ -186,9 +189,6 @@ func (c *conn) Run(ctx context.Context) {
 				}
 				connected = true
 				curDB = command.Value.CurDB
-			}
-			if !connected {
-				continue
 			}
 
 			if curDB != command.Value.CurDB && command.Value.CurDB != "" {
@@ -199,7 +199,6 @@ func (c *conn) Run(ctx context.Context) {
 					c.lg.Info("failed to use database", zap.String("db", command.Value.CurDB), zap.Error(resp.Err))
 					continue
 				}
-				c.lg.Info("succeeded to use database", zap.String("db", command.Value.CurDB))
 				curDB = command.Value.CurDB
 			}
 			if !c.updateExecuteStmt(command.Value) {
