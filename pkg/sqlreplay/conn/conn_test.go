@@ -594,7 +594,6 @@ func TestReconnect(t *testing.T) {
 	}, nil, lg)
 
 	for i, test := range tests {
-		fmt.Println("test", i)
 		var connErr error
 		if test.connErr {
 			connErr = errors.New("conn err")
@@ -613,6 +612,46 @@ func TestReconnect(t *testing.T) {
 	}
 
 	require.EqualValues(t, 1, <-closeCh)
+	require.True(t, backendConn.close.Load())
+	wg.Wait()
+}
+
+func TestQuitInConnect(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	var wg waitgroup.WaitGroup
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 10), make(chan uint64, 1), make(chan ExecInfo, 10)
+	stats := &ReplayStats{}
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 555,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+	backendConn.connErr, backendConn.execErr = errors.New("conn err"), errors.New("exec err")
+	wg.RunWithRecover(func() {
+		conn.Run(context.Background())
+	}, nil, lg)
+
+	// Send a QUIT at the beginning, the QUIT is not replayed at all.
+	conn.ExecuteCmd(&cmd.Command{
+		ConnID:         1,
+		UpstreamConnID: 555,
+		Type:           pnet.ComQuit,
+		Payload:        []byte{pnet.ComQuit.Byte()},
+	})
+	require.EqualValues(t, 1, <-closeCh)
+	require.Empty(t, backendConn.allRequests())
+	require.Empty(t, exceptionCh)
+	require.Empty(t, execInfoCh)
+	require.EqualValues(t, 0, stats.ReplayedCmds.Load())
+	require.EqualValues(t, 0, stats.ExceptionCmds.Load())
 	require.True(t, backendConn.close.Load())
 	wg.Wait()
 }
