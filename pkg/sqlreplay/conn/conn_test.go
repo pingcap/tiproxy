@@ -19,7 +19,9 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/siddontang/go/hack"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestConnectError(t *testing.T) {
@@ -726,5 +728,82 @@ func TestExceptionUsesUpstreamConnID(t *testing.T) {
 			cancel()
 			wg.Wait()
 		})
+	}
+}
+
+func TestExecInfo(t *testing.T) {
+	req, err := pnet.MakeExecuteStmtRequest(1, []any{1}, true)
+	require.NoError(t, err)
+	tests := []struct {
+		cmd     *cmd.Command
+		execErr error
+		sqlText string
+	}{
+		{
+			cmd: &cmd.Command{
+				Type:    pnet.ComStmtPrepare,
+				Payload: pnet.MakePrepareStmtRequest("select ?"),
+			},
+		},
+		{
+			cmd: &cmd.Command{
+				Type:    pnet.ComStmtExecute,
+				Payload: req,
+			},
+			sqlText: "select ?",
+		},
+		{
+			cmd: &cmd.Command{
+				Type:    pnet.ComQuery,
+				Payload: pnet.MakeQueryPacket("select 1"),
+			},
+			sqlText: "select 1",
+		},
+		{
+			cmd: &cmd.Command{
+				Type:    pnet.ComQuery,
+				Payload: pnet.MakeQueryPacket("select 2"),
+			},
+			execErr: errors.New("execution failed"),
+			sqlText: "select 2",
+		},
+	}
+
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 1)
+	stats := &ReplayStats{}
+	conn := NewConn(zap.NewNop(), ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 555,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+
+	var wg waitgroup.WaitGroup
+	childCtx, cancel := context.WithCancel(context.Background())
+	wg.RunWithRecover(func() {
+		conn.Run(childCtx)
+	}, nil, zap.NewNop())
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	for i, test := range tests {
+		backendConn.setExecErr(test.execErr)
+		conn.ExecuteCmd(test.cmd)
+		execInfo := <-execInfoCh
+		switch test.cmd.Type {
+		case pnet.ComStmtExecute:
+			require.Equal(t, test.sqlText, execInfo.Command.PreparedStmt, "case %d", i)
+		case pnet.ComQuery:
+			require.Equal(t, test.sqlText, hack.String(test.cmd.Payload[1:]), "case %d", i)
+		}
 	}
 }

@@ -504,6 +504,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 				CapturedPsID: stmtID,
 				Type:         pnet.ComStmtPrepare,
 				StmtType:     kvs[auditPluginKeyStmtType],
+				PreparedStmt: sql,
 				Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, hack.Slice(sql)...),
 			})
 		}
@@ -517,6 +518,8 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 			CapturedPsID: stmtID,
 			Type:         pnet.ComStmtExecute,
 			StmtType:     kvs[auditPluginKeyStmtType],
+			PreparedStmt: sql,
+			Params:       args,
 			Payload:      executeReq,
 		})
 
@@ -527,6 +530,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 				CapturedPsID: stmtID,
 				Type:         pnet.ComStmtClose,
 				StmtType:     kvs[auditPluginKeyStmtType],
+				PreparedStmt: sql,
 				Payload:      pnet.MakeCloseStmtRequest(stmtID),
 			})
 		}
