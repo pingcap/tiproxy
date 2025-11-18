@@ -182,9 +182,8 @@ func (c *conn) Run(ctx context.Context) {
 			// If the backend is upgrading, the connections may drop but the QPS should not drop too much.
 			if !connected {
 				if err := c.backendConn.Connect(ctx, command.Value.CurDB); err != nil {
-					c.lg.Debug("failed to connect backend", zap.String("db", command.Value.CurDB), zap.Error(err))
-					c.replayStats.ExceptionCmds.Add(1)
-					c.exceptionCh <- NewOtherException(err, c.upstreamConnID)
+					c.lg.Info("failed to connect backend", zap.String("db", command.Value.CurDB), zap.Error(err))
+					c.onDisconnected(err)
 					continue
 				}
 				connected = true
@@ -201,32 +200,32 @@ func (c *conn) Run(ctx context.Context) {
 				}
 				curDB = command.Value.CurDB
 			}
-			if !c.updateExecuteStmt(command.Value) {
+			// update psID, SQL, and params for the command.
+			if err := c.updateExecuteStmt(command.Value); err != nil {
 				c.replayStats.ExceptionCmds.Add(1)
-				c.exceptionCh <- NewFailException(errors.Errorf("prepared statement ID %d not found", command.Value.CapturedPsID), command.Value)
+				c.exceptionCh <- NewFailException(err, command.Value)
 				continue
 			}
 			startTime := time.Now()
-			if resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload); resp.Err != nil {
+			resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload)
+			latency := time.Since(startTime)
+			if resp.Err != nil {
 				if errors.Is(resp.Err, backend.ErrClosing) || pnet.IsDisconnectError(resp.Err) {
-					c.replayStats.ExceptionCmds.Add(1)
-					c.exceptionCh <- NewOtherException(resp.Err, c.upstreamConnID)
-					c.lg.Debug("backend connection disconnected", zap.Error(resp.Err))
+					c.onDisconnected(resp.Err)
+					c.lg.Info("backend connection disconnected", zap.Error(resp.Err))
 					connected = false
 					curDB = ""
 					continue
 				}
-				if c.updateCmdForExecuteStmt(command.Value) {
-					c.replayStats.ExceptionCmds.Add(1)
-					c.exceptionCh <- NewFailException(resp.Err, command.Value)
-				}
+				c.replayStats.ExceptionCmds.Add(1)
+				c.exceptionCh <- NewFailException(resp.Err, command.Value)
 			} else {
 				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
 			}
 			c.execInfoCh <- ExecInfo{
 				Command:   command.Value,
 				StartTime: startTime,
-				CostTime:  time.Since(startTime),
+				CostTime:  latency,
 			}
 			c.replayStats.ReplayedCmds.Add(1)
 		}
@@ -252,34 +251,6 @@ func (c *conn) isReadOnly(command *cmd.Command) bool {
 	// The problem is that it still requires write privilege. Better solutions are much more complex:
 	// - Replace all prepared DML statements with `SELECT 1`, including ComStmtPrepare and `SET SESSION_STATES`.
 	// - Remove all prepared DML statements and map catpure prepared stmt ID to replay prepared stmt ID, including ComStmtPrepare and `SET SESSION_STATES`.
-	return true
-}
-
-// update the params and sql text for the ComStmtExecute for recording errors.
-func (c *conn) updateCmdForExecuteStmt(command *cmd.Command) bool {
-	// updated before
-	if command.PreparedStmt != "" {
-		return true
-	}
-	switch command.Type {
-	case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
-		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-		ps := c.preparedStmts[stmtID]
-		if len(ps.text) == 0 {
-			// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
-			return false
-		}
-		if command.Type == pnet.ComStmtExecute {
-			_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, ps.paramNum, ps.paramTypes)
-			if err != nil {
-				// Failing to parse the request is not critical, so don't return false.
-				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.String("sql", ps.text),
-					zap.Int("param_num", ps.paramNum), zap.ByteString("param_types", ps.paramTypes), zap.Error(err))
-			}
-			command.Params = args
-		}
-		command.PreparedStmt = ps.text
-	}
 	return true
 }
 
@@ -311,9 +282,8 @@ func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp Exe
 		delete(c.preparedStmts, stmtID)
 		delete(c.psIDMapping, capturedPsID)
 	case pnet.ComChangeUser.Byte(), pnet.ComResetConnection.Byte():
-		for stmtID := range c.preparedStmts {
-			delete(c.preparedStmts, stmtID)
-		}
+		clear(c.preparedStmts)
+		clear(c.psIDMapping)
 	case pnet.ComQuery.Byte():
 		if len(request[1:]) > len(setSessionStates) && strings.EqualFold(hack.String(request[1:len(setSessionStates)+1]), setSessionStates) {
 			query := request[len(setSessionStates)+1:]
@@ -332,23 +302,53 @@ func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp Exe
 	}
 }
 
-// Update the prepared statement ID in the EXECUTE/FETCH/RESET/SEND_LONG_DATA/CLOSE command.
+// Update the prepared statement ID and SQL text in the EXECUTE/FETCH/RESET/SEND_LONG_DATA/CLOSE command.
 // If the prepared statement is not found, maybe the previous PREPARE failed or the connection
-// is reconnected after disconnection, so return false and do not continue.
-func (c *conn) updateExecuteStmt(command *cmd.Command) bool {
-	// Native traffic replay doesn't set the CapturedPsID yet.
-	if command.CapturedPsID == 0 {
-		return true
-	}
+// is reconnected after disconnection, so return error and do not continue.
+func (c *conn) updateExecuteStmt(command *cmd.Command) error {
 	switch command.Type {
 	case pnet.ComStmtExecute, pnet.ComStmtFetch, pnet.ComStmtClose, pnet.ComStmtReset, pnet.ComStmtSendLongData:
-		replayID, ok := c.psIDMapping[command.CapturedPsID]
-		if !ok {
-			return false
-		}
-		binary.LittleEndian.PutUint32(command.Payload[1:], replayID)
+	default:
+		return nil
 	}
-	return true
+
+	var replayPsID uint32
+	if command.CapturedPsID != 0 {
+		var ok bool
+		if replayPsID, ok = c.psIDMapping[command.CapturedPsID]; !ok {
+			// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
+			return errors.Errorf("prepared statement ID %d not found", command.CapturedPsID)
+		}
+		binary.LittleEndian.PutUint32(command.Payload[1:], replayPsID)
+	} else {
+		// Native traffic replay doesn't set the CapturedPsID yet.
+		replayPsID = binary.LittleEndian.Uint32(command.Payload[1:5])
+	}
+
+	ps := c.preparedStmts[replayPsID]
+	if len(ps.text) == 0 {
+		return errors.Errorf("prepared statement text is empty. capturePsID: %d, replayPsID: %d", command.CapturedPsID, replayPsID)
+	}
+	// Actually the PreparedStmt and Params are already set for audit-log based replay.
+	command.PreparedStmt = ps.text
+	if command.Type == pnet.ComStmtExecute && command.Params == nil {
+		// Native capture only contains the binary request. We may need the args to report errors.
+		_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, ps.paramNum, ps.paramTypes)
+		if err != nil {
+			// Failing to parse the request is not critical, so don't return false.
+			c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("replay_stmt_id", replayPsID), zap.String("sql", ps.text),
+				zap.Int("param_num", ps.paramNum), zap.ByteString("param_types", ps.paramTypes), zap.Error(err))
+		}
+		command.Params = args
+	}
+	return nil
+}
+
+func (c *conn) onDisconnected(err error) {
+	c.replayStats.ExceptionCmds.Add(1)
+	c.exceptionCh <- NewOtherException(err, c.upstreamConnID)
+	clear(c.psIDMapping)
+	clear(c.preparedStmts)
 }
 
 // ExecuteCmd executes a command asynchronously by adding it to the list.
