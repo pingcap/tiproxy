@@ -12,6 +12,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
+	"go.uber.org/zap"
 )
 
 const (
@@ -35,10 +36,10 @@ type CmdEncoder interface {
 	Encode(c *Command, writer *bytes.Buffer) error
 }
 
-func NewCmdDecoder(format string) CmdDecoder {
+func NewCmdDecoder(format string, dedup *DeDup, lg *zap.Logger) CmdDecoder {
 	switch format {
 	case FormatAuditLogPlugin:
-		return NewAuditLogPluginDecoder()
+		return NewAuditLogPluginDecoder(dedup, lg)
 	default:
 		return NewNativeDecoder()
 	}
@@ -71,9 +72,10 @@ type Command struct {
 	FileName string
 	Line     int
 	// Logged only in audit log.
-	StmtType string
-	EndTs    time.Time
-	Content  string
+	StmtType  string
+	EndTs     time.Time
+	Content   string
+	RawParams string
 	// Logged only in native log.
 	Success bool
 }

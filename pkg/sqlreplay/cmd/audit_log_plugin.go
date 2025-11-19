@@ -6,12 +6,14 @@ package cmd
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
+	"go.uber.org/zap"
 )
 
 const (
@@ -40,6 +42,23 @@ const (
 	timeLayout = "2006/01/02 15:04:05.999 -07:00"
 )
 
+type DupItem struct {
+	Times      int
+	MinOverlap time.Duration
+	Cost       time.Duration
+}
+
+type DeDup struct {
+	sync.Mutex
+	Items map[string]DupItem
+}
+
+func NewDeDup() *DeDup {
+	return &DeDup{
+		Items: make(map[string]DupItem),
+	}
+}
+
 type auditLogPluginConnCtx struct {
 	connID   uint64
 	lastPsID uint32
@@ -49,13 +68,16 @@ type auditLogPluginConnCtx struct {
 	// preparedStmtSql contains the prepared statement SQLs, only used for `ps-close=never`.
 	// It doesn't require the prepared statement IDs to be contained in the audit logs.
 	preparedStmtSql map[string]uint32
+	lastCmd         *Command
 }
 
-func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
+func NewAuditLogPluginDecoder(dedup *DeDup, lg *zap.Logger) *AuditLogPluginDecoder {
 	return &AuditLogPluginDecoder{
 		connInfo:        make(map[uint64]auditLogPluginConnCtx),
 		kvs:             make(map[string]string, 25),
 		psCloseStrategy: PSCloseStrategyDirected,
+		dedup:           dedup,
+		lg:              lg,
 	}
 }
 
@@ -86,7 +108,9 @@ type AuditLogPluginDecoder struct {
 
 	// kvs is a reusable map to avoid too many allocations to store the KV
 	// for each line.
-	kvs map[string]string
+	kvs   map[string]string
+	dedup *DeDup
+	lg    *zap.Logger
 }
 
 // ConnIDAllocator allocates connection IDs for new connections.
@@ -169,7 +193,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		eventClass := kvs[auditPluginKeyClass]
 		switch eventClass {
 		case auditPluginClassGeneral, auditPluginClassTableAccess:
-			cmds, err = decoder.parseGeneralEvent(kvs, upstreamConnID)
+			cmds, err = decoder.parseGeneralEvent(kvs, hack.String(line), startTs, endTs, upstreamConnID)
 		case auditPluginClassConnect:
 			var c *Command
 			c, err = decoder.parseConnectEvent(kvs, upstreamConnID)
@@ -406,7 +430,7 @@ func parseSingleParam(value string) (any, error) {
 	return nil, errors.Errorf("unknown param type: %s", tpStr)
 }
 
-func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, connID uint64) ([]*Command, error) {
+func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, line string, startTs, endTs time.Time, connID uint64) ([]*Command, error) {
 	connInfo := decoder.connInfo[connID]
 	if connInfo.preparedStmt == nil {
 		connInfo.preparedStmt = make(map[uint32]struct{})
@@ -420,18 +444,66 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 	}
 
 	cmdStr := parseCommand(kvs[auditPluginKeyCommand])
-	cmds := make([]*Command, 0, 3)
-	switch cmdStr {
-	case "Query":
-		sql, err := parseSQL(kvs[auditPluginKeySQL])
+	stmtType := kvs[auditPluginKeyStmtType]
+
+	// deduplicate DML and SELECT FOR UPDATE
+	var sql string
+	if cmdStr == "Query" || cmdStr == "Execute" {
+		var err error
+		sql, err = parseSQL(kvs[auditPluginKeySQL])
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
+		if connInfo.lastCmd != nil && connInfo.lastCmd.EndTs.After(startTs.Add(time.Millisecond)) {
+			duplicate := false
+			if cmdStr == "Query" {
+				duplicate = hack.String(connInfo.lastCmd.Payload[1:]) == sql
+			} else {
+				duplicate = connInfo.lastCmd.PreparedStmt == sql && connInfo.lastCmd.RawParams == kvs[auditPluginKeyParams]
+			}
+			if duplicate {
+				switch stmtType {
+				case "Insert", "Update", "Delete", "Replace":
+					duplicate = true
+				case "Select":
+					duplicate = strings.Contains(strings.ToLower(sql), "for update")
+				default:
+					duplicate = false
+				}
+				if !duplicate {
+					decoder.lg.Info("unexpected duplication",
+						zap.String("last_line", connInfo.lastCmd.Content),
+						zap.String("this_line", line))
+				}
+			}
+
+			if duplicate {
+				decoder.dedup.Lock()
+				dedup := decoder.dedup.Items[stmtType]
+				dedup.Times++
+				dedup.Cost += endTs.Sub(startTs)
+				overlap := connInfo.lastCmd.EndTs.Sub(startTs)
+				if dedup.MinOverlap == 0 {
+					dedup.MinOverlap = overlap
+				} else if dedup.MinOverlap > overlap {
+					dedup.MinOverlap = overlap
+				}
+				decoder.dedup.Items[stmtType] = dedup
+				decoder.dedup.Unlock()
+				return nil, nil
+			}
+		}
+	}
+
+	cmds := make([]*Command, 0, 3)
+	switch cmdStr {
+	case "Query":
 		cmds = append(cmds, &Command{
 			Type:     pnet.ComQuery,
 			StmtType: kvs[auditPluginKeyStmtType],
 			Payload:  append([]byte{pnet.ComQuery.Byte()}, hack.Slice(sql)...),
 		})
+		connInfo.lastCmd = cmds[0]
 	case "Close stmt":
 		if decoder.psCloseStrategy != PSCloseStrategyDirected {
 			break
@@ -457,10 +529,6 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 		if !ok {
 			// the old format doesn't output params
 			break
-		}
-		sql, err := parseSQL(kvs[auditPluginKeySQL])
-		if err != nil {
-			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
 		args, err := parseExecuteParams(params)
 		if err != nil {
@@ -515,14 +583,16 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 		if err != nil {
 			return nil, errors.Wrapf(err, "make execute request failed")
 		}
-		cmds = append(cmds, &Command{
+		connInfo.lastCmd = &Command{
 			CapturedPsID: stmtID,
 			Type:         pnet.ComStmtExecute,
 			StmtType:     kvs[auditPluginKeyStmtType],
 			PreparedStmt: sql,
 			Params:       args,
+			RawParams:    kvs[auditPluginKeyParams],
 			Payload:      executeReq,
-		})
+		}
+		cmds = append(cmds, connInfo.lastCmd)
 
 		// Append CLOSE command if needed.
 		if decoder.psCloseStrategy == PSCloseStrategyAlways {
@@ -537,6 +607,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 		}
 		// Ignore Quit since disconnection is handled in parseConnectEvent.
 	}
+	decoder.connInfo[connID] = connInfo
 	return cmds, nil
 }
 

@@ -25,12 +25,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type Dedup struct {
-	Times      int
-	MinOverlap time.Duration
-	Cost       time.Duration
-}
-
 // ReplayStats record the statistics during replay. All connections share one ReplayStats and update it concurrently.
 type ReplayStats struct {
 	// ReplayedCmds is the number of executed commands.
@@ -53,10 +47,6 @@ type ReplayStats struct {
 	CurCmdEndTs atomic.Int64
 	// The number of exception commands.
 	ExceptionCmds atomic.Uint64
-	Mu            struct {
-		sync.Mutex
-		DuplicateCmds map[string]Dedup
-	}
 }
 
 func (s *ReplayStats) Reset() {
@@ -69,9 +59,6 @@ func (s *ReplayStats) Reset() {
 	s.FirstCmdTs.Store(0)
 	s.CurCmdTs.Store(0)
 	s.ExceptionCmds.Store(0)
-	s.Mu.Lock()
-	s.Mu.DuplicateCmds = make(map[string]Dedup)
-	s.Mu.Unlock()
 }
 
 type ExecInfo struct {
@@ -153,7 +140,6 @@ func (c *conn) Run(ctx context.Context) {
 	// cmdCh is closed when the replay is finished.
 	finished := false
 	connected := false
-	var lastCmd *cmd.Command
 	var curDB string
 	for !finished {
 		select {
@@ -219,48 +205,6 @@ func (c *conn) Run(ctx context.Context) {
 				c.replayStats.ExceptionCmds.Add(1)
 				c.exceptionCh <- NewFailException(err, command.Value)
 				continue
-			}
-
-			// deduplicate DML and SELECT FOR UPDATE
-			if command.Value.Type == pnet.ComQuery || command.Value.Type == pnet.ComStmtExecute {
-				if lastCmd != nil && lastCmd.EndTs.After(command.Value.StartTs.Add(time.Millisecond)) {
-					duplicate := false
-					sql := command.Value.PreparedStmt
-					if command.Value.Type == pnet.ComQuery {
-						sql = hack.String(command.Value.Payload[1:])
-					}
-					switch command.Value.StmtType {
-					case "Insert", "Update", "Delete", "Replace":
-						duplicate = true
-					case "Select":
-						duplicate = strings.Contains(strings.ToLower(sql), "for update")
-					default:
-						duplicate = false
-					}
-					if !duplicate {
-						c.lg.Info("unexpected duplication",
-							zap.String("last_file", lastCmd.FileName),
-							zap.Int("last_line", lastCmd.Line),
-							zap.String("cur_file", command.Value.FileName),
-							zap.Int("cur_line", command.Value.Line),
-							zap.String("sql", sql))
-					} else {
-						c.replayStats.Mu.Lock()
-						dedup := c.replayStats.Mu.DuplicateCmds[command.Value.StmtType]
-						dedup.Times++
-						dedup.Cost += command.Value.EndTs.Sub(command.Value.StartTs)
-						overlap := lastCmd.EndTs.Sub(command.Value.StartTs)
-						if dedup.MinOverlap == 0 {
-							dedup.MinOverlap = overlap
-						} else if dedup.MinOverlap > overlap {
-							dedup.MinOverlap = overlap
-						}
-						c.replayStats.Mu.DuplicateCmds[command.Value.StmtType] = dedup
-						c.replayStats.Mu.Unlock()
-						continue
-					}
-				}
-				lastCmd = command.Value
 			}
 
 			isHack := false

@@ -257,6 +257,7 @@ type replay struct {
 	meta             store.Meta
 	storages         []storage.ExternalStorage
 	replayStats      conn.ReplayStats
+	dedup            *cmd.DeDup
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
 	closeConnCh      chan uint64
@@ -306,6 +307,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.decodedCmds.Store(0)
 	r.err = nil
 	r.replayStats.Reset()
+	r.dedup = cmd.NewDeDup()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
 	r.execInfoCh = make(chan conn.ExecInfo, maxPendingExecInfo)
@@ -554,7 +556,7 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 		return nil, err
 	}
 
-	cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
+	cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format, r.dedup, r.lg)
 	// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
 	// the connection state is maintained in decoder. Filtering out commands here will make it'
 	// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
@@ -775,9 +777,9 @@ func (r *replay) reportLoop(ctx context.Context) {
 			decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			r.replayStats.Mu.Lock()
-			dedup, _ := json.Marshal(r.replayStats.Mu.DuplicateCmds)
-			r.replayStats.Mu.Unlock()
+			r.dedup.Lock()
+			dedup, _ := json.Marshal(r.dedup.Items)
+			r.dedup.Unlock()
 			r.lg.Info("replay progress", zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
 				zap.Int64("pending_cmds", r.replayStats.PendingCmds.Load()), // if too many, replay is slower than decode
 				zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
@@ -930,6 +932,9 @@ func (r *replay) stop(err error) {
 		r.lg.Warn("pending command count is not 0", zap.Int64("pending_cmds", pendingCmds))
 	}
 	decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
+	r.dedup.Lock()
+	dedup, _ := json.Marshal(r.dedup.Items)
+	r.dedup.Unlock()
 	fields := []zap.Field{
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
@@ -949,6 +954,7 @@ func (r *replay) stop(err error) {
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
+		zap.String("deplicated", hack.String(dedup)),
 	}
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
