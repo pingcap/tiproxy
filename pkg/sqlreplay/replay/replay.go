@@ -775,6 +775,9 @@ func (r *replay) reportLoop(ctx context.Context) {
 			decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
+			r.replayStats.Mu.Lock()
+			dedup, _ := json.Marshal(r.replayStats.Mu.DuplicateCmds)
+			r.replayStats.Mu.Unlock()
 			r.lg.Info("replay progress", zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
 				zap.Int64("pending_cmds", r.replayStats.PendingCmds.Load()), // if too many, replay is slower than decode
 				zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
@@ -787,7 +790,8 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Int("pending_exec_info", len(r.execInfoCh)),              // if too many, recording sql is slow
 				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 				zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)))
+				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)),
+				zap.String("deplicated", hack.String(dedup)))
 		}
 	}
 }
