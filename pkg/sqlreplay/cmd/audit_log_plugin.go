@@ -454,7 +454,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, l
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
-		if connInfo.lastCmd != nil && connInfo.lastCmd.EndTs.After(startTs.Add(time.Millisecond)) {
+		if connInfo.lastCmd != nil && connInfo.lastCmd.EndTs.After(startTs) && startTs.Sub(connInfo.lastCmd.StartTs) < time.Millisecond {
 			duplicate := false
 			if cmdStr == "Query" {
 				duplicate = hack.String(connInfo.lastCmd.Payload[1:]) == sql
