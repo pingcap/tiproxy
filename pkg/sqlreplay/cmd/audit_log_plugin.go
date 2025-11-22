@@ -456,15 +456,20 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, l
 		}
 		if connInfo.lastCmd != nil && connInfo.lastCmd.EndTs.After(startTs) && startTs.Sub(connInfo.lastCmd.StartTs) < time.Millisecond {
 			duplicate := false
-			if cmdStr == "Query" {
-				duplicate = hack.String(connInfo.lastCmd.Payload[1:]) == sql
-			} else {
-				duplicate = connInfo.lastCmd.PreparedStmt == sql && connInfo.lastCmd.RawParams == kvs[auditPluginKeyParams]
+			switch connInfo.lastCmd.StmtType {
+			case "Insert", "Update", "Delete", "Replace":
+				duplicate = true
+			case "Select":
+				duplicate = strings.Contains(strings.ToLower(sql), "for update")
 			}
 			if duplicate {
 				switch stmtType {
 				case "Insert", "Update", "Delete", "Replace":
-					duplicate = true
+					if cmdStr == "Query" {
+						duplicate = hack.String(connInfo.lastCmd.Payload[1:]) == sql
+					} else {
+						duplicate = connInfo.lastCmd.PreparedStmt == sql && connInfo.lastCmd.RawParams == kvs[auditPluginKeyParams]
+					}
 				case "Select":
 					duplicate = strings.Contains(strings.ToLower(sql), "for update")
 				default:
@@ -583,7 +588,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, l
 		if err != nil {
 			return nil, errors.Wrapf(err, "make execute request failed")
 		}
-		connInfo.lastCmd = &Command{
+		cmds = append(cmds, &Command{
 			CapturedPsID: stmtID,
 			Type:         pnet.ComStmtExecute,
 			StmtType:     kvs[auditPluginKeyStmtType],
@@ -591,8 +596,8 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, l
 			Params:       args,
 			RawParams:    kvs[auditPluginKeyParams],
 			Payload:      executeReq,
-		}
-		cmds = append(cmds, connInfo.lastCmd)
+		})
+		connInfo.lastCmd = cmds[len(cmds)-1]
 
 		// Append CLOSE command if needed.
 		if decoder.psCloseStrategy == PSCloseStrategyAlways {

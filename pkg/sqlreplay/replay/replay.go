@@ -793,7 +793,7 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 				zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
 				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)),
-				zap.String("deplicated", hack.String(dedup)))
+				zap.String("duplicated", hack.String(dedup)))
 		}
 	}
 }
