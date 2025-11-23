@@ -120,6 +120,8 @@ type ReplayConfig struct {
 	ReplayerIndex uint64
 	// OutputPath is the path to output replayed sql.
 	OutputPath string
+	// Addr is the downstream address to connect to
+	Addr string
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
