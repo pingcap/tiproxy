@@ -31,7 +31,7 @@ func createServer(t *testing.T) (*Server, doHTTPFunc) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	ready := atomic.NewBool(true)
 	cfgmgr := mgrcfg.NewConfigManager()
-	require.NoError(t, cfgmgr.Init(context.Background(), lg, "", ""))
+	require.NoError(t, cfgmgr.Init(context.Background(), "", ""))
 	crtmgr := mgrcrt.NewCertManager()
 	require.NoError(t, crtmgr.Init(cfgmgr.GetConfig(), lg, cfgmgr.WatchConfig()))
 	nsMgr := newMockNamespaceManager()

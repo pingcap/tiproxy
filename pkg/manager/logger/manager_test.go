@@ -60,13 +60,15 @@ func TestUpdateCfg(t *testing.T) {
 		},
 		{
 			updateCfg: func(cfg *config.LogOnline) {
+				// Filter the logs in LoggerManager.watchCfg().
+				cfg.Level = "warn"
 				cfg.LogFile.MaxSize = 3
 				cfg.LogFile.MaxBackups = 5
 			},
 			action: func(log *zap.Logger) {
 				for range 5 {
 					msg := strings.Repeat("a", 500*1024)
-					log.Info(msg)
+					log.Warn(msg)
 				}
 			},
 			check: func(files []os.FileInfo) bool {
@@ -103,10 +105,15 @@ func TestUpdateCfg(t *testing.T) {
 		},
 	}
 
-	lg, ch := setupLogManager(t, cfg)
-	// Make sure the latest config also applies to cloned loggers.
-	lg = lg.Named("another").With(zap.String("field", "test_field"))
 	for i, test := range tests {
+		require.NoError(t, os.RemoveAll(dir))
+
+		lm, lg, err := NewLoggerManager(&cfg.Log)
+		require.NoError(t, err)
+		ch := make(chan *config.Config)
+		lm.Init(ch)
+		// Make sure the latest config also applies to cloned loggers.
+		lg = lg.Named("another").With(zap.String("field", "test_field"))
 		require.NoError(t, lg.Sync())
 
 		clonedCfg := cfg.Clone()
@@ -116,10 +123,6 @@ func TestUpdateCfg(t *testing.T) {
 		// 2rd will block due to watch channel of size 1
 		// this ensured all old data are flushed by closing the older file logger
 		ch <- clonedCfg
-
-		// delete old data after flushed
-		err := os.RemoveAll(dir)
-		require.NoError(t, err)
 
 		// write new data
 		test.action(lg)
@@ -148,6 +151,7 @@ func TestUpdateCfg(t *testing.T) {
 			}
 		}
 		timer.Stop()
+		require.NoError(t, lm.Close())
 	}
 }
 
