@@ -257,6 +257,7 @@ type replay struct {
 	meta             store.Meta
 	storages         []storage.ExternalStorage
 	replayStats      conn.ReplayStats
+	dedup            *cmd.DeDup
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
 	closeConnCh      chan uint64
@@ -306,6 +307,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.decodedCmds.Store(0)
 	r.err = nil
 	r.replayStats.Reset()
+	r.dedup = cmd.NewDeDup()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
 	r.execInfoCh = make(chan conn.ExecInfo, maxPendingExecInfo)
@@ -554,7 +556,7 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 		return nil, err
 	}
 
-	cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
+	cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format, r.dedup, r.lg)
 	// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
 	// the connection state is maintained in decoder. Filtering out commands here will make it'
 	// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
@@ -772,22 +774,14 @@ func (r *replay) reportLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			r.lg.Info("replay progress", zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
+			fields := append(r.commonFields(), []zap.Field{
 				zap.Int64("pending_cmds", r.replayStats.PendingCmds.Load()), // if too many, replay is slower than decode
-				zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
-				zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
-				zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
-				zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
-				zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
-				zap.Duration("replay_elapsed", time.Since(r.startTime)),
-				zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
-				zap.Int("pending_exec_info", len(r.execInfoCh)),              // if too many, recording sql is slow
-				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
-				zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)))
+				zap.Int("pending_exec_info", len(r.execInfoCh)),             // if too many, recording sql is slow
+				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)),
+			}...)
+			r.lg.Info("replay progress", fields...)
 		}
 	}
 }
@@ -925,8 +919,8 @@ func (r *replay) stop(err error) {
 	if pendingCmds != 0 {
 		r.lg.Warn("pending command count is not 0", zap.Int64("pending_cmds", pendingCmds))
 	}
-	decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
-	fields := []zap.Field{
+	commonFields := r.commonFields()
+	fields := append(commonFields, []zap.Field{
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
 		zap.Time("command_start_time", r.cfg.CommandStartTime),
@@ -936,16 +930,7 @@ func (r *replay) stop(err error) {
 		zap.Bool("ignore_errs", r.cfg.IgnoreErrs),
 		zap.Float64("speed", r.cfg.Speed),
 		zap.Bool("read_only", r.cfg.ReadOnly),
-		zap.Uint64("decoded_cmds", decodedCmds),
-		zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
-		zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
-		zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
-		zap.Duration("replay_elapsed", time.Since(r.startTime)),
-		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
-		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
-		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
-		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-	}
+	}...)
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
 		fields = append(fields, zap.Uint64("captured_cmds", r.meta.Cmds))
@@ -968,6 +953,26 @@ func (r *replay) stop(err error) {
 			s.Close()
 		}
 		r.storages = nil
+	}
+}
+
+func (r *replay) commonFields() []zap.Field {
+	decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
+	r.dedup.Lock()
+	dedup, _ := json.Marshal(r.dedup.Items)
+	r.dedup.Unlock()
+	return []zap.Field{
+		zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
+		zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
+		zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
+		zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
+		zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
+		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
+		zap.Duration("replay_elapsed", time.Since(r.startTime)),
+		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
+		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
+		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
+		zap.String("duplicated", hack.String(dedup)),
 	}
 }
 
