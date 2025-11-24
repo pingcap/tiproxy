@@ -238,7 +238,14 @@ func (cfg *ReplayConfig) LoadFromCheckpoint() error {
 	decoder := json.NewDecoder(file)
 	var state replayCheckpoint
 	if err := decoder.Decode(&state); err != nil {
-		return errors.Wrapf(err, "failed to decode checkpoint file %s", cfg.CheckPointFilePath)
+		// Allow empty file.
+		stat, err2 := file.Stat()
+		if err2 != nil {
+			return errors.Wrapf(err, "failed to stat checkpoint file %s", cfg.CheckPointFilePath)
+		}
+		if stat.Size() != 0 {
+			return errors.Wrapf(err, "failed to decode checkpoint file %s", cfg.CheckPointFilePath)
+		}
 	}
 
 	if state.CurCmdTs > 0 {
