@@ -595,7 +595,7 @@ func (decoder *AuditLogPluginDecoder) isDuplicatedWrite(lastCmd *Command, kvs ma
 	if lastCmd == nil {
 		return false
 	}
-	// Is the time overlap?
+	// Does the time overlap?
 	if lastCmd.EndTs.Before(startTs) || startTs.Sub(lastCmd.StartTs) > time.Millisecond {
 		return false
 	}
