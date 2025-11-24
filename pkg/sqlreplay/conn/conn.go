@@ -206,17 +206,6 @@ func (c *conn) Run(ctx context.Context) {
 				c.exceptionCh <- NewFailException(err, command.Value)
 				continue
 			}
-
-			isHack := false
-			if command.Value.Type == pnet.ComStmtExecute && command.Value.StmtType == "Insert" &&
-				command.Value.Digest() == "02b6af97af96a5b8cc8b41dbdb506dce163b56fbac2163cc2d11e9942c11063d" {
-				beginResp := c.backendConn.ExecuteCmd(ctx, pnet.MakeQueryPacket("BEGIN PESSIMISTIC"))
-				if beginResp.Err != nil {
-					c.lg.Info("failed to add BEGIN PESSIMISTIC", zap.Error(beginResp.Err))
-				}
-				isHack = beginResp.Err == nil
-			}
-
 			startTime := time.Now()
 			resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload)
 			latency := time.Since(startTime)
@@ -237,10 +226,6 @@ func (c *conn) Run(ctx context.Context) {
 				Command:   command.Value,
 				StartTime: startTime,
 				CostTime:  latency,
-			}
-
-			if isHack {
-				c.backendConn.ExecuteCmd(ctx, pnet.MakeQueryPacket("COMMIT"))
 			}
 			c.replayStats.ReplayedCmds.Add(1)
 		}
