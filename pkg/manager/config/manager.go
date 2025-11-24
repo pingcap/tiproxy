@@ -5,6 +5,8 @@ package config
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -12,7 +14,6 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/tidwall/btree"
-	"go.uber.org/zap"
 )
 
 const (
@@ -24,9 +25,7 @@ const (
 	checkFileInterval = 2 * time.Second
 )
 
-var (
-	ErrNoResults = errors.Errorf("has no results")
-)
+var ErrNoResults = errors.Errorf("has no results")
 
 type KVValue struct {
 	Key   string
@@ -36,7 +35,6 @@ type KVValue struct {
 type ConfigManager struct {
 	wg            waitgroup.WaitGroup
 	cancel        context.CancelFunc
-	logger        *zap.Logger
 	advertiseAddr string
 
 	kv *btree.BTreeG[KVValue]
@@ -58,11 +56,10 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
-func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, advertiseAddr string) error {
+func (e *ConfigManager) Init(ctx context.Context, configFile string, advertiseAddr string) error {
 	var nctx context.Context
 	nctx, e.cancel = context.WithCancel(ctx)
 
-	e.logger = logger
 	e.advertiseAddr = advertiseAddr
 
 	// for namespace persistence
@@ -89,11 +86,11 @@ func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile
 					return
 				case <-ticker.C:
 					if err := e.reloadConfigFile(configFile); err != nil {
-						e.logger.Warn("failed to reload file", zap.String("file", configFile), zap.Error(err))
+						fmt.Fprintf(os.Stderr, "failed to reload file %s: %v", configFile, err)
 					}
 				}
 			}
-		}, nil, e.logger)
+		}, nil, nil)
 	} else {
 		if err := e.SetTOMLConfig(nil); err != nil {
 			return err
