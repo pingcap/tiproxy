@@ -58,13 +58,14 @@ func main() {
 	replayerIndex := rootCmd.PersistentFlags().Uint64("replayer-index", 0, "the index of this replayer instance. Used only when dynamic-input is enabled.")
 	outputPath := rootCmd.PersistentFlags().String("output-path", "", "the file path to store replayed sql. Empty indicates do not output replayed sql.")
 	serviceMode := rootCmd.PersistentFlags().Bool("service-mode", false, "run replayer in service mode")
+	logLevel := rootCmd.PersistentFlags().String("log-level", "info", "the log level: debug, info, warn, error, dpanic, panic, fatal")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
 		cfg := &config.Config{
 			Log: config.Log{
 				LogOnline: config.LogOnline{
-					Level:   "info",
+					Level:   *logLevel,
 					LogFile: config.LogFile{Filename: *logFile},
 				},
 			},
