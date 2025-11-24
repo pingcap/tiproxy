@@ -50,7 +50,7 @@ func TestEncode(t *testing.T) {
 	}
 
 	mr := mockReader{data: buf.Bytes()}
-	decoder := NewCmdDecoder(FormatNative)
+	decoder := NewNativeDecoder()
 	for i := range tests {
 		cmd := cmds[i]
 		newCmd, err := decoder.Decode(&mr)
@@ -121,7 +121,7 @@ select 1
 
 	for _, test := range tests {
 		mr := mockReader{data: []byte(test)}
-		decoder := NewCmdDecoder(FormatNative)
+		decoder := NewNativeDecoder()
 		_, err := decoder.Decode(&mr)
 		require.Error(t, err, test)
 	}
@@ -157,7 +157,7 @@ select 2
 
 	commandStartTime := time.Date(2024, 8, 28, 18, 51, 21, 0, time.FixedZone("", 8*3600+600))
 	for i, test := range tests {
-		decoder := NewCmdDecoder(FormatNative)
+		decoder := NewNativeDecoder()
 		decoder.SetCommandStartTime(commandStartTime)
 		mr := mockReader{data: []byte(test.lines), filename: "my/file"}
 		for j, cmd := range test.cmds {

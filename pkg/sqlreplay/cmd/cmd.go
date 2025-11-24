@@ -72,10 +72,9 @@ type Command struct {
 	FileName string
 	Line     int
 	// Logged only in audit log.
-	StmtType  string
-	EndTs     time.Time
-	Content   string
-	RawParams string
+	StmtType string
+	EndTs    time.Time
+	kvs      map[string]string
 	// Logged only in native log.
 	Success bool
 }

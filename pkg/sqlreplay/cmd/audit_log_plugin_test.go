@@ -10,6 +10,7 @@ import (
 
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestSkipQuotes(t *testing.T) {
@@ -656,19 +657,10 @@ func TestDecodeSingleLine(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		decoder := NewAuditLogPluginDecoder()
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
 		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
 		mr := mockReader{data: append([]byte(test.line), '\n'), filename: "my/file"}
-		cmds := make([]*Command, 0, 4)
-		var err error
-		for {
-			var cmd *Command
-			cmd, err = decoder.Decode(&mr)
-			if cmd == nil {
-				break
-			}
-			cmds = append(cmds, cmd)
-		}
+		cmds, err := decodeCmds(decoder, &mr)
 		require.Error(t, err, "case %d", i)
 		if len(test.errMsg) > 0 {
 			require.ErrorContains(t, err, test.errMsg, "case %d", i)
@@ -896,17 +888,12 @@ func TestDecodeMultiLines(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		decoder := NewAuditLogPluginDecoder()
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
 		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
 		mr := mockReader{data: append([]byte(test.lines), '\n'), filename: "my/file"}
-		cmds := make([]*Command, 0, len(test.cmds))
-		for {
-			cmd, err := decoder.Decode(&mr)
-			if err != nil {
-				require.ErrorContains(t, err, "EOF", "case %d", i)
-				break
-			}
-			cmds = append(cmds, cmd)
+		cmds, err := decodeCmds(decoder, &mr)
+		if err != nil {
+			require.ErrorContains(t, err, "EOF", "case %d", i)
 		}
 		for _, cmd := range test.cmds {
 			cmd.FileName = "my/file"
@@ -964,25 +951,20 @@ func TestDecodeAuditLogWithCommandStartTime(t *testing.T) {
 
 	commandStartTime := time.Date(2025, 9, 14, 16, 16, 53, 0, time.FixedZone("", 8*3600+600))
 	for i, test := range tests {
-		decoder := NewAuditLogPluginDecoder()
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
 		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
 		decoder.SetCommandStartTime(commandStartTime)
 		mr := mockReader{data: append([]byte(test.lines), '\n')}
-		cmds := make([]*Command, 0, len(test.cmds))
-		for {
-			cmd, err := decoder.Decode(&mr)
-			if err != nil {
-				require.ErrorContains(t, err, "EOF", "case %d", i)
-				break
-			}
-			cmds = append(cmds, cmd)
+		cmds, err := decodeCmds(decoder, &mr)
+		if err != nil {
+			require.ErrorContains(t, err, "EOF", "case %d", i)
 		}
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
 }
 
 func BenchmarkAuditLogPluginDecoder(b *testing.B) {
-	decoder := NewAuditLogPluginDecoder()
+	decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
 	decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
 	reader := &endlessReader{
 		line: `[2025/09/14 16:16:31.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/14 16:16:53.720 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=b] [EVENT=COMPLETED]`,
@@ -1201,19 +1183,10 @@ func TestDecodeAuditLogInDirectedMode(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		decoder := NewAuditLogPluginDecoder()
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
 		decoder.SetPSCloseStrategy(PSCloseStrategyDirected)
 		mr := mockReader{data: append([]byte(test.lines), '\n')}
-		cmds := make([]*Command, 0, 4)
-		var err error
-		for {
-			var cmd *Command
-			cmd, err = decoder.Decode(&mr)
-			if cmd == nil {
-				break
-			}
-			cmds = append(cmds, cmd)
-		}
+		cmds, err := decodeCmds(decoder, &mr)
 		require.Error(t, err, "case %d", i)
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
@@ -1277,19 +1250,10 @@ func TestDecodeAuditLogInNeverMode(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		decoder := NewAuditLogPluginDecoder()
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
 		decoder.SetPSCloseStrategy(PSCloseStrategyNever)
 		mr := mockReader{data: append([]byte(test.lines), '\n')}
-		cmds := make([]*Command, 0, 4)
-		var err error
-		for {
-			var cmd *Command
-			cmd, err = decoder.Decode(&mr)
-			if cmd == nil {
-				break
-			}
-			cmds = append(cmds, cmd)
-		}
+		cmds, err := decodeCmds(decoder, &mr)
 		require.Error(t, err, "case %d", i)
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
@@ -1455,20 +1419,15 @@ func TestAuditLogDecoderWithIDAllocator(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		decoder := NewAuditLogPluginDecoder()
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
 		alloc, err := NewConnIDAllocator(test.decoderID)
 		require.NoError(t, err)
 		decoder.SetIDAllocator(alloc)
 
 		mr := mockReader{data: append([]byte(test.lines), '\n')}
-		cmds := make([]*Command, 0, len(test.cmds))
-		for {
-			cmd, err := decoder.Decode(&mr)
-			if err != nil {
-				require.ErrorContains(t, err, "EOF", "case %d", i)
-				break
-			}
-			cmds = append(cmds, cmd)
+		cmds, err := decodeCmds(decoder, &mr)
+		if err != nil {
+			require.ErrorContains(t, err, "EOF", "case %d", i)
 		}
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 
@@ -1542,7 +1501,7 @@ func TestDecoderCommandEndTimeFiltering(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			auditDecoder := NewAuditLogPluginDecoder()
+			auditDecoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
 			if len(tt.startTime) > 0 {
 				startTime, err := time.Parse(timeLayout, tt.startTime)
 				require.NoError(t, err)
@@ -1568,4 +1527,133 @@ func TestDecoderCommandEndTimeFiltering(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDeduplicateCommands(t *testing.T) {
+	tests := []struct {
+		lines      string
+		cmdTypes   []pnet.Command
+		duplicated bool
+	}{
+		{
+			// duplicated insert
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(?)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+		[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.714 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=100000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(?)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmdTypes: []pnet.Command{
+				pnet.ComStmtPrepare,
+				pnet.ComStmtExecute,
+				pnet.ComStmtClose,
+			},
+			duplicated: true,
+		},
+		{
+			// duplicated select for update
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT * FROM sbtest1 WHERE id = ? FOR UPDATE"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+		[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.714 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Select] [STATUS_CODE=0] [COST_TIME=100000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="SELECT * FROM sbtest1 WHERE id = ? FOR UPDATE"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmdTypes: []pnet.Command{
+				pnet.ComStmtPrepare,
+				pnet.ComStmtExecute,
+				pnet.ComStmtClose,
+			},
+			duplicated: true,
+		},
+		{
+			// duplicated insert using Query
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(1)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+		[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.714 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=100000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(1)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmdTypes: []pnet.Command{
+				pnet.ComQuery,
+			},
+			duplicated: true,
+		},
+		{
+			// time is overlapped but the sql is different
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(?)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+		[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.714 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=100000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest2]"] [SQL_TEXT="INSERT INTO sbtest2 VALUES(?)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmdTypes: []pnet.Command{
+				pnet.ComStmtPrepare,
+				pnet.ComStmtExecute,
+				pnet.ComStmtClose,
+				pnet.ComStmtPrepare,
+				pnet.ComStmtExecute,
+				pnet.ComStmtClose,
+			},
+		},
+		{
+			// time is overlapped but the params are different
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(?)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.714 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=100000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(?)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[\"KindInt64 503785\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmdTypes: []pnet.Command{
+				pnet.ComStmtPrepare,
+				pnet.ComStmtExecute,
+				pnet.ComStmtClose,
+				pnet.ComStmtPrepare,
+				pnet.ComStmtExecute,
+				pnet.ComStmtClose,
+			},
+		},
+		{
+			// time is overlapped but the sql is different
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(1)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.714 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=100000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest2]"] [SQL_TEXT="INSERT INTO sbtest2 VALUES(1)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmdTypes: []pnet.Command{
+				pnet.ComQuery,
+				pnet.ComQuery,
+			},
+		},
+		{
+			// same is sql but time is not overlapped
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(?)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+		[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.814 +08:10] [EVENT_CLASS=TABLE_ACCESS] [EVENT_SUBCLASS=Insert] [STATUS_CODE=0] [COST_TIME=100000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[sbtest1]"] [SQL_TEXT="INSERT INTO sbtest1 VALUES(?)"] [ROWS=1] [CONNECTION_ID=3807050215081378201] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Execute] [SQL_STATEMENTS=Insert] [EXECUTE_PARAMS="[\"KindInt64 503784\"]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			cmdTypes: []pnet.Command{
+				pnet.ComStmtPrepare,
+				pnet.ComStmtExecute,
+				pnet.ComStmtClose,
+				pnet.ComStmtPrepare,
+				pnet.ComStmtExecute,
+				pnet.ComStmtClose,
+			},
+		},
+	}
+
+	for i, test := range tests {
+		dedup := NewDeDup()
+		decoder := NewAuditLogPluginDecoder(dedup, zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		mr := mockReader{data: append([]byte(test.lines), '\n')}
+		cmds := make([]*Command, 0, 4)
+		for {
+			cmd, err := decoder.Decode(&mr)
+			if cmd == nil {
+				require.ErrorIs(t, err, io.EOF, "case %d", i)
+				break
+			}
+			cmds = append(cmds, cmd)
+		}
+		require.Equal(t, len(test.cmdTypes), len(cmds), "case %d", i)
+		for j, cmd := range cmds {
+			require.Equal(t, test.cmdTypes[j], cmd.Type, "case %d", i)
+		}
+		if test.duplicated {
+			require.NotEmpty(t, dedup.Items, "case %d", i)
+		} else {
+			require.Empty(t, dedup.Items, "case %d", i)
+		}
+	}
+}
+
+func decodeCmds(decoder CmdDecoder, reader LineReader) ([]*Command, error) {
+	cmds := make([]*Command, 0, 4)
+	var err error
+	for {
+		var cmd *Command
+		cmd, err = decoder.Decode(reader)
+		if cmd == nil {
+			break
+		}
+		// do not compare kvs
+		cmd.kvs = nil
+		cmds = append(cmds, cmd)
+	}
+	return cmds, err
 }

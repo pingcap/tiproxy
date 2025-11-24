@@ -74,7 +74,6 @@ type auditLogPluginConnCtx struct {
 func NewAuditLogPluginDecoder(dedup *DeDup, lg *zap.Logger) *AuditLogPluginDecoder {
 	return &AuditLogPluginDecoder{
 		connInfo:        make(map[uint64]auditLogPluginConnCtx),
-		kvs:             make(map[string]string, 25),
 		psCloseStrategy: PSCloseStrategyDirected,
 		dedup:           dedup,
 		lg:              lg,
@@ -105,12 +104,8 @@ type AuditLogPluginDecoder struct {
 	pendingCmds     []*Command
 	psCloseStrategy PSCloseStrategy
 	idAllocator     *ConnIDAllocator
-
-	// kvs is a reusable map to avoid too many allocations to store the KV
-	// for each line.
-	kvs   map[string]string
-	dedup *DeDup
-	lg    *zap.Logger
+	dedup           *DeDup
+	lg              *zap.Logger
 }
 
 // ConnIDAllocator allocates connection IDs for new connections.
@@ -142,7 +137,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		decoder.pendingCmds = decoder.pendingCmds[1:]
 		return cmd, nil
 	}
-	kvs := decoder.kvs
+	kvs := make(map[string]string, 25)
 	for {
 		line, filename, lineIdx, err := reader.ReadLine()
 		if err != nil {
@@ -193,7 +188,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		eventClass := kvs[auditPluginKeyClass]
 		switch eventClass {
 		case auditPluginClassGeneral, auditPluginClassTableAccess:
-			cmds, err = decoder.parseGeneralEvent(kvs, hack.String(line), startTs, endTs, upstreamConnID)
+			cmds, err = decoder.parseGeneralEvent(kvs, startTs, endTs, upstreamConnID)
 		case auditPluginClassConnect:
 			var c *Command
 			c, err = decoder.parseConnectEvent(kvs, upstreamConnID)
@@ -221,7 +216,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			cmd.FileName = filename
 			cmd.Line = lineIdx
 			cmd.EndTs = endTs
-			cmd.Content = hack.String(line)
+			cmd.kvs = kvs
 		}
 		if len(cmds) > 1 {
 			decoder.pendingCmds = cmds[1:]
@@ -430,7 +425,7 @@ func parseSingleParam(value string) (any, error) {
 	return nil, errors.Errorf("unknown param type: %s", tpStr)
 }
 
-func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, line string, startTs, endTs time.Time, connID uint64) ([]*Command, error) {
+func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, startTs, endTs time.Time, connID uint64) ([]*Command, error) {
 	connInfo := decoder.connInfo[connID]
 	if connInfo.preparedStmt == nil {
 		connInfo.preparedStmt = make(map[uint32]struct{})
@@ -443,60 +438,17 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, l
 		return nil, nil
 	}
 
-	cmdStr := parseCommand(kvs[auditPluginKeyCommand])
-	stmtType := kvs[auditPluginKeyStmtType]
-
-	// deduplicate DML and SELECT FOR UPDATE
 	var sql string
+	cmdStr := parseCommand(kvs[auditPluginKeyCommand])
 	if cmdStr == "Query" || cmdStr == "Execute" {
 		var err error
 		sql, err = parseSQL(kvs[auditPluginKeySQL])
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
-		if connInfo.lastCmd != nil && connInfo.lastCmd.EndTs.After(startTs) && startTs.Sub(connInfo.lastCmd.StartTs) < time.Millisecond {
-			duplicate := false
-			switch connInfo.lastCmd.StmtType {
-			case "Insert", "Update", "Delete", "Replace":
-				duplicate = true
-			case "Select":
-				duplicate = strings.Contains(strings.ToLower(sql), "for update")
-			}
-			if duplicate {
-				switch stmtType {
-				case "Insert", "Update", "Delete", "Replace":
-					if cmdStr == "Query" {
-						duplicate = hack.String(connInfo.lastCmd.Payload[1:]) == sql
-					} else {
-						duplicate = connInfo.lastCmd.PreparedStmt == sql && connInfo.lastCmd.RawParams == kvs[auditPluginKeyParams]
-					}
-				case "Select":
-					duplicate = strings.Contains(strings.ToLower(sql), "for update")
-				default:
-					duplicate = false
-				}
-				if !duplicate {
-					decoder.lg.Info("unexpected duplication",
-						zap.String("last_line", connInfo.lastCmd.Content),
-						zap.String("this_line", line))
-				}
-			}
-
-			if duplicate {
-				decoder.dedup.Lock()
-				dedup := decoder.dedup.Items[stmtType]
-				dedup.Times++
-				dedup.Cost += endTs.Sub(startTs)
-				overlap := connInfo.lastCmd.EndTs.Sub(startTs)
-				if dedup.MinOverlap == 0 {
-					dedup.MinOverlap = overlap
-				} else if dedup.MinOverlap > overlap {
-					dedup.MinOverlap = overlap
-				}
-				decoder.dedup.Items[stmtType] = dedup
-				decoder.dedup.Unlock()
-				return nil, nil
-			}
+		// deduplicate DML and SELECT FOR UPDATE
+		if decoder.isDuplicatedWrite(connInfo.lastCmd, kvs, cmdStr, sql, startTs, endTs) {
+			return nil, nil
 		}
 	}
 
@@ -594,7 +546,6 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, l
 			StmtType:     kvs[auditPluginKeyStmtType],
 			PreparedStmt: sql,
 			Params:       args,
-			RawParams:    kvs[auditPluginKeyParams],
 			Payload:      executeReq,
 		})
 		connInfo.lastCmd = cmds[len(cmds)-1]
@@ -637,4 +588,56 @@ func parseStmtID(value string) (uint32, error) {
 		return 0, errors.Errorf("parsing prepared stmt id failed: %s", value)
 	}
 	return uint32(id), nil
+}
+
+// Transaction retrials will record the same SQL multiple times in the audit logs, so we need to deduplicate them.
+func (decoder *AuditLogPluginDecoder) isDuplicatedWrite(lastCmd *Command, kvs map[string]string, cmdType, sql string, startTs, endTs time.Time) bool {
+	if lastCmd == nil {
+		return false
+	}
+	// Is the time overlap?
+	if lastCmd.EndTs.Before(startTs) || startTs.Sub(lastCmd.StartTs) > time.Millisecond {
+		return false
+	}
+	// Are the statements equal?
+	switch lastCmd.Type {
+	case pnet.ComStmtExecute:
+		if cmdType != "Execute" || lastCmd.PreparedStmt != sql || lastCmd.kvs[auditPluginKeyParams] != kvs[auditPluginKeyParams] {
+			return false
+		}
+	case pnet.ComQuery:
+		if cmdType != "Query" || hack.String(lastCmd.Payload[1:]) != sql {
+			return false
+		}
+	default:
+		return false
+	}
+	if lastCmd.StmtType != kvs[auditPluginKeyStmtType] {
+		return false
+	}
+	// Is it DML?
+	switch lastCmd.StmtType {
+	case "Insert", "Update", "Delete", "Replace":
+	case "Select":
+		// The judgment is inaccurate, but just make it simple.
+		if !strings.Contains(strings.ToLower(sql), "for update") {
+			return false
+		}
+	default:
+		return false
+	}
+	// Record the deduplication.
+	decoder.dedup.Lock()
+	dedup := decoder.dedup.Items[lastCmd.StmtType]
+	dedup.Times++
+	dedup.Cost += endTs.Sub(startTs)
+	overlap := lastCmd.EndTs.Sub(startTs)
+	if dedup.MinOverlap == 0 {
+		dedup.MinOverlap = overlap
+	} else if dedup.MinOverlap > overlap {
+		dedup.MinOverlap = overlap
+	}
+	decoder.dedup.Items[lastCmd.StmtType] = dedup
+	decoder.dedup.Unlock()
+	return true
 }
