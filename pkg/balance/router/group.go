@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/util/netutil"
 	"go.uber.org/zap"
 )
 
@@ -76,21 +77,15 @@ func NewGroup(values []string, bpCreator func(lg *zap.Logger) policy.BalancePoli
 }
 
 func (g *Group) parseValues() error {
-	var parseErr error
 	switch g.matchType {
 	case MatchClientCIDR, MatchProxyCIDR:
-		cidrList := make([]*net.IPNet, 0, len(g.values))
-		for _, v := range g.values {
-			_, cidr, err := net.ParseCIDR(v)
-			if err == nil {
-				cidrList = append(cidrList, cidr)
-			} else {
-				parseErr = err
-			}
+		cidrList, parseErr := netutil.ParseCIDRList(g.values)
+		if parseErr != nil {
+			return parseErr
 		}
 		g.cidrList = cidrList
 	}
-	return parseErr
+	return nil
 }
 
 func (g *Group) Match(clientInfo ClientInfo) bool {
@@ -100,26 +95,11 @@ func (g *Group) Match(clientInfo ClientInfo) bool {
 		if g.matchType == MatchClientCIDR {
 			addr = clientInfo.ClientAddr
 		}
-		if addr == nil || reflect.ValueOf(addr).IsNil() {
-			return false
-		}
-		value := addr.String()
-		ipStr, _, err := net.SplitHostPort(value)
+		contains, err := netutil.CIDRContainsIP(g.cidrList, addr)
 		if err != nil {
-			g.lg.Error("parsing address failed", zap.String("addr", value), zap.Error(err))
-			return false
+			g.lg.Error("checking CIDR failed", zap.String("addr", addr.String()), zap.Error(err))
 		}
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			g.lg.Error("parsing IP failed", zap.String("ip", value))
-			return false
-		}
-		for _, cidr := range g.cidrList {
-			if cidr.Contains(ip) {
-				return true
-			}
-		}
-		return false
+		return contains
 	}
 	return true
 }
