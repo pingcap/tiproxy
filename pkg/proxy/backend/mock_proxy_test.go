@@ -160,18 +160,24 @@ func (mc *mockCapture) Close() {
 var _ Meter = (*mockMeter)(nil)
 
 type mockMeter struct {
-	crossAZBytes map[string]int64
-	respBytes    map[string]int64
+	crossAZBytes     map[string]int64
+	privateRespBytes map[string]int64
+	publicRespBytes  map[string]int64
 }
 
 func newMeter() *mockMeter {
 	return &mockMeter{
-		crossAZBytes: make(map[string]int64),
-		respBytes:    make(map[string]int64),
+		crossAZBytes:     make(map[string]int64),
+		publicRespBytes:  make(map[string]int64),
+		privateRespBytes: make(map[string]int64),
 	}
 }
 
-func (m *mockMeter) IncTraffic(clusterID string, respBytes, crossAZBytes int64) {
+func (m *mockMeter) IncTraffic(clusterID string, respBytes, crossAZBytes int64, fromPublicEndpoint bool) {
 	m.crossAZBytes[clusterID] += crossAZBytes
-	m.respBytes[clusterID] += respBytes
+	if fromPublicEndpoint {
+		m.publicRespBytes[clusterID] += respBytes
+	} else {
+		m.privateRespBytes[clusterID] += respBytes
+	}
 }

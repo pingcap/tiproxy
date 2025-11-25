@@ -1369,6 +1369,9 @@ func TestTrafficMetrics(t *testing.T) {
 	meter := newMeter()
 	ts := newBackendMgrTester(t, func(cfg *testConfig) {
 		cfg.proxyConfig.meter = meter
+		cfg.proxyConfig.bcConfig.FromPublicEndpoints = func(net.Addr) bool {
+			return true
+		}
 	})
 	var inBytes, inPackets, outBytes, outPackets int
 	runners := []runner{
@@ -1398,7 +1401,8 @@ func TestTrafficMetrics(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, inBytes2 > inBytes && inPackets2 > inPackets && outBytes2 > outBytes && outPackets2 > outPackets)
 				require.True(t, inBytes2 > 4096 && inPackets2 > 1000)
-				require.True(t, meter.respBytes["key1"] > 4096)
+				require.True(t, meter.publicRespBytes["key1"] > 4096)
+				require.EqualValues(t, 0, meter.privateRespBytes["key1"])
 				inBytes, inPackets, outBytes, outPackets = inBytes2, inPackets2, outBytes2, outPackets2
 				// The first backend is local, so no cross-az traffic.
 				crossLocationBytes2, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
@@ -1444,7 +1448,8 @@ func TestTrafficMetrics(t *testing.T) {
 				inBytes2, inPackets2, outBytes2, outPackets2, err := readTraffic(addr)
 				require.NoError(t, err)
 				require.True(t, inBytes2 > inBytes1 && inPackets2 > inPackets1 && outBytes2 > outBytes1 && outPackets2 > outPackets1)
-				require.True(t, meter.respBytes["key2"] > 0)
+				require.True(t, meter.publicRespBytes["key2"] > 0)
+				require.EqualValues(t, 0, meter.privateRespBytes["key2"])
 				// The second backend is remote, so exists cross-az traffic.
 				crossLocationBytes2, err := metrics.ReadCounter(metrics.CrossLocationBytesCounter)
 				require.NoError(t, err)

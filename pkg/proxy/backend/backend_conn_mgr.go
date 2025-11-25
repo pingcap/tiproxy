@@ -90,6 +90,7 @@ const (
 type BCConfig struct {
 	HealthyKeepAlive     config.KeepAlive
 	UnhealthyKeepAlive   config.KeepAlive
+	FromPublicEndpoints  func(addr net.Addr) bool
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
 	DialTimeout          time.Duration
@@ -115,7 +116,7 @@ func (cfg *BCConfig) check() {
 }
 
 type Meter interface {
-	IncTraffic(clusterID string, respBytes, crossAZBytes int64)
+	IncTraffic(clusterID string, respBytes, crossAZBytes int64, fromPublicEndpoint bool)
 }
 
 // BackendConnManager migrates a session from one BackendConnection to another.
@@ -162,10 +163,11 @@ type BackendConnManager struct {
 		sync.Mutex
 		m map[any]any
 	}
-	connectionID uint64
-	quitSource   ErrorSource
-	cpt          capture.Capture
-	meter        Meter
+	connectionID       uint64
+	quitSource         ErrorSource
+	cpt                capture.Capture
+	meter              Meter
+	fromPublicEndpoint bool
 }
 
 // NewBackendConnManager creates a BackendConnManager.
@@ -235,6 +237,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 	endTime := time.Now()
 	addHandshakeMetrics(mgr.ServerAddr(), endTime.Sub(startTime))
+	if mgr.config.FromPublicEndpoints != nil {
+		mgr.fromPublicEndpoint = mgr.config.FromPublicEndpoints(clientIO.ProxyAddr())
+	}
 	mgr.updateTraffic(*mgr.backendIO.Load())
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
@@ -451,7 +456,7 @@ func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO) {
 			if !mgr.curBackend.Local() {
 				crossAZBytes = int64(outBytes - mgr.outBytes + inBytes - mgr.inBytes)
 			}
-			mgr.meter.IncTraffic(keyspace, int64(inBytes-mgr.inBytes), crossAZBytes)
+			mgr.meter.IncTraffic(keyspace, int64(inBytes-mgr.inBytes), crossAZBytes, mgr.fromPublicEndpoint)
 		}
 	}
 	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = inBytes, inPackets, outBytes, outPackets

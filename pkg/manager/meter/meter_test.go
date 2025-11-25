@@ -72,19 +72,23 @@ func TestNewMeter(t *testing.T) {
 func TestWrite(t *testing.T) {
 	m, reader := createLocalMeter(t, t.TempDir())
 	ts := time.Now().Unix() / 60 * 60
-	m.IncTraffic("cluster-1", 100, 200)
-	m.IncTraffic("cluster-2", 200, 300)
+	m.IncTraffic("cluster-1", 100, 200, false)
+	m.IncTraffic("cluster-2", 200, 300, false)
+	m.IncTraffic("cluster-1", 500, 200, true)
+	m.IncTraffic("cluster-2", 600, 300, true)
 	m.flush(ts, time.Second)
 
 	data := readMeteringData(t, reader, ts)
 	require.Len(t, data, 2)
-	resp, crossAZ := getValuesFromData(t, data, "cluster-1")
-	require.Equal(t, int64(100), resp)
-	require.Equal(t, int64(200), crossAZ)
+	publicResp, privateResp, crossAZ := getValuesFromData(t, data, "cluster-1")
+	require.Equal(t, int64(500), publicResp)
+	require.Equal(t, int64(100), privateResp)
+	require.Equal(t, int64(400), crossAZ)
 
-	resp, crossAZ = getValuesFromData(t, data, "cluster-2")
-	require.Equal(t, int64(200), resp)
-	require.Equal(t, int64(300), crossAZ)
+	publicResp, privateResp, crossAZ = getValuesFromData(t, data, "cluster-2")
+	require.Equal(t, int64(600), publicResp)
+	require.Equal(t, int64(200), privateResp)
+	require.Equal(t, int64(600), crossAZ)
 }
 
 func TestLoop(t *testing.T) {
@@ -97,8 +101,10 @@ func TestLoop(t *testing.T) {
 	for range 10 {
 		wg.Run(func() {
 			for range 100 {
-				m.IncTraffic("cluster-1", 1, 2)
-				m.IncTraffic("cluster-2", 1, 2)
+				m.IncTraffic("cluster-1", 1, 2, false)
+				m.IncTraffic("cluster-2", 1, 2, false)
+				m.IncTraffic("cluster-1", 10, 2, true)
+				m.IncTraffic("cluster-2", 10, 2, true)
 				time.Sleep(time.Millisecond)
 			}
 		}, nil)
@@ -106,25 +112,29 @@ func TestLoop(t *testing.T) {
 	wg.Wait()
 	require.NoError(t, m.Close())
 
-	totalResp, totalCrossAZ := make(map[string]int64), make(map[string]int64)
+	totalPublicResp, totalPrivateResp, totalCrossAZ := make(map[string]int64), make(map[string]int64), make(map[string]int64)
 	for ts := startTime / 60 * 60; ts <= startTime/60*60+60; ts += 60 {
 		data := readMeteringData(t, reader, ts)
 		if len(data) == 0 {
 			continue
 		}
 		require.Len(t, data, 2)
-		resp, crossAZ := getValuesFromData(t, data, "cluster-1")
-		totalResp["cluster-1"] += resp
+		publicResp, privateResp, crossAZ := getValuesFromData(t, data, "cluster-1")
+		totalPublicResp["cluster-1"] += publicResp
+		totalPrivateResp["cluster-1"] += privateResp
 		totalCrossAZ["cluster-1"] += crossAZ
-		resp, crossAZ = getValuesFromData(t, data, "cluster-2")
-		totalResp["cluster-2"] += resp
+		publicResp, privateResp, crossAZ = getValuesFromData(t, data, "cluster-2")
+		totalPublicResp["cluster-2"] += publicResp
+		totalPrivateResp["cluster-2"] += privateResp
 		totalCrossAZ["cluster-2"] += crossAZ
 	}
 
-	require.Equal(t, int64(1000), totalResp["cluster-1"])
-	require.Equal(t, int64(2000), totalCrossAZ["cluster-1"])
-	require.Equal(t, int64(1000), totalResp["cluster-2"])
-	require.Equal(t, int64(2000), totalCrossAZ["cluster-2"])
+	require.Equal(t, int64(10000), totalPublicResp["cluster-1"])
+	require.Equal(t, int64(1000), totalPrivateResp["cluster-1"])
+	require.Equal(t, int64(4000), totalCrossAZ["cluster-1"])
+	require.Equal(t, int64(10000), totalPublicResp["cluster-2"])
+	require.Equal(t, int64(1000), totalPrivateResp["cluster-2"])
+	require.Equal(t, int64(4000), totalCrossAZ["cluster-2"])
 }
 
 func createLocalMeter(t *testing.T, dir string) (*Meter, *meteringreader.MeteringReader) {
@@ -183,17 +193,20 @@ func readMeteringData(t *testing.T, reader *meteringreader.MeteringReader, ts in
 	return meteringData.Data
 }
 
-func getValuesFromData(t *testing.T, data []map[string]any, clusterID string) (int64, int64) {
+func getValuesFromData(t *testing.T, data []map[string]any, clusterID string) (int64, int64, int64) {
 	for i := range data {
 		if data[i]["cluster_id"] == clusterID {
-			outBound, ok := data[i]["outBound_bytes"].(map[string]any)
+			publicOutBound, ok := data[i][publicEndpointKey].(map[string]any)
 			require.True(t, ok)
-			crossZone, ok := data[i]["crossZone_bytes"].(map[string]any)
+			privateOutBound, ok := data[i][privateEndpointKey].(map[string]any)
 			require.True(t, ok)
-			require.Equal(t, "bytes", outBound["unit"])
+			crossZone, ok := data[i][crossAZKey].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, "bytes", publicOutBound["unit"])
+			require.Equal(t, "bytes", privateOutBound["unit"])
 			require.Equal(t, "bytes", crossZone["unit"])
-			return int64(outBound["value"].(float64)), int64(crossZone["value"].(float64))
+			return int64(publicOutBound["value"].(float64)), int64(privateOutBound["value"].(float64)), int64(crossZone["value"].(float64))
 		}
 	}
-	return 0, 0
+	return 0, 0, 0
 }
