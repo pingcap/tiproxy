@@ -25,11 +25,16 @@ const (
 	// The timeout can not be too long because the pod grace termination period is fixed.
 	writeTimeout = 10 * time.Second
 	category     = "proxy"
+
+	crossAZKey         = "crossZone_bytes"
+	publicEndpointKey  = "public_outBound_bytes"
+	privateEndpointKey = "private_outBound_bytes"
 )
 
 type MeterData struct {
-	respBytes    int64
-	crossAZBytes int64
+	publicRespBytes  int64
+	privateRespBytes int64
+	crossAZBytes     int64
 }
 
 type Meter struct {
@@ -62,11 +67,15 @@ func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
 	}, nil
 }
 
-func (m *Meter) IncTraffic(clusterID string, respBytes, crossAZBytes int64) {
+func (m *Meter) IncTraffic(clusterID string, respBytes, crossAZBytes int64, fromPublicEndpoint bool) {
 	m.Lock()
 	defer m.Unlock()
 	orig := m.data[clusterID]
-	orig.respBytes += respBytes
+	if fromPublicEndpoint {
+		orig.publicRespBytes += respBytes
+	} else {
+		orig.privateRespBytes += respBytes
+	}
 	orig.crossAZBytes += crossAZBytes
 	m.data[clusterID] = orig
 }
@@ -109,11 +118,12 @@ func (m *Meter) flush(ts int64, timeout time.Duration) {
 	array := make([]map[string]any, 0, len(data))
 	for clusterID, d := range data {
 		array = append(array, map[string]any{
-			"version":         "1",
-			"cluster_id":      clusterID,
-			"source_name":     category,
-			"crossZone_bytes": &common.MeteringValue{Value: uint64(d.crossAZBytes), Unit: "bytes"},
-			"outBound_bytes":  &common.MeteringValue{Value: uint64(d.respBytes), Unit: "bytes"},
+			"version":          "1",
+			"cluster_id":       clusterID,
+			"source_name":      category,
+			crossAZKey:         &common.MeteringValue{Value: uint64(d.crossAZBytes), Unit: "bytes"},
+			privateEndpointKey: &common.MeteringValue{Value: uint64(d.privateRespBytes), Unit: "bytes"},
+			publicEndpointKey:  &common.MeteringValue{Value: uint64(d.publicRespBytes), Unit: "bytes"},
 		})
 	}
 
