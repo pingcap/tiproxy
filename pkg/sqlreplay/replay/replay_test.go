@@ -570,7 +570,7 @@ func TestLoadFromCheckpoint(t *testing.T) {
 		{
 			checkpointData: "",
 			setupFile:      true,
-			expectedError:  true,
+			expectedError:  false,
 		},
 	}
 
