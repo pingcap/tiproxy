@@ -4,6 +4,7 @@
 package manager
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -197,4 +199,36 @@ func TestAllowAddrOnlyForStandaloneService(t *testing.T) {
 		Addr: "127.0.0.100:10000",
 	})
 	require.NoError(t, err)
+}
+
+func TestAvoidConcurrentReplay(t *testing.T) {
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, true)
+	defer mgr.Close()
+	mgr.replay = &mockReplay{}
+
+	successCount := 0
+	attempts := 1000
+
+	wg := &sync.WaitGroup{}
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			err := mgr.StartReplay(replay.ReplayConfig{
+				Addr:            "127.0.0.1:10000",
+				Input:           "/tmp/traffic",
+				Username:        "root",
+				StartTime:       time.Now(),
+				PSCloseStrategy: cmd.PSCloseStrategyAlways,
+			})
+			if err == nil {
+				successCount++
+			} else {
+				require.ErrorContains(t, err, "a job is running")
+			}
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, 1, successCount)
 }

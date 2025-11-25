@@ -6,6 +6,7 @@ package manager
 import (
 	"crypto/tls"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -46,6 +47,8 @@ type JobManager interface {
 var _ JobManager = (*jobManager)(nil)
 
 type jobManager struct {
+	mu sync.Mutex
+
 	jobHistory         []Job
 	capture            capture.Capture
 	replay             replay.Replay
@@ -100,6 +103,9 @@ func (jm *jobManager) runningJob() Job {
 }
 
 func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
+
 	running := jm.runningJob()
 	if running != nil {
 		return errors.Errorf("a job is running: %s", running.String())
@@ -121,6 +127,9 @@ func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
 }
 
 func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
+
 	running := jm.runningJob()
 	if running != nil {
 		return errors.Errorf("a job is running: %s", running.String())
@@ -174,6 +183,9 @@ func (jm *jobManager) GetCapture() capture.Capture {
 }
 
 func (jm *jobManager) Jobs() string {
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
+
 	jm.updateProgress()
 	b, err := json.MarshalIndent(jm.jobHistory, "", "  ")
 	if err != nil {
@@ -182,6 +194,8 @@ func (jm *jobManager) Jobs() string {
 	return hack.String(b)
 }
 
+// Wait waits for the running job to finish.
+// As `Wait` is a blocking call, it'll not acquire the jobManager lock. For now it's only used in standalone player mode.
 func (jm *jobManager) Wait() {
 	job := jm.runningJob()
 	if job == nil {
@@ -196,6 +210,9 @@ func (jm *jobManager) Wait() {
 }
 
 func (jm *jobManager) Stop(cfg CancelConfig) string {
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
+
 	job := jm.runningJob()
 	if job == nil {
 		return "no job running"
@@ -214,6 +231,9 @@ func (jm *jobManager) Stop(cfg CancelConfig) string {
 }
 
 func (jm *jobManager) Close() {
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
+
 	if jm.capture != nil {
 		jm.capture.Close()
 	}
