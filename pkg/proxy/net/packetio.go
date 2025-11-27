@@ -201,6 +201,7 @@ type PacketIO struct {
 	header        [4]byte // reuse memory to reduce allocation
 	inPackets     uint64
 	outPackets    uint64
+	readTimeout   time.Duration
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *PacketIO {
@@ -244,7 +245,16 @@ func (p *PacketIO) GetSequence() uint8 {
 }
 
 func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
+	start := time.Now()
+	if p.readTimeout > 0 {
+		if err := p.rawConn.SetReadDeadline(time.Now().Add(p.readTimeout)); err != nil {
+			return nil, false, errors.Wrap(ErrReadConn, err)
+		}
+	}
 	if err := ReadFull(p.readWriter, p.header[:]); err != nil {
+		if netErr, isNetErr := errors.Unwrap(err).(net.Error); isNetErr && netErr.Timeout() {
+			p.logger.Warn("read packet timeout", zap.Duration("timeout", p.readTimeout), zap.Duration("elapsed", time.Since(start)))
+		}
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 	sequence, pktSequence := p.header[3], p.readWriter.Sequence()
@@ -256,6 +266,9 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	length := int(p.header[0]) | int(p.header[1])<<8 | int(p.header[2])<<16
 	data := make([]byte, length)
 	if err := ReadFull(p.readWriter, data); err != nil {
+		if netErr, isNetErr := errors.Unwrap(err).(net.Error); isNetErr && netErr.Timeout() {
+			p.logger.Warn("read packet timeout", zap.Duration("timeout", p.readTimeout), zap.Duration("elapsed", time.Since(start)))
+		}
 		return nil, false, errors.Wrap(ErrReadConn, err)
 	}
 	p.inPackets++

@@ -35,18 +35,19 @@ const (
 
 type serverState struct {
 	sync.RWMutex
-	healthyKeepAlive   config.KeepAlive
-	unhealthyKeepAlive config.KeepAlive
-	clients            map[uint64]*client.ClientConnection
-	connID             uint64
-	maxConnections     uint64
-	connBufferSize     int
-	requireBackendTLS  bool
-	tcpKeepAlive       bool
-	proxyProtocol      bool
-	gracefulWait       int // graceful-wait-before-shutdown
-	gracefulClose      int // graceful-close-conn-timeout
-	status             serverStatus
+	healthyKeepAlive    config.KeepAlive
+	unhealthyKeepAlive  config.KeepAlive
+	clients             map[uint64]*client.ClientConnection
+	connID              uint64
+	maxConnections      uint64
+	connBufferSize      int
+	requireBackendTLS   bool
+	tcpKeepAlive        bool
+	proxyProtocol       bool
+	gracefulWait        int // graceful-wait-before-shutdown
+	gracefulClose       int // graceful-close-conn-timeout
+	frontendReadTimeout int // frontend-read-timeout
+	status              serverStatus
 }
 
 type SQLServer struct {
@@ -100,6 +101,7 @@ func (s *SQLServer) reset(cfg *config.Config) {
 	s.mu.healthyKeepAlive = cfg.Proxy.BackendHealthyKeepalive
 	s.mu.unhealthyKeepAlive = cfg.Proxy.BackendUnhealthyKeepalive
 	s.mu.connBufferSize = cfg.Proxy.ConnBufferSize
+	s.mu.frontendReadTimeout = cfg.Proxy.FrontendReadTimeout
 	s.mu.Unlock()
 }
 
@@ -165,7 +167,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		logger := s.logger.With(zap.Uint64("connID", connID), zap.String("client_addr", conn.RemoteAddr().String()),
 			zap.String("addr", addr))
 		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),
-			s.hsHandler, connID, addr, &backend.BCConfig{
+			s.hsHandler, connID, addr, s.mu.frontendReadTimeout, &backend.BCConfig{
 				ProxyProtocol:      s.mu.proxyProtocol,
 				RequireBackendTLS:  s.mu.requireBackendTLS,
 				HealthyKeepAlive:   s.mu.healthyKeepAlive,

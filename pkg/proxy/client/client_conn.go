@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -24,13 +25,16 @@ type ClientConnection struct {
 }
 
 func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config,
-	hsHandler backend.HandshakeHandler, connID uint64, addr string, bcConfig *backend.BCConfig) *ClientConnection {
+	hsHandler backend.HandshakeHandler, connID uint64, addr string, frontendReadTimeout int, bcConfig *backend.BCConfig) *ClientConnection {
 	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, connID, bcConfig)
 	bemgr.SetValue(backend.ConnContextKeyConnAddr, addr)
 	opts := make([]pnet.PacketIOption, 0, 2)
 	opts = append(opts, pnet.WithWrapError(backend.ErrClientConn))
 	if bcConfig.ProxyProtocol {
 		opts = append(opts, pnet.WithProxy)
+	}
+	if frontendReadTimeout > 0 {
+		opts = append(opts, pnet.WithReadTimeout(time.Duration(frontendReadTimeout)*time.Second))
 	}
 	pkt := pnet.NewPacketIO(conn, logger, bcConfig.ConnBufferSize, opts...)
 	return &ClientConnection{
@@ -71,6 +75,7 @@ func (cc *ClientConnection) processMsg(ctx context.Context) error {
 		cc.pkt.ResetSequence()
 		clientPkt, err := cc.pkt.ReadPacket()
 		if err != nil {
+			cc.connMgr.SetValue(backend.ConnContextClientError, err)
 			return err
 		}
 		err = cc.connMgr.ExecuteCmd(ctx, clientPkt)

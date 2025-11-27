@@ -5,6 +5,7 @@ package net
 
 import (
 	"net"
+	"time"
 
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 )
@@ -40,5 +41,11 @@ func (o *originAddr) String() string {
 func WithRemoteAddr(readdr string, addr net.Addr) func(pi *PacketIO) {
 	return func(pi *PacketIO) {
 		pi.remoteAddr = &originAddr{Addr: addr, addr: readdr}
+	}
+}
+
+func WithReadTimeout(d time.Duration) func(pi *PacketIO) {
+	return func(pi *PacketIO) {
+		pi.readTimeout = d
 	}
 }
