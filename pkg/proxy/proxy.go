@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/util/netutil"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
@@ -29,6 +30,7 @@ type serverState struct {
 	healthyKeepAlive   config.KeepAlive
 	unhealthyKeepAlive config.KeepAlive
 	clients            map[uint64]*client.ClientConnection
+	publicEndpoints    []*net.IPNet
 	maxConnections     uint64
 	connBufferSize     int
 	requireBackendTLS  bool
@@ -84,6 +86,10 @@ func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMana
 }
 
 func (s *SQLServer) reset(cfg *config.Config) {
+	cidrList, parseErr := netutil.ParseCIDRList(cfg.Proxy.PublicEndpoints)
+	if parseErr != nil {
+		s.logger.Warn("failed to parse public endpoints", zap.Error(parseErr))
+	}
 	s.mu.Lock()
 	s.mu.tcpKeepAlive = cfg.Proxy.FrontendKeepalive.Enabled
 	s.mu.maxConnections = cfg.Proxy.MaxConnections
@@ -94,6 +100,7 @@ func (s *SQLServer) reset(cfg *config.Config) {
 	s.mu.healthyKeepAlive = cfg.Proxy.BackendHealthyKeepalive
 	s.mu.unhealthyKeepAlive = cfg.Proxy.BackendUnhealthyKeepalive
 	s.mu.connBufferSize = cfg.Proxy.ConnBufferSize
+	s.mu.publicEndpoints = cidrList
 	s.mu.Unlock()
 }
 

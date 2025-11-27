@@ -26,7 +26,7 @@ func TestParseCIDR(t *testing.T) {
 	}{
 		{
 			cidrs:   []string{"1.1.1.1"},
-			success: false,
+			success: true,
 		},
 		{
 			cidrs:   []string{"1.1.1.1/32"},

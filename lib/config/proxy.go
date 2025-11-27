@@ -61,6 +61,8 @@ type ProxyServerOnline struct {
 	// In k8s, the pod terminationGracePeriodSeconds can be set to very long so that these configs can be updated online.
 	GracefulWaitBeforeShutdown int `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty" reloadable:"true"`
 	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty" reloadable:"true"`
+	// Public and private traffic are metered separately.
+	PublicEndpoints []string `yaml:"public-endpoints,omitempty" toml:"public-endpoints,omitempty" json:"public-endpoints,omitempty" reloadable:"true"`
 }
 
 type ProxyServer struct {
