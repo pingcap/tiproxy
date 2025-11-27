@@ -291,6 +291,8 @@ func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 }
 
 func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
+	j, _ := json.Marshal(cfg)
+	r.lg.Info("start replay", zap.String("config", hack.String(j)))
 	err := cfg.LoadFromCheckpoint()
 	if err != nil {
 		return err
@@ -449,6 +451,7 @@ func (r *replay) readCommands(ctx context.Context) {
 				err = nil
 				continue
 			} else {
+				r.lg.Info("decode err", zap.Error(err))
 				break
 			}
 		}
@@ -509,7 +512,9 @@ func (r *replay) readCommands(ctx context.Context) {
 		zap.Duration("extra_wait_time", extraWaitTime),
 		zap.Int("alive_conns", connCount),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
-		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())))
+		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
+		zap.NamedError("ctx", ctx.Err()),
+		zap.Bool("graceful", r.gracefulStop.Load()))
 
 	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
@@ -910,6 +915,8 @@ func (r *replay) recordExecInfoLoop() {
 }
 
 func (r *replay) stop(err error) {
+	r.lg.Info("replay stopped", zap.Error(err), zap.Stack("stack"))
+
 	r.Lock()
 	defer r.Unlock()
 
