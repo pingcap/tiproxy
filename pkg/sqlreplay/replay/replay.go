@@ -933,8 +933,8 @@ func (r *replay) stop(err error) {
 	}
 	commonFields := r.commonFields()
 	fields := append(commonFields, []zap.Field{
-		zap.Time("start_time", r.startTime),
-		zap.Time("end_time", r.endTime),
+		zap.Time("replay_start_time", r.startTime),
+		zap.Time("replay_end_time", r.endTime),
 		zap.Any("config", r.cfg),
 	}...)
 	if r.meta.Cmds > 0 {
