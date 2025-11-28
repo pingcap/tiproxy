@@ -164,7 +164,6 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 		jm.lg.Warn("start replay failed", zap.String("job", newJob.String()), zap.Error(err))
 		return errors.Wrapf(err, "start replay failed")
 	}
-	jm.lg.Info("start replay", zap.String("job", newJob.String()))
 	jm.addToHistory(newJob)
 	return nil
 }

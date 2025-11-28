@@ -431,43 +431,46 @@ func TestGracefulStop(t *testing.T) {
 	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
 
-	i := 0
-	loader := &customizedReader{
-		getCmd: func() *cmd.Command {
-			j := rand.Uint64N(100) + 1
-			command := newMockCommand(j)
-			i++
-			command.StartTs = time.Unix(0, int64(i)*int64(time.Microsecond))
-			return command
-		},
-	}
+	// Test 2 rounds to test that the graceful flag will be reset before each round.
+	for n := 0; n < 2; n++ {
+		i := 0
+		loader := &customizedReader{
+			getCmd: func() *cmd.Command {
+				j := rand.Uint64N(100) + 1
+				command := newMockCommand(j)
+				i++
+				command.StartTs = time.Unix(0, int64(i)*int64(time.Microsecond))
+				return command
+			},
+		}
 
-	cfg := ReplayConfig{
-		Input:     t.TempDir(),
-		Username:  "u1",
-		StartTime: time.Now(),
-		readers:   []cmd.LineReader{loader},
-		connCreator: func(connID uint64, _ uint64) conn.Conn {
-			return &mockDelayConn{
-				stats:   &replay.replayStats,
-				closeCh: replay.closeConnCh,
-				connID:  connID,
-			}
-		},
-		report:          newMockReport(replay.exceptionCh),
-		PSCloseStrategy: cmd.PSCloseStrategyDirected,
-	}
-	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+		cfg := ReplayConfig{
+			Input:     t.TempDir(),
+			Username:  "u1",
+			StartTime: time.Now(),
+			readers:   []cmd.LineReader{loader},
+			connCreator: func(connID uint64, _ uint64) conn.Conn {
+				return &mockDelayConn{
+					stats:   &replay.replayStats,
+					closeCh: replay.closeConnCh,
+					connID:  connID,
+				}
+			},
+			report:          newMockReport(replay.exceptionCh),
+			PSCloseStrategy: cmd.PSCloseStrategyDirected,
+		}
+		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
-	time.Sleep(2 * time.Second)
-	replay.Stop(errors.New("graceful stop"), true)
-	// check that all the pending commands are replayed
-	curCmdTs := replay.replayStats.CurCmdTs.Load()
-	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
-	require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Microsecond))
-	_, _, lastTs, _, _, err := replay.Progress()
-	require.ErrorContains(t, err, "graceful stop")
-	require.Equal(t, curCmdTs, lastTs.UnixNano())
+		time.Sleep(2 * time.Second)
+		replay.Stop(errors.New("graceful stop"), true)
+		// check that all the pending commands are replayed
+		curCmdTs := replay.replayStats.CurCmdTs.Load()
+		require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
+		require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Microsecond))
+		_, _, lastTs, _, _, err := replay.Progress()
+		require.ErrorContains(t, err, "graceful stop")
+		require.Equal(t, curCmdTs, lastTs.UnixNano())
+	}
 }
 
 func BenchmarkMultiBufferedDecoder(b *testing.B) {
