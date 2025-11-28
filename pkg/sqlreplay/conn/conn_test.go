@@ -223,27 +223,31 @@ func TestSkipReadOnly(t *testing.T) {
 			readonly: false,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)},
+			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, CapturedPsID: 1, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)},
 			readonly: true,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte(), 1, 0, 0, 0, 0, 0, 0, 0}},
+			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, CapturedPsID: 1, Payload: []byte{pnet.ComStmtExecute.Byte(), 1, 0, 0, 0, 0, 0, 0, 0}},
 			readonly: true,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtFetch, Payload: []byte{pnet.ComStmtFetch.Byte(), 1, 0, 0, 0}},
+			cmd:      &cmd.Command{Type: pnet.ComStmtFetch, CapturedPsID: 1, Payload: []byte{pnet.ComStmtFetch.Byte(), 1, 0, 0, 0}},
 			readonly: true,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("insert into t value(?)")...)},
-			readonly: true,
-		},
-		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte(), 2, 0, 0, 0}},
+			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, CapturedPsID: 2, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("insert into t value(?)")...)},
 			readonly: false,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtSendLongData, Payload: []byte{pnet.ComStmtFetch.Byte(), 2, 0, 0, 0, 0, 0, 0, 0}},
+			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, CapturedPsID: 2, Payload: []byte{pnet.ComStmtExecute.Byte(), 2, 0, 0, 0}},
+			readonly: false,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtSendLongData, CapturedPsID: 2, Payload: []byte{pnet.ComStmtFetch.Byte(), 2, 0, 0, 0, 0, 0, 0, 0}},
+			readonly: false,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtClose, CapturedPsID: 2, Payload: []byte{pnet.ComStmtClose.Byte(), 2, 0, 0, 0}},
 			readonly: false,
 		},
 		{
@@ -315,7 +319,7 @@ func TestReadOnly(t *testing.T) {
 		{
 			cmd:      pnet.ComStmtPrepare,
 			stmt:     "insert into t value(?)",
-			readOnly: true,
+			readOnly: false,
 		},
 		{
 			cmd:      pnet.ComStmtExecute,
@@ -328,9 +332,14 @@ func TestReadOnly(t *testing.T) {
 			readOnly: false,
 		},
 		{
+			cmd:      pnet.ComStmtExecute,
+			stmt:     "",
+			readOnly: false,
+		},
+		{
 			cmd:      pnet.ComStmtClose,
 			stmt:     "insert into t value(?)",
-			readOnly: true,
+			readOnly: false,
 		},
 		{
 			cmd:      pnet.ComQuit,
@@ -346,13 +355,19 @@ func TestReadOnly(t *testing.T) {
 	backendConn := newMockBackendConn()
 	conn.backendConn = backendConn
 	for i, test := range tests {
+		clear(conn.psIDMapping)
 		var payload []byte
 		switch test.cmd {
-		case pnet.ComQuery:
+		case pnet.ComQuery, pnet.ComStmtPrepare:
 			payload = append([]byte{test.cmd.Byte()}, []byte(test.stmt)...)
-		default:
-			conn.preparedStmts[1] = preparedStmt{text: test.stmt}
+		case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtFetch, pnet.ComStmtReset, pnet.ComStmtSendLongData:
+			prepare := cmd.NewCommand(append([]byte{pnet.ComStmtPrepare.Byte()}, []byte(test.stmt)...), time.Time{}, 100)
+			if conn.isReadOnly(prepare) {
+				conn.psIDMapping[1] = 1
+			}
 			payload = []byte{test.cmd.Byte(), 1, 0, 0, 0}
+		default:
+			payload = []byte{test.cmd.Byte()}
 		}
 		command := cmd.NewCommand(payload, time.Time{}, 100)
 		require.Equal(t, test.readOnly, conn.isReadOnly(command), "case %d", i)

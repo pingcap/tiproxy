@@ -164,11 +164,9 @@ func (c *conn) Run(ctx context.Context) {
 			if command == nil {
 				break
 			}
-			if c.readonly {
-				if !c.isReadOnly(command.Value) {
-					c.replayStats.FilteredCmds.Add(1)
-					continue
-				}
+			if c.readonly && !c.isReadOnly(command.Value) {
+				c.replayStats.FilteredCmds.Add(1)
+				continue
 			}
 			// Quit the connection in the next round no matter what exception happens (like disconnection).
 			if command.Value.Type == pnet.ComQuit {
@@ -234,16 +232,14 @@ func (c *conn) Run(ctx context.Context) {
 
 func (c *conn) isReadOnly(command *cmd.Command) bool {
 	switch command.Type {
-	case pnet.ComQuery:
+	case pnet.ComQuery, pnet.ComStmtPrepare:
+		// If the statement is not readonly, it won't be prepared.
 		return lex.IsReadOnly(hack.String(command.Payload[1:]))
-	case pnet.ComStmtExecute, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
-		stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-		ps := c.preparedStmts[stmtID]
-		if len(ps.text) == 0 {
-			// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
-			return false
-		}
-		return lex.IsReadOnly(ps.text)
+	case pnet.ComStmtExecute, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch, pnet.ComStmtClose:
+		// If the statement is prepared successfully, then it's readonly.
+		captureStmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
+		_, ok := c.psIDMapping[captureStmtID]
+		return ok
 	case pnet.ComCreateDB, pnet.ComDropDB, pnet.ComDelayedInsert:
 		return false
 	}
@@ -254,9 +250,7 @@ func (c *conn) isReadOnly(command *cmd.Command) bool {
 	return true
 }
 
-// maintain prepared statement info so that we can find its info when:
-// - Judge whether an EXECUTE command is readonly
-// - Get the error message when an EXECUTE command fails
+// Maintain prepared statement info so that we can find its info when getting the failed statement and params.
 func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp ExecuteResp) {
 	switch request[0] {
 	case pnet.ComStmtPrepare.Byte():

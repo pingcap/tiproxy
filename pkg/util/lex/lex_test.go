@@ -42,6 +42,14 @@ func TestNextToken(t *testing.T) {
 			sql:    `sEleCt ** from; t5ble_name`,
 			tokens: []string{"SELECT", "FROM", "T", "BLE_NAME"},
 		},
+		{
+			sql:    `set @@session.autocommit = 0`,
+			tokens: []string{"SET", "SESSION", "AUTOCOMMIT"},
+		},
+		{
+			sql:    `select "for update"`,
+			tokens: []string{"SELECT"},
+		},
 	}
 
 	for i, test := range tests {
