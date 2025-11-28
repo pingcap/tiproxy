@@ -86,7 +86,7 @@ type ReplayConfig struct {
 	Format   string
 	Input    string
 	Username string
-	Password string
+	Password string `json:"-"`
 	KeyFile  string
 	// It's specified when executing with the statement `TRAFFIC REPLAY` so that all TiProxy instances
 	// use the same start time and the time acts as the job ID.
@@ -291,8 +291,6 @@ func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 }
 
 func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
-	j, _ := json.Marshal(cfg)
-	r.lg.Info("start replay", zap.String("config", hack.String(j)))
 	err := cfg.LoadFromCheckpoint()
 	if err != nil {
 		return err
@@ -305,11 +303,13 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 		return err
 	}
 
+	r.lg.Info("start replay", zap.Any("config", cfg))
 	r.Lock()
 	defer r.Unlock()
 	r.cfg = cfg
 	r.storages = storages
 	r.meta = *r.readMeta()
+	r.gracefulStop.Store(false)
 	r.startTime = cfg.StartTime
 	r.endTime = time.Time{}
 	r.progress = 0
@@ -451,7 +451,7 @@ func (r *replay) readCommands(ctx context.Context) {
 				err = nil
 				continue
 			} else {
-				r.lg.Info("decode err", zap.Error(err))
+				r.lg.Info("decode failed, stop", zap.Error(err))
 				break
 			}
 		}
@@ -513,8 +513,8 @@ func (r *replay) readCommands(ctx context.Context) {
 		zap.Int("alive_conns", connCount),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-		zap.NamedError("ctx", ctx.Err()),
-		zap.Bool("graceful", r.gracefulStop.Load()))
+		zap.NamedError("ctx_err", ctx.Err()),
+		zap.Bool("graceful_stop", r.gracefulStop.Load()))
 
 	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
@@ -915,8 +915,6 @@ func (r *replay) recordExecInfoLoop() {
 }
 
 func (r *replay) stop(err error) {
-	r.lg.Info("replay stopped", zap.Error(err), zap.Stack("stack"))
-
 	r.Lock()
 	defer r.Unlock()
 
@@ -937,13 +935,7 @@ func (r *replay) stop(err error) {
 	fields := append(commonFields, []zap.Field{
 		zap.Time("start_time", r.startTime),
 		zap.Time("end_time", r.endTime),
-		zap.Time("command_start_time", r.cfg.CommandStartTime),
-		zap.Time("command_end_time", r.cfg.CommandEndTime),
-		zap.String("format", r.cfg.Format),
-		zap.String("username", r.cfg.Username),
-		zap.Bool("ignore_errs", r.cfg.IgnoreErrs),
-		zap.Float64("speed", r.cfg.Speed),
-		zap.Bool("read_only", r.cfg.ReadOnly),
+		zap.Any("config", r.cfg),
 	}...)
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
