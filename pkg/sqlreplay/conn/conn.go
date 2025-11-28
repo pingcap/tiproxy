@@ -250,9 +250,7 @@ func (c *conn) isReadOnly(command *cmd.Command) bool {
 	return true
 }
 
-// maintain prepared statement info so that we can find its info when:
-// - Judge whether an EXECUTE command is readonly
-// - Get the error message when an EXECUTE command fails
+// Maintain prepared statement info so that we can find its info when getting the failed statement and params.
 func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp ExecuteResp) {
 	switch request[0] {
 	case pnet.ComStmtPrepare.Byte():
