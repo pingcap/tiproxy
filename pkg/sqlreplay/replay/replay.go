@@ -854,16 +854,6 @@ func (r *replay) saveCheckpointToFile(file *os.File) error {
 	return nil
 }
 
-func (r *replay) saveCurrentStateToFilePath(filePath string) error {
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return errors.Wrapf(err, "open state file %s", filePath)
-	}
-	defer file.Close()
-
-	return r.saveCheckpointToFile(file)
-}
-
 func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
 	return replayCheckpoint{
 		CurCmdTs:    r.replayStats.CurCmdTs.Load(),
