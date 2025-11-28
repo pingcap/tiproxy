@@ -360,8 +360,8 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	}
 	r.report = cfg.report
 	if r.report == nil {
-		if cfg.DryRun {
-			r.report = &mockReport{exceptionCh: r.exceptionCh}
+		if cfg.DryRun || cfg.ReadOnly {
+			r.report = &nopReport{exceptionCh: r.exceptionCh}
 		} else {
 			backendConnCreator := func() conn.BackendConn {
 				return conn.NewBackendConn(r.lg.Named("be"), r.idMgr.NewID(), hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
@@ -513,8 +513,9 @@ func (r *replay) readCommands(ctx context.Context) {
 		zap.Int("alive_conns", connCount),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-		zap.NamedError("ctx_err", ctx.Err()),
-		zap.Bool("graceful_stop", r.gracefulStop.Load()))
+		zap.Bool("graceful_stop", r.gracefulStop.Load()),
+		zap.Error(err),
+		zap.NamedError("ctx_err", ctx.Err()))
 
 	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
@@ -816,23 +817,21 @@ func (r *replay) saveCheckpointLoop(ctx context.Context) {
 	}
 	defer file.Close()
 
-	for {
-		// Add an interval here to avoid printing too many logs when error occurs.
-		if err != nil {
-			time.Sleep(stateSaveRetryInterval)
-		}
-
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
-			return
+			break
 		case <-ticker.C:
 			err = r.saveCheckpointToFile(file)
 			if err != nil {
 				r.lg.Error("save current checkpoint failed", zap.Error(err))
+				// Add an interval here to avoid printing too many logs when error occurs.
 				time.Sleep(stateSaveRetryInterval)
-				continue
 			}
 		}
+	}
+	if err = r.saveCheckpointToFile(file); err != nil {
+		r.lg.Error("save current state failed on close", zap.Error(err))
 	}
 }
 
@@ -923,6 +922,10 @@ func (r *replay) stop(err error) {
 		r.cancel = nil
 	}
 	close(r.execInfoCh)
+	if r.report != nil {
+		r.report.Close()
+		r.report = nil
+	}
 	r.endTime = time.Now()
 	// decodedCmds - pendingCmds may be greater than replayedCmds because if a connection is closed unexpectedly,
 	// the pending commands of that connection are discarded. We calculate the progress based on decodedCmds - pendingCmds.
@@ -1006,17 +1009,6 @@ func (r *replay) Stop(err error, graceful bool) {
 
 func (r *replay) Close() {
 	r.Stop(errors.New("shutting down"), false)
-	if r.report != nil {
-		r.report.Close()
-	}
-	// at this time, the save checkpoint loop and replay loop have exited. It's safe to update the latest
-	// checkpoint file.
-	if len(r.cfg.CheckPointFilePath) > 0 {
-		err := r.saveCurrentStateToFilePath(r.cfg.CheckPointFilePath)
-		if err != nil {
-			r.lg.Error("save current state failed on close", zap.Error(err))
-		}
-	}
 }
 
 func getDirForInput(input string) (string, error) {

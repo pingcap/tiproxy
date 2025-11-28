@@ -315,7 +315,7 @@ func TestReadOnly(t *testing.T) {
 		{
 			cmd:      pnet.ComStmtPrepare,
 			stmt:     "insert into t value(?)",
-			readOnly: true,
+			readOnly: false,
 		},
 		{
 			cmd:      pnet.ComStmtExecute,
@@ -328,9 +328,14 @@ func TestReadOnly(t *testing.T) {
 			readOnly: false,
 		},
 		{
+			cmd:      pnet.ComStmtExecute,
+			stmt:     "",
+			readOnly: false,
+		},
+		{
 			cmd:      pnet.ComStmtClose,
 			stmt:     "insert into t value(?)",
-			readOnly: true,
+			readOnly: false,
 		},
 		{
 			cmd:      pnet.ComQuit,
@@ -348,7 +353,7 @@ func TestReadOnly(t *testing.T) {
 	for i, test := range tests {
 		var payload []byte
 		switch test.cmd {
-		case pnet.ComQuery:
+		case pnet.ComQuery, pnet.ComStmtPrepare:
 			payload = append([]byte{test.cmd.Byte()}, []byte(test.stmt)...)
 		default:
 			conn.preparedStmts[1] = preparedStmt{text: test.stmt}
