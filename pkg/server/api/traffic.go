@@ -155,11 +155,14 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	}
 	cfg.OutputPath = c.PostForm("outputpath")
 	cfg.Addr = c.PostForm("addr")
+	h.lg.Info("request: traffic replay", zap.Any("cfg", cfg))
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
+		h.lg.Info("response: traffic replay", zap.Error(err))
 		return
 	}
+	h.lg.Info("response: traffic replay")
 	c.String(http.StatusOK, "replay started")
 }
 
@@ -181,7 +184,9 @@ func (h *Server) TrafficCancel(c *gin.Context) {
 		}
 	}
 	cfg.Graceful = strings.EqualFold(c.PostForm("graceful"), "true")
+	h.lg.Info("request: traffic cancel", zap.Any("cfg", cfg))
 	result := h.mgr.ReplayJobMgr.Stop(cfg)
+	h.lg.Info("response: traffic cancel", zap.String("result", result))
 	c.String(http.StatusOK, result)
 }
 

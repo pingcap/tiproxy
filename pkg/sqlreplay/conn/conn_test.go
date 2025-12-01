@@ -822,3 +822,23 @@ func TestExecInfo(t *testing.T) {
 		}
 	}
 }
+
+func TestNoBlockReplay(t *testing.T) {
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 1)
+	stats := &ReplayStats{}
+	conn := NewConn(zap.NewNop(), ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 555,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	for range 100 {
+		conn.onDisconnected(errors.New("conn err"))
+		conn.onExecuteFailed(&cmd.Command{}, errors.New("exec err"))
+	}
+}
