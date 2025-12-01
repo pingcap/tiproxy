@@ -191,8 +191,7 @@ func (c *conn) Run(ctx context.Context) {
 			if curDB != command.Value.CurDB && command.Value.CurDB != "" {
 				// Maybe there's a USE statement already, never mind.
 				if resp := c.backendConn.ExecuteCmd(ctx, pnet.MakeInitDBRequest(command.Value.CurDB)); resp.Err != nil {
-					c.replayStats.ExceptionCmds.Add(1)
-					c.exceptionCh <- NewFailException(resp.Err, command.Value)
+					c.onExecuteFailed(command.Value, resp.Err)
 					c.lg.Info("failed to use database", zap.String("db", command.Value.CurDB), zap.Error(resp.Err))
 					continue
 				}
@@ -200,8 +199,7 @@ func (c *conn) Run(ctx context.Context) {
 			}
 			// update psID, SQL, and params for the command.
 			if err := c.updateExecuteStmt(command.Value); err != nil {
-				c.replayStats.ExceptionCmds.Add(1)
-				c.exceptionCh <- NewFailException(err, command.Value)
+				c.onExecuteFailed(command.Value, err)
 				continue
 			}
 			startTime := time.Now()
@@ -215,16 +213,20 @@ func (c *conn) Run(ctx context.Context) {
 					curDB = ""
 					continue
 				}
-				c.replayStats.ExceptionCmds.Add(1)
-				c.exceptionCh <- NewFailException(resp.Err, command.Value)
+				c.onExecuteFailed(command.Value, resp.Err)
 			} else {
 				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
 			}
-			c.execInfoCh <- ExecInfo{
+			// Logging should not block replaying.
+			select {
+			case c.execInfoCh <- ExecInfo{
 				Command:   command.Value,
 				StartTime: startTime,
 				CostTime:  latency,
+			}:
+			default:
 			}
+
 			c.replayStats.ReplayedCmds.Add(1)
 		}
 	}
@@ -340,9 +342,22 @@ func (c *conn) updateExecuteStmt(command *cmd.Command) error {
 
 func (c *conn) onDisconnected(err error) {
 	c.replayStats.ExceptionCmds.Add(1)
-	c.exceptionCh <- NewOtherException(err, c.upstreamConnID)
+	// Reporting should not block replaying.
+	select {
+	case c.exceptionCh <- NewOtherException(err, c.upstreamConnID):
+	default:
+	}
 	clear(c.psIDMapping)
 	clear(c.preparedStmts)
+}
+
+func (c *conn) onExecuteFailed(command *cmd.Command, err error) {
+	c.replayStats.ExceptionCmds.Add(1)
+	// Reporting should not block replaying.
+	select {
+	case c.exceptionCh <- NewFailException(err, command):
+	default:
+	}
 }
 
 // ExecuteCmd executes a command asynchronously by adding it to the list.
