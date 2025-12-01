@@ -176,8 +176,6 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	now := time.Now()
 	if cfg.StartTime.IsZero() {
 		return storages, errors.New("start time is not specified")
-	} else if now.Add(time.Minute).Before(cfg.StartTime) {
-		return storages, errors.New("start time should not be in the future")
 	} else if cfg.StartTime.Add(time.Minute).Before(now) {
 		return storages, errors.New("start time should not be in the past")
 	}
@@ -395,7 +393,21 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	return nil
 }
 
+func (r *replay) waitUntilStartTime(ctx context.Context) {
+	waitDuration := time.Until(r.cfg.StartTime)
+	if waitDuration > 0 {
+		r.lg.Info("wait until the specified time to start replaying", zap.Time("until", r.cfg.StartTime),
+			zap.Duration("duration", waitDuration))
+		select {
+		case <-ctx.Done():
+		case <-time.After(waitDuration):
+		}
+	}
+}
+
 func (r *replay) readCommands(ctx context.Context) {
+	r.waitUntilStartTime(ctx)
+
 	var decoder decoder
 	var err error
 
