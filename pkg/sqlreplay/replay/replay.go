@@ -903,7 +903,7 @@ func (r *replay) recordExecInfoLoop() {
 	}
 }
 
-// stop is called when replaying commands fails or finishs, so no connection should be running.
+// stop is called when replaying commands fails or finishes, so no connection should be running.
 func (r *replay) stop(err error) {
 	r.Lock()
 	defer r.Unlock()
