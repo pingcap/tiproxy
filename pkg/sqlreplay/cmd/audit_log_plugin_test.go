@@ -1657,3 +1657,65 @@ func decodeCmds(decoder CmdDecoder, reader LineReader) ([]*Command, error) {
 	}
 	return cmds, err
 }
+
+func TestFilterOutCommandsWithRetry(t *testing.T) {
+	tests := []struct {
+		name     string
+		lines    string
+		enable   bool
+		cmdCount int
+	}{
+		{
+			name:     "filter out retried query command",
+			lines:    `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT * FROM test"] [ROWS=1] [CONNECTION_ID=1001] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [RETRY=true] [EVENT=COMPLETED]`,
+			enable:   true,
+			cmdCount: 0,
+		},
+		{
+			name:     "do not filter when this function is disabled",
+			lines:    `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT * FROM test"] [ROWS=1] [CONNECTION_ID=1001] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [RETRY=true] [EVENT=COMPLETED]`,
+			enable:   false,
+			cmdCount: 1,
+		},
+		{
+			name:     "do not filter non-retried commands",
+			lines:    `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT * FROM test"] [ROWS=1] [CONNECTION_ID=1001] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			enable:   true,
+			cmdCount: 1,
+		},
+		{
+			name: "mixed retried and non-retried commands",
+			lines: `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT 1"] [ROWS=1] [CONNECTION_ID=1001] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]
+[2025/09/18 17:48:20.714 +08:10] [INFO] [logger.go:77] [ID=17581889006156] [TIMESTAMP=2025/09/18 17:48:20.714 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT 2"] [ROWS=1] [CONNECTION_ID=1001] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [RETRY=true] [EVENT=COMPLETED]
+[2025/09/18 17:48:20.814 +08:10] [INFO] [logger.go:77] [ID=17581889006157] [TIMESTAMP=2025/09/18 17:48:20.814 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT 3"] [ROWS=1] [CONNECTION_ID=1001] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [EVENT=COMPLETED]`,
+			enable:   true,
+			cmdCount: 2,
+		},
+		{
+			name:     "retry flag with other value should not be filtered",
+			lines:    `[2025/09/18 17:48:20.614 +08:10] [INFO] [logger.go:77] [ID=17581889006155] [TIMESTAMP=2025/09/18 17:48:20.614 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1000] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="SELECT * FROM test"] [ROWS=1] [CONNECTION_ID=1001] [CLIENT_PORT=50112] [PID=542193] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=test] [RETRY=false] [EVENT=COMPLETED]`,
+			enable:   true,
+			cmdCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+			if tt.enable {
+				decoder.EnableFilterCommandWithRetry()
+			}
+			mr := mockReader{data: append([]byte(tt.lines), '\n')}
+			cmds := make([]*Command, 0, 4)
+			for {
+				cmd, err := decoder.Decode(&mr)
+				if cmd == nil {
+					require.ErrorIs(t, err, io.EOF)
+					break
+				}
+				cmds = append(cmds, cmd)
+			}
+			require.Equal(t, tt.cmdCount, len(cmds))
+		})
+	}
+}
