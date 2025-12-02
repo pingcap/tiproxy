@@ -167,11 +167,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 			zap.String("addr", addr))
 		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),
 			s.hsHandler, s.cpt, connID, addr, &backend.BCConfig{
-				ProxyProtocol:      s.mu.proxyProtocol,
-				RequireBackendTLS:  s.mu.requireBackendTLS,
-				HealthyKeepAlive:   s.mu.healthyKeepAlive,
-				UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
-				ConnBufferSize:     s.mu.connBufferSize,
+				ProxyProtocol:       s.mu.proxyProtocol,
+				RequireBackendTLS:   s.mu.requireBackendTLS,
+				HealthyKeepAlive:    s.mu.healthyKeepAlive,
+				UnhealthyKeepAlive:  s.mu.unhealthyKeepAlive,
+				ConnBufferSize:      s.mu.connBufferSize,
+				FromPublicEndpoints: s.fromPublicEndpoint,
 			}, s.meter)
 		s.mu.clients[connID] = clientConn
 		logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
