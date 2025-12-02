@@ -59,6 +59,7 @@ func main() {
 	outputPath := rootCmd.PersistentFlags().String("output-path", "", "the file path to store replayed sql. Empty indicates do not output replayed sql.")
 	serviceMode := rootCmd.PersistentFlags().Bool("service-mode", false, "run replayer in service mode")
 	logLevel := rootCmd.PersistentFlags().String("log-level", "info", "the log level: debug, info, warn, error, dpanic, panic, fatal")
+	startTime := rootCmd.PersistentFlags().Time("start-time", time.Now(), []string{time.RFC3339, time.RFC3339Nano}, "the time to start the replay. Format is RFC3339. Default is the current time.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
@@ -134,7 +135,7 @@ func main() {
 				Password:           *password,
 				Format:             *format,
 				ReadOnly:           *readonly,
-				StartTime:          time.Now(),
+				StartTime:          *startTime,
 				CommandStartTime:   *cmdStartTime,
 				CommandEndTime:     *cmdEndTime,
 				IgnoreErrs:         *ignoreErrs,

@@ -1102,3 +1102,31 @@ func TestDynamicInputCoverAllDirectories(t *testing.T) {
 	}
 	require.Equal(t, expectCommandCount, actualCommandCount)
 }
+
+func TestWaitUntil(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+	loader := newMockNormalLoader()
+	startReplayTime := time.Now()
+	waitUntil := startReplayTime.Add(500 * time.Millisecond)
+	cfg := ReplayConfig{
+		DryRun:          true,
+		Input:           t.TempDir(),
+		StartTime:       waitUntil,
+		readers:         []cmd.LineReader{loader},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+
+	now := time.Now()
+	command := newMockCommand(1)
+	command.StartTs = now
+	loader.writeCommand(command, cmd.FormatAuditLogPlugin)
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	loader.Close()
+
+	require.Eventually(t, func() bool {
+		return replay.replayStats.CurCmdTs.Load() != 0
+	}, time.Second*5, time.Millisecond)
+	actualStartTime := time.Now()
+	require.GreaterOrEqual(t, actualStartTime.Sub(startReplayTime), 500*time.Millisecond)
+}
