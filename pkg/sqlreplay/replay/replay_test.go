@@ -1124,7 +1124,9 @@ func TestWaitUntil(t *testing.T) {
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 	loader.Close()
 
-	replay.Stop(nil, true)
-	finishTime := time.Now()
-	require.GreaterOrEqual(t, finishTime.Sub(startReplayTime), 500*time.Millisecond)
+	require.Eventually(t, func() bool {
+		return replay.replayStats.CurCmdTs.Load() != 0
+	}, time.Second*5, time.Millisecond)
+	actualStartTime := time.Now()
+	require.GreaterOrEqual(t, actualStartTime.Sub(startReplayTime), 500*time.Millisecond)
 }

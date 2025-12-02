@@ -267,7 +267,7 @@ type replay struct {
 	exceptionCh      chan conn.Exception
 	closeConnCh      chan uint64
 	execInfoCh       chan conn.ExecInfo
-	gracefulStop     atomic.Bool
+	gracefulStopCh   chan struct{}
 	wg               waitgroup.WaitGroup
 	cancel           context.CancelFunc
 	connCreator      conn.ConnCreator
@@ -307,7 +307,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.cfg = cfg
 	r.storages = storages
 	r.meta = *r.readMeta()
-	r.gracefulStop.Store(false)
+	r.gracefulStopCh = make(chan struct{})
 	r.startTime = cfg.StartTime
 	r.endTime = time.Time{}
 	r.progress = 0
@@ -393,20 +393,44 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	return nil
 }
 
-func (r *replay) waitUntilStartTime(ctx context.Context) {
+// waitUntilStartTime waits until the configured start time and returns whether the replay has stopped
+func (r *replay) waitUntilStartTime(ctx context.Context) bool {
 	waitDuration := time.Until(r.cfg.StartTime)
 	if waitDuration > 0 {
 		r.lg.Info("wait until the specified time to start replaying", zap.Time("until", r.cfg.StartTime),
 			zap.Duration("duration", waitDuration))
 		select {
 		case <-ctx.Done():
+			return true
 		case <-time.After(waitDuration):
+			return false
+		case <-r.gracefulStopCh:
+			return true
 		}
+	}
+
+	return false
+}
+
+// isGracefulStopped returns whether the replay is gracefully stopped.
+func (r *replay) isGracefulStopped() bool {
+	select {
+	case _, ok := <-r.gracefulStopCh:
+		if !ok {
+			return true
+		} else {
+			return false
+		}
+	default:
+		return false
 	}
 }
 
 func (r *replay) readCommands(ctx context.Context) {
-	r.waitUntilStartTime(ctx)
+	if r.waitUntilStartTime(ctx) {
+		r.stop(nil)
+		return
+	}
 
 	var decoder decoder
 	var err error
@@ -441,7 +465,7 @@ func (r *replay) readCommands(ctx context.Context) {
 	connCount := 0                      // alive connection count
 	maxPendingCmds := int64(0)
 	extraWaitTime := time.Duration(0)
-	for ctx.Err() == nil && !r.gracefulStop.Load() {
+	for ctx.Err() == nil && !r.isGracefulStopped() {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
 			case id := <-r.closeConnCh:
@@ -513,6 +537,7 @@ func (r *replay) readCommands(ctx context.Context) {
 				select {
 				case <-ctx.Done():
 				case <-time.After(expectedInterval):
+				case <-r.gracefulStopCh:
 				}
 			}
 		}
@@ -525,7 +550,7 @@ func (r *replay) readCommands(ctx context.Context) {
 		zap.Int("alive_conns", connCount),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-		zap.Bool("graceful_stop", r.gracefulStop.Load()),
+		zap.Bool("graceful_stop", r.isGracefulStopped()),
 		zap.Error(err),
 		zap.NamedError("ctx_err", ctx.Err()))
 
@@ -992,6 +1017,10 @@ func (r *replay) Wait() {
 	r.wg.Wait()
 }
 
+func (r *replay) gracefulStop() {
+	close(r.gracefulStopCh)
+}
+
 func (r *replay) Stop(err error, graceful bool) {
 	r.Lock()
 	// already stopped
@@ -1001,7 +1030,7 @@ func (r *replay) Stop(err error, graceful bool) {
 	}
 	r.err = err
 	if graceful {
-		r.gracefulStop.Store(true)
+		r.gracefulStop()
 	} else if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
