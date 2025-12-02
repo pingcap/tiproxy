@@ -95,9 +95,14 @@ func (g *Group) Match(clientInfo ClientInfo) bool {
 		if g.matchType == MatchClientCIDR {
 			addr = clientInfo.ClientAddr
 		}
-		contains, err := netutil.CIDRContainsIP(g.cidrList, addr)
+		ip, err := netutil.NetAddr2IP(addr)
 		if err != nil {
-			g.lg.Error("checking CIDR failed", zap.String("addr", addr.String()), zap.Error(err))
+			g.lg.Error("checking CIDR failed", zap.Stringer("addr", addr), zap.Error(err))
+			return false
+		}
+		contains, err := netutil.CIDRContainsIP(g.cidrList, ip)
+		if err != nil {
+			g.lg.Error("checking CIDR failed", zap.Stringer("addr", addr), zap.Error(err))
 		}
 		return contains
 	}
