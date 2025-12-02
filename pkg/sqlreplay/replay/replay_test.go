@@ -744,7 +744,7 @@ func TestDynamicInput(t *testing.T) {
 		}
 	}()
 
-	dirWatcherInterval := 10 * time.Millisecond
+	dirWatcherInterval := 100 * time.Millisecond
 	store.SetDirWatcherPollIntervalForTest(dirWatcherInterval)
 
 	auditLog := `[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]
