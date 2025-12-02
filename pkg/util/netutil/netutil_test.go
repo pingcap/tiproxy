@@ -89,7 +89,60 @@ func TestContainIP(t *testing.T) {
 	for _, test := range tests {
 		list, err := ParseCIDRList(test.cidrs)
 		require.NoError(t, err, "ip: %s, cidrs: %v", test.ip, test.cidrs)
-		contain, _ := CIDRContainsIP(list, &net.TCPAddr{IP: net.ParseIP(test.ip), Port: 1000})
+		contain, _ := CIDRContainsIP(list, net.ParseIP(test.ip))
 		require.Equal(t, test.success, contain, "ip: %s, cidrs: %v", test.ip, test.cidrs)
+	}
+}
+
+func TestIsPrivate(t *testing.T) {
+	tests := []struct {
+		ip      string
+		private bool
+	}{
+		{
+			ip:      "8.8.8.8",
+			private: false,
+		},
+		{
+			ip:      "192.168.1.1",
+			private: true,
+		},
+		{
+			ip:      "172.16.0.1",
+			private: true,
+		},
+		{
+			ip:      "10.0.0.1",
+			private: true,
+		},
+		{
+			ip:      "127.0.0.1",
+			private: true,
+		},
+		{
+			ip:      "::1",
+			private: true,
+		},
+		{
+			ip:      "169.254.1.1",
+			private: true,
+		},
+		{
+			ip:      "100.64.1.1",
+			private: true,
+		},
+		{
+			ip:      "2001:4860:4860::8888",
+			private: false,
+		},
+		{
+			ip:      "fc00::1",
+			private: true,
+		},
+	}
+
+	for _, test := range tests {
+		ip := net.ParseIP(test.ip)
+		require.Equal(t, test.private, IsPrivate(ip), "ip: %s", test.ip)
 	}
 }
