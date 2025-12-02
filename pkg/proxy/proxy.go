@@ -6,6 +6,7 @@ package proxy
 import (
 	"context"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -202,6 +203,31 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	}
 
 	clientConn.Run(ctx)
+}
+
+func (s *SQLServer) fromPublicEndpoint(addr net.Addr) bool {
+	if addr == nil || reflect.ValueOf(addr).IsNil() {
+		return false
+	}
+	s.mu.RLock()
+	publicEndpoints := s.mu.publicEndpoints
+	s.mu.RUnlock()
+	ip, err := netutil.NetAddr2IP(addr)
+	if err != nil {
+		s.logger.Warn("failed to check public endpoint", zap.Any("addr", addr), zap.Error(err))
+		return false
+	}
+	contains, err := netutil.CIDRContainsIP(publicEndpoints, ip)
+	if err != nil {
+		s.logger.Warn("failed to check public endpoint", zap.Any("ip", ip), zap.Error(err))
+		return false
+	}
+	if contains {
+		return true
+	}
+	// The public NLB may enable preserveIP, and the incoming address is the client address, which may be a public address.
+	// Even if the private NLB enables preserveIP, the client address is still a private address.
+	return !netutil.IsPrivate(ip)
 }
 
 func (s *SQLServer) PreClose() {
