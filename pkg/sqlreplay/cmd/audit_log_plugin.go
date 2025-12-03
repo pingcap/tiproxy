@@ -29,6 +29,7 @@ const (
 	auditPluginKeyEvent          = "EVENT"
 	auditPluginKeyCostTime       = "COST_TIME"
 	auditPluginKeyPreparedStmtID = "PREPARED_STMT_ID"
+	auditPluginKeyRetry          = "RETRY"
 
 	auditPluginClassGeneral     = "GENERAL"
 	auditPluginClassTableAccess = "TABLE_ACCESS"
@@ -101,11 +102,12 @@ type AuditLogPluginDecoder struct {
 	commandStartTime time.Time
 	commandEndTime   time.Time
 	// pendingCmds contains the commands that has not been returned yet.
-	pendingCmds     []*Command
-	psCloseStrategy PSCloseStrategy
-	idAllocator     *ConnIDAllocator
-	dedup           *DeDup
-	lg              *zap.Logger
+	pendingCmds            []*Command
+	psCloseStrategy        PSCloseStrategy
+	filterCommandWithRetry bool
+	idAllocator            *ConnIDAllocator
+	dedup                  *DeDup
+	lg                     *zap.Logger
 }
 
 // ConnIDAllocator allocates connection IDs for new connections.
@@ -446,9 +448,18 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, s
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
-		// deduplicate DML and SELECT FOR UPDATE
-		if decoder.isDuplicatedWrite(connInfo.lastCmd, kvs, cmdStr, sql, startTs, endTs) {
-			return nil, nil
+		if decoder.filterCommandWithRetry {
+			if retryStr, ok := kvs[auditPluginKeyRetry]; ok {
+				if retryStr == "true" {
+					// skip the retried command
+					return nil, nil
+				}
+			}
+		} else {
+			// deduplicate DML and SELECT FOR UPDATE
+			if decoder.isDuplicatedWrite(connInfo.lastCmd, kvs, cmdStr, sql, startTs, endTs) {
+				return nil, nil
+			}
 		}
 	}
 
@@ -640,4 +651,9 @@ func (decoder *AuditLogPluginDecoder) isDuplicatedWrite(lastCmd *Command, kvs ma
 	decoder.dedup.Items[lastCmd.StmtType] = dedup
 	decoder.dedup.Unlock()
 	return true
+}
+
+// EnableFilterCommandWithRetry enables filtering out commands that are retries according to the audit log.
+func (decoder *AuditLogPluginDecoder) EnableFilterCommandWithRetry() {
+	decoder.filterCommandWithRetry = true
 }

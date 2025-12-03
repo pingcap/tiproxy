@@ -122,6 +122,8 @@ type ReplayConfig struct {
 	OutputPath string
 	// Addr is the downstream address to connect to
 	Addr string
+	// FilterCommandWithRetry indicates whether to filter out commands that are retries according to the audit log.
+	FilterCommandWithRetry bool
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -616,6 +618,10 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 		auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
 		auditLogDecoder.SetIDAllocator(idAllocator)
 		auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)
+
+		if r.cfg.FilterCommandWithRetry {
+			auditLogDecoder.EnableFilterCommandWithRetry()
+		}
 	}
 
 	var decoder decoder

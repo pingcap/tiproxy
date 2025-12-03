@@ -60,6 +60,7 @@ func main() {
 	serviceMode := rootCmd.PersistentFlags().Bool("service-mode", false, "run replayer in service mode")
 	logLevel := rootCmd.PersistentFlags().String("log-level", "info", "the log level: debug, info, warn, error, dpanic, panic, fatal")
 	startTime := rootCmd.PersistentFlags().Time("start-time", time.Now(), []string{time.RFC3339, time.RFC3339Nano}, "the time to start the replay. Format is RFC3339. Default is the current time.")
+	filterCommandWithRetry := rootCmd.PersistentFlags().Bool("filter-command-with-retry", false, "filter out commands that are retries according to the audit log.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
@@ -129,24 +130,25 @@ func main() {
 		} else {
 			// start replay
 			replayCfg := replay.ReplayConfig{
-				Input:              *input,
-				Speed:              *speed,
-				Username:           *username,
-				Password:           *password,
-				Format:             *format,
-				ReadOnly:           *readonly,
-				StartTime:          *startTime,
-				CommandStartTime:   *cmdStartTime,
-				CommandEndTime:     *cmdEndTime,
-				IgnoreErrs:         *ignoreErrs,
-				BufSize:            *bufSize,
-				PSCloseStrategy:    replaycmd.PSCloseStrategy(*psCloseStrategy),
-				DryRun:             *dryRun,
-				CheckPointFilePath: *checkPointFilePath,
-				DynamicInput:       *dynamicInput,
-				ReplayerCount:      *replayerCount,
-				ReplayerIndex:      *replayerIndex,
-				OutputPath:         *outputPath,
+				Input:                  *input,
+				Speed:                  *speed,
+				Username:               *username,
+				Password:               *password,
+				Format:                 *format,
+				ReadOnly:               *readonly,
+				StartTime:              *startTime,
+				CommandStartTime:       *cmdStartTime,
+				CommandEndTime:         *cmdEndTime,
+				IgnoreErrs:             *ignoreErrs,
+				BufSize:                *bufSize,
+				PSCloseStrategy:        replaycmd.PSCloseStrategy(*psCloseStrategy),
+				DryRun:                 *dryRun,
+				CheckPointFilePath:     *checkPointFilePath,
+				DynamicInput:           *dynamicInput,
+				ReplayerCount:          *replayerCount,
+				ReplayerIndex:          *replayerIndex,
+				OutputPath:             *outputPath,
+				FilterCommandWithRetry: *filterCommandWithRetry,
 			}
 			if err := r.StartReplay(replayCfg); err != nil {
 				cancel()
