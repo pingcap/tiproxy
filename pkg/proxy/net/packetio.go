@@ -247,7 +247,7 @@ func (p *PacketIO) GetSequence() uint8 {
 func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 	start := time.Now()
 	if p.readTimeout > 0 {
-		if err := p.rawConn.SetReadDeadline(time.Now().Add(p.readTimeout)); err != nil {
+		if err := p.rawConn.SetReadDeadline(start.Add(p.readTimeout)); err != nil {
 			return nil, false, errors.Wrap(ErrReadConn, err)
 		}
 	}
