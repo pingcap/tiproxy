@@ -52,6 +52,8 @@ type ProxyServerOnline struct {
 	ProxyProtocol              string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty"`
 	GracefulWaitBeforeShutdown int       `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty"`
 	GracefulCloseConnTimeout   int       `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty"`
+	// FrontendReadTimeout is the timeout for reading data from frontend connections.
+	FrontendReadTimeout int `yaml:"frontend-read-timeout,omitempty" toml:"frontend-read-timeout,omitempty" json:"frontend-read-timeout,omitempty"`
 }
 
 type ProxyServer struct {
