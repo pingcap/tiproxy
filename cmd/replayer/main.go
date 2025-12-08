@@ -61,7 +61,7 @@ func main() {
 	logLevel := rootCmd.PersistentFlags().String("log-level", "info", "the log level: debug, info, warn, error, dpanic, panic, fatal")
 	startTime := rootCmd.PersistentFlags().Time("start-time", time.Now(), []string{time.RFC3339, time.RFC3339Nano}, "the time to start the replay. Format is RFC3339. Default is the current time.")
 	filterCommandWithRetry := rootCmd.PersistentFlags().Bool("filter-command-with-retry", false, "filter out commands that are retries according to the audit log.")
-	waitOnEOF := rootCmd.PersistentFlags().Bool("wait-on-eof", true, "wait for the next file when all the files are read.")
+	waitOnEOF := rootCmd.PersistentFlags().Bool("wait-on-eof", false, "wait for the next file when all the files are read.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
