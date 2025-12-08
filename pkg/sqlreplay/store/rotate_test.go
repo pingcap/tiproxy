@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/mock"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -264,7 +265,7 @@ func TestIterateFiles(t *testing.T) {
 			}
 			require.NoError(t, f.Close())
 		}
-		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: test.format})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: test.format, QuitOnEOF: true})
 		require.NoError(t, err)
 		fileOrder := make([]string, 0, len(test.order))
 		for {
@@ -276,6 +277,34 @@ func TestIterateFiles(t *testing.T) {
 		}
 		require.Equal(t, test.order, fileOrder)
 	}
+}
+
+func TestQuitOnEOF(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	l, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, QuitOnEOF: false})
+	require.NoError(t, err)
+
+	// Read next file when no available files.
+	fileName := "tidb-audit-2025-09-10T17-01-56.073.log"
+	fileCh := make(chan string)
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		if err := l.nextReader(); err != nil {
+			require.True(t, errors.Is(err, io.EOF))
+		} else {
+			fileCh <- l.externalFile.fileName
+		}
+	}, nil)
+
+	// Wait for a while and then create the file.
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, fileName), []byte{}, 0666))
+	require.Equal(t, fileName, <-fileCh)
+	require.NoError(t, l.Close())
+	wg.Wait()
 }
 
 func TestReadGZip(t *testing.T) {
@@ -311,7 +340,7 @@ func TestReadGZip(t *testing.T) {
 		require.NoError(t, writer.Close())
 
 		lg, _ := logger.CreateLoggerForTest(t)
-		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: tmpDir})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: tmpDir, QuitOnEOF: true})
 		require.NoError(t, err)
 		for range 12 {
 			data = make([]byte, 100)
@@ -369,6 +398,7 @@ func TestCompressAndEncrypt(t *testing.T) {
 		Dir:              tmpDir,
 		EncryptionMethod: EncryptAes,
 		EncryptionKey:    key,
+		QuitOnEOF:        true,
 	})
 	require.NoError(t, err)
 	data := make([]byte, 1000)
@@ -454,7 +484,12 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 	require.NoError(t, err)
 	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
-	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, FileNameFilterTime: commandStartTime})
+	l, err := newRotateReader(lg, storage, ReaderCfg{
+		Dir:                dir,
+		Format:             cmd.FormatAuditLogPlugin,
+		FileNameFilterTime: commandStartTime,
+		QuitOnEOF:          true,
+	})
 	require.NoError(t, err)
 	var fileOrder []string
 	for {
@@ -515,6 +550,7 @@ func TestWalkS3ForAuditLogFile(t *testing.T) {
 		cfg: ReaderCfg{
 			Format:             cmd.FormatAuditLogPlugin,
 			FileNameFilterTime: time.Time{},
+			QuitOnEOF:          true,
 		},
 	}
 	selectedFileCount := 0

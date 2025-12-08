@@ -92,7 +92,7 @@ func TestReadLine(t *testing.T) {
 	require.NoError(t, err)
 	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
-	cfg := ReaderCfg{Dir: dir}
+	cfg := ReaderCfg{Dir: dir, QuitOnEOF: true}
 	for i, test := range tests {
 		require.NoError(t, os.RemoveAll(dir), "case %d", i)
 		require.NoError(t, os.MkdirAll(dir, 0777), "case %d", i)
@@ -195,7 +195,7 @@ func TestRead(t *testing.T) {
 	require.NoError(t, err)
 	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
-	cfg := ReaderCfg{Dir: dir}
+	cfg := ReaderCfg{Dir: dir, QuitOnEOF: true}
 	for i, test := range tests {
 		require.NoError(t, os.RemoveAll(dir), "case %d", i)
 		require.NoError(t, os.MkdirAll(dir, 0777), "case %d", i)
