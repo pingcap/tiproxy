@@ -45,10 +45,17 @@ func (ci *CertInfo) Reload(lg *zap.Logger) (tlsConfig *tls.Config, err error) {
 	// Some methods to rotate client config:
 	// - For certs: customize GetClientCertificate
 	// - For CA: customize InsecureSkipVerify + VerifyPeerCertificate
+	prevExpireTime := ci.getExpireTime()
 	if ci.server {
 		tlsConfig, err = ci.buildServerConfig(lg)
 	} else {
 		tlsConfig, err = ci.buildClientConfig(lg)
+	}
+	if err == nil {
+		curExpireTime := ci.getExpireTime()
+		if prevExpireTime != curExpireTime {
+			lg.Info("update cert expiration", zap.Time("prev", prevExpireTime), zap.Time("cur", curExpireTime), zap.Any("cfg", ci.cfg.Load()))
+		}
 	}
 	return tlsConfig, err
 }
@@ -135,7 +142,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 		if cfg.AutoCerts {
 			autoCerts = true
 		} else {
-			lg.Info("require certificates to secure clients connections, disable TLS")
+			lg.Debug("require certificates to secure clients connections, disable TLS")
 			return nil, nil
 		}
 	}
@@ -187,7 +194,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	if !cfg.HasCA() {
-		lg.Info("no CA, server will not authenticate clients (connection is still secured)")
+		lg.Debug("no CA, server will not authenticate clients (connection is still secured)")
 		return tcfg, nil
 	}
 
@@ -232,7 +239,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 				MinVersion:         GetMinTLSVer(cfg.MinTLSVersion, lg),
 			}, nil
 		}
-		lg.Info("no CA to verify server connections, disable TLS")
+		lg.Debug("no CA to verify server connections, disable TLS")
 		return nil, nil
 	}
 
@@ -258,7 +265,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	tcfg.RootCAs = certPool
 
 	if !cfg.HasCert() {
-		lg.Info("no certificates, server may reject the connection")
+		lg.Debug("no certificates, server may reject the connection")
 		return tcfg, nil
 	}
 
@@ -269,4 +276,16 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	ci.cert.Store(&cert)
 
 	return tcfg, nil
+}
+
+func (ci *CertInfo) getExpireTime() time.Time {
+	cert := ci.cert.Load()
+	if cert == nil {
+		return time.Time{}
+	}
+	cp, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return time.Time{}
+	}
+	return cp.NotAfter
 }
