@@ -5,11 +5,8 @@ package security
 
 import (
 	"crypto/tls"
-<<<<<<< HEAD
 	"crypto/x509"
 	"encoding/pem"
-=======
->>>>>>> ce7b8a29 (security: log the cert expiration when the cert rotates (#1018))
 	"net"
 	"os"
 	"path/filepath"
@@ -298,11 +295,7 @@ func TestReload(t *testing.T) {
 	require.Equal(t, 1, strings.Count(text.String(), "cert will expire"))
 
 	// Replace the cert and then reload. Check that the expiration is different.
-<<<<<<< HEAD
-	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, 2*time.Hour)
-=======
-	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, 25*time.Hour, "")
->>>>>>> ce7b8a29 (security: log the cert expiration when the cert rotates (#1018))
+	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, 25*time.Hour)
 	require.NoError(t, err)
 	_, err = ci.Reload(lg)
 	require.NoError(t, err)
