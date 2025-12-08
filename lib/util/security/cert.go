@@ -45,10 +45,22 @@ func (ci *CertInfo) Reload(lg *zap.Logger) (tlsConfig *tls.Config, err error) {
 	// Some methods to rotate client config:
 	// - For certs: customize GetClientCertificate
 	// - For CA: customize InsecureSkipVerify + VerifyPeerCertificate
+	prevExpireTime := ci.getExpireTime()
 	if ci.server {
+		lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg.Load()))
 		tlsConfig, err = ci.buildServerConfig(lg)
 	} else {
+		lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg.Load()))
 		tlsConfig, err = ci.buildClientConfig(lg)
+	}
+	if err == nil {
+		curExpireTime := ci.getExpireTime()
+		if prevExpireTime != curExpireTime {
+			lg.Info("update cert expiration", zap.Time("prev", prevExpireTime), zap.Time("cur", curExpireTime))
+		}
+		if !curExpireTime.IsZero() && time.Now().Add(24*time.Hour).After(curExpireTime) {
+			lg.Warn("cert will expire in 24 hours", zap.Time("expire", curExpireTime))
+		}
 	}
 	return tlsConfig, err
 }
@@ -131,14 +143,13 @@ func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 }
 
 func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
-	lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg.Load()))
 	autoCerts := false
 	cfg := ci.cfg.Load()
 	if !cfg.HasCert() {
 		if cfg.AutoCerts {
 			autoCerts = true
 		} else {
-			lg.Info("require certificates to secure clients connections, disable TLS")
+			lg.Debug("require certificates to secure clients connections, disable TLS")
 			return nil, nil
 		}
 	}
@@ -185,7 +196,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	if !cfg.HasCA() {
-		lg.Info("no CA, server will not authenticate clients (connection is still secured)")
+		lg.Debug("no CA, server will not authenticate clients (connection is still secured)")
 		return tcfg, nil
 	}
 
@@ -210,7 +221,6 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 }
 
 func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
-	lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg.Load()))
 	cfg := ci.cfg.Load()
 	if cfg.AutoCerts {
 		lg.Info("specified auto-certs in a client tls config, ignored")
@@ -224,7 +234,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 				MinVersion:         GetMinTLSVer(cfg.MinTLSVersion, lg),
 			}, nil
 		}
-		lg.Info("no CA to verify server connections, disable TLS")
+		lg.Debug("no CA to verify server connections, disable TLS")
 		return nil, nil
 	}
 
@@ -247,7 +257,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	ci.ca.Store(cas)
 
 	if !cfg.HasCert() {
-		lg.Info("no certificates, server may reject the connection")
+		lg.Debug("no certificates, server may reject the connection")
 		return tcfg, nil
 	}
 
@@ -258,4 +268,16 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	ci.cert.Store(&cert)
 
 	return tcfg, nil
+}
+
+func (ci *CertInfo) getExpireTime() time.Time {
+	cert := ci.cert.Load()
+	if cert == nil {
+		return time.Time{}
+	}
+	cp, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		return time.Time{}
+	}
+	return cp.NotAfter
 }
