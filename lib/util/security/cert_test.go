@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,7 +272,7 @@ func TestCertServer(t *testing.T) {
 }
 
 func TestReload(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
+	lg, text := logger.CreateLoggerForTest(t)
 	tmpdir := t.TempDir()
 	certPath := filepath.Join(tmpdir, "cert")
 	keyPath := filepath.Join(tmpdir, "key")
@@ -289,15 +290,19 @@ func TestReload(t *testing.T) {
 	tcfg, err := ci.Reload(lg)
 	require.NoError(t, err)
 	require.NotNil(t, tcfg)
-	expire1 := getExpireTime(t, ci)
+	expire1 := ci.getExpireTime()
+	require.Equal(t, 1, strings.Count(text.String(), "update cert expiration"))
+	require.Equal(t, 1, strings.Count(text.String(), "cert will expire"))
 
 	// Replace the cert and then reload. Check that the expiration is different.
-	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 0, 2*time.Hour)
+	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, 25*time.Hour)
 	require.NoError(t, err)
 	_, err = ci.Reload(lg)
 	require.NoError(t, err)
-	expire2 := getExpireTime(t, ci)
+	expire2 := ci.getExpireTime()
 	require.NotEqual(t, expire1, expire2)
+	require.Equal(t, 2, strings.Count(text.String(), "update cert expiration"))
+	require.Equal(t, 1, strings.Count(text.String(), "cert will expire"))
 }
 
 func TestAutoCerts(t *testing.T) {
@@ -313,7 +318,7 @@ func TestAutoCerts(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, tcfg)
 	cert1 := ci.cert.Load()
-	expire1 := getExpireTime(t, ci)
+	expire1 := ci.getExpireTime()
 	require.True(t, ci.autoCertExp.Load() < expire1.Unix())
 
 	// The cert will not be recreated now.
@@ -322,7 +327,7 @@ func TestAutoCerts(t *testing.T) {
 	_, err = ci.Reload(lg)
 	cert2 := ci.cert.Load()
 	require.Equal(t, cert1, cert2)
-	expire2 := getExpireTime(t, ci)
+	expire2 := ci.getExpireTime()
 	require.Equal(t, expire1, expire2)
 
 	// The cert will be recreated when it almost expires.
@@ -330,15 +335,8 @@ func TestAutoCerts(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ci.Reload(lg)
 	require.NoError(t, err)
-	expire3 := getExpireTime(t, ci)
+	expire3 := ci.getExpireTime()
 	require.NotEqual(t, expire1, expire3)
-}
-
-func getExpireTime(t *testing.T, ci *CertInfo) time.Time {
-	cert := ci.cert.Load()
-	cp, err := x509.ParseCertificate(cert.Certificate[0])
-	require.NoError(t, err)
-	return cp.NotAfter
 }
 
 func TestSetConfig(t *testing.T) {
