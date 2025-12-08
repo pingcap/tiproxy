@@ -265,7 +265,7 @@ func TestIterateFiles(t *testing.T) {
 			}
 			require.NoError(t, f.Close())
 		}
-		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: test.format, QuitOnEOF: true})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: test.format})
 		require.NoError(t, err)
 		fileOrder := make([]string, 0, len(test.order))
 		for {
@@ -279,12 +279,12 @@ func TestIterateFiles(t *testing.T) {
 	}
 }
 
-func TestQuitOnEOF(t *testing.T) {
+func TestWaitOnEOF(t *testing.T) {
 	dir := t.TempDir()
 	storage, err := NewStorage(dir)
 	require.NoError(t, err)
 	defer storage.Close()
-	l, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, QuitOnEOF: false})
+	l, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, WaitOnEOF: true})
 	require.NoError(t, err)
 
 	// Read next file when no available files.
@@ -340,7 +340,7 @@ func TestReadGZip(t *testing.T) {
 		require.NoError(t, writer.Close())
 
 		lg, _ := logger.CreateLoggerForTest(t)
-		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: tmpDir, QuitOnEOF: true})
+		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: tmpDir})
 		require.NoError(t, err)
 		for range 12 {
 			data = make([]byte, 100)
@@ -398,7 +398,6 @@ func TestCompressAndEncrypt(t *testing.T) {
 		Dir:              tmpDir,
 		EncryptionMethod: EncryptAes,
 		EncryptionKey:    key,
-		QuitOnEOF:        true,
 	})
 	require.NoError(t, err)
 	data := make([]byte, 1000)
@@ -488,7 +487,6 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 		Dir:                dir,
 		Format:             cmd.FormatAuditLogPlugin,
 		FileNameFilterTime: commandStartTime,
-		QuitOnEOF:          true,
 	})
 	require.NoError(t, err)
 	var fileOrder []string
@@ -550,7 +548,6 @@ func TestWalkS3ForAuditLogFile(t *testing.T) {
 		cfg: ReaderCfg{
 			Format:             cmd.FormatAuditLogPlugin,
 			FileNameFilterTime: time.Time{},
-			QuitOnEOF:          true,
 		},
 	}
 	selectedFileCount := 0

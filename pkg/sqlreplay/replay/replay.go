@@ -124,8 +124,8 @@ type ReplayConfig struct {
 	Addr string
 	// FilterCommandWithRetry indicates whether to filter out commands that are retries according to the audit log.
 	FilterCommandWithRetry bool
-	// QuitOnEOF indicates whether quit the replayer when no more files. If it's false, the replayer will wait for the next file.
-	QuitOnEOF bool
+	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
+	WaitOnEOF bool
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -740,7 +740,7 @@ func (r *replay) constructReaderForDir(storage storage.ExternalStorage, dir stri
 		EncryptionKey:      r.cfg.encryptionKey,
 		EncryptionMethod:   r.meta.EncryptMethod,
 		FileNameFilterTime: filterTime,
-		QuitOnEOF:          r.cfg.QuitOnEOF,
+		WaitOnEOF:          r.cfg.WaitOnEOF,
 	}
 	if r.cfg.CommandEndTime.IsZero() {
 		cfg.FileNameFilterTime = r.cfg.CommandStartTime

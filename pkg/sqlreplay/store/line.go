@@ -35,7 +35,7 @@ type ReaderCfg struct {
 	EncryptionKey    []byte
 	// Reader will skip the files whose end time is before FileNameFilterTime.
 	FileNameFilterTime time.Time
-	QuitOnEOF          bool
+	WaitOnEOF          bool
 }
 
 var _ cmd.LineReader = (*loader)(nil)

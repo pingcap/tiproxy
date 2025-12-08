@@ -249,12 +249,12 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			break
 		}
 		if minFileName == "" {
-			if r.cfg.QuitOnEOF {
-				err = io.EOF
-				break
-			} else {
+			if r.cfg.WaitOnEOF {
 				time.Sleep(10 * time.Millisecond)
 				continue
+			} else {
+				err = io.EOF
+				break
 			}
 		}
 		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
