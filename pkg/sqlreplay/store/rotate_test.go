@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/mock"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -278,6 +279,34 @@ func TestIterateFiles(t *testing.T) {
 	}
 }
 
+func TestWaitOnEOF(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	l, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, WaitOnEOF: true})
+	require.NoError(t, err)
+
+	// Read next file when no available files.
+	fileName := "tidb-audit-2025-09-10T17-01-56.073.log"
+	fileCh := make(chan string)
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		if err := l.nextReader(); err != nil {
+			require.True(t, errors.Is(err, io.EOF))
+		} else {
+			fileCh <- l.externalFile.fileName
+		}
+	}, nil)
+
+	// Wait for a while and then create the file.
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, fileName), []byte{}, 0666))
+	require.Equal(t, fileName, <-fileCh)
+	require.NoError(t, l.Close())
+	wg.Wait()
+}
+
 func TestReadGZip(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, err := NewStorage(tmpDir)
@@ -454,7 +483,11 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 	require.NoError(t, err)
 	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
-	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, FileNameFilterTime: commandStartTime})
+	l, err := newRotateReader(lg, storage, ReaderCfg{
+		Dir:                dir,
+		Format:             cmd.FormatAuditLogPlugin,
+		FileNameFilterTime: commandStartTime,
+	})
 	require.NoError(t, err)
 	var fileOrder []string
 	for {

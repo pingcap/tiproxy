@@ -157,6 +157,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	cfg.Addr = c.PostForm("addr")
 	cfg.DryRun = strings.EqualFold(c.PostForm("dryrun"), "true")
 	cfg.FilterCommandWithRetry = strings.EqualFold(c.PostForm("filtercommandwithretry"), "true")
+	cfg.WaitOnEOF = strings.EqualFold(c.PostForm("wait-on-eof"), "true")
 	h.lg.Info("request: traffic replay", zap.Any("cfg", cfg))
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
