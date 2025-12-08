@@ -47,14 +47,19 @@ func (ci *CertInfo) Reload(lg *zap.Logger) (tlsConfig *tls.Config, err error) {
 	// - For CA: customize InsecureSkipVerify + VerifyPeerCertificate
 	prevExpireTime := ci.getExpireTime()
 	if ci.server {
+		lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg.Load()))
 		tlsConfig, err = ci.buildServerConfig(lg)
 	} else {
+		lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg.Load()))
 		tlsConfig, err = ci.buildClientConfig(lg)
 	}
 	if err == nil {
 		curExpireTime := ci.getExpireTime()
 		if prevExpireTime != curExpireTime {
-			lg.Info("update cert expiration", zap.Time("prev", prevExpireTime), zap.Time("cur", curExpireTime), zap.Any("cfg", ci.cfg.Load()))
+			lg.Info("update cert expiration", zap.Time("prev", prevExpireTime), zap.Time("cur", curExpireTime))
+		}
+		if !curExpireTime.IsZero() && time.Now().Add(24*time.Hour).After(curExpireTime) {
+			lg.Warn("cert will expire in 24 hours", zap.Time("expire", curExpireTime))
 		}
 	}
 	return tlsConfig, err
@@ -135,7 +140,6 @@ func verifyCommonName(allowedCN []string, verifiedChains [][]*x509.Certificate) 
 }
 
 func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
-	lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg.Load()))
 	autoCerts := false
 	cfg := ci.cfg.Load()
 	if !cfg.HasCert() {
@@ -225,7 +229,6 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 }
 
 func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
-	lg = lg.With(zap.String("tls", "client"), zap.Any("cfg", ci.cfg.Load()))
 	cfg := ci.cfg.Load()
 	if cfg.AutoCerts {
 		lg.Warn("specified auto-certs in a client tls config, ignored")

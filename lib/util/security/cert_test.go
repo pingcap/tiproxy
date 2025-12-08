@@ -277,15 +277,17 @@ func TestReload(t *testing.T) {
 	require.NotNil(t, tcfg)
 	expire1 := ci.getExpireTime()
 	require.Equal(t, 1, strings.Count(text.String(), "update cert expiration"))
+	require.Equal(t, 1, strings.Count(text.String(), "cert will expire"))
 
 	// Replace the cert and then reload. Check that the expiration is different.
-	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, 2*time.Hour, "")
+	err = CreateTLSCertificates(lg, certPath, keyPath, caPath, 1024, 25*time.Hour, "")
 	require.NoError(t, err)
 	_, err = ci.Reload(lg)
 	require.NoError(t, err)
 	expire2 := ci.getExpireTime()
 	require.NotEqual(t, expire1, expire2)
 	require.Equal(t, 2, strings.Count(text.String(), "update cert expiration"))
+	require.Equal(t, 1, strings.Count(text.String(), "cert will expire"))
 }
 
 func TestAutoCerts(t *testing.T) {
