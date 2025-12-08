@@ -108,8 +108,6 @@ graceful-close-conn-timeout = 15
 	# proxy HTTP port will use this
 	# auto-certs = true
 	# cert-allowed-cn = ["tiproxy", "tidb", "test-client", "prometheus"]
-	cert="/Users/zhangming/gopath/src/github.com/pingcap/tiproxy/server.crt"
-	key="/Users/zhangming/gopath/src/github.com/pingcap/tiproxy/server.key"
 
 # require-backend-tls = false
 
