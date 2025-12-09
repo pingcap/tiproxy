@@ -1130,3 +1130,56 @@ func TestWaitUntil(t *testing.T) {
 	actualStartTime := time.Now()
 	require.GreaterOrEqual(t, actualStartTime.Sub(startReplayTime), 500*time.Millisecond)
 }
+
+func TestResetStatsForEachReplay(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+
+	const auditlogFileName = "tidb-audit-2025-09-04T13-42-55.511.log"
+	tempDir := t.TempDir()
+	dir := tempDir + "/tidb-0"
+	require.NoError(t, os.MkdirAll(dir, 0755))
+	logFilePath := filepath.Join(dir, auditlogFileName)
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+
+	// Write 2 commands to the log file
+	for range 2 {
+		_, err := logFile.WriteString(`[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`)
+		require.NoError(t, err)
+		_, err = logFile.WriteString("\n")
+		require.NoError(t, err)
+	}
+
+	cfg := ReplayConfig{
+		Input:           tempDir + "/tidb-",
+		Username:        "u1",
+		StartTime:       time.Now(),
+		DryRun:          true,
+		report:          newMockReport(replay.exceptionCh),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+		DynamicInput:    true,
+		ReplayerCount:   1,
+		ReplayerIndex:   0,
+		Format:          cmd.FormatAuditLogPlugin,
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	replay.Wait()
+
+	// After the first execute, the stats should be updated
+	require.EqualValues(t, 2, replay.replayStats.ReplayedCmds.Load())
+	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
+
+	// For the next replay, write a new command to the log file
+	_, err = logFile.WriteString(`[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 10:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`)
+	require.NoError(t, err)
+	_, err = logFile.WriteString("\n")
+	require.NoError(t, err)
+
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	replay.Wait()
+
+	// It should replay 3 commands
+	require.EqualValues(t, 3, replay.replayStats.ReplayedCmds.Load())
+	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
+}
