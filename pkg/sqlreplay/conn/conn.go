@@ -49,18 +49,6 @@ type ReplayStats struct {
 	ExceptionCmds atomic.Uint64
 }
 
-func (s *ReplayStats) Reset() {
-	s.ReplayedCmds.Store(0)
-	s.PendingCmds.Store(0)
-	s.FilteredCmds.Store(0)
-	s.TotalWaitTime.Store(0)
-	s.ExtraWaitTime.Store(0)
-	s.ReplayStartTs.Store(0)
-	s.FirstCmdTs.Store(0)
-	s.CurCmdTs.Store(0)
-	s.ExceptionCmds.Store(0)
-}
-
 type ExecInfo struct {
 	Command   *cmd.Command
 	StartTime time.Time

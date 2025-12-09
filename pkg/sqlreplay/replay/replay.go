@@ -317,7 +317,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.progress = 0
 	r.decodedCmds.Store(0)
 	r.err = nil
-	r.replayStats.Reset()
+	r.replayStats = conn.ReplayStats{}
 	r.dedup = cmd.NewDeDup()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
@@ -742,7 +742,7 @@ func (r *replay) constructReaderForDir(storage storage.ExternalStorage, dir stri
 		FileNameFilterTime: filterTime,
 		WaitOnEOF:          r.cfg.WaitOnEOF,
 	}
-	if r.cfg.CommandEndTime.IsZero() {
+	if cfg.FileNameFilterTime.IsZero() {
 		cfg.FileNameFilterTime = r.cfg.CommandStartTime
 	}
 	reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
