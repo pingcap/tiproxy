@@ -192,45 +192,23 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	for _, backend := range scoredBackends {
 		fields = append(fields, zap.String(backend.Addr(), strconv.FormatUint(backend.scoreBits, 16)))
 	}
-	if !fbb.canBeRouted(scoredBackends[0].scoreBits) {
-		return nil
-	}
-	if len(backends) == 1 {
-		fields = append(fields, zap.String("target", backends[0].Addr()))
-		return backends[0]
-	}
 
-	// Evict the backends that are so busy that it should migrate connections to another, and then randomly choose one.
-	// Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
+	// Evict the backends that are can't be routed to, and then choose one randomly, because:
+	// - Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
 	// in the next second route to the same backend.
+	// - New connections are more likely to be more intensive. If new connections are all routed to the newly scaled backend,
+	// the backend will be overloaded.
+	//
+	// But this introduces a problem: connections may be routed to a remote backend even when the local one is idle.
 	idxes := make([]int, 0, len(scoredBackends))
-	for i := len(scoredBackends) - 1; i > 0; i-- {
-		leftBitNum := fbb.totalBitNum
-		var balanceCount float64
-		for _, factor := range fbb.factors {
-			bitNum := factor.ScoreBitNum()
-			score1 := scoredBackends[i].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-			score2 := scoredBackends[0].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
-			if score1 > score2 {
-				var balanceFields []zap.Field
-				var advice BalanceAdvice
-				advice, balanceCount, balanceFields = factor.BalanceCount(scoredBackends[i], scoredBackends[0])
-				if advice == AdvicePositive && balanceCount > 0.0001 {
-					// This backend is too busy. If it's routed, migration may happen.
-					fields = append(fields, zap.String(scoredBackends[i].Addr(), factor.Name()))
-					fields = append(fields, balanceFields...)
-					break
-				}
-			} else if score1 < score2 {
-				break
-			}
-			leftBitNum -= bitNum
-		}
-		if balanceCount <= 0.0001 {
+	for i := range scoredBackends {
+		if fbb.canBeRouted(scoredBackends[i].scoreBits) {
 			idxes = append(idxes, i)
 		}
 	}
-	idxes = append(idxes, 0)
+	if len(idxes) == 0 {
+		return nil
+	}
 
 	// For the rest backends, choose a random one.
 	idx := 0
