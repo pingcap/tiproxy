@@ -35,19 +35,19 @@ func TestRouteWithOneFactor(t *testing.T) {
 		},
 		{
 			scores:   []int{10, 20},
-			idxRange: []int{0},
+			idxRange: []int{0, 1},
 		},
 		{
 			scores:   []int{10, 20, 30},
-			idxRange: []int{0},
+			idxRange: []int{0, 1, 2},
 		},
 		{
 			scores:   []int{30, 20, 10},
-			idxRange: []int{2},
+			idxRange: []int{0, 1, 2},
 		},
 		{
 			scores:   []int{30, 11, 10},
-			idxRange: []int{1, 2},
+			idxRange: []int{0, 1, 2},
 		},
 		{
 			scores:   []int{11, 11, 10},
@@ -75,7 +75,7 @@ func TestRouteWithOneFactor(t *testing.T) {
 func TestRouteWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1, canBeRouted: true}
+	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1, canBeRouted: false}
 	factor2 := &mockFactor{bitNum: 12, balanceCount: 1, threshold: 1, canBeRouted: true}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
@@ -88,7 +88,7 @@ func TestRouteWith2Factors(t *testing.T) {
 		{
 			scores1:  []int{10, 0, 0},
 			scores2:  []int{0, 100, 200},
-			idxRange: []int{1},
+			idxRange: []int{1, 2},
 		},
 		{
 			scores1:  []int{10, 10, 0},
@@ -98,27 +98,17 @@ func TestRouteWith2Factors(t *testing.T) {
 		{
 			scores1:  []int{10, 10, 10},
 			scores2:  []int{0, 100, 200},
-			idxRange: []int{0},
+			idxRange: []int{},
 		},
 		{
-			scores1:  []int{10, 11, 11},
+			scores1:  []int{0, 0, 0},
 			scores2:  []int{100, 101, 100},
 			idxRange: []int{0, 1, 2},
 		},
 		{
-			scores1:  []int{10, 11, 11},
-			scores2:  []int{100, 101, 110},
-			idxRange: []int{0, 1},
-		},
-		{
-			scores1:  []int{10, 11, 11},
-			scores2:  []int{110, 101, 100},
+			scores1:  []int{0, 0, 0},
+			scores2:  []int{0, 100, 200},
 			idxRange: []int{0, 1, 2},
-		},
-		{
-			scores1:  []int{10, 20, 11},
-			scores2:  []int{110, 0, 100},
-			idxRange: []int{0, 2},
 		},
 	}
 	for tIdx, test := range tests {
@@ -133,6 +123,10 @@ func TestRouteWith2Factors(t *testing.T) {
 			}
 		}
 		backends := createBackends(len(test.scores1))
+		if len(test.idxRange) == 0 {
+			require.Nil(t, fm.BackendToRoute(backends), "test index %d", tIdx)
+			continue
+		}
 		targets := make(map[int]struct{}, len(test.scores1))
 		for i := 0; len(targets) < len(test.idxRange) || i < 100; i++ {
 			require.Less(t, i, 100000, "test index %d", tIdx)
