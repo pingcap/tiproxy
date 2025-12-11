@@ -10,8 +10,8 @@ const (
 	BalancePolicyLocation   = "location"
 	BalancePolicyConnection = "connection"
 
-	RoutePolicyIdlest = "idlest"
-	RoutePolicyRandom = "random"
+	RoutePolicyPreferIdle = "prefer-idle"
+	RoutePolicyRandom     = "random"
 )
 
 type Balance struct {
@@ -31,10 +31,10 @@ func (b *Balance) Check() error {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.policy")
 	}
 	switch b.RoutePolicy {
-	case RoutePolicyIdlest, RoutePolicyRandom:
+	case RoutePolicyPreferIdle, RoutePolicyRandom:
 		return nil
 	case "":
-		b.RoutePolicy = RoutePolicyIdlest
+		b.RoutePolicy = RoutePolicyPreferIdle
 	default:
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.route-policy")
 	}
@@ -44,6 +44,6 @@ func (b *Balance) Check() error {
 func DefaultBalance() Balance {
 	return Balance{
 		Policy:      BalancePolicyResource,
-		RoutePolicy: RoutePolicyIdlest,
+		RoutePolicy: RoutePolicyPreferIdle,
 	}
 }
