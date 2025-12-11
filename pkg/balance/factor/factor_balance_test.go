@@ -28,13 +28,16 @@ func TestRouteWithOneFactor(t *testing.T) {
 	tests := []struct {
 		scores   []int
 		idxRange []int
+		policy   string
 	}{
 		{
 			scores:   []int{10},
 			idxRange: []int{0},
+			policy:   config.RoutePolicyRandom,
 		},
 		{
 			scores:   []int{10, 20},
+<<<<<<< HEAD
 			idxRange: []int{0},
 		},
 		{
@@ -48,13 +51,68 @@ func TestRouteWithOneFactor(t *testing.T) {
 		{
 			scores:   []int{30, 11, 10},
 			idxRange: []int{1, 2},
+=======
+			idxRange: []int{0, 1},
+			policy:   config.RoutePolicyRandom,
+		},
+		{
+			scores:   []int{10, 20, 30},
+			idxRange: []int{0, 1, 2},
+			policy:   config.RoutePolicyRandom,
+		},
+		{
+			scores:   []int{30, 20, 10},
+			idxRange: []int{0, 1, 2},
+			policy:   config.RoutePolicyRandom,
+		},
+		{
+			scores:   []int{30, 11, 10},
+			idxRange: []int{0, 1, 2},
+			policy:   config.RoutePolicyRandom,
+>>>>>>> 628c5469 (balance, config: add a config `route-policy` to specify routing policy (#1027))
 		},
 		{
 			scores:   []int{11, 11, 10},
 			idxRange: []int{0, 1, 2},
+			policy:   config.RoutePolicyRandom,
+		},
+		{
+			scores:   []int{10},
+			idxRange: []int{0},
+			policy:   config.RoutePolicyPreferIdle,
+		},
+		{
+			scores:   []int{10, 20},
+			idxRange: []int{0},
+			policy:   config.RoutePolicyPreferIdle,
+		},
+		{
+			scores:   []int{10, 20, 30},
+			idxRange: []int{0},
+			policy:   config.RoutePolicyPreferIdle,
+		},
+		{
+			scores:   []int{30, 20, 10},
+			idxRange: []int{2},
+			policy:   config.RoutePolicyPreferIdle,
+		},
+		{
+			scores:   []int{30, 11, 10},
+			idxRange: []int{1, 2},
+			policy:   config.RoutePolicyPreferIdle,
+		},
+		{
+			scores:   []int{11, 11, 10},
+			idxRange: []int{0, 1, 2},
+			policy:   config.RoutePolicyPreferIdle,
+		},
+		{
+			scores:   []int{10, 20},
+			idxRange: []int{0},
 		},
 	}
 	for tIdx, test := range tests {
+		fm.routePolicy = test.policy
 		factor.updateScore = func(backends []scoredBackend) {
 			for i := range backends {
 				backends[i].addScore(test.scores[i], factor.bitNum)
@@ -72,10 +130,87 @@ func TestRouteWithOneFactor(t *testing.T) {
 	}
 }
 
-func TestRouteWith2Factors(t *testing.T) {
+func TestRouteIdlestWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
+<<<<<<< HEAD
 	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1, canBeRouted: true}
+=======
+	fm.routePolicy = config.RoutePolicyPreferIdle
+	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1, canBeRouted: true}
+	factor2 := &mockFactor{bitNum: 12, balanceCount: 1, threshold: 1, canBeRouted: true}
+	fm.factors = []Factor{factor1, factor2}
+	require.NoError(t, fm.updateBitNum())
+	tests := []struct {
+		scores1  []int
+		scores2  []int
+		idxRange []int
+	}{
+		{
+			scores1:  []int{10, 0, 0},
+			scores2:  []int{0, 100, 200},
+			idxRange: []int{1},
+		},
+		{
+			scores1:  []int{10, 10, 0},
+			scores2:  []int{0, 100, 200},
+			idxRange: []int{2},
+		},
+		{
+			scores1:  []int{10, 10, 10},
+			scores2:  []int{0, 100, 200},
+			idxRange: []int{0},
+		},
+		{
+			scores1:  []int{10, 11, 11},
+			scores2:  []int{100, 101, 100},
+			idxRange: []int{0, 1, 2},
+		},
+		{
+			scores1:  []int{10, 11, 11},
+			scores2:  []int{100, 101, 110},
+			idxRange: []int{0, 1},
+		},
+		{
+			scores1:  []int{10, 11, 11},
+			scores2:  []int{110, 101, 100},
+			idxRange: []int{0, 1, 2},
+		},
+		{
+			scores1:  []int{10, 20, 11},
+			scores2:  []int{110, 0, 100},
+			idxRange: []int{0, 2},
+		},
+	}
+	for tIdx, test := range tests {
+		factor1.updateScore = func(backends []scoredBackend) {
+			for i := range backends {
+				backends[i].addScore(test.scores1[i], factor1.bitNum)
+			}
+		}
+		factor2.updateScore = func(backends []scoredBackend) {
+			for i := range backends {
+				backends[i].addScore(test.scores2[i], factor2.bitNum)
+			}
+		}
+		backends := createBackends(len(test.scores1))
+		targets := make(map[int]struct{}, len(test.scores1))
+		for i := 0; len(targets) < len(test.idxRange) || i < 100; i++ {
+			require.Less(t, i, 100000, "test index %d", tIdx)
+			backend := fm.BackendToRoute(backends)
+			idx := slices.Index(backends, backend)
+			require.Contains(t, test.idxRange, idx, "test index %d", tIdx)
+			targets[idx] = struct{}{}
+		}
+	}
+}
+
+func TestRouteRandomWith2Factors(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
+	fm.routePolicy = config.RoutePolicyRandom
+	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1, canBeRouted: false}
+>>>>>>> 628c5469 (balance, config: add a config `route-policy` to specify routing policy (#1027))
 	factor2 := &mockFactor{bitNum: 12, balanceCount: 1, threshold: 1, canBeRouted: true}
 	fm.factors = []Factor{factor1, factor2}
 	require.NoError(t, fm.updateBitNum())
@@ -520,7 +655,7 @@ func TestCanBalance(t *testing.T) {
 	}
 }
 
-func TestSetFactorConcurrently(t *testing.T) {
+func TestSetConfigsConcurrently(t *testing.T) {
 	fbb := NewFactorBasedBalance(zap.NewNop(), newMockMetricsReader())
 	var wg waitgroup.WaitGroup
 	cfg := &config.Config{}
@@ -530,9 +665,11 @@ func TestSetFactorConcurrently(t *testing.T) {
 	wg.Run(func() {
 		defer wg.Done()
 		policies := []string{config.BalancePolicyConnection, config.BalancePolicyResource, config.BalancePolicyLocation}
+		routePolicies := []string{config.RoutePolicyRandom, config.RoutePolicyPreferIdle}
 		for i := 0; ctx.Err() != nil; i++ {
 			cfg.Balance = config.Balance{
-				Policy: policies[i%len(policies)],
+				Policy:      policies[i%len(policies)],
+				RoutePolicy: routePolicies[i%len(routePolicies)],
 			}
 			fbb.SetConfig(cfg)
 		}
