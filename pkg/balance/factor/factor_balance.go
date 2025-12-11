@@ -196,7 +196,7 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	case config.RoutePolicyRandom:
 		return fbb.routeRandom(scoredBackends, &fields)
 	default:
-		return fbb.routeIdlest(scoredBackends, &fields)
+		return fbb.routePreferIdle(scoredBackends, &fields)
 	}
 }
 
@@ -230,7 +230,7 @@ func (fbb *FactorBasedBalance) routeRandom(scoredBackends []scoredBackend, field
 	return scoredBackends[idx].BackendCtx
 }
 
-func (fbb *FactorBasedBalance) routeIdlest(scoredBackends []scoredBackend, fields *[]zap.Field) policy.BackendCtx {
+func (fbb *FactorBasedBalance) routePreferIdle(scoredBackends []scoredBackend, fields *[]zap.Field) policy.BackendCtx {
 	if !fbb.canBeRouted(scoredBackends[0].scoreBits) {
 		return nil
 	}

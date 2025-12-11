@@ -63,32 +63,32 @@ func TestRouteWithOneFactor(t *testing.T) {
 		{
 			scores:   []int{10},
 			idxRange: []int{0},
-			policy:   config.RoutePolicyIdlest,
+			policy:   config.RoutePolicyPreferIdle,
 		},
 		{
 			scores:   []int{10, 20},
 			idxRange: []int{0},
-			policy:   config.RoutePolicyIdlest,
+			policy:   config.RoutePolicyPreferIdle,
 		},
 		{
 			scores:   []int{10, 20, 30},
 			idxRange: []int{0},
-			policy:   config.RoutePolicyIdlest,
+			policy:   config.RoutePolicyPreferIdle,
 		},
 		{
 			scores:   []int{30, 20, 10},
 			idxRange: []int{2},
-			policy:   config.RoutePolicyIdlest,
+			policy:   config.RoutePolicyPreferIdle,
 		},
 		{
 			scores:   []int{30, 11, 10},
 			idxRange: []int{1, 2},
-			policy:   config.RoutePolicyIdlest,
+			policy:   config.RoutePolicyPreferIdle,
 		},
 		{
 			scores:   []int{11, 11, 10},
 			idxRange: []int{0, 1, 2},
-			policy:   config.RoutePolicyIdlest,
+			policy:   config.RoutePolicyPreferIdle,
 		},
 		{
 			scores:   []int{10, 20},
@@ -117,7 +117,7 @@ func TestRouteWithOneFactor(t *testing.T) {
 func TestRouteIdlestWith2Factors(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
-	fm.routePolicy = config.RoutePolicyIdlest
+	fm.routePolicy = config.RoutePolicyPreferIdle
 	factor1 := &mockFactor{bitNum: 4, balanceCount: 1, threshold: 1, canBeRouted: true}
 	factor2 := &mockFactor{bitNum: 12, balanceCount: 1, threshold: 1, canBeRouted: true}
 	fm.factors = []Factor{factor1, factor2}
@@ -639,7 +639,7 @@ func TestSetConfigsConcurrently(t *testing.T) {
 	wg.Run(func() {
 		defer wg.Done()
 		policies := []string{config.BalancePolicyConnection, config.BalancePolicyResource, config.BalancePolicyLocation}
-		routePolicies := []string{config.RoutePolicyRandom, config.RoutePolicyIdlest}
+		routePolicies := []string{config.RoutePolicyRandom, config.RoutePolicyPreferIdle}
 		for i := 0; ctx.Err() != nil; i++ {
 			cfg.Balance = config.Balance{
 				Policy:      policies[i%len(policies)],
