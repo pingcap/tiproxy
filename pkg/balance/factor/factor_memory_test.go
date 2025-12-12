@@ -451,10 +451,6 @@ func TestFactorMemoryConfig(t *testing.T) {
 		fm := NewFactorMemory(mmr, zap.NewNop())
 		fm.SetConfig(&config.Config{Balance: config.Balance{Memory: config.Factor{MigrationsPerSecond: test.speed}}})
 		fm.UpdateScore(backends)
-		scores := make([]uint64, 0, len(backends))
-		for _, backend := range backends {
-			scores = append(scores, backend.score())
-		}
 		from, to := backends[len(backends)-1], backends[0]
 		_, balanceCount, _ := fm.BalanceCount(from, to)
 		require.EqualValues(t, test.speed, balanceCount, "test index %d", i)
