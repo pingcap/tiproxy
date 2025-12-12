@@ -25,7 +25,8 @@ var _ Factor = (*FactorConnCount)(nil)
 // - The backend CPU usages are unavailable
 // - The workload just starts and the backend CPU usages are low
 type FactorConnCount struct {
-	bitNum int
+	bitNum              int
+	migrationsPerSecond float64
 }
 
 func NewFactorConnCount() *FactorConnCount {
@@ -58,6 +59,9 @@ func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) (BalanceAdvice,
 	if float64(from.ConnScore()) <= float64(to.ConnScore()+1)*connBalancedRatio {
 		return AdviceNeutral, 0, nil
 	}
+	if fcc.migrationsPerSecond > 0 {
+		return AdvicePositive, fcc.migrationsPerSecond, nil
+	}
 	targetTo := float64(from.ConnScore()+to.ConnScore()+1) / (1 + connBalancedRatio)
 	count := (targetTo - float64(to.ConnScore()+1)) / balanceSeconds4Conn
 	if count < 0 {
@@ -67,6 +71,7 @@ func (fcc *FactorConnCount) BalanceCount(from, to scoredBackend) (BalanceAdvice,
 }
 
 func (fcc *FactorConnCount) SetConfig(cfg *config.Config) {
+	fcc.migrationsPerSecond = cfg.Balance.ConnCount.MigrationsPerSecond
 }
 
 func (fcc *FactorConnCount) CanBeRouted(_ uint64) bool {

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -415,4 +416,47 @@ func TestMissBackendInMemory(t *testing.T) {
 	advice, count, _ = fm.BalanceCount(backends[0], backends[1])
 	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4HighMemory, count)
+}
+
+func TestFactorMemoryConfig(t *testing.T) {
+	tests := []struct {
+		memory [][]float64
+		speed  float64
+	}{
+		{
+			memory: [][]float64{{0.2, 0.3}, {0.3, 0.4}},
+			speed:  0,
+		},
+		{
+			memory: [][]float64{{0.2, 0.15}, {0.81, 0.82}},
+			speed:  10,
+		},
+	}
+
+	for i, test := range tests {
+		backends := make([]scoredBackend, 0, len(test.memory))
+		values := make([]*model.SampleStream, 0, len(test.memory))
+		for j := 0; j < len(test.memory); j++ {
+			backends = append(backends, createBackend(j, 100, 100))
+			values = append(values, createSampleStream(test.memory[j], j, model.Now()))
+		}
+		mmr := &mockMetricsReader{
+			qrs: map[string]metricsreader.QueryResult{
+				"memory": {
+					UpdateTime: time.Now(),
+					Value:      model.Matrix(values),
+				},
+			},
+		}
+		fm := NewFactorMemory(mmr, zap.NewNop())
+		fm.SetConfig(&config.Config{Balance: config.Balance{Memory: config.Factor{MigrationsPerSecond: test.speed}}})
+		fm.UpdateScore(backends)
+		scores := make([]uint64, 0, len(backends))
+		for _, backend := range backends {
+			scores = append(scores, backend.score())
+		}
+		from, to := backends[len(backends)-1], backends[0]
+		_, balanceCount, _ := fm.BalanceCount(from, to)
+		require.EqualValues(t, test.speed, balanceCount, "test index %d", i)
+	}
 }
