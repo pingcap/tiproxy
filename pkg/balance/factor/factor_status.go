@@ -30,9 +30,10 @@ type statusBackendSnapshot struct {
 var _ Factor = (*FactorStatus)(nil)
 
 type FactorStatus struct {
-	snapshot map[string]statusBackendSnapshot
-	bitNum   int
-	lg       *zap.Logger
+	snapshot            map[string]statusBackendSnapshot
+	bitNum              int
+	migrationsPerSecond float64
+	lg                  *zap.Logger
 }
 
 func NewFactorStatus(lg *zap.Logger) *FactorStatus {
@@ -101,10 +102,14 @@ func (fs *FactorStatus) ScoreBitNum() int {
 }
 
 func (fs *FactorStatus) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
+	if fs.migrationsPerSecond > 0 {
+		return AdvicePositive, fs.migrationsPerSecond, nil
+	}
 	return AdvicePositive, fs.snapshot[from.Addr()].balanceCount, nil
 }
 
 func (fs *FactorStatus) SetConfig(cfg *config.Config) {
+	fs.migrationsPerSecond = cfg.Balance.Status.MigrationsPerSecond
 }
 
 func (fl *FactorStatus) CanBeRouted(score uint64) bool {

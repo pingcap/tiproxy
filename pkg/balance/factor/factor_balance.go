@@ -193,11 +193,30 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	}
 
 	switch fbb.routePolicy {
-	case config.RoutePolicyRandom:
+	case config.RoutingPolicyRandom:
 		return fbb.routeRandom(scoredBackends, &fields)
+	case config.RoutingPolicyIdlest:
+		return fbb.routeIdlest(scoredBackends, &fields)
 	default:
 		return fbb.routePreferIdle(scoredBackends, &fields)
 	}
+}
+
+func (fbb *FactorBasedBalance) routeIdlest(scoredBackends []scoredBackend, fields *[]zap.Field) policy.BackendCtx {
+	// Evict the backends that are can't be routed to, and then choose the idlest one.
+	// It's like least-connection algorithm.
+	idx := -1
+	for i := range scoredBackends {
+		if fbb.canBeRouted(scoredBackends[i].scoreBits) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+	*fields = append(*fields, zap.String("target", scoredBackends[idx].Addr()))
+	return scoredBackends[idx].BackendCtx
 }
 
 func (fbb *FactorBasedBalance) routeRandom(scoredBackends []scoredBackend, fields *[]zap.Field) policy.BackendCtx {
@@ -370,7 +389,7 @@ func (fbb *FactorBasedBalance) SetConfig(cfg *config.Config) {
 	fbb.Lock()
 	defer fbb.Unlock()
 	fbb.setFactors(cfg)
-	fbb.routePolicy = cfg.Balance.RoutePolicy
+	fbb.routePolicy = cfg.Balance.RoutingPolicy
 }
 
 func (fbb *FactorBasedBalance) Close() {
