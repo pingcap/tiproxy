@@ -19,7 +19,7 @@ type Balance struct {
 	LabelName     string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty" reloadable:"true"`
 	RoutingRule   string `yaml:"routing-rule,omitempty" toml:"routing-rule,omitempty" json:"routing-rule,omitempty" reloadable:"false"`
 	Policy        string `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
-	RoutingPolicy string `yaml:"route-policy,omitempty" toml:"route-policy,omitempty" json:"route-policy,omitempty" reloadable:"true"`
+	RoutingPolicy string `yaml:"routing-policy,omitempty" toml:"routing-policy,omitempty" json:"routing-policy,omitempty" reloadable:"true"`
 	Status        Factor `yaml:"status,omitempty" toml:"status,omitempty" json:"status,omitempty" reloadable:"true"`
 	Health        Factor `yaml:"health,omitempty" toml:"health,omitempty" json:"health,omitempty" reloadable:"true"`
 	Memory        Factor `yaml:"memory,omitempty" toml:"memory,omitempty" json:"memory,omitempty" reloadable:"true"`
