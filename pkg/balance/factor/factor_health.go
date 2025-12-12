@@ -185,11 +185,12 @@ type errIndicator struct {
 }
 
 type FactorHealth struct {
-	snapshot   map[string]healthBackendSnapshot
-	indicators []errIndicator
-	mr         metricsreader.MetricsReader
-	bitNum     int
-	lg         *zap.Logger
+	snapshot            map[string]healthBackendSnapshot
+	indicators          []errIndicator
+	mr                  metricsreader.MetricsReader
+	bitNum              int
+	migrationsPerSecond float64
+	lg                  *zap.Logger
 }
 
 func NewFactorHealth(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorHealth {
@@ -415,10 +416,14 @@ func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	if fromScore-toScore <= 1 {
 		return AdviceNeutral, 0, fields
 	}
+	if fh.migrationsPerSecond > 0 {
+		return AdvicePositive, fh.migrationsPerSecond, fields
+	}
 	return AdvicePositive, snapshot.balanceCount, fields
 }
 
 func (fh *FactorHealth) SetConfig(cfg *config.Config) {
+	fh.migrationsPerSecond = cfg.Balance.Health.MigrationsPerSecond
 }
 
 func (fh *FactorHealth) CanBeRouted(_ uint64) bool {

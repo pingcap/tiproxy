@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -434,4 +435,48 @@ func TestMissBackendInHealth(t *testing.T) {
 	advice, count, _ = fh.BalanceCount(backends[0], backends[1])
 	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4Health, count)
+}
+
+func TestFactorHealthConfig(t *testing.T) {
+	tests := []struct {
+		errCounts [][]float64
+		speed     float64
+	}{
+		{
+			errCounts: [][]float64{{math.NaN(), math.NaN()}, {math.NaN(), math.NaN()}},
+			speed:     0,
+		},
+		{
+			errCounts: [][]float64{{1000000, 0}, {0, 0}},
+			speed:     10,
+		},
+	}
+
+	for i, test := range tests {
+		backends := make([]scoredBackend, 0, len(test.errCounts))
+		values1 := make([]*model.Sample, 0, len(test.errCounts))
+		values2 := make([]*model.Sample, 0, len(test.errCounts))
+		for beIndx := 0; beIndx < len(test.errCounts); beIndx++ {
+			backends = append(backends, createBackend(beIndx, 100, 100))
+			values1 = append(values1, createSample(test.errCounts[beIndx][0], beIndx))
+			values2 = append(values2, createSample(test.errCounts[beIndx][1], beIndx))
+		}
+		mmr := &mockMetricsReader{
+			qrs: map[string]metricsreader.QueryResult{
+				"failure_tikv": {
+					UpdateTime: time.Now(),
+					Value:      model.Vector(values1),
+				},
+				"total_tikv": {
+					UpdateTime: time.Now(),
+					Value:      model.Vector(values2),
+				},
+			},
+		}
+		fh := NewFactorHealth(mmr, zap.NewNop())
+		fh.SetConfig(&config.Config{Balance: config.Balance{Health: config.Factor{MigrationsPerSecond: test.speed}}})
+		fh.UpdateScore(backends)
+		_, balanceCount, _ := fh.BalanceCount(backends[0], backends[1])
+		require.EqualValues(t, test.speed, balanceCount, "test index %d", i)
+	}
 }
