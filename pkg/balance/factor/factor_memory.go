@@ -106,10 +106,11 @@ type FactorMemory struct {
 	// The snapshot of backend statistics when the matrix was updated.
 	snapshot map[string]memBackendSnapshot
 	// The updated time of the metric that we've read last time.
-	lastMetricTime time.Time
-	mr             metricsreader.MetricsReader
-	bitNum         int
-	lg             *zap.Logger
+	lastMetricTime      time.Time
+	mr                  metricsreader.MetricsReader
+	bitNum              int
+	migrationsPerSecond float64
+	lg                  *zap.Logger
 }
 
 func NewFactorMemory(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorMemory {
@@ -288,10 +289,14 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	if fromSnapshot.riskLevel-toSnapshot.riskLevel <= 1 {
 		return AdviceNeutral, 0, fields
 	}
+	if fm.migrationsPerSecond > 0 {
+		return AdvicePositive, fm.migrationsPerSecond, fields
+	}
 	return AdvicePositive, fromSnapshot.balanceCount, fields
 }
 
 func (fm *FactorMemory) SetConfig(cfg *config.Config) {
+	fm.migrationsPerSecond = cfg.Balance.Memory.MigrationsPerSecond
 }
 
 func (fm *FactorMemory) CanBeRouted(_ uint64) bool {
