@@ -178,5 +178,6 @@ type connWrapper struct {
 	redirectReason string
 	// Last redirect start time of this connection.
 	lastRedirect time.Time
+	createTime   time.Time
 	phase        connPhase
 }
