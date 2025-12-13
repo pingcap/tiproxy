@@ -680,7 +680,7 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 	} else {
 		err := eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
 		mgr.logger.Debug("redirect connection succeeds", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.NamedError("notify_err", err))
+			zap.String("to", rs.to), zap.Duration("lifetime", time.Since(mgr.createTime)), zap.NamedError("notify_err", err))
 	}
 }
 
