@@ -284,6 +284,7 @@ func (g *Group) onCreateConn(backendInst BackendInst, conn RedirectableConn, suc
 	if succeed {
 		connWrapper := &connWrapper{
 			RedirectableConn: conn,
+			createTime:       time.Now(),
 			phase:            phaseNotRedirected,
 		}
 		g.addConn(backend, connWrapper)
@@ -406,6 +407,9 @@ func (g *Group) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toB
 		zap.Uint64("connID", conn.ConnectionID()),
 		zap.String("from", fromBackend.addr),
 		zap.String("to", toBackend.addr),
+	}
+	if !conn.lastRedirect.IsZero() {
+		fields = append(fields, zap.Duration("since_last_redirect", curTime.Sub(conn.lastRedirect)))
 	}
 	fields = append(fields, logFields...)
 	succeed := conn.Redirect(toBackend)
