@@ -15,15 +15,9 @@ const (
 )
 
 type Balance struct {
-<<<<<<< HEAD
-	LabelName string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty" reloadable:"true"`
-	Policy    string `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
-=======
 	LabelName   string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty" reloadable:"true"`
-	RoutingRule string `yaml:"routing-rule,omitempty" toml:"routing-rule,omitempty" json:"routing-rule,omitempty" reloadable:"false"`
 	Policy      string `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
 	RoutePolicy string `yaml:"route-policy,omitempty" toml:"route-policy,omitempty" json:"route-policy,omitempty" reloadable:"true"`
->>>>>>> 628c5469 (balance, config: add a config `route-policy` to specify routing policy (#1027))
 }
 
 func (b *Balance) Check() error {
