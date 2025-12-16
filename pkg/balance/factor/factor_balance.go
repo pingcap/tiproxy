@@ -41,6 +41,7 @@ type FactorBasedBalance struct {
 	factorConnCount *FactorConnCount
 	totalBitNum     int
 	lastMetricTime  time.Time
+	routePolicy     string
 }
 
 func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *FactorBasedBalance {
@@ -48,16 +49,14 @@ func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *Fact
 		lg:         lg,
 		mr:         mr,
 		cachedList: make([]scoredBackend, 0, 512),
+		factors:    make([]Factor, 0, 7),
 	}
 }
 
 // Init creates factors at the first time.
 // TODO: create factors according to config and update policy when config changes.
 func (fbb *FactorBasedBalance) Init(cfg *config.Config) {
-	fbb.Lock()
-	defer fbb.Unlock()
-	fbb.factors = make([]Factor, 0, 7)
-	fbb.setFactors(cfg)
+	fbb.SetConfig(cfg)
 }
 
 func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
@@ -193,13 +192,21 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 		fields = append(fields, zap.String(backend.Addr(), strconv.FormatUint(backend.scoreBits, 16)))
 	}
 
-	// Evict the backends that are can't be routed to, and then choose one randomly, because:
-	// - Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
-	// in the next second route to the same backend.
-	// - New connections are more likely to be more intensive. If new connections are all routed to the newly scaled backend,
+	switch fbb.routePolicy {
+	case config.RoutePolicyRandom:
+		return fbb.routeRandom(scoredBackends, &fields)
+	default:
+		return fbb.routePreferIdle(scoredBackends, &fields)
+	}
+}
+
+func (fbb *FactorBasedBalance) routeRandom(scoredBackends []scoredBackend, fields *[]zap.Field) policy.BackendCtx {
+	// Evict the backends that are can't be routed to, and then choose one randomly, with the idlest one having 10% higher priority.
+	// It works when new connections are more intensive. If new connections are all routed to the newly scaled backend,
 	// the backend will be overloaded.
+	// The connections are migrated slowly from the old backends to the new backend to achieve balance.
 	//
-	// But this introduces a problem: connections may be routed to a remote backend even when the local one is idle.
+	// One problem is that connections may be routed to a remote backend even when the local one is idle.
 	idxes := make([]int, 0, len(scoredBackends))
 	for i := range scoredBackends {
 		if fbb.canBeRouted(scoredBackends[i].scoreBits) {
@@ -210,6 +217,63 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 		return nil
 	}
 
+	idx := 0
+	if len(idxes) > 1 {
+		// math/rand can not pass security scanning while crypto/rand is too slow for short connections, so use the current time as a seed.
+		// Some platforms only produce microseconds, so use microseconds.
+		seed := time.Now().UnixMicro()
+		// The first backend (the idlest one) has 10% higher possibility so that the connection count can finally catch up.
+		// The possibility for the idlest backend: 11/(N*10+1). The possibility for the others: 10/(N*10+1).
+		idx = idxes[int(seed%int64(len(idxes)*10+1)%int64(len(idxes)))]
+	}
+	*fields = append(*fields, zap.String("target", scoredBackends[idx].Addr()), zap.Ints("rand", idxes))
+	return scoredBackends[idx].BackendCtx
+}
+
+func (fbb *FactorBasedBalance) routePreferIdle(scoredBackends []scoredBackend, fields *[]zap.Field) policy.BackendCtx {
+	if !fbb.canBeRouted(scoredBackends[0].scoreBits) {
+		return nil
+	}
+	if len(scoredBackends) == 1 {
+		*fields = append(*fields, zap.String("target", scoredBackends[0].Addr()))
+		return scoredBackends[0].BackendCtx
+	}
+
+	// Evict the backends that are so busy that it should migrate connections to another, and then randomly choose one.
+	// Always choosing the idlest one works badly for short connections because even a little jitter may cause all the connections
+	// in the next second route to the same backend.
+	//
+	// If works badly when new connections are more intensive. If new connections are all routed to the newly scaled backend,
+	// the backend will be overloaded.
+	idxes := make([]int, 0, len(scoredBackends))
+	for i := len(scoredBackends) - 1; i > 0; i-- {
+		leftBitNum := fbb.totalBitNum
+		var balanceCount float64
+		for _, factor := range fbb.factors {
+			bitNum := factor.ScoreBitNum()
+			score1 := scoredBackends[i].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			score2 := scoredBackends[0].scoreBits << (maxBitNum - leftBitNum) >> (maxBitNum - bitNum)
+			if score1 > score2 {
+				var balanceFields []zap.Field
+				var advice BalanceAdvice
+				advice, balanceCount, balanceFields = factor.BalanceCount(scoredBackends[i], scoredBackends[0])
+				if advice == AdvicePositive && balanceCount > 0.0001 {
+					// This backend is too busy. If it's routed, migration may happen.
+					*fields = append(*fields, zap.String(scoredBackends[i].Addr(), factor.Name()))
+					*fields = append(*fields, balanceFields...)
+					break
+				}
+			} else if score1 < score2 {
+				break
+			}
+			leftBitNum -= bitNum
+		}
+		if balanceCount <= 0.0001 {
+			idxes = append(idxes, i)
+		}
+	}
+	idxes = append(idxes, 0)
+
 	// For the rest backends, choose a random one.
 	idx := 0
 	if len(idxes) > 1 {
@@ -217,7 +281,7 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 		// Some platforms only produce microseconds, so use microseconds.
 		idx = idxes[int(time.Now().UnixMicro()%int64(len(idxes)))]
 	}
-	fields = append(fields, zap.String("target", scoredBackends[idx].Addr()), zap.Ints("rand", idxes))
+	*fields = append(*fields, zap.String("target", scoredBackends[idx].Addr()), zap.Ints("rand", idxes))
 	return scoredBackends[idx].BackendCtx
 }
 
@@ -306,6 +370,7 @@ func (fbb *FactorBasedBalance) SetConfig(cfg *config.Config) {
 	fbb.Lock()
 	defer fbb.Unlock()
 	fbb.setFactors(cfg)
+	fbb.routePolicy = cfg.Balance.RoutePolicy
 }
 
 func (fbb *FactorBasedBalance) Close() {
