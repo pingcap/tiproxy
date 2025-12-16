@@ -16,13 +16,7 @@ const (
 )
 
 type Balance struct {
-<<<<<<< HEAD
-	LabelName   string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty" reloadable:"true"`
-	Policy      string `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
-	RoutePolicy string `yaml:"route-policy,omitempty" toml:"route-policy,omitempty" json:"route-policy,omitempty" reloadable:"true"`
-=======
 	LabelName     string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty" reloadable:"true"`
-	RoutingRule   string `yaml:"routing-rule,omitempty" toml:"routing-rule,omitempty" json:"routing-rule,omitempty" reloadable:"false"`
 	Policy        string `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
 	RoutingPolicy string `yaml:"routing-policy,omitempty" toml:"routing-policy,omitempty" json:"routing-policy,omitempty" reloadable:"true"`
 	Status        Factor `yaml:"status,omitempty" toml:"status,omitempty" json:"status,omitempty" reloadable:"true"`
@@ -35,7 +29,6 @@ type Balance struct {
 
 type Factor struct {
 	MigrationsPerSecond float64 `yaml:"migrations-per-second,omitempty" toml:"migrations-per-second,omitempty" json:"migrations-per-second,omitempty" reloadable:"true"`
->>>>>>> 248210c0 (balance, config: add configs to tune the migration speed (#1032))
 }
 
 func (b *Balance) Check() error {
