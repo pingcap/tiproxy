@@ -16,7 +16,8 @@ const (
 var _ Factor = (*FactorLocation)(nil)
 
 type FactorLocation struct {
-	bitNum int
+	bitNum              int
+	migrationsPerSecond float64
 }
 
 func NewFactorLocation() *FactorLocation {
@@ -47,10 +48,15 @@ func (fl *FactorLocation) ScoreBitNum() int {
 }
 
 func (fl *FactorLocation) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
-	return AdvicePositive, balanceCount4Location, nil
+	count := float64(balanceCount4Location)
+	if fl.migrationsPerSecond > 0 {
+		count = fl.migrationsPerSecond
+	}
+	return AdvicePositive, count, nil
 }
 
 func (fl *FactorLocation) SetConfig(cfg *config.Config) {
+	fl.migrationsPerSecond = cfg.Balance.Location.MigrationsPerSecond
 }
 
 func (fl *FactorLocation) CanBeRouted(_ uint64) bool {

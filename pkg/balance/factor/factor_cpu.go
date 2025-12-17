@@ -94,10 +94,11 @@ type FactorCPU struct {
 	// The updated time of the metric that we've read last time.
 	lastMetricTime time.Time
 	// The estimated average CPU usage used by one connection.
-	usagePerConn float64
-	mr           metricsreader.MetricsReader
-	bitNum       int
-	lg           *zap.Logger
+	usagePerConn        float64
+	mr                  metricsreader.MetricsReader
+	bitNum              int
+	migrationsPerSecond float64
+	lg                  *zap.Logger
 }
 
 func NewFactorCPU(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorCPU {
@@ -278,10 +279,14 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float6
 	if 1.3-toAvgUsage < (1.3-fromAvgUsage)*cpuBalancedRatio || 1.3-toLatestUsage < (1.3-fromLatestUsage)*cpuBalancedRatio {
 		return AdviceNeutral, 0, fields
 	}
+	if fc.migrationsPerSecond > 0 {
+		return AdvicePositive, fc.migrationsPerSecond, fields
+	}
 	return AdvicePositive, 1 / fc.usagePerConn / balanceRatio4Cpu, fields
 }
 
 func (fc *FactorCPU) SetConfig(cfg *config.Config) {
+	fc.migrationsPerSecond = cfg.Balance.CPU.MigrationsPerSecond
 }
 
 func (fc *FactorCPU) CanBeRouted(_ uint64) bool {
