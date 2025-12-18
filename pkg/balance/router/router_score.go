@@ -147,6 +147,7 @@ func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn Redir
 	if succeed {
 		connWrapper := &connWrapper{
 			RedirectableConn: conn,
+			createTime:       time.Now(),
 			phase:            phaseNotRedirected,
 		}
 		router.addConn(backend, connWrapper)
@@ -397,6 +398,10 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 		zap.Uint64("connID", conn.ConnectionID()),
 		zap.String("from", fromBackend.addr),
 		zap.String("to", toBackend.addr),
+		zap.Duration("lifetime", curTime.Sub(conn.createTime)),
+	}
+	if !conn.lastRedirect.IsZero() {
+		fields = append(fields, zap.Duration("since_last_redirect", curTime.Sub(conn.lastRedirect)))
 	}
 	fields = append(fields, logFields...)
 	succeed := conn.Redirect(toBackend)
