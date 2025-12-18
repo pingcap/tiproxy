@@ -107,6 +107,8 @@ func init() {
 		KeepAliveCounter,
 		QueryTotalCounter,
 		QueryDurationHistogram,
+		QueryTimeSinceConnCreationHistogram,
+		ConnLifetimeHistogram,
 		HandshakeDurationHistogram,
 		BackendStatusGauge,
 		GetBackendHistogram,
