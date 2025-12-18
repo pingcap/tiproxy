@@ -352,6 +352,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		}
 		mgr.lastActiveTime = now
 		mgr.processLock.Unlock()
+		metrics.QueryTimeSinceConnCreationHistogram.Observe(startTime.Sub(mgr.createTime).Seconds())
 	}()
 	if len(request) < 1 {
 		err = mysql.ErrMalformPacket
@@ -792,6 +793,7 @@ func (mgr *BackendConnManager) Close() error {
 		mgr.cpt.Capture([]byte{pnet.ComQuit.Byte()}, time.Now(), mgr.connectionID, nil)
 	}
 	mgr.closeStatus.Store(statusClosed)
+	metrics.ConnLifetimeHistogram.Observe(time.Since(mgr.createTime).Seconds())
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
 
