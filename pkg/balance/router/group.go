@@ -32,13 +32,6 @@ const (
 	MatchProxyCIDR
 )
 
-const (
-	// MatchClientCIDRStr is used for MatchClientCIDR.
-	MatchClientCIDRStr = "client_cidr"
-	// MatchProxyCIDRStr is used for MatchProxyCIDR.
-	MatchProxyCIDRStr = "proxy_cidr"
-)
-
 var _ ConnEventReceiver = (*Group)(nil)
 
 // Group is used for one backend group that can be matched by CIDR, username, database, or resource group list.

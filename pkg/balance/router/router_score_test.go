@@ -1010,7 +1010,7 @@ func TestGroupBackends(t *testing.T) {
 	cfgCh := make(chan *config.Config)
 	cfg := &config.Config{
 		Balance: config.Balance{
-			RoutingRule: MatchClientCIDRStr,
+			RoutingRule: config.MatchClientCIDRStr,
 		},
 	}
 	cfgGetter := newMockConfigGetter(cfg)
