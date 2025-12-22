@@ -52,9 +52,7 @@ func (b *Balance) Check() error {
 	}
 
 	switch b.RoutingRule {
-	case MatchClientCIDRStr, MatchProxyCIDRStr:
-	case "":
-		b.RoutingRule = MatchClientCIDRStr
+	case MatchClientCIDRStr, MatchProxyCIDRStr, "":
 	default:
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.routing-rule")
 	}
