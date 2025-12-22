@@ -57,24 +57,8 @@ func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver, balancePolicy policy.BalancePolicy, cfg *config.Config, cfgCh <-chan *config.Config) {
 	r.observer = ob
 	r.healthCh = r.observer.Subscribe("score_based_router")
-<<<<<<< HEAD
 	r.policy = balancePolicy
 	balancePolicy.Init(cfg)
-=======
-	cfg := cfgGetter.GetConfig()
-
-	r.matchType = MatchAll
-	switch strings.ToLower(cfg.Balance.RoutingRule) {
-	case config.MatchClientCIDRStr:
-		r.matchType = MatchClientCIDR
-	case config.MatchProxyCIDRStr:
-		r.matchType = MatchProxyCIDR
-	case "":
-	default:
-		r.logger.Error("unsupported routing rule, use the default rule", zap.String("rule", cfg.Balance.RoutingRule))
-	}
-
->>>>>>> 4c29041c (config, balance: add configs to specify the balanced conn ratio (#1045))
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
 	r.cfgCh = cfgCh

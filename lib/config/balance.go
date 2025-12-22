@@ -13,27 +13,10 @@ const (
 	RoutingPolicyPreferIdle = "prefer-idle"
 	RoutingPolicyRandom     = "random"
 	RoutingPolicyIdlest     = "idlest"
-
-	// MatchClientCIDRStr is used for MatchClientCIDR.
-	MatchClientCIDRStr = "client_cidr"
-	// MatchProxyCIDRStr is used for MatchProxyCIDR.
-	MatchProxyCIDRStr = "proxy_cidr"
 )
 
 type Balance struct {
-<<<<<<< HEAD
-	LabelName     string `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty" reloadable:"true"`
-	Policy        string `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
-	RoutingPolicy string `yaml:"routing-policy,omitempty" toml:"routing-policy,omitempty" json:"routing-policy,omitempty" reloadable:"true"`
-	Status        Factor `yaml:"status,omitempty" toml:"status,omitempty" json:"status,omitempty" reloadable:"true"`
-	Health        Factor `yaml:"health,omitempty" toml:"health,omitempty" json:"health,omitempty" reloadable:"true"`
-	Memory        Factor `yaml:"memory,omitempty" toml:"memory,omitempty" json:"memory,omitempty" reloadable:"true"`
-	CPU           Factor `yaml:"cpu,omitempty" toml:"cpu,omitempty" json:"cpu,omitempty" reloadable:"true"`
-	Location      Factor `yaml:"location,omitempty" toml:"location,omitempty" json:"location,omitempty" reloadable:"true"`
-	ConnCount     Factor `yaml:"conn-count,omitempty" toml:"conn-count,omitempty" json:"conn-count,omitempty" reloadable:"true"`
-=======
 	LabelName     string          `yaml:"label-name,omitempty" toml:"label-name,omitempty" json:"label-name,omitempty" reloadable:"true"`
-	RoutingRule   string          `yaml:"routing-rule,omitempty" toml:"routing-rule,omitempty" json:"routing-rule,omitempty" reloadable:"false"`
 	Policy        string          `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
 	RoutingPolicy string          `yaml:"routing-policy,omitempty" toml:"routing-policy,omitempty" json:"routing-policy,omitempty" reloadable:"true"`
 	Status        Factor          `yaml:"status,omitempty" toml:"status,omitempty" json:"status,omitempty" reloadable:"true"`
@@ -47,7 +30,6 @@ type Balance struct {
 type ConnCountFactor struct {
 	Factor              `yaml:",inline" toml:",inline" json:",inline"`
 	CountRatioThreshold float64 `yaml:"count-ratio-threshold,omitempty" toml:"count-ratio-threshold,omitempty" json:"count-ratio-threshold,omitempty" reloadable:"true"`
->>>>>>> 4c29041c (config, balance: add configs to specify the balanced conn ratio (#1045))
 }
 
 type Factor struct {
@@ -61,12 +43,6 @@ func (b *Balance) Check() error {
 		b.Policy = BalancePolicyResource
 	default:
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.policy")
-	}
-
-	switch b.RoutingRule {
-	case MatchClientCIDRStr, MatchProxyCIDRStr, "":
-	default:
-		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.routing-rule")
 	}
 
 	switch b.RoutingPolicy {
