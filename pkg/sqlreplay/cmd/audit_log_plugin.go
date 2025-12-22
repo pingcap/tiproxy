@@ -30,6 +30,8 @@ const (
 	auditPluginKeyCostTime       = "COST_TIME"
 	auditPluginKeyPreparedStmtID = "PREPARED_STMT_ID"
 	auditPluginKeyRetry          = "RETRY"
+	auditPluginKeyRows           = "ROWS"
+	auditPluginKeyDatabases      = "DATABASES"
 
 	auditPluginClassGeneral     = "GENERAL"
 	auditPluginClassTableAccess = "TABLE_ACCESS"
@@ -603,6 +605,28 @@ func parseStmtID(value string) (uint32, error) {
 
 // Transaction retrials will record the same SQL multiple times in the audit logs, so we need to deduplicate them.
 func (decoder *AuditLogPluginDecoder) isDuplicatedWrite(lastCmd *Command, kvs map[string]string, cmdType, sql string, startTs, endTs time.Time) bool {
+	isDuplicated := isDuplicatedWrite(lastCmd, kvs, cmdType, sql, startTs, endTs)
+	if !isDuplicated {
+		return false
+	}
+
+	// Record the deduplication.
+	decoder.dedup.Lock()
+	dedup := decoder.dedup.Items[lastCmd.StmtType]
+	dedup.Times++
+	dedup.Cost += endTs.Sub(startTs)
+	overlap := lastCmd.EndTs.Sub(startTs)
+	if dedup.MinOverlap == 0 {
+		dedup.MinOverlap = overlap
+	} else if dedup.MinOverlap > overlap {
+		dedup.MinOverlap = overlap
+	}
+	decoder.dedup.Items[lastCmd.StmtType] = dedup
+	decoder.dedup.Unlock()
+	return true
+}
+
+func isDuplicatedWrite(lastCmd *Command, kvs map[string]string, cmdType, sql string, startTs, endTs time.Time) bool {
 	if lastCmd == nil {
 		return false
 	}
@@ -637,19 +661,7 @@ func (decoder *AuditLogPluginDecoder) isDuplicatedWrite(lastCmd *Command, kvs ma
 	default:
 		return false
 	}
-	// Record the deduplication.
-	decoder.dedup.Lock()
-	dedup := decoder.dedup.Items[lastCmd.StmtType]
-	dedup.Times++
-	dedup.Cost += endTs.Sub(startTs)
-	overlap := lastCmd.EndTs.Sub(startTs)
-	if dedup.MinOverlap == 0 {
-		dedup.MinOverlap = overlap
-	} else if dedup.MinOverlap > overlap {
-		dedup.MinOverlap = overlap
-	}
-	decoder.dedup.Items[lastCmd.StmtType] = dedup
-	decoder.dedup.Unlock()
+
 	return true
 }
 
