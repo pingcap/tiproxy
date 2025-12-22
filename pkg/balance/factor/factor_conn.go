@@ -32,7 +32,7 @@ type FactorConnCount struct {
 
 func NewFactorConnCount() *FactorConnCount {
 	return &FactorConnCount{
-		bitNum:              18,
+		bitNum:              16,
 		countRatioThreshold: countRatioThreshold,
 	}
 }
