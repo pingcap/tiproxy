@@ -946,3 +946,142 @@ func TestRedirectFail(t *testing.T) {
 	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
 	require.Equal(t, 1, tester.getBackendByIndex(1).connScore)
 }
+<<<<<<< HEAD
+=======
+
+func TestSkipRedirection(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	backends := map[string]*observer.BackendHealth{
+		"0": {
+			Healthy:            true,
+			SupportRedirection: false,
+		},
+		"1": {
+			Healthy:            true,
+			SupportRedirection: true,
+		},
+	}
+	result := observer.NewHealthResult(backends, nil)
+	tester.router.updateBackendHealth(result)
+	require.False(t, tester.router.supportRedirection)
+
+	tester.addConnections(10)
+	require.Equal(t, 5, tester.getBackendByIndex(0).connScore)
+	backends["0"].Healthy = false
+	tester.router.updateBackendHealth(result)
+	tester.rebalance(1)
+	require.Equal(t, 5, tester.getBackendByIndex(0).connScore)
+
+	backends["0"].SupportRedirection = true
+	tester.router.updateBackendHealth(result)
+	require.True(t, tester.router.supportRedirection)
+	tester.rebalance(1)
+	require.NotEqual(t, 5, tester.getBackendByIndex(0).connScore)
+}
+
+func TestGroupBackends(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
+	cfgCh := make(chan *config.Config)
+	cfg := &config.Config{
+		Balance: config.Balance{
+			RoutingRule: config.MatchClientCIDRStr,
+		},
+	}
+	cfgGetter := newMockConfigGetter(cfg)
+	p := &mockBalancePolicy{}
+	bpCreator := func(_ *zap.Logger) policy.BalancePolicy {
+		p.Init(cfg)
+		return p
+	}
+	bo := newMockBackendObserver()
+	router.Init(context.Background(), bo, bpCreator, cfgGetter, cfgCh)
+	t.Cleanup(bo.Close)
+	t.Cleanup(router.Close)
+
+	tests := []struct {
+		addr         string
+		labels       map[string]string
+		groupCount   int
+		backendCount int
+		cidrs        []string
+	}{
+		{
+			addr:         "0",
+			labels:       nil,
+			groupCount:   0,
+			backendCount: 1,
+			cidrs:        nil,
+		},
+		{
+			addr:         "1",
+			labels:       map[string]string{"cidr": "1.1.1.1/32"},
+			groupCount:   1,
+			backendCount: 2,
+			cidrs:        []string{"1.1.1.1/32"},
+		},
+		{
+			addr:         "2",
+			labels:       map[string]string{"cidr": "1.1.1.1/32 , "},
+			groupCount:   1,
+			backendCount: 3,
+			cidrs:        []string{"1.1.1.1/32"},
+		},
+		{
+			addr:         "3",
+			labels:       map[string]string{"cidr": "1.1.2.1/32, 1.1.3.1/32"},
+			groupCount:   2,
+			backendCount: 4,
+			cidrs:        []string{"1.1.2.1/32", "1.1.3.1/32"},
+		},
+		{
+			addr:         "4",
+			labels:       map[string]string{"cidr": "1.1.2.1/32,, 1.1.3.1/32 "},
+			groupCount:   2,
+			backendCount: 5,
+			cidrs:        []string{"1.1.2.1/32", "1.1.3.1/32"},
+		},
+		{
+			addr:         "0",
+			labels:       map[string]string{"cidr": " 1.1.1.1/32 "},
+			groupCount:   2,
+			backendCount: 5,
+			cidrs:        []string{"1.1.1.1/32"},
+		},
+		{
+			addr:         "1",
+			labels:       map[string]string{"cidr": "1.1.1.1/32, 1.1.4.1/32"},
+			groupCount:   2,
+			backendCount: 5,
+			cidrs:        []string{"1.1.1.1/32", "1.1.4.1/32"},
+		},
+		{
+			addr:         "3",
+			labels:       map[string]string{"cidr": "1.1.2.1/32"},
+			groupCount:   2,
+			backendCount: 5,
+			cidrs:        []string{"1.1.2.1/32", "1.1.3.1/32"},
+		},
+	}
+
+	for i, test := range tests {
+		bo.addBackend(test.addr, test.labels)
+		bo.notify(nil)
+		require.Eventually(t, func() bool {
+			router.Lock()
+			defer router.Unlock()
+			if len(router.groups) != test.groupCount {
+				return false
+			}
+			if len(router.backends) != test.backendCount {
+				return false
+			}
+			group := router.backends[test.addr].group
+			if test.cidrs == nil {
+				return group == nil
+			}
+			return group.EqualValues(test.cidrs)
+		}, 3*time.Second, 10*time.Millisecond, "test %d", i)
+	}
+}
+>>>>>>> 4c29041c (config, balance: add configs to specify the balanced conn ratio (#1045))
