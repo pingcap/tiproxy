@@ -259,7 +259,7 @@ func (b *Reader) Buffered() int { return b.w - b.r }
 func (b *Reader) WriteTo(w io.Writer) (n int64, err error) {
 	n, err = b.writeBuf(w)
 	if err != nil {
-		err = errors.Wrap(err, ErrWriteFail)
+		err = errors.Wrap(ErrWriteFail, err)
 		return
 	}
 
@@ -287,7 +287,7 @@ func (b *Reader) WriteTo(w io.Writer) (n int64, err error) {
 		b.err = nil
 	}
 
-	return n, errors.Wrap(b.readErr(), ErrReadFail)
+	return n, errors.Wrap(ErrReadFail, b.readErr())
 }
 
 var errNegativeWrite = errors.New("bufio: writer returned negative count from Write")
@@ -441,13 +441,13 @@ func (b *Writer) Write(p []byte) (nn int, err error) {
 // Wrap the error with ErrWriteFail/ErrReadFail so that the caller knows which peer fails.
 func (b *Writer) ReadFrom(r io.Reader) (n int64, err error) {
 	if b.err != nil {
-		return 0, errors.Wrap(b.err, ErrWriteFail)
+		return 0, errors.Wrap(ErrWriteFail, b.err)
 	}
 	var m int
 	for {
 		if b.Available() == 0 {
 			if err1 := b.Flush(); err1 != nil {
-				return n, errors.Wrap(err1, ErrWriteFail)
+				return n, errors.Wrap(ErrWriteFail, err1)
 			}
 		}
 		nr := 0
@@ -459,7 +459,7 @@ func (b *Writer) ReadFrom(r io.Reader) (n int64, err error) {
 			nr++
 		}
 		if nr == maxConsecutiveEmptyReads {
-			return n, errors.Wrap(io.ErrNoProgress, ErrReadFail)
+			return n, errors.Wrap(ErrReadFail, io.ErrNoProgress)
 		}
 		b.n += m
 		n += int64(m)
@@ -471,13 +471,13 @@ func (b *Writer) ReadFrom(r io.Reader) (n int64, err error) {
 		// If we filled the buffer exactly, flush preemptively.
 		if b.Available() == 0 {
 			if err = b.Flush(); err != nil {
-				err = errors.Wrap(err, ErrWriteFail)
+				err = errors.Wrap(ErrWriteFail, err)
 			}
 		} else {
 			err = nil
 		}
 	}
-	return n, errors.Wrap(err, ErrReadFail)
+	return n, errors.Wrap(ErrReadFail, err)
 }
 
 // buffered input and output
