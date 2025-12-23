@@ -361,8 +361,17 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 			if err != nil {
 				return p.wrapErr(errors.Wrap(ErrReadConn, err))
 			}
+<<<<<<< HEAD
 			if err := dest.WritePacket(data, false); err != nil {
 				return p.wrapErr(errors.Wrap(ErrWriteConn, err))
+=======
+			if err := destIO.WritePacket(data, false); err != nil {
+				err = errors.Wrap(err, ErrWriteConn)
+				if dest != nil {
+					err = dest.wrapErr(err)
+				}
+				return err
+>>>>>>> f92e6280 (proxy, bufio: fix client network error is summarized as backend network error (#1051))
 			}
 		} else {
 			for {
@@ -375,7 +384,14 @@ func (p *PacketIO) ForwardUntil(dest *PacketIO, isEnd func(firstByte byte, first
 				dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
 				p.limitReader.N = int64(length + 4)
 				if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
+<<<<<<< HEAD
 					return p.wrapErr(errors.Wrap(ErrRelayConn, err))
+=======
+					if errors.Is(err, bufio.ErrWriteFail) {
+						return dest.wrapErr(errors.Wrap(err, ErrWriteConn))
+					}
+					return p.wrapErr(errors.Wrap(err, ErrReadConn))
+>>>>>>> f92e6280 (proxy, bufio: fix client network error is summarized as backend network error (#1051))
 				}
 				p.inPackets++
 				dest.outPackets++
