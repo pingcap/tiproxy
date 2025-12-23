@@ -356,7 +356,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	mgr.processLock.Lock()
 	defer func() {
 		if err != nil && !pnet.IsMySQLError(err) {
-			mgr.setQuitSourceByErr(err)
+			mgr.SetQuitSourceByErr(err)
 		}
 		mgr.handshakeHandler.OnTraffic(mgr)
 		now := time.Now()
@@ -864,7 +864,7 @@ func (mgr *BackendConnManager) setKeepAlive() {
 	}
 }
 
-func (mgr *BackendConnManager) setQuitSourceByErr(err error) {
+func (mgr *BackendConnManager) SetQuitSourceByErr(err error) {
 	if err == nil {
 		return
 	}
