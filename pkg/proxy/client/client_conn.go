@@ -72,6 +72,7 @@ func (cc *ClientConnection) processMsg(ctx context.Context) error {
 		cc.pkt.ResetSequence()
 		clientPkt, err := cc.pkt.ReadPacket()
 		if err != nil {
+			cc.connMgr.SetQuitSourceByErr(err)
 			return err
 		}
 		err = cc.connMgr.ExecuteCmd(ctx, clientPkt)
