@@ -5,14 +5,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package bufio is a simplified Golang bufio.
-// It mainly avoids calling TCPConn.ReadFrom in Writer.ReadFrom because
-// TCPConn.ReadFrom calls sys calls.
+// Package bufio is a simplified Golang bufio. It mainly changes:
+// - Avoid calling TCPConn.ReadFrom in Writer.ReadFrom because TCPConn.ReadFrom calls sys calls.
+// - Wrap the error with ErrWriteFail/ErrReadFail so that the caller knows which peer fails.
 package bufio
 
 import (
-	"errors"
 	"io"
+
+	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
 const (
@@ -22,6 +23,9 @@ const (
 var (
 	ErrBufferFull    = errors.New("bufio: buffer full")
 	ErrNegativeCount = errors.New("bufio: negative count")
+
+	ErrReadFail  = errors.New("read failed")
+	ErrWriteFail = errors.New("write failed")
 )
 
 // Buffered input.
@@ -250,9 +254,12 @@ func (b *Reader) Buffered() int { return b.w - b.r }
 // This may make multiple calls to the Read method of the underlying Reader.
 // If the underlying reader supports the WriteTo method,
 // this calls the underlying WriteTo without buffering.
+//
+// Wrap the error with ErrWriteFail/ErrReadFail so that the caller knows which peer fails.
 func (b *Reader) WriteTo(w io.Writer) (n int64, err error) {
 	n, err = b.writeBuf(w)
 	if err != nil {
+		err = errors.Wrap(ErrWriteFail, err)
 		return
 	}
 
@@ -280,7 +287,7 @@ func (b *Reader) WriteTo(w io.Writer) (n int64, err error) {
 		b.err = nil
 	}
 
-	return n, b.readErr()
+	return n, errors.Wrap(ErrReadFail, b.readErr())
 }
 
 var errNegativeWrite = errors.New("bufio: writer returned negative count from Write")
@@ -430,15 +437,17 @@ func (b *Writer) Write(p []byte) (nn int, err error) {
 // supports the ReadFrom method, this calls the underlying ReadFrom.
 // If there is buffered data and an underlying ReadFrom, this fills
 // the buffer and writes it before calling ReadFrom.
+//
+// Wrap the error with ErrWriteFail/ErrReadFail so that the caller knows which peer fails.
 func (b *Writer) ReadFrom(r io.Reader) (n int64, err error) {
 	if b.err != nil {
-		return 0, b.err
+		return 0, errors.Wrap(ErrWriteFail, b.err)
 	}
 	var m int
 	for {
 		if b.Available() == 0 {
 			if err1 := b.Flush(); err1 != nil {
-				return n, err1
+				return n, errors.Wrap(ErrWriteFail, err1)
 			}
 		}
 		nr := 0
@@ -450,7 +459,7 @@ func (b *Writer) ReadFrom(r io.Reader) (n int64, err error) {
 			nr++
 		}
 		if nr == maxConsecutiveEmptyReads {
-			return n, io.ErrNoProgress
+			return n, errors.Wrap(ErrReadFail, io.ErrNoProgress)
 		}
 		b.n += m
 		n += int64(m)
@@ -461,12 +470,14 @@ func (b *Writer) ReadFrom(r io.Reader) (n int64, err error) {
 	if err == io.EOF {
 		// If we filled the buffer exactly, flush preemptively.
 		if b.Available() == 0 {
-			err = b.Flush()
+			if err = b.Flush(); err != nil {
+				err = errors.Wrap(ErrWriteFail, err)
+			}
 		} else {
 			err = nil
 		}
 	}
-	return n, err
+	return n, errors.Wrap(ErrReadFail, err)
 }
 
 // buffered input and output

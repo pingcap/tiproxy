@@ -319,7 +319,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	startTime := monotime.Now()
 	mgr.processLock.Lock()
 	defer func() {
-		mgr.setQuitSourceByErr(err)
+		mgr.SetQuitSourceByErr(err)
 		mgr.handshakeHandler.OnTraffic(mgr)
 		now := monotime.Now()
 		if err != nil && errors.Is(err, ErrBackendConn) {
@@ -810,7 +810,7 @@ func (mgr *BackendConnManager) setKeepAlive() {
 	}
 }
 
-func (mgr *BackendConnManager) setQuitSourceByErr(err error) {
+func (mgr *BackendConnManager) SetQuitSourceByErr(err error) {
 	if err == nil {
 		return
 	}

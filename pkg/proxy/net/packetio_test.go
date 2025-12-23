@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/security"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -549,6 +550,48 @@ func TestForwardUntilLongData(t *testing.T) {
 			func(t *testing.T, srv2 *PacketIO) {
 				srvCh <- srv2
 				<-exitCh
+			},
+			1,
+		)
+	})
+	wg.Wait()
+}
+
+func TestForwardUntilError(t *testing.T) {
+	srvCh := make(chan *PacketIO)
+	var wg waitgroup.WaitGroup
+	selfErr, peerErr := errors.New("self"), errors.New("peer")
+	// client1 writes to server1
+	// server1 forwards to server2
+	// server2 writes to client2 while client2 closes
+	wg.Run(func() {
+		testTCPConn(t,
+			func(t *testing.T, cli *PacketIO) {
+				data := make([]byte, DefaultConnBufferSize*2)
+				data[0] = byte(0)
+				require.NoError(t, cli.WritePacket(data, true))
+			},
+			func(t *testing.T, srv1 *PacketIO) {
+				srv1.ApplyOpts(WithWrapError(selfErr))
+				srv2 := <-srvCh
+				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
+					return true, true
+				}, func(response []byte) error {
+					return srv2.Flush()
+				})
+				require.ErrorIs(t, err, peerErr)
+			},
+			1,
+		)
+	})
+	wg.Run(func() {
+		testTCPConn(t,
+			func(t *testing.T, cli *PacketIO) {
+				require.NoError(t, cli.Close())
+			},
+			func(t *testing.T, srv2 *PacketIO) {
+				srv2.ApplyOpts(WithWrapError(peerErr))
+				srvCh <- srv2
 			},
 			1,
 		)
