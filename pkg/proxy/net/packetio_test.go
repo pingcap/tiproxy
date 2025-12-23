@@ -558,7 +558,7 @@ func TestForwardUntilLongData(t *testing.T) {
 }
 
 func TestForwardUntilError(t *testing.T) {
-	srvCh := make(chan *packetIO)
+	srvCh := make(chan *PacketIO)
 	var wg waitgroup.WaitGroup
 	selfErr, peerErr := errors.New("self"), errors.New("peer")
 	// client1 writes to server1
@@ -566,12 +566,12 @@ func TestForwardUntilError(t *testing.T) {
 	// server2 writes to client2 while client2 closes
 	wg.Run(func() {
 		testTCPConn(t,
-			func(t *testing.T, cli *packetIO) {
+			func(t *testing.T, cli *PacketIO) {
 				data := make([]byte, DefaultConnBufferSize*2)
 				data[0] = byte(0)
 				require.NoError(t, cli.WritePacket(data, true))
 			},
-			func(t *testing.T, srv1 *packetIO) {
+			func(t *testing.T, srv1 *PacketIO) {
 				srv1.ApplyOpts(WithWrapError(selfErr))
 				srv2 := <-srvCh
 				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
@@ -586,10 +586,10 @@ func TestForwardUntilError(t *testing.T) {
 	})
 	wg.Run(func() {
 		testTCPConn(t,
-			func(t *testing.T, cli *packetIO) {
+			func(t *testing.T, cli *PacketIO) {
 				require.NoError(t, cli.Close())
 			},
-			func(t *testing.T, srv2 *packetIO) {
+			func(t *testing.T, srv2 *PacketIO) {
 				srv2.ApplyOpts(WithWrapError(peerErr))
 				srvCh <- srv2
 			},

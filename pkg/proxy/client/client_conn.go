@@ -75,11 +75,8 @@ func (cc *ClientConnection) processMsg(ctx context.Context) error {
 		cc.pkt.ResetSequence()
 		clientPkt, err := cc.pkt.ReadPacket()
 		if err != nil {
-<<<<<<< HEAD
 			cc.connMgr.SetValue(backend.ConnContextClientError, err)
-=======
 			cc.connMgr.SetQuitSourceByErr(err)
->>>>>>> f92e6280 (proxy, bufio: fix client network error is summarized as backend network error (#1051))
 			return err
 		}
 		err = cc.connMgr.ExecuteCmd(ctx, clientPkt)

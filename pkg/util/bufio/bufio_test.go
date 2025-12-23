@@ -9,7 +9,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,14 +24,14 @@ func TestReadFrom(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, p2.Close())
 		require.NoError(t, p1.Close())
-	}, nil)
+	})
 	wg.Run(func() {
 		n, err := bufWriter.ReadFrom(io.LimitReader(p2, 1))
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)
 		_, err = bufWriter.ReadFrom(p2)
 		require.ErrorIs(t, err, ErrReadFail)
-	}, nil)
+	})
 	wg.Wait()
 
 	// The writer breaks and ReadFrom returns ErrWriteFail.

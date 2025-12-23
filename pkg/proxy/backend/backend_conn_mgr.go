@@ -319,13 +319,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	startTime := monotime.Now()
 	mgr.processLock.Lock()
 	defer func() {
-<<<<<<< HEAD
-		mgr.setQuitSourceByErr(err)
-=======
-		if err != nil && !pnet.IsMySQLError(err) {
-			mgr.SetQuitSourceByErr(err)
-		}
->>>>>>> f92e6280 (proxy, bufio: fix client network error is summarized as backend network error (#1051))
+		mgr.SetQuitSourceByErr(err)
 		mgr.handshakeHandler.OnTraffic(mgr)
 		now := monotime.Now()
 		if err != nil && errors.Is(err, ErrBackendConn) {
