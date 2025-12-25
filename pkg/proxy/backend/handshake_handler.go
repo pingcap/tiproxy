@@ -18,11 +18,12 @@ import (
 type ConnContextKey string
 
 const (
-	ConnContextKeyTLSState ConnContextKey = "tls-state"
-	ConnContextKeyConnID   ConnContextKey = "conn-id"
-	ConnContextKeyConnAddr ConnContextKey = "conn-addr"
-	ConnContextKeyAuthSalt ConnContextKey = "auth-salt"
-	ConnContextClientError ConnContextKey = "client-error"
+	ConnContextKeyTLSState      ConnContextKey = "tls-state"
+	ConnContextKeyConnID        ConnContextKey = "conn-id"
+	ConnContextKeyConnAddr      ConnContextKey = "conn-addr"
+	ConnContextKeyAuthSalt      ConnContextKey = "auth-salt"
+	ConnContextKeyClientError   ConnContextKey = "client-error"
+	ConnContextKeyProxyProtocol ConnContextKey = "proxy-protocol"
 )
 
 var _ HandshakeHandler = (*DefaultHandshakeHandler)(nil)
