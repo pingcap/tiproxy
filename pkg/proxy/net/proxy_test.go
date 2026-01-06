@@ -53,7 +53,11 @@ func TestProxyReadWrite(t *testing.T) {
 			n, err := prw.Read(data)
 			require.NoError(t, err)
 			require.Equal(t, len(message), n)
-			require.Equal(t, p.SrcAddress, prw.Proxy().SrcAddress)
+
+			parsedAddr, ok := prw.Proxy().SrcAddress.(*net.TCPAddr)
+			require.True(t, ok)
+			require.Equal(t, addr.IP.To4(), parsedAddr.IP)
+			require.Equal(t, addr.Port, parsedAddr.Port)
 			require.Equal(t, addr.String(), prw.RemoteAddr().String())
 		}, 1)
 }
