@@ -50,8 +50,15 @@ func TestProxyParse(t *testing.T) {
 			p, _, err := ParseProxyV2(srv)
 			require.NoError(t, err)
 			require.NotNil(t, p)
-			require.Equal(t, tcpaddr, p.SrcAddress)
-			require.Equal(t, tcpaddr, p.DstAddress)
+
+			srcAddr, ok := p.SrcAddress.(*net.TCPAddr)
+			require.True(t, ok)
+			require.Equal(t, tcpaddr.IP.To4(), srcAddr.IP)
+			require.Equal(t, tcpaddr.Port, srcAddr.Port)
+			dstAddr, ok := p.DstAddress.(*net.TCPAddr)
+			require.True(t, ok)
+			require.Equal(t, tcpaddr.IP.To4(), dstAddr.IP)
+			require.Equal(t, tcpaddr.Port, dstAddr.Port)
 			require.Equal(t, ProxyVersion2, p.Version)
 			require.Equal(t, ProxyCommandLocal, p.Command)
 			require.Len(t, p.TLV, 2)
@@ -91,4 +98,86 @@ func TestProxyToBytes(t *testing.T) {
 	hdr.DstAddress = &originAddr{Addr: &net.TCPAddr{IP: make(net.IP, net.IPv6len), Port: 0}}
 	_, err = hdr.ToBytes()
 	require.NoError(t, err)
+}
+
+func TestMixIPv4AndIPv6ProxyToBytes(t *testing.T) {
+	tests := []struct {
+		srcIP     net.IP
+		dstIP     net.IP
+		srcPort   int
+		dstPort   int
+		wantAF    ProxyAddressFamily
+		wantIPLen int
+	}{
+		{
+			srcIP:     net.ParseIP("192.168.1.1"),
+			dstIP:     net.ParseIP("192.168.1.2"),
+			srcPort:   1234,
+			dstPort:   5678,
+			wantAF:    ProxyAFINet,
+			wantIPLen: net.IPv4len,
+		},
+		{
+			srcIP:     net.ParseIP("2001:db8::1"),
+			dstIP:     net.ParseIP("2001:db8::2"),
+			srcPort:   1234,
+			dstPort:   5678,
+			wantAF:    ProxyAFINet6,
+			wantIPLen: net.IPv6len,
+		},
+		{
+			srcIP:     net.ParseIP("192.168.1.1"),
+			dstIP:     net.ParseIP("2001:db8::1"),
+			srcPort:   1234,
+			dstPort:   5678,
+			wantAF:    ProxyAFINet6,
+			wantIPLen: net.IPv6len,
+		},
+		{
+			srcIP:     net.ParseIP("192.168.1.1"),
+			dstIP:     net.ParseIP("::ffff:192.168.1.2"),
+			srcPort:   1234,
+			dstPort:   5678,
+			wantAF:    ProxyAFINet,
+			wantIPLen: net.IPv4len,
+		},
+		{
+			srcIP:     net.ParseIP("::ffff:192.168.1.1"),
+			dstIP:     net.ParseIP("::ffff:192.168.1.2"),
+			srcPort:   1234,
+			dstPort:   5678,
+			wantAF:    ProxyAFINet,
+			wantIPLen: net.IPv4len,
+		},
+		{
+			srcIP:     net.ParseIP("::ffff:192.168.1.1"),
+			dstIP:     net.ParseIP("2001:db8::1"),
+			srcPort:   1234,
+			dstPort:   5678,
+			wantAF:    ProxyAFINet6,
+			wantIPLen: net.IPv6len,
+		},
+	}
+
+	for _, tt := range tests {
+		hdr := &Proxy{
+			Version:    ProxyVersion2,
+			Command:    ProxyCommandProxy,
+			SrcAddress: &net.TCPAddr{IP: tt.srcIP, Port: tt.srcPort},
+			DstAddress: &net.TCPAddr{IP: tt.dstIP, Port: tt.dstPort},
+		}
+
+		hdrBytes, err := hdr.ToBytes()
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, len(hdrBytes), len(MagicV2)+4)
+
+		addressFamily := ProxyAddressFamily(hdrBytes[len(MagicV2)+1] >> 4)
+		require.Equal(t, tt.wantAF, addressFamily)
+
+		length := int(hdrBytes[len(MagicV2)+2])<<8 | int(hdrBytes[len(MagicV2)+3])
+		require.Equal(t, len(hdrBytes)-4-len(MagicV2), length)
+
+		expectedPayloadSize := tt.wantIPLen*2 + 4
+		require.Equal(t, expectedPayloadSize, length)
+	}
 }
