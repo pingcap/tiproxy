@@ -30,7 +30,7 @@ func NewWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg Writ
 
 type ReaderCfg struct {
 	Dir              string
-	Format           string
+	Format           cmd.TrafficFormat
 	EncryptionMethod string
 	EncryptionKey    []byte
 	// Reader will skip the files whose end time is before FileNameFilterTime.

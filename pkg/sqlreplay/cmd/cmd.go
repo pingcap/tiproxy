@@ -15,10 +15,22 @@ import (
 	"go.uber.org/zap"
 )
 
+// TrafficFormat is the supported format of traffic files.
+type TrafficFormat string
+
 const (
-	FormatNative         = "native"
-	FormatAuditLogPlugin = "audit_log_plugin"
+	FormatNative            TrafficFormat = "native"
+	FormatAuditLogPlugin    TrafficFormat = "audit_log_plugin"
+	FormatAuditLogExtension TrafficFormat = "audit_log_extension"
 )
+
+func (f TrafficFormat) String() string {
+	return string(f)
+}
+
+func (f TrafficFormat) IsAuditLogFormat() bool {
+	return f == FormatAuditLogPlugin || f == FormatAuditLogExtension
+}
 
 type LineReader interface {
 	String() string
@@ -27,7 +39,7 @@ type LineReader interface {
 	Close()
 }
 
-func NewCmdEncoder(_ string) CmdEncoder {
+func NewCmdEncoder(_ TrafficFormat) CmdEncoder {
 	// Only support writing native format
 	return NewNativeEncoder()
 }
@@ -36,10 +48,12 @@ type CmdEncoder interface {
 	Encode(c *Command, writer *bytes.Buffer) error
 }
 
-func NewCmdDecoder(format string, dedup *DeDup, lg *zap.Logger) CmdDecoder {
+func NewCmdDecoder(format TrafficFormat, dedup *DeDup, lg *zap.Logger) CmdDecoder {
 	switch format {
 	case FormatAuditLogPlugin:
 		return NewAuditLogPluginDecoder(dedup, lg)
+	case FormatAuditLogExtension:
+		return NewAuditLogExtensionDecoder(lg)
 	default:
 		return NewNativeDecoder()
 	}

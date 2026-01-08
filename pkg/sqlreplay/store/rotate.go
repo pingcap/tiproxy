@@ -231,7 +231,7 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 				}
 				fileIdx := parseFunc(name, fileNamePrefix)
 				if fileIdx == 0 {
-					r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", r.cfg.Format))
+					r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", string(r.cfg.Format)))
 					return false, nil
 				}
 				if fileIdx <= curFileIdx {
@@ -302,7 +302,7 @@ func (r *rotateReader) nextReader() error {
 // The return value of the function indicates whether this file is valid or not.
 // For S3 storage and audit log format, it'll stop walking once the fn returns true.
 func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func(string, int64) (bool, error)) error {
-	if s3, ok := r.storage.(*storage.S3Storage); ok && r.cfg.Format == cmd.FormatAuditLogPlugin {
+	if s3, ok := r.storage.(*storage.S3Storage); ok && r.cfg.Format.IsAuditLogFormat() {
 		return r.walkS3ForAuditLogFile(ctx, curfileName, s3.GetS3APIHandle(), s3.GetOptions(), fn)
 	}
 	return r.storage.WalkDir(ctx, &storage.WalkOption{}, func(name string, size int64) error {
@@ -401,25 +401,22 @@ func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, curFileName st
 	return nil
 }
 
-func getFileNamePrefix(format string) string {
-	switch format {
-	case cmd.FormatAuditLogPlugin:
+func getFileNamePrefix(format cmd.TrafficFormat) string {
+	if format.IsAuditLogFormat() {
 		return auditFileNamePrefix
 	}
 	return fileNamePrefix
 }
 
-func getParseFileNameFunc(format string) func(string, string) int64 {
-	switch format {
-	case cmd.FormatAuditLogPlugin:
+func getParseFileNameFunc(format cmd.TrafficFormat) func(string, string) int64 {
+	if format.IsAuditLogFormat() {
 		return parseFileTimeToIdx
 	}
 	return parseFileIdx
 }
 
-func getFilterFileNameFunc(format string, fileNameFilterTime time.Time) func(string, string) bool {
-	switch format {
-	case cmd.FormatAuditLogPlugin:
+func getFilterFileNameFunc(format cmd.TrafficFormat, fileNameFilterTime time.Time) func(string, string) bool {
+	if format.IsAuditLogFormat() {
 		return func(name, fileNamePrefix string) bool {
 			return filterFileByTime(name, fileNamePrefix, fileNameFilterTime)
 		}

@@ -31,6 +31,11 @@ const (
 	auditPluginKeyPreparedStmtID = "PREPARED_STMT_ID"
 	auditPluginKeyRetry          = "RETRY"
 
+	// auditPluginKeyLogTime is a special marker for the first field in audit log line, which is usually the
+	// log time. It doesn't have key in the original format, but replayer will give it a special key.
+	// As it's not a real key, it'll start with underscore to avoid conflict with real keys.
+	auditPluginKeyLogTime = "_LOG_TIME"
+
 	auditPluginClassGeneral     = "GENERAL"
 	auditPluginClassTableAccess = "TABLE_ACCESS"
 	auditPluginClassConnect     = "CONNECTION"
@@ -72,7 +77,7 @@ type auditLogPluginConnCtx struct {
 	lastCmd         *Command
 }
 
-func NewAuditLogPluginDecoder(dedup *DeDup, lg *zap.Logger) *AuditLogPluginDecoder {
+func NewAuditLogPluginDecoder(dedup *DeDup, lg *zap.Logger) AuditLogDecoder {
 	return &AuditLogPluginDecoder{
 		connInfo:        make(map[uint64]auditLogPluginConnCtx),
 		psCloseStrategy: PSCloseStrategyDirected,
@@ -82,6 +87,7 @@ func NewAuditLogPluginDecoder(dedup *DeDup, lg *zap.Logger) *AuditLogPluginDecod
 }
 
 var _ CmdDecoder = (*AuditLogPluginDecoder)(nil)
+var _ AuditLogDecoder = (*AuditLogPluginDecoder)(nil)
 
 // PSCloseStrategy defines when to close the prepared statements.
 type PSCloseStrategy string
@@ -96,6 +102,15 @@ const (
 	// traffic file.
 	PSCloseStrategyDirected PSCloseStrategy = "directed"
 )
+
+type AuditLogDecoder interface {
+	CmdDecoder
+
+	SetPSCloseStrategy(s PSCloseStrategy)
+	SetIDAllocator(alloc *ConnIDAllocator)
+	SetCommandEndTime(t time.Time)
+	EnableFilterCommandWithRetry()
+}
 
 type AuditLogPluginDecoder struct {
 	connInfo         map[uint64]auditLogPluginConnCtx
@@ -245,6 +260,7 @@ func (decoder *AuditLogPluginDecoder) SetIDAllocator(alloc *ConnIDAllocator) {
 
 // All SQL_TEXT are converted into one line in audit log.
 func parseLog(kv map[string]string, line string) error {
+	firstField := true
 	for idx := 0; idx < len(line); idx++ {
 		switch line[idx] {
 		case '[':
@@ -253,7 +269,11 @@ func parseLog(kv map[string]string, line string) error {
 				return err
 			}
 			idx += endIdx + 1
-			if len(key) > 0 {
+
+			if firstField {
+				kv[auditPluginKeyLogTime] = value
+				firstField = false
+			} else if len(key) > 0 {
 				kv[key] = value
 			}
 		}
