@@ -83,7 +83,7 @@ type Replay interface {
 }
 
 type ReplayConfig struct {
-	Format   string
+	Format   cmd.TrafficFormat
 	Input    string
 	Username string
 	Password string `json:"-"`
@@ -141,7 +141,7 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 		return nil, errors.New("input is required")
 	}
 	inputs := strings.Split(cfg.Input, ",")
-	if len(inputs) > 1 && cfg.Format != cmd.FormatAuditLogPlugin {
+	if len(inputs) > 1 && !cfg.Format.IsAuditLogFormat() {
 		return nil, errors.New("only `audit_log_plugin` format supports multiple input files")
 	}
 	var storages []storage.ExternalStorage
@@ -172,7 +172,7 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 		return storages, errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
 	}
 	switch cfg.Format {
-	case cmd.FormatAuditLogPlugin, cmd.FormatNative, "":
+	case cmd.FormatAuditLogPlugin, cmd.FormatAuditLogExtension, cmd.FormatNative, "":
 	default:
 		return storages, errors.Errorf("invalid traffic file format %s", cfg.Format)
 	}
@@ -203,8 +203,20 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	default:
 		return storages, errors.Errorf("invalid prepared statement close strategy %s", cfg.PSCloseStrategy)
 	}
-	if cfg.Format != cmd.FormatAuditLogPlugin && !cfg.CommandEndTime.IsZero() {
+	if !cfg.Format.IsAuditLogFormat() && !cfg.CommandEndTime.IsZero() {
 		return storages, errors.New("command end time is only supported for `audit_log_plugin` format")
+	}
+
+	if cfg.Format == cmd.FormatAuditLogExtension {
+		if cfg.PSCloseStrategy == cmd.PSCloseStrategyDirected {
+			return storages, errors.New("prepared statement directed close strategy is not supported for audit log plugin v2 format")
+		}
+		if cfg.FilterCommandWithRetry {
+			return storages, errors.New("filtering commands with retry is not supported for audit log plugin v2 format")
+		}
+		if !cfg.CommandStartTime.IsZero() {
+			return storages, errors.New("command start time filter is not supported for audit log plugin v2 format")
+		}
 	}
 
 	if cfg.DynamicInput {
@@ -254,7 +266,7 @@ func (cfg *ReplayConfig) LoadFromCheckpoint() error {
 		cfg.CommandStartTime = time.Unix(0, state.CurCmdTs)
 	}
 	// Only load `CommandEndTime` for `audit_log_plugin` format, or it'll not pass validation.
-	if state.CurCmdEndTs > 0 && cfg.Format == cmd.FormatAuditLogPlugin {
+	if state.CurCmdEndTs > 0 && cfg.Format.IsAuditLogFormat() {
 		cfg.CommandEndTime = time.Unix(0, state.CurCmdEndTs)
 	}
 	return nil
@@ -616,7 +628,7 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 	// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
 	// the current session state correctly.
 	cmdDecoder.SetCommandStartTime(r.cfg.CommandStartTime)
-	if auditLogDecoder, ok := cmdDecoder.(*cmd.AuditLogPluginDecoder); ok {
+	if auditLogDecoder, ok := cmdDecoder.(cmd.AuditLogDecoder); ok {
 		auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
 		auditLogDecoder.SetIDAllocator(idAllocator)
 		auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)

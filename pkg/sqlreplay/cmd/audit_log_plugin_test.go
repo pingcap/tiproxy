@@ -192,6 +192,7 @@ func TestParseLog(t *testing.T) {
 		},
 		{
 			line:   "[abc]",
+			kvs:    map[string]string{auditPluginKeyLogTime: "abc"},
 			hasErr: false,
 		},
 		{
@@ -216,7 +217,7 @@ func TestParseLog(t *testing.T) {
 		},
 		{
 			line:   "[abc=def]",
-			kvs:    map[string]string{"abc": "def"},
+			kvs:    map[string]string{auditPluginKeyLogTime: "def"},
 			hasErr: false,
 		},
 		{
@@ -225,12 +226,12 @@ func TestParseLog(t *testing.T) {
 		},
 		{
 			line:   "[abc=def=ghi]",
-			kvs:    map[string]string{"abc": "def=ghi"},
+			kvs:    map[string]string{auditPluginKeyLogTime: "def=ghi"},
 			hasErr: false,
 		},
 		{
 			line:   "[a=\"b\"]",
-			kvs:    map[string]string{"a": "\"b\""},
+			kvs:    map[string]string{auditPluginKeyLogTime: "\"b\""},
 			hasErr: false,
 		},
 		{
@@ -239,7 +240,7 @@ func TestParseLog(t *testing.T) {
 		},
 		{
 			line:   "[abc][a=b]",
-			kvs:    map[string]string{"a": "b"},
+			kvs:    map[string]string{auditPluginKeyLogTime: "abc", "a": "b"},
 			hasErr: false,
 		},
 		{
@@ -248,16 +249,17 @@ func TestParseLog(t *testing.T) {
 		},
 		{
 			line:   "a[abc]a",
+			kvs:    map[string]string{auditPluginKeyLogTime: "abc"},
 			hasErr: false,
 		},
 		{
 			line:   "a[a=b]a",
-			kvs:    map[string]string{"a": "b"},
+			kvs:    map[string]string{auditPluginKeyLogTime: "b"},
 			hasErr: false,
 		},
 		{
 			line:   "a[a=b]a[c=d]",
-			kvs:    map[string]string{"a": "b", "c": "d"},
+			kvs:    map[string]string{auditPluginKeyLogTime: "b", "c": "d"},
 			hasErr: false,
 		},
 		{
@@ -266,17 +268,17 @@ func TestParseLog(t *testing.T) {
 		},
 		{
 			line:   `[2025/09/06 17:03:53.720 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.720 +08:00] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1336.083] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"[=]\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
-			kvs:    map[string]string{"ID": "17571494330", "TIMESTAMP": "2025/09/06 17:03:53.720 +08:00", "EVENT_CLASS": "GENERAL", "EVENT_SUBCLASS": "", "STATUS_CODE": "0", "COST_TIME": "1336.083", "HOST": "127.0.0.1", "CLIENT_IP": "127.0.0.1", "USER": "root", "DATABASES": "\"[]\"", "TABLES": "\"[]\"", "SQL_TEXT": "\"select \\\"[=]\\\"\"", "ROWS": "0", "CONNECTION_ID": "3695181836", "CLIENT_PORT": "63912", "PID": "61215", "COMMAND": "Query", "SQL_STATEMENTS": "Select"},
+			kvs:    map[string]string{auditPluginKeyLogTime: "2025/09/06 17:03:53.720 +08:00", "ID": "17571494330", "TIMESTAMP": "2025/09/06 17:03:53.720 +08:00", "EVENT_CLASS": "GENERAL", "EVENT_SUBCLASS": "", "STATUS_CODE": "0", "COST_TIME": "1336.083", "HOST": "127.0.0.1", "CLIENT_IP": "127.0.0.1", "USER": "root", "DATABASES": "\"[]\"", "TABLES": "\"[]\"", "SQL_TEXT": "\"select \\\"[=]\\\"\"", "ROWS": "0", "CONNECTION_ID": "3695181836", "CLIENT_PORT": "63912", "PID": "61215", "COMMAND": "Query", "SQL_STATEMENTS": "Select"},
 			hasErr: false,
 		},
 		{
 			line:   `[2025/09/06 17:03:53.717 +08:00] [INFO] [logger.go:77] [ID=17571494330] [TIMESTAMP=2025/09/06 17:03:53.717 +08:00] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=824806376.375] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"\n\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
-			kvs:    map[string]string{"ID": "17571494330", "TIMESTAMP": "2025/09/06 17:03:53.717 +08:00", "EVENT_CLASS": "GENERAL", "EVENT_SUBCLASS": "", "STATUS_CODE": "0", "COST_TIME": "824806376.375", "HOST": "127.0.0.1", "CLIENT_IP": "127.0.0.1", "USER": "root", "DATABASES": "\"[]\"", "TABLES": "\"[]\"", "SQL_TEXT": "\"select \\\"\\n\\\"\"", "ROWS": "0", "CONNECTION_ID": "3695181836", "CLIENT_PORT": "63912", "PID": "61215", "COMMAND": "Query", "SQL_STATEMENTS": "Select"},
+			kvs:    map[string]string{auditPluginKeyLogTime: "2025/09/06 17:03:53.717 +08:00", "ID": "17571494330", "TIMESTAMP": "2025/09/06 17:03:53.717 +08:00", "EVENT_CLASS": "GENERAL", "EVENT_SUBCLASS": "", "STATUS_CODE": "0", "COST_TIME": "824806376.375", "HOST": "127.0.0.1", "CLIENT_IP": "127.0.0.1", "USER": "root", "DATABASES": "\"[]\"", "TABLES": "\"[]\"", "SQL_TEXT": "\"select \\\"\\n\\\"\"", "ROWS": "0", "CONNECTION_ID": "3695181836", "CLIENT_PORT": "63912", "PID": "61215", "COMMAND": "Query", "SQL_STATEMENTS": "Select"},
 			hasErr: false,
 		},
 		{
 			line:   `[2025/09/06 16:50:08.917 +08:00] [INFO] [logger.go:77] [ID=17571486080] [TIMESTAMP=2025/09/06 16:50:08.917 +08:00] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=2442.333] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select \"\n\""] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=63912] [PID=61215] [COMMAND=Query] [SQL_STATEMENTS=Select]`,
-			kvs:    map[string]string{"ID": "17571486080", "TIMESTAMP": "2025/09/06 16:50:08.917 +08:00", "EVENT_CLASS": "GENERAL", "EVENT_SUBCLASS": "", "STATUS_CODE": "0", "COST_TIME": "2442.333", "HOST": "127.0.0.1", "CLIENT_IP": "127.0.0.1", "USER": "root", "DATABASES": "\"[]\"", "TABLES": "\"[]\"", "SQL_TEXT": "\"select \\\"\\n\\\"\"", "ROWS": "0", "CONNECTION_ID": "3695181836", "CLIENT_PORT": "63912", "PID": "61215", "COMMAND": "Query", "SQL_STATEMENTS": "Select"},
+			kvs:    map[string]string{auditPluginKeyLogTime: "2025/09/06 16:50:08.917 +08:00", "ID": "17571486080", "TIMESTAMP": "2025/09/06 16:50:08.917 +08:00", "EVENT_CLASS": "GENERAL", "EVENT_SUBCLASS": "", "STATUS_CODE": "0", "COST_TIME": "2442.333", "HOST": "127.0.0.1", "CLIENT_IP": "127.0.0.1", "USER": "root", "DATABASES": "\"[]\"", "TABLES": "\"[]\"", "SQL_TEXT": "\"select \\\"\\n\\\"\"", "ROWS": "0", "CONNECTION_ID": "3695181836", "CLIENT_PORT": "63912", "PID": "61215", "COMMAND": "Query", "SQL_STATEMENTS": "Select"},
 			hasErr: false,
 		},
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/siddontang/go/hack"
 )
@@ -129,13 +130,13 @@ type replayJob struct {
 
 type replayJob4Marshal struct {
 	job4Marshal
-	LastCmdTs string  `json:"last_cmd_ts,omitempty"`
-	Input     string  `json:"input,omitempty"`
-	Username  string  `json:"username,omitempty"`
-	Format    string  `json:"format,omitempty"`
-	Speed     float64 `json:"speed,omitempty"`
-	ReadOnly  bool    `json:"readonly,omitempty"`
-	Addr      string  `json:"addr,omitempty"`
+	LastCmdTs string            `json:"last_cmd_ts,omitempty"`
+	Input     string            `json:"input,omitempty"`
+	Username  string            `json:"username,omitempty"`
+	Format    cmd.TrafficFormat `json:"format,omitempty"`
+	Speed     float64           `json:"speed,omitempty"`
+	ReadOnly  bool              `json:"readonly,omitempty"`
+	Addr      string            `json:"addr,omitempty"`
 }
 
 func (job *replayJob) Type() JobType {

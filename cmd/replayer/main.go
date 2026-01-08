@@ -135,7 +135,7 @@ func main() {
 				Speed:                  *speed,
 				Username:               *username,
 				Password:               *password,
-				Format:                 *format,
+				Format:                 replaycmd.TrafficFormat(*format),
 				ReadOnly:               *readonly,
 				StartTime:              *startTime,
 				CommandStartTime:       *cmdStartTime,
