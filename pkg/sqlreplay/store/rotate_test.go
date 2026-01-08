@@ -145,7 +145,7 @@ func mustParseTime(s string) time.Time {
 
 func TestIterateFiles(t *testing.T) {
 	tests := []struct {
-		format    string
+		format    cmd.TrafficFormat
 		fileNames []string
 		order     []string
 	}{
