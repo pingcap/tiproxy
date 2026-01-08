@@ -163,7 +163,7 @@ func newMockNormalLoader() *mockNormalLoader {
 	return &mockNormalLoader{}
 }
 
-func (m *mockNormalLoader) writeCommand(command *cmd.Command, format string) {
+func (m *mockNormalLoader) writeCommand(command *cmd.Command, format cmd.TrafficFormat) {
 	encoder := cmd.NewCmdEncoder(format)
 	_ = encoder.Encode(command, &m.buf)
 }

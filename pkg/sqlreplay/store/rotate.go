@@ -281,7 +281,7 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 				}
 				fileTime := parseFileTime(name, fileNamePrefix)
 				if fileTime.IsZero() {
-					r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", r.cfg.Format))
+					r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", string(r.cfg.Format)))
 					return false, nil
 				}
 				if !fileTime.After(curFileTime) {
@@ -451,9 +451,8 @@ func (r *rotateReader) walkS3(ctx context.Context, curFileName string, s3api s3i
 	return nil
 }
 
-func getFileNamePrefix(format string) string {
-	switch format {
-	case cmd.FormatAuditLogPlugin:
+func getFileNamePrefix(format cmd.TrafficFormat) string {
+	if format.IsAuditLogFormat() {
 		return auditFileNamePrefix
 	}
 	return fileNamePrefix
