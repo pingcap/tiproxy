@@ -30,6 +30,7 @@ type mockRedirectableConn struct {
 	to       BackendInst
 	receiver ConnEventReceiver
 	pausing  bool
+	closing  bool
 }
 
 func newMockRedirectableConn(t *testing.T, id uint64) *mockRedirectableConn {
@@ -61,10 +62,13 @@ func (conn *mockRedirectableConn) Value(k any) any {
 
 func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 	conn.Lock()
+	defer conn.Unlock()
+	if conn.closing {
+		return false
+	}
 	require.Nil(conn.t, conn.to)
 	require.True(conn.t, inst.Healthy())
 	conn.to = inst
-	conn.Unlock()
 	return true
 }
 
@@ -971,4 +975,17 @@ func TestConnPauseResume(t *testing.T) {
 	conn2 := tester.conns[2]
 	tester.simpleRoute(conn2)
 	require.Equal(t, 3, tester.router.pausedConnList.Len())
+}
+
+func TestRedirectFail(t *testing.T) {
+	tester := newRouterTester(t)
+	tester.addBackends(1)
+	tester.addConnections(1)
+	tester.conns[1].closing = true
+	tester.killBackends(1)
+	tester.addBackends(1)
+	tester.rebalance(1)
+	// If the connection refuses to redirect, the connScore should not change.
+	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
+	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
 }

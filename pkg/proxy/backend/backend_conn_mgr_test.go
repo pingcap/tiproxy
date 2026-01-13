@@ -607,8 +607,8 @@ func TestCloseWhileRedirect(t *testing.T) {
 				})
 				// Make sure the process goroutine finishes.
 				ts.mp.wg.Wait()
-				// Redirect() should not panic after Close().
-				ts.mp.Redirect(newMockBackendInst(ts))
+				// Redirect() should not panic after Close() and it returns false.
+				require.False(t, ts.mp.Redirect(newMockBackendInst(ts)))
 				eventReceiver.checkEvent(t, eventRedirectSucceed)
 				wg.Wait()
 				eventReceiver.checkEvent(t, eventClose)
