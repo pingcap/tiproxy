@@ -266,7 +266,6 @@ func (router *ScoreBasedRouter) RedirectConnections() error {
 				connWrapper.phase = phaseRedirectNotify
 				// we dont care the results
 				_ = connWrapper.Redirect(backend)
-				connWrapper.redirectingBackend = backend
 			}
 		}
 	}
@@ -329,6 +328,11 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 	fromBe := router.ensureBackend(from, true)
 	toBe := router.ensureBackend(to, false)
 	connWrapper := router.getConnWrapper(conn).Value
+	addMigrateMetrics(from, to, succeed, connWrapper.lastRedirect)
+	// The connection may be closed when this function is waiting for the lock.
+	if connWrapper.phase == phaseClosed {
+		return
+	}
 	if succeed {
 		router.removeConn(fromBe, router.getConnWrapper(conn))
 		router.addConn(toBe, connWrapper)
@@ -340,8 +344,6 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 		router.adjustBackendList(toBe, true)
 		connWrapper.phase = phaseRedirectFail
 	}
-	connWrapper.redirectingBackend = nil
-	addMigrateMetrics(from, to, succeed, connWrapper.lastRedirect)
 }
 
 // OnPauseSucceed implements ConnEventReceiver.OnPauseSucceed interface.
@@ -372,28 +374,26 @@ func (router *ScoreBasedRouter) onPauseFinished(addr string, conn RedirectableCo
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
-func (router *ScoreBasedRouter) OnConnClosed(addr string, conn RedirectableConn) error {
+func (router *ScoreBasedRouter) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
 	router.Lock()
 	defer router.Unlock()
 	connWrapper := router.getConnWrapper(conn)
 	if len(addr) > 0 {
-		be := router.ensureBackend(addr, true)
-		redirectingBackend := connWrapper.Value.redirectingBackend
-		// If this connection is redirecting, decrease the score of the target backend.
-		if redirectingBackend != nil {
-			redirectingBackend.connScore--
-			connWrapper.Value.redirectingBackend = nil
-			if redirectingBe := router.lookupBackend(redirectingBackend.addr, true); redirectingBe != nil {
-				router.adjustBackendList(redirectingBe, true)
-			}
+		backend := router.ensureBackend(addr, true)
+		// If this connection has not redirected yet, decrease the score of the target backend.
+		if redirectingAddr != "" {
+			redirectingBackend := router.ensureBackend(redirectingAddr, true)
+			redirectingBackend.Value.connScore--
+			router.adjustBackendList(redirectingBackend, true)
 		} else {
-			be.Value.connScore--
+			backend.Value.connScore--
 		}
-		router.removeConn(be, connWrapper)
+		router.removeConn(backend, connWrapper)
 	} else {
 		// addr is empty indicates the connection has been paused
 		router.removePausedConn(connWrapper)
 	}
+	connWrapper.Value.phase = phaseClosed
 	return nil
 }
 
@@ -538,7 +538,6 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend, toB
 		toBackend.Value.connScore++
 		router.adjustBackendList(toBackend, false)
 		conn.phase = phaseRedirectNotify
-		conn.redirectingBackend = toBackend.Value
 	} else {
 		// Avoid it to be redirected again immediately.
 		conn.phase = phaseRedirectFail

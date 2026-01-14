@@ -259,7 +259,7 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 		}
 	}
 	for _, conn := range conns {
-		err := tester.router.OnConnClosed(conn.from.Addr(), conn)
+		err := tester.router.OnConnClosed(conn.from.Addr(), conn.GetRedirectingAddr(), conn)
 		require.NoError(tester.t, err)
 		delete(tester.conns, conn.connID)
 	}
@@ -751,7 +751,7 @@ func TestConcurrency(t *testing.T) {
 						from, to := conn.getAddr()
 						var err error
 						if i < 1 {
-							err = router.OnConnClosed(from, conn)
+							err = router.OnConnClosed(from, conn.GetRedirectingAddr(), conn)
 							conn = nil
 						} else if i < 3 {
 							conn.redirectFail()
@@ -767,7 +767,7 @@ func TestConcurrency(t *testing.T) {
 						if i < 2 {
 							// The balancer may happen to redirect it concurrently - that's exactly what may happen.
 							from, _ := conn.getAddr()
-							err := router.OnConnClosed(from, conn)
+							err = router.OnConnClosed(from, conn.GetRedirectingAddr(), conn)
 							require.NoError(t, err)
 							conn = nil
 						}
@@ -939,16 +939,23 @@ func TestCloseRedirectingConns(t *testing.T) {
 	// Make the connection redirect.
 	tester := newRouterTester(t)
 	tester.addBackends(1)
-	tester.addConnections(1)
-	require.Equal(t, 1, tester.getBackendByIndex(0).connScore)
+	tester.addConnections(2)
+	require.Equal(t, 2, tester.getBackendByIndex(0).connScore)
 	tester.killBackends(1)
 	tester.addBackends(1)
-	tester.rebalance(1)
+	tester.rebalance(2)
 	require.Equal(t, 0, tester.getBackendByIndex(0).connScore)
-	require.Equal(t, 1, tester.getBackendByIndex(1).connScore)
+	require.Equal(t, 2, tester.getBackendByIndex(1).connScore)
 	// Close the connection.
 	tester.updateBackendStatusByAddr(tester.getBackendByIndex(0).Addr(), StatusHealthy)
-	tester.closeConnections(1, true)
+	tester.closeConnections(2, true)
+	require.Equal(t, 0, tester.getBackendByIndex(0).connScore)
+	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
+	require.Equal(t, 0, tester.getBackendByIndex(0).connList.Len())
+	require.Equal(t, 0, tester.getBackendByIndex(1).connList.Len())
+	// The results are received (after getting the lock) after the connections are closed.
+	tester.redirectFinish(1, true)
+	tester.redirectFinish(1, false)
 	require.Equal(t, 0, tester.getBackendByIndex(0).connScore)
 	require.Equal(t, 0, tester.getBackendByIndex(1).connScore)
 	require.Equal(t, 0, tester.getBackendByIndex(0).connList.Len())
