@@ -22,7 +22,7 @@ type ConnEventReceiver interface {
 	OnRedirectFail(from, to string, conn RedirectableConn) error
 	OnPauseSucceed(addr string, conn RedirectableConn) error
 	OnPauseFail(addr string, conn RedirectableConn) error
-	OnConnClosed(addr string, conn RedirectableConn) error
+	OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error
 }
 
 // Router routes client connections to backends.
@@ -52,6 +52,8 @@ const (
 	phasePauseNotify
 	// The session failed to pause last time.
 	phasePauseFail
+	// The connection is closed.
+	phaseClosed
 )
 
 const (
@@ -149,8 +151,6 @@ func (b *backendWrapper) String() string {
 // connWrapper wraps RedirectableConn.
 type connWrapper struct {
 	RedirectableConn
-	// Reference to the target backend if it's redirecting, otherwise nil.
-	redirectingBackend *backendWrapper
 	// Last redirect start time of this connection.
 	lastRedirect monotime.Time
 	phase        connPhase

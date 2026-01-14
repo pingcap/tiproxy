@@ -780,8 +780,12 @@ func (mgr *BackendConnManager) Close() error {
 		if len(mgr.redirectResCh) > 0 {
 			mgr.notifyRedirectResult(context.Background(), <-mgr.redirectResCh)
 		}
-		// Just notify it with the current address.
-		if err := eventReceiver.OnConnClosed(addr, mgr); err != nil {
+		// The connection may have just received the redirecting signal.
+		var redirectingAddr string
+		if redirectingBackend := mgr.redirectInfo.Load(); redirectingBackend != nil {
+			redirectingAddr = (*redirectingBackend).Addr()
+		}
+		if err := eventReceiver.OnConnClosed(addr, redirectingAddr, mgr); err != nil {
 			mgr.logger.Error("close connection error", zap.String("backend_addr", addr), zap.NamedError("notify_err", err))
 		}
 	}

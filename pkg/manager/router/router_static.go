@@ -78,7 +78,7 @@ func (r *StaticRouter) OnPauseFail(addr string, conn RedirectableConn) error {
 	return nil
 }
 
-func (r *StaticRouter) OnConnClosed(addr string, conn RedirectableConn) error {
+func (r *StaticRouter) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
 	r.cnt--
 	return nil
 }
