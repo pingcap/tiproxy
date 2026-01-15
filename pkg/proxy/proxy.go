@@ -47,6 +47,7 @@ type serverState struct {
 	gracefulWait        int // graceful-wait-before-shutdown
 	gracefulClose       int // graceful-close-conn-timeout
 	frontendReadTimeout int // frontend-read-timeout
+	connectTimeout      int
 	status              serverStatus
 }
 
@@ -102,6 +103,7 @@ func (s *SQLServer) reset(cfg *config.Config) {
 	s.mu.unhealthyKeepAlive = cfg.Proxy.BackendUnhealthyKeepalive
 	s.mu.connBufferSize = cfg.Proxy.ConnBufferSize
 	s.mu.frontendReadTimeout = cfg.Proxy.FrontendReadTimeout
+	s.mu.connectTimeout = cfg.Proxy.ConnectTimeout
 	s.mu.Unlock()
 }
 
@@ -173,6 +175,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				HealthyKeepAlive:   s.mu.healthyKeepAlive,
 				UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
 				ConnBufferSize:     s.mu.connBufferSize,
+				ConnectTimeout:     time.Duration(s.mu.connectTimeout) * time.Second,
 			})
 		s.mu.clients[connID] = clientConn
 		logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
