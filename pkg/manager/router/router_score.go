@@ -6,6 +6,7 @@ package router
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
@@ -84,6 +85,7 @@ type ScoreBasedRouter struct {
 	serverVersion  string
 	pausedConnList *glist.List[*connWrapper]
 	config         *RouterConfig
+	rebalanceTick  atomic.Uint64
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
@@ -404,10 +406,10 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 	router.observeError = err
 	for addr, health := range backends {
 		be := router.lookupBackend(addr, true)
+		var backend *backendWrapper
+		prev := "none"
 		if be == nil && health.Status != StatusCannotConnect {
-			router.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev", "none"), zap.String("cur", health.String()))
-			backend := &backendWrapper{
+			backend = &backendWrapper{
 				addr:     addr,
 				connList: glist.New[*connWrapper](),
 			}
@@ -415,12 +417,22 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 			be = router.backends.PushBack(backend)
 			router.adjustBackendList(be, false)
 		} else if be != nil {
-			backend := be.Value
-			router.logger.Info("update backend", zap.String("backend_addr", addr),
-				zap.String("prev", backend.mu.String()), zap.String("cur", health.String()))
+			backend = be.Value
+			prev = backend.mu.String()
 			backend.setHealth(*health)
 			router.adjustBackendList(be, true)
+		} else {
+			continue
 		}
+
+		healthyCnt, unhealthyCnt := router.backendHealthStats()
+		router.logger.Info("update backend", zap.String("backend_addr", addr),
+			zap.String("prev", prev), zap.String("cur", health.String()),
+			zap.Int("conn_count", backend.connList.Len()),
+			zap.Int("conn_score", backend.connScore),
+			zap.Int("healthy_backends", healthyCnt),
+			zap.Int("unhealthy_backends", unhealthyCnt),
+			zap.Uint64("rebalance_tick", router.rebalanceTick.Load()))
 	}
 	if len(backends) > 0 {
 		router.updateServerVersion()
@@ -458,12 +470,27 @@ func (router *ScoreBasedRouter) OnBackendChanged(backends map[string]*BackendHea
 	}
 }
 
+// backendHealthStats returns the number of healthy and unhealthy backends.
+// It's called with router locked.
+func (router *ScoreBasedRouter) backendHealthStats() (healthy, unhealthy int) {
+	for be := router.backends.Front(); be != nil; be = be.Next() {
+		backend := be.Value
+		if backend.Healthy() {
+			healthy++
+		} else {
+			unhealthy++
+		}
+	}
+	return
+}
+
 func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 	ticker := time.NewTicker(router.config.RebalanceInterval)
 	for {
 		select {
 		case <-ctx.Done():
 			ticker.Stop()
+			router.logger.Info("rebalance loop stopped", zap.Uint64("rebalance_tick", router.rebalanceTick.Load()))
 			return
 		case <-ticker.C:
 			router.rebalance(router.config.RebalanceConnsPerLoop)
@@ -475,6 +502,7 @@ func (router *ScoreBasedRouter) rebalance(maxNum int) {
 	curTime := monotime.Now()
 	router.Lock()
 	defer router.Unlock()
+	router.rebalanceTick.Add(1)
 	for i := 0; i < maxNum; i++ {
 		var busiestEle *glist.Element[*backendWrapper]
 		for be := router.backends.Front(); be != nil; be = be.Next() {
@@ -530,6 +558,7 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend, toB
 			zap.Uint64("connID", conn.ConnectionID()),
 			zap.String("from", fromBackend.Value.addr),
 			zap.String("to", toBackend.Value.addr),
+			zap.Uint64("rebalance_tick", router.rebalanceTick.Load()),
 		}
 		fields = append(fields, logFields...)
 		router.logger.Debug("begin redirect connection", fields...)
