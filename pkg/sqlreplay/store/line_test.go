@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
@@ -97,8 +98,10 @@ func TestReadLine(t *testing.T) {
 		require.NoError(t, os.RemoveAll(dir), "case %d", i)
 		require.NoError(t, os.MkdirAll(dir, 0777), "case %d", i)
 		fileNames := make([]string, 0, len(test.data))
+		baseTime := time.Date(2025, 9, 10, 17, 1, 56, 0, time.Local)
 		for j, data := range test.data {
-			name := fmt.Sprintf("%s%d%s", fileNamePrefix, j+1, fileNameSuffix)
+			ts := baseTime.Add(time.Duration(j) * time.Millisecond)
+			name := fmt.Sprintf("%s%s%s", fileNamePrefix, ts.Format(logTimeLayout), fileNameSuffix)
 			err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600)
 			require.NoError(t, err, "case %d", i)
 			fileNames = append(fileNames, name)
@@ -200,8 +203,10 @@ func TestRead(t *testing.T) {
 		require.NoError(t, os.RemoveAll(dir), "case %d", i)
 		require.NoError(t, os.MkdirAll(dir, 0777), "case %d", i)
 		fileNames := make([]string, 0, len(test.data))
+		baseTime := time.Date(2025, 9, 10, 17, 1, 56, 0, time.Local)
 		for j, data := range test.data {
-			name := fmt.Sprintf("%s%d%s", fileNamePrefix, j+1, fileNameSuffix)
+			ts := baseTime.Add(time.Duration(j) * time.Millisecond)
+			name := fmt.Sprintf("%s%s%s", fileNamePrefix, ts.Format(logTimeLayout), fileNameSuffix)
 			err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600)
 			require.NoError(t, err, "case %d", i)
 			fileNames = append(fileNames, name)
