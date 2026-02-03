@@ -27,7 +27,12 @@ func TestStartAndStop(t *testing.T) {
 	defer cpt.Close()
 
 	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
-	cpt.Capture(packet, time.Now(), 100, mockInitSession)
+	cpt.Capture(StmtInfo{
+		Request:     packet,
+		StartTime:   time.Now(),
+		ConnID:      100,
+		InitSession: mockInitSession,
+	})
 	writer := newMockWriter(store.WriterCfg{})
 	cfg := CaptureConfig{
 		Output:    dir,
@@ -38,7 +43,12 @@ func TestStartAndStop(t *testing.T) {
 
 	// start capture and the traffic should be outputted
 	require.NoError(t, cpt.Start(cfg))
-	cpt.Capture(packet, time.Now(), 100, mockInitSession)
+	cpt.Capture(StmtInfo{
+		Request:     packet,
+		StartTime:   time.Now(),
+		ConnID:      100,
+		InitSession: mockInitSession,
+	})
 	cpt.Stop(errors.Errorf("mock error"))
 	data := writer.getData()
 	require.Greater(t, len(data), 0)
@@ -46,14 +56,24 @@ func TestStartAndStop(t *testing.T) {
 	require.Equal(t, uint64(2), cpt.capturedCmds)
 
 	// stop capture and traffic should not be outputted
-	cpt.Capture(packet, time.Now(), 100, mockInitSession)
+	cpt.Capture(StmtInfo{
+		Request:     packet,
+		StartTime:   time.Now(),
+		ConnID:      100,
+		InitSession: mockInitSession,
+	})
 	cpt.wg.Wait()
 	require.Equal(t, len(data), len(writer.getData()))
 
 	// start capture again
 	removeMeta(dir)
 	require.NoError(t, cpt.Start(cfg))
-	cpt.Capture(packet, time.Now(), 100, mockInitSession)
+	cpt.Capture(StmtInfo{
+		Request:     packet,
+		StartTime:   time.Now(),
+		ConnID:      100,
+		InitSession: mockInitSession,
+	})
 	cpt.Stop(nil)
 	require.Greater(t, len(writer.getData()), len(data))
 
@@ -89,7 +109,12 @@ func TestConcurrency(t *testing.T) {
 				return
 			case <-time.After(10 * time.Microsecond):
 				id := rand.Intn(100) + 1
-				cpt.Capture(packet, time.Now(), uint64(id), mockInitSession)
+				cpt.Capture(StmtInfo{
+					Request:     packet,
+					StartTime:   time.Now(),
+					ConnID:      uint64(id),
+					InitSession: mockInitSession,
+				})
 			}
 		}
 	})
@@ -221,7 +246,12 @@ func TestProgress(t *testing.T) {
 	require.GreaterOrEqual(t, progress, 0.5)
 
 	packet := append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...)
-	cpt.Capture(packet, time.Now(), 100, mockInitSession)
+	cpt.Capture(StmtInfo{
+		Request:     packet,
+		StartTime:   time.Now(),
+		ConnID:      100,
+		InitSession: mockInitSession,
+	})
 	cpt.Stop(errors.Errorf("mock error"))
 	progress, _, done, err = cpt.Progress()
 	require.ErrorContains(t, err, "mock error")
@@ -254,14 +284,29 @@ func TestInitConn(t *testing.T) {
 
 	require.NoError(t, cpt.Start(cfg))
 	cpt.InitConn(time.Now(), 100, "mockDB")
-	cpt.Capture(packet, time.Now(), 100, func() (string, error) {
-		return "init session 100", nil
+	cpt.Capture(StmtInfo{
+		Request:   packet,
+		StartTime: time.Now(),
+		ConnID:    100,
+		InitSession: func() (string, error) {
+			return "init session 100", nil
+		},
 	})
-	cpt.Capture(packet, time.Now(), 101, func() (string, error) {
-		return "init session fail 101", errors.New("init session fail 101")
+	cpt.Capture(StmtInfo{
+		Request:   packet,
+		StartTime: time.Now(),
+		ConnID:    101,
+		InitSession: func() (string, error) {
+			return "init session fail 101", errors.New("init session fail 101")
+		},
 	})
-	cpt.Capture(packet, time.Now(), 101, func() (string, error) {
-		return "init session 101", nil
+	cpt.Capture(StmtInfo{
+		Request:   packet,
+		StartTime: time.Now(),
+		ConnID:    101,
+		InitSession: func() (string, error) {
+			return "init session 101", nil
+		},
 	})
 	cpt.Stop(errors.Errorf("mock error"))
 	data := string(writer.getData())
@@ -289,18 +334,38 @@ func TestQuit(t *testing.T) {
 
 	require.NoError(t, cpt.Start(cfg))
 	// 100: quit
-	cpt.Capture(quitPacket, time.Now(), 100, func() (string, error) {
-		return "init session 100", nil
+	cpt.Capture(StmtInfo{
+		Request:   quitPacket,
+		StartTime: time.Now(),
+		ConnID:    100,
+		InitSession: func() (string, error) {
+			return "init session 100", nil
+		},
 	})
 	// 101: select + quit + quit
-	cpt.Capture(queryPacket, time.Now(), 101, func() (string, error) {
-		return "init session 101", nil
+	cpt.Capture(StmtInfo{
+		Request:   queryPacket,
+		StartTime: time.Now(),
+		ConnID:    101,
+		InitSession: func() (string, error) {
+			return "init session 101", nil
+		},
 	})
-	cpt.Capture(quitPacket, time.Now(), 101, func() (string, error) {
-		return "init session 101", nil
+	cpt.Capture(StmtInfo{
+		Request:   quitPacket,
+		StartTime: time.Now(),
+		ConnID:    101,
+		InitSession: func() (string, error) {
+			return "init session 101", nil
+		},
 	})
-	cpt.Capture(quitPacket, time.Now(), 101, func() (string, error) {
-		return "init session 101", nil
+	cpt.Capture(StmtInfo{
+		Request:   quitPacket,
+		StartTime: time.Now(),
+		ConnID:    101,
+		InitSession: func() (string, error) {
+			return "init session 101", nil
+		},
 	})
 	cpt.Stop(errors.Errorf("mock error"))
 
@@ -348,8 +413,13 @@ func TestFilterCmds(t *testing.T) {
 		cfg.cmdLogger = writer
 		removeMeta(dir)
 		require.NoError(t, cpt.Start(cfg))
-		cpt.Capture(test.packet, time.Now(), 100, func() (string, error) {
-			return "init session 100", nil
+		cpt.Capture(StmtInfo{
+			Request:   test.packet,
+			StartTime: time.Now(),
+			ConnID:    100,
+			InitSession: func() (string, error) {
+				return "init session 100", nil
+			},
 		})
 		cpt.Stop(nil)
 

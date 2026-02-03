@@ -25,6 +25,9 @@ type CmdProcessor struct {
 	// Only includes in_trans or quit status.
 	serverStatus uint32
 	logger       *zap.Logger
+	// prepareEndHook is called after receiving the first response packet of COM_STMT_PREPARE.
+	// It's set by BackendConnManager for a single ExecuteCmd call.
+	prepareEndHook func(stmtID uint32)
 }
 
 func NewCmdProcessor(logger *zap.Logger) *CmdProcessor {

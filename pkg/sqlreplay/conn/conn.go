@@ -4,12 +4,10 @@
 package conn
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/binary"
-	"encoding/json"
-	"strings"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +18,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/sessionstates"
 	"github.com/pingcap/tiproxy/pkg/util/lex"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
@@ -53,6 +52,13 @@ type ExecInfo struct {
 	Command   *cmd.Command
 	StartTime time.Time
 	CostTime  time.Duration
+}
+
+// Used for parsing prepared stmt.
+type preparedStmt struct {
+	text       string
+	paramTypes []byte
+	paramNum   int
 }
 
 type Conn interface {
@@ -186,7 +192,7 @@ func (c *conn) Run(ctx context.Context) {
 				curDB = command.Value.CurDB
 			}
 			// update psID, SQL, and params for the command.
-			if err := c.updateExecuteStmt(command.Value); err != nil {
+			if err := c.updateExecuteStmt(ctx, command.Value); err != nil {
 				c.onExecuteFailed(command.Value, err)
 				continue
 			}
@@ -269,19 +275,14 @@ func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp Exe
 		clear(c.preparedStmts)
 		clear(c.psIDMapping)
 	case pnet.ComQuery.Byte():
-		if len(request[1:]) > len(setSessionStates) && strings.EqualFold(hack.String(request[1:len(setSessionStates)+1]), setSessionStates) {
-			query := request[len(setSessionStates)+1:]
-			query = bytes.TrimSpace(query)
-			query = bytes.Trim(query, "'\"")
-			query = bytes.ReplaceAll(query, []byte("\\\\"), []byte("\\"))
-			query = bytes.ReplaceAll(query, []byte("\\'"), []byte("'"))
-			var sessionStates sessionStates
-			if err := json.Unmarshal(query, &sessionStates); err != nil {
-				c.lg.Warn("failed to unmarshal session states", zap.Error(err))
-			}
-			for stmtID, stmt := range sessionStates.PreparedStmts {
-				c.preparedStmts[stmtID] = preparedStmt{text: stmt.StmtText, paramNum: len(stmt.ParamTypes) >> 1, paramTypes: stmt.ParamTypes}
-			}
+		sql := hack.String(request[1:])
+		ss, err := sessionstates.ParseFromSetSessionStatesSQL(sql)
+		if err != nil {
+			c.lg.Warn("failed to unmarshal session states", zap.Error(err))
+			return
+		}
+		for stmtID, stmt := range ss.PreparedStmts {
+			c.preparedStmts[stmtID] = preparedStmt{text: stmt.StmtText, paramNum: len(stmt.ParamTypes) >> 1, paramTypes: stmt.ParamTypes}
 		}
 	}
 }
@@ -289,7 +290,7 @@ func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp Exe
 // Update the prepared statement ID and SQL text in the EXECUTE/FETCH/RESET/SEND_LONG_DATA/CLOSE command.
 // If the prepared statement is not found, maybe the previous PREPARE failed or the connection
 // is reconnected after disconnection, so return error and do not continue.
-func (c *conn) updateExecuteStmt(command *cmd.Command) error {
+func (c *conn) updateExecuteStmt(ctx context.Context, command *cmd.Command) error {
 	switch command.Type {
 	case pnet.ComStmtExecute, pnet.ComStmtFetch, pnet.ComStmtClose, pnet.ComStmtReset, pnet.ComStmtSendLongData:
 	default:
@@ -300,8 +301,20 @@ func (c *conn) updateExecuteStmt(command *cmd.Command) error {
 	if command.CapturedPsID != 0 {
 		var ok bool
 		if replayPsID, ok = c.psIDMapping[command.CapturedPsID]; !ok {
-			// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
-			return errors.Errorf("prepared statement ID %d not found", command.CapturedPsID)
+			// If we start replaying from mid-connection, we may see EXECUTE without the corresponding PREPARE.
+			// In this case, the capture should have filled PreparedStmt; we can PREPARE it on demand.
+			if command.Type == pnet.ComStmtExecute && len(command.PreparedStmt) > 0 && c.backendConn != nil && !reflect.ValueOf(c.backendConn).IsNil() {
+				req := pnet.MakePrepareStmtRequest(command.PreparedStmt)
+				resp := c.backendConn.ExecuteCmd(ctx, req)
+				if resp.Err != nil {
+					return resp.Err
+				}
+				c.updatePreparedStmts(command.CapturedPsID, req, resp)
+				replayPsID = resp.StmtID
+			} else {
+				// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
+				return errors.Errorf("prepared statement ID %d not found", command.CapturedPsID)
+			}
 		}
 		binary.LittleEndian.PutUint32(command.Payload[1:], replayPsID)
 	} else {

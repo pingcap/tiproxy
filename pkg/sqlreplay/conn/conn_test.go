@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/sessionstates"
 	"github.com/siddontang/go/hack"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -375,8 +376,8 @@ func TestReadOnly(t *testing.T) {
 }
 
 func TestPreparedStmt(t *testing.T) {
-	ss := sessionStates{
-		PreparedStmts: map[uint32]*preparedStmtInfo{
+	ss := sessionstates.SessionStates{
+		PreparedStmts: map[uint32]*sessionstates.PreparedStmtInfo{
 			1: {
 				StmtText:   "select ?",
 				ParamTypes: []byte{0x08, 0x00},
@@ -527,6 +528,58 @@ func TestPreparedStmtMapId(t *testing.T) {
 
 	cancel()
 	wg.Wait()
+}
+
+func TestPrepareOnDemandForExecute(t *testing.T) {
+	execReq, err := pnet.MakeExecuteStmtRequest(100, []any{1}, true)
+	require.NoError(t, err)
+
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 10)
+	stats := &ReplayStats{}
+	conn := NewConn(zap.NewNop(), ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+
+	var wg waitgroup.WaitGroup
+	childCtx, cancel := context.WithCancel(context.Background())
+	wg.RunWithRecover(func() {
+		conn.Run(childCtx)
+	}, nil, zap.NewNop())
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	// Send EXECUTE directly without PREPARE. It should PREPARE on demand using PreparedStmt.
+	conn.ExecuteCmd(&cmd.Command{
+		CapturedPsID:   100,
+		Type:           pnet.ComStmtExecute,
+		Payload:        execReq,
+		PreparedStmt:   "select ?",
+		ConnID:         1,
+		UpstreamConnID: 1,
+	})
+	require.Eventually(t, func() bool {
+		return stats.PendingCmds.Load() == 0
+	}, 3*time.Second, 10*time.Millisecond)
+
+	reqs := backendConn.allRequests()
+	require.GreaterOrEqual(t, len(reqs), 2)
+	require.Equal(t, pnet.ComStmtPrepare.Byte(), reqs[0][0])
+	require.Equal(t, "select ?", hack.String(reqs[0][1:]))
+	require.Equal(t, pnet.ComStmtExecute.Byte(), reqs[1][0])
+	stmtID := binary.LittleEndian.Uint32(reqs[1][1:5])
+	require.Equal(t, uint32(1), stmtID)
 }
 
 func TestReconnect(t *testing.T) {

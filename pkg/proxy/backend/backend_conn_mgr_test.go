@@ -1589,6 +1589,31 @@ func TestCapture(t *testing.T) {
 			},
 		},
 		{
+			client: func(packetIO pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComStmtPrepare
+				ts.mc.sql = "select ?"
+				return ts.mc.request(packetIO)
+			},
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				now := time.Now()
+				err := ts.forwardCmd4Proxy(clientIO, backendIO)
+				cpt := ts.mp.cpt.(*mockCapture)
+				packet := append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)
+				require.Equal(t, packet, cpt.packet)
+				require.GreaterOrEqual(t, cpt.startTime, now)
+				require.EqualValues(t, 100, cpt.connID)
+				require.EqualValues(t, mockCmdInt, cpt.stmtID)
+				return err
+			},
+			backend: func(packetIO pnet.PacketIO) error {
+				// respond to COM_STMT_PREPARE
+				ts.mb.respondType = responseTypePrepareOK
+				ts.mb.params = 1
+				ts.mb.columns = 0
+				return ts.mb.respond(packetIO)
+			},
+		},
+		{
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				_ = ts.mp.Close()
 				ts.closed = true

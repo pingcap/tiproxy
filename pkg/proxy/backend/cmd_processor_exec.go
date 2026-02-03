@@ -131,6 +131,10 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO pnet.PacketIO) err
 	}
 	switch response[0] {
 	case pnet.OKHeader.Byte():
+		if cp.prepareEndHook != nil {
+			stmtID := binary.LittleEndian.Uint32(response[1:])
+			cp.prepareEndHook(stmtID)
+		}
 		// The OK packet doesn't contain a server status.
 		// See https://mariadb.com/kb/en/com_stmt_prepare/
 		numColumns := binary.LittleEndian.Uint16(response[5:])

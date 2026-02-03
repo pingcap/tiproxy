@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,11 +119,14 @@ func (mp *mockProxy) directQuery(_, backendIO pnet.PacketIO) error {
 var _ capture.Capture = (*mockCapture)(nil)
 
 type mockCapture struct {
+	mu        sync.Mutex
+	inited    map[uint64]struct{}
 	db        string
 	initSql   string
 	packet    []byte
 	startTime time.Time
 	connID    uint64
+	stmtID    uint32
 }
 
 func (mc *mockCapture) Start(cfg capture.CaptureConfig) error {
@@ -141,12 +145,22 @@ func (mc *mockCapture) InitConn(startTime time.Time, connID uint64, dbname strin
 	mc.connID = connID
 }
 
-func (mc *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error)) {
-	mc.packet = packet
-	mc.startTime = startTime
-	mc.connID = connID
-	if initSession != nil {
-		mc.initSql, _ = initSession()
+func (mc *mockCapture) Capture(stmtInfo capture.StmtInfo) {
+	// For tests, just record the packet and call initSession if needed.
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.packet = stmtInfo.Request
+	mc.startTime = stmtInfo.StartTime
+	mc.connID = stmtInfo.ConnID
+	mc.stmtID = stmtInfo.StmtID
+	if stmtInfo.InitSession != nil {
+		if mc.inited == nil {
+			mc.inited = make(map[uint64]struct{})
+		}
+		if _, ok := mc.inited[stmtInfo.ConnID]; !ok {
+			mc.initSql, _ = stmtInfo.InitSession()
+			mc.inited[stmtInfo.ConnID] = struct{}{}
+		}
 	}
 }
 
