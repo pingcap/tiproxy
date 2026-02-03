@@ -52,7 +52,7 @@ func (job *job) IsRunning() bool {
 }
 
 func (job *job) IsStopping() bool {
-	return !job.done && job.err != nil
+	return job.err != nil && !job.done
 }
 
 func (job *job) SetProgress(progress float64, endTime time.Time, done bool, err error) {
