@@ -416,11 +416,6 @@ func (r *replay) waitUntilStartTime(ctx context.Context) bool {
 	return false
 }
 
-// isDecodingStopped returns whether the replay is gracefully stopped.
-func (r *replay) isDecodingStopped() bool {
-	return r.decodeCtx.Err() != nil
-}
-
 func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context) {
 	if r.waitUntilStartTime(decodeCtx) {
 		r.stop(nil)
@@ -556,7 +551,6 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 		zap.Int("alive_conns", connCount),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
 		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-		zap.Bool("graceful_stop", r.isDecodingStopped()),
 		zap.Error(err),
 		zap.NamedError("ctx_err", decodeCtx.Err()))
 
