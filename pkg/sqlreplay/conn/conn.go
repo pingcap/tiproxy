@@ -54,6 +54,13 @@ type ExecInfo struct {
 	CostTime  time.Duration
 }
 
+// Used for parsing prepared stmt.
+type preparedStmt struct {
+	text       string
+	paramTypes []byte
+	paramNum   int
+}
+
 type Conn interface {
 	Run(ctx context.Context)
 	ExecuteCmd(command *cmd.Command)

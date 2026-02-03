@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/sessionstates"
 	"github.com/siddontang/go/hack"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -375,8 +376,8 @@ func TestReadOnly(t *testing.T) {
 }
 
 func TestPreparedStmt(t *testing.T) {
-	ss := sessionStates{
-		PreparedStmts: map[uint32]*preparedStmtInfo{
+	ss := sessionstates.SessionStates{
+		PreparedStmts: map[uint32]*sessionstates.PreparedStmtInfo{
 			1: {
 				StmtText:   "select ?",
 				ParamTypes: []byte{0x08, 0x00},
@@ -561,11 +562,11 @@ func TestPrepareOnDemandForExecute(t *testing.T) {
 
 	// Send EXECUTE directly without PREPARE. It should PREPARE on demand using PreparedStmt.
 	conn.ExecuteCmd(&cmd.Command{
-		CapturedPsID:  100,
-		Type:          pnet.ComStmtExecute,
-		Payload:       execReq,
-		PreparedStmt:  "select ?",
-		ConnID:        1,
+		CapturedPsID:   100,
+		Type:           pnet.ComStmtExecute,
+		Payload:        execReq,
+		PreparedStmt:   "select ?",
+		ConnID:         1,
 		UpstreamConnID: 1,
 	})
 	require.Eventually(t, func() bool {

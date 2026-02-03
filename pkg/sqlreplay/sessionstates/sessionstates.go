@@ -23,8 +23,7 @@ type PreparedStmtInfo struct {
 	ParamTypes []byte `json:"types,omitempty"`
 }
 
-// ParseFromSetSessionStatesSQL parses a SQL string like:
-//   SET SESSION_STATES '...json...'
+// ParseFromSetSessionStatesSQL parses a SQL string like: SET SESSION_STATES '...json...'
 // and returns its decoded SessionStates. If sql is not a SET SESSION_STATES statement,
 // it returns an empty SessionStates and nil error.
 func ParseFromSetSessionStatesSQL(sql string) (SessionStates, error) {
@@ -62,4 +61,3 @@ func ExtractPreparedStmtTextsFromSetSessionStatesSQL(sql string) map[uint32]stri
 	}
 	return m
 }
-
