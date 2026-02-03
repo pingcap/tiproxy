@@ -232,3 +232,34 @@ func TestAvoidConcurrentReplay(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, 1, successCount)
 }
+
+func TestGracefulCancelTimeout(t *testing.T) {
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, true)
+	defer mgr.Close()
+
+	cfg := replay.ReplayConfig{
+		Input:           t.TempDir(),
+		Format:          cmd.FormatAuditLogPlugin,
+		StartTime:       time.Now().Add(-30 * time.Second),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+		DryRun:          true,
+		WaitOnEOF:       true,
+	}
+	require.NoError(t, mgr.StartReplay(cfg))
+	time.Sleep(50 * time.Millisecond)
+
+	timeout := 20 * time.Millisecond
+	start := time.Now()
+	result := mgr.Stop(CancelConfig{Type: Replay, Graceful: true, GracefulTimeout: timeout})
+	require.Contains(t, result, "graceful cancel timeout")
+	require.Less(t, time.Since(start), time.Second)
+
+	_, _, _, _, done, _ := mgr.replay.Progress()
+	require.False(t, done, "replay finished before force cancel")
+
+	result = mgr.Stop(CancelConfig{Type: Replay, Graceful: false})
+	require.Contains(t, result, "stopped")
+
+	_, _, _, _, done, _ = mgr.replay.Progress()
+	require.True(t, done)
+}

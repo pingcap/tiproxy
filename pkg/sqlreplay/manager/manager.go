@@ -23,11 +23,13 @@ const (
 	maxJobHistoryCount = 10
 	connectTimeout     = 60 * time.Second
 	dialTimeout        = 5 * time.Second
+	gracefulStopTimeout = 60 * time.Second
 )
 
 type CancelConfig struct {
-	Type     JobType
-	Graceful bool
+	Type            JobType
+	Graceful        bool
+	GracefulTimeout time.Duration
 }
 
 type CertManager interface {
@@ -77,15 +79,21 @@ func (jm *jobManager) updateProgress() {
 	}
 	job := jm.jobHistory[len(jm.jobHistory)-1]
 	if job.IsRunning() {
-		switch job.Type() {
-		case Capture:
-			progress, endTime, done, err := jm.capture.Progress()
-			job.SetProgress(progress, endTime, done, err)
-		case Replay:
-			progress, endTime, curCmdTs, curCmdEndTs, done, err := jm.replay.Progress()
-			job.SetProgress(progress, endTime, done, err)
-			job.(*replayJob).lastCmdTs = curCmdTs
-			job.(*replayJob).lastCmdEndTs = curCmdEndTs
+		jm.updateJobProgress(job)
+	}
+}
+
+func (jm *jobManager) updateJobProgress(job Job) {
+	switch job.Type() {
+	case Capture:
+		progress, endTime, done, err := jm.capture.Progress()
+		job.SetProgress(progress, endTime, done, err)
+	case Replay:
+		progress, endTime, curCmdTs, curCmdEndTs, done, err := jm.replay.Progress()
+		job.SetProgress(progress, endTime, done, err)
+		if replayJob, ok := job.(*replayJob); ok {
+			replayJob.lastCmdTs = curCmdTs
+			replayJob.lastCmdEndTs = curCmdEndTs
 		}
 	}
 }
@@ -100,6 +108,24 @@ func (jm *jobManager) runningJob() Job {
 		return job
 	}
 	return nil
+}
+
+func (jm *jobManager) lastJob() Job {
+	if len(jm.jobHistory) == 0 {
+		return nil
+	}
+	return jm.jobHistory[len(jm.jobHistory)-1]
+}
+
+func (jm *jobManager) jobDone(job Job) bool {
+	switch job := job.(type) {
+	case *captureJob:
+		return job.done
+	case *replayJob:
+		return job.done
+	default:
+		return true
+	}
 }
 
 func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
@@ -209,23 +235,84 @@ func (jm *jobManager) Wait() {
 }
 
 func (jm *jobManager) Stop(cfg CancelConfig) string {
+	var (
+		job     Job
+		jobType JobType
+		stopFn  func()
+		errText string
+	)
+	func() {
+		jm.mu.Lock()
+		defer jm.mu.Unlock()
+
+		job = jm.runningJob()
+		if job == nil {
+			job = jm.lastJob()
+			if job == nil {
+				errText = "no job running"
+				return
+			}
+			if job.Type()&cfg.Type == 0 {
+				errText = "no privilege to stop the job"
+				return
+			}
+			jm.updateJobProgress(job)
+			if jm.jobDone(job) {
+				errText = "no job running"
+				return
+			}
+		} else if job.Type()&cfg.Type == 0 {
+			errText = "no privilege to stop the job"
+			return
+		}
+		jobType = job.Type()
+		stopFn = jm.stopFunc(jobType, cfg.Graceful, jm.capture, jm.replay)
+	}()
+	if errText != "" {
+		return errText
+	}
+
+	if jobType == Replay && cfg.Graceful {
+		timeout := cfg.GracefulTimeout
+		if timeout <= 0 {
+			timeout = gracefulStopTimeout
+		}
+		done := make(chan struct{})
+		go func() {
+			stopFn()
+			close(done)
+		}()
+		select {
+		case <-done:
+			return jm.finishStop(job)
+		case <-time.After(timeout):
+			return "graceful cancel timeout after " + timeout.String()
+		}
+	}
+
+	stopFn()
+	return jm.finishStop(job)
+}
+
+func (jm *jobManager) stopFunc(jobType JobType, graceful bool, captureJob capture.Capture, replayJob replay.Replay) func() {
+	switch jobType {
+	case Capture:
+		return func() {
+			captureJob.Stop(errors.Errorf("manually stopped"))
+		}
+	case Replay:
+		return func() {
+			replayJob.Stop(errors.Errorf("manually stopped, graceful: %v", graceful), graceful)
+		}
+	default:
+		return func() {}
+	}
+}
+
+func (jm *jobManager) finishStop(job Job) string {
 	jm.mu.Lock()
 	defer jm.mu.Unlock()
-
-	job := jm.runningJob()
-	if job == nil {
-		return "no job running"
-	}
-	if job.Type()&cfg.Type == 0 {
-		return "no privilege to stop the job"
-	}
-	switch job.Type() {
-	case Capture:
-		jm.capture.Stop(errors.Errorf("manually stopped"))
-	case Replay:
-		jm.replay.Stop(errors.Errorf("manually stopped, graceful: %v", cfg.Graceful), cfg.Graceful)
-	}
-	jm.updateProgress()
+	jm.updateJobProgress(job)
 	return "stopped: " + job.String()
 }
 

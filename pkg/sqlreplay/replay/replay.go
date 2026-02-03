@@ -1027,6 +1027,9 @@ func (r *replay) Wait() {
 }
 
 func (r *replay) gracefulStop() {
+	if r.isGracefulStopped() {
+		return
+	}
 	close(r.gracefulStopCh)
 }
 
