@@ -597,7 +597,7 @@ func MakePrepareStmtResp(stmtID uint32, paramNum int) []byte {
 	// header
 	response := make([]byte, 1+4+2+2)
 	pos := 0
-	response[pos] = ComStmtPrepare.Byte()
+	response[pos] = OKHeader.Byte()
 	pos += 1
 	binary.LittleEndian.PutUint32(response[pos:], stmtID)
 	pos += 4

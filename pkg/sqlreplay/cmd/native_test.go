@@ -16,6 +16,8 @@ func TestEncode(t *testing.T) {
 	tests := []struct {
 		payload []byte
 		cmd     pnet.Command
+		psID    uint32
+		psText  string
 	}{
 		{
 			cmd:     pnet.ComQuery,
@@ -32,6 +34,8 @@ func TestEncode(t *testing.T) {
 		{
 			cmd:     pnet.ComStmtExecute,
 			payload: []byte("1\n2\n"),
+			psID:    123,
+			psText:  "select \n\"\"",
 		},
 		{
 			cmd: pnet.ComQuit,
@@ -45,6 +49,8 @@ func TestEncode(t *testing.T) {
 		packet := append([]byte{byte(test.cmd)}, test.payload...)
 		now := time.Now()
 		cmd := NewCommand(packet, now, 100)
+		cmd.CapturedPsID = test.psID
+		cmd.PreparedStmt = test.psText
 		require.NoError(t, encoder.Encode(cmd, &buf), "case %d", i)
 		cmds = append(cmds, cmd)
 	}
@@ -56,6 +62,8 @@ func TestEncode(t *testing.T) {
 		newCmd, err := decoder.Decode(&mr)
 		require.NoError(t, err, "case %d, buf: %s", i, buf.String())
 		require.True(t, cmd.Equal(newCmd), "case %d, buf: %s", i, buf.String())
+		require.Equal(t, cmd.CapturedPsID, newCmd.CapturedPsID, "case %d, buf: %s", i, buf.String())
+		require.Equal(t, cmd.PreparedStmt, newCmd.PreparedStmt, "case %d, buf: %s", i, buf.String())
 	}
 }
 

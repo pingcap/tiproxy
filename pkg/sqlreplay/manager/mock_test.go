@@ -32,7 +32,7 @@ type mockCapture struct {
 func (m *mockCapture) InitConn(startTime time.Time, connID uint64, db string) {
 }
 
-func (m *mockCapture) Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error)) {
+func (m *mockCapture) Capture(stmtInfo capture.StmtInfo) {
 }
 
 func (m *mockCapture) Close() {
