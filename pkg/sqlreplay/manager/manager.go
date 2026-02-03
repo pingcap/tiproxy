@@ -104,6 +104,18 @@ func (jm *jobManager) runningJob() Job {
 	return nil
 }
 
+func (jm *jobManager) runningOrStoppingJob() Job {
+	if len(jm.jobHistory) == 0 {
+		return nil
+	}
+	jm.updateProgress()
+	job := jm.jobHistory[len(jm.jobHistory)-1]
+	if job.IsRunning() || job.IsStopping() {
+		return job
+	}
+	return nil
+}
+
 func (jm *jobManager) StartCapture(cfg capture.CaptureConfig) error {
 	jm.mu.Lock()
 	defer jm.mu.Unlock()
@@ -223,7 +235,7 @@ func (jm *jobManager) Stop(cfg CancelConfig) string {
 		jm.mu.Lock()
 		defer jm.mu.Unlock()
 
-		job := jm.runningJob()
+		job := jm.runningOrStoppingJob()
 		if job == nil {
 			errText = "no job running"
 			return

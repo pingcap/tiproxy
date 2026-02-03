@@ -27,6 +27,7 @@ type Job interface {
 	MarshalJSON() ([]byte, error)
 	SetProgress(progress float64, endTime time.Time, done bool, err error)
 	IsRunning() bool
+	IsStopping() bool
 }
 
 type job struct {
@@ -48,6 +49,10 @@ type job4Marshal struct {
 
 func (job *job) IsRunning() bool {
 	return job.err == nil && !job.done
+}
+
+func (job *job) IsStopping() bool {
+	return !job.done && job.err != nil
 }
 
 func (job *job) SetProgress(progress float64, endTime time.Time, done bool, err error) {
