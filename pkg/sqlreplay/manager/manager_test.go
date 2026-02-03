@@ -4,6 +4,11 @@
 package manager
 
 import (
+	"bytes"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
+	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
@@ -234,32 +240,165 @@ func TestAvoidConcurrentReplay(t *testing.T) {
 }
 
 func TestGracefulCancelTimeout(t *testing.T) {
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, true)
+	mgr, backend := startBlockingReplay(t)
 	defer mgr.Close()
+	defer backend.Close()
 
-	cfg := replay.ReplayConfig{
-		Input:           t.TempDir(),
-		Format:          cmd.FormatAuditLogPlugin,
-		StartTime:       time.Now().Add(-30 * time.Second),
-		PSCloseStrategy: cmd.PSCloseStrategyDirected,
-		DryRun:          true,
-		WaitOnEOF:       true,
-	}
-	require.NoError(t, mgr.StartReplay(cfg))
-	time.Sleep(50 * time.Millisecond)
-
-	timeout := 20 * time.Millisecond
+	timeout := 200 * time.Millisecond
 	start := time.Now()
 	result := mgr.Stop(CancelConfig{Type: Replay, Graceful: true, GracefulTimeout: timeout})
 	require.Contains(t, result, "graceful cancel timeout")
-	require.Less(t, time.Since(start), time.Second)
+	require.Less(t, time.Since(start), timeout*10)
 
 	_, _, _, _, done, _ := mgr.replay.Progress()
 	require.False(t, done, "replay finished before force cancel")
 
+	backend.Close()
 	result = mgr.Stop(CancelConfig{Type: Replay, Graceful: false})
 	require.Contains(t, result, "stopped")
 
 	_, _, _, _, done, _ = mgr.replay.Progress()
 	require.True(t, done)
+}
+
+func TestShowDuringGracefulCancel(t *testing.T) {
+	mgr, backend := startBlockingReplay(t)
+	defer mgr.Close()
+	defer backend.Close()
+
+	gracefulCancelTimeout := time.Second
+	stopDone := make(chan struct{})
+	go func() {
+		_ = mgr.Stop(CancelConfig{Type: Replay, Graceful: true, GracefulTimeout: gracefulCancelTimeout})
+		close(stopDone)
+	}()
+
+	time.Sleep(gracefulCancelTimeout / 10)
+	select {
+	case <-stopDone:
+		t.Fatal("graceful cancel returned early")
+	default:
+	}
+
+	showDone := make(chan struct{})
+	go func() {
+		_ = mgr.Jobs()
+		close(showDone)
+	}()
+	select {
+	case <-showDone:
+	case <-time.After(gracefulCancelTimeout):
+		t.Fatal("show blocked during graceful cancel")
+	}
+
+	select {
+	case <-stopDone:
+	case <-time.After(gracefulCancelTimeout * 2):
+		t.Fatal("graceful cancel did not return")
+	}
+
+	backend.Close()
+	_ = mgr.Stop(CancelConfig{Type: Replay, Graceful: false})
+}
+
+func startBlockingReplay(t *testing.T) (*jobManager, *silentBackend) {
+	t.Helper()
+
+	backend := newSilentBackend(t)
+	dir := t.TempDir()
+	writeNativeLog(t, dir)
+
+	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, true)
+	cfg := replay.ReplayConfig{
+		Input:           dir,
+		Format:          cmd.FormatNative,
+		Username:        "root",
+		ReadOnly:        true,
+		StartTime:       time.Now().Add(-time.Second),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+		Addr:            backend.Addr(),
+	}
+	require.NoError(t, mgr.StartReplay(cfg))
+	backend.WaitAccepted(t, time.Second)
+	return mgr, backend
+}
+
+func writeNativeLog(t *testing.T, dir string) {
+	t.Helper()
+
+	command := cmd.NewCommand(pnet.MakeQueryPacket("select 1"), time.Now(), 1)
+	encoder := cmd.NewCmdEncoder(cmd.FormatNative)
+	var buf bytes.Buffer
+	require.NoError(t, encoder.Encode(command, &buf))
+
+	fileName := fmt.Sprintf("traffic-%s.log", time.Now().In(time.Local).Format("2006-01-02T15-04-05.999"))
+	path := filepath.Join(dir, fileName)
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0644))
+}
+
+type silentBackend struct {
+	listener     net.Listener
+	acceptedOnce sync.Once
+	acceptedCh   chan struct{}
+	mu           sync.Mutex
+	conns        []net.Conn
+}
+
+func newSilentBackend(t *testing.T) *silentBackend {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	backend := &silentBackend{
+		listener:   listener,
+		acceptedCh: make(chan struct{}),
+	}
+	go backend.acceptLoop()
+	return backend
+}
+
+func (b *silentBackend) acceptLoop() {
+	for {
+		conn, err := b.listener.Accept()
+		if err != nil {
+			return
+		}
+		b.mu.Lock()
+		b.conns = append(b.conns, conn)
+		b.mu.Unlock()
+		b.acceptedOnce.Do(func() {
+			close(b.acceptedCh)
+		})
+	}
+}
+
+func (b *silentBackend) Addr() string {
+	return b.listener.Addr().String()
+}
+
+func (b *silentBackend) WaitAccepted(t *testing.T, timeout time.Duration) {
+	t.Helper()
+
+	select {
+	case <-b.acceptedCh:
+	case <-time.After(timeout):
+		t.Fatal("backend did not accept connection")
+	}
+}
+
+func (b *silentBackend) CloseConns() {
+	b.mu.Lock()
+	conns := append([]net.Conn(nil), b.conns...)
+	b.conns = nil
+	b.mu.Unlock()
+
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+}
+
+func (b *silentBackend) Close() {
+	_ = b.listener.Close()
+	b.CloseConns()
 }
