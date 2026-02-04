@@ -36,31 +36,35 @@ func (p *Proxy) ToBytes() ([]byte, error) {
 
 	switch sadd := srcAddr.(type) {
 	case *net.TCPAddr:
-		addressFamily = ProxyAFINet
-		if len(sadd.IP) == net.IPv6len {
-			addressFamily = ProxyAFINet6
-		}
-		network = ProxyNetworkStream
 		dadd, ok := dstAddr.(*net.TCPAddr)
 		if !ok {
 			return nil, ErrAddressFamilyMismatch
 		}
-		buf = append(buf, sadd.IP...)
-		buf = append(buf, dadd.IP...)
+		saddUnifiedIP, daddUnifiedIP := unifyIPFamily(sadd.IP, dadd.IP)
+
+		addressFamily = ProxyAFINet
+		if len(saddUnifiedIP) == net.IPv6len {
+			addressFamily = ProxyAFINet6
+		}
+		network = ProxyNetworkStream
+		buf = append(buf, saddUnifiedIP...)
+		buf = append(buf, daddUnifiedIP...)
 		buf = append(buf, byte(sadd.Port>>8), byte(sadd.Port))
 		buf = append(buf, byte(dadd.Port>>8), byte(dadd.Port))
 	case *net.UDPAddr:
-		addressFamily = ProxyAFINet
-		if len(sadd.IP) == net.IPv6len {
-			addressFamily = ProxyAFINet6
-		}
-		network = ProxyNetworkDgram
 		dadd, ok := dstAddr.(*net.UDPAddr)
 		if !ok {
 			return nil, ErrAddressFamilyMismatch
 		}
-		buf = append(buf, sadd.IP...)
-		buf = append(buf, dadd.IP...)
+		saddUnifiedIP, daddUnifiedIP := unifyIPFamily(sadd.IP, dadd.IP)
+
+		addressFamily = ProxyAFINet
+		if len(saddUnifiedIP) == net.IPv6len {
+			addressFamily = ProxyAFINet6
+		}
+		network = ProxyNetworkDgram
+		buf = append(buf, saddUnifiedIP...)
+		buf = append(buf, daddUnifiedIP...)
 		buf = append(buf, byte(sadd.Port>>8), byte(sadd.Port))
 		buf = append(buf, byte(dadd.Port>>8), byte(dadd.Port))
 	case *net.UnixAddr:
@@ -92,6 +96,19 @@ func (p *Proxy) ToBytes() ([]byte, error) {
 	buf[magicLen+3] = byte(length)
 
 	return buf, nil
+}
+
+// unifyIPFamily unifies the IP family of ip1 and ip2.
+// If both of them are IPv4 (or IPv4 mapped IPv6), return the IPv4 addresses.
+// Else, convert both of them to IPv6 and return.
+func unifyIPFamily(ip1 net.IP, ip2 net.IP) (net.IP, net.IP) {
+	ip1To4 := ip1.To4()
+	ip2To4 := ip2.To4()
+	if ip1To4 != nil && ip2To4 != nil {
+		return ip1To4, ip2To4
+	}
+
+	return ip1.To16(), ip2.To16()
 }
 
 func ParseProxyV2(rd io.Reader) (m *Proxy, n int, err error) {

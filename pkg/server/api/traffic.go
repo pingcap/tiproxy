@@ -154,11 +154,18 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 		cfg.ReplayerIndex = replayerIndex
 	}
 	cfg.OutputPath = c.PostForm("outputpath")
+	cfg.Addr = c.PostForm("addr")
+	cfg.DryRun = strings.EqualFold(c.PostForm("dryrun"), "true")
+	cfg.FilterCommandWithRetry = strings.EqualFold(c.PostForm("filtercommandwithretry"), "true")
+	cfg.WaitOnEOF = strings.EqualFold(c.PostForm("wait-on-eof"), "true")
+	h.lg.Info("request: traffic replay", zap.Any("cfg", cfg))
 
 	if err := h.mgr.ReplayJobMgr.StartReplay(cfg); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
+		h.lg.Info("response: traffic replay", zap.Error(err))
 		return
 	}
+	h.lg.Info("response: traffic replay")
 	c.String(http.StatusOK, "replay started")
 }
 
@@ -180,7 +187,17 @@ func (h *Server) TrafficCancel(c *gin.Context) {
 		}
 	}
 	cfg.Graceful = strings.EqualFold(c.PostForm("graceful"), "true")
+	if timeoutStr := c.PostForm("timeout"); timeoutStr != "" {
+		timeout, err := time.ParseDuration(timeoutStr)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.GracefulTimeout = timeout
+	}
+	h.lg.Info("request: traffic cancel", zap.Any("cfg", cfg))
 	result := h.mgr.ReplayJobMgr.Stop(cfg)
+	h.lg.Info("response: traffic cancel", zap.String("result", result))
 	c.String(http.StatusOK, result)
 }
 

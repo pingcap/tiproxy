@@ -9,6 +9,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 )
 
 type nopConn struct {
@@ -32,24 +33,41 @@ func (c *nopConn) Stop() {
 	c.closeCh <- c.connID
 }
 
-var _ report.Report = (*mockReport)(nil)
+var _ report.Report = (*nopReport)(nil)
 
-type mockReport struct {
+type nopReport struct {
 	exceptionCh chan conn.Exception
+	wg          waitgroup.WaitGroup
+	cancel      context.CancelFunc
 }
 
-func newMockReport(exceptionCh chan conn.Exception) *mockReport {
-	return &mockReport{
+func newMockReport(exceptionCh chan conn.Exception) *nopReport {
+	return &nopReport{
 		exceptionCh: exceptionCh,
 	}
 }
 
-func (mr *mockReport) Start(ctx context.Context, cfg report.ReportConfig) error {
+func (mr *nopReport) Start(ctx context.Context, cfg report.ReportConfig) error {
+	childCtx, cancel := context.WithCancel(ctx)
+	mr.cancel = cancel
+	mr.wg.RunWithRecover(func() { mr.loop(childCtx) }, nil, nil)
 	return nil
 }
 
-func (mr *mockReport) Stop(err error) {
+func (mr *nopReport) loop(ctx context.Context) {
+	for ctx.Err() == nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-mr.exceptionCh:
+		}
+	}
 }
 
-func (mr *mockReport) Close() {
+func (mr *nopReport) Close() {
+	if mr.cancel != nil {
+		mr.cancel()
+		mr.cancel = nil
+	}
+	mr.wg.Wait()
 }

@@ -27,6 +27,7 @@ type Job interface {
 	MarshalJSON() ([]byte, error)
 	SetProgress(progress float64, endTime time.Time, done bool, err error)
 	IsRunning() bool
+	IsStopping() bool
 }
 
 type job struct {
@@ -48,6 +49,10 @@ type job4Marshal struct {
 
 func (job *job) IsRunning() bool {
 	return job.err == nil && !job.done
+}
+
+func (job *job) IsStopping() bool {
+	return job.err != nil && !job.done
 }
 
 func (job *job) SetProgress(progress float64, endTime time.Time, done bool, err error) {
@@ -135,6 +140,7 @@ type replayJob4Marshal struct {
 	Format    string  `json:"format,omitempty"`
 	Speed     float64 `json:"speed,omitempty"`
 	ReadOnly  bool    `json:"readonly,omitempty"`
+	Addr      string  `json:"addr,omitempty"`
 }
 
 func (job *replayJob) Type() JobType {
@@ -152,6 +158,7 @@ func (job *replayJob) MarshalJSON() ([]byte, error) {
 		Speed:       job.cfg.Speed,
 		ReadOnly:    job.cfg.ReadOnly,
 		Format:      job.cfg.Format,
+		Addr:        job.cfg.Addr,
 	}
 	return json.Marshal(r)
 }

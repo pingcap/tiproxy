@@ -6,6 +6,7 @@ package proxy
 import (
 	"context"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/util/netutil"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
@@ -29,6 +31,7 @@ type serverState struct {
 	healthyKeepAlive   config.KeepAlive
 	unhealthyKeepAlive config.KeepAlive
 	clients            map[uint64]*client.ClientConnection
+	publicEndpoints    []*net.IPNet
 	maxConnections     uint64
 	connBufferSize     int
 	requireBackendTLS  bool
@@ -84,6 +87,10 @@ func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMana
 }
 
 func (s *SQLServer) reset(cfg *config.Config) {
+	cidrList, parseErr := netutil.ParseCIDRList(cfg.Proxy.PublicEndpoints)
+	if parseErr != nil {
+		s.logger.Warn("failed to parse public endpoints", zap.Error(parseErr))
+	}
 	s.mu.Lock()
 	s.mu.tcpKeepAlive = cfg.Proxy.FrontendKeepalive.Enabled
 	s.mu.maxConnections = cfg.Proxy.MaxConnections
@@ -94,6 +101,7 @@ func (s *SQLServer) reset(cfg *config.Config) {
 	s.mu.healthyKeepAlive = cfg.Proxy.BackendHealthyKeepalive
 	s.mu.unhealthyKeepAlive = cfg.Proxy.BackendUnhealthyKeepalive
 	s.mu.connBufferSize = cfg.Proxy.ConnBufferSize
+	s.mu.publicEndpoints = cidrList
 	s.mu.Unlock()
 }
 
@@ -159,11 +167,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 			zap.String("addr", addr))
 		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),
 			s.hsHandler, s.cpt, connID, addr, &backend.BCConfig{
-				ProxyProtocol:      s.mu.proxyProtocol,
-				RequireBackendTLS:  s.mu.requireBackendTLS,
-				HealthyKeepAlive:   s.mu.healthyKeepAlive,
-				UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
-				ConnBufferSize:     s.mu.connBufferSize,
+				ProxyProtocol:       s.mu.proxyProtocol,
+				RequireBackendTLS:   s.mu.requireBackendTLS,
+				HealthyKeepAlive:    s.mu.healthyKeepAlive,
+				UnhealthyKeepAlive:  s.mu.unhealthyKeepAlive,
+				ConnBufferSize:      s.mu.connBufferSize,
+				FromPublicEndpoints: s.fromPublicEndpoint,
 			}, s.meter)
 		s.mu.clients[connID] = clientConn
 		logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
@@ -195,6 +204,31 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	}
 
 	clientConn.Run(ctx)
+}
+
+func (s *SQLServer) fromPublicEndpoint(addr net.Addr) bool {
+	if addr == nil || reflect.ValueOf(addr).IsNil() {
+		return false
+	}
+	s.mu.RLock()
+	publicEndpoints := s.mu.publicEndpoints
+	s.mu.RUnlock()
+	ip, err := netutil.NetAddr2IP(addr)
+	if err != nil {
+		s.logger.Warn("failed to check public endpoint", zap.Any("addr", addr), zap.Error(err))
+		return false
+	}
+	contains, err := netutil.CIDRContainsIP(publicEndpoints, ip)
+	if err != nil {
+		s.logger.Warn("failed to check public endpoint", zap.Any("ip", ip), zap.Error(err))
+		return false
+	}
+	if contains {
+		return true
+	}
+	// The public NLB may enable preserveIP, and the incoming address is the client address, which may be a public address.
+	// Even if the private NLB enables preserveIP, the client address is still a private address.
+	return !netutil.IsPrivate(ip)
 }
 
 func (s *SQLServer) PreClose() {

@@ -6,12 +6,14 @@ package cmd
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/siddontang/go/hack"
+	"go.uber.org/zap"
 )
 
 const (
@@ -27,6 +29,7 @@ const (
 	auditPluginKeyEvent          = "EVENT"
 	auditPluginKeyCostTime       = "COST_TIME"
 	auditPluginKeyPreparedStmtID = "PREPARED_STMT_ID"
+	auditPluginKeyRetry          = "RETRY"
 
 	auditPluginClassGeneral     = "GENERAL"
 	auditPluginClassTableAccess = "TABLE_ACCESS"
@@ -40,6 +43,23 @@ const (
 	timeLayout = "2006/01/02 15:04:05.999 -07:00"
 )
 
+type DupItem struct {
+	Times      int
+	MinOverlap time.Duration
+	Cost       time.Duration
+}
+
+type DeDup struct {
+	sync.Mutex
+	Items map[string]DupItem
+}
+
+func NewDeDup() *DeDup {
+	return &DeDup{
+		Items: make(map[string]DupItem),
+	}
+}
+
 type auditLogPluginConnCtx struct {
 	connID   uint64
 	lastPsID uint32
@@ -49,13 +69,15 @@ type auditLogPluginConnCtx struct {
 	// preparedStmtSql contains the prepared statement SQLs, only used for `ps-close=never`.
 	// It doesn't require the prepared statement IDs to be contained in the audit logs.
 	preparedStmtSql map[string]uint32
+	lastCmd         *Command
 }
 
-func NewAuditLogPluginDecoder() *AuditLogPluginDecoder {
+func NewAuditLogPluginDecoder(dedup *DeDup, lg *zap.Logger) *AuditLogPluginDecoder {
 	return &AuditLogPluginDecoder{
 		connInfo:        make(map[uint64]auditLogPluginConnCtx),
-		kvs:             make(map[string]string, 25),
 		psCloseStrategy: PSCloseStrategyDirected,
+		dedup:           dedup,
+		lg:              lg,
 	}
 }
 
@@ -80,13 +102,12 @@ type AuditLogPluginDecoder struct {
 	commandStartTime time.Time
 	commandEndTime   time.Time
 	// pendingCmds contains the commands that has not been returned yet.
-	pendingCmds     []*Command
-	psCloseStrategy PSCloseStrategy
-	idAllocator     *ConnIDAllocator
-
-	// kvs is a reusable map to avoid too many allocations to store the KV
-	// for each line.
-	kvs map[string]string
+	pendingCmds            []*Command
+	psCloseStrategy        PSCloseStrategy
+	filterCommandWithRetry bool
+	idAllocator            *ConnIDAllocator
+	dedup                  *DeDup
+	lg                     *zap.Logger
 }
 
 // ConnIDAllocator allocates connection IDs for new connections.
@@ -118,7 +139,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		decoder.pendingCmds = decoder.pendingCmds[1:]
 		return cmd, nil
 	}
-	kvs := decoder.kvs
+	kvs := make(map[string]string, 25)
 	for {
 		line, filename, lineIdx, err := reader.ReadLine()
 		if err != nil {
@@ -169,7 +190,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		eventClass := kvs[auditPluginKeyClass]
 		switch eventClass {
 		case auditPluginClassGeneral, auditPluginClassTableAccess:
-			cmds, err = decoder.parseGeneralEvent(kvs, upstreamConnID)
+			cmds, err = decoder.parseGeneralEvent(kvs, startTs, endTs, upstreamConnID)
 		case auditPluginClassConnect:
 			var c *Command
 			c, err = decoder.parseConnectEvent(kvs, upstreamConnID)
@@ -197,6 +218,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			cmd.FileName = filename
 			cmd.Line = lineIdx
 			cmd.EndTs = endTs
+			cmd.kvs = kvs
 		}
 		if len(cmds) > 1 {
 			decoder.pendingCmds = cmds[1:]
@@ -405,7 +427,7 @@ func parseSingleParam(value string) (any, error) {
 	return nil, errors.Errorf("unknown param type: %s", tpStr)
 }
 
-func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, connID uint64) ([]*Command, error) {
+func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, startTs, endTs time.Time, connID uint64) ([]*Command, error) {
 	connInfo := decoder.connInfo[connID]
 	if connInfo.preparedStmt == nil {
 		connInfo.preparedStmt = make(map[uint32]struct{})
@@ -418,19 +440,38 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 		return nil, nil
 	}
 
+	var sql string
 	cmdStr := parseCommand(kvs[auditPluginKeyCommand])
-	cmds := make([]*Command, 0, 3)
-	switch cmdStr {
-	case "Query":
-		sql, err := parseSQL(kvs[auditPluginKeySQL])
+	if cmdStr == "Query" || cmdStr == "Execute" {
+		var err error
+		sql, err = parseSQL(kvs[auditPluginKeySQL])
 		if err != nil {
 			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
+		if decoder.filterCommandWithRetry {
+			if retryStr, ok := kvs[auditPluginKeyRetry]; ok {
+				if retryStr == "true" {
+					// skip the retried command
+					return nil, nil
+				}
+			}
+		} else {
+			// deduplicate DML and SELECT FOR UPDATE
+			if decoder.isDuplicatedWrite(connInfo.lastCmd, kvs, cmdStr, sql, startTs, endTs) {
+				return nil, nil
+			}
+		}
+	}
+
+	cmds := make([]*Command, 0, 3)
+	switch cmdStr {
+	case "Query":
 		cmds = append(cmds, &Command{
 			Type:     pnet.ComQuery,
 			StmtType: kvs[auditPluginKeyStmtType],
 			Payload:  append([]byte{pnet.ComQuery.Byte()}, hack.Slice(sql)...),
 		})
+		connInfo.lastCmd = cmds[0]
 	case "Close stmt":
 		if decoder.psCloseStrategy != PSCloseStrategyDirected {
 			break
@@ -456,10 +497,6 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 		if !ok {
 			// the old format doesn't output params
 			break
-		}
-		sql, err := parseSQL(kvs[auditPluginKeySQL])
-		if err != nil {
-			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
 		}
 		args, err := parseExecuteParams(params)
 		if err != nil {
@@ -504,6 +541,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 				CapturedPsID: stmtID,
 				Type:         pnet.ComStmtPrepare,
 				StmtType:     kvs[auditPluginKeyStmtType],
+				PreparedStmt: sql,
 				Payload:      append([]byte{pnet.ComStmtPrepare.Byte()}, hack.Slice(sql)...),
 			})
 		}
@@ -517,8 +555,11 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 			CapturedPsID: stmtID,
 			Type:         pnet.ComStmtExecute,
 			StmtType:     kvs[auditPluginKeyStmtType],
+			PreparedStmt: sql,
+			Params:       args,
 			Payload:      executeReq,
 		})
+		connInfo.lastCmd = cmds[len(cmds)-1]
 
 		// Append CLOSE command if needed.
 		if decoder.psCloseStrategy == PSCloseStrategyAlways {
@@ -527,11 +568,13 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, c
 				CapturedPsID: stmtID,
 				Type:         pnet.ComStmtClose,
 				StmtType:     kvs[auditPluginKeyStmtType],
+				PreparedStmt: sql,
 				Payload:      pnet.MakeCloseStmtRequest(stmtID),
 			})
 		}
 		// Ignore Quit since disconnection is handled in parseConnectEvent.
 	}
+	decoder.connInfo[connID] = connInfo
 	return cmds, nil
 }
 
@@ -556,4 +599,61 @@ func parseStmtID(value string) (uint32, error) {
 		return 0, errors.Errorf("parsing prepared stmt id failed: %s", value)
 	}
 	return uint32(id), nil
+}
+
+// Transaction retrials will record the same SQL multiple times in the audit logs, so we need to deduplicate them.
+func (decoder *AuditLogPluginDecoder) isDuplicatedWrite(lastCmd *Command, kvs map[string]string, cmdType, sql string, startTs, endTs time.Time) bool {
+	if lastCmd == nil {
+		return false
+	}
+	// Does the time overlap?
+	if lastCmd.EndTs.Before(startTs) || startTs.Sub(lastCmd.StartTs) > time.Millisecond {
+		return false
+	}
+	// Are the statements equal?
+	switch lastCmd.Type {
+	case pnet.ComStmtExecute:
+		if cmdType != "Execute" || lastCmd.PreparedStmt != sql || lastCmd.kvs[auditPluginKeyParams] != kvs[auditPluginKeyParams] {
+			return false
+		}
+	case pnet.ComQuery:
+		if cmdType != "Query" || hack.String(lastCmd.Payload[1:]) != sql {
+			return false
+		}
+	default:
+		return false
+	}
+	if lastCmd.StmtType != kvs[auditPluginKeyStmtType] {
+		return false
+	}
+	// Is it DML?
+	switch lastCmd.StmtType {
+	case "Insert", "Update", "Delete", "Replace":
+	case "Select":
+		// The judgment is inaccurate, but just make it simple.
+		if !strings.Contains(strings.ToLower(sql), "for update") {
+			return false
+		}
+	default:
+		return false
+	}
+	// Record the deduplication.
+	decoder.dedup.Lock()
+	dedup := decoder.dedup.Items[lastCmd.StmtType]
+	dedup.Times++
+	dedup.Cost += endTs.Sub(startTs)
+	overlap := lastCmd.EndTs.Sub(startTs)
+	if dedup.MinOverlap == 0 {
+		dedup.MinOverlap = overlap
+	} else if dedup.MinOverlap > overlap {
+		dedup.MinOverlap = overlap
+	}
+	decoder.dedup.Items[lastCmd.StmtType] = dedup
+	decoder.dedup.Unlock()
+	return true
+}
+
+// EnableFilterCommandWithRetry enables filtering out commands that are retries according to the audit log.
+func (decoder *AuditLogPluginDecoder) EnableFilterCommandWithRetry() {
+	decoder.filterCommandWithRetry = true
 }

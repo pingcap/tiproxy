@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"io"
+	"net/http"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
 )
@@ -39,5 +40,17 @@ func NewStorage(path string) (storage.ExternalStorage, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	defer cancel()
-	return storage.New(ctx, backend, &storage.ExternalStorageOptions{})
+	return storage.New(ctx, backend, &storage.ExternalStorageOptions{
+		// Disable compression to be compatible with Aliyun OSS.
+		//
+		// S3 will never send compressed response, so this config changes nothing.
+		// Aliyun OSS will send compressed response if Accept-Encoding is set to gzip, then
+		// the response will not have `Content-Length` header, which will make br storage
+		// refuse to process.
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				DisableCompression: true,
+			},
+		},
+	})
 }

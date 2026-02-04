@@ -90,6 +90,7 @@ const (
 type BCConfig struct {
 	HealthyKeepAlive     config.KeepAlive
 	UnhealthyKeepAlive   config.KeepAlive
+	FromPublicEndpoints  func(addr net.Addr) bool
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
 	DialTimeout          time.Duration
@@ -115,7 +116,7 @@ func (cfg *BCConfig) check() {
 }
 
 type Meter interface {
-	IncTraffic(clusterID string, respBytes, crossAZBytes int64)
+	IncTraffic(clusterID string, respBytes, crossAZBytes int64, fromPublicEndpoint bool)
 }
 
 // BackendConnManager migrates a session from one BackendConnection to another.
@@ -162,10 +163,11 @@ type BackendConnManager struct {
 		sync.Mutex
 		m map[any]any
 	}
-	connectionID uint64
-	quitSource   ErrorSource
-	cpt          capture.Capture
-	meter        Meter
+	connectionID       uint64
+	quitSource         ErrorSource
+	cpt                capture.Capture
+	meter              Meter
+	fromPublicEndpoint bool
 }
 
 // NewBackendConnManager creates a BackendConnManager.
@@ -235,6 +237,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 	endTime := time.Now()
 	addHandshakeMetrics(mgr.ServerAddr(), endTime.Sub(startTime))
+	if mgr.config.FromPublicEndpoints != nil {
+		mgr.fromPublicEndpoint = mgr.config.FromPublicEndpoints(clientIO.ProxyAddr())
+	}
 	mgr.updateTraffic(*mgr.backendIO.Load())
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
@@ -345,13 +350,20 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 // If it finds that the session is ready for redirection, it migrates the session.
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
 	startTime := time.Now()
-	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
-		mgr.cpt.Capture(request, startTime, mgr.connectionID, mgr.initForCapture)
+	// For most cases, capture the command at the beginning.
+	if len(request) > 0 && request[0] != pnet.ComStmtPrepare.Byte() && mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
+		mgr.cpt.Capture(capture.StmtInfo{
+			Request:     request,
+			StartTime:   startTime,
+			ConnID:      mgr.connectionID,
+			InitSession: mgr.initForCapture,
+		})
 	}
+	var stmtID uint32
 	mgr.processLock.Lock()
 	defer func() {
 		if err != nil && !pnet.IsMySQLError(err) {
-			mgr.setQuitSourceByErr(err)
+			mgr.SetQuitSourceByErr(err)
 		}
 		mgr.handshakeHandler.OnTraffic(mgr)
 		now := time.Now()
@@ -370,7 +382,20 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 				zap.Duration("execute_time", now.Sub(startTime)), zap.Stringer("cmd", cmd), zap.String("query", query))
 		}
 		mgr.lastActiveTime = now
+		mgr.cmdProcessor.prepareEndHook = nil
 		mgr.processLock.Unlock()
+		// For ComStmtPrepare, capture the command after the statement ID is obtained.
+		// Capture ComStmtPrepare after releasing processLock to avoid deadlock with initForCapture().
+		if request[0] == pnet.ComStmtPrepare.Byte() && stmtID > 0 && mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
+			mgr.cpt.Capture(capture.StmtInfo{
+				Request:     request,
+				StmtID:      stmtID,
+				StartTime:   startTime,
+				ConnID:      mgr.connectionID,
+				InitSession: mgr.initForCapture,
+			})
+		}
+		metrics.QueryTimeSinceConnCreationHistogram.Observe(startTime.Sub(mgr.createTime).Seconds())
 	}()
 	if len(request) < 1 {
 		err = mysql.ErrMalformPacket
@@ -386,6 +411,11 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	backendIO := *mgr.backendIO.Load()
+	if cmd == pnet.ComStmtPrepare {
+		mgr.cmdProcessor.prepareEndHook = func(id uint32) {
+			stmtID = id
+		}
+	}
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect)
 	if !holdRequest {
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
@@ -451,7 +481,7 @@ func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO) {
 			if !mgr.curBackend.Local() {
 				crossAZBytes = int64(outBytes - mgr.outBytes + inBytes - mgr.inBytes)
 			}
-			mgr.meter.IncTraffic(keyspace, int64(inBytes-mgr.inBytes), crossAZBytes)
+			mgr.meter.IncTraffic(keyspace, int64(inBytes-mgr.inBytes), crossAZBytes, mgr.fromPublicEndpoint)
 		}
 	}
 	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = inBytes, inPackets, outBytes, outPackets
@@ -668,6 +698,7 @@ func (mgr *BackendConnManager) Redirect(backendInst router.BackendInst) bool {
 }
 
 func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *redirectResult) {
+	_ = ctx
 	if rs == nil {
 		return
 	}
@@ -682,7 +713,7 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 	} else {
 		err := eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
 		mgr.logger.Debug("redirect connection succeeds", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.NamedError("notify_err", err))
+			zap.String("to", rs.to), zap.Duration("lifetime", time.Since(mgr.createTime)), zap.NamedError("notify_err", err))
 	}
 }
 
@@ -827,9 +858,15 @@ func (mgr *BackendConnManager) Close() error {
 	}
 	// Maybe it's unexpectedly closing without a QUIT command, explicitly add one.
 	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
-		mgr.cpt.Capture([]byte{pnet.ComQuit.Byte()}, time.Now(), mgr.connectionID, nil)
+		mgr.cpt.Capture(capture.StmtInfo{
+			Request:     []byte{pnet.ComQuit.Byte()},
+			StartTime:   time.Now(),
+			ConnID:      mgr.connectionID,
+			InitSession: nil,
+		})
 	}
 	mgr.closeStatus.Store(statusClosed)
+	metrics.ConnLifetimeHistogram.Observe(time.Since(mgr.createTime).Seconds())
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
 
@@ -857,7 +894,7 @@ func (mgr *BackendConnManager) setKeepAlive() {
 	}
 }
 
-func (mgr *BackendConnManager) setQuitSourceByErr(err error) {
+func (mgr *BackendConnManager) SetQuitSourceByErr(err error) {
 	if err == nil {
 		return
 	}

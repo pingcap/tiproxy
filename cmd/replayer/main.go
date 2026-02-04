@@ -12,16 +12,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/cmd"
-	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/memory"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
-	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/server/api"
 	replaycmd "github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
@@ -60,13 +57,18 @@ func main() {
 	replayerCount := rootCmd.PersistentFlags().Uint64("replayer-count", 1, "the total number of replayer instances running concurrently. Used only when dynamic-input is enabled.")
 	replayerIndex := rootCmd.PersistentFlags().Uint64("replayer-index", 0, "the index of this replayer instance. Used only when dynamic-input is enabled.")
 	outputPath := rootCmd.PersistentFlags().String("output-path", "", "the file path to store replayed sql. Empty indicates do not output replayed sql.")
+	serviceMode := rootCmd.PersistentFlags().Bool("service-mode", false, "run replayer in service mode")
+	logLevel := rootCmd.PersistentFlags().String("log-level", "info", "the log level: debug, info, warn, error, dpanic, panic, fatal")
+	startTime := rootCmd.PersistentFlags().Time("start-time", time.Now(), []string{time.RFC3339, time.RFC3339Nano}, "the time to start the replay. Format is RFC3339. Default is the current time.")
+	filterCommandWithRetry := rootCmd.PersistentFlags().Bool("filter-command-with-retry", false, "filter out commands that are retries according to the audit log.")
+	waitOnEOF := rootCmd.PersistentFlags().Bool("wait-on-eof", false, "wait for the next file when all the files are read.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
 		cfg := &config.Config{
 			Log: config.Log{
 				LogOnline: config.LogOnline{
-					Level:   "info",
+					Level:   *logLevel,
 					LogFile: config.LogFile{Filename: *logFile},
 				},
 			},
@@ -84,9 +86,9 @@ func main() {
 		memMgr.Start(context.Background())
 
 		// create replay job manager
-		hsHandler := newStaticHandshakeHandler(*addr)
+		hsHandler := backend.NewStaticHandshakeHandler(*addr)
 		idMgr := id.NewIDManager()
-		r := mgrrp.NewJobManager(lg, cfg, &nopCertManager{}, idMgr, hsHandler)
+		r := mgrrp.NewJobManager(lg, cfg, &nopCertManager{}, idMgr, hsHandler, true)
 
 		// start api server
 		mgrs := api.Managers{
@@ -105,6 +107,7 @@ func main() {
 
 		// set up signal handler
 		ctx, cancel := context.WithCancel(context.Background())
+		closeCh := make(chan struct{})
 		go func() {
 			sc := make(chan os.Signal, 1)
 			signal.Notify(sc,
@@ -118,34 +121,43 @@ func main() {
 				r.Stop(mgrrp.CancelConfig{Type: mgrrp.Replay})
 			case <-ctx.Done():
 			}
+
+			close(closeCh)
 		}()
 
-		// start replay
-		replayCfg := replay.ReplayConfig{
-			Input:              *input,
-			Speed:              *speed,
-			Username:           *username,
-			Password:           *password,
-			Format:             *format,
-			ReadOnly:           *readonly,
-			StartTime:          time.Now(),
-			CommandStartTime:   *cmdStartTime,
-			CommandEndTime:     *cmdEndTime,
-			IgnoreErrs:         *ignoreErrs,
-			BufSize:            *bufSize,
-			PSCloseStrategy:    replaycmd.PSCloseStrategy(*psCloseStrategy),
-			DryRun:             *dryRun,
-			CheckPointFilePath: *checkPointFilePath,
-			DynamicInput:       *dynamicInput,
-			ReplayerCount:      *replayerCount,
-			ReplayerIndex:      *replayerIndex,
-			OutputPath:         *outputPath,
+		if *serviceMode {
+			// In this case, we didn't start any replay job. Just need to wait for the signal to exit.
+			<-closeCh
+		} else {
+			// start replay
+			replayCfg := replay.ReplayConfig{
+				Input:                  *input,
+				Speed:                  *speed,
+				Username:               *username,
+				Password:               *password,
+				Format:                 *format,
+				ReadOnly:               *readonly,
+				StartTime:              *startTime,
+				CommandStartTime:       *cmdStartTime,
+				CommandEndTime:         *cmdEndTime,
+				IgnoreErrs:             *ignoreErrs,
+				BufSize:                *bufSize,
+				PSCloseStrategy:        replaycmd.PSCloseStrategy(*psCloseStrategy),
+				DryRun:                 *dryRun,
+				CheckPointFilePath:     *checkPointFilePath,
+				DynamicInput:           *dynamicInput,
+				ReplayerCount:          *replayerCount,
+				ReplayerIndex:          *replayerIndex,
+				OutputPath:             *outputPath,
+				FilterCommandWithRetry: *filterCommandWithRetry,
+				WaitOnEOF:              *waitOnEOF,
+			}
+			if err := r.StartReplay(replayCfg); err != nil {
+				cancel()
+				return err
+			}
+			r.Wait()
 		}
-		if err := r.StartReplay(replayCfg); err != nil {
-			cancel()
-			return err
-		}
-		r.Wait()
 
 		cancel()
 		r.Close()
@@ -164,46 +176,6 @@ type nopCertManager struct{}
 
 func (c *nopCertManager) SQLTLS() *tls.Config {
 	return nil
-}
-
-type staticHandshakeHandler struct {
-	rt router.Router
-}
-
-func newStaticHandshakeHandler(addr string) *staticHandshakeHandler {
-	return &staticHandshakeHandler{
-		rt: router.NewStaticRouter([]string{addr}),
-	}
-}
-
-func (handler *staticHandshakeHandler) HandleHandshakeResp(backend.ConnContext, *pnet.HandshakeResp) error {
-	return nil
-}
-
-func (handler *staticHandshakeHandler) HandleHandshakeErr(backend.ConnContext, *mysql.MyError) bool {
-	return false
-}
-
-func (handler *staticHandshakeHandler) GetRouter(backend.ConnContext, *pnet.HandshakeResp) (router.Router, error) {
-	return handler.rt, nil
-}
-
-func (handler *staticHandshakeHandler) OnHandshake(backend.ConnContext, string, error, backend.ErrorSource) {
-}
-
-func (handler *staticHandshakeHandler) OnTraffic(backend.ConnContext) {
-}
-
-func (handler *staticHandshakeHandler) OnConnClose(backend.ConnContext, backend.ErrorSource) error {
-	return nil
-}
-
-func (handler *staticHandshakeHandler) GetCapability() pnet.Capability {
-	return backend.SupportedServerCapabilities
-}
-
-func (handler *staticHandshakeHandler) GetServerVersion() string {
-	return pnet.ServerVersion
 }
 
 var _ api.ConfigManager = (*nopConfigManager)(nil)

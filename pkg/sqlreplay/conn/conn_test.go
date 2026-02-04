@@ -19,7 +19,10 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/sessionstates"
+	"github.com/siddontang/go/hack"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestConnectError(t *testing.T) {
@@ -158,6 +161,7 @@ func TestExecuteError(t *testing.T) {
 				request, err := pnet.MakeExecuteStmtRequest(1, []any{uint64(100), "abc", nil}, true)
 				require.NoError(t, err)
 				c.preparedStmts[1] = preparedStmt{text: "select ?", paramNum: 3, paramTypes: nil}
+				c.psIDMapping[1] = 1
 				return request
 			},
 			digest:    "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
@@ -190,6 +194,7 @@ func TestExecuteError(t *testing.T) {
 	for i, test := range tests {
 		request := test.prepare(conn)
 		command := cmd.NewCommand(request, time.Now(), 100)
+		command.CapturedPsID = 1
 		// Set UpstreamConnID to test that exceptions report it correctly
 		command.UpstreamConnID = 999
 		conn.ExecuteCmd(command)
@@ -221,27 +226,31 @@ func TestSkipReadOnly(t *testing.T) {
 			readonly: false,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)},
+			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, CapturedPsID: 1, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("select ?")...)},
 			readonly: true,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte(), 1, 0, 0, 0, 0, 0, 0, 0}},
+			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, CapturedPsID: 1, Payload: []byte{pnet.ComStmtExecute.Byte(), 1, 0, 0, 0, 0, 0, 0, 0}},
 			readonly: true,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtFetch, Payload: []byte{pnet.ComStmtFetch.Byte(), 1, 0, 0, 0}},
+			cmd:      &cmd.Command{Type: pnet.ComStmtFetch, CapturedPsID: 1, Payload: []byte{pnet.ComStmtFetch.Byte(), 1, 0, 0, 0}},
 			readonly: true,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("insert into t value(?)")...)},
-			readonly: true,
-		},
-		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, Payload: []byte{pnet.ComStmtExecute.Byte(), 2, 0, 0, 0}},
+			cmd:      &cmd.Command{Type: pnet.ComStmtPrepare, CapturedPsID: 2, Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte("insert into t value(?)")...)},
 			readonly: false,
 		},
 		{
-			cmd:      &cmd.Command{Type: pnet.ComStmtSendLongData, Payload: []byte{pnet.ComStmtFetch.Byte(), 2, 0, 0, 0, 0, 0, 0, 0}},
+			cmd:      &cmd.Command{Type: pnet.ComStmtExecute, CapturedPsID: 2, Payload: []byte{pnet.ComStmtExecute.Byte(), 2, 0, 0, 0}},
+			readonly: false,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtSendLongData, CapturedPsID: 2, Payload: []byte{pnet.ComStmtFetch.Byte(), 2, 0, 0, 0, 0, 0, 0, 0}},
+			readonly: false,
+		},
+		{
+			cmd:      &cmd.Command{Type: pnet.ComStmtClose, CapturedPsID: 2, Payload: []byte{pnet.ComStmtClose.Byte(), 2, 0, 0, 0}},
 			readonly: false,
 		},
 		{
@@ -313,7 +322,7 @@ func TestReadOnly(t *testing.T) {
 		{
 			cmd:      pnet.ComStmtPrepare,
 			stmt:     "insert into t value(?)",
-			readOnly: true,
+			readOnly: false,
 		},
 		{
 			cmd:      pnet.ComStmtExecute,
@@ -326,9 +335,14 @@ func TestReadOnly(t *testing.T) {
 			readOnly: false,
 		},
 		{
+			cmd:      pnet.ComStmtExecute,
+			stmt:     "",
+			readOnly: false,
+		},
+		{
 			cmd:      pnet.ComStmtClose,
 			stmt:     "insert into t value(?)",
-			readOnly: true,
+			readOnly: false,
 		},
 		{
 			cmd:      pnet.ComQuit,
@@ -344,13 +358,19 @@ func TestReadOnly(t *testing.T) {
 	backendConn := newMockBackendConn()
 	conn.backendConn = backendConn
 	for i, test := range tests {
+		clear(conn.psIDMapping)
 		var payload []byte
 		switch test.cmd {
-		case pnet.ComQuery:
+		case pnet.ComQuery, pnet.ComStmtPrepare:
 			payload = append([]byte{test.cmd.Byte()}, []byte(test.stmt)...)
-		default:
-			conn.preparedStmts[1] = preparedStmt{text: test.stmt}
+		case pnet.ComStmtExecute, pnet.ComStmtClose, pnet.ComStmtFetch, pnet.ComStmtReset, pnet.ComStmtSendLongData:
+			prepare := cmd.NewCommand(append([]byte{pnet.ComStmtPrepare.Byte()}, []byte(test.stmt)...), time.Time{}, 100)
+			if conn.isReadOnly(prepare) {
+				conn.psIDMapping[1] = 1
+			}
 			payload = []byte{test.cmd.Byte(), 1, 0, 0, 0}
+		default:
+			payload = []byte{test.cmd.Byte()}
 		}
 		command := cmd.NewCommand(payload, time.Time{}, 100)
 		require.Equal(t, test.readOnly, conn.isReadOnly(command), "case %d", i)
@@ -358,8 +378,8 @@ func TestReadOnly(t *testing.T) {
 }
 
 func TestPreparedStmt(t *testing.T) {
-	ss := sessionStates{
-		PreparedStmts: map[uint32]*preparedStmtInfo{
+	ss := sessionstates.SessionStates{
+		PreparedStmts: map[uint32]*sessionstates.PreparedStmtInfo{
 			1: {
 				StmtText:   "select ?",
 				ParamTypes: []byte{0x08, 0x00},
@@ -481,35 +501,83 @@ func TestPreparedStmtMapId(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 	require.Equal(t, uint32(1), conn.psIDMapping[100])
 
-	// The stmtID in the EXECUTE command is updated.
-	execReq, err := pnet.MakeExecuteStmtRequest(100, []any{1}, true)
-	require.NoError(t, err)
-	conn.ExecuteCmd(&cmd.Command{
-		CapturedPsID: 100,
-		Type:         pnet.ComStmtExecute,
-		Payload:      execReq,
-	})
-	require.Eventually(t, func() bool {
-		return stats.PendingCmds.Load() == 0
-	}, 3*time.Second, 10*time.Millisecond)
-	stmtID := binary.LittleEndian.Uint32(backendConn.lastReq()[1:5])
-	require.Equal(t, uint32(1), stmtID)
+	// The stmtIDs in the commands are updated.
+	for _, stmtType := range []pnet.Command{
+		pnet.ComStmtReset,
+		pnet.ComStmtSendLongData,
+		pnet.ComStmtExecute,
+		pnet.ComStmtFetch,
+		pnet.ComStmtClose,
+	} {
+		conn.ExecuteCmd(&cmd.Command{
+			CapturedPsID: 100,
+			Type:         stmtType,
+			Payload:      pnet.MakeCloseStmtRequest(100),
+		})
+		require.Eventually(t, func() bool {
+			return stats.PendingCmds.Load() == 0
+		}, 3*time.Second, 10*time.Millisecond)
+		stmtID := binary.LittleEndian.Uint32(backendConn.lastReq()[1:5])
+		require.Equal(t, uint32(1), stmtID)
+	}
 
-	// The stmtID in the CLOSE command is updated and the mapping is empty.
-	conn.ExecuteCmd(&cmd.Command{
-		CapturedPsID: 100,
-		Type:         pnet.ComStmtClose,
-		Payload:      pnet.MakeCloseStmtRequest(100),
-	})
-	require.Eventually(t, func() bool {
-		return stats.PendingCmds.Load() == 0
-	}, 3*time.Second, 10*time.Millisecond)
-	stmtID = binary.LittleEndian.Uint32(backendConn.lastReq()[1:5])
-	require.Equal(t, uint32(1), stmtID)
+	// The mapping is empty after CLOSE.
 	require.Len(t, conn.psIDMapping, 0)
 
 	cancel()
 	wg.Wait()
+}
+
+func TestPrepareOnDemandForExecute(t *testing.T) {
+	execReq, err := pnet.MakeExecuteStmtRequest(100, []any{1}, true)
+	require.NoError(t, err)
+
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 10)
+	stats := &ReplayStats{}
+	conn := NewConn(zap.NewNop(), ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+
+	var wg waitgroup.WaitGroup
+	childCtx, cancel := context.WithCancel(context.Background())
+	wg.RunWithRecover(func() {
+		conn.Run(childCtx)
+	}, nil, zap.NewNop())
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	// Send EXECUTE directly without PREPARE. It should PREPARE on demand using PreparedStmt.
+	conn.ExecuteCmd(&cmd.Command{
+		CapturedPsID:   100,
+		Type:           pnet.ComStmtExecute,
+		Payload:        execReq,
+		PreparedStmt:   "select ?",
+		ConnID:         1,
+		UpstreamConnID: 1,
+	})
+	require.Eventually(t, func() bool {
+		return stats.PendingCmds.Load() == 0
+	}, 3*time.Second, 10*time.Millisecond)
+
+	reqs := backendConn.allRequests()
+	require.GreaterOrEqual(t, len(reqs), 2)
+	require.Equal(t, pnet.ComStmtPrepare.Byte(), reqs[0][0])
+	require.Equal(t, "select ?", hack.String(reqs[0][1:]))
+	require.Equal(t, pnet.ComStmtExecute.Byte(), reqs[1][0])
+	stmtID := binary.LittleEndian.Uint32(reqs[1][1:5])
+	require.Equal(t, uint32(1), stmtID)
 }
 
 func TestReconnect(t *testing.T) {
@@ -726,5 +794,102 @@ func TestExceptionUsesUpstreamConnID(t *testing.T) {
 			cancel()
 			wg.Wait()
 		})
+	}
+}
+
+func TestExecInfo(t *testing.T) {
+	req, err := pnet.MakeExecuteStmtRequest(1, []any{1}, true)
+	require.NoError(t, err)
+	tests := []struct {
+		cmd     *cmd.Command
+		execErr error
+		sqlText string
+	}{
+		{
+			cmd: &cmd.Command{
+				Type:    pnet.ComStmtPrepare,
+				Payload: pnet.MakePrepareStmtRequest("select ?"),
+			},
+		},
+		{
+			cmd: &cmd.Command{
+				Type:    pnet.ComStmtExecute,
+				Payload: req,
+			},
+			sqlText: "select ?",
+		},
+		{
+			cmd: &cmd.Command{
+				Type:    pnet.ComQuery,
+				Payload: pnet.MakeQueryPacket("select 1"),
+			},
+			sqlText: "select 1",
+		},
+		{
+			cmd: &cmd.Command{
+				Type:    pnet.ComQuery,
+				Payload: pnet.MakeQueryPacket("select 2"),
+			},
+			execErr: errors.New("execution failed"),
+			sqlText: "select 2",
+		},
+	}
+
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 1)
+	stats := &ReplayStats{}
+	conn := NewConn(zap.NewNop(), ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 555,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+
+	var wg waitgroup.WaitGroup
+	childCtx, cancel := context.WithCancel(context.Background())
+	wg.RunWithRecover(func() {
+		conn.Run(childCtx)
+	}, nil, zap.NewNop())
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	for i, test := range tests {
+		backendConn.setExecErr(test.execErr)
+		conn.ExecuteCmd(test.cmd)
+		execInfo := <-execInfoCh
+		switch test.cmd.Type {
+		case pnet.ComStmtExecute:
+			require.Equal(t, test.sqlText, execInfo.Command.PreparedStmt, "case %d", i)
+		case pnet.ComQuery:
+			require.Equal(t, test.sqlText, hack.String(test.cmd.Payload[1:]), "case %d", i)
+		}
+	}
+}
+
+func TestNoBlockReplay(t *testing.T) {
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 1)
+	stats := &ReplayStats{}
+	conn := NewConn(zap.NewNop(), ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 555,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	for range 100 {
+		conn.onDisconnected(errors.New("conn err"))
+		conn.onExecuteFailed(&cmd.Command{}, errors.New("exec err"))
 	}
 }

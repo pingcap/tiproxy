@@ -6,6 +6,7 @@ package factor
 import (
 	"testing"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -92,5 +93,42 @@ func TestFactorConnSpeed(t *testing.T) {
 		}
 		require.GreaterOrEqual(t, backend2.connScore, test.targetRange[0], "case id: %d", i)
 		require.LessOrEqual(t, backend2.connScore, test.targetRange[1], "case id: %d", i)
+	}
+}
+
+func TestFactorConnConfig(t *testing.T) {
+	tests := []struct {
+		score1 int
+		score2 int
+		speed  float64
+	}{
+		{
+			score1: 150,
+			score2: 100,
+			speed:  0,
+		},
+		{
+			score1: 300,
+			score2: 100,
+			speed:  10,
+		},
+	}
+
+	factor := NewFactorConnCount()
+	cfg := config.Config{}
+	cfg.Balance.ConnCount.MigrationsPerSecond = 10
+	cfg.Balance.ConnCount.CountRatioThreshold = 2
+	factor.SetConfig(&cfg)
+	require.EqualValues(t, 10, factor.migrationsPerSecond)
+	require.EqualValues(t, 2, factor.countRatioThreshold)
+	backend1 := newMockBackend(true, 0)
+	backend2 := newMockBackend(true, 0)
+	scoredBackend1 := newScoredBackend(backend1, zap.NewNop())
+	scoredBackend2 := newScoredBackend(backend2, zap.NewNop())
+	for i, test := range tests {
+		backend1.connScore = test.score1
+		backend2.connScore = test.score2
+		_, balanceCount, _ := factor.BalanceCount(scoredBackend1, scoredBackend2)
+		require.EqualValues(t, test.speed, balanceCount, "case id: %d", i)
 	}
 }

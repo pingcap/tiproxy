@@ -396,7 +396,11 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 				return p.wrapErr(errors.Wrap(err, ErrReadConn))
 			}
 			if err := destIO.WritePacket(data, false); err != nil {
-				return p.wrapErr(errors.Wrap(err, ErrWriteConn))
+				err = errors.Wrap(err, ErrWriteConn)
+				if dest != nil {
+					err = dest.wrapErr(err)
+				}
+				return err
 			}
 		} else {
 			for {
@@ -409,7 +413,10 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 				dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
 				p.limitReader.N = int64(length + 4)
 				if _, err := dest.readWriter.ReadFrom(&p.limitReader); err != nil {
-					return p.wrapErr(errors.Wrap(err, ErrRelayConn))
+					if errors.Is(err, bufio.ErrWriteFail) {
+						return dest.wrapErr(errors.Wrap(err, ErrWriteConn))
+					}
+					return p.wrapErr(errors.Wrap(err, ErrReadConn))
 				}
 				p.inPackets++
 				dest.outPackets++

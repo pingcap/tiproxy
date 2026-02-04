@@ -16,6 +16,8 @@ func TestEncode(t *testing.T) {
 	tests := []struct {
 		payload []byte
 		cmd     pnet.Command
+		psID    uint32
+		psText  string
 	}{
 		{
 			cmd:     pnet.ComQuery,
@@ -32,6 +34,8 @@ func TestEncode(t *testing.T) {
 		{
 			cmd:     pnet.ComStmtExecute,
 			payload: []byte("1\n2\n"),
+			psID:    123,
+			psText:  "select \n\"\"",
 		},
 		{
 			cmd: pnet.ComQuit,
@@ -45,17 +49,21 @@ func TestEncode(t *testing.T) {
 		packet := append([]byte{byte(test.cmd)}, test.payload...)
 		now := time.Now()
 		cmd := NewCommand(packet, now, 100)
+		cmd.CapturedPsID = test.psID
+		cmd.PreparedStmt = test.psText
 		require.NoError(t, encoder.Encode(cmd, &buf), "case %d", i)
 		cmds = append(cmds, cmd)
 	}
 
 	mr := mockReader{data: buf.Bytes()}
-	decoder := NewCmdDecoder(FormatNative)
+	decoder := NewNativeDecoder()
 	for i := range tests {
 		cmd := cmds[i]
 		newCmd, err := decoder.Decode(&mr)
 		require.NoError(t, err, "case %d, buf: %s", i, buf.String())
 		require.True(t, cmd.Equal(newCmd), "case %d, buf: %s", i, buf.String())
+		require.Equal(t, cmd.CapturedPsID, newCmd.CapturedPsID, "case %d, buf: %s", i, buf.String())
+		require.Equal(t, cmd.PreparedStmt, newCmd.PreparedStmt, "case %d, buf: %s", i, buf.String())
 	}
 }
 
@@ -121,7 +129,7 @@ select 1
 
 	for _, test := range tests {
 		mr := mockReader{data: []byte(test)}
-		decoder := NewCmdDecoder(FormatNative)
+		decoder := NewNativeDecoder()
 		_, err := decoder.Decode(&mr)
 		require.Error(t, err, test)
 	}
@@ -157,7 +165,7 @@ select 2
 
 	commandStartTime := time.Date(2024, 8, 28, 18, 51, 21, 0, time.FixedZone("", 8*3600+600))
 	for i, test := range tests {
-		decoder := NewCmdDecoder(FormatNative)
+		decoder := NewNativeDecoder()
 		decoder.SetCommandStartTime(commandStartTime)
 		mr := mockReader{data: []byte(test.lines), filename: "my/file"}
 		for j, cmd := range test.cmds {

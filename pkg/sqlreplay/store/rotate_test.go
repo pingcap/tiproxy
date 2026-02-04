@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/tidb/br/pkg/mock"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -42,9 +43,10 @@ func TestFileRotation(t *testing.T) {
 		n, err := writer.Write(data)
 		require.NoError(t, err)
 		require.Equal(t, len(data), n)
+		time.Sleep(time.Millisecond)
 	}
-	require.Equal(t, 3, countTrafficFiles(t, tmpDir))
 	require.NoError(t, writer.Close())
+	require.Equal(t, 3, countTrafficFiles(t, tmpDir))
 }
 
 func listFiles(t *testing.T, dir string) []string {
@@ -97,63 +99,48 @@ func TestCompress(t *testing.T) {
 		n, err := writer.Write([]byte("test"))
 		require.NoError(t, err, "case %d", i)
 		require.Equal(t, 4, n, "case %d", i)
+		require.NoError(t, writer.Close(), "case %d", i)
 		files := listFiles(t, tmpDir)
 		require.Len(t, files, 1, "case %d", i)
 		require.True(t, strings.HasSuffix(files[0], test.ext), "case %d", i)
 		require.NoError(t, os.Remove(filepath.Join(tmpDir, files[0])), "case %d", i)
-		require.NoError(t, writer.Close(), "case %d", i)
-	}
-}
-
-func TestParseFileIdx(t *testing.T) {
-	tests := []struct {
-		fileName string
-		fileIdx  int64
-	}{
-		{"traffic-1.log", 1},
-		{"traffic-2.log.gz", 2},
-		{"traffic-100.log.gz", 100},
-		{"traffic-2024-08-29T17-37-12.log", 0},
-		{"traffic-2024-08-29T17-37-12.log.gz", 0},
-		{"traffic-.log", 0},
-		{"traffic-.log.gz", 0},
-		{"traffic.log", 0},
-		{"traffic-100.gz", 0},
-		{"test", 0},
-		{"traffic.log.gz", 0},
-	}
-
-	for i, test := range tests {
-		idx := parseFileIdx(test.fileName, fileNamePrefix)
-		require.Equal(t, test.fileIdx, idx, "case %d", i)
 	}
 }
 
 func TestParseFileTime(t *testing.T) {
-	// Calculate the current timezone shift
-	_, offset := time.Now().Zone()
-
 	tests := []struct {
 		fileName string
-		fileIdx  int64
+		fileTime time.Time
 	}{
-		{"tidb-audit-2025-09-10T17-01-56.073.log", 1757523716073 - int64(offset*1000)},
-		{"tidb-audit-2025-09-10T17-01-56.172.log.gz", 1757523716172 - int64(offset*1000)},
-		{"tidb-audit-2025-09-10T17-01-56.log.gz", 1757523716000 - int64(offset*1000)},
-		{"traffic-2025-09-10T17-01-56.172.log", 0},
-		{"traffic-2025-09-10T17-01-56.172.log.gz", 0},
-		{"tidb-audit-.log", 0},
-		{"tidb-audit-.log.gz", 0},
-		{"tidb-audit.log", 0},
-		{"tidb-audit-100.gz", 0},
-		{"test", 0},
-		{"tidb-audit.log.gz", 0},
+		{"tidb-audit-2025-09-10T17-01-56.073.log", mustParseTime("2025-09-10T17-01-56.073")},
+		{"tidb-audit-2025-09-10T17-01-56.172.log.gz", mustParseTime("2025-09-10T17-01-56.172")},
+		{"tidb-audit-2025-09-10T17-01-56.log.gz", mustParseTime("2025-09-10T17-01-56.000")},
+		{"traffic-2025-09-10T17-01-56.172.log", time.Time{}},
+		{"traffic-2025-09-10T17-01-56.172.log.gz", time.Time{}},
+		{"tidb-audit-.log", time.Time{}},
+		{"tidb-audit-.log.gz", time.Time{}},
+		{"tidb-audit.log", time.Time{}},
+		{"tidb-audit-100.gz", time.Time{}},
+		{"test", time.Time{}},
+		{"tidb-audit.log.gz", time.Time{}},
 	}
 
 	for i, test := range tests {
-		idx := parseFileTimeToIdx(test.fileName, auditFileNamePrefix)
-		require.Equal(t, test.fileIdx, idx, "case %d", i)
+		ts := parseFileTime(test.fileName, auditFileNamePrefix)
+		if test.fileTime.IsZero() {
+			require.True(t, ts.IsZero(), "case %d", i)
+		} else {
+			require.True(t, ts.Equal(test.fileTime), "case %d: expected %v, got %v", i, test.fileTime, ts)
+		}
 	}
+}
+
+func mustParseTime(s string) time.Time {
+	t, err := time.ParseInLocation(logTimeLayout, s, time.Local)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 func TestIterateFiles(t *testing.T) {
@@ -168,43 +155,43 @@ func TestIterateFiles(t *testing.T) {
 		},
 		{
 			fileNames: []string{
-				"traffic-1.log.gz",
+				"traffic-2025-09-10T17-01-56.073.log.gz",
 			},
 			order: []string{
-				"traffic-1.log.gz",
+				"traffic-2025-09-10T17-01-56.073.log.gz",
 			},
 		},
 		{
 			fileNames: []string{
-				"traffic-2.log.gz",
-				"traffic-1.log.gz",
+				"traffic-2025-09-10T17-01-56.172.log.gz",
+				"traffic-2025-09-10T17-01-56.073.log.gz",
 			},
 			order: []string{
-				"traffic-1.log.gz",
-				"traffic-2.log.gz",
+				"traffic-2025-09-10T17-01-56.073.log.gz",
+				"traffic-2025-09-10T17-01-56.172.log.gz",
 			},
 		},
 		{
 			fileNames: []string{
-				"traffic-1.log",
-				"traffic-2.log",
+				"traffic-2025-09-10T17-01-56.073.log",
+				"traffic-2025-09-10T17-01-56.172.log",
 			},
 			order: []string{
-				"traffic-1.log",
-				"traffic-2.log",
+				"traffic-2025-09-10T17-01-56.073.log",
+				"traffic-2025-09-10T17-01-56.172.log",
 			},
 		},
 		{
 			fileNames: []string{
-				"traffic-1.log.gz",
-				"traffic-2.log.gz",
+				"traffic-2025-09-10T17-01-56.073.log.gz",
+				"traffic-2025-09-10T17-01-56.172.log.gz",
 				"traffic.log",
 				"meta",
 				"dir",
 			},
 			order: []string{
-				"traffic-1.log.gz",
-				"traffic-2.log.gz",
+				"traffic-2025-09-10T17-01-56.073.log.gz",
+				"traffic-2025-09-10T17-01-56.172.log.gz",
 			},
 		},
 		{
@@ -278,6 +265,34 @@ func TestIterateFiles(t *testing.T) {
 	}
 }
 
+func TestWaitOnEOF(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	l, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, WaitOnEOF: true})
+	require.NoError(t, err)
+
+	// Read next file when no available files.
+	fileName := "tidb-audit-2025-09-10T17-01-56.073.log"
+	fileCh := make(chan string)
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		if err := l.nextReader(); err != nil {
+			require.True(t, errors.Is(err, io.EOF))
+		} else {
+			fileCh <- l.externalFile.fileName
+		}
+	}, nil)
+
+	// Wait for a while and then create the file.
+	time.Sleep(200 * time.Millisecond)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, fileName), []byte{}, 0666))
+	require.Equal(t, fileName, <-fileCh)
+	require.NoError(t, l.Close())
+	wg.Wait()
+}
+
 func TestReadGZip(t *testing.T) {
 	tmpDir := t.TempDir()
 	storage, err := NewStorage(tmpDir)
@@ -299,6 +314,7 @@ func TestReadGZip(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, len(data), n)
 		}
+		require.NoError(t, writer.Close())
 		files := listFiles(t, tmpDir)
 		for _, f := range files {
 			require.True(t, strings.HasPrefix(f, fileNamePrefix))
@@ -308,7 +324,6 @@ func TestReadGZip(t *testing.T) {
 				require.True(t, strings.HasSuffix(f, fileNameSuffix))
 			}
 		}
-		require.NoError(t, writer.Close())
 
 		lg, _ := logger.CreateLoggerForTest(t)
 		l, err := newRotateReader(lg, storage, ReaderCfg{Dir: tmpDir})
@@ -352,8 +367,12 @@ func TestCompressAndEncrypt(t *testing.T) {
 	require.NoError(t, writer.Close())
 
 	// make sure data is compressed after encryption
-	for i := range 2 {
-		file, err := os.Open(filepath.Join(tmpDir, fmt.Sprintf("traffic-%d.log.gz", i+1)))
+	files := listFiles(t, tmpDir)
+	require.Len(t, files, 2)
+	for _, name := range files {
+		require.True(t, strings.HasPrefix(name, fileNamePrefix))
+		require.True(t, strings.HasSuffix(name, fileCompressFormat))
+		file, err := os.Open(filepath.Join(tmpDir, name))
 		require.NoError(t, err)
 		greader, err := gzip.NewReader(file)
 		require.NoError(t, err)
@@ -454,7 +473,11 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 	require.NoError(t, err)
 	defer storage.Close()
 	lg, _ := logger.CreateLoggerForTest(t)
-	l, err := newRotateReader(lg, storage, ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin, FileNameFilterTime: commandStartTime})
+	l, err := newRotateReader(lg, storage, ReaderCfg{
+		Dir:                dir,
+		Format:             cmd.FormatAuditLogPlugin,
+		FileNameFilterTime: commandStartTime,
+	})
 	require.NoError(t, err)
 	var fileOrder []string
 	for {
@@ -467,7 +490,7 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 	require.Equal(t, expectedFileOrder, fileOrder)
 }
 
-func TestWalkS3ForAuditLogFile(t *testing.T) {
+func TestWalkS3(t *testing.T) {
 	controller := gomock.NewController(t)
 	s3api := mock.NewMockS3API(controller)
 
@@ -522,7 +545,7 @@ func TestWalkS3ForAuditLogFile(t *testing.T) {
 	for {
 		selected := false
 		cFileName := curFilename
-		err := r.walkS3ForAuditLogFile(context.Background(), cFileName, s3api, &backuppb.S3{
+		err := r.walkS3(context.Background(), cFileName, s3api, &backuppb.S3{
 			Bucket: "bucket",
 			Prefix: "prefix/",
 		}, func(fileName string, size int64) (bool, error) {

@@ -17,6 +17,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/util/netutil"
 	"go.uber.org/zap"
 )
 
@@ -29,13 +30,6 @@ const (
 	MatchClientCIDR
 	// Match connections based on proxy CIDR. If proxy-protocol is disabled, route by the client CIDR.
 	MatchProxyCIDR
-)
-
-const (
-	// MatchClientCIDRStr is used for MatchClientCIDR.
-	MatchClientCIDRStr = "client_cidr"
-	// MatchProxyCIDRStr is used for MatchProxyCIDR.
-	MatchProxyCIDRStr = "proxy_cidr"
 )
 
 var _ ConnEventReceiver = (*Group)(nil)
@@ -76,21 +70,15 @@ func NewGroup(values []string, bpCreator func(lg *zap.Logger) policy.BalancePoli
 }
 
 func (g *Group) parseValues() error {
-	var parseErr error
 	switch g.matchType {
 	case MatchClientCIDR, MatchProxyCIDR:
-		cidrList := make([]*net.IPNet, 0, len(g.values))
-		for _, v := range g.values {
-			_, cidr, err := net.ParseCIDR(v)
-			if err == nil {
-				cidrList = append(cidrList, cidr)
-			} else {
-				parseErr = err
-			}
+		cidrList, parseErr := netutil.ParseCIDRList(g.values)
+		if parseErr != nil {
+			return parseErr
 		}
 		g.cidrList = cidrList
 	}
-	return parseErr
+	return nil
 }
 
 func (g *Group) Match(clientInfo ClientInfo) bool {
@@ -100,26 +88,16 @@ func (g *Group) Match(clientInfo ClientInfo) bool {
 		if g.matchType == MatchClientCIDR {
 			addr = clientInfo.ClientAddr
 		}
-		if addr == nil || reflect.ValueOf(addr).IsNil() {
-			return false
-		}
-		value := addr.String()
-		ipStr, _, err := net.SplitHostPort(value)
+		ip, err := netutil.NetAddr2IP(addr)
 		if err != nil {
-			g.lg.Error("parsing address failed", zap.String("addr", value), zap.Error(err))
+			g.lg.Error("checking CIDR failed", zap.Stringer("addr", addr), zap.Error(err))
 			return false
 		}
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			g.lg.Error("parsing IP failed", zap.String("ip", value))
-			return false
+		contains, err := netutil.CIDRContainsIP(g.cidrList, ip)
+		if err != nil {
+			g.lg.Error("checking CIDR failed", zap.Stringer("addr", addr), zap.Error(err))
 		}
-		for _, cidr := range g.cidrList {
-			if cidr.Contains(ip) {
-				return true
-			}
-		}
-		return false
+		return contains
 	}
 	return true
 }
@@ -299,6 +277,7 @@ func (g *Group) onCreateConn(backendInst BackendInst, conn RedirectableConn, suc
 	if succeed {
 		connWrapper := &connWrapper{
 			RedirectableConn: conn,
+			createTime:       time.Now(),
 			phase:            phaseNotRedirected,
 		}
 		g.addConn(backend, connWrapper)
@@ -421,6 +400,9 @@ func (g *Group) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toB
 		zap.Uint64("connID", conn.ConnectionID()),
 		zap.String("from", fromBackend.addr),
 		zap.String("to", toBackend.addr),
+	}
+	if !conn.lastRedirect.IsZero() {
+		fields = append(fields, zap.Duration("since_last_redirect", curTime.Sub(conn.lastRedirect)))
 	}
 	fields = append(fields, logFields...)
 	succeed := conn.Redirect(toBackend)

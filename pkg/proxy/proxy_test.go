@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestCreateConn(t *testing.T) {
@@ -283,6 +284,44 @@ func TestRecoverPanic(t *testing.T) {
 	server.PreClose()
 	require.NoError(t, server.Close())
 	certManager.Close()
+}
+
+func TestPublicEndpoint(t *testing.T) {
+	tests := []struct {
+		publicEndpoints []string
+		publicIps       []string
+		privateIps      []string
+	}{
+		{
+			publicIps:  []string{"137.84.2.178"},
+			privateIps: []string{"10.10.10.10"},
+		},
+		{
+			publicEndpoints: []string{"10.10.10.0/24"},
+			publicIps:       []string{"137.84.2.178", "10.10.10.10"},
+			privateIps:      []string{"10.10.20.10"},
+		},
+		{
+			publicEndpoints: []string{"10.10.10.0/24", "10.10.20.10"},
+			publicIps:       []string{"137.84.2.178", "10.10.10.10", "10.10.20.10"},
+			privateIps:      []string{"10.10.20.11"},
+		},
+	}
+
+	server, err := NewSQLServer(zap.NewNop(), &config.Config{}, nil, id.NewIDManager(), nil, nil, backend.NewDefaultHandshakeHandler(nil))
+	require.NoError(t, err)
+	for i, test := range tests {
+		cfg := &config.Config{}
+		cfg.Proxy.PublicEndpoints = test.publicEndpoints
+		server.reset(cfg)
+		for j, ip := range test.publicIps {
+			require.True(t, server.fromPublicEndpoint(&net.TCPAddr{IP: net.ParseIP(ip), Port: 1000}), "test %d %d", i, j)
+		}
+		for j, ip := range test.privateIps {
+			require.False(t, server.fromPublicEndpoint(&net.TCPAddr{IP: net.ParseIP(ip), Port: 1000}), "test %d %d", i, j)
+		}
+		require.False(t, server.fromPublicEndpoint(nil))
+	}
 }
 
 type mockHsHandler struct {

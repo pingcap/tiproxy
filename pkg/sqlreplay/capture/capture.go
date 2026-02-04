@@ -6,6 +6,7 @@ package capture
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"io"
 	"reflect"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/sessionstates"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"github.com/pingcap/tiproxy/pkg/util/lex"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -36,6 +38,14 @@ const (
 	statusStopping
 )
 
+type StmtInfo struct {
+	Request     []byte
+	StmtID      uint32
+	StartTime   time.Time
+	ConnID      uint64
+	InitSession func() (string, error)
+}
+
 type Capture interface {
 	// Start starts the capture
 	Start(cfg CaptureConfig) error
@@ -47,7 +57,7 @@ type Capture interface {
 	// InitConn is called when a new connection is created.
 	InitConn(startTime time.Time, connID uint64, db string)
 	// Capture captures traffic
-	Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error))
+	Capture(stmtInfo StmtInfo)
 	// Progress returns the progress of the capture job
 	Progress() (float64, time.Time, bool, error)
 	// Close closes the capture
@@ -119,7 +129,7 @@ var _ Capture = (*capture)(nil)
 type capture struct {
 	sync.Mutex
 	cfg          CaptureConfig
-	conns        map[uint64]struct{}
+	conns        map[uint64]*connState
 	wg           waitgroup.WaitGroup
 	cancel       context.CancelFunc
 	storage      storage.ExternalStorage
@@ -132,6 +142,10 @@ type capture struct {
 	filteredCmds uint64
 	status       int
 	lg           *zap.Logger
+}
+
+type connState struct {
+	preparedStmtTexts map[uint32]string
 }
 
 func NewCapture(lg *zap.Logger) *capture {
@@ -161,7 +175,7 @@ func (c *capture) Start(cfg CaptureConfig) error {
 	c.filteredCmds = 0
 	c.status = statusRunning
 	c.err = nil
-	c.conns = make(map[uint64]struct{})
+	c.conns = make(map[uint64]*connState)
 	childCtx, cancel := context.WithTimeout(context.Background(), c.cfg.Duration)
 	c.cancel = cancel
 	bufCh := make(chan *bytes.Buffer, cfg.maxBuffers)
@@ -300,48 +314,96 @@ func (c *capture) InitConn(startTime time.Time, connID uint64, db string) {
 		}
 		c.putCommand(command)
 	}
-	c.conns[connID] = struct{}{}
+	if _, ok := c.conns[connID]; !ok {
+		c.conns[connID] = &connState{}
+	}
 }
 
-func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, initSession func() (string, error)) {
+func (c *capture) Capture(stmtInfo StmtInfo) {
+	if len(stmtInfo.Request) == 0 {
+		return
+	}
+	if stmtInfo.Request[0] == pnet.ComStmtPrepare.Byte() && stmtInfo.StmtID == 0 {
+		return
+	}
 	c.Lock()
 	if c.status != statusRunning {
 		c.Unlock()
 		return
 	}
-	_, inited := c.conns[connID]
+	st, inited := c.conns[stmtInfo.ConnID]
 	c.Unlock()
 
 	// If this is the first command for this connection, record a `set session_states` statement.
 	if !inited {
 		// Maybe it's quitting, no need to init session.
-		if initSession == nil || len(packet) == 0 || packet[0] == pnet.ComQuit.Byte() {
+		if stmtInfo.InitSession == nil || len(stmtInfo.Request) == 0 || stmtInfo.Request[0] == pnet.ComQuit.Byte() {
 			return
 		}
 		// initSession is slow, do not call it in the lock.
-		sql, err := initSession()
+		sql, err := stmtInfo.InitSession()
 		if err != nil {
 			// Maybe the connection is in transaction or closing.
-			c.lg.Debug("failed to init session", zap.Uint64("connID", connID), zap.Error(err))
+			c.lg.Debug("failed to init session", zap.Uint64("connID", stmtInfo.ConnID), zap.Error(err))
 			return
 		}
-		initPacket := make([]byte, 0, len(sql)+1)
-		initPacket = append(initPacket, pnet.ComQuery.Byte())
-		initPacket = append(initPacket, hack.Slice(sql)...)
-		command := cmd.NewCommand(initPacket, startTime, connID)
+		// Extract prepared statements from session states. Best-effort only.
+		prepared := sessionstates.ExtractPreparedStmtTextsFromSetSessionStatesSQL(sql)
+		initPacket := pnet.MakeQueryPacket(sql)
+		command := cmd.NewCommand(initPacket, stmtInfo.StartTime, stmtInfo.ConnID)
 		c.Lock()
 		if c.putCommand(command) {
-			c.conns[connID] = struct{}{}
+			st = &connState{}
+			if len(prepared) > 0 {
+				st.preparedStmtTexts = prepared
+			}
+			c.conns[stmtInfo.ConnID] = st
 		}
 		c.Unlock()
 	}
 
-	command := cmd.NewCommand(packet, startTime, connID)
+	command := cmd.NewCommand(stmtInfo.Request, stmtInfo.StartTime, stmtInfo.ConnID)
 	if command == nil {
 		return
 	}
 	c.Lock()
 	defer c.Unlock()
+	// Maintain prepared statement lifecycle.
+	switch command.Type {
+	case pnet.ComStmtPrepare:
+		if stmtInfo.StmtID > 0 {
+			if st.preparedStmtTexts == nil {
+				st.preparedStmtTexts = make(map[uint32]string)
+			}
+			st.preparedStmtTexts[stmtInfo.StmtID] = hack.String(command.Payload[1:])
+			command.CapturedPsID = stmtInfo.StmtID
+		}
+	case pnet.ComStmtExecute:
+		if len(command.Payload) >= 5 {
+			stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
+			command.CapturedPsID = stmtID
+			if command.PreparedStmt == "" {
+				if stmt, ok := st.preparedStmtTexts[stmtID]; ok && stmt != "" {
+					command.PreparedStmt = stmt
+				}
+			}
+		}
+	case pnet.ComStmtClose:
+		if len(command.Payload) >= 5 {
+			stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
+			command.CapturedPsID = stmtID
+			if st.preparedStmtTexts != nil {
+				delete(st.preparedStmtTexts, stmtID)
+			}
+		}
+	case pnet.ComStmtSendLongData, pnet.ComStmtFetch, pnet.ComStmtReset:
+		if len(command.Payload) >= 5 {
+			stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
+			command.CapturedPsID = stmtID
+		}
+	case pnet.ComResetConnection, pnet.ComChangeUser:
+		clear(st.preparedStmtTexts)
+	}
 	c.putCommand(command)
 }
 
@@ -412,7 +474,7 @@ func (c *capture) stopNoLock(err error) {
 	if c.err == nil {
 		c.err = err
 	}
-	c.conns = map[uint64]struct{}{}
+	c.conns = map[uint64]*connState{}
 }
 
 func (c *capture) stop(err error) {

@@ -431,43 +431,74 @@ func TestGracefulStop(t *testing.T) {
 	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
 
-	i := 0
-	loader := &customizedReader{
-		getCmd: func() *cmd.Command {
-			j := rand.Uint64N(100) + 1
-			command := newMockCommand(j)
-			i++
-			command.StartTs = time.Unix(0, int64(i)*int64(time.Microsecond))
-			return command
-		},
+	// Test 2 rounds to test that the graceful flag will be reset before each round.
+	for n := 0; n < 2; n++ {
+		i := 0
+		loader := &customizedReader{
+			getCmd: func() *cmd.Command {
+				j := rand.Uint64N(100) + 1
+				command := newMockCommand(j)
+				i++
+				command.StartTs = time.Unix(0, int64(i)*int64(time.Microsecond))
+				return command
+			},
+		}
+
+		cfg := ReplayConfig{
+			Input:     t.TempDir(),
+			Username:  "u1",
+			StartTime: time.Now(),
+			readers:   []cmd.LineReader{loader},
+			connCreator: func(connID uint64, _ uint64) conn.Conn {
+				return &mockDelayConn{
+					stats:   &replay.replayStats,
+					closeCh: replay.closeConnCh,
+					connID:  connID,
+				}
+			},
+			report:          newMockReport(replay.exceptionCh),
+			PSCloseStrategy: cmd.PSCloseStrategyDirected,
+		}
+		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+
+		time.Sleep(2 * time.Second)
+		replay.Stop(errors.New("graceful stop"), true)
+		// check that all the pending commands are replayed
+		curCmdTs := replay.replayStats.CurCmdTs.Load()
+		require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
+		require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Microsecond))
+		_, _, lastTs, _, _, err := replay.Progress()
+		require.ErrorContains(t, err, "graceful stop")
+		require.Equal(t, curCmdTs, lastTs.UnixNano())
 	}
+}
+
+func TestGracefulStopWaitOnEOF(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
 
 	cfg := ReplayConfig{
-		Input:     t.TempDir(),
-		Username:  "u1",
-		StartTime: time.Now(),
-		readers:   []cmd.LineReader{loader},
-		connCreator: func(connID uint64, _ uint64) conn.Conn {
-			return &mockDelayConn{
-				stats:   &replay.replayStats,
-				closeCh: replay.closeConnCh,
-				connID:  connID,
-			}
-		},
-		report:          newMockReport(replay.exceptionCh),
+		Input:           t.TempDir(),
+		Format:          cmd.FormatAuditLogPlugin,
+		StartTime:       time.Now().Add(-time.Second),
+		DryRun:          true,
+		WaitOnEOF:       true,
 		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
 	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
 
-	time.Sleep(2 * time.Second)
-	replay.Stop(errors.New("graceful stop"), true)
-	// check that all the pending commands are replayed
-	curCmdTs := replay.replayStats.CurCmdTs.Load()
-	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
-	require.EqualValues(t, curCmdTs, int64(replay.replayStats.ReplayedCmds.Load())*int64(time.Microsecond))
-	_, _, lastTs, _, _, err := replay.Progress()
-	require.ErrorContains(t, err, "graceful stop")
-	require.Equal(t, curCmdTs, lastTs.UnixNano())
+	time.Sleep(50 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		replay.Stop(errors.New("graceful stop"), true)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for graceful stop to cancel wait-on-eof reader")
+	}
 }
 
 func BenchmarkMultiBufferedDecoder(b *testing.B) {
@@ -570,7 +601,7 @@ func TestLoadFromCheckpoint(t *testing.T) {
 		{
 			checkpointData: "",
 			setupFile:      true,
-			expectedError:  true,
+			expectedError:  false,
 		},
 	}
 
@@ -741,7 +772,7 @@ func TestDynamicInput(t *testing.T) {
 		}
 	}()
 
-	dirWatcherInterval := 10 * time.Millisecond
+	dirWatcherInterval := 100 * time.Millisecond
 	store.SetDirWatcherPollIntervalForTest(dirWatcherInterval)
 
 	auditLog := `[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]
@@ -1098,4 +1129,85 @@ func TestDynamicInputCoverAllDirectories(t *testing.T) {
 		dynamicReplayer.Close()
 	}
 	require.Equal(t, expectCommandCount, actualCommandCount)
+}
+
+func TestWaitUntil(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+	loader := newMockNormalLoader()
+	startReplayTime := time.Now()
+	waitUntil := startReplayTime.Add(500 * time.Millisecond)
+	cfg := ReplayConfig{
+		DryRun:          true,
+		Input:           t.TempDir(),
+		StartTime:       waitUntil,
+		readers:         []cmd.LineReader{loader},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+
+	now := time.Now()
+	command := newMockCommand(1)
+	command.StartTs = now
+	loader.writeCommand(command, cmd.FormatAuditLogPlugin)
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	loader.Close()
+
+	require.Eventually(t, func() bool {
+		return replay.replayStats.CurCmdTs.Load() != 0
+	}, time.Second*5, time.Millisecond)
+	actualStartTime := time.Now()
+	require.GreaterOrEqual(t, actualStartTime.Sub(startReplayTime), 500*time.Millisecond)
+}
+
+func TestResetStatsForEachReplay(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+
+	const auditlogFileName = "tidb-audit-2025-09-04T13-42-55.511.log"
+	tempDir := t.TempDir()
+	dir := tempDir + "/tidb-0"
+	require.NoError(t, os.MkdirAll(dir, 0755))
+	logFilePath := filepath.Join(dir, auditlogFileName)
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+
+	// Write 2 commands to the log file
+	for range 2 {
+		_, err := logFile.WriteString(`[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`)
+		require.NoError(t, err)
+		_, err = logFile.WriteString("\n")
+		require.NoError(t, err)
+	}
+
+	cfg := ReplayConfig{
+		Input:           tempDir + "/tidb-",
+		Username:        "u1",
+		StartTime:       time.Now(),
+		DryRun:          true,
+		report:          newMockReport(replay.exceptionCh),
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+		DynamicInput:    true,
+		ReplayerCount:   1,
+		ReplayerIndex:   0,
+		Format:          cmd.FormatAuditLogPlugin,
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	replay.Wait()
+
+	// After the first execute, the stats should be updated
+	require.EqualValues(t, 2, replay.replayStats.ReplayedCmds.Load())
+	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
+
+	// For the next replay, write a new command to the log file
+	_, err = logFile.WriteString(`[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 10:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select 1"] [ROWS=0] [CONNECTION_ID=3695181836] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`)
+	require.NoError(t, err)
+	_, err = logFile.WriteString("\n")
+	require.NoError(t, err)
+
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+	replay.Wait()
+
+	// It should replay 3 commands
+	require.EqualValues(t, 3, replay.replayStats.ReplayedCmds.Load())
+	require.EqualValues(t, 0, replay.replayStats.PendingCmds.Load())
 }

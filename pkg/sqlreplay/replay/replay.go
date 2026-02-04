@@ -86,7 +86,7 @@ type ReplayConfig struct {
 	Format   string
 	Input    string
 	Username string
-	Password string
+	Password string `json:"-"`
 	KeyFile  string
 	// It's specified when executing with the statement `TRAFFIC REPLAY` so that all TiProxy instances
 	// use the same start time and the time acts as the job ID.
@@ -120,6 +120,12 @@ type ReplayConfig struct {
 	ReplayerIndex uint64
 	// OutputPath is the path to output replayed sql.
 	OutputPath string
+	// Addr is the downstream address to connect to
+	Addr string
+	// FilterCommandWithRetry indicates whether to filter out commands that are retries according to the audit log.
+	FilterCommandWithRetry bool
+	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
+	WaitOnEOF bool
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -174,8 +180,6 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	now := time.Now()
 	if cfg.StartTime.IsZero() {
 		return storages, errors.New("start time is not specified")
-	} else if now.Add(time.Minute).Before(cfg.StartTime) {
-		return storages, errors.New("start time should not be in the future")
 	} else if cfg.StartTime.Add(time.Minute).Before(now) {
 		return storages, errors.New("start time should not be in the past")
 	}
@@ -236,7 +240,14 @@ func (cfg *ReplayConfig) LoadFromCheckpoint() error {
 	decoder := json.NewDecoder(file)
 	var state replayCheckpoint
 	if err := decoder.Decode(&state); err != nil {
-		return errors.Wrapf(err, "failed to decode checkpoint file %s", cfg.CheckPointFilePath)
+		// Allow empty file.
+		stat, err2 := file.Stat()
+		if err2 != nil {
+			return errors.Wrapf(err, "failed to stat checkpoint file %s", cfg.CheckPointFilePath)
+		}
+		if stat.Size() != 0 {
+			return errors.Wrapf(err, "failed to decode checkpoint file %s", cfg.CheckPointFilePath)
+		}
 	}
 
 	if state.CurCmdTs > 0 {
@@ -255,11 +266,13 @@ type replay struct {
 	meta             store.Meta
 	storages         []storage.ExternalStorage
 	replayStats      conn.ReplayStats
+	dedup            *cmd.DeDup
 	idMgr            *id.IDManager
 	exceptionCh      chan conn.Exception
 	closeConnCh      chan uint64
 	execInfoCh       chan conn.ExecInfo
-	gracefulStop     atomic.Bool
+	decodeCtx        context.Context
+	decodeCancel     context.CancelFunc
 	wg               waitgroup.WaitGroup
 	cancel           context.CancelFunc
 	connCreator      conn.ConnCreator
@@ -293,6 +306,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 		return err
 	}
 
+	r.lg.Info("start replay", zap.Any("config", cfg))
 	r.Lock()
 	defer r.Unlock()
 	r.cfg = cfg
@@ -303,7 +317,8 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.progress = 0
 	r.decodedCmds.Store(0)
 	r.err = nil
-	r.replayStats.Reset()
+	r.replayStats = conn.ReplayStats{}
+	r.dedup = cmd.NewDeDup()
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
 	r.execInfoCh = make(chan conn.ExecInfo, maxPendingExecInfo)
@@ -347,8 +362,8 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	}
 	r.report = cfg.report
 	if r.report == nil {
-		if cfg.DryRun {
-			r.report = &mockReport{exceptionCh: r.exceptionCh}
+		if cfg.DryRun || cfg.ReadOnly {
+			r.report = &nopReport{exceptionCh: r.exceptionCh}
 		} else {
 			backendConnCreator := func() conn.BackendConn {
 				return conn.NewBackendConn(r.lg.Named("be"), r.idMgr.NewID(), hsHandler, bcConfig, backendTLSConfig, r.cfg.Username, r.cfg.Password)
@@ -359,6 +374,8 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 
 	childCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
+	// Cancel decoding on graceful stop without shutting down execution.
+	r.decodeCtx, r.decodeCancel = context.WithCancel(childCtx)
 	if err := r.report.Start(childCtx, report.ReportConfig{
 		StartTime: r.startTime,
 		TlsConfig: r.backendTLSConfig,
@@ -366,7 +383,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 		return err
 	}
 	r.wg.RunWithRecover(func() {
-		r.readCommands(childCtx)
+		r.readCommands(r.decodeCtx, childCtx)
 	}, nil, r.lg)
 	r.wg.RunWithRecover(func() {
 		r.reportLoop(childCtx)
@@ -382,7 +399,29 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	return nil
 }
 
-func (r *replay) readCommands(ctx context.Context) {
+// waitUntilStartTime waits until the configured start time and returns whether the replay has stopped
+func (r *replay) waitUntilStartTime(ctx context.Context) bool {
+	waitDuration := time.Until(r.cfg.StartTime)
+	if waitDuration > 0 {
+		r.lg.Info("wait until the specified time to start replaying", zap.Time("until", r.cfg.StartTime),
+			zap.Duration("duration", waitDuration))
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(waitDuration):
+			return false
+		}
+	}
+
+	return false
+}
+
+func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context) {
+	if r.waitUntilStartTime(decodeCtx) {
+		r.stop(nil)
+		return
+	}
+
 	var decoder decoder
 	var err error
 
@@ -398,13 +437,13 @@ func (r *replay) readCommands(ctx context.Context) {
 				r.Close()
 			}
 		}()
-		decoder, err = r.constructStaticDecoder(ctx, readers)
+		decoder, err = r.constructStaticDecoder(decodeCtx, readers)
 		if err != nil {
 			r.stop(err)
 			return
 		}
 	} else {
-		decoder, err = r.constructDynamicDecoder(ctx)
+		decoder, err = r.constructDynamicDecoder(decodeCtx)
 		if err != nil {
 			r.stop(err)
 			return
@@ -416,7 +455,8 @@ func (r *replay) readCommands(ctx context.Context) {
 	connCount := 0                      // alive connection count
 	maxPendingCmds := int64(0)
 	extraWaitTime := time.Duration(0)
-	for ctx.Err() == nil && !r.gracefulStop.Load() {
+	stopDecoding := false
+	for execCtx.Err() == nil && decodeCtx.Err() == nil {
 		for hasCloseEvent := true; hasCloseEvent; {
 			select {
 			case id := <-r.closeConnCh:
@@ -433,11 +473,16 @@ func (r *replay) readCommands(ctx context.Context) {
 				err = nil
 				break
 			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				err = nil
+				break
+			}
 			if r.cfg.IgnoreErrs {
 				r.lg.Error("failed to decode command", zap.Error(err))
 				err = nil
 				continue
 			} else {
+				r.lg.Info("decode failed, stop", zap.Error(err))
 				break
 			}
 		}
@@ -485,20 +530,29 @@ func (r *replay) readCommands(ctx context.Context) {
 			if expectedInterval > time.Microsecond {
 				r.replayStats.TotalWaitTime.Add(expectedInterval.Nanoseconds())
 				select {
-				case <-ctx.Done():
+				case <-execCtx.Done():
+					err = execCtx.Err()
+					break
 				case <-time.After(expectedInterval):
+				case <-decodeCtx.Done():
+					stopDecoding = true
 				}
 			}
 		}
-		if ctx.Err() == nil {
-			r.executeCmd(ctx, command, conns, &connCount)
+		if execCtx.Err() == nil {
+			r.executeCmd(execCtx, command, conns, &connCount)
+		}
+		if stopDecoding {
+			break
 		}
 	}
 	r.lg.Info("finished decoding commands, draining connections", zap.Int64("max_pending_cmds", maxPendingCmds),
 		zap.Duration("extra_wait_time", extraWaitTime),
 		zap.Int("alive_conns", connCount),
 		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
-		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())))
+		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
+		zap.Error(err),
+		zap.NamedError("ctx_err", decodeCtx.Err()))
 
 	// Notify the connections that the commands are finished.
 	for _, conn := range conns {
@@ -552,7 +606,7 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 		return nil, err
 	}
 
-	cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format)
+	cmdDecoder := cmd.NewCmdDecoder(r.cfg.Format, r.dedup, r.lg)
 	// It's better to filter out the commands in `readCommands` instead of `Decoder`. However,
 	// the connection state is maintained in decoder. Filtering out commands here will make it'
 	// impossible for decoder to know whether `use xxx` will be executed, and thus cannot maintain
@@ -562,6 +616,10 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 		auditLogDecoder.SetPSCloseStrategy(r.cfg.PSCloseStrategy)
 		auditLogDecoder.SetIDAllocator(idAllocator)
 		auditLogDecoder.SetCommandEndTime(r.cfg.CommandEndTime)
+
+		if r.cfg.FilterCommandWithRetry {
+			auditLogDecoder.EnableFilterCommandWithRetry()
+		}
 	}
 
 	var decoder decoder
@@ -678,8 +736,9 @@ func (r *replay) constructReaderForDir(storage storage.ExternalStorage, dir stri
 		EncryptionKey:      r.cfg.encryptionKey,
 		EncryptionMethod:   r.meta.EncryptMethod,
 		FileNameFilterTime: filterTime,
+		WaitOnEOF:          r.cfg.WaitOnEOF,
 	}
-	if r.cfg.CommandEndTime.IsZero() {
+	if cfg.FileNameFilterTime.IsZero() {
 		cfg.FileNameFilterTime = r.cfg.CommandStartTime
 	}
 	reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
@@ -770,22 +829,14 @@ func (r *replay) reportLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			r.lg.Info("replay progress", zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
+			fields := append(r.commonFields(), []zap.Field{
 				zap.Int64("pending_cmds", r.replayStats.PendingCmds.Load()), // if too many, replay is slower than decode
-				zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
-				zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
-				zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
-				zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
-				zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
-				zap.Duration("replay_elapsed", time.Since(r.startTime)),
-				zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
-				zap.Int("pending_exec_info", len(r.execInfoCh)),              // if too many, recording sql is slow
-				zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
-				zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)))
+				zap.Int("pending_exec_info", len(r.execInfoCh)),             // if too many, recording sql is slow
+				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)),
+			}...)
+			r.lg.Info("replay progress", fields...)
 		}
 	}
 }
@@ -808,23 +859,21 @@ func (r *replay) saveCheckpointLoop(ctx context.Context) {
 	}
 	defer file.Close()
 
-	for {
-		// Add an interval here to avoid printing too many logs when error occurs.
-		if err != nil {
-			time.Sleep(stateSaveRetryInterval)
-		}
-
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
-			return
+			break
 		case <-ticker.C:
 			err = r.saveCheckpointToFile(file)
 			if err != nil {
 				r.lg.Error("save current checkpoint failed", zap.Error(err))
+				// Add an interval here to avoid printing too many logs when error occurs.
 				time.Sleep(stateSaveRetryInterval)
-				continue
 			}
 		}
+	}
+	if err = r.saveCheckpointToFile(file); err != nil {
+		r.lg.Error("save current state failed on close", zap.Error(err))
 	}
 }
 
@@ -845,16 +894,6 @@ func (r *replay) saveCheckpointToFile(file *os.File) error {
 		return errors.Wrapf(err, "save current checkpoint")
 	}
 	return nil
-}
-
-func (r *replay) saveCurrentStateToFilePath(filePath string) error {
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return errors.Wrapf(err, "open state file %s", filePath)
-	}
-	defer file.Close()
-
-	return r.saveCheckpointToFile(file)
 }
 
 func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
@@ -906,6 +945,7 @@ func (r *replay) recordExecInfoLoop() {
 	}
 }
 
+// stop is called when replaying commands fails or finishes, so no connection should be running.
 func (r *replay) stop(err error) {
 	r.Lock()
 	defer r.Unlock()
@@ -914,7 +954,12 @@ func (r *replay) stop(err error) {
 		r.cancel()
 		r.cancel = nil
 	}
+	r.decodeCancel = nil
 	close(r.execInfoCh)
+	if r.report != nil {
+		r.report.Close()
+		r.report = nil
+	}
 	r.endTime = time.Now()
 	// decodedCmds - pendingCmds may be greater than replayedCmds because if a connection is closed unexpectedly,
 	// the pending commands of that connection are discarded. We calculate the progress based on decodedCmds - pendingCmds.
@@ -923,27 +968,12 @@ func (r *replay) stop(err error) {
 	if pendingCmds != 0 {
 		r.lg.Warn("pending command count is not 0", zap.Int64("pending_cmds", pendingCmds))
 	}
-	decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
-	fields := []zap.Field{
-		zap.Time("start_time", r.startTime),
-		zap.Time("end_time", r.endTime),
-		zap.Time("command_start_time", r.cfg.CommandStartTime),
-		zap.Time("command_end_time", r.cfg.CommandEndTime),
-		zap.String("format", r.cfg.Format),
-		zap.String("username", r.cfg.Username),
-		zap.Bool("ignore_errs", r.cfg.IgnoreErrs),
-		zap.Float64("speed", r.cfg.Speed),
-		zap.Bool("read_only", r.cfg.ReadOnly),
-		zap.Uint64("decoded_cmds", decodedCmds),
-		zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
-		zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
-		zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
-		zap.Duration("replay_elapsed", time.Since(r.startTime)),
-		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)),
-		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())),
-		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
-		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
-	}
+	commonFields := r.commonFields()
+	fields := append(commonFields, []zap.Field{
+		zap.Time("replay_start_time", r.startTime),
+		zap.Time("replay_end_time", r.endTime),
+		zap.Any("config", r.cfg),
+	}...)
 	if r.meta.Cmds > 0 {
 		r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
 		fields = append(fields, zap.Uint64("captured_cmds", r.meta.Cmds))
@@ -969,6 +999,26 @@ func (r *replay) stop(err error) {
 	}
 }
 
+func (r *replay) commonFields() []zap.Field {
+	decodeElapsed := r.replayStats.CurCmdTs.Load() - r.replayStats.FirstCmdTs.Load()
+	r.dedup.Lock()
+	dedup, _ := json.Marshal(r.dedup.Items)
+	r.dedup.Unlock()
+	return []zap.Field{
+		zap.Uint64("replayed_cmds", r.replayStats.ReplayedCmds.Load()),
+		zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
+		zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
+		zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
+		zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
+		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
+		zap.Duration("replay_elapsed", time.Since(r.startTime)),
+		zap.Duration("decode_elapsed", time.Duration(decodeElapsed)), // if shorter than replay_elapsed, decode is slow
+		zap.Time("last_cmd_start_ts", time.Unix(0, r.replayStats.CurCmdTs.Load())),
+		zap.Time("last_cmd_end_ts", time.Unix(0, r.replayStats.CurCmdEndTs.Load())),
+		zap.String("duplicated", hack.String(dedup)),
+	}
+}
+
 func (r *replay) Wait() {
 	r.wg.Wait()
 }
@@ -982,7 +1032,7 @@ func (r *replay) Stop(err error, graceful bool) {
 	}
 	r.err = err
 	if graceful {
-		r.gracefulStop.Store(true)
+		r.decodeCancel()
 	} else if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
@@ -993,17 +1043,6 @@ func (r *replay) Stop(err error, graceful bool) {
 
 func (r *replay) Close() {
 	r.Stop(errors.New("shutting down"), false)
-	if r.report != nil {
-		r.report.Close()
-	}
-	// at this time, the save checkpoint loop and replay loop have exited. It's safe to update the latest
-	// checkpoint file.
-	if len(r.cfg.CheckPointFilePath) > 0 {
-		err := r.saveCurrentStateToFilePath(r.cfg.CheckPointFilePath)
-		if err != nil {
-			r.lg.Error("save current state failed on close", zap.Error(err))
-		}
-	}
 }
 
 func getDirForInput(input string) (string, error) {

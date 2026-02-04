@@ -6,6 +6,7 @@ package factor
 import (
 	"testing"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -106,4 +107,33 @@ func TestMissBackendInStatus(t *testing.T) {
 	advice, count, _ = fs.BalanceCount(backends[0], backends[1])
 	require.Equal(t, AdvicePositive, advice)
 	require.Equal(t, 100/balanceSeconds4Status, count)
+}
+
+func TestFactorStatusConfig(t *testing.T) {
+	tests := []struct {
+		migrations float64
+		speed      float64
+	}{
+		{
+			migrations: 0,
+			speed:      20,
+		},
+		{
+			migrations: 10,
+			speed:      10,
+		},
+	}
+
+	for i, test := range tests {
+		backends := make([]scoredBackend, 0, 2)
+		backends = append(backends, createBackend(0, 100, 100))
+		backends = append(backends, createBackend(1, 100, 100))
+		fs := NewFactorStatus(zap.NewNop())
+		fs.SetConfig(&config.Config{Balance: config.Balance{Status: config.Factor{MigrationsPerSecond: test.migrations}}})
+		require.EqualValues(t, test.migrations, fs.migrationsPerSecond)
+		backends[0].BackendCtx.(*mockBackend).healthy = false
+		fs.UpdateScore(backends)
+		_, count, _ := fs.BalanceCount(backends[0], backends[1])
+		require.Equal(t, test.speed, count, "test idx: %d", i)
+	}
 }

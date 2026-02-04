@@ -4,12 +4,12 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"path"
 	"reflect"
-	"strconv"
 	"strings"
 	"time"
 
@@ -26,13 +26,25 @@ import (
 
 var _ io.WriteCloser = (*rotateWriter)(nil)
 
+// rotateWriter is a writer that writes to a file and rotates the file when the
+// file size reaches the configured limit. It also ensures that the file name
+// is unique by appending a timestamp to the file name.
+//
+// Problems of lumberjack:
+// - It doesn't support object storage.
+// - The command size can't be bigger than the file size.
+// - If it's written too frequently, the previous file may be overwritten.
 type rotateWriter struct {
 	cfg      WriterCfg
-	writer   io.WriteCloser
 	storage  storage.ExternalStorage
 	lg       *zap.Logger
-	fileIdx  int
 	writeLen int
+	buf      *bytes.Buffer
+	// lastFileTS is the last timestamp string (formatted with logTimeLayout)
+	// that was used in a file name. It's used to avoid creating multiple files
+	// with the same timestamp-based name, which could overwrite the previous file
+	// in object storage.
+	lastFileTS string
 }
 
 func newRotateWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg WriterCfg) (*rotateWriter, error) {
@@ -43,61 +55,101 @@ func newRotateWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cf
 		cfg:     cfg,
 		lg:      lg,
 		storage: externalStorage,
+		buf:     bytes.NewBuffer(make([]byte, 0, cfg.FileSize)),
 	}, nil
 }
 
 func (w *rotateWriter) Write(data []byte) (n int, err error) {
-	if w.writer == nil || reflect.ValueOf(w.writer).IsNil() {
-		if err = w.createFile(); err != nil {
-			return
-		}
+	if len(data) == 0 {
+		return 0, nil
 	}
-	if n, err = w.writer.Write(data); err != nil {
+	if w.buf == nil {
+		w.buf = bytes.NewBuffer(make([]byte, 0, w.cfg.FileSize))
+	}
+	if n, err = w.buf.Write(data); err != nil {
 		return n, errors.WithStack(err)
 	}
 	w.writeLen += n
 	if w.writeLen >= w.cfg.FileSize {
-		err = w.closeFile()
-		w.writeLen = 0
+		// Normal rotation triggered by reaching FileSize. If the timestamp-based
+		// file name would conflict with the last one, we prefer to keep writing
+		// to the in-memory buffer and wait for a later opportunity (with a new
+		// timestamp) to flush.
+		err = w.flush(false)
 	}
 	return n, err
 }
 
-func (w *rotateWriter) createFile() error {
+// flush writes current in-memory buffer to a new file. The file name contains
+// the timestamp when the file is *closed*, which is consistent with TiDB audit
+// log plugin files where the timestamp represents the end time of the file.
+//
+// If forceWait is false, and the newly generated timestamp string would be the
+// same as the previous one, we skip flushing to avoid overwriting the last
+// file and keep accumulating data in the buffer.
+// If forceWait is true (used on Close), and the newly generated timestamp
+// string would be the same as the previous one, we synthetically advance the
+// timestamp by 1ms to guarantee both a flush and a non-conflicting file name
+// without waiting.
+func (w *rotateWriter) flush(force bool) error {
+	if w.buf == nil || w.writeLen == 0 {
+		return nil
+	}
 	var ext string
 	if w.cfg.Compress {
 		ext = fileCompressFormat
 	}
-	w.fileIdx++
-	fileName := fmt.Sprintf("%s%d%s%s", fileNamePrefix, w.fileIdx, fileNameSuffix, ext)
+	// Use timestamp in file name so that files can be efficiently located by time
+	// in object storage (e.g. S3). The time format is the same as audit log
+	// plugin files, but with a different prefix. The timestamp is generated
+	// when the buffer is flushed to disk, which approximates the file end time.
+	//
+	// We compare formatted timestamp strings to avoid generating multiple files
+	// with the same name:
+	ts := time.Now().In(time.Local)
+	tsStr := ts.Format(logTimeLayout)
+	if w.lastFileTS != "" && tsStr == w.lastFileTS {
+		if !force {
+			// Continue to accumulate data in the current buffer until the timestamp
+			// changes so we can safely generate a new, non-conflicting file.
+			return nil
+		}
+		// Close() should not block waiting for the wall clock to advance. Instead,
+		// if the formatted timestamp would collide with the previous one, bump the
+		// timestamp by 1ms to ensure a strictly increasing suffix in the file
+		// name.
+		tsStr = ts.Add(time.Millisecond).Format(logTimeLayout)
+	}
+	w.lastFileTS = tsStr
+	fileName := fmt.Sprintf("%s%s%s%s", fileNamePrefix, tsStr, fileNameSuffix, ext)
 	// rotateWriter -> encryptWriter -> compressWriter -> file
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	fileWriter, err := w.storage.Create(ctx, fileName, &storage.WriterOption{})
 	cancel()
-	w.writer = NewStorageWriter(fileWriter)
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	var writer io.WriteCloser = NewStorageWriter(fileWriter)
 	if w.cfg.Compress {
-		w.writer = newCompressWriter(w.lg, w.writer)
+		writer = newCompressWriter(w.lg, writer)
 	}
-	if w.writer, err = newWriterWithEncryptOpts(w.writer, w.cfg.EncryptionMethod, w.cfg.EncryptionKey); err != nil {
+	if writer, err = newWriterWithEncryptOpts(writer, w.cfg.EncryptionMethod, w.cfg.EncryptionKey); err != nil {
 		return err
 	}
-	return nil
-}
-
-func (w *rotateWriter) closeFile() error {
-	if w.writer != nil && !reflect.ValueOf(w.writer).IsNil() {
-		err := w.writer.Close()
-		w.writer = nil
-		return err
+	if _, err := writer.Write(w.buf.Bytes()); err != nil {
+		_ = writer.Close()
+		return errors.WithStack(err)
+	}
+	w.writeLen = 0
+	w.buf.Reset()
+	if err := writer.Close(); err != nil {
+		return errors.WithStack(err)
 	}
 	return nil
 }
 
 func (w *rotateWriter) Close() error {
-	return w.closeFile()
+	return w.flush(true)
 }
 
 type Reader interface {
@@ -210,15 +262,13 @@ func (r *rotateReader) closeFile() error {
 }
 
 func (r *rotateReader) openFileLoop(ctx context.Context) error {
-	var curFileIdx int64
+	var curFileTime time.Time
 	var curFileName string
 	var err error
 	for ctx.Err() == nil {
-		var minFileIdx int64
+		var minFileTime time.Time
 		var minFileName string
 		fileNamePrefix := getFileNamePrefix(r.cfg.Format)
-		parseFunc := getParseFileNameFunc(r.cfg.Format)
-		fileFilter := getFilterFileNameFunc(r.cfg.Format, r.cfg.FileNameFilterTime)
 		childCtx, cancel := context.WithTimeout(ctx, opTimeout)
 		startTime := time.Now()
 		err = r.walkFile(childCtx, curFileName,
@@ -226,19 +276,19 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 				if !strings.HasPrefix(name, fileNamePrefix) {
 					return false, nil
 				}
-				if !fileFilter(name, fileNamePrefix) {
+				if !filterFileByTime(name, fileNamePrefix, r.cfg.FileNameFilterTime) {
 					return false, nil
 				}
-				fileIdx := parseFunc(name, fileNamePrefix)
-				if fileIdx == 0 {
+				fileTime := parseFileTime(name, fileNamePrefix)
+				if fileTime.IsZero() {
 					r.lg.Warn("traffic file name is invalid", zap.String("filename", name), zap.String("format", r.cfg.Format))
 					return false, nil
 				}
-				if fileIdx <= curFileIdx {
+				if !fileTime.After(curFileTime) {
 					return false, nil
 				}
-				if minFileName == "" || fileIdx < minFileIdx {
-					minFileIdx = fileIdx
+				if minFileName == "" || fileTime.Before(minFileTime) {
+					minFileTime = fileTime
 					minFileName = name
 					return true, nil
 				}
@@ -249,8 +299,13 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			break
 		}
 		if minFileName == "" {
-			err = io.EOF
-			break
+			if r.cfg.WaitOnEOF {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			} else {
+				err = io.EOF
+				break
+			}
 		}
 		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
 		var fr storage.ExternalFileReader
@@ -259,7 +314,7 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			err = errors.WithStack(err)
 			break
 		}
-		curFileIdx = minFileIdx
+		curFileTime = minFileTime
 		curFileName = minFileName
 		r.lg.Info("opening next file", zap.String("file", path.Join(r.storage.URI(), minFileName)),
 			zap.Duration("open_time", time.Since(startTime)),
@@ -297,8 +352,8 @@ func (r *rotateReader) nextReader() error {
 // The return value of the function indicates whether this file is valid or not.
 // For S3 storage and audit log format, it'll stop walking once the fn returns true.
 func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func(string, int64) (bool, error)) error {
-	if s3, ok := r.storage.(*storage.S3Storage); ok && r.cfg.Format == cmd.FormatAuditLogPlugin {
-		return r.walkS3ForAuditLogFile(ctx, curfileName, s3.GetS3APIHandle(), s3.GetOptions(), fn)
+	if s3, ok := r.storage.(*storage.S3Storage); ok {
+		return r.walkS3(ctx, curfileName, s3.GetS3APIHandle(), s3.GetOptions(), fn)
 	}
 	return r.storage.WalkDir(ctx, &storage.WalkOption{}, func(name string, size int64) error {
 		_, err := fn(name, size)
@@ -306,13 +361,13 @@ func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func
 	})
 }
 
-// walkS3ForAuditLogFile is a special implementation to list files from S3 for audit log format.
-// The reason is that the audit log file name contains timestamp info, and we may
+// walkS3 is a special implementation to list files from S3.
+// The reason is that the file name contains timestamp info, and we may
 // want to start from a specific time point. The normal WalkDir implementation
 // just lists all files in the directory, which is not efficient when there are
 // many files.
 // Most of the code is copied from storage/s3.go's WalkDir implementation.
-func (r *rotateReader) walkS3ForAuditLogFile(ctx context.Context, curFileName string, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
+func (r *rotateReader) walkS3(ctx context.Context, curFileName string, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
 	for ; r.fileMetaCacheIdx < len(r.fileMetaCache); r.fileMetaCacheIdx++ {
 		meta := r.fileMetaCache[r.fileMetaCacheIdx]
 		valid, err := fn(meta.fileName, meta.fileSize)
@@ -404,49 +459,6 @@ func getFileNamePrefix(format string) string {
 	return fileNamePrefix
 }
 
-func getParseFileNameFunc(format string) func(string, string) int64 {
-	switch format {
-	case cmd.FormatAuditLogPlugin:
-		return parseFileTimeToIdx
-	}
-	return parseFileIdx
-}
-
-func getFilterFileNameFunc(format string, fileNameFilterTime time.Time) func(string, string) bool {
-	switch format {
-	case cmd.FormatAuditLogPlugin:
-		return func(name, fileNamePrefix string) bool {
-			return filterFileByTime(name, fileNamePrefix, fileNameFilterTime)
-		}
-	}
-	return func(string, string) bool { return true }
-}
-
-// Parse the file name to get the file index.
-// filename pattern: traffic-1.log.gz
-func parseFileIdx(name, fileNamePrefix string) int64 {
-	if !strings.HasPrefix(name, fileNamePrefix) {
-		return 0
-	}
-	startIdx := len(fileNamePrefix)
-	if len(name) <= startIdx+len(fileNameSuffix) {
-		return 0
-	}
-	endIdx := len(name)
-	if strings.HasSuffix(name, fileCompressFormat) {
-		endIdx -= len(fileCompressFormat)
-	}
-	if !strings.HasSuffix(name[:endIdx], fileNameSuffix) {
-		return 0
-	}
-	endIdx -= len(fileNameSuffix)
-	fileIdx, err := strconv.Atoi(name[startIdx:endIdx])
-	if err != nil {
-		return 0
-	}
-	return int64(fileIdx)
-}
-
 // Parse the file name to get the file timestamp.
 // filename pattern: tidb-audit-2025-09-10T17-01-56.073.log
 func parseFileTime(name, fileNamePrefix string) time.Time {
@@ -473,14 +485,6 @@ func parseFileTime(name, fileNamePrefix string) time.Time {
 		return time.Time{}
 	}
 	return ts
-}
-
-func parseFileTimeToIdx(name, fileNamePrefix string) int64 {
-	ts := parseFileTime(name, fileNamePrefix)
-	if ts.IsZero() {
-		return 0
-	}
-	return ts.UnixNano() / 1000000
 }
 
 func filterFileByTime(name, fileNamePrefix string, fileNameFilterTime time.Time) bool {

@@ -22,6 +22,8 @@ const (
 	nativeKeyConnID       = "# Conn_ID: "
 	nativeKeyType         = "# Cmd_type: "
 	nativeKeySuccess      = "# Success: "
+	nativeKeyCapturedPsID = "# Captured_ps_id: "
+	nativeKeyPreparedStmt = "# Prepared_stmt: "
 	nativeKeyPayloadLen   = "# Payload_len: "
 )
 
@@ -50,6 +52,17 @@ func (rw *NativeEncoder) Encode(c *Command, writer *bytes.Buffer) error {
 	}
 	if !c.Success {
 		if err = writeString(nativeKeySuccess, "false", writer); err != nil {
+			return err
+		}
+	}
+	if c.CapturedPsID != 0 {
+		if err = writeString(nativeKeyCapturedPsID, strconv.FormatUint(uint64(c.CapturedPsID), 10), writer); err != nil {
+			return err
+		}
+	}
+	if len(c.PreparedStmt) > 0 {
+		// Use quoted string so it can be stored in a single line, e.g. it may contain '\n'.
+		if err = writeString(nativeKeyPreparedStmt, strconv.Quote(c.PreparedStmt), writer); err != nil {
 			return err
 		}
 	}
@@ -132,6 +145,18 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 			c.Type = pnet.CommandFromString(value)
 		case nativeKeySuccess:
 			c.Success = value == "true"
+		case nativeKeyCapturedPsID:
+			id, parseErr := strconv.ParseUint(value, 10, 32)
+			if parseErr != nil {
+				return nil, errors.Errorf("%s, line %d: parsing Captured_ps_id failed: %s", filename, lineIdx, line)
+			}
+			c.CapturedPsID = uint32(id)
+		case nativeKeyPreparedStmt:
+			stmt, unqErr := strconv.Unquote(value)
+			if unqErr != nil {
+				return nil, errors.Errorf("%s, line %d: unquoting Prepared_stmt failed: %s", filename, lineIdx, line)
+			}
+			c.PreparedStmt = stmt
 		case nativeKeyPayloadLen:
 			var payloadLen int
 			if payloadLen, err = strconv.Atoi(value); err != nil {

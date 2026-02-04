@@ -70,9 +70,9 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 
 	r.matchType = MatchAll
 	switch strings.ToLower(cfg.Balance.RoutingRule) {
-	case MatchClientCIDRStr:
+	case config.MatchClientCIDRStr:
 		r.matchType = MatchClientCIDR
-	case MatchProxyCIDRStr:
+	case config.MatchProxyCIDRStr:
 		r.matchType = MatchProxyCIDR
 	case "":
 	default:

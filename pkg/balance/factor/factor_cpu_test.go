@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
@@ -463,5 +464,44 @@ func TestCPURejectBalance(t *testing.T) {
 		updateScore(fc, backends)
 		advice, _, _ := fc.BalanceCount(backends[1], backends[0])
 		require.Equal(t, test.advice, advice, "test index %d", i)
+	}
+}
+
+func TestFactorCPUConfig(t *testing.T) {
+	tests := []struct {
+		cpus  [][]float64
+		speed float64
+	}{
+		{
+			cpus:  [][]float64{{0}, {0.2}},
+			speed: 0,
+		},
+		{
+			cpus:  [][]float64{{0}, {1.0}},
+			speed: 10,
+		},
+	}
+
+	for i, test := range tests {
+		backends := make([]scoredBackend, 0, len(test.cpus))
+		values := make([]*model.SampleStream, 0, len(test.cpus))
+		for j := 0; j < len(test.cpus); j++ {
+			backends = append(backends, createBackend(j, 100, 100))
+			values = append(values, createSampleStream(test.cpus[j], j, model.Now()))
+		}
+		mmr := &mockMetricsReader{
+			qrs: map[string]metricsreader.QueryResult{
+				"cpu": {
+					UpdateTime: time.Now(),
+					Value:      model.Matrix(values),
+				},
+			},
+		}
+		fc := NewFactorCPU(mmr, zap.NewNop())
+		fc.SetConfig(&config.Config{Balance: config.Balance{CPU: config.Factor{MigrationsPerSecond: 10}}})
+		require.EqualValues(t, 10, fc.migrationsPerSecond)
+		updateScore(fc, backends)
+		_, count, _ := fc.BalanceCount(backends[1], backends[0])
+		require.Equal(t, test.speed, count, "test index %d", i)
 	}
 }
