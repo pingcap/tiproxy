@@ -161,6 +161,7 @@ func TestExecuteError(t *testing.T) {
 				request, err := pnet.MakeExecuteStmtRequest(1, []any{uint64(100), "abc", nil}, true)
 				require.NoError(t, err)
 				c.preparedStmts[1] = preparedStmt{text: "select ?", paramNum: 3, paramTypes: nil}
+				c.psIDMapping[1] = 1
 				return request
 			},
 			digest:    "e1c71d1661ae46e09b7aaec1c390957f0d6260410df4e4bc71b9c8d681021471",
@@ -193,6 +194,7 @@ func TestExecuteError(t *testing.T) {
 	for i, test := range tests {
 		request := test.prepare(conn)
 		command := cmd.NewCommand(request, time.Now(), 100)
+		command.CapturedPsID = 1
 		// Set UpstreamConnID to test that exceptions report it correctly
 		command.UpstreamConnID = 999
 		conn.ExecuteCmd(command)
@@ -499,31 +501,27 @@ func TestPreparedStmtMapId(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 	require.Equal(t, uint32(1), conn.psIDMapping[100])
 
-	// The stmtID in the EXECUTE command is updated.
-	execReq, err := pnet.MakeExecuteStmtRequest(100, []any{1}, true)
-	require.NoError(t, err)
-	conn.ExecuteCmd(&cmd.Command{
-		CapturedPsID: 100,
-		Type:         pnet.ComStmtExecute,
-		Payload:      execReq,
-	})
-	require.Eventually(t, func() bool {
-		return stats.PendingCmds.Load() == 0
-	}, 3*time.Second, 10*time.Millisecond)
-	stmtID := binary.LittleEndian.Uint32(backendConn.lastReq()[1:5])
-	require.Equal(t, uint32(1), stmtID)
+	// The stmtIDs in the commands are updated.
+	for _, stmtType := range []pnet.Command{
+		pnet.ComStmtReset,
+		pnet.ComStmtSendLongData,
+		pnet.ComStmtExecute,
+		pnet.ComStmtFetch,
+		pnet.ComStmtClose,
+	} {
+		conn.ExecuteCmd(&cmd.Command{
+			CapturedPsID: 100,
+			Type:         stmtType,
+			Payload:      pnet.MakeCloseStmtRequest(100),
+		})
+		require.Eventually(t, func() bool {
+			return stats.PendingCmds.Load() == 0
+		}, 3*time.Second, 10*time.Millisecond)
+		stmtID := binary.LittleEndian.Uint32(backendConn.lastReq()[1:5])
+		require.Equal(t, uint32(1), stmtID)
+	}
 
-	// The stmtID in the CLOSE command is updated and the mapping is empty.
-	conn.ExecuteCmd(&cmd.Command{
-		CapturedPsID: 100,
-		Type:         pnet.ComStmtClose,
-		Payload:      pnet.MakeCloseStmtRequest(100),
-	})
-	require.Eventually(t, func() bool {
-		return stats.PendingCmds.Load() == 0
-	}, 3*time.Second, 10*time.Millisecond)
-	stmtID = binary.LittleEndian.Uint32(backendConn.lastReq()[1:5])
-	require.Equal(t, uint32(1), stmtID)
+	// The mapping is empty after CLOSE.
 	require.Len(t, conn.psIDMapping, 0)
 
 	cancel()
