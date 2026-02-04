@@ -1,8 +1,6 @@
 module github.com/pingcap/tiproxy/lib
 
-go 1.22
-
-toolchain go1.23.12
+go 1.25.6
 
 require (
 	github.com/cenkalti/backoff/v4 v4.2.1
@@ -11,7 +9,7 @@ require (
 	github.com/tiancaiamao/gp v0.0.0-20230126082955-4f9e4f1ed9b5
 	go.uber.org/atomic v1.9.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/term v0.29.0
+	golang.org/x/term v0.39.0
 )
 
 require (
@@ -53,8 +51,8 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
-	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/time v0.4.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
