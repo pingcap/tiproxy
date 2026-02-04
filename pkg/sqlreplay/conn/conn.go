@@ -297,30 +297,24 @@ func (c *conn) updateExecuteStmt(ctx context.Context, command *cmd.Command) erro
 		return nil
 	}
 
-	var replayPsID uint32
-	if command.CapturedPsID != 0 {
-		var ok bool
-		if replayPsID, ok = c.psIDMapping[command.CapturedPsID]; !ok {
-			// If we start replaying from mid-connection, we may see EXECUTE without the corresponding PREPARE.
-			// In this case, the capture should have filled PreparedStmt; we can PREPARE it on demand.
-			if command.Type == pnet.ComStmtExecute && len(command.PreparedStmt) > 0 && c.backendConn != nil && !reflect.ValueOf(c.backendConn).IsNil() {
-				req := pnet.MakePrepareStmtRequest(command.PreparedStmt)
-				resp := c.backendConn.ExecuteCmd(ctx, req)
-				if resp.Err != nil {
-					return resp.Err
-				}
-				c.updatePreparedStmts(command.CapturedPsID, req, resp)
-				replayPsID = resp.StmtID
-			} else {
-				// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
-				return errors.Errorf("prepared statement ID %d not found", command.CapturedPsID)
+	replayPsID, ok := c.psIDMapping[command.CapturedPsID]
+	if !ok {
+		// If we start replaying from mid-connection, we may see EXECUTE without the corresponding PREPARE.
+		// In this case, the capture should have filled PreparedStmt; we can PREPARE it on demand.
+		if command.Type == pnet.ComStmtExecute && len(command.PreparedStmt) > 0 && c.backendConn != nil && !reflect.ValueOf(c.backendConn).IsNil() {
+			req := pnet.MakePrepareStmtRequest(command.PreparedStmt)
+			resp := c.backendConn.ExecuteCmd(ctx, req)
+			if resp.Err != nil {
+				return resp.Err
 			}
+			c.updatePreparedStmts(command.CapturedPsID, req, resp)
+			replayPsID = resp.StmtID
+		} else {
+			// Maybe the connection is reconnected after disconnection and the prepared statements are lost.
+			return errors.Errorf("prepared statement ID %d in %s not found", command.CapturedPsID, command.Type.String())
 		}
-		binary.LittleEndian.PutUint32(command.Payload[1:], replayPsID)
-	} else {
-		// Native traffic replay doesn't set the CapturedPsID yet.
-		replayPsID = binary.LittleEndian.Uint32(command.Payload[1:5])
 	}
+	binary.LittleEndian.PutUint32(command.Payload[1:], replayPsID)
 
 	ps := c.preparedStmts[replayPsID]
 	if len(ps.text) == 0 {

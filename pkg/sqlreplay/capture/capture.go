@@ -349,9 +349,7 @@ func (c *capture) Capture(stmtInfo StmtInfo) {
 		}
 		// Extract prepared statements from session states. Best-effort only.
 		prepared := sessionstates.ExtractPreparedStmtTextsFromSetSessionStatesSQL(sql)
-		initPacket := make([]byte, 0, len(sql)+1)
-		initPacket = append(initPacket, pnet.ComQuery.Byte())
-		initPacket = append(initPacket, hack.Slice(sql)...)
+		initPacket := pnet.MakeQueryPacket(sql)
 		command := cmd.NewCommand(initPacket, stmtInfo.StartTime, stmtInfo.ConnID)
 		c.Lock()
 		if c.putCommand(command) {
@@ -398,8 +396,13 @@ func (c *capture) Capture(stmtInfo StmtInfo) {
 				delete(st.preparedStmtTexts, stmtID)
 			}
 		}
+	case pnet.ComStmtSendLongData, pnet.ComStmtFetch, pnet.ComStmtReset:
+		if len(command.Payload) >= 5 {
+			stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
+			command.CapturedPsID = stmtID
+		}
 	case pnet.ComResetConnection, pnet.ComChangeUser:
-		st.preparedStmtTexts = nil
+		clear(st.preparedStmtTexts)
 	}
 	c.putCommand(command)
 }

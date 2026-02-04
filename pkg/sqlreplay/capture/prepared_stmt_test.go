@@ -5,6 +5,7 @@ package capture
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -104,32 +105,27 @@ func TestCapturePreparedStmtLifecycle(t *testing.T) {
 		ConnID:    connID,
 	})
 
-	execReq, err := pnet.MakeExecuteStmtRequest(10, []any{int64(1)}, true)
-	require.NoError(t, err)
-	cpt.Capture(StmtInfo{
-		Request:   execReq,
-		StartTime: time.Now(),
-		ConnID:    connID,
-	})
-
-	closeReq := pnet.MakeCloseStmtRequest(10)
-	cpt.Capture(StmtInfo{
-		Request:   closeReq,
-		StartTime: time.Now(),
-		ConnID:    connID,
-	})
-
-	execAfterClose, err := pnet.MakeExecuteStmtRequest(10, []any{int64(2)}, true)
-	require.NoError(t, err)
-	cpt.Capture(StmtInfo{
-		Request:   execAfterClose,
-		StartTime: time.Now(),
-		ConnID:    connID,
-	})
+	for _, stmtType := range []pnet.Command{
+		pnet.ComStmtExecute,
+		pnet.ComStmtReset,
+		pnet.ComStmtSendLongData,
+		pnet.ComStmtFetch,
+		pnet.ComStmtClose,
+		pnet.ComStmtExecute, // execute after close
+	} {
+		req := make([]byte, 1+4)
+		req[0] = stmtType.Byte()
+		binary.LittleEndian.PutUint32(req[1:], 10)
+		cpt.Capture(StmtInfo{
+			Request:   req,
+			StartTime: time.Now(),
+			ConnID:    connID,
+		})
+	}
 
 	cpt.Stop(nil)
 	cmds := decodeNativeCommands(t, writer.getData())
-	require.Len(t, cmds, 4)
+	require.Len(t, cmds, 7)
 
 	require.Equal(t, pnet.ComStmtPrepare, cmds[0].Type)
 	require.Equal(t, uint32(10), cmds[0].CapturedPsID)
@@ -138,10 +134,17 @@ func TestCapturePreparedStmtLifecycle(t *testing.T) {
 	require.Equal(t, uint32(10), cmds[1].CapturedPsID)
 	require.Equal(t, "select ?", cmds[1].PreparedStmt)
 
-	require.Equal(t, pnet.ComStmtClose, cmds[2].Type)
-	require.Equal(t, uint32(10), cmds[2].CapturedPsID)
+	for i, stmtType := range []pnet.Command{
+		pnet.ComStmtReset,
+		pnet.ComStmtSendLongData,
+		pnet.ComStmtFetch,
+		pnet.ComStmtClose,
+	} {
+		require.Equal(t, stmtType, cmds[i+2].Type)
+		require.Equal(t, uint32(10), cmds[i+2].CapturedPsID)
+	}
 
-	require.Equal(t, pnet.ComStmtExecute, cmds[3].Type)
+	require.Equal(t, pnet.ComStmtExecute, cmds[6].Type)
 	require.Equal(t, uint32(10), cmds[3].CapturedPsID)
 	require.Empty(t, cmds[3].PreparedStmt)
 }
