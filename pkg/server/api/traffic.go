@@ -187,6 +187,14 @@ func (h *Server) TrafficCancel(c *gin.Context) {
 		}
 	}
 	cfg.Graceful = strings.EqualFold(c.PostForm("graceful"), "true")
+	if timeoutStr := c.PostForm("timeout"); timeoutStr != "" {
+		timeout, err := time.ParseDuration(timeoutStr)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.GracefulTimeout = timeout
+	}
 	h.lg.Info("request: traffic cancel", zap.Any("cfg", cfg))
 	result := h.mgr.ReplayJobMgr.Stop(cfg)
 	h.lg.Info("response: traffic cancel", zap.String("result", result))

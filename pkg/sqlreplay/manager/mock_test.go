@@ -47,6 +47,7 @@ func (m *mockCapture) Wait() {
 
 func (m *mockCapture) Stop(err error) {
 	m.err = err
+	m.done = true
 }
 
 func (m *mockCapture) Start(capture.CaptureConfig) error {
@@ -83,4 +84,5 @@ func (m *mockReplay) Start(cfg replay.ReplayConfig, backendTLSConfig *tls.Config
 
 func (m *mockReplay) Stop(err error, _ bool) {
 	m.err = err
+	m.done = true
 }

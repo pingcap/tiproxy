@@ -20,14 +20,16 @@ import (
 )
 
 const (
-	maxJobHistoryCount = 10
-	connectTimeout     = 60 * time.Second
-	dialTimeout        = 5 * time.Second
+	maxJobHistoryCount         = 10
+	connectTimeout             = 60 * time.Second
+	dialTimeout                = 5 * time.Second
+	defaultGracefulStopTimeout = 60 * time.Second
 )
 
 type CancelConfig struct {
-	Type     JobType
-	Graceful bool
+	Type            JobType
+	Graceful        bool
+	GracefulTimeout time.Duration
 }
 
 type CertManager interface {
@@ -209,24 +211,80 @@ func (jm *jobManager) Wait() {
 }
 
 func (jm *jobManager) Stop(cfg CancelConfig) string {
+	// These variables are safe to access without lock.
+	var (
+		jobType JobType
+		jobStr  string
+		stopFn  func()
+		errText string
+	)
+
+	func() {
+		jm.mu.Lock()
+		defer jm.mu.Unlock()
+
+		if len(jm.jobHistory) == 0 {
+			errText = "no job running"
+			return
+		}
+		jm.updateProgress()
+		job := jm.jobHistory[len(jm.jobHistory)-1]
+		// Also allow to stop a job that is stopping.
+		// For traffic replay, maybe this time it goes to non-graceful shutdown and it stopped immediately.
+		if !(job.IsRunning() || job.IsStopping()) {
+			errText = "no job running"
+			return
+		}
+		if job.Type()&cfg.Type == 0 {
+			errText = "no privilege to stop the job"
+			return
+		}
+
+		switch job.Type() {
+		case Capture:
+			capture := jm.capture
+			stopFn = func() { capture.Stop(errors.Errorf("manually stopped")) }
+		case Replay:
+			replay := jm.replay
+			stopFn = func() { replay.Stop(errors.Errorf("manually stopped, graceful: %v", cfg.Graceful), cfg.Graceful) }
+		}
+
+		jobType = job.Type()
+		jobStr = job.String()
+	}()
+	if errText != "" {
+		return errText
+	}
+
+	if jobType == Replay && cfg.Graceful {
+		timeout := cfg.GracefulTimeout
+		if timeout <= 0 {
+			timeout = defaultGracefulStopTimeout
+		}
+		done := make(chan struct{})
+		go func() {
+			stopFn()
+			close(done)
+		}()
+		select {
+		case <-done:
+			jm.finishStop()
+			return "stopped: " + jobStr
+		case <-time.After(timeout):
+			return "graceful cancel timeout after " + timeout.String()
+		}
+	}
+
+	stopFn()
+	jm.finishStop()
+	return "stopped: " + jobStr
+}
+
+func (jm *jobManager) finishStop() {
 	jm.mu.Lock()
 	defer jm.mu.Unlock()
 
-	job := jm.runningJob()
-	if job == nil {
-		return "no job running"
-	}
-	if job.Type()&cfg.Type == 0 {
-		return "no privilege to stop the job"
-	}
-	switch job.Type() {
-	case Capture:
-		jm.capture.Stop(errors.Errorf("manually stopped"))
-	case Replay:
-		jm.replay.Stop(errors.Errorf("manually stopped, graceful: %v", cfg.Graceful), cfg.Graceful)
-	}
 	jm.updateProgress()
-	return "stopped: " + job.String()
 }
 
 func (jm *jobManager) Close() {

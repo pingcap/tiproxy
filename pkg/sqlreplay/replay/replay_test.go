@@ -473,6 +473,34 @@ func TestGracefulStop(t *testing.T) {
 	}
 }
 
+func TestGracefulStopWaitOnEOF(t *testing.T) {
+	replay := NewReplay(zap.NewNop(), id.NewIDManager())
+	defer replay.Close()
+
+	cfg := ReplayConfig{
+		Input:           t.TempDir(),
+		Format:          cmd.FormatAuditLogPlugin,
+		StartTime:       time.Now().Add(-time.Second),
+		DryRun:          true,
+		WaitOnEOF:       true,
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+
+	time.Sleep(50 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		replay.Stop(errors.New("graceful stop"), true)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for graceful stop to cancel wait-on-eof reader")
+	}
+}
+
 func BenchmarkMultiBufferedDecoder(b *testing.B) {
 	bufferSizes := []int{-1, 0, 1, 2, 4, 8, 16, 32, 64, 128, 256}
 	readerCounts := []int{1, 2, 4, 8, 16, 32}
