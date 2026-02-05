@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
@@ -81,7 +81,7 @@ type CaptureConfig struct {
 	maxPendingCommands int
 }
 
-func (cfg *CaptureConfig) Validate() (storage.ExternalStorage, error) {
+func (cfg *CaptureConfig) Validate() (storeapi.Storage, error) {
 	if cfg.Output == "" {
 		return nil, errors.New("output is required")
 	}
@@ -132,7 +132,7 @@ type capture struct {
 	conns        map[uint64]*connState
 	wg           waitgroup.WaitGroup
 	cancel       context.CancelFunc
-	storage      storage.ExternalStorage
+	storage      storeapi.Storage
 	cmdCh        chan *cmd.Command
 	err          error
 	startTime    time.Time
@@ -440,7 +440,7 @@ func (c *capture) putCommand(command *cmd.Command) bool {
 	}
 }
 
-func (c *capture) writeMeta(storage storage.ExternalStorage, duration time.Duration, cmds, filteredCmds uint64) {
+func (c *capture) writeMeta(storage storeapi.Storage, duration time.Duration, cmds, filteredCmds uint64) {
 	meta := store.NewMeta(duration, cmds, filteredCmds, c.cfg.EncryptionMethod)
 	if err := meta.Write(storage); err != nil {
 		c.lg.Error("failed to write meta", zap.Error(err))

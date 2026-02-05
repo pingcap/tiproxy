@@ -18,8 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/s3"
-	backuppb "github.com/pingcap/kvproto/pkg/brpb"
-	"github.com/pingcap/tidb/br/pkg/mock"
+	"github.com/pingcap/tidb/pkg/objstore/s3store/mock"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -513,7 +512,7 @@ func TestWalkS3(t *testing.T) {
 	// Second request: from 44.999 to 45.999, return next 1000 files
 	// Third request: from 45.998 to end, return 2 files
 	// Fourth request: from 45.999 end, return 1 file
-	s3api.EXPECT().ListObjectsWithContext(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
+	s3api.EXPECT().ListObjects(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
 		func(ctx context.Context, req *s3.ListObjectsInput, _ ...request.Option) (*s3.ListObjectsOutput, error) {
 			require.Equal(t, "bucket", *req.Bucket)
 			require.Equal(t, "prefix/tidb-audit-", *req.Prefix)
@@ -545,10 +544,7 @@ func TestWalkS3(t *testing.T) {
 	for {
 		selected := false
 		cFileName := curFilename
-		err := r.walkS3(context.Background(), cFileName, s3api, &backuppb.S3{
-			Bucket: "bucket",
-			Prefix: "prefix/",
-		}, func(fileName string, size int64) (bool, error) {
+		err := r.walkFile(context.Background(), cFileName, func(fileName string, size int64) (bool, error) {
 			require.GreaterOrEqual(t, fileName, cFileName)
 			if fileName <= cFileName {
 				return false, nil

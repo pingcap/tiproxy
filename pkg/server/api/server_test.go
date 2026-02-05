@@ -69,7 +69,7 @@ func createServer(t *testing.T) (*Server, doHTTPFunc) {
 func TestGrpc(t *testing.T) {
 	srv, _ := createServer(t)
 	addr := srv.listener.Addr().String()
-	cc, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	cc, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
 	require.NoError(t, cc.Close())
 }

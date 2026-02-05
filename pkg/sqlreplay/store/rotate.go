@@ -13,11 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	backuppb "github.com/pingcap/kvproto/pkg/brpb"
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore/objectio"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -36,7 +33,7 @@ var _ io.WriteCloser = (*rotateWriter)(nil)
 // - If it's written too frequently, the previous file may be overwritten.
 type rotateWriter struct {
 	cfg      WriterCfg
-	storage  storage.ExternalStorage
+	storage  storeapi.Storage
 	lg       *zap.Logger
 	writeLen int
 	buf      *bytes.Buffer
@@ -47,7 +44,7 @@ type rotateWriter struct {
 	lastFileTS string
 }
 
-func newRotateWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg WriterCfg) (*rotateWriter, error) {
+func newRotateWriter(lg *zap.Logger, externalStorage storeapi.Storage, cfg WriterCfg) (*rotateWriter, error) {
 	if cfg.FileSize == 0 {
 		cfg.FileSize = fileSize
 	}
@@ -124,7 +121,7 @@ func (w *rotateWriter) flush(force bool) error {
 	fileName := fmt.Sprintf("%s%s%s%s", fileNamePrefix, tsStr, fileNameSuffix, ext)
 	// rotateWriter -> encryptWriter -> compressWriter -> file
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-	fileWriter, err := w.storage.Create(ctx, fileName, &storage.WriterOption{})
+	fileWriter, err := w.storage.Create(ctx, fileName, &storeapi.WriterOption{})
 	cancel()
 	if err != nil {
 		return errors.WithStack(err)
@@ -159,14 +156,9 @@ type Reader interface {
 
 var _ Reader = (*rotateReader)(nil)
 
-type fileMeta struct {
-	fileName string
-	fileSize int64
-}
-
 type fileReader struct {
 	fileName string
-	reader   storage.ExternalFileReader
+	reader   objectio.Reader
 }
 
 type rotateReader struct {
@@ -174,20 +166,15 @@ type rotateReader struct {
 	absolutePath string
 	reader       io.Reader
 	externalFile fileReader
-	storage      storage.ExternalStorage
+	storage      storeapi.Storage
 	lg           *zap.Logger
 	fileCh       chan fileReader
 	wg           waitgroup.WaitGroup
 	cancel       context.CancelFunc
 	eof          bool
-
-	// fileMetaCache and fileMetaCacheIdx are used to access and cache file metadata.
-	// The fileMeta in the cache should be sorted by file index in ascending order.
-	fileMetaCache    []fileMeta
-	fileMetaCacheIdx int
 }
 
-func newRotateReader(lg *zap.Logger, store storage.ExternalStorage, cfg ReaderCfg) (*rotateReader, error) {
+func newRotateReader(lg *zap.Logger, store storeapi.Storage, cfg ReaderCfg) (*rotateReader, error) {
 	r := &rotateReader{
 		cfg:     cfg,
 		lg:      lg,
@@ -308,8 +295,8 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			}
 		}
 		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
-		var fr storage.ExternalFileReader
-		fr, err = r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
+		var fr objectio.Reader
+		fr, err = r.storage.Open(ctx, minFileName, &storeapi.ReaderOption{})
 		if err != nil {
 			err = errors.WithStack(err)
 			break
@@ -317,8 +304,7 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		curFileTime = minFileTime
 		curFileName = minFileName
 		r.lg.Info("opening next file", zap.String("file", path.Join(r.storage.URI(), minFileName)),
-			zap.Duration("open_time", time.Since(startTime)),
-			zap.Int("files_in_cache", len(r.fileMetaCache)-r.fileMetaCacheIdx))
+			zap.Duration("open_time", time.Since(startTime)))
 		select {
 		case r.fileCh <- fileReader{fileName: minFileName, reader: fr}:
 		case <-ctx.Done():
@@ -352,103 +338,10 @@ func (r *rotateReader) nextReader() error {
 // The return value of the function indicates whether this file is valid or not.
 // For S3 storage and audit log format, it'll stop walking once the fn returns true.
 func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func(string, int64) (bool, error)) error {
-	if s3, ok := r.storage.(*storage.S3Storage); ok {
-		return r.walkS3(ctx, curfileName, s3.GetS3APIHandle(), s3.GetOptions(), fn)
-	}
-	return r.storage.WalkDir(ctx, &storage.WalkOption{}, func(name string, size int64) error {
+	return r.storage.WalkDir(ctx, &storeapi.WalkOption{}, func(name string, size int64) error {
 		_, err := fn(name, size)
 		return err
 	})
-}
-
-// walkS3 is a special implementation to list files from S3.
-// The reason is that the file name contains timestamp info, and we may
-// want to start from a specific time point. The normal WalkDir implementation
-// just lists all files in the directory, which is not efficient when there are
-// many files.
-// Most of the code is copied from storage/s3.go's WalkDir implementation.
-func (r *rotateReader) walkS3(ctx context.Context, curFileName string, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
-	for ; r.fileMetaCacheIdx < len(r.fileMetaCache); r.fileMetaCacheIdx++ {
-		meta := r.fileMetaCache[r.fileMetaCacheIdx]
-		valid, err := fn(meta.fileName, meta.fileSize)
-		if err != nil {
-			return err
-		}
-		if valid {
-			r.fileMetaCacheIdx++
-			return nil
-		}
-	}
-
-	// The cache is used up, and we didn't find the valid file yet.
-	pathPrefix := options.Prefix
-	if len(pathPrefix) > 0 && !strings.HasSuffix(pathPrefix, "/") {
-		pathPrefix += "/"
-	}
-
-	prefix := pathPrefix + getFileNamePrefix(r.cfg.Format)
-
-	var marker string
-	if curFileName != "" {
-		marker = pathPrefix + curFileName
-	} else if !r.cfg.FileNameFilterTime.IsZero() {
-		t := r.cfg.FileNameFilterTime.In(time.Local)
-		marker = fmt.Sprintf("%s%s", prefix, t.Format(logTimeLayout))
-	}
-
-	req := &s3.ListObjectsInput{
-		Bucket:  aws.String(options.Bucket),
-		Prefix:  aws.String(prefix),
-		MaxKeys: aws.Int64(1000),
-		Marker:  aws.String(marker),
-	}
-	// The first result of `ListObjects` may include the `marker` file itself, so
-	// we still need to walk and filter it. It's possible to further optimize to
-	// skip the first file and take the second one if the file name is exactly the
-	// same with the `marker`.
-	res, err := s3api.ListObjectsWithContext(ctx, req)
-	if err != nil {
-		return err
-	}
-
-	startAppendingFileToCache := false
-	for _, file := range res.Contents {
-		// when walk on specify directory, the result include storage.Prefix,
-		// which can not be reuse in other API(Open/Read) directly.
-		// so we use TrimPrefix to filter Prefix for next Open/Read.
-		path := strings.TrimPrefix(*file.Key, options.Prefix)
-		// trim the prefix '/' to ensure that the path returned is consistent with the local storage
-		path = strings.TrimPrefix(path, "/")
-		itemSize := *file.Size
-
-		// filter out s3's empty directory items
-		if itemSize <= 0 && strings.HasSuffix(path, "/") {
-			continue
-		}
-		if startAppendingFileToCache {
-			r.fileMetaCache = append(r.fileMetaCache, fileMeta{
-				fileName: path,
-				fileSize: itemSize,
-			})
-			continue
-		}
-
-		valid, err := fn(path, itemSize)
-		if err != nil {
-			return err
-		}
-		if valid {
-			startAppendingFileToCache = true
-			if r.fileMetaCache == nil {
-				r.fileMetaCache = make([]fileMeta, 0, 1000)
-			} else {
-				r.fileMetaCache = r.fileMetaCache[:0]
-			}
-			r.fileMetaCacheIdx = 0
-		}
-	}
-
-	return nil
 }
 
 func getFileNamePrefix(format string) string {

@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
@@ -35,7 +35,7 @@ func NewMeta(duration time.Duration, cmds, filteredCmds uint64, EncryptMethod st
 	}
 }
 
-func (m *Meta) Write(externalStorage storage.ExternalStorage) error {
+func (m *Meta) Write(externalStorage storeapi.Storage) error {
 	b, err := json.Marshal(m)
 	if err != nil {
 		return errors.WithStack(err)
@@ -48,7 +48,7 @@ func (m *Meta) Write(externalStorage storage.ExternalStorage) error {
 	return nil
 }
 
-func (m *Meta) Read(externalStorage storage.ExternalStorage) error {
+func (m *Meta) Read(externalStorage storeapi.Storage) error {
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	defer cancel()
 	b, err := externalStorage.ReadFile(ctx, metaFile)
@@ -61,7 +61,7 @@ func (m *Meta) Read(externalStorage storage.ExternalStorage) error {
 	return nil
 }
 
-func PreCheckMeta(externalStorage storage.ExternalStorage) error {
+func PreCheckMeta(externalStorage storeapi.Storage) error {
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	exists, err := externalStorage.FileExists(ctx, metaFile)
 	cancel()

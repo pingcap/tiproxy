@@ -8,13 +8,15 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore"
+	"github.com/pingcap/tidb/pkg/objstore/objectio"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 )
 
 var _ io.WriteCloser = (*StorageWriter)(nil)
 
 type StorageWriter struct {
-	writer storage.ExternalFileWriter
+	writer objectio.Writer
 }
 
 func (s *StorageWriter) Write(p []byte) (n int, err error) {
@@ -29,18 +31,18 @@ func (s *StorageWriter) Close() error {
 	return s.writer.Close(ctx)
 }
 
-func NewStorageWriter(writer storage.ExternalFileWriter) *StorageWriter {
+func NewStorageWriter(writer objectio.Writer) *StorageWriter {
 	return &StorageWriter{writer: writer}
 }
 
-func NewStorage(path string) (storage.ExternalStorage, error) {
-	backend, err := storage.ParseBackend(path, &storage.BackendOptions{})
+func NewStorage(path string) (storeapi.Storage, error) {
+	backend, err := objstore.ParseBackend(path, &objstore.BackendOptions{})
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	defer cancel()
-	return storage.New(ctx, backend, &storage.ExternalStorageOptions{
+	return objstore.New(ctx, backend, &storeapi.Options{
 		// Disable compression to be compatible with Aliyun OSS.
 		//
 		// S3 will never send compressed response, so this config changes nothing.

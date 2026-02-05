@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -136,7 +136,7 @@ type ReplayConfig struct {
 	reportLogInterval time.Duration
 }
 
-func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
+func (cfg *ReplayConfig) Validate() ([]storeapi.Storage, error) {
 	if cfg.Input == "" {
 		return nil, errors.New("input is required")
 	}
@@ -144,10 +144,10 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	if len(inputs) > 1 && cfg.Format != cmd.FormatAuditLogPlugin {
 		return nil, errors.New("only `audit_log_plugin` format supports multiple input files")
 	}
-	var storages []storage.ExternalStorage
+	var storages []storeapi.Storage
 	var err error
 	for _, input := range inputs {
-		var storage storage.ExternalStorage
+		var storage storeapi.Storage
 		if cfg.DynamicInput {
 			input, err = getDirForInput(input)
 			if err != nil {
@@ -264,7 +264,7 @@ type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig
 	meta             store.Meta
-	storages         []storage.ExternalStorage
+	storages         []storeapi.Storage
 	replayStats      conn.ReplayStats
 	dedup            *cmd.DeDup
 	idMgr            *id.IDManager
@@ -729,7 +729,7 @@ func (r *replay) constructDynamicDecoder(ctx context.Context) (decoder, error) {
 	return decoder, nil
 }
 
-func (r *replay) constructReaderForDir(storage storage.ExternalStorage, dir string, filterTime time.Time) (cmd.LineReader, error) {
+func (r *replay) constructReaderForDir(storage storeapi.Storage, dir string, filterTime time.Time) (cmd.LineReader, error) {
 	cfg := store.ReaderCfg{
 		Format:             r.cfg.Format,
 		Dir:                dir,

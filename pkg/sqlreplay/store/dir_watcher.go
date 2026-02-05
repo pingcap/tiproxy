@@ -5,15 +5,10 @@ package store
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/pingcap/tidb/br/pkg/storage"
-	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"go.uber.org/zap"
 )
 
@@ -24,14 +19,14 @@ type dirWatcher struct {
 	lg *zap.Logger
 
 	pathPrefix string
-	storage    storage.ExternalStorage
+	storage    storeapi.Storage
 
 	recordedDirs map[string]struct{}
 	onNewDir     func(path string) error
 }
 
 // NewDirWatcher creates a new dirWatcher.
-func NewDirWatcher(lg *zap.Logger, pathPrefix string, onNewDir func(filename string) error, storage storage.ExternalStorage) *dirWatcher {
+func NewDirWatcher(lg *zap.Logger, pathPrefix string, onNewDir func(filename string) error, storage storeapi.Storage) *dirWatcher {
 	return &dirWatcher{
 		lg:           lg,
 		pathPrefix:   pathPrefix,
@@ -64,19 +59,9 @@ func (c *dirWatcher) WalkFiles(ctx context.Context) error {
 	var err error
 	var dirs []string
 
-	switch c.storage.(type) {
-	case *storage.S3Storage:
-		dirs, err = c.listFilesForS3(ctx)
-		if err != nil {
-			return err
-		}
-	case *storage.LocalStorage:
-		dirs, err = c.listFilesForLocal()
-		if err != nil {
-			return err
-		}
-	default:
-		return errors.New("unsupported storage type for dir watcher")
+	dirs, err = c.listDirs(ctx)
+	if err != nil {
+		return err
 	}
 
 	for _, dir := range dirs {
@@ -96,64 +81,48 @@ func (c *dirWatcher) WalkFiles(ctx context.Context) error {
 	return nil
 }
 
-func (c *dirWatcher) listFilesForS3(ctx context.Context) ([]string, error) {
-	// Assumes that we don't have more than 1000 directories under one prefix.
-	s := c.storage.(*storage.S3Storage)
-	options := s.GetOptions()
-	req := &s3.ListObjectsInput{
-		Bucket:    aws.String(options.Bucket),
-		Prefix:    aws.String(c.pathPrefix),
-		MaxKeys:   aws.Int64(1000),
-		Delimiter: aws.String("/"),
-	}
+func (c *dirWatcher) listDirs(ctx context.Context) ([]string, error) {
+	// Use generic WalkDir over the configured storage and derive first-level directories
+	// under the configured path prefix. This works for both local and S3-like backends.
+	prefix := strings.TrimLeft(c.pathPrefix, "/")
+	dirSet := make(map[string]struct{})
 
-	res, err := s.GetS3APIHandle().ListObjectsWithContext(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	var dirs []string
-	for _, dir := range res.CommonPrefixes {
-		dirs = append(dirs, *dir.Prefix)
-	}
-
-	return dirs, nil
-}
-
-func (c *dirWatcher) listFilesForLocal() ([]string, error) {
-	var dirs []string
-	s := c.storage.(*storage.LocalStorage)
-	err := filepath.WalkDir(s.Base(), func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+	err := c.storage.WalkDir(ctx, &storeapi.WalkOption{}, func(name string, size int64) error {
+		rel := strings.TrimLeft(name, "/")
+		if prefix != "" {
+			if !strings.HasPrefix(rel, prefix) {
+				return nil
+			}
+			rel = strings.TrimPrefix(rel, prefix)
+			rel = strings.TrimLeft(rel, "/")
 		}
-		if !d.IsDir() {
+		if rel == "" {
 			return nil
 		}
-
-		// For local storage, the `path` has '/' prefix. However, the pathPrefix may not
-		// have '/' prefix. So we trim the left '/' from path before comparison.
-		if !strings.HasPrefix(strings.TrimLeft(path, "/"), strings.TrimLeft(c.pathPrefix, "/")) {
+		// Extract first path segment after the prefix.
+		first := rel
+		if idx := strings.Index(first, "/"); idx >= 0 {
+			first = first[:idx]
+		}
+		if first == "" {
 			return nil
 		}
-		relPath, err := filepath.Rel(s.Base(), path)
-		if err != nil {
-			return err
+		dir := prefix
+		if dir != "" && !strings.HasSuffix(dir, "/") {
+			dir += "/"
 		}
-		if strings.Contains(relPath, string(os.PathSeparator)) && relPath != "." {
-			// Only watch first-level directories under the prefix.
-			return filepath.SkipDir
-		}
-		// Add trailing slash to indicate it's a directory and keep consistent with S3 storage.
-		if !strings.HasSuffix(path, string(os.PathSeparator)) {
-			path += string(os.PathSeparator)
-		}
-		dirs = append(dirs, path)
+		dir += first + "/"
+		dirSet[dir] = struct{}{}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	dirs := make([]string, 0, len(dirSet))
+	for d := range dirSet {
+		dirs = append(dirs, d)
+	}
 	return dirs, nil
 }
 

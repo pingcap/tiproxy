@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
@@ -787,7 +787,7 @@ func TestDynamicInput(t *testing.T) {
 	otherDirs := []string{}
 	for i := 0; len(locateZeroDirs) < 2 || len(otherDirs) < 1; i++ {
 		filename := fmt.Sprintf("tidb-%d/", i)
-		if _, ok := storages[0].(*storage.LocalStorage); ok {
+		if _, ok := storages[0].(*objstore.LocalStorage); ok {
 			filename = tempDir + "/" + filename
 		}
 

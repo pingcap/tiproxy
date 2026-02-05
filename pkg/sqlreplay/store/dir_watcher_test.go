@@ -19,8 +19,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/s3"
 	backup "github.com/pingcap/kvproto/pkg/brpb"
-	"github.com/pingcap/tidb/br/pkg/mock"
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore"
+	"github.com/pingcap/tidb/pkg/objstore/s3store"
+	"github.com/pingcap/tidb/pkg/objstore/s3store/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -29,9 +30,9 @@ import (
 func TestLocalDirWatcher(t *testing.T) {
 	tempDir := t.TempDir()
 	pathPrefix := filepath.Join(tempDir, "dir_watcher_test_")
-	backend, err := storage.ParseBackend(tempDir, &storage.BackendOptions{})
+	backend, err := objstore.ParseBackend(tempDir, &objstore.BackendOptions{})
 	require.NoError(t, err)
-	s, err := storage.New(context.Background(), backend, nil)
+	s, err := objstore.NewWithDefaultOpt(context.Background(), backend)
 	require.NoError(t, err)
 
 	dirWatcherPollInterval = time.Millisecond * 10
@@ -120,7 +121,7 @@ func TestS3DirWatcher(t *testing.T) {
 
 	dirWatcherPollInterval = time.Millisecond * 10
 
-	s3api.EXPECT().ListObjectsWithContext(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
+	s3api.EXPECT().ListObjects(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
 		func(ctx context.Context, req *s3.ListObjectsInput, _ ...request.Option) (*s3.ListObjectsOutput, error) {
 			var retFiles []*s3.CommonPrefix
 			files := currentFiles.Load()
@@ -159,9 +160,9 @@ func TestS3DirWatcher(t *testing.T) {
 		"dir_watcher_test_file",
 	})
 
-	s := storage.NewS3StorageForTest(s3api, &backup.S3{
+	s := s3store.NewS3StorageForTest(s3api, &backup.S3{
 		Bucket: "test-bucket",
-	})
+	}, nil)
 
 	logger := zap.NewNop()
 	t.Run("WalkFiles will call callbacks on dir", func(t *testing.T) {
@@ -225,9 +226,9 @@ func TestS3DirWatcherWithRealS3(t *testing.T) {
 		t.Skip("S3_URL_FOR_TEST not set, skipping real S3 test")
 	}
 
-	backend, err := storage.ParseBackend(url, &storage.BackendOptions{})
+	backend, err := objstore.ParseBackend(url, &objstore.BackendOptions{})
 	require.NoError(t, err)
-	s, err := storage.New(context.Background(), backend, nil)
+	s, err := objstore.New(context.Background(), backend, nil)
 	require.NoError(t, err)
 
 	dirWatcherPollInterval = time.Millisecond * 10
