@@ -58,6 +58,7 @@ advance.backend-metrics-gc-idle-seconds = 1800
 
 - `backend`
 - `cmd_type`
+- `sql_type`（仅 `COM_QUERY` 会细分到 `select/update/begin/commit/...`，其他命令为 `other`）
 
 PromQL 示例：
 
@@ -74,6 +75,14 @@ histogram_quantile(
 histogram_quantile(
   0.99,
   sum(rate(tiproxy_session_query_interaction_duration_seconds_bucket[1m])) by (le, backend)
+)
+```
+
+```promql
+# 按 sql_type 看 P99 interaction latency（例如 select/update/commit/begin）
+histogram_quantile(
+  0.99,
+  sum(rate(tiproxy_session_query_interaction_duration_seconds_bucket[1m])) by (le, sql_type)
 )
 ```
 

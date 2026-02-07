@@ -14,9 +14,9 @@ import (
 )
 
 type mcPerCmd struct {
-	counter             prometheus.Counter
-	observer            prometheus.Observer
-	interactionObserver prometheus.Observer
+	counter              prometheus.Counter
+	observer             prometheus.Observer
+	interactionObservers map[string]prometheus.Observer
 }
 
 type mcPerBackend struct {
@@ -65,20 +65,28 @@ func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 	cache.maybeRunGC(now)
 }
 
-func addCmdInteractionMetrics(cmd pnet.Command, addr string, duration time.Duration) {
+func addCmdInteractionMetrics(cmd pnet.Command, addr, sqlType string, duration time.Duration) {
 	if cmd >= pnet.ComEnd {
 		return
+	}
+	if sqlType == "" {
+		sqlType = sqlTypeOther
 	}
 	now := monotime.Now()
 	cache.Lock()
 	defer cache.Unlock()
 	backendMetrics := ensureBackendMetrics(addr, now)
 	mc := &backendMetrics.cmds[cmd]
-	if mc.interactionObserver == nil {
-		label := cmd.String()
-		mc.interactionObserver = metrics.QueryInteractionDurationHistogram.WithLabelValues(addr, label)
+	if mc.interactionObservers == nil {
+		mc.interactionObservers = make(map[string]prometheus.Observer, len(interactionSQLTypes))
 	}
-	mc.interactionObserver.Observe(duration.Seconds())
+	observer, ok := mc.interactionObservers[sqlType]
+	if !ok {
+		cmdType := cmd.String()
+		observer = metrics.QueryInteractionDurationHistogram.WithLabelValues(addr, cmdType, sqlType)
+		mc.interactionObservers[sqlType] = observer
+	}
+	observer.Observe(duration.Seconds())
 	cache.maybeRunGC(now)
 }
 
@@ -139,10 +147,12 @@ func deleteBackendMetricLabels(addr string) {
 	metrics.OutboundPacketsCounter.DeleteLabelValues(addr)
 	metrics.HandshakeDurationHistogram.DeleteLabelValues(addr)
 	for cmd := pnet.Command(0); cmd < pnet.ComEnd; cmd++ {
-		label := cmd.String()
-		metrics.QueryTotalCounter.DeleteLabelValues(addr, label)
-		metrics.QueryDurationHistogram.DeleteLabelValues(addr, label)
-		metrics.QueryInteractionDurationHistogram.DeleteLabelValues(addr, label)
+		cmdType := cmd.String()
+		metrics.QueryTotalCounter.DeleteLabelValues(addr, cmdType)
+		metrics.QueryDurationHistogram.DeleteLabelValues(addr, cmdType)
+		for _, sqlType := range interactionSQLTypes {
+			metrics.QueryInteractionDurationHistogram.DeleteLabelValues(addr, cmdType, sqlType)
+		}
 	}
 }
 
@@ -153,9 +163,9 @@ func readCmdCounter(cmd pnet.Command, addr string) (int, error) {
 }
 
 // Only used for testing, no need to optimize.
-func readCmdInteractionCounter(cmd pnet.Command, addr string) (uint64, error) {
-	label := cmd.String()
-	return metrics.ReadHistogramSampleCount(metrics.QueryInteractionDurationHistogram.WithLabelValues(addr, label))
+func readCmdInteractionCounter(cmd pnet.Command, addr, sqlType string) (uint64, error) {
+	cmdType := cmd.String()
+	return metrics.ReadHistogramSampleCount(metrics.QueryInteractionDurationHistogram.WithLabelValues(addr, cmdType, sqlType))
 }
 
 // Only used for testing, no need to optimize.

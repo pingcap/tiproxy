@@ -8,9 +8,10 @@ package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
-// LblCmdType is the label constant.
+// LblCmdType and LblSQLType are label constants.
 const (
 	LblCmdType = "cmd_type"
+	LblSQLType = "sql_type"
 )
 
 var (
@@ -38,7 +39,7 @@ var (
 			Name:      "query_interaction_duration_seconds",
 			Help:      "Bucketed histogram of request to first response latency (s) for handled commands.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 29), // 0.5ms ~ 1.5days
-		}, []string{LblBackend, LblCmdType})
+		}, []string{LblBackend, LblCmdType, LblSQLType})
 
 	HandshakeDurationHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{

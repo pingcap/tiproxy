@@ -415,7 +415,11 @@ func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet
 	duration := monotime.Since(start)
 	addr := backendIO.RemoteAddr().String()
 	if metrics.ShouldCollectQueryInteractionForUser(interactionUser) {
-		addCmdInteractionMetrics(cmd, addr, duration)
+		sqlType := sqlTypeOther
+		if cmd == pnet.ComQuery && len(request) > 1 {
+			sqlType = classifyComQuerySQLType(request[1:])
+		}
+		addCmdInteractionMetrics(cmd, addr, sqlType, duration)
 	}
 
 	threshold := metrics.QueryInteractionSlowLogThreshold()

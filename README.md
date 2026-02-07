@@ -121,6 +121,8 @@ TiProxy can expose per-interaction latency:
 
 - Interaction latency: from forwarding one MySQL command to TiDB, until receiving the first response packet from TiDB.
 - Command duration (`tiproxy_session_query_duration_seconds`) still exists and keeps the original meaning.
+- Interaction metric (`tiproxy_session_query_interaction_duration_seconds`) includes labels: `backend`, `cmd_type`, `sql_type`.
+  - `sql_type` is fine-grained only for `COM_QUERY` (for example `select`, `update`, `begin`, `commit`); other commands use `other`.
 
 Configure it in `proxy.toml`:
 

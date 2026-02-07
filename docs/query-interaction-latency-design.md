@@ -14,7 +14,7 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
 
 ### 2.1 目标
 
-- 提供每次交互的聚合延迟指标，支持按 `backend`、`cmd_type` 维度分析。
+- 提供每次交互的聚合延迟指标，支持按 `backend`、`cmd_type`、`sql_type` 维度分析。
 - 支持慢交互日志阈值动态修改，无需重启 TiProxy。
 - 支持按 MySQL `username` 模式过滤交互指标，降低排障期指标压力。
 - 控制 metrics label 内存增长，支持 TTL 回收。
@@ -64,9 +64,10 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
 ### 5.1 新增指标
 
 - `tiproxy_session_query_interaction_duration_seconds` (HistogramVec)
-  - Labels: `backend`, `cmd_type`
+  - Labels: `backend`, `cmd_type`, `sql_type`
   - Bucket：与 `query_duration_seconds` 对齐。
   - 仅对匹配 `query-interaction-user-patterns` 的连接采集。
+  - `sql_type` 取值固定：`select|insert|update|delete|replace|begin|commit|rollback|set|use|other`。
 
 ### 5.2 慢交互日志
 
@@ -83,6 +84,7 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
 
 - 单响应命令：收到首包时采集一次。
 - `COM_QUERY`/`COM_STMT_EXECUTE` 多结果：每轮结果单独采集。
+- `COM_QUERY` 额外做轻量首关键字分类，写入固定集合 `sql_type`，未识别归类为 `other`。
 - `LOAD DATA LOCAL INFILE`：包含本地文件阶段后的最终返回轮次。
 - `COM_CHANGE_USER`：包含 auth switch 多轮交互。
 - 无响应命令（如 `COM_QUIT`）不采集。
