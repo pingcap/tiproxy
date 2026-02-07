@@ -22,6 +22,11 @@ func TestInteractionSettings(t *testing.T) {
 	SetQueryInteractionSlowLogThreshold(threshold)
 	require.Equal(t, threshold, QueryInteractionSlowLogThreshold())
 
+	SetQueryInteractionSlowLogOnlyDigest(false)
+	require.False(t, QueryInteractionSlowLogOnlyDigest())
+	SetQueryInteractionSlowLogOnlyDigest(true)
+	require.True(t, QueryInteractionSlowLogOnlyDigest())
+
 	interval := 123 * time.Second
 	SetBackendMetricsGCInterval(interval)
 	require.Equal(t, interval, BackendMetricsGCInterval())

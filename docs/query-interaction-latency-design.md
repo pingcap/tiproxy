@@ -43,6 +43,9 @@ New `[advance]` options:
   - Slow interaction log threshold in milliseconds.
   - `0` disables slow interaction logs.
   - Default: `200`.
+- `query-interaction-slow-log-only-digest` (bool)
+  - When `true`, slow interaction logs print `sql_digest` and omit the normalized `query` text.
+  - Default: `false`.
 - `query-interaction-user-patterns` (string)
   - Comma-separated, case-sensitive glob patterns for usernames.
   - Examples: `app_*`, `readonly`, `tenant_??`.
@@ -81,11 +84,12 @@ When `interaction_duration >= threshold`, TiProxy logs `Warn`:
   - `sql_type`
   - `username`
   - `backend_addr`
+  - `sql_digest` (only for `COM_QUERY`)
 - Filter fields:
   - `username_pattern_matched`
   - `username_matched_pattern`
 - Conditional fields:
-  - `query` for `COM_QUERY` (normalized and truncated)
+  - `query` for `COM_QUERY` (normalized and truncated), unless `query-interaction-slow-log-only-digest=true`
   - `stmt_id` for `COM_STMT_*` when statement id exists
 
 When slow interaction also matches username pattern, TiProxy emits an extra `Warn` log:

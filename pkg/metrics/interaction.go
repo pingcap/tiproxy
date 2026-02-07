@@ -12,6 +12,7 @@ import (
 
 var queryInteractionEnabled atomic.Bool
 var queryInteractionSlowLogThreshold atomic.Int64
+var queryInteractionSlowLogOnlyDigest atomic.Bool
 var backendMetricsGCInterval atomic.Int64
 var backendMetricsGCIdleTTL atomic.Int64
 var queryInteractionUserMatcherPtr atomic.Pointer[queryInteractionUserMatcher]
@@ -45,6 +46,17 @@ func SetQueryInteractionSlowLogThreshold(threshold time.Duration) {
 // QueryInteractionSlowLogThreshold returns the slow log threshold of per-interaction latency.
 func QueryInteractionSlowLogThreshold() time.Duration {
 	return time.Duration(queryInteractionSlowLogThreshold.Load())
+}
+
+// SetQueryInteractionSlowLogOnlyDigest updates whether slow interaction logs should only print SQL digest
+// and omit the normalized query text.
+func SetQueryInteractionSlowLogOnlyDigest(onlyDigest bool) {
+	queryInteractionSlowLogOnlyDigest.Store(onlyDigest)
+}
+
+// QueryInteractionSlowLogOnlyDigest returns whether slow interaction logs should only print SQL digest.
+func QueryInteractionSlowLogOnlyDigest() bool {
+	return queryInteractionSlowLogOnlyDigest.Load()
 }
 
 // SetQueryInteractionUserPatterns updates username glob filters for per-interaction metrics.

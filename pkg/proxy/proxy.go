@@ -108,6 +108,7 @@ func (s *SQLServer) reset(cfg *config.Config) {
 
 	metrics.SetQueryInteractionEnabled(cfg.Advance.QueryInteractionMetrics)
 	metrics.SetQueryInteractionSlowLogThreshold(time.Duration(cfg.Advance.QueryInteractionSlowLogThreshold) * time.Millisecond)
+	metrics.SetQueryInteractionSlowLogOnlyDigest(cfg.Advance.QueryInteractionSlowLogOnlyDigest)
 	metrics.SetQueryInteractionUserPatterns(cfg.Advance.QueryInteractionUserPatterns)
 	metrics.SetBackendMetricsGCInterval(time.Duration(cfg.Advance.BackendMetricsGCInterval) * time.Second)
 	metrics.SetBackendMetricsGCIdleTTL(time.Duration(cfg.Advance.BackendMetricsGCIdle) * time.Second)

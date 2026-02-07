@@ -440,11 +440,17 @@ func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet
 		zap.String("backend_addr", addr),
 	}
 	if cmd == pnet.ComQuery {
-		query := parser.Normalize(pnet.ParseQueryPacket(request[1:]), "ON")
-		if len(query) > 256 {
-			query = query[:256]
+		sqlText := pnet.ParseQueryPacket(request[1:])
+		normalized, digest := parser.NormalizeDigest(sqlText)
+		if digest != nil {
+			fields = append(fields, zap.String("sql_digest", digest.String()))
 		}
-		fields = append(fields, zap.String("query", query))
+		if !metrics.QueryInteractionSlowLogOnlyDigest() {
+			if len(normalized) > 256 {
+				normalized = normalized[:256]
+			}
+			fields = append(fields, zap.String("query", normalized))
+		}
 	}
 	if isStmtCmd(cmd) && len(request) >= 5 {
 		fields = append(fields, zap.Uint32("stmt_id", binary.LittleEndian.Uint32(request[1:5])))

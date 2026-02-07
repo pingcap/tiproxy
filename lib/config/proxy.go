@@ -72,12 +72,13 @@ type API struct {
 }
 
 type Advance struct {
-	IgnoreWrongNamespace             bool   `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
-	QueryInteractionMetrics          bool   `yaml:"query-interaction-metrics,omitempty" toml:"query-interaction-metrics,omitempty" json:"query-interaction-metrics,omitempty"`
-	QueryInteractionSlowLogThreshold int    `yaml:"query-interaction-slow-log-threshold-ms,omitempty" toml:"query-interaction-slow-log-threshold-ms,omitempty" json:"query-interaction-slow-log-threshold-ms,omitempty"`
-	QueryInteractionUserPatterns     string `yaml:"query-interaction-user-patterns,omitempty" toml:"query-interaction-user-patterns,omitempty" json:"query-interaction-user-patterns,omitempty"`
-	BackendMetricsGCInterval         int    `yaml:"backend-metrics-gc-interval-seconds,omitempty" toml:"backend-metrics-gc-interval-seconds,omitempty" json:"backend-metrics-gc-interval-seconds,omitempty"`
-	BackendMetricsGCIdle             int    `yaml:"backend-metrics-gc-idle-seconds,omitempty" toml:"backend-metrics-gc-idle-seconds,omitempty" json:"backend-metrics-gc-idle-seconds,omitempty"`
+	IgnoreWrongNamespace              bool   `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
+	QueryInteractionMetrics           bool   `yaml:"query-interaction-metrics,omitempty" toml:"query-interaction-metrics,omitempty" json:"query-interaction-metrics,omitempty"`
+	QueryInteractionSlowLogThreshold  int    `yaml:"query-interaction-slow-log-threshold-ms,omitempty" toml:"query-interaction-slow-log-threshold-ms,omitempty" json:"query-interaction-slow-log-threshold-ms,omitempty"`
+	QueryInteractionSlowLogOnlyDigest bool   `yaml:"query-interaction-slow-log-only-digest,omitempty" toml:"query-interaction-slow-log-only-digest,omitempty" json:"query-interaction-slow-log-only-digest,omitempty"`
+	QueryInteractionUserPatterns      string `yaml:"query-interaction-user-patterns,omitempty" toml:"query-interaction-user-patterns,omitempty" json:"query-interaction-user-patterns,omitempty"`
+	BackendMetricsGCInterval          int    `yaml:"backend-metrics-gc-interval-seconds,omitempty" toml:"backend-metrics-gc-interval-seconds,omitempty" json:"backend-metrics-gc-interval-seconds,omitempty"`
+	BackendMetricsGCIdle              int    `yaml:"backend-metrics-gc-idle-seconds,omitempty" toml:"backend-metrics-gc-idle-seconds,omitempty" json:"backend-metrics-gc-idle-seconds,omitempty"`
 }
 
 type LogOnline struct {

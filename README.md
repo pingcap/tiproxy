@@ -139,6 +139,8 @@ backend-metrics-gc-idle-seconds = 3600
   - `0` disables slow interaction logs.
   - positive values log interactions slower than threshold.
   - slow logs include `interaction_time`, `connection_id`, `username`, `sql_type`, and username-pattern match fields.
+- `query-interaction-slow-log-only-digest`:
+  - when `true`, slow interaction logs print only `sql_digest` for `COM_QUERY` and omit the normalized `query` text.
 - `query-interaction-user-patterns`:
   - comma-separated username glob patterns (`*`, `?`), case-sensitive.
   - empty value means collecting interaction metrics for all users.

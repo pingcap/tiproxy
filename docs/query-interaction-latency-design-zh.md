@@ -43,6 +43,9 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
   - 慢交互日志阈值，单位毫秒。
   - `0` 表示关闭慢日志。
   - 默认：`200`。
+- `query-interaction-slow-log-only-digest` (bool)
+  - 为 `true` 时，慢交互日志仅输出 `sql_digest`，不输出规范化后的 `query` 文本。
+  - 默认：`false`。
 - `query-interaction-user-patterns` (string)
   - 交互指标按用户名过滤（glob 模式，逗号分隔，大小写敏感）。
   - 例如：`app_*`, `readonly`, `tenant_??`。
@@ -81,11 +84,12 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
   - `sql_type`
   - `username`
   - `backend_addr`
+- `sql_digest`（仅 `COM_QUERY`）
 - 过滤字段：
   - `username_pattern_matched`
   - `username_matched_pattern`
 - 条件字段：
-  - `query`：仅 `COM_QUERY`，经过 normalize 并截断
+  - `query`：仅 `COM_QUERY`，经过 normalize 并截断；当 `query-interaction-slow-log-only-digest=true` 时不输出
   - `stmt_id`：`COM_STMT_*` 且包体含 statement id 时
 
 当慢交互同时命中 username pattern 时，额外输出：
