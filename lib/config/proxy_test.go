@@ -15,7 +15,11 @@ import (
 var testProxyConfig = Config{
 	Workdir: "./wd",
 	Advance: Advance{
-		IgnoreWrongNamespace: true,
+		IgnoreWrongNamespace:             true,
+		QueryInteractionMetrics:          true,
+		QueryInteractionSlowLogThreshold: 500,
+		BackendMetricsGCInterval:         60,
+		BackendMetricsGCIdle:             300,
 	},
 	Proxy: ProxyServer{
 		Addr:    "0.0.0.0:4000",
@@ -110,6 +114,24 @@ func TestProxyCheck(t *testing.T) {
 		{
 			pre: func(t *testing.T, c *Config) {
 				c.Proxy.ConnBufferSize = 100 * 1024 * 1024
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Advance.QueryInteractionSlowLogThreshold = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Advance.BackendMetricsGCInterval = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Advance.BackendMetricsGCIdle = -1
 			},
 			err: ErrInvalidConfigValue,
 		},

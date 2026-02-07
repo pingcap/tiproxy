@@ -8,6 +8,7 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"runtime"
 	"sync"
@@ -100,6 +101,7 @@ func registerProxyMetrics() {
 	prometheus.MustRegister(KeepAliveCounter)
 	prometheus.MustRegister(QueryTotalCounter)
 	prometheus.MustRegister(QueryDurationHistogram)
+	prometheus.MustRegister(QueryInteractionDurationHistogram)
 	prometheus.MustRegister(HandshakeDurationHistogram)
 	prometheus.MustRegister(BackendStatusGauge)
 	prometheus.MustRegister(GetBackendHistogram)
@@ -131,4 +133,17 @@ func ReadGauge(gauge prometheus.Gauge) (float64, error) {
 		return 0, err
 	}
 	return metric.Gauge.GetValue(), nil
+}
+
+// ReadHistogramSampleCount reads the sample count from the observer. It is only used for testing.
+func ReadHistogramSampleCount(observer prometheus.Observer) (uint64, error) {
+	metric, ok := observer.(prometheus.Metric)
+	if !ok {
+		return 0, fmt.Errorf("observer %T does not implement prometheus.Metric", observer)
+	}
+	var dtoMetric dto.Metric
+	if err := metric.Write(&dtoMetric); err != nil {
+		return 0, err
+	}
+	return dtoMetric.Histogram.GetSampleCount(), nil
 }

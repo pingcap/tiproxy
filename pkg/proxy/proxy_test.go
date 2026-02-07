@@ -227,6 +227,12 @@ func TestWatchCfg(t *testing.T) {
 				GracefulCloseConnTimeout: 100,
 			},
 		},
+		Advance: config.Advance{
+			QueryInteractionMetrics:          true,
+			QueryInteractionSlowLogThreshold: 1234,
+			BackendMetricsGCInterval:         321,
+			BackendMetricsGCIdle:             654,
+		},
 		Security: config.Security{
 			RequireBackendTLS: true,
 		},
@@ -239,7 +245,11 @@ func TestWatchCfg(t *testing.T) {
 			server.mu.maxConnections == cfg.Proxy.MaxConnections &&
 			server.mu.connBufferSize == cfg.Proxy.ConnBufferSize &&
 			server.mu.proxyProtocol == (cfg.Proxy.ProxyProtocol != "") &&
-			server.mu.gracefulWait == cfg.Proxy.GracefulWaitBeforeShutdown
+			server.mu.gracefulWait == cfg.Proxy.GracefulWaitBeforeShutdown &&
+			metrics.QueryInteractionEnabled() == cfg.Advance.QueryInteractionMetrics &&
+			metrics.QueryInteractionSlowLogThreshold() == time.Duration(cfg.Advance.QueryInteractionSlowLogThreshold)*time.Millisecond &&
+			metrics.BackendMetricsGCInterval() == time.Duration(cfg.Advance.BackendMetricsGCInterval)*time.Second &&
+			metrics.BackendMetricsGCIdleTTL() == time.Duration(cfg.Advance.BackendMetricsGCIdle)*time.Second
 	}, 3*time.Second, 10*time.Millisecond)
 	require.NoError(t, server.Close())
 }

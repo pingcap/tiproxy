@@ -70,7 +70,11 @@ type API struct {
 }
 
 type Advance struct {
-	IgnoreWrongNamespace bool `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
+	IgnoreWrongNamespace             bool `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
+	QueryInteractionMetrics          bool `yaml:"query-interaction-metrics,omitempty" toml:"query-interaction-metrics,omitempty" json:"query-interaction-metrics,omitempty"`
+	QueryInteractionSlowLogThreshold int  `yaml:"query-interaction-slow-log-threshold-ms,omitempty" toml:"query-interaction-slow-log-threshold-ms,omitempty" json:"query-interaction-slow-log-threshold-ms,omitempty"`
+	BackendMetricsGCInterval         int  `yaml:"backend-metrics-gc-interval-seconds,omitempty" toml:"backend-metrics-gc-interval-seconds,omitempty" json:"backend-metrics-gc-interval-seconds,omitempty"`
+	BackendMetricsGCIdle             int  `yaml:"backend-metrics-gc-idle-seconds,omitempty" toml:"backend-metrics-gc-idle-seconds,omitempty" json:"backend-metrics-gc-idle-seconds,omitempty"`
 }
 
 type LogOnline struct {
@@ -149,6 +153,9 @@ func NewConfig() *Config {
 	cfg.Log.LogFile.MaxBackups = 3
 
 	cfg.Advance.IgnoreWrongNamespace = true
+	cfg.Advance.QueryInteractionSlowLogThreshold = 200
+	cfg.Advance.BackendMetricsGCInterval = 300
+	cfg.Advance.BackendMetricsGCIdle = 3600
 	cfg.Security.SQLTLS.MinTLSVersion = "1.2"
 	cfg.Security.ServerSQLTLS.MinTLSVersion = "1.2"
 	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.2"
@@ -180,6 +187,15 @@ func (cfg *Config) Check() error {
 
 	if cfg.Proxy.ConnBufferSize > 0 && (cfg.Proxy.ConnBufferSize > 16*1024*1024 || cfg.Proxy.ConnBufferSize < 1024) {
 		return errors.Wrapf(ErrInvalidConfigValue, "conn-buffer-size must be between 1K and 16M")
+	}
+	if cfg.Advance.QueryInteractionSlowLogThreshold < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "query-interaction-slow-log-threshold-ms cannot be negative")
+	}
+	if cfg.Advance.BackendMetricsGCInterval < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "backend-metrics-gc-interval-seconds cannot be negative")
+	}
+	if cfg.Advance.BackendMetricsGCIdle < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "backend-metrics-gc-idle-seconds cannot be negative")
 	}
 
 	return nil

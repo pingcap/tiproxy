@@ -31,6 +31,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 29), // 0.5ms ~ 1.5days
 		}, []string{LblBackend, LblCmdType})
 
+	QueryInteractionDurationHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelSession,
+			Name:      "query_interaction_duration_seconds",
+			Help:      "Bucketed histogram of request to first response latency (s) for handled commands.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 29), // 0.5ms ~ 1.5days
+		}, []string{LblBackend, LblCmdType})
+
 	HandshakeDurationHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: ModuleProxy,

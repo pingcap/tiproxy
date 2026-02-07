@@ -115,6 +115,49 @@ bin/tiproxy --config=conf/proxy.toml
 mysql -h127.0.0.1 -uroot -P6000
 ```
 
+## Interaction Latency Observability
+
+TiProxy can expose per-interaction latency:
+
+- Interaction latency: from forwarding one MySQL command to TiDB, until receiving the first response packet from TiDB.
+- Command duration (`tiproxy_session_query_duration_seconds`) still exists and keeps the original meaning.
+
+Configure it in `proxy.toml`:
+
+```toml
+[advance]
+query-interaction-metrics = true
+query-interaction-slow-log-threshold-ms = 200
+backend-metrics-gc-interval-seconds = 300
+backend-metrics-gc-idle-seconds = 3600
+```
+
+- `query-interaction-slow-log-threshold-ms`:
+  - `0` disables slow interaction logs.
+  - positive values log interactions slower than threshold.
+- `backend-metrics-gc-idle-seconds`:
+  - removes idle backend label series to control in-memory metric cache growth.
+  - `0` disables metric GC.
+- `backend-metrics-gc-interval-seconds`:
+  - controls GC sweep frequency.
+  - `0` disables metric GC.
+
+These options support dynamic update through `PUT /api/admin/config`, so no restart is required.
+
+Detailed docs:
+
+- Design: [`docs/query-interaction-latency-design.md`](docs/query-interaction-latency-design.md)
+- Usage: [`docs/query-interaction-latency-usage.md`](docs/query-interaction-latency-usage.md)
+
+### Resource Sizing Notes
+
+Enabling interaction latency metrics increases CPU and memory usage because each interaction adds extra histogram observation and optional slow-log checks.
+
+- Recommended initial production reservation after enabling:
+  - CPU: +15%
+  - Memory: +10%
+- Re-check and tune by workload. Use your own benchmark and metrics data before full rollout.
+
 ## Code of Conduct
 
 This project is for everyone. We ask that our users and contributors take a few minutes to review our [Code of Conduct](code-of-conduct.md).
