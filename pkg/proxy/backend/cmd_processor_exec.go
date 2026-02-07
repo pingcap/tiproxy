@@ -20,7 +20,8 @@ import (
 // executeCmd forwards requests and responses between the client and the backend.
 // holdRequest: should the proxy send the request to the new backend.
 // err: unexpected errors or MySQL errors.
-func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool) (holdRequest bool, err error) {
+func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool, currentUser string) (holdRequest bool, err error) {
+	cp.currentUser = currentUser
 	backendIO.ResetSequence()
 	if waitingRedirect && cp.needHoldRequest(request) {
 		var response []byte
@@ -306,6 +307,7 @@ func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) error {
 }
 
 func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+	interactionUser := cp.currentUser
 	req, err := pnet.ParseChangeUser(request, cp.capability)
 	if err != nil {
 		cp.logger.Warn("parse COM_CHANGE_USER packet encounters error", zap.Error(err))
@@ -313,6 +315,8 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 		if !errors.As(err, &warning) {
 			return mysql.ErrMalformPacket
 		}
+	} else {
+		interactionUser = req.User
 	}
 	// The client may use the TiProxy salt to generate the auth data instead of using the TiDB salt,
 	// so we need another switch-auth request to pass the TiDB salt to the client.
@@ -329,7 +333,7 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 		if err != nil {
 			return err
 		}
-		cp.observeInteraction(request, backendIO, interactionStart)
+		cp.observeInteractionByUser(request, backendIO, interactionStart, interactionUser)
 		switch response[0] {
 		case pnet.OKHeader.Byte():
 			cp.handleOKPacket(request, response)
@@ -394,6 +398,10 @@ func isBeginStmt(query string) bool {
 }
 
 func (cp *CmdProcessor) observeInteraction(request []byte, backendIO *pnet.PacketIO, start monotime.Time) {
+	cp.observeInteractionByUser(request, backendIO, start, cp.currentUser)
+}
+
+func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet.PacketIO, start monotime.Time, interactionUser string) {
 	if !metrics.QueryInteractionEnabled() {
 		return
 	}
@@ -406,7 +414,9 @@ func (cp *CmdProcessor) observeInteraction(request []byte, backendIO *pnet.Packe
 	}
 	duration := monotime.Since(start)
 	addr := backendIO.RemoteAddr().String()
-	addCmdInteractionMetrics(cmd, addr, duration)
+	if metrics.ShouldCollectQueryInteractionForUser(interactionUser) {
+		addCmdInteractionMetrics(cmd, addr, duration)
+	}
 
 	threshold := metrics.QueryInteractionSlowLogThreshold()
 	if threshold <= 0 || duration < threshold {

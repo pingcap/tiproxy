@@ -128,6 +128,7 @@ Configure it in `proxy.toml`:
 [advance]
 query-interaction-metrics = true
 query-interaction-slow-log-threshold-ms = 200
+query-interaction-user-patterns = "app_*,readonly"
 backend-metrics-gc-interval-seconds = 300
 backend-metrics-gc-idle-seconds = 3600
 ```
@@ -135,6 +136,9 @@ backend-metrics-gc-idle-seconds = 3600
 - `query-interaction-slow-log-threshold-ms`:
   - `0` disables slow interaction logs.
   - positive values log interactions slower than threshold.
+- `query-interaction-user-patterns`:
+  - comma-separated username glob patterns (`*`, `?`), case-sensitive.
+  - empty value means collecting interaction metrics for all users.
 - `backend-metrics-gc-idle-seconds`:
   - removes idle backend label series to control in-memory metric cache growth.
   - `0` disables metric GC.

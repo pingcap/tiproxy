@@ -50,6 +50,65 @@ func TestBackendMetricsGC(t *testing.T) {
 	require.True(t, ok2)
 }
 
+func TestInteractionMetricsUserPatternFilter(t *testing.T) {
+	originEnabled := metrics.QueryInteractionEnabled()
+	defer metrics.SetQueryInteractionEnabled(originEnabled)
+	defer metrics.SetQueryInteractionUserPatterns("")
+
+	metrics.SetQueryInteractionEnabled(true)
+	metrics.SetQueryInteractionUserPatterns("app_*")
+
+	tc := newTCPConnSuite(t)
+	ts, clean := newTestSuite(t, tc, func(cfg *testConfig) {
+		cfg.clientConfig.cmd = pnet.ComQuery
+		cfg.backendConfig.respondType = responseTypeOK
+	})
+	defer clean()
+	ts.authenticateFirstTime(t, nil)
+
+	addr := ts.tc.proxyBIO.RemoteAddr().String()
+	prev, err := readCmdInteractionCounter(pnet.ComQuery, addr)
+	require.NoError(t, err)
+
+	ts.executeCmd(t, nil)
+	cur, err := readCmdInteractionCounter(pnet.ComQuery, addr)
+	require.NoError(t, err)
+	require.Equal(t, prev, cur)
+
+	ts.changeUser("app_reader", mockDBName)
+	ts.executeCmd(t, nil)
+	cur, err = readCmdInteractionCounter(pnet.ComQuery, addr)
+	require.NoError(t, err)
+	require.Equal(t, prev+1, cur)
+}
+
+func TestInteractionMetricsUserPatternOnChangeUser(t *testing.T) {
+	originEnabled := metrics.QueryInteractionEnabled()
+	defer metrics.SetQueryInteractionEnabled(originEnabled)
+	defer metrics.SetQueryInteractionUserPatterns("")
+
+	metrics.SetQueryInteractionEnabled(true)
+	metrics.SetQueryInteractionUserPatterns("app_*")
+
+	tc := newTCPConnSuite(t)
+	ts, clean := newTestSuite(t, tc, func(cfg *testConfig) {
+		cfg.clientConfig.cmd = pnet.ComChangeUser
+		cfg.clientConfig.username = "app_switch"
+		cfg.backendConfig.respondType = responseTypeOK
+	})
+	defer clean()
+	ts.authenticateFirstTime(t, nil)
+
+	addr := ts.tc.proxyBIO.RemoteAddr().String()
+	prev, err := readCmdInteractionCounter(pnet.ComChangeUser, addr)
+	require.NoError(t, err)
+
+	ts.executeCmd(t, nil)
+	cur, err := readCmdInteractionCounter(pnet.ComChangeUser, addr)
+	require.NoError(t, err)
+	require.Equal(t, prev+1, cur)
+}
+
 func BenchmarkAddCmdMetrics(b *testing.B) {
 	cmd := pnet.ComQuery
 	addr := "127.0.0.1:4000"

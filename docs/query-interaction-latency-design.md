@@ -16,6 +16,7 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
 
 - 提供每次交互的聚合延迟指标，支持按 `backend`、`cmd_type` 维度分析。
 - 支持慢交互日志阈值动态修改，无需重启 TiProxy。
+- 支持按 MySQL `username` 模式过滤交互指标，降低排障期指标压力。
 - 控制 metrics label 内存增长，支持 TTL 回收。
 - 保持线上稳定：默认关闭交互指标，开关与阈值可热更新。
 
@@ -42,6 +43,11 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
   - 慢交互日志阈值，单位毫秒。
   - `0` 表示关闭慢日志。
   - 默认：`200`。
+- `query-interaction-user-patterns` (string)
+  - 交互指标按用户名过滤（glob 模式，逗号分隔，大小写敏感）。
+  - 例如：`app_*`, `readonly`, `tenant_??`。
+  - 空字符串表示不过滤（采集所有用户）。
+  - 默认：`""`。
 - `backend-metrics-gc-interval-seconds` (int)
   - backend metrics GC 扫描周期。
   - `0` 表示关闭 GC。
@@ -60,6 +66,7 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
 - `tiproxy_session_query_interaction_duration_seconds` (HistogramVec)
   - Labels: `backend`, `cmd_type`
   - Bucket：与 `query_duration_seconds` 对齐。
+  - 仅对匹配 `query-interaction-user-patterns` 的连接采集。
 
 ### 5.2 慢交互日志
 
@@ -106,6 +113,7 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
   - histogram observe
   - 慢日志阈值判断
 - GC 采用“低频 + TTL”策略，避免每次请求都做全量扫描。
+- username 过滤采用预解析 glob 列表匹配，开销与 pattern 数量线性相关。
 
 建议上线预留资源：
 
@@ -128,4 +136,3 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
 - 原有指标与语义保持不变。
 - 新配置均有默认值，升级兼容旧配置文件。
 - 若需完全关闭回收，将 `backend-metrics-gc-interval-seconds=0` 或 `backend-metrics-gc-idle-seconds=0`。
-

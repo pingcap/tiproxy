@@ -17,6 +17,7 @@
 [advance]
 query-interaction-metrics = true
 query-interaction-slow-log-threshold-ms = 200
+query-interaction-user-patterns = "app_*,readonly"
 backend-metrics-gc-interval-seconds = 300
 backend-metrics-gc-idle-seconds = 3600
 ```
@@ -25,6 +26,7 @@ backend-metrics-gc-idle-seconds = 3600
 
 - `query-interaction-metrics=false`：关闭交互延迟指标（默认）。
 - `query-interaction-slow-log-threshold-ms=0`：关闭慢交互日志。
+- `query-interaction-user-patterns=""`：采集所有用户名；设置后仅采集匹配 username 的交互指标。
 - `backend-metrics-gc-interval-seconds=0` 或 `backend-metrics-gc-idle-seconds=0`：关闭 metrics GC。
 
 ## 3. 动态修改（不中断服务）
@@ -35,6 +37,7 @@ backend-metrics-gc-idle-seconds = 3600
 curl -X PUT http://127.0.0.1:3080/api/admin/config -d '
 advance.query-interaction-metrics = true
 advance.query-interaction-slow-log-threshold-ms = 1000
+advance.query-interaction-user-patterns = "app_*"
 advance.backend-metrics-gc-interval-seconds = 120
 advance.backend-metrics-gc-idle-seconds = 1800
 '
@@ -116,6 +119,7 @@ histogram_quantile(
 原因：
 
 - 每次交互多一次 histogram observe。
+- 若设置 `query-interaction-user-patterns`，每次交互会做一次用户名 glob 匹配（与 pattern 数量线性相关）。
 - 慢日志阈值判断和可能的日志写入。
 - backend metrics label cache 维护与周期性 GC。
 
@@ -130,6 +134,7 @@ histogram_quantile(
 ### 7.1 看不到 interaction 指标
 
 - 确认 `advance.query-interaction-metrics = true`。
+- 若配置了 `advance.query-interaction-user-patterns`，确认当前连接 username 能匹配其中至少一个 pattern。
 - 确认 `/api/admin/config` 返回已生效值。
 - 确认有真实 SQL 流量经过 TiProxy。
 
@@ -143,4 +148,3 @@ histogram_quantile(
 
 - 提高 `query-interaction-slow-log-threshold-ms`。
 - 排障窗口之外可设置为 `0` 关闭慢日志。
-

@@ -4,6 +4,8 @@
 package metrics
 
 import (
+	"path"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -12,11 +14,17 @@ var queryInteractionEnabled atomic.Bool
 var queryInteractionSlowLogThreshold atomic.Int64
 var backendMetricsGCInterval atomic.Int64
 var backendMetricsGCIdleTTL atomic.Int64
+var queryInteractionUserMatcherPtr atomic.Pointer[queryInteractionUserMatcher]
+
+type queryInteractionUserMatcher struct {
+	patterns []string
+}
 
 func init() {
 	queryInteractionSlowLogThreshold.Store(int64(200 * time.Millisecond))
 	backendMetricsGCInterval.Store(int64(5 * time.Minute))
 	backendMetricsGCIdleTTL.Store(int64(time.Hour))
+	SetQueryInteractionUserPatterns("")
 }
 
 // SetQueryInteractionEnabled updates whether per-interaction query latency metrics are emitted.
@@ -37,6 +45,40 @@ func SetQueryInteractionSlowLogThreshold(threshold time.Duration) {
 // QueryInteractionSlowLogThreshold returns the slow log threshold of per-interaction latency.
 func QueryInteractionSlowLogThreshold() time.Duration {
 	return time.Duration(queryInteractionSlowLogThreshold.Load())
+}
+
+// SetQueryInteractionUserPatterns updates username glob filters for per-interaction metrics.
+// Comma separates multiple patterns; empty means allowing all users.
+func SetQueryInteractionUserPatterns(patterns string) {
+	filterPatterns := make([]string, 0, 4)
+	for _, pattern := range strings.Split(patterns, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		filterPatterns = append(filterPatterns, pattern)
+	}
+	queryInteractionUserMatcherPtr.Store(&queryInteractionUserMatcher{
+		patterns: filterPatterns,
+	})
+}
+
+// ShouldCollectQueryInteractionForUser reports whether per-interaction metrics should be emitted for this user.
+func ShouldCollectQueryInteractionForUser(user string) bool {
+	matcher := queryInteractionUserMatcherPtr.Load()
+	if matcher == nil || len(matcher.patterns) == 0 {
+		return true
+	}
+	for _, pattern := range matcher.patterns {
+		matched, err := path.Match(pattern, user)
+		if err != nil {
+			continue
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 // SetBackendMetricsGCInterval updates how often backend metric labels are GC'ed.

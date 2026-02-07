@@ -24,7 +24,9 @@ type CmdProcessor struct {
 	capability         pnet.Capability
 	// Only includes in_trans or quit status.
 	serverStatus uint32
-	logger       *zap.Logger
+	// currentUser is used by interaction metrics filters.
+	currentUser string
+	logger      *zap.Logger
 }
 
 func NewCmdProcessor(logger *zap.Logger) *CmdProcessor {

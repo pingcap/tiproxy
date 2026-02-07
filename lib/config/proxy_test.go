@@ -18,6 +18,7 @@ var testProxyConfig = Config{
 		IgnoreWrongNamespace:             true,
 		QueryInteractionMetrics:          true,
 		QueryInteractionSlowLogThreshold: 500,
+		QueryInteractionUserPatterns:     "app_*,readonly",
 		BackendMetricsGCInterval:         60,
 		BackendMetricsGCIdle:             300,
 	},
@@ -132,6 +133,12 @@ func TestProxyCheck(t *testing.T) {
 		{
 			pre: func(t *testing.T, c *Config) {
 				c.Advance.BackendMetricsGCIdle = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Advance.QueryInteractionUserPatterns = "["
 			},
 			err: ErrInvalidConfigValue,
 		},

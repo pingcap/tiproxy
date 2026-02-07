@@ -6,7 +6,9 @@ package config
 import (
 	"bytes"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -70,11 +72,12 @@ type API struct {
 }
 
 type Advance struct {
-	IgnoreWrongNamespace             bool `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
-	QueryInteractionMetrics          bool `yaml:"query-interaction-metrics,omitempty" toml:"query-interaction-metrics,omitempty" json:"query-interaction-metrics,omitempty"`
-	QueryInteractionSlowLogThreshold int  `yaml:"query-interaction-slow-log-threshold-ms,omitempty" toml:"query-interaction-slow-log-threshold-ms,omitempty" json:"query-interaction-slow-log-threshold-ms,omitempty"`
-	BackendMetricsGCInterval         int  `yaml:"backend-metrics-gc-interval-seconds,omitempty" toml:"backend-metrics-gc-interval-seconds,omitempty" json:"backend-metrics-gc-interval-seconds,omitempty"`
-	BackendMetricsGCIdle             int  `yaml:"backend-metrics-gc-idle-seconds,omitempty" toml:"backend-metrics-gc-idle-seconds,omitempty" json:"backend-metrics-gc-idle-seconds,omitempty"`
+	IgnoreWrongNamespace             bool   `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
+	QueryInteractionMetrics          bool   `yaml:"query-interaction-metrics,omitempty" toml:"query-interaction-metrics,omitempty" json:"query-interaction-metrics,omitempty"`
+	QueryInteractionSlowLogThreshold int    `yaml:"query-interaction-slow-log-threshold-ms,omitempty" toml:"query-interaction-slow-log-threshold-ms,omitempty" json:"query-interaction-slow-log-threshold-ms,omitempty"`
+	QueryInteractionUserPatterns     string `yaml:"query-interaction-user-patterns,omitempty" toml:"query-interaction-user-patterns,omitempty" json:"query-interaction-user-patterns,omitempty"`
+	BackendMetricsGCInterval         int    `yaml:"backend-metrics-gc-interval-seconds,omitempty" toml:"backend-metrics-gc-interval-seconds,omitempty" json:"backend-metrics-gc-interval-seconds,omitempty"`
+	BackendMetricsGCIdle             int    `yaml:"backend-metrics-gc-idle-seconds,omitempty" toml:"backend-metrics-gc-idle-seconds,omitempty" json:"backend-metrics-gc-idle-seconds,omitempty"`
 }
 
 type LogOnline struct {
@@ -197,7 +200,23 @@ func (cfg *Config) Check() error {
 	if cfg.Advance.BackendMetricsGCIdle < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "backend-metrics-gc-idle-seconds cannot be negative")
 	}
+	if err := checkQueryInteractionUserPatterns(cfg.Advance.QueryInteractionUserPatterns); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func checkQueryInteractionUserPatterns(patterns string) error {
+	for _, pattern := range strings.Split(patterns, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return errors.Wrapf(ErrInvalidConfigValue, "invalid query-interaction-user-patterns pattern %q: %v", pattern, err)
+		}
+	}
 	return nil
 }
 

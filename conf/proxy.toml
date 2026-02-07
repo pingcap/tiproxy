@@ -122,6 +122,11 @@ graceful-close-conn-timeout = 15
 #  200 => log interactions slower than 200ms
 # query-interaction-slow-log-threshold-ms = 200
 
+# optional username glob filter for interaction metrics:
+# comma-separated patterns, supports `*` and `?`, case-sensitive
+# empty means collect all users
+# query-interaction-user-patterns = ""
+
 # backend metrics GC:
 # backend labels not updated for `backend-metrics-gc-idle-seconds` will be removed from in-memory caches and metric vectors
 # set `backend-metrics-gc-interval-seconds = 0` or `backend-metrics-gc-idle-seconds = 0` to disable GC

@@ -11,6 +11,8 @@ import (
 )
 
 func TestInteractionSettings(t *testing.T) {
+	defer SetQueryInteractionUserPatterns("")
+
 	SetQueryInteractionEnabled(false)
 	require.False(t, QueryInteractionEnabled())
 	SetQueryInteractionEnabled(true)
@@ -27,4 +29,12 @@ func TestInteractionSettings(t *testing.T) {
 	ttl := 456 * time.Second
 	SetBackendMetricsGCIdleTTL(ttl)
 	require.Equal(t, ttl, BackendMetricsGCIdleTTL())
+
+	SetQueryInteractionUserPatterns("app_*, readonly")
+	require.True(t, ShouldCollectQueryInteractionForUser("app_0"))
+	require.True(t, ShouldCollectQueryInteractionForUser("readonly"))
+	require.False(t, ShouldCollectQueryInteractionForUser("root"))
+
+	SetQueryInteractionUserPatterns("")
+	require.True(t, ShouldCollectQueryInteractionForUser("any-user"))
 }
