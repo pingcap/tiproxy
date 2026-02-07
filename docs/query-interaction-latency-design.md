@@ -1,110 +1,119 @@
 # TiProxy Query Interaction Latency Design
 
-## 1. 背景
+## 1. Background
 
-TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时，但无法直接回答以下问题：
+As a TiDB gateway, TiProxy already exposes command-level total duration metrics. However, those metrics cannot directly answer:
 
-- 单次 MySQL 交互（request -> backend first response）的延迟是否异常。
-- 出现慢请求时，是 TiDB 后端慢，还是 TiProxy 自身引入额外时延。
-- backend 数量或地址变化后，metrics label 是否会长期累积占用内存。
+- Whether one MySQL interaction (`request -> first backend response packet`) is slow.
+- Whether a latency spike comes from TiDB backend latency or TiProxy overhead.
+- Whether backend label cardinality can grow indefinitely when backend addresses change.
 
-为此，本设计新增交互延迟观测、慢交互日志、以及 backend metrics label GC。
+To solve this, we add interaction latency observability, slow interaction logs, and backend metrics label GC.
 
-## 2. 目标与非目标
+## 2. Goals and Non-goals
 
-### 2.1 目标
+### 2.1 Goals
 
-- 提供每次交互的聚合延迟指标，支持按 `backend`、`cmd_type`、`sql_type` 维度分析。
-- 支持慢交互日志阈值动态修改，无需重启 TiProxy。
-- 支持按 MySQL `username` 模式过滤交互指标，降低排障期指标压力。
-- 控制 metrics label 内存增长，支持 TTL 回收。
-- 保持线上稳定：默认关闭交互指标，开关与阈值可热更新。
+- Provide per-interaction latency metrics with dimensions `backend`, `cmd_type`, and `sql_type`.
+- Support dynamic updates for slow interaction threshold without restarting TiProxy.
+- Support username-pattern filtering for interaction metrics to reduce troubleshooting-time metric pressure.
+- Control metrics-label memory growth with TTL-based GC.
+- Keep production stable: interaction metrics remain disabled by default; options are dynamically reloadable.
 
-### 2.2 非目标
+### 2.2 Non-goals
 
-- 不提供完整 SQL tracing/span。
-- 不改变已有 `query_duration_seconds` 指标语义。
-- 不对外暴露每一条请求的全量明细存储。
+- Full SQL tracing/span storage.
+- Changing semantics of existing `query_duration_seconds`.
+- Storing full per-request raw details externally.
 
-## 3. 术语定义
+## 3. Terminology
 
-- Interaction：一轮 MySQL 命令交互，从 TiProxy 把 request 转发到 TiDB 后开始，直到收到 TiDB 的第一个 response packet 结束。
-- Command Duration：现有命令完整处理耗时（已有指标，不变）。
-- Interaction Duration：本次新增的首包响应延迟。
+- Interaction: one MySQL command round from forwarding request to TiDB until receiving the first response packet.
+- Command Duration: existing full command processing duration metric.
+- Interaction Duration: first-response latency introduced by this feature.
 
-## 4. 配置设计
+## 4. Configuration
 
-新增 `[advance]` 配置项：
+New `[advance]` options:
 
 - `query-interaction-metrics` (bool)
-  - 是否开启交互延迟观测。
-  - 默认：`false`。
+  - Enable interaction latency metrics.
+  - Default: `false`.
 - `query-interaction-slow-log-threshold-ms` (int)
-  - 慢交互日志阈值，单位毫秒。
-  - `0` 表示关闭慢日志。
-  - 默认：`200`。
+  - Slow interaction log threshold in milliseconds.
+  - `0` disables slow interaction logs.
+  - Default: `200`.
 - `query-interaction-user-patterns` (string)
-  - 交互指标按用户名过滤（glob 模式，逗号分隔，大小写敏感）。
-  - 例如：`app_*`, `readonly`, `tenant_??`。
-  - 空字符串表示不过滤（采集所有用户）。
-  - 默认：`""`。
+  - Comma-separated, case-sensitive glob patterns for usernames.
+  - Examples: `app_*`, `readonly`, `tenant_??`.
+  - Empty means no filtering (collect all usernames).
+  - Default: `""`.
 - `backend-metrics-gc-interval-seconds` (int)
-  - backend metrics GC 扫描周期。
-  - `0` 表示关闭 GC。
-  - 默认：`300`。
+  - Backend metrics GC sweep interval.
+  - `0` disables GC.
+  - Default: `300`.
 - `backend-metrics-gc-idle-seconds` (int)
-  - backend idle TTL，超过 TTL 未更新则回收其 metrics labels。
-  - `0` 表示关闭 GC。
-  - 默认：`3600`。
+  - Idle TTL for backend labels; stale labels are removed after TTL.
+  - `0` disables GC.
+  - Default: `3600`.
 
-所有配置支持通过 `PUT /api/admin/config` 动态更新。
+All options support dynamic updates through `PUT /api/admin/config`.
 
-## 5. 指标与日志设计
+## 5. Metrics and Logs
 
-### 5.1 新增指标
+### 5.1 New metric
 
 - `tiproxy_session_query_interaction_duration_seconds` (HistogramVec)
   - Labels: `backend`, `cmd_type`, `sql_type`
-  - Bucket：与 `query_duration_seconds` 对齐。
-  - 仅对匹配 `query-interaction-user-patterns` 的连接采集。
-  - `sql_type` 取值固定：`select|insert|update|delete|replace|begin|commit|rollback|set|use|other`。
+  - Buckets aligned with `query_duration_seconds`
+  - Collected only when username matches `query-interaction-user-patterns`
+  - `sql_type` is fixed: `select|insert|update|delete|replace|begin|commit|rollback|set|use|other`
 
-### 5.2 慢交互日志
+### 5.2 Slow interaction logs
 
-当 `interaction_duration >= threshold` 时记录 `Warn` 日志：
+When `interaction_duration >= threshold`, TiProxy logs `Warn`:
 
-- 固定字段：`interaction_time`, `interaction_duration`, `connection_id`, `cmd`, `sql_type`, `username`, `backend_addr`
-- 过滤字段：`username_pattern_matched`, `username_matched_pattern`
-- 条件字段：
-  - `query`：仅 `COM_QUERY`，经过 normalize 并截断
-  - `stmt_id`：`COM_STMT_*` 且包体含 statement id 时
+- Base fields:
+  - `interaction_time`
+  - `interaction_duration`
+  - `connection_id`
+  - `cmd`
+  - `sql_type`
+  - `username`
+  - `backend_addr`
+- Filter fields:
+  - `username_pattern_matched`
+  - `username_matched_pattern`
+- Conditional fields:
+  - `query` for `COM_QUERY` (normalized and truncated)
+  - `stmt_id` for `COM_STMT_*` when statement id exists
 
-当慢交互同时命中 username pattern 时，额外输出：
+When slow interaction also matches username pattern, TiProxy emits an extra `Warn` log:
 
 - `slow mysql interaction matched username pattern`
 
-## 6. 数据路径与埋点位置
+## 6. Data path and instrumentation
 
-埋点位于 `CmdProcessor` 转发路径，按“每一轮交互”采集：
+Instrumentation is in the `CmdProcessor` forwarding path, sampled per interaction:
 
-- 单响应命令：收到首包时采集一次。
-- `COM_QUERY`/`COM_STMT_EXECUTE` 多结果：每轮结果单独采集。
-- `COM_QUERY` 额外做轻量首关键字分类，写入固定集合 `sql_type`，未识别归类为 `other`。
-- `LOAD DATA LOCAL INFILE`：包含本地文件阶段后的最终返回轮次。
-- `COM_CHANGE_USER`：包含 auth switch 多轮交互。
-- 无响应命令（如 `COM_QUIT`）不采集。
+- Single-response commands: observed once when first response packet arrives.
+- `COM_QUERY`/`COM_STMT_EXECUTE` with multiple results: observed per result round.
+- `COM_QUERY`: lightweight first-keyword classification fills fixed `sql_type`; unrecognized SQL is `other`.
+- `LOAD DATA LOCAL INFILE`: includes the final response after file transfer phase.
+- `COM_CHANGE_USER`: includes multi-round auth switch interactions.
+- No-response commands (for example `COM_QUIT`) are not observed.
 
-## 7. Backend Metrics GC 设计
+## 7. Backend metrics GC
 
-在 backend metrics cache 维护 `lastSeen`：
+`backend metrics cache` tracks `lastSeen`:
 
-1. 每次 metrics 更新刷新 `lastSeen`。
-2. 到达 GC interval 时触发 sweep。
-3. 若 `now - lastSeen > idleTTL`：
-   - 删除缓存节点。
-   - 调用 Prometheus `DeleteLabelValues` 回收对应 labels。
+1. Refresh `lastSeen` on each metric update.
+2. Run sweep when GC interval arrives.
+3. If `now - lastSeen > idleTTL`:
+   - Delete cache entry.
+   - Call Prometheus `DeleteLabelValues` to remove metric labels.
 
-回收范围：
+GC coverage:
 
 - `query_total`
 - `query_duration_seconds`
@@ -112,34 +121,34 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
 - `handshake_duration_seconds`
 - traffic counters
 
-## 8. 性能与稳定性考虑
+## 8. Performance and stability
 
-- 默认关闭交互指标，避免默认增量开销。
-- 开启后增量主要是：
-  - monotonic time 计算
+- Interaction metrics are disabled by default to avoid default overhead.
+- Main incremental cost when enabled:
+  - monotonic time calculation
   - histogram observe
-  - 慢日志阈值判断
-- GC 采用“低频 + TTL”策略，避免每次请求都做全量扫描。
-- username 过滤采用预解析 glob 列表匹配，开销与 pattern 数量线性相关。
+  - slow-threshold evaluation and logging
+- GC uses low-frequency + TTL sweep to avoid per-request full scans.
+- Username filter uses pre-parsed glob patterns; cost is linear to pattern count.
 
-建议上线预留资源：
+Recommended initial reservation before rollout:
 
 - CPU: +15%
 - Memory: +10%
 
-实际值需结合业务流量压测复核。
+Validate with workload-specific benchmarks.
 
-## 9. 测试策略
+## 9. Testing strategy
 
-- 配置测试：新字段默认值、序列化、负值校验。
-- 热更新测试：`WatchConfig` 下参数动态生效。
-- 指标测试：
-  - interaction histogram sample count 增长
-  - TTL GC 可删除 stale backend labels
-- 协议路径回归：`pkg/proxy/backend` 全量测试通过。
+- Config tests: defaults, serialization, invalid value checks.
+- Dynamic update tests: runtime updates effective under `WatchConfig`.
+- Metrics tests:
+  - interaction histogram sample count increments
+  - TTL GC removes stale backend labels
+- Protocol-path regression: full `pkg/proxy/backend` tests pass.
 
-## 10. 兼容性
+## 10. Compatibility
 
-- 原有指标与语义保持不变。
-- 新配置均有默认值，升级兼容旧配置文件。
-- 若需完全关闭回收，将 `backend-metrics-gc-interval-seconds=0` 或 `backend-metrics-gc-idle-seconds=0`。
+- Existing metrics and semantics stay unchanged.
+- New options have defaults, so upgrades are backward-compatible.
+- To fully disable GC, set `backend-metrics-gc-interval-seconds=0` or `backend-metrics-gc-idle-seconds=0`.

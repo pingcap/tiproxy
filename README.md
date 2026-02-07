@@ -154,6 +154,7 @@ These options support dynamic update through `PUT /api/admin/config`, so no rest
 Detailed docs:
 
 - Design: [`docs/query-interaction-latency-design.md`](docs/query-interaction-latency-design.md)
+- Design (Chinese): [`docs/query-interaction-latency-design-zh.md`](docs/query-interaction-latency-design-zh.md)
 - Usage: [`docs/query-interaction-latency-usage.md`](docs/query-interaction-latency-usage.md)
 
 ### Resource Sizing Notes
