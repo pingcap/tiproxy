@@ -104,11 +104,18 @@ histogram_quantile(
 日志名：
 
 - `slow mysql interaction`
+- `slow mysql interaction matched username pattern`（当慢交互且命中 username pattern）
 
 字段：
 
+- `interaction_time`
 - `interaction_duration`
+- `connection_id`
 - `cmd`
+- `sql_type`
+- `username`
+- `username_pattern_matched`
+- `username_matched_pattern`
 - `backend_addr`
 - `query`（仅 `COM_QUERY`）
 - `stmt_id`（适用 `COM_STMT_*`）

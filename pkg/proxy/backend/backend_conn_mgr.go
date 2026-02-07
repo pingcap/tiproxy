@@ -182,6 +182,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 	}
 	mgr.ctxmap.m = make(map[any]any)
 	mgr.SetValue(ConnContextKeyConnID, connectionID)
+	mgr.cmdProcessor.connectionID = connectionID
 	return mgr
 }
 

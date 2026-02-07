@@ -26,7 +26,9 @@ type CmdProcessor struct {
 	serverStatus uint32
 	// currentUser is used by interaction metrics filters.
 	currentUser string
-	logger      *zap.Logger
+	// connectionID is used in interaction logs.
+	connectionID uint64
+	logger       *zap.Logger
 }
 
 func NewCmdProcessor(logger *zap.Logger) *CmdProcessor {

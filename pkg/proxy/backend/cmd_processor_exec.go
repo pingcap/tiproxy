@@ -6,6 +6,7 @@ package backend
 import (
 	"encoding/binary"
 	"strings"
+	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/pkg/parser"
@@ -414,11 +415,12 @@ func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet
 	}
 	duration := monotime.Since(start)
 	addr := backendIO.RemoteAddr().String()
-	if metrics.ShouldCollectQueryInteractionForUser(interactionUser) {
-		sqlType := sqlTypeOther
-		if cmd == pnet.ComQuery && len(request) > 1 {
-			sqlType = classifyComQuerySQLType(request[1:])
-		}
+	sqlType := sqlTypeOther
+	if cmd == pnet.ComQuery && len(request) > 1 {
+		sqlType = classifyComQuerySQLType(request[1:])
+	}
+	patternMatched, matchedPattern := metrics.MatchQueryInteractionUserPattern(interactionUser)
+	if patternMatched {
 		addCmdInteractionMetrics(cmd, addr, sqlType, duration)
 	}
 
@@ -427,8 +429,14 @@ func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet
 		return
 	}
 	fields := []zap.Field{
+		zap.Time("interaction_time", time.Now()),
 		zap.Duration("interaction_duration", duration),
+		zap.Uint64("connection_id", cp.connectionID),
 		zap.Stringer("cmd", cmd),
+		zap.String("sql_type", sqlType),
+		zap.String("username", interactionUser),
+		zap.Bool("username_pattern_matched", patternMatched),
+		zap.String("username_matched_pattern", matchedPattern),
 		zap.String("backend_addr", addr),
 	}
 	if cmd == pnet.ComQuery {
@@ -442,6 +450,9 @@ func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet
 		fields = append(fields, zap.Uint32("stmt_id", binary.LittleEndian.Uint32(request[1:5])))
 	}
 	cp.logger.Warn("slow mysql interaction", fields...)
+	if patternMatched {
+		cp.logger.Warn("slow mysql interaction matched username pattern", fields...)
+	}
 }
 
 func isStmtCmd(cmd pnet.Command) bool {

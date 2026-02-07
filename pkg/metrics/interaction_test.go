@@ -34,7 +34,16 @@ func TestInteractionSettings(t *testing.T) {
 	require.True(t, ShouldCollectQueryInteractionForUser("app_0"))
 	require.True(t, ShouldCollectQueryInteractionForUser("readonly"))
 	require.False(t, ShouldCollectQueryInteractionForUser("root"))
+	matched, pattern := MatchQueryInteractionUserPattern("app_0")
+	require.True(t, matched)
+	require.Equal(t, "app_*", pattern)
+	matched, pattern = MatchQueryInteractionUserPattern("root")
+	require.False(t, matched)
+	require.Equal(t, "", pattern)
 
 	SetQueryInteractionUserPatterns("")
 	require.True(t, ShouldCollectQueryInteractionForUser("any-user"))
+	matched, pattern = MatchQueryInteractionUserPattern("any-user")
+	require.True(t, matched)
+	require.Equal(t, "", pattern)
 }

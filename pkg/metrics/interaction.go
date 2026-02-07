@@ -65,9 +65,16 @@ func SetQueryInteractionUserPatterns(patterns string) {
 
 // ShouldCollectQueryInteractionForUser reports whether per-interaction metrics should be emitted for this user.
 func ShouldCollectQueryInteractionForUser(user string) bool {
+	matched, _ := MatchQueryInteractionUserPattern(user)
+	return matched
+}
+
+// MatchQueryInteractionUserPattern reports whether the user matches configured patterns
+// and returns the matched pattern when available.
+func MatchQueryInteractionUserPattern(user string) (matched bool, pattern string) {
 	matcher := queryInteractionUserMatcherPtr.Load()
 	if matcher == nil || len(matcher.patterns) == 0 {
-		return true
+		return true, ""
 	}
 	for _, pattern := range matcher.patterns {
 		matched, err := path.Match(pattern, user)
@@ -75,10 +82,10 @@ func ShouldCollectQueryInteractionForUser(user string) bool {
 			continue
 		}
 		if matched {
-			return true
+			return true, pattern
 		}
 	}
-	return false
+	return false, ""
 }
 
 // SetBackendMetricsGCInterval updates how often backend metric labels are GC'ed.

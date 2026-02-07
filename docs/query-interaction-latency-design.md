@@ -73,10 +73,15 @@ TiProxy 作为 TiDB gateway，原有指标可以看到命令级别的总耗时�
 
 当 `interaction_duration >= threshold` 时记录 `Warn` 日志：
 
-- 固定字段：`interaction_duration`, `cmd`, `backend_addr`
+- 固定字段：`interaction_time`, `interaction_duration`, `connection_id`, `cmd`, `sql_type`, `username`, `backend_addr`
+- 过滤字段：`username_pattern_matched`, `username_matched_pattern`
 - 条件字段：
   - `query`：仅 `COM_QUERY`，经过 normalize 并截断
   - `stmt_id`：`COM_STMT_*` 且包体含 statement id 时
+
+当慢交互同时命中 username pattern 时，额外输出：
+
+- `slow mysql interaction matched username pattern`
 
 ## 6. 数据路径与埋点位置
 
