@@ -31,6 +31,9 @@ func main() {
 	rootCmd.PersistentFlags().StringVar(&sctx.ConfigFile, "config", "", "proxy config file path")
 	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Log.Encoder, "log_encoder", "", "log in format of tidb, console, or json")
 	rootCmd.PersistentFlags().StringVar(&sctx.Overlay.Log.Level, "log_level", "", "log level")
+	rootCmd.PersistentFlags().BoolVar(&sctx.Overlay.Advance.QueryInteractionMetrics, "query-interaction-metrics", false, "enable query interaction latency metrics (advance.query-interaction-metrics). Note: CLI flag is an overlay and will override config reloads")
+	// Keep underscore alias for compatibility with existing flag naming style.
+	rootCmd.PersistentFlags().BoolVar(&sctx.Overlay.Advance.QueryInteractionMetrics, "query_interaction_metrics", false, "alias of --query-interaction-metrics")
 
 	metrics.MaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 
