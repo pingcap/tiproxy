@@ -14,8 +14,9 @@ import (
 )
 
 type mcPerCmd struct {
-	counter  prometheus.Counter
-	observer prometheus.Observer
+	counter              prometheus.Counter
+	observer             prometheus.Observer
+	interactionObservers map[string]prometheus.Observer
 }
 
 type mcPerBackend struct {
@@ -27,11 +28,13 @@ type mcPerBackend struct {
 	outBytes          prometheus.Counter
 	outPackets        prometheus.Counter
 	handshakeDuration prometheus.Observer
+	lastSeen          monotime.Time
 }
 
 type cmdMetricsCache struct {
 	sync.Mutex
 	backendMetrics map[string]*mcPerBackend
+	lastGCTime     monotime.Time
 }
 
 func newCmdMetricsCache() cmdMetricsCache {
@@ -43,9 +46,13 @@ func newCmdMetricsCache() cmdMetricsCache {
 var cache = newCmdMetricsCache()
 
 func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
+	if cmd >= pnet.ComEnd {
+		return
+	}
+	now := monotime.Now()
 	cache.Lock()
 	defer cache.Unlock()
-	backendMetrics := ensureBackendMetrics(addr)
+	backendMetrics := ensureBackendMetrics(addr, now)
 	mc := &backendMetrics.cmds[cmd]
 	if mc.counter == nil {
 		label := cmd.String()
@@ -55,20 +62,48 @@ func addCmdMetrics(cmd pnet.Command, addr string, startTime monotime.Time) {
 	mc.counter.Inc()
 	cost := monotime.Since(startTime)
 	mc.observer.Observe(cost.Seconds())
+	cache.maybeRunGC(now)
+}
+
+func addCmdInteractionMetrics(cmd pnet.Command, addr, sqlType string, duration time.Duration) {
+	if cmd >= pnet.ComEnd {
+		return
+	}
+	if sqlType == "" {
+		sqlType = sqlTypeOther
+	}
+	now := monotime.Now()
+	cache.Lock()
+	defer cache.Unlock()
+	backendMetrics := ensureBackendMetrics(addr, now)
+	mc := &backendMetrics.cmds[cmd]
+	if mc.interactionObservers == nil {
+		mc.interactionObservers = make(map[string]prometheus.Observer, len(interactionSQLTypes))
+	}
+	observer, ok := mc.interactionObservers[sqlType]
+	if !ok {
+		cmdType := cmd.String()
+		observer = metrics.QueryInteractionDurationHistogram.WithLabelValues(addr, cmdType, sqlType)
+		mc.interactionObservers[sqlType] = observer
+	}
+	observer.Observe(duration.Seconds())
+	cache.maybeRunGC(now)
 }
 
 func addTraffic(addr string, inBytes, inPackets, outBytes, outPackets uint64) {
+	now := monotime.Now()
 	cache.Lock()
 	defer cache.Unlock()
 	// Updating traffic per IO costs too much CPU, so update it per command.
-	backendMetrics := ensureBackendMetrics(addr)
+	backendMetrics := ensureBackendMetrics(addr, now)
 	backendMetrics.inBytes.Add(float64(inBytes))
 	backendMetrics.inPackets.Add(float64(inPackets))
 	backendMetrics.outBytes.Add(float64(outBytes))
 	backendMetrics.outPackets.Add(float64(outPackets))
+	cache.maybeRunGC(now)
 }
 
-func ensureBackendMetrics(addr string) *mcPerBackend {
+func ensureBackendMetrics(addr string, now monotime.Time) *mcPerBackend {
 	backendMetrics, ok := cache.backendMetrics[addr]
 	if !ok {
 		backendMetrics = &mcPerBackend{
@@ -81,13 +116,56 @@ func ensureBackendMetrics(addr string) *mcPerBackend {
 		}
 		cache.backendMetrics[addr] = backendMetrics
 	}
+	backendMetrics.lastSeen = now
 	return backendMetrics
+}
+
+func (cache *cmdMetricsCache) maybeRunGC(now monotime.Time) {
+	ttl := metrics.BackendMetricsGCIdleTTL()
+	interval := metrics.BackendMetricsGCInterval()
+	if ttl <= 0 || interval <= 0 {
+		return
+	}
+	if cache.lastGCTime > 0 && now.Before(cache.lastGCTime.Add(interval)) {
+		return
+	}
+	cache.lastGCTime = now
+	expireBefore := now.Sub(ttl)
+	for addr, backendMetrics := range cache.backendMetrics {
+		if backendMetrics.lastSeen.After(expireBefore) {
+			continue
+		}
+		deleteBackendMetricLabels(addr)
+		delete(cache.backendMetrics, addr)
+	}
+}
+
+func deleteBackendMetricLabels(addr string) {
+	metrics.InboundBytesCounter.DeleteLabelValues(addr)
+	metrics.InboundPacketsCounter.DeleteLabelValues(addr)
+	metrics.OutboundBytesCounter.DeleteLabelValues(addr)
+	metrics.OutboundPacketsCounter.DeleteLabelValues(addr)
+	metrics.HandshakeDurationHistogram.DeleteLabelValues(addr)
+	for cmd := pnet.Command(0); cmd < pnet.ComEnd; cmd++ {
+		cmdType := cmd.String()
+		metrics.QueryTotalCounter.DeleteLabelValues(addr, cmdType)
+		metrics.QueryDurationHistogram.DeleteLabelValues(addr, cmdType)
+		for _, sqlType := range interactionSQLTypes {
+			metrics.QueryInteractionDurationHistogram.DeleteLabelValues(addr, cmdType, sqlType)
+		}
+	}
 }
 
 // Only used for testing, no need to optimize.
 func readCmdCounter(cmd pnet.Command, addr string) (int, error) {
 	label := cmd.String()
 	return metrics.ReadCounter(metrics.QueryTotalCounter.WithLabelValues(addr, label))
+}
+
+// Only used for testing, no need to optimize.
+func readCmdInteractionCounter(cmd pnet.Command, addr, sqlType string) (uint64, error) {
+	cmdType := cmd.String()
+	return metrics.ReadHistogramSampleCount(metrics.QueryInteractionDurationHistogram.WithLabelValues(addr, cmdType, sqlType))
 }
 
 // Only used for testing, no need to optimize.
@@ -106,10 +184,12 @@ func readTraffic(addr string) (inBytes, inPackets, outBytes, outPackets int, err
 }
 
 func addHandshakeMetrics(addr string, duration time.Duration) {
+	now := monotime.Now()
 	cache.Lock()
 	defer cache.Unlock()
-	backendMetrics := ensureBackendMetrics(addr)
+	backendMetrics := ensureBackendMetrics(addr, now)
 	backendMetrics.handshakeDuration.Observe(duration.Seconds())
+	cache.maybeRunGC(now)
 }
 
 func addGetBackendMetrics(duration time.Duration, succeed bool) {

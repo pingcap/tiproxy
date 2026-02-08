@@ -19,7 +19,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -182,6 +181,7 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 	}
 	mgr.ctxmap.m = make(map[any]any)
 	mgr.SetValue(ConnContextKeyConnID, connectionID)
+	mgr.cmdProcessor.connectionID = connectionID
 	return mgr
 }
 
@@ -325,16 +325,18 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		if err != nil && errors.Is(err, ErrBackendConn) {
 			cmd, data := pnet.Command(request[0]), request[1:]
 			var query string
+			queryNormalizeOK := true
 			if cmd == pnet.ComQuery {
-				query = parser.Normalize(pnet.ParseQueryPacket(data), "ON")
-				if len(query) > 256 {
+				query, queryNormalizeOK = normalizeSQLSafe(pnet.ParseQueryPacket(data))
+				if queryNormalizeOK && len(query) > 256 {
 					query = query[:256]
 				}
 			}
 			// idle_time: maybe the idle time exceeds wait_timeout?
 			// execute_time and query: maybe this query causes TiDB OOM?
 			mgr.logger.Info("backend disconnects", zap.Duration("idle_time", time.Duration(now-mgr.lastActiveTime)),
-				zap.Duration("execute_time", time.Duration(now-startTime)), zap.Stringer("cmd", cmd), zap.String("query", query))
+				zap.Duration("execute_time", time.Duration(now-startTime)), zap.Stringer("cmd", cmd),
+				zap.Bool("query_normalize_ok", queryNormalizeOK), zap.String("query", query))
 		}
 		mgr.lastActiveTime = now
 		mgr.processLock.Unlock()
@@ -359,7 +361,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	backendIO := mgr.backendIO.Load()
-	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect)
+	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect, mgr.authenticator.user)
 	if !holdRequest {
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
 		mgr.updateTraffic(backendIO)
@@ -405,7 +407,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	// Execute the held request no matter redirection succeeds or not.
 	if holdRequest && mgr.closeStatus.Load() < statusNotifyClose {
 		backendIO = mgr.backendIO.Load()
-		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false)
+		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false, mgr.authenticator.user)
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
 		mgr.updateTraffic(backendIO)
 		if err != nil && !pnet.IsMySQLError(err) {

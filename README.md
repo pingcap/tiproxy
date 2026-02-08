@@ -115,6 +115,59 @@ bin/tiproxy --config=conf/proxy.toml
 mysql -h127.0.0.1 -uroot -P6000
 ```
 
+## Interaction Latency Observability
+
+TiProxy can expose per-interaction latency:
+
+- Interaction latency: from forwarding one MySQL command to TiDB, until receiving the first response packet from TiDB.
+- Command duration (`tiproxy_session_query_duration_seconds`) still exists and keeps the original meaning.
+- Interaction metric (`tiproxy_session_query_interaction_duration_seconds`) includes labels: `backend`, `cmd_type`, `sql_type`.
+  - `sql_type` is fine-grained only for `COM_QUERY` (for example `select`, `update`, `begin`, `commit`); other commands use `other`.
+
+Configure it in `proxy.toml`:
+
+```toml
+[advance]
+query-interaction-metrics = true
+query-interaction-slow-log-threshold-ms = 200
+query-interaction-user-patterns = "app_*,readonly"
+backend-metrics-gc-interval-seconds = 300
+backend-metrics-gc-idle-seconds = 3600
+```
+
+- `query-interaction-slow-log-threshold-ms`:
+  - `0` disables slow interaction logs.
+  - positive values log interactions slower than threshold.
+  - slow logs include `interaction_time`, `connection_id`, `username`, `sql_type`, and username-pattern match fields.
+- `query-interaction-slow-log-only-digest`:
+  - when `true`, slow interaction logs print only `sql_digest` for `COM_QUERY` and omit the normalized `query` text.
+- `query-interaction-user-patterns`:
+  - comma-separated username glob patterns (`*`, `?`), case-sensitive.
+  - empty value means collecting interaction metrics for all users.
+- `backend-metrics-gc-idle-seconds`:
+  - removes idle backend label series to control in-memory metric cache growth.
+  - `0` disables metric GC.
+- `backend-metrics-gc-interval-seconds`:
+  - controls GC sweep frequency.
+  - `0` disables metric GC.
+
+These options support dynamic update through `PUT /api/admin/config`, so no restart is required.
+
+Detailed docs:
+
+- Design: [`docs/query-interaction-latency-design.md`](docs/query-interaction-latency-design.md)
+- Design (Chinese): [`docs/query-interaction-latency-design-zh.md`](docs/query-interaction-latency-design-zh.md)
+- Usage: [`docs/query-interaction-latency-usage.md`](docs/query-interaction-latency-usage.md)
+
+### Resource Sizing Notes
+
+Enabling interaction latency metrics increases CPU and memory usage because each interaction adds extra histogram observation and optional slow-log checks.
+
+- Recommended initial production reservation after enabling:
+  - CPU: +15%
+  - Memory: +10%
+- Re-check and tune by workload. Use your own benchmark and metrics data before full rollout.
+
 ## Code of Conduct
 
 This project is for everyone. We ask that our users and contributors take a few minutes to review our [Code of Conduct](code-of-conduct.md).

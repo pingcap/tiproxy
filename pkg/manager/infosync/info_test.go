@@ -27,6 +27,19 @@ import (
 	"go.uber.org/zap"
 )
 
+func disableProxyEnvForTest(t *testing.T) {
+	// Some environments (dev machines / CI) set HTTP(S)/ALL proxy variables.
+	// These can interfere with etcd/grpc connections in tests (e.g. redirecting to 127.0.0.1:7890).
+	for _, k := range []string{
+		"HTTP_PROXY", "http_proxy",
+		"HTTPS_PROXY", "https_proxy",
+		"ALL_PROXY", "all_proxy",
+		"NO_PROXY", "no_proxy",
+	} {
+		t.Setenv(k, "")
+	}
+}
+
 // TTL is refreshed periodically and info stays the same.
 func TestTTLRefresh(t *testing.T) {
 	ts := newEtcdTestSuite(t)
@@ -244,6 +257,8 @@ type etcdTestSuite struct {
 }
 
 func newEtcdTestSuite(t *testing.T) *etcdTestSuite {
+	disableProxyEnvForTest(t)
+
 	lg, _ := logger.CreateLoggerForTest(t)
 	ts := &etcdTestSuite{
 		t:  t,

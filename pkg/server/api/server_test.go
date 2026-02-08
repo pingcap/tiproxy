@@ -43,6 +43,10 @@ func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, meth
 	})
 
 	addr := fmt.Sprintf("http://%s", srv.listener.Addr().String())
+	// Avoid using HTTP proxy env vars in tests. The server is always local.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.Proxy = nil
+	httpClient := &http.Client{Transport: tr}
 	return srv, func(t *testing.T, method, pa string, rd io.Reader, header map[string]string, f func(*testing.T, *http.Response)) {
 		if pa[0] != '/' {
 			pa = "/" + pa
@@ -52,7 +56,7 @@ func createServer(t *testing.T, closing *bool) (*Server, func(t *testing.T, meth
 		for key, value := range header {
 			req.Header.Set(key, value)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		f(t, resp)
 		require.NoError(t, resp.Body.Close())

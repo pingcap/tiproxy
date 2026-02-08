@@ -112,3 +112,26 @@ graceful-close-conn-timeout = 15
 [advance]
 
 # ignore-wrong-namespace = true
+
+# enable per-interaction latency metrics:
+# request sent to TiDB -> first response packet received from TiDB
+# query-interaction-metrics = false
+
+# slow interaction log threshold in milliseconds:
+#  0 => disable slow interaction logs
+#  200 => log interactions slower than 200ms
+# query-interaction-slow-log-threshold-ms = 200
+
+# only print sql_digest in slow interaction logs, omit normalized query text:
+# query-interaction-slow-log-only-digest = false
+
+# optional username glob filter for interaction metrics:
+# comma-separated patterns, supports `*` and `?`, case-sensitive
+# empty means collect all users
+# query-interaction-user-patterns = ""
+
+# backend metrics GC:
+# backend labels not updated for `backend-metrics-gc-idle-seconds` will be removed from in-memory caches and metric vectors
+# set `backend-metrics-gc-interval-seconds = 0` or `backend-metrics-gc-idle-seconds = 0` to disable GC
+# backend-metrics-gc-interval-seconds = 300
+# backend-metrics-gc-idle-seconds = 3600

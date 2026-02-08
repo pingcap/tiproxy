@@ -6,7 +6,9 @@ package config
 import (
 	"bytes"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -70,7 +72,13 @@ type API struct {
 }
 
 type Advance struct {
-	IgnoreWrongNamespace bool `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
+	IgnoreWrongNamespace              bool   `yaml:"ignore-wrong-namespace,omitempty" toml:"ignore-wrong-namespace,omitempty" json:"ignore-wrong-namespace,omitempty"`
+	QueryInteractionMetrics           bool   `yaml:"query-interaction-metrics,omitempty" toml:"query-interaction-metrics,omitempty" json:"query-interaction-metrics,omitempty"`
+	QueryInteractionSlowLogThreshold  int    `yaml:"query-interaction-slow-log-threshold-ms,omitempty" toml:"query-interaction-slow-log-threshold-ms,omitempty" json:"query-interaction-slow-log-threshold-ms,omitempty"`
+	QueryInteractionSlowLogOnlyDigest bool   `yaml:"query-interaction-slow-log-only-digest,omitempty" toml:"query-interaction-slow-log-only-digest,omitempty" json:"query-interaction-slow-log-only-digest,omitempty"`
+	QueryInteractionUserPatterns      string `yaml:"query-interaction-user-patterns,omitempty" toml:"query-interaction-user-patterns,omitempty" json:"query-interaction-user-patterns,omitempty"`
+	BackendMetricsGCInterval          int    `yaml:"backend-metrics-gc-interval-seconds,omitempty" toml:"backend-metrics-gc-interval-seconds,omitempty" json:"backend-metrics-gc-interval-seconds,omitempty"`
+	BackendMetricsGCIdle              int    `yaml:"backend-metrics-gc-idle-seconds,omitempty" toml:"backend-metrics-gc-idle-seconds,omitempty" json:"backend-metrics-gc-idle-seconds,omitempty"`
 }
 
 type LogOnline struct {
@@ -149,6 +157,9 @@ func NewConfig() *Config {
 	cfg.Log.LogFile.MaxBackups = 3
 
 	cfg.Advance.IgnoreWrongNamespace = true
+	cfg.Advance.QueryInteractionSlowLogThreshold = 200
+	cfg.Advance.BackendMetricsGCInterval = 300
+	cfg.Advance.BackendMetricsGCIdle = 3600
 	cfg.Security.SQLTLS.MinTLSVersion = "1.2"
 	cfg.Security.ServerSQLTLS.MinTLSVersion = "1.2"
 	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.2"
@@ -181,7 +192,32 @@ func (cfg *Config) Check() error {
 	if cfg.Proxy.ConnBufferSize > 0 && (cfg.Proxy.ConnBufferSize > 16*1024*1024 || cfg.Proxy.ConnBufferSize < 1024) {
 		return errors.Wrapf(ErrInvalidConfigValue, "conn-buffer-size must be between 1K and 16M")
 	}
+	if cfg.Advance.QueryInteractionSlowLogThreshold < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "query-interaction-slow-log-threshold-ms cannot be negative")
+	}
+	if cfg.Advance.BackendMetricsGCInterval < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "backend-metrics-gc-interval-seconds cannot be negative")
+	}
+	if cfg.Advance.BackendMetricsGCIdle < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "backend-metrics-gc-idle-seconds cannot be negative")
+	}
+	if err := checkQueryInteractionUserPatterns(cfg.Advance.QueryInteractionUserPatterns); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func checkQueryInteractionUserPatterns(patterns string) error {
+	for _, pattern := range strings.Split(patterns, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return errors.Wrapf(ErrInvalidConfigValue, "invalid query-interaction-user-patterns pattern %q: %v", pattern, err)
+		}
+	}
 	return nil
 }
 

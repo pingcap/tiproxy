@@ -105,6 +105,13 @@ func (s *SQLServer) reset(cfg *config.Config) {
 	s.mu.frontendReadTimeout = cfg.Proxy.FrontendReadTimeout
 	s.mu.connectTimeout = cfg.Proxy.ConnectTimeout
 	s.mu.Unlock()
+
+	metrics.SetQueryInteractionEnabled(cfg.Advance.QueryInteractionMetrics)
+	metrics.SetQueryInteractionSlowLogThreshold(time.Duration(cfg.Advance.QueryInteractionSlowLogThreshold) * time.Millisecond)
+	metrics.SetQueryInteractionSlowLogOnlyDigest(cfg.Advance.QueryInteractionSlowLogOnlyDigest)
+	metrics.SetQueryInteractionUserPatterns(cfg.Advance.QueryInteractionUserPatterns)
+	metrics.SetBackendMetricsGCInterval(time.Duration(cfg.Advance.BackendMetricsGCInterval) * time.Second)
+	metrics.SetBackendMetricsGCIdleTTL(time.Duration(cfg.Advance.BackendMetricsGCIdle) * time.Second)
 }
 
 func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {

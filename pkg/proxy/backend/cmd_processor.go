@@ -24,6 +24,10 @@ type CmdProcessor struct {
 	capability         pnet.Capability
 	// Only includes in_trans or quit status.
 	serverStatus uint32
+	// currentUser is used by interaction metrics filters.
+	currentUser string
+	// connectionID is used in interaction logs.
+	connectionID uint64
 	logger       *zap.Logger
 }
 

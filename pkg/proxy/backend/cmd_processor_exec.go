@@ -6,11 +6,14 @@ package backend
 import (
 	"encoding/binary"
 	"strings"
+	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util/monotime"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
@@ -18,7 +21,8 @@ import (
 // executeCmd forwards requests and responses between the client and the backend.
 // holdRequest: should the proxy send the request to the new backend.
 // err: unexpected errors or MySQL errors.
-func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool) (holdRequest bool, err error) {
+func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.PacketIO, waitingRedirect bool, currentUser string) (holdRequest bool, err error) {
+	cp.currentUser = currentUser
 	backendIO.ResetSequence()
 	if waitingRedirect && cp.needHoldRequest(request) {
 		var response []byte
@@ -39,6 +43,7 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO *pnet.Pac
 
 func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, request []byte) error {
 	cmd := pnet.Command(request[0])
+	interactionStart := monotime.Now()
 	// ComChangeUser is special: we need to modify the packet before forwarding.
 	if cmd != pnet.ComChangeUser {
 		if err := backendIO.WritePacket(request, true); err != nil {
@@ -47,11 +52,11 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 	}
 	switch cmd {
 	case pnet.ComStmtPrepare:
-		return cp.forwardPrepareCmd(clientIO, backendIO)
+		return cp.forwardPrepareCmd(clientIO, backendIO, request, interactionStart)
 	case pnet.ComStmtFetch:
-		return cp.forwardFetchCmd(clientIO, backendIO, request)
+		return cp.forwardFetchCmd(clientIO, backendIO, request, interactionStart)
 	case pnet.ComQuery, pnet.ComStmtExecute, pnet.ComProcessInfo:
-		return cp.forwardQueryCmd(clientIO, backendIO, request)
+		return cp.forwardQueryCmd(clientIO, backendIO, request, interactionStart)
 	case pnet.ComStmtClose:
 		return cp.forwardCloseCmd(request)
 	case pnet.ComStmtSendLongData:
@@ -59,9 +64,9 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 	case pnet.ComChangeUser:
 		return cp.forwardChangeUserCmd(clientIO, backendIO, request)
 	case pnet.ComStatistics:
-		return cp.forwardStatisticsCmd(clientIO, backendIO)
+		return cp.forwardStatisticsCmd(clientIO, backendIO, request, interactionStart)
 	case pnet.ComFieldList:
-		return cp.forwardFieldListCmd(clientIO, backendIO, request)
+		return cp.forwardFieldListCmd(clientIO, backendIO, request, interactionStart)
 	case pnet.ComQuit:
 		return cp.forwardQuitCmd()
 	}
@@ -71,6 +76,7 @@ func (cp *CmdProcessor) forwardCommand(clientIO, backendIO *pnet.PacketIO, reque
 	if err != nil {
 		return err
 	}
+	cp.observeInteraction(request, backendIO, interactionStart)
 	switch response[0] {
 	case pnet.OKHeader.Byte():
 		cp.handleOKPacket(request, response)
@@ -96,9 +102,14 @@ func forwardOnePacket(destIO, srcIO *pnet.PacketIO, flush bool) (data []byte, er
 	return data, destIO.WritePacket(data, flush)
 }
 
-func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO, request []byte) (uint16, error) {
+func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO, request []byte, interactionStart monotime.Time, observeFirstPacket bool) (uint16, error) {
 	var serverStatus uint16
+	observed := !observeFirstPacket
 	err := backendIO.ForwardUntil(clientIO, func(firstByte byte, length int) (end, needData bool) {
+		if !observed {
+			observed = true
+			cp.observeInteraction(request, backendIO, interactionStart)
+		}
 		switch {
 		case pnet.IsErrorPacket(firstByte):
 			return true, true
@@ -125,11 +136,12 @@ func (cp *CmdProcessor) forwardUntilResultEnd(clientIO, backendIO *pnet.PacketIO
 	return serverStatus, err
 }
 
-func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) error {
+func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO, request []byte, interactionStart monotime.Time) error {
 	response, err := forwardOnePacket(clientIO, backendIO, false)
 	if err != nil {
 		return err
 	}
+	cp.observeInteraction(request, backendIO, interactionStart)
 	switch response[0] {
 	case pnet.OKHeader.Byte():
 		// The OK packet doesn't contain a server status.
@@ -167,22 +179,27 @@ func (cp *CmdProcessor) forwardPrepareCmd(clientIO, backendIO *pnet.PacketIO) er
 	return errors.Errorf("unexpected response, cmd:%d resp:%d", pnet.ComStmtPrepare, response[0])
 }
 
-func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
-	_, err := cp.forwardUntilResultEnd(clientIO, backendIO, request)
+func (cp *CmdProcessor) forwardFetchCmd(clientIO, backendIO *pnet.PacketIO, request []byte, interactionStart monotime.Time) error {
+	_, err := cp.forwardUntilResultEnd(clientIO, backendIO, request, interactionStart, true)
 	return err
 }
 
-func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
-	_, err := cp.forwardUntilResultEnd(clientIO, backendIO, request)
+func (cp *CmdProcessor) forwardFieldListCmd(clientIO, backendIO *pnet.PacketIO, request []byte, interactionStart monotime.Time) error {
+	_, err := cp.forwardUntilResultEnd(clientIO, backendIO, request, interactionStart, true)
 	return err
 }
 
-func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, request []byte, interactionStart monotime.Time) error {
 	for {
 		var serverStatus uint16
 		var first byte
+		observed := false
 		err := backendIO.ForwardUntil(clientIO, func(firstByte byte, _ int) (end, needData bool) {
 			first = firstByte
+			if !observed {
+				observed = true
+				cp.observeInteraction(request, backendIO, interactionStart)
+			}
 			switch firstByte {
 			case pnet.OKHeader.Byte(), pnet.ErrHeader.Byte():
 				return true, true
@@ -215,6 +232,7 @@ func (cp *CmdProcessor) forwardQueryCmd(clientIO, backendIO *pnet.PacketIO, requ
 		if serverStatus&pnet.ServerMoreResultsExists == 0 {
 			break
 		}
+		interactionStart = monotime.Now()
 	}
 	return nil
 }
@@ -238,9 +256,11 @@ func (cp *CmdProcessor) forwardLoadInFile(clientIO, backendIO *pnet.PacketIO, re
 		}
 	}
 	var response []byte
+	interactionStart := monotime.Now()
 	if response, err = forwardOnePacket(clientIO, backendIO, true); err != nil {
 		return
 	}
+	cp.observeInteraction(request, backendIO, interactionStart)
 	switch response[0] {
 	case pnet.OKHeader.Byte():
 		return cp.handleOKPacket(request, response), nil
@@ -272,7 +292,7 @@ func (cp *CmdProcessor) forwardResultSet(clientIO, backendIO *pnet.PacketIO, req
 		}
 	}
 	// Deprecate EOF or no cursor.
-	return cp.forwardUntilResultEnd(clientIO, backendIO, request)
+	return cp.forwardUntilResultEnd(clientIO, backendIO, request, 0, false)
 }
 
 func (cp *CmdProcessor) forwardCloseCmd(request []byte) error {
@@ -288,6 +308,7 @@ func (cp *CmdProcessor) forwardSendLongDataCmd(request []byte) error {
 }
 
 func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO, request []byte) error {
+	interactionUser := cp.currentUser
 	req, err := pnet.ParseChangeUser(request, cp.capability)
 	if err != nil {
 		cp.logger.Warn("parse COM_CHANGE_USER packet encounters error", zap.Error(err))
@@ -295,12 +316,15 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 		if !errors.As(err, &warning) {
 			return mysql.ErrMalformPacket
 		}
+	} else {
+		interactionUser = req.User
 	}
 	// The client may use the TiProxy salt to generate the auth data instead of using the TiDB salt,
 	// so we need another switch-auth request to pass the TiDB salt to the client.
 	// See https://github.com/pingcap/tiproxy/issues/127.
 	req.AuthPlugin = unknownAuthPlugin
 	req.AuthData = nil
+	interactionStart := monotime.Now()
 	if err := backendIO.WritePacket(pnet.MakeChangeUser(req, cp.capability), true); err != nil {
 		return err
 	}
@@ -310,6 +334,7 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 		if err != nil {
 			return err
 		}
+		cp.observeInteractionByUser(request, backendIO, interactionStart, interactionUser)
 		switch response[0] {
 		case pnet.OKHeader.Byte():
 			cp.handleOKPacket(request, response)
@@ -321,13 +346,17 @@ func (cp *CmdProcessor) forwardChangeUserCmd(clientIO, backendIO *pnet.PacketIO,
 			if _, err = forwardOnePacket(backendIO, clientIO, true); err != nil {
 				return err
 			}
+			interactionStart = monotime.Now()
 		}
 	}
 }
 
-func (cp *CmdProcessor) forwardStatisticsCmd(clientIO, backendIO *pnet.PacketIO) error {
+func (cp *CmdProcessor) forwardStatisticsCmd(clientIO, backendIO *pnet.PacketIO, request []byte, interactionStart monotime.Time) error {
 	// It just sends a string.
 	_, err := forwardOnePacket(clientIO, backendIO, true)
+	if err == nil {
+		cp.observeInteraction(request, backendIO, interactionStart)
+	}
 	return err
 }
 
@@ -365,6 +394,98 @@ func (cp *CmdProcessor) needHoldRequest(request []byte) bool {
 }
 
 func isBeginStmt(query string) bool {
-	normalized := parser.Normalize(query, "ON")
+	normalized, ok := normalizeSQLSafe(query)
+	if !ok {
+		return false
+	}
 	return strings.HasPrefix(normalized, "begin") || strings.HasPrefix(normalized, "start transaction")
+}
+
+func (cp *CmdProcessor) observeInteraction(request []byte, backendIO *pnet.PacketIO, start monotime.Time) {
+	cp.observeInteractionByUser(request, backendIO, start, cp.currentUser)
+}
+
+func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet.PacketIO, start monotime.Time, interactionUser string) {
+	if !metrics.QueryInteractionEnabled() {
+		return
+	}
+	if start == 0 || len(request) == 0 {
+		return
+	}
+	cmd := pnet.Command(request[0])
+	if cmd >= pnet.ComEnd {
+		return
+	}
+	duration := monotime.Since(start)
+	addr := backendIO.RemoteAddr().String()
+	sqlType := sqlTypeOther
+	if cmd == pnet.ComQuery && len(request) > 1 {
+		sqlType = classifyComQuerySQLType(request[1:])
+	}
+	patternMatched, matchedPattern := metrics.MatchQueryInteractionUserPattern(interactionUser)
+	if patternMatched {
+		addCmdInteractionMetrics(cmd, addr, sqlType, duration)
+	}
+
+	threshold := metrics.QueryInteractionSlowLogThreshold()
+	if threshold <= 0 || duration < threshold {
+		return
+	}
+	fields := []zap.Field{
+		zap.Time("interaction_time", time.Now()),
+		zap.Duration("interaction_duration", duration),
+		zap.Uint64("connection_id", cp.connectionID),
+		zap.Stringer("cmd", cmd),
+		zap.String("sql_type", sqlType),
+		zap.String("username", interactionUser),
+		zap.Bool("username_pattern_matched", patternMatched),
+		zap.String("username_matched_pattern", matchedPattern),
+		zap.String("backend_addr", addr),
+	}
+	if cmd == pnet.ComQuery {
+		sqlText := pnet.ParseQueryPacket(request[1:])
+		normalized, digestStr, ok := normalizeDigestSafe(sqlText)
+		fields = append(fields, zap.Bool("sql_digest_ok", ok))
+		if digestStr != "" {
+			fields = append(fields, zap.String("sql_digest", digestStr))
+		}
+		if ok && !metrics.QueryInteractionSlowLogOnlyDigest() {
+			if len(normalized) > 256 {
+				normalized = normalized[:256]
+			}
+			fields = append(fields, zap.String("query", normalized))
+		}
+	}
+	if isStmtCmd(cmd) && len(request) >= 5 {
+		fields = append(fields, zap.Uint32("stmt_id", binary.LittleEndian.Uint32(request[1:5])))
+	}
+	cp.logger.Warn("slow mysql interaction", fields...)
+	if patternMatched {
+		cp.logger.Warn("slow mysql interaction matched username pattern", fields...)
+	}
+}
+
+func normalizeDigestSafe(sqlText string) (normalized string, digestStr string, ok bool) {
+	ok = true
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+			normalized = ""
+			digestStr = ""
+		}
+	}()
+	normalized, digest := parser.NormalizeDigest(sqlText)
+	if digest != nil {
+		digestStr = digest.String()
+	}
+	return normalized, digestStr, ok
+}
+
+func isStmtCmd(cmd pnet.Command) bool {
+	switch cmd {
+	case pnet.ComStmtExecute, pnet.ComStmtSendLongData, pnet.ComStmtClose, pnet.ComStmtReset, pnet.ComStmtFetch:
+		return true
+	default:
+		return false
+	}
 }

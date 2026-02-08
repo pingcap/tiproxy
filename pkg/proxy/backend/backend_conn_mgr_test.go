@@ -899,24 +899,33 @@ func TestGetBackendIO(t *testing.T) {
 	}
 	lg, _ := logger.CreateLoggerForTest(t)
 	mgr := NewBackendConnManager(lg, handler, 0, &BCConfig{ConnectTimeout: time.Second})
-	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
+		idx := i
+		var wg waitgroup.WaitGroup
 		wg.Run(func() {
-			if i < len(listeners) {
-				cn, err := listeners[i].Accept()
-				require.NoError(t, err)
-				require.NoError(t, cn.Close())
+			if idx >= len(listeners) {
+				return
 			}
+			cn, err := listeners[idx].Accept()
+			if err != nil {
+				// It's possible that the listener is closed before Accept returns (scheduler timing).
+				// Treat close-related errors as expected; other errors should fail the test.
+				if errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection") {
+					return
+				}
+				require.NoError(t, err)
+				return
+			}
+			require.NoError(t, cn.Close())
 		})
 		io, err := mgr.getBackendIO(context.Background(), mgr, nil)
 		if err == nil {
 			require.NoError(t, io.Close())
 		}
-		message := fmt.Sprintf("%d: %s, %+v\n", i, badAddrs, err)
-		if i < len(listeners) {
+		message := fmt.Sprintf("%d: %s, %+v\n", idx, badAddrs, err)
+		if idx < len(listeners) {
 			require.NoError(t, err, message)
-			err = listeners[i].Close()
-			require.NoError(t, err, message)
+			require.NoError(t, listeners[idx].Close(), message)
 		} else {
 			require.Error(t, err, message)
 		}
