@@ -394,7 +394,10 @@ func (cp *CmdProcessor) needHoldRequest(request []byte) bool {
 }
 
 func isBeginStmt(query string) bool {
-	normalized := parser.Normalize(query, "ON")
+	normalized, ok := normalizeSQLSafe(query)
+	if !ok {
+		return false
+	}
 	return strings.HasPrefix(normalized, "begin") || strings.HasPrefix(normalized, "start transaction")
 }
 

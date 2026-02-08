@@ -19,7 +19,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -326,16 +325,18 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		if err != nil && errors.Is(err, ErrBackendConn) {
 			cmd, data := pnet.Command(request[0]), request[1:]
 			var query string
+			queryNormalizeOK := true
 			if cmd == pnet.ComQuery {
-				query = parser.Normalize(pnet.ParseQueryPacket(data), "ON")
-				if len(query) > 256 {
+				query, queryNormalizeOK = normalizeSQLSafe(pnet.ParseQueryPacket(data))
+				if queryNormalizeOK && len(query) > 256 {
 					query = query[:256]
 				}
 			}
 			// idle_time: maybe the idle time exceeds wait_timeout?
 			// execute_time and query: maybe this query causes TiDB OOM?
 			mgr.logger.Info("backend disconnects", zap.Duration("idle_time", time.Duration(now-mgr.lastActiveTime)),
-				zap.Duration("execute_time", time.Duration(now-startTime)), zap.Stringer("cmd", cmd), zap.String("query", query))
+				zap.Duration("execute_time", time.Duration(now-startTime)), zap.Stringer("cmd", cmd),
+				zap.Bool("query_normalize_ok", queryNormalizeOK), zap.String("query", query))
 		}
 		mgr.lastActiveTime = now
 		mgr.processLock.Unlock()
