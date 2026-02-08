@@ -441,11 +441,12 @@ func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet
 	}
 	if cmd == pnet.ComQuery {
 		sqlText := pnet.ParseQueryPacket(request[1:])
-		normalized, digest := parser.NormalizeDigest(sqlText)
-		if digest != nil {
-			fields = append(fields, zap.String("sql_digest", digest.String()))
+		normalized, digestStr, ok := normalizeDigestSafe(sqlText)
+		fields = append(fields, zap.Bool("sql_digest_ok", ok))
+		if digestStr != "" {
+			fields = append(fields, zap.String("sql_digest", digestStr))
 		}
-		if !metrics.QueryInteractionSlowLogOnlyDigest() {
+		if ok && !metrics.QueryInteractionSlowLogOnlyDigest() {
 			if len(normalized) > 256 {
 				normalized = normalized[:256]
 			}
@@ -459,6 +460,22 @@ func (cp *CmdProcessor) observeInteractionByUser(request []byte, backendIO *pnet
 	if patternMatched {
 		cp.logger.Warn("slow mysql interaction matched username pattern", fields...)
 	}
+}
+
+func normalizeDigestSafe(sqlText string) (normalized string, digestStr string, ok bool) {
+	ok = true
+	defer func() {
+		if r := recover(); r != nil {
+			ok = false
+			normalized = ""
+			digestStr = ""
+		}
+	}()
+	normalized, digest := parser.NormalizeDigest(sqlText)
+	if digest != nil {
+		digestStr = digest.String()
+	}
+	return normalized, digestStr, ok
 }
 
 func isStmtCmd(cmd pnet.Command) bool {
