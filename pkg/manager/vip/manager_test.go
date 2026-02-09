@@ -208,7 +208,8 @@ func TestMultiVIP(t *testing.T) {
 	require.NoError(t, err)
 	require.Eventually(t, func() bool {
 		return strings.Count(text.String(), "adding VIP success") >= 2 ||
-			strings.Count(text.String(), "ip: command not found") >= 2
+			strings.Count(text.String(), "ip: command not found") >= 2 ||
+			strings.Count(text.String(), "executable file not found") >= 2
 	}, 3*time.Second, 10*time.Millisecond)
 	vm1.PreClose()
 	vm2.PreClose()
