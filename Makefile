@@ -47,7 +47,11 @@ cmd_%:
 	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
 golangci-lint:
+<<<<<<< HEAD
 	GOBIN=$(GOBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0
+=======
+	GOBIN=$(GOBIN) GOTOOLCHAIN=go1.25.6 $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+>>>>>>> 7f15b1bb (*: upgrade go version to v1.25.6 to avoid security vulnerabilities (#1080))
 
 go-header:
 	GOBIN=$(GOBIN) go install github.com/denis-tingaikin/go-header/cmd/go-header@latest
