@@ -1,10 +1,6 @@
 module github.com/pingcap/tiproxy/lib
 
-<<<<<<< HEAD
-go 1.21
-=======
 go 1.25.6
->>>>>>> 7f15b1bb (*: upgrade go version to v1.25.6 to avoid security vulnerabilities (#1080))
 
 require (
 	github.com/cenkalti/backoff/v4 v4.2.1
