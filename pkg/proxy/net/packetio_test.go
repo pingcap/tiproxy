@@ -561,6 +561,7 @@ func TestForwardUntilLongData(t *testing.T) {
 
 func TestForwardUntilError(t *testing.T) {
 	srvCh := make(chan *packetIO)
+	exitCh := make(chan struct{})
 	var wg waitgroup.WaitGroup
 	selfErr, peerErr := errors.New("self"), errors.New("peer")
 	// client1 writes to server1
@@ -582,6 +583,7 @@ func TestForwardUntilError(t *testing.T) {
 					return srv2.Flush()
 				})
 				require.ErrorIs(t, err, peerErr)
+				exitCh <- struct{}{}
 			},
 			1,
 		)
@@ -594,6 +596,7 @@ func TestForwardUntilError(t *testing.T) {
 			func(t *testing.T, srv2 *packetIO) {
 				srv2.ApplyOpts(WithWrapError(peerErr))
 				srvCh <- srv2
+				<-exitCh
 			},
 			1,
 		)
@@ -718,4 +721,99 @@ func runForwardBenchmark(b *testing.B, f func(packetIO1, packetIO2 *packetIO)) {
 	_ = packetIO1.Close()
 	_ = packetIO2.Close()
 	wg.Wait()
+}
+
+func TestPacketIOPooling(t *testing.T) {
+	testTCPConn(t,
+		func(t *testing.T, cli *packetIO) {
+			brw, ok := cli.readWriter.(*basicReadWriter)
+			require.True(t, ok)
+			require.True(t, brw.pooled, "pooled flag should be true for default buffer size")
+
+			require.NoError(t, cli.WritePacket([]byte("pooltest"), true))
+		},
+		func(t *testing.T, srv *packetIO) {
+			brw, ok := srv.readWriter.(*basicReadWriter)
+			require.True(t, ok)
+			require.True(t, brw.pooled, "pooled flag should be true for default buffer size")
+
+			data, err := srv.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, []byte("pooltest"), data)
+		},
+		1,
+	)
+
+	lg, _ := logger.CreateLoggerForTest(t)
+	cli, srv := net.Pipe()
+	cliIO := NewPacketIO(cli, lg, DefaultConnBufferSize*2)
+	srvIO := NewPacketIO(srv, lg, DefaultConnBufferSize*2)
+	brw, ok := cliIO.readWriter.(*basicReadWriter)
+	require.True(t, ok)
+	require.True(t, brw.pooled, "pooled flag should always be true")
+	_ = cliIO.Close()
+	_ = srvIO.Close()
+
+	testTCPConn(t,
+		func(t *testing.T, cli *packetIO) {
+			require.NoError(t, cli.Close())
+			require.NoError(t, cli.Close())
+		},
+		func(t *testing.T, srv *packetIO) {
+			require.NoError(t, srv.Close())
+			require.NoError(t, srv.Close())
+		},
+		1,
+	)
+
+	for i := 0; i < 100; i++ {
+		c1, c2 := net.Pipe()
+		p1 := NewPacketIO(c1, lg, DefaultConnBufferSize)
+		p2 := NewPacketIO(c2, lg, DefaultConnBufferSize)
+		_ = p1.Close()
+		_ = p2.Close()
+	}
+}
+
+func TestPoolSizeMismatch(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+
+	for i := 0; i < 10; i++ {
+		c1, c2 := net.Pipe()
+		p1 := NewPacketIO(c1, lg, DefaultConnBufferSize)
+		p2 := NewPacketIO(c2, lg, DefaultConnBufferSize)
+		_ = p1.Close()
+		_ = p2.Close()
+	}
+
+	customSize := DefaultConnBufferSize * 2
+	c1, c2 := net.Pipe()
+	p1 := NewPacketIO(c1, lg, customSize)
+	p2 := NewPacketIO(c2, lg, customSize)
+	brw1, ok := p1.readWriter.(*basicReadWriter)
+	require.True(t, ok)
+	require.True(t, brw1.pooled, "pooled should always be true")
+	require.Equal(t, customSize, brw1.ReadWriter.Reader.Size(), "reader should have custom size")
+	require.Equal(t, customSize, brw1.ReadWriter.Writer.Size(), "writer should have custom size")
+	_ = p1.Close()
+	_ = p2.Close()
+
+	c1, c2 = net.Pipe()
+	p1 = NewPacketIO(c1, lg, customSize)
+	p2 = NewPacketIO(c2, lg, customSize)
+	brw1, ok = p1.readWriter.(*basicReadWriter)
+	require.True(t, ok)
+	require.True(t, brw1.pooled)
+	require.Equal(t, customSize, brw1.ReadWriter.Reader.Size())
+	_ = p1.Close()
+	_ = p2.Close()
+
+	c1, c2 = net.Pipe()
+	p1 = NewPacketIO(c1, lg, DefaultConnBufferSize)
+	p2 = NewPacketIO(c2, lg, DefaultConnBufferSize)
+	brw1, ok = p1.readWriter.(*basicReadWriter)
+	require.True(t, ok)
+	require.True(t, brw1.pooled)
+	_ = p1.Close()
+	_ = p2.Close()
 }
