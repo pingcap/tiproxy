@@ -625,3 +625,27 @@ func TestMalformedHandshakePacket(t *testing.T) {
 
 	clean()
 }
+
+func TestHandshakePacketSizeLimit(t *testing.T) {
+	tc := newTCPConnSuite(t)
+	ts, clean := newTestSuite(t, tc)
+
+	customClientRunner := func(packetIO pnet.PacketIO) error {
+		if _, err := packetIO.ReadPacket(); err != nil {
+			return err
+		}
+
+		oversizedPacket := make([]byte, maxHandshakePacketSize+1)
+		binary.LittleEndian.PutUint32(oversizedPacket[0:4], ts.mc.capability.Uint32())
+
+		return packetIO.WritePacket(oversizedPacket, true)
+	}
+
+	ts.runAndCheck(t, func(t *testing.T, ts *testSuite) {
+		require.Error(t, ts.mp.err)
+		require.ErrorIs(t, ts.mp.err, pnet.ErrPacketTooLarge)
+		require.Equal(t, SrcClientHandshake, Error2Source(ts.mp.err))
+	}, customClientRunner, ts.mb.authenticate, ts.mp.authenticateFirstTime)
+
+	clean()
+}

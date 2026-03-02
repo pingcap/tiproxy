@@ -24,6 +24,16 @@ const requiredFrontendCaps = pnet.ClientProtocol41
 const defRequiredBackendCaps = pnet.ClientDeprecateEOF
 const ER_INVALID_SEQUENCE = 8052
 
+// maxHandshakePacketSize limits client handshake packets to avoid OOM.
+// Most known clients send ~1-2KB handshakes: 4B capability + 4B max packet size +
+// 1B charset + 23B reserved + NUL-terminated user + auth data (lenenc/len) +
+// optional NUL-terminated db name + optional auth plugin name +
+// optional connection attributes (lenenc length + key/value pairs).
+// The SSLRequest packet is fixed 32 bytes. These stay far below 1MB in practice.
+//
+// Ref https://dev.mysql.com/doc/dev/mysql-server/9.5.0/page_protocol_connection_phase_packets_protocol_handshake_response.html
+const maxHandshakePacketSize = 1 << 20
+
 // SupportedServerCapabilities is the default supported capabilities. Other server capabilities are not supported.
 // TiDB supports ClientDeprecateEOF since v6.3.0.
 // TiDB supports ClientCompress and ClientZstdCompressionAlgorithm since v7.2.0.
@@ -89,6 +99,11 @@ type backendIOGetter func(ctx context.Context, cctx ConnContext, resp *pnet.Hand
 func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.Logger, cctx ConnContext, clientIO pnet.PacketIO, handshakeHandler HandshakeHandler,
 	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
+	clientIO.ApplyOpts(pnet.WithReadPacketLimit(maxHandshakePacketSize))
+	// TODO: now we only limit the size of the handshake packet, we assume that all clients with proper
+	// user / password will send reasonable packets. However, it's not true when the TiProxy is shared by
+	// many TiDBs keyspaces and customers.
+	defer clientIO.ApplyOpts(pnet.WithReadPacketLimit(0))
 
 	proxyCapability := handshakeHandler.GetCapability()
 	if frontendTLSConfig == nil {
