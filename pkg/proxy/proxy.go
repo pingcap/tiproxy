@@ -205,6 +205,9 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	if err := keepalive.SetKeepalive(conn, config.KeepAlive{Enabled: tcpKeepAlive}); err != nil {
 		logger.Warn("failed to set tcp keep alive option", zap.Error(err))
 	}
+	if err := pnet.SetNoDelay(conn, true); err != nil {
+		logger.Warn("failed to set tcp no delay option", zap.Error(err))
+	}
 
 	clientConn.Run(ctx)
 }

@@ -46,6 +46,8 @@ const (
 	TickerInterval = 5 * time.Second
 	// DefaultPausedConnTimeout is the maximum duration a paused connection can last before being closed.
 	DefaultPausedConnTimeout = 8 * time.Hour
+	// SlowCmdThreshold is the threshold for logging slow proxy command processing.
+	SlowCmdThreshold = 100 * time.Millisecond
 )
 
 const (
@@ -316,8 +318,17 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 // ExecuteCmd forwards messages between the client and the backend.
 // If it finds that the session is ready for redirection, it migrates the session.
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
+	lockStart := time.Now()
+	startWall := time.Now()
 	startTime := monotime.Now()
 	mgr.processLock.Lock()
+	lockWait := time.Since(lockStart)
+	var (
+		cmd             pnet.Command
+		waitingRedirect bool
+		holdRequest     bool
+		resumeTriggered bool
+	)
 	defer func() {
 		mgr.SetQuitSourceByErr(err)
 		mgr.handshakeHandler.OnTraffic(mgr)
@@ -338,26 +349,41 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		}
 		mgr.lastActiveTime = now
 		mgr.processLock.Unlock()
+		totalElapsed := time.Since(startWall)
+		if lockWait >= SlowCmdThreshold || totalElapsed >= SlowCmdThreshold {
+			fields := []zap.Field{
+				zap.Stringer("cmd", cmd),
+				zap.Duration("lock_wait", lockWait),
+				zap.Duration("duration", totalElapsed),
+				zap.Bool("resume", resumeTriggered),
+				zap.Bool("waiting_redirect", waitingRedirect),
+				zap.Bool("hold_request", holdRequest),
+			}
+			if backendAddr := mgr.ServerAddr(); backendAddr != "" {
+				fields = append(fields, zap.String("backend_addr", backendAddr))
+			}
+			mgr.logger.Info("slow execute cmd", fields...)
+		}
 	}()
 	if len(request) < 1 {
 		err = mysql.ErrMalformPacket
 		return
 	}
-	cmd := pnet.Command(request[0])
+	cmd = pnet.Command(request[0])
 
 	// Once the request is accepted, it's treated in the transaction, so we don't check graceful shutdown here.
 	if mgr.closeStatus.Load() >= statusClosing {
 		return
 	}
 	if mgr.backendIO.Load() == nil {
+		resumeTriggered = true
 		err = mgr.resume(ctx)
 		if err != nil {
 			mgr.logger.Error("resume failed", zap.Error(err))
 			return
 		}
 	}
-	waitingRedirect := mgr.redirectInfo.Load() != nil
-	var holdRequest bool
+	waitingRedirect = mgr.redirectInfo.Load() != nil
 	backendIO := mgr.backendIO.Load()
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect)
 	if !holdRequest {
@@ -485,9 +511,9 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 			mgr.notifyRedirectResult(ctx, rs)
 		case <-checkBackendTicker.C:
 			func() {
-				mgr.checkBackendActive()
 				mgr.processLock.Lock()
 				defer mgr.processLock.Unlock()
+				mgr.checkBackendActiveLocked()
 				mgr.setKeepAlive()
 			}()
 		case <-ctx.Done():
@@ -664,10 +690,8 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 	mgr.closeStatus.CompareAndSwap(statusNotifyClose, statusClosing)
 }
 
-func (mgr *BackendConnManager) checkBackendActive() {
-	mgr.processLock.Lock()
-	defer mgr.processLock.Unlock()
-
+// checkBackendActiveLocked assumes processLock is already held.
+func (mgr *BackendConnManager) checkBackendActiveLocked() {
 	if mgr.closeStatus.Load() >= statusNotifyClose {
 		return
 	}

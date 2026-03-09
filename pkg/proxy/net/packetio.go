@@ -44,8 +44,10 @@ var (
 	ErrInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
 )
 
+var requestQuickAck = setQuickAck
+
 const (
-	DefaultConnBufferSize = 32 * 1024
+	DefaultConnBufferSize = 16 * 1024
 )
 
 type rwStatus int
@@ -198,6 +200,9 @@ type PacketIO struct {
 	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
+	quickAck      bool
+	slowLogRole   string
+	slowThreshold time.Duration
 	header        [4]byte // reuse memory to reduce allocation
 	inPackets     uint64
 	outPackets    uint64
@@ -277,6 +282,10 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 
 // ReadPacket reads data and removes the header
 func (p *PacketIO) ReadPacket() (data []byte, err error) {
+	start := time.Now()
+	defer func() {
+		p.logSlowIO("read_packet", start, len(data), err)
+	}()
 	p.readWriter.BeginRW(rwRead)
 	for more := true; more; {
 		var buf []byte
@@ -420,9 +429,14 @@ func (p *PacketIO) OutPackets() uint64 {
 }
 
 func (p *PacketIO) Flush() error {
+	start := time.Now()
 	if err := p.readWriter.Flush(); err != nil {
-		return p.wrapErr(errors.Wrap(ErrFlushConn, errors.WithStack(err)))
+		err = p.wrapErr(errors.Wrap(ErrFlushConn, errors.WithStack(err)))
+		p.logSlowIO("flush", start, 0, err)
+		return err
 	}
+	p.requestQuickAck()
+	p.logSlowIO("flush", start, 0, nil)
 	return nil
 }
 
@@ -441,6 +455,42 @@ func (p *PacketIO) SetKeepalive(cfg config.KeepAlive) error {
 // LastKeepAlive is used for test.
 func (p *PacketIO) LastKeepAlive() config.KeepAlive {
 	return p.lastKeepAlive
+}
+
+func (p *PacketIO) requestQuickAck() {
+	if !p.quickAck {
+		return
+	}
+	if err := requestQuickAck(p.rawConn); err != nil && p.logger != nil {
+		p.logger.Debug("failed to request tcp quickack", zap.Error(err))
+	}
+}
+
+func (p *PacketIO) logSlowIO(op string, start time.Time, bytes int, err error) {
+	if p.logger == nil || p.slowThreshold <= 0 {
+		return
+	}
+	elapsed := time.Since(start)
+	if elapsed < p.slowThreshold {
+		return
+	}
+	fields := []zap.Field{
+		zap.String("op", op),
+		zap.Duration("duration", elapsed),
+	}
+	if p.slowLogRole != "" {
+		fields = append(fields, zap.String("role", p.slowLogRole))
+	}
+	if bytes > 0 {
+		fields = append(fields, zap.Int("bytes", bytes))
+	}
+	if remoteAddr := p.RemoteAddr(); remoteAddr != nil {
+		fields = append(fields, zap.Stringer("remote_addr", remoteAddr))
+	}
+	if err != nil {
+		fields = append(fields, zap.Error(err))
+	}
+	p.logger.Info("slow packet io", fields...)
 }
 
 func (p *PacketIO) GracefulClose() error {

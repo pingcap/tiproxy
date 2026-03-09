@@ -6,6 +6,7 @@ package net
 import (
 	"encoding/binary"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -256,6 +257,50 @@ func TestKeepAlive(t *testing.T) {
 		},
 		1,
 	)
+}
+
+func TestQuickAckRequestedAfterFlush(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cliConn, srvConn := net.Pipe()
+	defer func() {
+		require.NoError(t, cliConn.Close())
+		require.NoError(t, srvConn.Close())
+	}()
+
+	oldRequester := requestQuickAck
+	defer func() {
+		requestQuickAck = oldRequester
+	}()
+	var quickAckCalls atomic.Int32
+	requestQuickAck = func(net.Conn) error {
+		quickAckCalls.Add(1)
+		return nil
+	}
+
+	cli := NewPacketIO(cliConn, lg, DefaultConnBufferSize, WithQuickAck())
+	srv := NewPacketIO(srvConn, lg, DefaultConnBufferSize)
+
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		data, err := srv.ReadPacket()
+		require.NoError(t, err)
+		require.Equal(t, []byte("hello"), data)
+	}()
+	require.NoError(t, cli.WritePacket([]byte("hello"), true))
+	<-readDone
+	require.EqualValues(t, 1, quickAckCalls.Load())
+
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		require.NoError(t, srv.WritePacket([]byte("world"), true))
+	}()
+	data, err := cli.ReadPacket()
+	require.NoError(t, err)
+	require.Equal(t, []byte("world"), data)
+	<-writeDone
+	require.EqualValues(t, 1, quickAckCalls.Load())
 }
 
 func TestPredefinedPacket(t *testing.T) {

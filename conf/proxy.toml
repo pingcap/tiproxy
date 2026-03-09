@@ -34,7 +34,7 @@ graceful-close-conn-timeout = 15
 
 # It's a tradeoff between memory and performance.
 # possible values:
-#       0 => default value
+#       0 => default value (16K)
 #		1K to 16M
 # conn-buffer-size = 0
 
