@@ -45,7 +45,7 @@ var (
 )
 
 const (
-	DefaultConnBufferSize = 32 * 1024
+	DefaultConnBufferSize = 16 * 1024
 )
 
 type rwStatus int

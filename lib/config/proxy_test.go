@@ -25,7 +25,7 @@ var testProxyConfig = Config{
 			FrontendKeepalive:          KeepAlive{Enabled: true},
 			ProxyProtocol:              "v2",
 			GracefulWaitBeforeShutdown: 10,
-			ConnBufferSize:             32 * 1024,
+			ConnBufferSize:             16 * 1024,
 		},
 	},
 	API: API{
