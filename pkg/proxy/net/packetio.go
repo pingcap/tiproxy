@@ -198,6 +198,7 @@ type PacketIO struct {
 	logger        *zap.Logger
 	remoteAddr    net.Addr
 	wrap          error
+	quickAck      bool
 	header        [4]byte // reuse memory to reduce allocation
 	inPackets     uint64
 	outPackets    uint64
@@ -277,6 +278,11 @@ func (p *PacketIO) readOnePacket() ([]byte, bool, error) {
 
 // ReadPacket reads data and removes the header
 func (p *PacketIO) ReadPacket() (data []byte, err error) {
+	if p.quickAck {
+		if err = setQuickAck(p.rawConn); err != nil {
+			p.logger.Debug("failed to request tcp quickack", zap.Error(err))
+		}
+	}
 	p.readWriter.BeginRW(rwRead)
 	for more := true; more; {
 		var buf []byte

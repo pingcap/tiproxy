@@ -30,6 +30,7 @@ func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *t
 	bemgr.SetValue(backend.ConnContextKeyConnAddr, addr)
 	opts := make([]pnet.PacketIOption, 0, 2)
 	opts = append(opts, pnet.WithWrapError(backend.ErrClientConn))
+	opts = append(opts, pnet.WithQuickAck())
 	if bcConfig.ProxyProtocol {
 		opts = append(opts, pnet.WithProxy)
 	}

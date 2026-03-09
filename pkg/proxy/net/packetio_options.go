@@ -49,3 +49,9 @@ func WithReadTimeout(d time.Duration) func(pi *PacketIO) {
 		pi.readTimeout = d
 	}
 }
+
+func WithQuickAck() func(pi *PacketIO) {
+	return func(pi *PacketIO) {
+		pi.quickAck = true
+	}
+}
