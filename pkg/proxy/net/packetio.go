@@ -44,6 +44,8 @@ var (
 	ErrInvalidSequence = dbterror.ClassServer.NewStd(errno.ErrInvalidSequence)
 )
 
+var requestQuickAck = setQuickAck
+
 const (
 	DefaultConnBufferSize = 16 * 1024
 )
@@ -284,11 +286,6 @@ func (p *PacketIO) ReadPacket() (data []byte, err error) {
 	defer func() {
 		p.logSlowIO("read_packet", start, len(data), err)
 	}()
-	if p.quickAck {
-		if err = setQuickAck(p.rawConn); err != nil {
-			p.logger.Debug("failed to request tcp quickack", zap.Error(err))
-		}
-	}
 	p.readWriter.BeginRW(rwRead)
 	for more := true; more; {
 		var buf []byte
@@ -438,6 +435,7 @@ func (p *PacketIO) Flush() error {
 		p.logSlowIO("flush", start, 0, err)
 		return err
 	}
+	p.requestQuickAck()
 	p.logSlowIO("flush", start, 0, nil)
 	return nil
 }
@@ -457,6 +455,15 @@ func (p *PacketIO) SetKeepalive(cfg config.KeepAlive) error {
 // LastKeepAlive is used for test.
 func (p *PacketIO) LastKeepAlive() config.KeepAlive {
 	return p.lastKeepAlive
+}
+
+func (p *PacketIO) requestQuickAck() {
+	if !p.quickAck {
+		return
+	}
+	if err := requestQuickAck(p.rawConn); err != nil && p.logger != nil {
+		p.logger.Debug("failed to request tcp quickack", zap.Error(err))
+	}
 }
 
 func (p *PacketIO) logSlowIO(op string, start time.Time, bytes int, err error) {
