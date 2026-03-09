@@ -16,6 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const frontendSlowPathThreshold = 100 * time.Millisecond
+
 type ClientConnection struct {
 	logger            *zap.Logger
 	frontendTLSConfig *tls.Config    // the TLS config to connect to clients.
@@ -28,9 +30,10 @@ func NewClientConnection(logger *zap.Logger, conn net.Conn, frontendTLSConfig *t
 	hsHandler backend.HandshakeHandler, connID uint64, addr string, frontendReadTimeout int, bcConfig *backend.BCConfig) *ClientConnection {
 	bemgr := backend.NewBackendConnManager(logger.Named("be"), hsHandler, connID, bcConfig)
 	bemgr.SetValue(backend.ConnContextKeyConnAddr, addr)
-	opts := make([]pnet.PacketIOption, 0, 2)
+	opts := make([]pnet.PacketIOption, 0, 4)
 	opts = append(opts, pnet.WithWrapError(backend.ErrClientConn))
 	opts = append(opts, pnet.WithQuickAck())
+	opts = append(opts, pnet.WithSlowLog("frontend", frontendSlowPathThreshold))
 	if bcConfig.ProxyProtocol {
 		opts = append(opts, pnet.WithProxy)
 	}
@@ -74,15 +77,27 @@ clean:
 func (cc *ClientConnection) processMsg(ctx context.Context) error {
 	for {
 		cc.pkt.ResetSequence()
+		readStart := time.Now()
 		clientPkt, err := cc.pkt.ReadPacket()
+		readElapsed := time.Since(readStart)
 		if err != nil {
 			cc.connMgr.SetValue(backend.ConnContextKeyClientError, err)
 			cc.connMgr.SetQuitSourceByErr(err)
 			return err
 		}
+		execStart := time.Now()
 		err = cc.connMgr.ExecuteCmd(ctx, clientPkt)
+		execElapsed := time.Since(execStart)
 		if err != nil {
 			return err
+		}
+		totalElapsed := readElapsed + execElapsed
+		if totalElapsed >= frontendSlowPathThreshold {
+			cc.logger.Info("slow frontend command",
+				zap.Stringer("cmd", pnet.Command(clientPkt[0])),
+				zap.Duration("read_packet_elapsed", readElapsed),
+				zap.Duration("execute_cmd_elapsed", execElapsed),
+				zap.Duration("total_elapsed", totalElapsed))
 		}
 		if pnet.Command(clientPkt[0]) == pnet.ComQuit {
 			return nil
