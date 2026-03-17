@@ -18,6 +18,8 @@ const (
 	MatchClientCIDRStr = "client_cidr"
 	// MatchProxyCIDRStr is used for MatchProxyCIDR.
 	MatchProxyCIDRStr = "proxy_cidr"
+	// MatchPortStr is used for port-based routing.
+	MatchPortStr = "port"
 )
 
 type Balance struct {
@@ -52,7 +54,7 @@ func (b *Balance) Check() error {
 	}
 
 	switch b.RoutingRule {
-	case MatchClientCIDRStr, MatchProxyCIDRStr, "":
+	case MatchClientCIDRStr, MatchProxyCIDRStr, MatchPortStr, "":
 	default:
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.routing-rule")
 	}

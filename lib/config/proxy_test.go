@@ -25,6 +25,18 @@ var testProxyConfig = Config{
 			ProxyProtocol:              "v2",
 			GracefulWaitBeforeShutdown: 10,
 			ConnBufferSize:             32 * 1024,
+			BackendClusters: []BackendCluster{
+				{
+					Name:      "cluster-a",
+					PDAddrs:   "127.0.0.1:12379,127.0.0.1:22379",
+					NSServers: []string{"10.0.0.2", "10.0.0.3"},
+				},
+				{
+					Name:      "cluster-b",
+					PDAddrs:   "127.0.0.1:32379",
+					NSServers: []string{"10.0.0.4"},
+				},
+			},
 		},
 	},
 	API: API{
@@ -112,6 +124,58 @@ func TestProxyCheck(t *testing.T) {
 			},
 			err: ErrInvalidConfigValue,
 		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.PortRange = []int{10000}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.PortRange = []int{10000, 9999}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.Addr = "0.0.0.0:6000,0.0.0.0:6001"
+				c.Proxy.PortRange = []int{10000, 10001}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = append(c.Proxy.BackendClusters, BackendCluster{})
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = []BackendCluster{{Name: "c1", PDAddrs: ""}}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = []BackendCluster{{Name: "c1", PDAddrs: "127.0.0.1"}}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = []BackendCluster{
+					{Name: "c1", PDAddrs: "127.0.0.1:2379"},
+					{Name: "c1", PDAddrs: "127.0.0.1:2380"},
+				}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = []BackendCluster{{Name: "c1", PDAddrs: "127.0.0.1:2379", NSServers: []string{"10.0.0.1:abc"}}}
+			},
+			err: ErrInvalidConfigValue,
+		},
 	}
 	for _, tc := range testcases {
 		cfg := testProxyConfig
@@ -168,11 +232,100 @@ func TestGetIPPort(t *testing.T) {
 	}
 }
 
+func TestGetSQLAddrs(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Proxy.Addr = "0.0.0.0:6000"
+	cfg.Proxy.PortRange = nil
+	addrs, err := cfg.Proxy.GetSQLAddrs()
+	require.NoError(t, err)
+	require.Equal(t, []string{"0.0.0.0:6000"}, addrs)
+
+	cfg.Proxy.PortRange = []int{10000, 10002}
+	addrs, err = cfg.Proxy.GetSQLAddrs()
+	require.NoError(t, err)
+	require.Equal(t, []string{"0.0.0.0:10000", "0.0.0.0:10001", "0.0.0.0:10002"}, addrs)
+}
+
+func TestParseNSServers(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		input     []string
+		expected  []string
+		expectErr bool
+	}{
+		{
+			name:     "ipv4 default port",
+			input:    []string{"10.0.0.1"},
+			expected: []string{"10.0.0.1:53"},
+		},
+		{
+			name:     "hostname explicit port",
+			input:    []string{"dns.example.com:5353"},
+			expected: []string{"dns.example.com:5353"},
+		},
+		{
+			name:     "ipv6 default port",
+			input:    []string{"2001:db8::1"},
+			expected: []string{"[2001:db8::1]:53"},
+		},
+		{
+			name:      "bracketed ipv6 without port is invalid",
+			input:     []string{"[2001:db8::1]"},
+			expectErr: true,
+		},
+		{
+			name:      "invalid port",
+			input:     []string{"10.0.0.1:abc"},
+			expectErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addrs, err := ParseNSServers(tc.input)
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, addrs)
+		})
+	}
+}
+
 func TestCloneConfig(t *testing.T) {
 	cfg := testProxyConfig
 	cfg.Labels = map[string]string{"a": "b"}
+	cfg.Proxy.PublicEndpoints = []string{"1.1.1.0/24"}
 	clone := cfg.Clone()
 	require.Equal(t, cfg, *clone)
 	cfg.Labels["c"] = "d"
+	cfg.Proxy.PublicEndpoints[0] = "2.2.2.0/24"
+	cfg.Proxy.BackendClusters[0].Name = "cluster-updated"
+	cfg.Proxy.BackendClusters[0].NSServers[0] = "10.0.0.9"
 	require.NotContains(t, clone.Labels, "c")
+	require.Equal(t, []string{"1.1.1.0/24"}, clone.Proxy.PublicEndpoints)
+	require.Equal(t, "cluster-a", clone.Proxy.BackendClusters[0].Name)
+	require.Equal(t, []string{"10.0.0.2", "10.0.0.3"}, clone.Proxy.BackendClusters[0].NSServers)
+}
+
+func TestGetBackendClusters(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Proxy.PDAddrs = "127.0.0.1:2379,127.0.0.2:2379"
+	cfg.Proxy.BackendClusters = nil
+
+	clusters := cfg.GetBackendClusters()
+	require.Len(t, clusters, 1)
+	require.Equal(t, "default", clusters[0].Name)
+	require.Equal(t, cfg.Proxy.PDAddrs, clusters[0].PDAddrs)
+
+	cfg.Proxy.BackendClusters = []BackendCluster{
+		{Name: "cluster-a", PDAddrs: "127.0.0.3:2379"},
+	}
+	clusters = cfg.GetBackendClusters()
+	require.Len(t, clusters, 1)
+	require.Equal(t, "cluster-a", clusters[0].Name)
+	require.Equal(t, "127.0.0.3:2379", clusters[0].PDAddrs)
+
+	cfg.Proxy.BackendClusters = nil
+	cfg.Proxy.PDAddrs = ""
+	require.Nil(t, cfg.GetBackendClusters())
 }
