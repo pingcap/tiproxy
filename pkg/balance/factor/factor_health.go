@@ -187,13 +187,13 @@ type errIndicator struct {
 type FactorHealth struct {
 	snapshot            map[string]healthBackendSnapshot
 	indicators          []errIndicator
-	mr                  metricsreader.MetricsReader
+	mr                  metricsreader.MetricsQuerier
 	bitNum              int
 	migrationsPerSecond float64
 	lg                  *zap.Logger
 }
 
-func NewFactorHealth(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorHealth {
+func NewFactorHealth(mr metricsreader.MetricsQuerier, lg *zap.Logger) *FactorHealth {
 	return &FactorHealth{
 		mr:         mr,
 		snapshot:   make(map[string]healthBackendSnapshot),
@@ -203,7 +203,7 @@ func NewFactorHealth(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorHeal
 	}
 }
 
-func initErrIndicator(mr metricsreader.MetricsReader) []errIndicator {
+func initErrIndicator(mr metricsreader.MetricsQuerier) []errIndicator {
 	indicators := make([]errIndicator, 0, len(errDefinitions))
 	for _, def := range errDefinitions {
 		indicator := errIndicator{

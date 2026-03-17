@@ -314,7 +314,7 @@ func TestGetBackendClusters(t *testing.T) {
 
 	clusters := cfg.GetBackendClusters()
 	require.Len(t, clusters, 1)
-	require.Equal(t, "default", clusters[0].Name)
+	require.Equal(t, DefaultBackendClusterName, clusters[0].Name)
 	require.Equal(t, cfg.Proxy.PDAddrs, clusters[0].PDAddrs)
 
 	cfg.Proxy.BackendClusters = []BackendCluster{

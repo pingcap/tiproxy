@@ -13,8 +13,10 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
+	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -25,6 +27,7 @@ type Cluster struct {
 	cfg        config.BackendCluster
 	etcdCli    *clientv3.Client
 	infoSyncer *infosync.InfoSyncer
+	metrics    *metricsreader.ClusterReader
 }
 
 func (c *Cluster) Config() config.BackendCluster {
@@ -46,9 +49,11 @@ func (c *Cluster) GetPromInfo(ctx context.Context) (*infosync.PrometheusInfo, er
 type Manager struct {
 	lg         *zap.Logger
 	clusterTLS func() *tls.Config
+	cfgGetter  config.ConfigGetter
 
-	wg     waitgroup.WaitGroup
-	cancel context.CancelFunc
+	wg      waitgroup.WaitGroup
+	cancel  context.CancelFunc
+	metrics *MetricsQuerier
 
 	mu struct {
 		sync.RWMutex
@@ -62,10 +67,12 @@ func NewManager(lg *zap.Logger, clusterTLS func() *tls.Config) *Manager {
 		clusterTLS: clusterTLS,
 	}
 	mgr.mu.clusters = make(map[string]*Cluster)
+	mgr.metrics = NewMetricsQuerier(mgr)
 	return mgr
 }
 
 func (m *Manager) Start(ctx context.Context, cfgGetter config.ConfigGetter, cfgCh <-chan *config.Config) error {
+	m.cfgGetter = cfgGetter
 	if err := m.syncClusters(ctx, cfgGetter.GetConfig()); err != nil {
 		return err
 	}
@@ -206,11 +213,34 @@ func (m *Manager) buildCluster(ctx context.Context, cfg *config.Config, clusterC
 		return nil, err
 	}
 
-	return &Cluster{
+	cluster := &Cluster{
 		cfg:        clusterCfg,
 		etcdCli:    etcdCli,
 		infoSyncer: infoSyncer,
-	}, nil
+	}
+	cluster.metrics = metricsreader.NewClusterReader(
+		m.lg.With(zap.String("cluster", clusterCfg.Name)).Named("metrics"),
+		clusterCfg.Name,
+		cluster,
+		cluster,
+		http.NewHTTPClient(m.clusterTLS),
+		etcdCli,
+		config.NewDefaultHealthCheckConfig(),
+		m.cfgGetter,
+	)
+	for key, query := range m.metrics.snapshot() {
+		cluster.metrics.AddQueryExpr(key, query.expr, query.rule)
+	}
+	if err := cluster.metrics.Start(ctx); err != nil {
+		_ = infoSyncer.Close()
+		if closeErr := etcdCli.Close(); closeErr != nil {
+			m.lg.Warn("close cluster etcd client failed after metrics init error",
+				zap.String("cluster", clusterCfg.Name), zap.Error(closeErr))
+		}
+		return nil, err
+	}
+
+	return cluster, nil
 }
 
 func (m *Manager) closeCluster(cluster *Cluster) error {
@@ -218,6 +248,9 @@ func (m *Manager) closeCluster(cluster *Cluster) error {
 		return nil
 	}
 	errs := make([]error, 0, 2)
+	if cluster.metrics != nil {
+		cluster.metrics.Close()
+	}
 	if cluster.infoSyncer != nil {
 		errs = append(errs, cluster.infoSyncer.Close())
 	}
@@ -241,9 +274,12 @@ func (m *Manager) HasBackendClusters() bool {
 	return len(m.mu.clusters) > 0
 }
 
+func (m *Manager) MetricsQuerier() *MetricsQuerier {
+	return m.metrics
+}
+
 // PrimaryCluster returns the only configured cluster when the cluster count is exactly one.
-// It exists for features that are only well-defined in the single-cluster case, such as VIP,
-// and for temporary transition points that still require a unique cluster.
+// It exists for features that are only well-defined in the single-cluster case, such as VIP.
 func (m *Manager) PrimaryCluster() *Cluster {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -254,6 +290,15 @@ func (m *Manager) PrimaryCluster() *Cluster {
 		return cluster
 	}
 	return nil
+}
+
+func (m *Manager) PreClose() {
+	for _, cluster := range m.Snapshot() {
+		if cluster == nil || cluster.metrics == nil {
+			continue
+		}
+		cluster.metrics.PreClose()
+	}
 }
 
 func (m *Manager) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error) {
