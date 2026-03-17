@@ -30,14 +30,14 @@ func TestReadPromMetrics(t *testing.T) {
 		{
 			promQL:         `tidb_server_connections`,
 			respBody:       `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"tidb_server_connections","instance":"127.0.0.1:10080","job":"tidb"},"values":[[1712738879.406,"0"],[1712738894.406,"0"],[1712738909.406,"0"],[1712738924.406,"0"],[1712738939.406,"0"]]}]}}`,
-			expectedString: "tidb_server_connections{instance=\"127.0.0.1:10080\", job=\"tidb\"} =>\n0 @[1712738879.406]\n0 @[1712738894.406]\n0 @[1712738909.406]\n0 @[1712738924.406]\n0 @[1712738939.406]",
+			expectedString: "tidb_server_connections{instance=\"127.0.0.1:10080\", job=\"tidb\", tiproxy_cluster=\"default\"} =>\n0 @[1712738879.406]\n0 @[1712738894.406]\n0 @[1712738909.406]\n0 @[1712738924.406]\n0 @[1712738939.406]",
 			expectedType:   model.ValMatrix,
 		},
 		{
 			promQL:         `go_goroutines{%s="tidb"}`,
 			hasLabel:       true,
 			respBody:       `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"go_goroutines","instance":"127.0.0.1:10080","job":"tidb"},"values":[[1712742184.054,"229"],[1712742199.054,"229"],[1712742214.054,"229"],[1712742229.054,"229"],[1712742244.054,"229"]]}]}}`,
-			expectedString: "go_goroutines{instance=\"127.0.0.1:10080\", job=\"tidb\"} =>\n229 @[1712742184.054]\n229 @[1712742199.054]\n229 @[1712742214.054]\n229 @[1712742229.054]\n229 @[1712742244.054]",
+			expectedString: "go_goroutines{instance=\"127.0.0.1:10080\", job=\"tidb\", tiproxy_cluster=\"default\"} =>\n229 @[1712742184.054]\n229 @[1712742199.054]\n229 @[1712742214.054]\n229 @[1712742229.054]\n229 @[1712742244.054]",
 			expectedType:   model.ValMatrix,
 		},
 		{
@@ -79,12 +79,12 @@ func TestMultiExprs(t *testing.T) {
 		{
 			promQL:         `tidb_server_connections`,
 			respBody:       `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"tidb_server_connections","instance":"127.0.0.1:10080","job":"tidb"},"values":[[1712738879.406,"0"],[1712738894.406,"0"],[1712738909.406,"0"],[1712738924.406,"0"],[1712738939.406,"0"]]}]}}`,
-			expectedString: "tidb_server_connections{instance=\"127.0.0.1:10080\", job=\"tidb\"} =>\n0 @[1712738879.406]\n0 @[1712738894.406]\n0 @[1712738909.406]\n0 @[1712738924.406]\n0 @[1712738939.406]",
+			expectedString: "tidb_server_connections{instance=\"127.0.0.1:10080\", job=\"tidb\", tiproxy_cluster=\"default\"} =>\n0 @[1712738879.406]\n0 @[1712738894.406]\n0 @[1712738909.406]\n0 @[1712738924.406]\n0 @[1712738939.406]",
 		},
 		{
 			promQL:         `go_goroutines`,
 			respBody:       `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"go_goroutines","instance":"127.0.0.1:10080","job":"tidb"},"values":[[1712742184.054,"229"],[1712742199.054,"229"],[1712742214.054,"229"],[1712742229.054,"229"],[1712742244.054,"229"]]}]}}`,
-			expectedString: "go_goroutines{instance=\"127.0.0.1:10080\", job=\"tidb\"} =>\n229 @[1712742184.054]\n229 @[1712742199.054]\n229 @[1712742214.054]\n229 @[1712742229.054]\n229 @[1712742244.054]",
+			expectedString: "go_goroutines{instance=\"127.0.0.1:10080\", job=\"tidb\", tiproxy_cluster=\"default\"} =>\n229 @[1712742184.054]\n229 @[1712742199.054]\n229 @[1712742214.054]\n229 @[1712742229.054]\n229 @[1712742244.054]",
 		},
 		{
 			promQL:         `unknown`,
@@ -138,13 +138,13 @@ func TestBackendLabel(t *testing.T) {
 			promQL:         `tidb_server_connections`,
 			label:          `job`,
 			respBody:       `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"tidb_server_connections","instance":"127.0.0.1:10080","job":"tidb"},"values":[[1712738879.406,"0"],[1712738894.406,"0"],[1712738909.406,"0"],[1712738924.406,"0"],[1712738939.406,"0"]]}]}}`,
-			expectedString: "tidb_server_connections{instance=\"127.0.0.1:10080\", job=\"tidb\"} =>\n0 @[1712738879.406]\n0 @[1712738894.406]\n0 @[1712738909.406]\n0 @[1712738924.406]\n0 @[1712738939.406]",
+			expectedString: "tidb_server_connections{instance=\"127.0.0.1:10080\", job=\"tidb\", tiproxy_cluster=\"default\"} =>\n0 @[1712738879.406]\n0 @[1712738894.406]\n0 @[1712738909.406]\n0 @[1712738924.406]\n0 @[1712738939.406]",
 		},
 		{
 			promQL:         `go_goroutines`,
 			label:          `component`,
 			respBody:       `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"__name__":"go_goroutines","instance":"127.0.0.1:10080","component":"tidb"},"values":[[1712742184.054,"229"],[1712742199.054,"229"],[1712742214.054,"229"],[1712742229.054,"229"],[1712742244.054,"229"]]}]}}`,
-			expectedString: "go_goroutines{component=\"tidb\", instance=\"127.0.0.1:10080\"} =>\n229 @[1712742184.054]\n229 @[1712742199.054]\n229 @[1712742214.054]\n229 @[1712742229.054]\n229 @[1712742244.054]",
+			expectedString: "go_goroutines{component=\"tidb\", instance=\"127.0.0.1:10080\", tiproxy_cluster=\"default\"} =>\n229 @[1712742184.054]\n229 @[1712742199.054]\n229 @[1712742214.054]\n229 @[1712742229.054]\n229 @[1712742244.054]",
 		},
 	}
 

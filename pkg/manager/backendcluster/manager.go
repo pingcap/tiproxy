@@ -22,9 +22,11 @@ import (
 type Manager struct {
 	lg         *zap.Logger
 	clusterTLS func() *tls.Config
+	cfgGetter  config.ConfigGetter
 
-	wg     waitgroup.WaitGroup
-	cancel context.CancelFunc
+	wg      waitgroup.WaitGroup
+	cancel  context.CancelFunc
+	metrics *MetricsQuerier
 
 	mu struct {
 		sync.RWMutex
@@ -38,10 +40,12 @@ func NewManager(lg *zap.Logger, clusterTLS func() *tls.Config) *Manager {
 		clusterTLS: clusterTLS,
 	}
 	mgr.mu.clusters = make(map[string]*Cluster)
+	mgr.metrics = NewMetricsQuerier(mgr)
 	return mgr
 }
 
 func (m *Manager) Start(ctx context.Context, cfgGetter config.ConfigGetter, cfgCh <-chan *config.Config) error {
+	m.cfgGetter = cfgGetter
 	if err := m.syncClusters(ctx, cfgGetter.GetConfig()); err != nil {
 		return err
 	}
@@ -94,7 +98,7 @@ func (m *Manager) syncClusters(ctx context.Context, cfg *config.Config) error {
 				continue
 			}
 
-			cluster, err := NewCluster(ctx, cfg, clusterCfg, m.clusterTLS, m.lg)
+			cluster, err := NewCluster(ctx, cfg, clusterCfg, m.clusterTLS, m.lg, m.cfgGetter, m.metrics)
 			if err != nil {
 				if ok {
 					m.lg.Error("failed to update backend cluster, keep the old one",
@@ -160,7 +164,6 @@ func clusterReusable(cluster *Cluster, cfg config.BackendCluster) bool {
 		left.PDAddrs == right.PDAddrs &&
 		slices.Equal(left.NSServers, right.NSServers)
 }
-
 func (m *Manager) Snapshot() map[string]*Cluster {
 	m.mu.RLock()
 	snapshot := make(map[string]*Cluster, len(m.mu.clusters))
@@ -175,9 +178,12 @@ func (m *Manager) HasBackendClusters() bool {
 	return len(m.mu.clusters) > 0
 }
 
+func (m *Manager) MetricsQuerier() *MetricsQuerier {
+	return m.metrics
+}
+
 // PrimaryCluster returns the only configured cluster when the cluster count is exactly one.
-// It exists for features that are only well-defined in the single-cluster case, such as VIP,
-// and for temporary transition points that still require a unique cluster.
+// It exists for features that are only well-defined in the single-cluster case, such as VIP.
 func (m *Manager) PrimaryCluster() *Cluster {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -188,6 +194,12 @@ func (m *Manager) PrimaryCluster() *Cluster {
 		return cluster
 	}
 	return nil
+}
+
+func (m *Manager) PreClose() {
+	for _, cluster := range m.Snapshot() {
+		cluster.PreClose()
+	}
 }
 
 func (m *Manager) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error) {

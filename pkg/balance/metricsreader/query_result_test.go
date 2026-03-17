@@ -44,6 +44,7 @@ func TestParseMatrix(t *testing.T) {
 func TestMatrixMatchLabel(t *testing.T) {
 	tests := []struct {
 		jsonRes       string
+		clusterName   string
 		addr          string
 		ip            string
 		port          uint
@@ -51,6 +52,7 @@ func TestMatrixMatchLabel(t *testing.T) {
 	}{
 		{
 			jsonRes:       `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"10.10.11.1:10080","job":"tidb"},"values":[[1712700000,"100"]]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"10.10.11.1:10081","job":"tidb"},"values":[[1712700000,"200"]]}]`,
+			clusterName:   "cluster-a",
 			addr:          "10.10.11.1:4000",
 			ip:            "10.10.11.1",
 			port:          10080,
@@ -58,6 +60,7 @@ func TestMatrixMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:       `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"10.10.11.1:10080","job":"tidb"},"values":[[1712700000,"100"]]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"10.10.11.1:10081","job":"tidb"},"values":[[1712700000,"200"]]}]`,
+			clusterName:   "cluster-a",
 			addr:          "10.10.11.1:4000",
 			ip:            "10.10.11.1",
 			port:          10082,
@@ -65,6 +68,7 @@ func TestMatrixMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:       `[]`,
+			clusterName:   "cluster-a",
 			addr:          "10.10.11.1:4000",
 			ip:            "10.10.11.1",
 			port:          10080,
@@ -72,6 +76,7 @@ func TestMatrixMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:       `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"tidb-peer-0:10080","job":"tidb"},"values":[[1712700000,"100"]]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"tidb-peer-1:10081","job":"tidb"},"values":[[1712700000,"200"]]}]`,
+			clusterName:   "cluster-a",
 			addr:          "tidb-peer-0:4000",
 			ip:            "tidb-peer-0",
 			port:          10080,
@@ -79,6 +84,7 @@ func TestMatrixMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:       `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-0","job":"tidb"},"values":[[1712700000,"100"]]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-1","job":"tidb"},"values":[[1712700000,"200"]]}]`,
+			clusterName:   "cluster-a",
 			addr:          "tc-tidb-0.tc-tidb-peer.ns.svc:4000",
 			ip:            "tc-tidb-0.tc-tidb-peer.ns.svc",
 			port:          10080,
@@ -86,6 +92,7 @@ func TestMatrixMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:       `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-0","job":"tidb"},"values":[[1712700000,"100"]]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-1","job":"tidb"},"values":[[1712700000,"200"]]}]`,
+			clusterName:   "cluster-a",
 			addr:          "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local:4000",
 			ip:            "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local",
 			port:          10080,
@@ -93,10 +100,19 @@ func TestMatrixMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:       `[]`,
+			clusterName:   "cluster-a",
 			addr:          "tc-tidb-0.tc-tidb-peer.ns.svc:4000",
 			ip:            "tc-tidb-0.tc-tidb-peer.ns.svc",
 			port:          10080,
 			expectedPairs: nil,
+		},
+		{
+			jsonRes:       `[{"metric":{"instance":"10.10.11.1:10080","tiproxy_cluster":"cluster-a"},"values":[[1712700000,"100"]]}, {"metric":{"instance":"10.10.11.1:10080","tiproxy_cluster":"cluster-b"},"values":[[1712700000,"200"]]}]`,
+			clusterName:   "cluster-b",
+			addr:          "10.10.11.1:4000",
+			ip:            "10.10.11.1",
+			port:          10080,
+			expectedPairs: []model.SamplePair{{Timestamp: 1712700000000, Value: 200}},
 		},
 	}
 
@@ -107,6 +123,7 @@ func TestMatrixMatchLabel(t *testing.T) {
 			Value: m,
 		}
 		backend := newMockBackend(test.addr, test.ip, test.port)
+		backend.ClusterName = test.clusterName
 		pairs := qr.GetSamplePair4Backend(backend)
 		require.Equal(t, test.expectedPairs, pairs, "test index %d", i)
 	}
@@ -115,6 +132,7 @@ func TestMatrixMatchLabel(t *testing.T) {
 func TestVectorMatchLabel(t *testing.T) {
 	tests := []struct {
 		jsonRes        string
+		clusterName    string
 		addr           string
 		ip             string
 		port           uint
@@ -122,6 +140,7 @@ func TestVectorMatchLabel(t *testing.T) {
 	}{
 		{
 			jsonRes:        `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"10.10.11.1:10080","job":"tidb"},"value":[1712700000,"100"]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"10.10.11.1:10081","job":"tidb"},"value":[1712700000,"200"]}]`,
+			clusterName:    "cluster-a",
 			addr:           "10.10.11.1:4000",
 			ip:             "10.10.11.1",
 			port:           10080,
@@ -129,6 +148,7 @@ func TestVectorMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:        `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"10.10.11.1:10080","job":"tidb"},"value":[1712700000,"100"]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"10.10.11.1:10081","job":"tidb"},"value":[1712700000,"200"]}]`,
+			clusterName:    "cluster-a",
 			addr:           "10.10.11.1:4000",
 			ip:             "10.10.11.1",
 			port:           10082,
@@ -136,6 +156,7 @@ func TestVectorMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:        `[]`,
+			clusterName:    "cluster-a",
 			addr:           "10.10.11.1:4000",
 			ip:             "10.10.11.1",
 			port:           10080,
@@ -143,6 +164,7 @@ func TestVectorMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:        `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"tidb-peer-0:10080","job":"tidb"},"value":[1712700000,"100"]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"tidb-peer-1:10081","job":"tidb"},"value":[1712700000,"200"]}]`,
+			clusterName:    "cluster-a",
 			addr:           "tidb-peer-0:4000",
 			ip:             "tidb-peer-0",
 			port:           10080,
@@ -150,6 +172,7 @@ func TestVectorMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:        `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-0","job":"tidb"},"value":[1712700000,"100"]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-1","job":"tidb"},"value":[1712700000,"200"]}]`,
+			clusterName:    "cluster-a",
 			addr:           "tc-tidb-0.tc-tidb-peer.ns.svc:4000",
 			ip:             "tc-tidb-0.tc-tidb-peer.ns.svc",
 			port:           10080,
@@ -157,6 +180,7 @@ func TestVectorMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:        `[{"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-0","job":"tidb"},"value":[1712700000,"100"]}, {"metric":{"__name__":"process_cpu_seconds_total","instance":"tc-tidb-1","job":"tidb"},"value":[1712700000,"200"]}]`,
+			clusterName:    "cluster-a",
 			addr:           "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local:4000",
 			ip:             "tc-tidb-0.tc-tidb-peer.ns.svc.cluster.local",
 			port:           10080,
@@ -164,10 +188,19 @@ func TestVectorMatchLabel(t *testing.T) {
 		},
 		{
 			jsonRes:        `[]`,
+			clusterName:    "cluster-a",
 			addr:           "tc-tidb-0.tc-tidb-peer.ns.svc:4000",
 			ip:             "tc-tidb-0.tc-tidb-peer.ns.svc",
 			port:           10080,
 			expectedSample: nil,
+		},
+		{
+			jsonRes:        `[{"metric":{"instance":"10.10.11.1:10080","tiproxy_cluster":"cluster-a"},"value":[1712700000,"100"]}, {"metric":{"instance":"10.10.11.1:10080","tiproxy_cluster":"cluster-b"},"value":[1712700000,"200"]}]`,
+			clusterName:    "cluster-b",
+			addr:           "10.10.11.1:4000",
+			ip:             "10.10.11.1",
+			port:           10080,
+			expectedSample: &model.Sample{Timestamp: 1712700000000, Value: 200},
 		},
 	}
 
@@ -178,6 +211,7 @@ func TestVectorMatchLabel(t *testing.T) {
 			Value: v,
 		}
 		backend := newMockBackend(test.addr, test.ip, test.port)
+		backend.ClusterName = test.clusterName
 		sample := qr.GetSample4Backend(backend)
 		if test.expectedSample == nil {
 			require.Nil(t, sample, "test index %d", i)

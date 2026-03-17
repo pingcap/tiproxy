@@ -310,6 +310,40 @@ func TestHealthBalanceCount(t *testing.T) {
 	}
 }
 
+func TestHealthSnapshotUsesBackendID(t *testing.T) {
+	backends := []scoredBackend{
+		createBackendWithAddrID("shared:4000", "cluster-a/shared:4000", "10.0.0.1", 10080, 10, 10),
+		createBackendWithAddrID("shared:4000", "cluster-b/shared:4000", "10.0.0.2", 10080, 20, 20),
+	}
+	mmr := &mockMetricsReader{
+		qrs: map[string]metricsreader.QueryResult{
+			"failure_pd": {
+				UpdateTime: time.Now(),
+				Value: model.Vector([]*model.Sample{
+					createSampleForInstance(0, "10.0.0.1:10080"),
+					createSampleForInstance(100, "10.0.0.2:10080"),
+				}),
+			},
+			"total_pd": {
+				UpdateTime: time.Now(),
+				Value: model.Vector([]*model.Sample{
+					createSampleForInstance(100, "10.0.0.1:10080"),
+					createSampleForInstance(100, "10.0.0.2:10080"),
+				}),
+			},
+		},
+	}
+	fh := NewFactorHealth(mmr, zap.NewNop())
+
+	fh.UpdateScore(backends)
+
+	require.Len(t, fh.snapshot, 2)
+	require.Contains(t, fh.snapshot, "cluster-a/shared:4000")
+	require.Contains(t, fh.snapshot, "cluster-b/shared:4000")
+	require.Equal(t, valueRangeNormal, fh.snapshot["cluster-a/shared:4000"].valueRange)
+	require.Equal(t, valueRangeAbnormal, fh.snapshot["cluster-b/shared:4000"].valueRange)
+}
+
 func TestHealthQueryRule(t *testing.T) {
 	tests := []struct {
 		text       string
