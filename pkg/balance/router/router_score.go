@@ -116,7 +116,11 @@ func (router *ScoreBasedRouter) GetBackendSelector(clientInfo ClientInfo) Backen
 				return
 			}
 			// The router may remove this group concurrently, make sure the group can be accessed after it's removed.
-			backend, err = group.Route(excluded)
+			var backendCtx policy.BackendCtx
+			backendCtx, err = group.Route(excluded)
+			if err == nil && backendCtx != nil {
+				backend = backendCtx.(BackendInst)
+			}
 			return
 		},
 		onCreate: func(backend BackendInst, conn RedirectableConn, succeed bool) {
@@ -181,11 +185,12 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	// `backends` contain all the backends, not only the updated ones.
 	backends := healthResults.Backends()
 	// If some backends are removed from the list, add them to `backends`.
-	for addr, backend := range router.backends {
-		if _, ok := backends[addr]; !ok {
+	for backendID, backend := range router.backends {
+		if _, ok := backends[backendID]; !ok {
 			health := backend.getHealth()
-			router.logger.Debug("backend is removed from the list, add it back to router", zap.String("addr", addr), zap.Stringer("health", &health))
-			backends[addr] = &observer.BackendHealth{
+			router.logger.Debug("backend is removed from the list, add it back to router",
+				zap.String("backend_id", backendID), zap.String("addr", backend.Addr()), zap.Stringer("health", &health))
+			backends[backendID] = &observer.BackendHealth{
 				BackendInfo:        backend.GetBackendInfo(),
 				SupportRedirection: backend.SupportRedirection(),
 				Healthy:            false,
@@ -195,22 +200,25 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	}
 	var serverVersion string
 	supportRedirection := true
-	for addr, health := range backends {
-		backend, ok := router.backends[addr]
+	for backendID, health := range backends {
+		backend, ok := router.backends[backendID]
 		if !ok && health.Healthy {
-			router.logger.Debug("add new backend to router", zap.String("addr", addr), zap.Stringer("health", health))
-			router.backends[addr] = newBackendWrapper(addr, *health)
+			router.logger.Debug("add new backend to router",
+				zap.String("backend_id", backendID), zap.String("addr", health.Addr), zap.Stringer("health", health))
+			router.backends[backendID] = newBackendWrapper(backendID, *health)
 			serverVersion = health.ServerVersion
 		} else if ok {
 			if !health.Equals(backend.getHealth()) {
-				router.logger.Debug("update backend in router", zap.String("addr", addr), zap.Stringer("health", health))
+				router.logger.Debug("update backend in router",
+					zap.String("backend_id", backendID), zap.String("addr", health.Addr), zap.Stringer("health", health))
 			}
 			backend.setHealth(*health)
 			if health.Healthy {
 				serverVersion = health.ServerVersion
 			}
 		} else {
-			router.logger.Debug("unhealthy backend is not in router", zap.String("addr", addr), zap.Stringer("health", health))
+			router.logger.Debug("unhealthy backend is not in router",
+				zap.String("backend_id", backendID), zap.String("addr", health.Addr), zap.Stringer("health", health))
 		}
 		supportRedirection = health.SupportRedirection && supportRedirection
 	}
@@ -232,9 +240,9 @@ func (router *ScoreBasedRouter) updateGroups() {
 		// If connList.Len() == 0, there won't be any outgoing connections.
 		// And if also connScore == 0, there won't be any incoming connections.
 		if !backend.Healthy() && backend.connList.Len() == 0 && backend.connScore <= 0 {
-			delete(router.backends, backend.addr)
+			delete(router.backends, backend.id)
 			if backend.group != nil {
-				backend.group.RemoveBackend(backend.addr)
+				backend.group.RemoveBackend(backend.id)
 				// remove empty groups
 				if backend.group.Empty() {
 					router.groups = slices.DeleteFunc(router.groups, func(g *Group) bool {
@@ -280,7 +288,7 @@ func (router *ScoreBasedRouter) updateGroups() {
 			}
 		}
 		if group != nil {
-			group.AddBackend(backend.addr, backend)
+			group.AddBackend(backend.id, backend)
 		}
 	}
 	for _, group := range router.groups {
@@ -295,9 +303,19 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 		case <-ctx.Done():
 			ticker.Stop()
 			return
-		case healthResults := <-router.healthCh:
+		case healthResults, ok := <-router.healthCh:
+			if !ok {
+				router.logger.Warn("health channel is closed, stop watching channel")
+				router.healthCh = nil
+				continue
+			}
 			router.updateBackendHealth(healthResults)
-		case cfg := <-router.cfgCh:
+		case cfg, ok := <-router.cfgCh:
+			if !ok {
+				router.logger.Warn("config channel is closed, stop watching channel")
+				router.cfgCh = nil
+				continue
+			}
 			router.setConfig(cfg)
 		case <-ticker.C:
 			router.rebalance(ctx)

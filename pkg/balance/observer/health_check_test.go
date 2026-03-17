@@ -143,6 +143,7 @@ func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
 	backend.setSqlResp(true)
 	backend.startSQLServer()
 	return backend, &BackendInfo{
+		Addr:       backend.sqlAddr,
 		IP:         backend.ip,
 		StatusPort: backend.statusPort,
 	}

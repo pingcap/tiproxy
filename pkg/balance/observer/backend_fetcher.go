@@ -25,6 +25,10 @@ type BackendFetcher interface {
 // TopologyFetcher is an interface to fetch the tidb topology from ETCD.
 type TopologyFetcher interface {
 	GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error)
+	// HasBackendClusters reports whether dynamic PD-backed clusters are configured at all.
+	// PDFetcher uses it to preserve the legacy behavior that static backend.instances still work
+	// when TiProxy starts without any PD cluster and clusters are added later through the API.
+	HasBackendClusters() bool
 }
 
 // PDFetcher fetches backend list from PD.
@@ -32,25 +36,35 @@ type PDFetcher struct {
 	tpFetcher TopologyFetcher
 	logger    *zap.Logger
 	config    *config.HealthCheck
+	static    *StaticFetcher
 }
 
-func NewPDFetcher(tpFetcher TopologyFetcher, logger *zap.Logger, config *config.HealthCheck) *PDFetcher {
+func NewPDFetcher(tpFetcher TopologyFetcher, staticAddrs []string, logger *zap.Logger, config *config.HealthCheck) *PDFetcher {
 	config.Check()
 	return &PDFetcher{
 		tpFetcher: tpFetcher,
 		logger:    logger,
 		config:    config,
+		static:    NewStaticFetcher(staticAddrs),
 	}
 }
 
 func (pf *PDFetcher) GetBackendList(ctx context.Context) (map[string]*BackendInfo, error) {
+	// Keep backward compatibility with the legacy static-namespace flow: before any backend cluster
+	// is configured, backend.instances must still be routable even though namespace now always sees
+	// a non-nil topology fetcher from the cluster manager.
+	if !pf.tpFetcher.HasBackendClusters() {
+		return pf.static.GetBackendList(ctx)
+	}
 	backends := pf.fetchBackendList(ctx)
 	infos := make(map[string]*BackendInfo, len(backends))
-	for addr, backend := range backends {
-		infos[addr] = &BackendInfo{
-			Labels:     backend.Labels,
-			IP:         backend.IP,
-			StatusPort: backend.StatusPort,
+	for key, backend := range backends {
+		infos[key] = &BackendInfo{
+			Addr:        backend.Addr,
+			ClusterName: backend.ClusterName,
+			Labels:      backend.Labels,
+			IP:          backend.IP,
+			StatusPort:  backend.StatusPort,
 		}
 	}
 	return infos, nil
@@ -98,7 +112,7 @@ func (sf *StaticFetcher) GetBackendList(context.Context) (map[string]*BackendInf
 func backendListToMap(addrs []string) map[string]*BackendInfo {
 	backends := make(map[string]*BackendInfo, len(addrs))
 	for _, addr := range addrs {
-		backends[addr] = &BackendInfo{}
+		backends[addr] = &BackendInfo{Addr: addr}
 	}
 	return backends
 }
