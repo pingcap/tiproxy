@@ -6,9 +6,10 @@ package config
 const (
 	// LocationLabelName indicates the label name that decides the location of TiProxy and backends.
 	// We use `zone` because the follower read in TiDB also uses `zone` to decide location.
-	LocationLabelName = "zone"
-	KeyspaceLabelName = "keyspace"
-	CidrLabelName     = "cidr"
+	LocationLabelName    = "zone"
+	KeyspaceLabelName    = "keyspace"
+	CidrLabelName        = "cidr"
+	TiProxyPortLabelName = "tiproxy-port"
 )
 
 func (cfg *Config) GetLocation() string {
