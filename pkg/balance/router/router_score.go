@@ -5,6 +5,8 @@ package router
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -41,6 +43,8 @@ type ScoreBasedRouter struct {
 	backends map[string]*backendWrapper
 	// TODO: sort the groups to leverage binary search.
 	groups []*Group
+	// portConflictDetector dispatches listener ports to cluster-scoped backend groups.
+	portConflictDetector *portConflictDetector
 	// The routing rule for categorizing backends to groups.
 	matchType    MatchType
 	observeError error
@@ -74,6 +78,8 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 		r.matchType = MatchClientCIDR
 	case config.MatchProxyCIDRStr:
 		r.matchType = MatchProxyCIDR
+	case config.MatchPortStr:
+		r.matchType = MatchPort
 	case "":
 	default:
 		r.logger.Error("unsupported routing rule, use the default rule", zap.String("rule", cfg.Balance.RoutingRule))
@@ -110,7 +116,10 @@ func (router *ScoreBasedRouter) GetBackendSelector(clientInfo ClientInfo) Backen
 				return
 			}
 			// The group may change from round to round because the backends are updated.
-			group = router.routeToGroup(clientInfo)
+			group, err = router.routeToGroup(clientInfo)
+			if err != nil {
+				return
+			}
 			if group == nil {
 				err = ErrNoBackend
 				return
@@ -146,14 +155,22 @@ func (router *ScoreBasedRouter) HealthyBackendCount() int {
 }
 
 // called in the lock
-func (router *ScoreBasedRouter) routeToGroup(clientInfo ClientInfo) *Group {
+func (router *ScoreBasedRouter) routeToGroup(clientInfo ClientInfo) (*Group, error) {
+	if router.matchType == MatchPort {
+		_, port, err := net.SplitHostPort(clientInfo.ListenerAddr)
+		if err != nil {
+			router.logger.Error("checking port failed", zap.String("listener_addr", clientInfo.ListenerAddr), zap.Error(err))
+			return nil, nil
+		}
+		return router.portConflictDetector.groupFor(port)
+	}
 	// TODO: binary search
 	for _, group := range router.groups {
 		if group.Match(clientInfo) {
-			return group
+			return group, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // RefreshBackend implements Router.GetBackendSelector interface.
@@ -233,7 +250,32 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	}
 }
 
-// Update the groups after the backend list is updated.
+func matchPortValue(clusterName, port string) string {
+	if clusterName == "" {
+		return port
+	}
+	return fmt.Sprintf("%s:%s", clusterName, port)
+}
+
+func (router *ScoreBasedRouter) rebuildPortConflictDetector() {
+	if router.matchType != MatchPort {
+		router.portConflictDetector = nil
+		return
+	}
+	detector := newPortConflictDetector()
+	for _, group := range router.groups {
+		for _, value := range group.values {
+			clusterName, port, ok := strings.Cut(value, ":")
+			if !ok {
+				port = value
+				clusterName = ""
+			}
+			detector.bind(port, clusterName, group)
+		}
+	}
+	router.portConflictDetector = detector
+}
+
 // called in the lock.
 func (router *ScoreBasedRouter) updateGroups() {
 	for _, backend := range router.backends {
@@ -243,22 +285,39 @@ func (router *ScoreBasedRouter) updateGroups() {
 			delete(router.backends, backend.id)
 			if backend.group != nil {
 				backend.group.RemoveBackend(backend.id)
-				// remove empty groups
 				if backend.group.Empty() {
 					router.groups = slices.DeleteFunc(router.groups, func(g *Group) bool {
 						return g == backend.group
 					})
 				}
+				backend.group = nil
 			}
 			continue
 		}
-		// If the labels were correctly set, we won't update its group even if the labels change.
 		if backend.group != nil {
+			switch router.matchType {
+			case MatchClientCIDR, MatchProxyCIDR, MatchPort:
+				var values []string
+				switch router.matchType {
+				case MatchClientCIDR, MatchProxyCIDR:
+					values = backend.Cidr()
+				case MatchPort:
+					port := backend.TiProxyPort()
+					if port != "" {
+						values = []string{matchPortValue(backend.ClusterName(), port)}
+					}
+				}
+				if !backend.group.EqualValues(values) {
+					router.logger.Warn("backend routing values changed, keep the existing group until it is removed",
+						zap.String("backend_id", backend.id),
+						zap.String("addr", backend.Addr()),
+						zap.Strings("current_values", values),
+						zap.Strings("group_values", backend.group.values))
+				}
+			}
 			continue
 		}
 
-		// If the backend is not in any group, add it to a new group if its label is set.
-		// In operator deployment, the labels are set dynamically.
 		var group *Group
 		switch router.matchType {
 		case MatchAll:
@@ -267,33 +326,43 @@ func (router *ScoreBasedRouter) updateGroups() {
 				router.groups = append(router.groups, group)
 			}
 			group = router.groups[0]
-		case MatchClientCIDR, MatchProxyCIDR:
-			cidrs := backend.Cidr()
-			if len(cidrs) == 0 {
+		case MatchClientCIDR, MatchProxyCIDR, MatchPort:
+			var values []string
+			switch router.matchType {
+			case MatchClientCIDR, MatchProxyCIDR:
+				values = backend.Cidr()
+			case MatchPort:
+				port := backend.TiProxyPort()
+				if port != "" {
+					values = []string{matchPortValue(backend.ClusterName(), port)}
+				}
+			}
+			if len(values) == 0 {
 				break
 			}
 			for _, g := range router.groups {
-				if g.Intersect(cidrs) {
+				if g.Intersect(values) {
 					group = g
 					break
 				}
 			}
 			if group == nil {
-				g, err := NewGroup(cidrs, router.bpCreator, router.matchType, router.logger)
+				g, err := NewGroup(values, router.bpCreator, router.matchType, router.logger)
 				if err == nil {
 					group = g
 					router.groups = append(router.groups, group)
 				}
-				// maybe too many logs, ignore the error now
 			}
 		}
-		if group != nil {
-			group.AddBackend(backend.id, backend)
+		if group == nil {
+			continue
 		}
+		group.AddBackend(backend.id, backend)
 	}
 	for _, group := range router.groups {
 		group.RefreshCidr()
 	}
+	router.rebuildPortConflictDetector()
 }
 
 func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {

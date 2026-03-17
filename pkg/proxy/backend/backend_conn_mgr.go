@@ -287,6 +287,9 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 		ci.ClientAddr = mgr.clientIO.RemoteAddr()
 		ci.ProxyAddr = mgr.clientIO.ProxyAddr()
 	}
+	if addr, ok := cctx.Value(ConnContextKeyConnAddr).(string); ok {
+		ci.ListenerAddr = addr
+	}
 	selector := r.GetBackendSelector(ci)
 	startTime := time.Now()
 	var addr string
