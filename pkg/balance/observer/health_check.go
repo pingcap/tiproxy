@@ -19,6 +19,11 @@ import (
 	"go.uber.org/zap"
 )
 
+type BackendNetwork interface {
+	HTTPClient(clusterName string) *http.Client
+	DialContext(ctx context.Context, network, addr, clusterName string) (net.Conn, error)
+}
+
 // HealthCheck is used to check the backends of one backend. One can pass a customized health check function to the observer.
 type HealthCheck interface {
 	Check(ctx context.Context, backendID string, info *BackendInfo, lastHealth *BackendHealth) *BackendHealth
@@ -48,18 +53,42 @@ type security struct {
 type DefaultHealthCheck struct {
 	cfg     *config.HealthCheck
 	logger  *zap.Logger
-	httpCli *http.Client
+	network BackendNetwork
 }
 
 func NewDefaultHealthCheck(httpCli *http.Client, cfg *config.HealthCheck, logger *zap.Logger) *DefaultHealthCheck {
-	if httpCli == nil {
-		httpCli = http.NewHTTPClient(func() *tls.Config { return nil })
+	return NewDefaultHealthCheckWithNetwork(newDefaultBackendNetwork(httpCli), cfg, logger)
+}
+
+func NewDefaultHealthCheckWithNetwork(network BackendNetwork, cfg *config.HealthCheck, logger *zap.Logger) *DefaultHealthCheck {
+	if network == nil {
+		network = newDefaultBackendNetwork(nil)
 	}
 	return &DefaultHealthCheck{
-		httpCli: httpCli,
+		network: network,
 		cfg:     cfg,
 		logger:  logger,
 	}
+}
+
+type defaultBackendNetwork struct {
+	httpCli *http.Client
+}
+
+func newDefaultBackendNetwork(httpCli *http.Client) *defaultBackendNetwork {
+	if httpCli == nil {
+		httpCli = http.NewHTTPClient(func() *tls.Config { return nil })
+	}
+	return &defaultBackendNetwork{httpCli: httpCli}
+}
+
+func (n *defaultBackendNetwork) HTTPClient(string) *http.Client {
+	return n.httpCli
+}
+
+func (n *defaultBackendNetwork) DialContext(ctx context.Context, network, addr, _ string) (net.Conn, error) {
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, network, addr)
 }
 
 func (dhc *DefaultHealthCheck) Check(ctx context.Context, _ string, info *BackendInfo, lastBh *BackendHealth) *BackendHealth {
@@ -96,10 +125,13 @@ func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, info *BackendIn
 		return
 	}
 	addr := info.Addr
+	clusterName := info.ClusterName
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
 	err := http.ConnectWithRetry(func() error {
 		startTime := time.Now()
-		conn, err := net.DialTimeout("tcp", addr, dhc.cfg.DialTimeout)
+		dialCtx, cancel := context.WithTimeout(ctx, dhc.cfg.DialTimeout)
+		conn, err := dhc.network.DialContext(dialCtx, "tcp", addr, clusterName)
+		cancel()
 		setPingBackendMetrics(addr, startTime)
 		if err != nil {
 			return err
@@ -134,7 +166,8 @@ func (dhc *DefaultHealthCheck) checkStatusPort(ctx context.Context, info *Backen
 
 	addr := net.JoinHostPort(info.IP, strconv.Itoa(int(info.StatusPort)))
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
-	resp, err := dhc.httpCli.Get(addr, statusPathSuffix, b, dhc.cfg.DialTimeout)
+	clusterName := info.ClusterName
+	resp, err := dhc.network.HTTPClient(clusterName).Get(addr, statusPathSuffix, b, dhc.cfg.DialTimeout)
 	if err == nil {
 		var respBody backendHttpStatusRespBody
 		err = json.Unmarshal(resp, &respBody)
@@ -176,7 +209,8 @@ func (dhc *DefaultHealthCheck) queryConfig(ctx context.Context, info *BackendInf
 
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
 	var resp []byte
-	if resp, err = dhc.httpCli.Get(addr, configPathSuffix, b, dhc.cfg.DialTimeout); err != nil {
+	clusterName := info.ClusterName
+	if resp, err = dhc.network.HTTPClient(clusterName).Get(addr, configPathSuffix, b, dhc.cfg.DialTimeout); err != nil {
 		return
 	}
 	var respBody backendHttpConfigRespBody

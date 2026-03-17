@@ -35,3 +35,26 @@ func TestEtcdClient(t *testing.T) {
 	require.NoError(t, client.Close())
 	server.Close()
 }
+
+func TestSyncEtcdClient(t *testing.T) {
+	err := syncEtcdClient(context.Background(), &mockEtcdSyncer{})
+	require.NoError(t, err)
+}
+
+func TestSyncEtcdClientTimeout(t *testing.T) {
+	err := syncEtcdClient(context.Background(), &mockEtcdSyncer{block: true})
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+type mockEtcdSyncer struct {
+	block bool
+}
+
+func (m *mockEtcdSyncer) Sync(ctx context.Context) error {
+	if !m.block {
+		return nil
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
