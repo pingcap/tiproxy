@@ -109,6 +109,24 @@ func TestMissBackendInStatus(t *testing.T) {
 	require.Equal(t, 100/balanceSeconds4Status, count)
 }
 
+func TestStatusSnapshotUsesBackendID(t *testing.T) {
+	backends := []scoredBackend{
+		createBackendWithAddrID("shared:4000", "cluster-a/shared:4000", "10.0.0.1", 10080, 10, 10),
+		createBackendWithAddrID("shared:4000", "cluster-b/shared:4000", "10.0.0.2", 10080, 20, 20),
+	}
+	backends[0].BackendCtx.(*mockBackend).healthy = false
+	backends[1].BackendCtx.(*mockBackend).healthy = false
+
+	fs := NewFactorStatus(zap.NewNop())
+	fs.UpdateScore(backends)
+
+	require.Len(t, fs.snapshot, 2)
+	require.Contains(t, fs.snapshot, "cluster-a/shared:4000")
+	require.Contains(t, fs.snapshot, "cluster-b/shared:4000")
+	require.Equal(t, 10/balanceSeconds4Status, fs.snapshot["cluster-a/shared:4000"].balanceCount)
+	require.Equal(t, 20/balanceSeconds4Status, fs.snapshot["cluster-b/shared:4000"].balanceCount)
+}
+
 func TestFactorStatusConfig(t *testing.T) {
 	tests := []struct {
 		migrations float64

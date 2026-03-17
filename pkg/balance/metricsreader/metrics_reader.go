@@ -32,19 +32,25 @@ type TopologyFetcher interface {
 	GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error)
 }
 
-type MetricsReader interface {
-	Start(ctx context.Context) error
+type MetricsQuerier interface {
 	AddQueryExpr(key string, queryExpr QueryExpr, queryRule QueryRule)
 	RemoveQueryExpr(key string)
 	GetQueryResult(key string) QueryResult
 	GetBackendMetrics() []byte
+}
+
+type MetricsReader interface {
+	MetricsQuerier
+
+	Start(ctx context.Context) error
 	PreClose()
 	Close()
 }
 
-var _ MetricsReader = (*DefaultMetricsReader)(nil)
+var _ MetricsReader = (*ClusterReader)(nil)
 
-type DefaultMetricsReader struct {
+// ClusterReader is the metrics reader owned by one backend cluster.
+type ClusterReader struct {
 	source        atomic.Int32
 	backendReader *BackendReader
 	promReader    *PromReader
@@ -54,17 +60,24 @@ type DefaultMetricsReader struct {
 	cfg           *config.HealthCheck
 }
 
-func NewDefaultMetricsReader(lg *zap.Logger, promFetcher PromInfoFetcher, backendFetcher TopologyFetcher, httpCli *http.Client,
-	etcdCli *clientv3.Client, cfg *config.HealthCheck, cfgGetter config.ConfigGetter) *DefaultMetricsReader {
-	return &DefaultMetricsReader{
+func NewClusterReader(lg *zap.Logger, clusterName string, promFetcher PromInfoFetcher, backendFetcher TopologyFetcher, httpCli *http.Client,
+	etcdCli *clientv3.Client, cfg *config.HealthCheck, cfgGetter config.ConfigGetter) *ClusterReader {
+	promReader := NewPromReader(lg.Named("prom_reader"), promFetcher, cfg)
+	promReader.clusterName = clusterName
+	return &ClusterReader{
 		lg:            lg,
 		cfg:           cfg,
-		promReader:    NewPromReader(lg.Named("prom_reader"), promFetcher, cfg),
-		backendReader: NewBackendReader(lg.Named("backend_reader"), cfgGetter, httpCli, etcdCli, backendFetcher, cfg),
+		promReader:    promReader,
+		backendReader: NewClusterBackendReader(lg.Named("backend_reader"), clusterName, cfgGetter, httpCli, etcdCli, backendFetcher, cfg),
 	}
 }
 
-func (dmr *DefaultMetricsReader) Start(ctx context.Context) error {
+func NewDefaultMetricsReader(lg *zap.Logger, promFetcher PromInfoFetcher, backendFetcher TopologyFetcher, httpCli *http.Client,
+	etcdCli *clientv3.Client, cfg *config.HealthCheck, cfgGetter config.ConfigGetter) *ClusterReader {
+	return NewClusterReader(lg, config.DefaultBackendClusterName, promFetcher, backendFetcher, httpCli, etcdCli, cfg, cfgGetter)
+}
+
+func (dmr *ClusterReader) Start(ctx context.Context) error {
 	if err := dmr.backendReader.Start(ctx); err != nil {
 		return err
 	}
@@ -86,7 +99,7 @@ func (dmr *DefaultMetricsReader) Start(ctx context.Context) error {
 }
 
 // readMetrics reads from Prometheus first. If it fails, fall back to read backends.
-func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) {
+func (dmr *ClusterReader) readMetrics(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -107,7 +120,7 @@ func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) {
 	dmr.lg.Warn("read metrics failed", zap.NamedError("prometheus", promErr), zap.NamedError("backends", backendErr))
 }
 
-func (dmr *DefaultMetricsReader) setSource(source int32, err error) {
+func (dmr *ClusterReader) setSource(source int32, err error) {
 	old := dmr.source.Load()
 	if old != source {
 		dmr.source.Store(source)
@@ -120,18 +133,18 @@ func (dmr *DefaultMetricsReader) setSource(source int32, err error) {
 	}
 }
 
-func (dmr *DefaultMetricsReader) AddQueryExpr(key string, queryExpr QueryExpr, queryRule QueryRule) {
+func (dmr *ClusterReader) AddQueryExpr(key string, queryExpr QueryExpr, queryRule QueryRule) {
 	dmr.promReader.AddQueryExpr(key, queryExpr)
 	dmr.backendReader.AddQueryRule(key, queryRule)
 }
 
-func (dmr *DefaultMetricsReader) RemoveQueryExpr(key string) {
+func (dmr *ClusterReader) RemoveQueryExpr(key string) {
 	dmr.promReader.RemoveQueryExpr(key)
 	dmr.backendReader.RemoveQueryRule(key)
 }
 
 // GetQueryResult returns an empty result if the key or the result is not found.
-func (dmr *DefaultMetricsReader) GetQueryResult(key string) QueryResult {
+func (dmr *ClusterReader) GetQueryResult(key string) QueryResult {
 	switch dmr.source.Load() {
 	case sourceProm:
 		return dmr.promReader.GetQueryResult(key)
@@ -142,11 +155,11 @@ func (dmr *DefaultMetricsReader) GetQueryResult(key string) QueryResult {
 	}
 }
 
-func (dmr *DefaultMetricsReader) GetBackendMetrics() []byte {
+func (dmr *ClusterReader) GetBackendMetrics() []byte {
 	return dmr.backendReader.GetBackendMetrics()
 }
 
-func (dmr *DefaultMetricsReader) PreClose() {
+func (dmr *ClusterReader) PreClose() {
 	// No need to update results in the graceful shutdown.
 	// Stop the loop before pre-closing the backend reader to avoid data race.
 	if dmr.cancel != nil {
@@ -157,7 +170,7 @@ func (dmr *DefaultMetricsReader) PreClose() {
 	dmr.backendReader.PreClose()
 }
 
-func (dmr *DefaultMetricsReader) Close() {
+func (dmr *ClusterReader) Close() {
 	if dmr.cancel != nil {
 		dmr.cancel()
 		dmr.cancel = nil

@@ -352,6 +352,34 @@ func TestMemoryBalanceCount(t *testing.T) {
 	}
 }
 
+func TestMemorySnapshotUsesBackendID(t *testing.T) {
+	now := model.Now()
+	backends := []scoredBackend{
+		createBackendWithAddrID("shared:4000", "cluster-a/shared:4000", "10.0.0.1", 10080, 10, 10),
+		createBackendWithAddrID("shared:4000", "cluster-b/shared:4000", "10.0.0.2", 10080, 20, 20),
+	}
+	mmr := &mockMetricsReader{
+		qrs: map[string]metricsreader.QueryResult{
+			"memory": {
+				UpdateTime: time.Now(),
+				Value: model.Matrix([]*model.SampleStream{
+					createSampleStreamForInstance([]float64{0.2, 0.2}, "10.0.0.1:10080", now),
+					createSampleStreamForInstance([]float64{0.85, 0.85}, "10.0.0.2:10080", now),
+				}),
+			},
+		},
+	}
+	fm := NewFactorMemory(mmr, zap.NewNop())
+
+	fm.UpdateScore(backends)
+
+	require.Len(t, fm.snapshot, 2)
+	require.Contains(t, fm.snapshot, "cluster-a/shared:4000")
+	require.Contains(t, fm.snapshot, "cluster-b/shared:4000")
+	require.Equal(t, 0.2, fm.snapshot["cluster-a/shared:4000"].memUsage)
+	require.Equal(t, 0.85, fm.snapshot["cluster-b/shared:4000"].memUsage)
+}
+
 func TestMemoryQueryRule(t *testing.T) {
 	tests := []struct {
 		text       string

@@ -107,13 +107,13 @@ type FactorMemory struct {
 	snapshot map[string]memBackendSnapshot
 	// The updated time of the metric that we've read last time.
 	lastMetricTime      time.Time
-	mr                  metricsreader.MetricsReader
+	mr                  metricsreader.MetricsQuerier
 	bitNum              int
 	migrationsPerSecond float64
 	lg                  *zap.Logger
 }
 
-func NewFactorMemory(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorMemory {
+func NewFactorMemory(mr metricsreader.MetricsQuerier, lg *zap.Logger) *FactorMemory {
 	bitNum := 0
 	for levels := len(oomRiskLevels); ; bitNum++ {
 		if levels == 0 {
@@ -155,9 +155,9 @@ func (fm *FactorMemory) UpdateScore(backends []scoredBackend) {
 	}
 
 	for i := range backends {
-		addr := backends[i].Addr()
+		key := backends[i].ID()
 		// If the backend is new or the backend misses metrics, take it safe.
-		score := fm.snapshot[addr].riskLevel
+		score := fm.snapshot[key].riskLevel
 		backends[i].addScore(score, fm.bitNum)
 	}
 }
@@ -170,7 +170,8 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 	now := time.Now()
 	for _, backend := range backends {
 		addr := backend.Addr()
-		snapshot := fm.snapshot[addr]
+		key := backend.ID()
+		snapshot := fm.snapshot[key]
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
@@ -202,7 +203,7 @@ func (fm *FactorMemory) updateSnapshot(qr metricsreader.QueryResult, backends []
 				zap.Float64("balance_count", balanceCount),
 				zap.Int("conn_score", backend.ConnScore()))
 		}
-		fm.snapshot[addr] = memBackendSnapshot{
+		fm.snapshot[key] = memBackendSnapshot{
 			updatedTime:  updateTime,
 			memUsage:     latestUsage,
 			timeToOOM:    timeToOOM,
@@ -265,7 +266,7 @@ func (fm *FactorMemory) calcBalanceCount(backend scoredBackend, riskLevel int, t
 	}
 	balanceCount := float64(backend.ConnScore()) / seconds
 	// If the migration started eariler, reuse the balance count.
-	if snapshot := fm.snapshot[backend.Addr()]; snapshot.balanceCount > balanceCount {
+	if snapshot := fm.snapshot[backend.ID()]; snapshot.balanceCount > balanceCount {
 		return snapshot.balanceCount
 	}
 	return balanceCount
@@ -279,8 +280,8 @@ func (fm *FactorMemory) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	// The risk level may change frequently, e.g. last time timeToOOM was 30s and connections were migrated away,
 	// then this time it becomes 60s and the connections are migrated back.
 	// So we only rebalance when the difference of risk levels of 2 backends is big enough.
-	fromSnapshot := fm.snapshot[from.Addr()]
-	toSnapshot := fm.snapshot[to.Addr()]
+	fromSnapshot := fm.snapshot[from.ID()]
+	toSnapshot := fm.snapshot[to.ID()]
 	fields := []zap.Field{
 		zap.Duration("from_time_to_oom", fromSnapshot.timeToOOM),
 		zap.Float64("from_mem_usage", fromSnapshot.memUsage),

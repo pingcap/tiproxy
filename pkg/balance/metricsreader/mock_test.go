@@ -138,6 +138,10 @@ func (mb *mockBackend) ConnCount() int {
 	return 0
 }
 
+func (mb *mockBackend) ID() string {
+	return mb.addr
+}
+
 func (mb *mockBackend) Addr() string {
 	return mb.addr
 }

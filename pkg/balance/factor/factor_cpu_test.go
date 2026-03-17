@@ -301,6 +301,34 @@ func TestCPUResultNotUpdated(t *testing.T) {
 	}
 }
 
+func TestCPUSnapshotUsesBackendID(t *testing.T) {
+	now := model.Now()
+	backends := []scoredBackend{
+		createBackendWithAddrID("shared:4000", "cluster-a/shared:4000", "10.0.0.1", 10080, 10, 10),
+		createBackendWithAddrID("shared:4000", "cluster-b/shared:4000", "10.0.0.2", 10080, 20, 20),
+	}
+	mmr := &mockMetricsReader{
+		qrs: map[string]metricsreader.QueryResult{
+			"cpu": {
+				UpdateTime: time.Now(),
+				Value: model.Matrix([]*model.SampleStream{
+					createSampleStreamForInstance([]float64{0.2, 0.2}, "10.0.0.1:10080", now),
+					createSampleStreamForInstance([]float64{0.6, 0.6}, "10.0.0.2:10080", now),
+				}),
+			},
+		},
+	}
+	fc := NewFactorCPU(mmr, zap.NewNop())
+
+	fc.UpdateScore(backends)
+
+	require.Len(t, fc.snapshot, 2)
+	require.Contains(t, fc.snapshot, "cluster-a/shared:4000")
+	require.Contains(t, fc.snapshot, "cluster-b/shared:4000")
+	require.Equal(t, 0.2, fc.snapshot["cluster-a/shared:4000"].latestUsage)
+	require.Equal(t, 0.6, fc.snapshot["cluster-b/shared:4000"].latestUsage)
+}
+
 func TestCPUQueryRule(t *testing.T) {
 	tests := []struct {
 		text       string
