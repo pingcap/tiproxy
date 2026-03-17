@@ -287,6 +287,14 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 		ci.ClientAddr = mgr.clientIO.RemoteAddr()
 		ci.ProxyAddr = mgr.clientIO.ProxyAddr()
 	}
+	if addr, ok := cctx.Value(ConnContextKeyConnAddr).(string); ok {
+		_, port, splitErr := net.SplitHostPort(addr)
+		if splitErr != nil {
+			mgr.logger.Error("checking port failed", zap.String("listener_addr", addr), zap.Error(splitErr))
+		} else {
+			ci.ListenerPort = port
+		}
+	}
 	selector := r.GetBackendSelector(ci)
 	startTime := time.Now()
 	var addr string
