@@ -28,6 +28,7 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -40,6 +41,11 @@ import (
 
 var (
 	ErrInvalidSequence = errors.New("invalid sequence")
+)
+
+var (
+	readerPool sync.Pool
+	writerPool sync.Pool
 )
 
 const (
@@ -86,6 +92,27 @@ type basicReadWriter struct {
 	inBytes  uint64
 	outBytes uint64
 	sequence uint8
+	pooled   bool
+}
+
+func getPooledReader(conn net.Conn, size int) *bufio.Reader {
+	if v := readerPool.Get(); v != nil {
+		if r := v.(*bufio.Reader); r.Size() == size {
+			r.Reset(conn)
+			return r
+		}
+	}
+	return bufio.NewReaderSize(conn, size)
+}
+
+func getPooledWriter(conn net.Conn, size int) *bufio.Writer {
+	if v := writerPool.Get(); v != nil {
+		if w := v.(*bufio.Writer); w.Size() == size {
+			w.Reset(conn)
+			return w
+		}
+	}
+	return bufio.NewWriterSize(conn, size)
 }
 
 func newBasicReadWriter(conn net.Conn, bufferSize int) *basicReadWriter {
@@ -94,7 +121,8 @@ func newBasicReadWriter(conn net.Conn, bufferSize int) *basicReadWriter {
 	}
 	return &basicReadWriter{
 		Conn:       conn,
-		ReadWriter: bufio.NewReadWriter(bufio.NewReaderSize(conn, bufferSize), bufio.NewWriterSize(conn, bufferSize)),
+		ReadWriter: bufio.NewReadWriter(getPooledReader(conn, bufferSize), getPooledWriter(conn, bufferSize)),
+		pooled:     true,
 	}
 }
 
@@ -151,6 +179,22 @@ func (brw *basicReadWriter) BeginRW(rwStatus) {
 
 func (brw *basicReadWriter) ResetSequence() {
 	brw.sequence = 0
+}
+
+func (brw *basicReadWriter) Free() {
+	if brw.pooled {
+		brw.pooled = false
+		brw.ReadWriter.Reader.Reset(nil)
+		brw.ReadWriter.Writer.Reset(nil)
+		readerPool.Put(brw.ReadWriter.Reader)
+		writerPool.Put(brw.ReadWriter.Writer)
+	}
+}
+
+func (brw *basicReadWriter) Close() error {
+	err := brw.Conn.Close()
+	brw.Free()
+	return err
 }
 
 func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
@@ -496,6 +540,7 @@ func (p *packetIO) Close() error {
 			errs = append(errs, err)
 		}
 	*/
+
 	if err := p.readWriter.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		errs = append(errs, errors.WithStack(err))
 	}
