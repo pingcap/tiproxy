@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -126,6 +127,10 @@ type ReplayConfig struct {
 	FilterCommandWithRetry bool
 	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
 	WaitOnEOF bool
+	// DBMultipler is the number of replay connections for each captured connection.
+	DBMultipler int
+	// DBNamePattern matches database names in SQL text and appends the replica suffix for multiplied replay.
+	DBNamePattern string
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -171,10 +176,25 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
 		return storages, errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
 	}
+	if cfg.DBMultipler == 0 {
+		cfg.DBMultipler = 1
+	} else if cfg.DBMultipler < 0 {
+		return storages, errors.New("db multipler should be greater than 0")
+	}
 	switch cfg.Format {
 	case cmd.FormatAuditLogPlugin, cmd.FormatNative, "":
 	default:
 		return storages, errors.Errorf("invalid traffic file format %s", cfg.Format)
+	}
+	if cfg.DBMultipler > 1 || len(cfg.DBNamePattern) > 0 {
+		if cfg.DBMultipler > 1 && len(cfg.DBNamePattern) == 0 {
+			return storages, errors.New("db-name-pattern is required when db multipler is greater than 1")
+		}
+		if len(cfg.DBNamePattern) > 0 {
+			if _, err := regexp.Compile(cfg.DBNamePattern); err != nil {
+				return storages, errors.Wrapf(err, "invalid db-name-pattern")
+			}
+		}
 	}
 	// Maybe there's a time bias between TiDB and TiProxy, so add one minute.
 	now := time.Now()
@@ -281,6 +301,7 @@ type replay struct {
 	startTime        time.Time
 	endTime          time.Time
 	progress         float64
+	dbFanout         *dbFanout
 	decodedCmds      atomic.Uint64
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
@@ -322,6 +343,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
 	r.execInfoCh = make(chan conn.ExecInfo, maxPendingExecInfo)
+	r.dbFanout = newDBFanout(cfg, r.idMgr)
 	key, err := store.LoadEncryptionKey(r.meta.EncryptMethod, cfg.KeyFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load encryption key")
@@ -774,17 +796,24 @@ func (r *replay) constructReaders() ([]cmd.LineReader, error) {
 }
 
 func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map[uint64]conn.Conn, connCount *int) {
-	conn, ok := conns[command.ConnID]
-	if !ok {
-		conn = r.connCreator(command.ConnID, command.UpstreamConnID)
-		conns[command.ConnID] = conn
-		*connCount++
-		r.wg.RunWithRecover(func() {
-			conn.Run(ctx)
-		}, nil, r.lg)
+	commands, err := r.dbFanout.Expand(command)
+	if err != nil {
+		r.stop(err)
+		return
 	}
-	if conn != nil && !reflect.ValueOf(conn).IsNil() {
-		conn.ExecuteCmd(command)
+	for _, command := range commands {
+		conn, ok := conns[command.ConnID]
+		if !ok {
+			conn = r.connCreator(command.ConnID, command.UpstreamConnID)
+			conns[command.ConnID] = conn
+			*connCount++
+			r.wg.RunWithRecover(func() {
+				conn.Run(ctx)
+			}, nil, r.lg)
+		}
+		if conn != nil && !reflect.ValueOf(conn).IsNil() {
+			conn.ExecuteCmd(command)
+		}
 	}
 	r.decodedCmds.Add(1)
 }
@@ -803,7 +832,15 @@ func (r *replay) Progress() (float64, time.Time, time.Time, time.Time, bool, err
 	r.Lock()
 	defer r.Unlock()
 	if r.meta.Cmds > 0 {
-		r.progress = float64(r.decodedCmds.Load()-uint64(pendingCmds)) / float64(r.meta.Cmds)
+		decodedCmds := r.decodedCmds.Load()
+		switch {
+		case pendingCmds <= 0:
+			r.progress = float64(decodedCmds) / float64(r.meta.Cmds)
+		case uint64(pendingCmds) >= decodedCmds:
+			r.progress = 0
+		default:
+			r.progress = float64(decodedCmds-uint64(pendingCmds)) / float64(r.meta.Cmds)
+		}
 	}
 	curCmdTs := time.Unix(0, r.replayStats.CurCmdTs.Load())
 	curCmdEndTs := time.Unix(0, r.replayStats.CurCmdEndTs.Load())

@@ -68,6 +68,8 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 	ignoreErrors := replayCmd.PersistentFlags().Bool("ignore-errs", false, "ignore errors when replaying")
 	bufSize := replayCmd.PersistentFlags().Int("bufsize", 100000, "the size of buffer for reordering commands from audit files. 0 means no buffering.")
 	psCloseStrategy := replayCmd.PersistentFlags().String("ps-close", "directed", "the strategy to close prepared statements. Supported values: directed (close when the original prepared statement closed), always (close the prepared statement right after it's executed), never (never close prepared statements). Default is directed.")
+	dbMultipler := replayCmd.PersistentFlags().Int("db-multipler", 1, "the number of replay connections for each captured connection")
+	dbNamePattern := replayCmd.PersistentFlags().String("db-name-pattern", "", "the regex pattern used to match database names in SQL text")
 	replayCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		username := *username
 		if len(username) == 0 {
@@ -83,16 +85,18 @@ func GetTrafficReplayCmd(ctx *Context) *cobra.Command {
 			password = string(bytePassword)
 		}
 		reader := GetFormReader(map[string]string{
-			"input":        *input,
-			"speed":        strconv.FormatFloat(*speed, 'f', -1, 64),
-			"username":     username,
-			"password":     password,
-			"readonly":     strconv.FormatBool(*readonly),
-			"format":       *format,
-			"cmdstarttime": *cmdStartTime,
-			"ignore-errs":  strconv.FormatBool(*ignoreErrors),
-			"bufsize":      strconv.Itoa(*bufSize),
-			"ps-close":     *psCloseStrategy,
+			"input":         *input,
+			"speed":         strconv.FormatFloat(*speed, 'f', -1, 64),
+			"username":      username,
+			"password":      password,
+			"readonly":      strconv.FormatBool(*readonly),
+			"format":        *format,
+			"cmdstarttime":  *cmdStartTime,
+			"ignore-errs":   strconv.FormatBool(*ignoreErrors),
+			"bufsize":       strconv.Itoa(*bufSize),
+			"ps-close":      *psCloseStrategy,
+			"dbmultipler":   strconv.Itoa(*dbMultipler),
+			"dbnamepattern": *dbNamePattern,
 		})
 		resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, "/api/traffic/replay", reader)
 		if err != nil {

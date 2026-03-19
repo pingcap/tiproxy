@@ -684,6 +684,68 @@ func TestReconnect(t *testing.T) {
 	wg.Wait()
 }
 
+func TestConnectAndInitDBUseCurrentDB(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	var wg waitgroup.WaitGroup
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 10), make(chan uint64, 1), make(chan ExecInfo, 3)
+	stats := &ReplayStats{}
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 555,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+	wg.RunWithRecover(func() {
+		conn.Run(context.Background())
+	}, nil, lg)
+
+	conn.ExecuteCmd(&cmd.Command{
+		ConnID:         1,
+		UpstreamConnID: 555,
+		Type:           pnet.ComQuery,
+		Payload:        pnet.MakeQueryPacket("select 1"),
+		CurDB:          "db1",
+	})
+	conn.ExecuteCmd(&cmd.Command{
+		ConnID:         1,
+		UpstreamConnID: 555,
+		Type:           pnet.ComQuery,
+		Payload:        pnet.MakeQueryPacket("select 2"),
+		CurDB:          "db2",
+	})
+	conn.ExecuteCmd(&cmd.Command{
+		ConnID:         1,
+		UpstreamConnID: 555,
+		Type:           pnet.ComQuit,
+		Payload:        []byte{pnet.ComQuit.Byte()},
+		CurDB:          "db2",
+	})
+
+	require.Eventually(t, func() bool {
+		return stats.ReplayedCmds.Load() == 3
+	}, 3*time.Second, 10*time.Millisecond)
+
+	require.Equal(t, []string{"db1"}, backendConn.allConnectDBs())
+	requests := backendConn.allRequests()
+	require.Len(t, requests, 4)
+	require.Equal(t, pnet.ComQuery.Byte(), requests[0][0])
+	require.Equal(t, pnet.ComInitDB.Byte(), requests[1][0])
+	require.Equal(t, "db2", hack.String(requests[1][1:]))
+	require.Equal(t, pnet.ComQuery.Byte(), requests[2][0])
+	require.Equal(t, pnet.ComQuit.Byte(), requests[3][0])
+
+	require.EqualValues(t, 1, <-closeCh)
+	require.True(t, backendConn.close.Load())
+	wg.Wait()
+}
+
 func TestQuitInConnect(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	var wg waitgroup.WaitGroup

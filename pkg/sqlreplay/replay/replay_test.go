@@ -159,6 +159,21 @@ func TestValidateCfg(t *testing.T) {
 			CommandEndTime: time.Now(),
 			Format:         cmd.FormatNative,
 		},
+		{
+			Input:       dir,
+			Username:    "u1",
+			StartTime:   now,
+			Format:      cmd.FormatAuditLogPlugin,
+			DBMultipler: 2,
+		},
+		{
+			Input:         dir,
+			Username:      "u1",
+			StartTime:     now,
+			Format:        cmd.FormatAuditLogPlugin,
+			DBMultipler:   2,
+			DBNamePattern: "(",
+		},
 	}
 
 	for i, cfg := range cfgs {

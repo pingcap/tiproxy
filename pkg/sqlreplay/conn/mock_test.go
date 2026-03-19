@@ -42,11 +42,12 @@ var _ BackendConn = (*mockBackendConn)(nil)
 
 type mockBackendConn struct {
 	sync.Mutex
-	connErr  error
-	execErr  error
-	close    atomic.Bool
-	stmtID   uint32
-	requests [][]byte
+	connErr    error
+	execErr    error
+	close      atomic.Bool
+	stmtID     uint32
+	requests   [][]byte
+	connectDBs []string
 }
 
 func newMockBackendConn() *mockBackendConn {
@@ -58,6 +59,7 @@ func newMockBackendConn() *mockBackendConn {
 func (c *mockBackendConn) Connect(ctx context.Context, dbName string) error {
 	c.Lock()
 	defer c.Unlock()
+	c.connectDBs = append(c.connectDBs, dbName)
 	return c.connErr
 }
 
@@ -127,4 +129,10 @@ func (c *mockBackendConn) allRequests() [][]byte {
 	c.Lock()
 	defer c.Unlock()
 	return c.requests
+}
+
+func (c *mockBackendConn) allConnectDBs() []string {
+	c.Lock()
+	defer c.Unlock()
+	return append([]string(nil), c.connectDBs...)
 }

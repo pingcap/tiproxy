@@ -154,6 +154,15 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 		cfg.ReplayerIndex = replayerIndex
 	}
 	cfg.OutputPath = c.PostForm("outputpath")
+	if dbMultiplerStr := c.PostForm("dbmultipler"); dbMultiplerStr != "" {
+		dbMultipler, err := strconv.Atoi(dbMultiplerStr)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		cfg.DBMultipler = dbMultipler
+	}
+	cfg.DBNamePattern = c.PostForm("dbnamepattern")
 	cfg.Addr = c.PostForm("addr")
 	cfg.DryRun = strings.EqualFold(c.PostForm("dryrun"), "true")
 	cfg.FilterCommandWithRetry = strings.EqualFold(c.PostForm("filtercommandwithretry"), "true")
