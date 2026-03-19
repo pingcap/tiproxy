@@ -57,6 +57,8 @@ func main() {
 	replayerCount := rootCmd.PersistentFlags().Uint64("replayer-count", 1, "the total number of replayer instances running concurrently. Used only when dynamic-input is enabled.")
 	replayerIndex := rootCmd.PersistentFlags().Uint64("replayer-index", 0, "the index of this replayer instance. Used only when dynamic-input is enabled.")
 	outputPath := rootCmd.PersistentFlags().String("output-path", "", "the file path to store replayed sql. Empty indicates do not output replayed sql.")
+	dbMultipler := rootCmd.PersistentFlags().Int("db-multipler", 1, "the number of replay connections for each captured connection")
+	dbNamePattern := rootCmd.PersistentFlags().String("db-name-pattern", "", "the regex pattern used to match database names in SQL text")
 	serviceMode := rootCmd.PersistentFlags().Bool("service-mode", false, "run replayer in service mode")
 	logLevel := rootCmd.PersistentFlags().String("log-level", "info", "the log level: debug, info, warn, error, dpanic, panic, fatal")
 	startTime := rootCmd.PersistentFlags().Time("start-time", time.Now(), []string{time.RFC3339, time.RFC3339Nano}, "the time to start the replay. Format is RFC3339. Default is the current time.")
@@ -149,6 +151,8 @@ func main() {
 				ReplayerCount:          *replayerCount,
 				ReplayerIndex:          *replayerIndex,
 				OutputPath:             *outputPath,
+				DBMultipler:            *dbMultipler,
+				DBNamePattern:          *dbNamePattern,
 				FilterCommandWithRetry: *filterCommandWithRetry,
 				WaitOnEOF:              *waitOnEOF,
 			}
