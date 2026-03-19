@@ -42,14 +42,7 @@ func (f *dbFanout) Expand(command *cmd.Command) ([]*cmd.Command, error) {
 		return []*cmd.Command{command}, nil
 	}
 
-	replicaConnIDs, ok := f.replicaConns[command.ConnID]
-	if !ok {
-		replicaConnIDs = make([]uint64, f.multipler)
-		for i := 0; i < f.multipler; i++ {
-			replicaConnIDs[i] = f.idMgr.NewID()
-		}
-		f.replicaConns[command.ConnID] = replicaConnIDs
-	}
+	replicaConnIDs := f.replicaConnIDs(command.ConnID)
 
 	sqlVariants, preparedStmtVariants := f.buildSQLVariants(command)
 	commands := make([]*cmd.Command, 0, len(replicaConnIDs))
@@ -68,12 +61,29 @@ func (f *dbFanout) Expand(command *cmd.Command) ([]*cmd.Command, error) {
 				cloned.Payload = pnet.MakePrepareStmtRequest(cloned.PreparedStmt)
 			}
 		}
-		if cloned.Type == pnet.ComInitDB {
+		if cloned.Type == pnet.ComInitDB && cloned.CurDB != "" {
 			cloned.Payload = pnet.MakeInitDBRequest(cloned.CurDB)
 		}
 		commands = append(commands, cloned)
 	}
+	if command.Type == pnet.ComQuit {
+		delete(f.replicaConns, command.ConnID)
+	}
 	return commands, nil
+}
+
+func (f *dbFanout) replicaConnIDs(connID uint64) []uint64 {
+	replicaConnIDs, ok := f.replicaConns[connID]
+	if ok {
+		return replicaConnIDs
+	}
+
+	replicaConnIDs = make([]uint64, f.multipler)
+	for i := 0; i < f.multipler; i++ {
+		replicaConnIDs[i] = f.idMgr.NewID()
+	}
+	f.replicaConns[connID] = replicaConnIDs
+	return replicaConnIDs
 }
 
 func cloneCommand(command *cmd.Command) *cmd.Command {

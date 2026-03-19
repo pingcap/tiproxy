@@ -80,6 +80,66 @@ func TestDBFanoutExpandWithoutCurrentDB(t *testing.T) {
 	}
 }
 
+func TestDBFanoutExpandInitDBWithoutCurrentDB(t *testing.T) {
+	fanout := newDBFanout(ReplayConfig{
+		DBMultipler:   3,
+		DBNamePattern: `ec_force_app_[a-z]+_db`,
+	}, id.NewIDManager())
+	command := &cmd.Command{
+		ConnID:  2002,
+		Type:    pnet.ComInitDB,
+		Payload: pnet.MakeInitDBRequest("ec_force_app_abc_db"),
+	}
+
+	expanded, err := fanout.Expand(command)
+	require.NoError(t, err)
+	require.Len(t, expanded, 3)
+	for _, cloned := range expanded {
+		require.Empty(t, cloned.CurDB)
+		require.Equal(t, "ec_force_app_abc_db", hack.String(cloned.Payload[1:]))
+	}
+}
+
+func TestDBFanoutReleasesReplicaConnsOnQuit(t *testing.T) {
+	fanout := newDBFanout(ReplayConfig{
+		DBMultipler:   2,
+		DBNamePattern: `ec_force_app_[a-z]+_db`,
+	}, id.NewIDManager())
+
+	first, err := fanout.Expand(&cmd.Command{
+		ConnID:  3001,
+		Type:    pnet.ComQuery,
+		Payload: pnet.MakeQueryPacket("select 1"),
+		CurDB:   "ec_force_app_abc_db",
+	})
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+
+	quit, err := fanout.Expand(&cmd.Command{
+		ConnID:  3001,
+		Type:    pnet.ComQuit,
+		Payload: []byte{pnet.ComQuit.Byte()},
+		CurDB:   "ec_force_app_abc_db",
+	})
+	require.NoError(t, err)
+	require.Len(t, quit, 2)
+	require.Equal(t, first[0].ConnID, quit[0].ConnID)
+	require.Equal(t, first[1].ConnID, quit[1].ConnID)
+	_, ok := fanout.replicaConns[3001]
+	require.False(t, ok)
+
+	second, err := fanout.Expand(&cmd.Command{
+		ConnID:  3001,
+		Type:    pnet.ComQuery,
+		Payload: pnet.MakeQueryPacket("select 2"),
+		CurDB:   "ec_force_app_abc_db",
+	})
+	require.NoError(t, err)
+	require.Len(t, second, 2)
+	require.NotEqual(t, first[0].ConnID, second[0].ConnID)
+	require.NotEqual(t, first[1].ConnID, second[1].ConnID)
+}
+
 func TestReplayWithDBMultipler(t *testing.T) {
 	replayer := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replayer.Close()
