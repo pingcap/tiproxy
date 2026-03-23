@@ -101,7 +101,7 @@ func targetDBName(db string, replica int) string {
 }
 
 func (f *dbFanout) buildSQLVariants(command *cmd.Command) ([]string, []string) {
-	if f.dbNameRegexp == nil || command.CurDB == "" {
+	if f.dbNameRegexp == nil {
 		return nil, nil
 	}
 
