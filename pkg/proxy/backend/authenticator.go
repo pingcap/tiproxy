@@ -34,6 +34,11 @@ const ER_INVALID_SEQUENCE = 8052
 // Ref https://dev.mysql.com/doc/dev/mysql-server/9.5.0/page_protocol_connection_phase_packets_protocol_handshake_response.html
 const maxHandshakePacketSize = 1 << 20
 
+// maxPacketSize limits the size of a single packet to avoid OOM.
+// The configuration `max_allowed_packet` is at most 1GB in TiDB, so we set the limit
+// to 1GB as well.
+const maxPacketSize = 1 << 30
+
 // SupportedServerCapabilities is the default supported capabilities. Other server capabilities are not supported.
 // TiDB supports ClientDeprecateEOF since v6.3.0.
 // TiDB supports ClientCompress and ClientZstdCompressionAlgorithm since v7.2.0.
@@ -100,10 +105,10 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
 	clientIO.ApplyOpts(pnet.WithReadPacketLimit(maxHandshakePacketSize))
-	// TODO: now we only limit the size of the handshake packet, we assume that all clients with proper
+	// TODO: now we only limit the size with the greatest limit, we assume that all clients with proper
 	// user / password will send reasonable packets. However, it's not true when the TiProxy is shared by
 	// many TiDBs keyspaces and customers.
-	defer clientIO.ApplyOpts(pnet.WithReadPacketLimit(0))
+	defer clientIO.ApplyOpts(pnet.WithReadPacketLimit(maxPacketSize))
 
 	proxyCapability := handshakeHandler.GetCapability()
 	if frontendTLSConfig == nil {
