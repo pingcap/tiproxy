@@ -49,6 +49,8 @@ func ErrToClient(err error) error {
 		return ErrBackendNoTLS
 	case errors.Is(err, ErrBackendPPV2):
 		return ErrBackendPPV2
+	case errors.Is(err, pnet.ErrPacketTooLarge):
+		return mysql.NewDefaultError(mysql.ER_NET_PACKET_TOO_LARGE)
 	case errors.Is(err, ErrProxyErr):
 		// The error is returned by HandshakeHandler/BackendFetcher and wrapped with ErrProxyErr.
 		return errors.Unwrap(err)
@@ -112,7 +114,7 @@ func Error2Source(err error) ErrorSource {
 	case errors.Is(err, pnet.ErrInvalidSequence), errors.Is(err, mysql.ErrMalformPacket):
 		// We assume the clients and TiDB are right and treat it as TiProxy bugs.
 		return SrcProxyMalformed
-	case errors.Is(err, ErrClientHandshake), errors.Is(err, ErrClientCap):
+	case errors.Is(err, ErrClientHandshake), errors.Is(err, ErrClientCap), errors.Is(err, pnet.ErrPacketTooLarge):
 		return SrcClientHandshake
 	case errors.Is(err, ErrClientAuthFail):
 		return SrcClientAuthFail
