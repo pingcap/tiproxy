@@ -233,6 +233,7 @@ type PacketIO interface {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type packetIO struct {
+<<<<<<< HEAD
 	lastKeepAlive config.KeepAlive
 	// TLS allocates another buffered layer after the handshake. Keep the
 	// normalized base connection buffer size here so the TLS layer can scale
@@ -247,6 +248,19 @@ type packetIO struct {
 	header         [4]byte // reuse memory to reduce allocation
 	inPackets      uint64
 	outPackets     uint64
+=======
+	lastKeepAlive   config.KeepAlive
+	rawConn         net.Conn
+	readWriter      packetReadWriter
+	limitReader     io.LimitedReader // reuse memory to reduce allocation
+	logger          *zap.Logger
+	remoteAddr      net.Addr
+	wrap            error
+	header          [4]byte // reuse memory to reduce allocation
+	readPacketLimit int
+	inPackets       uint64
+	outPackets      uint64
+>>>>>>> 4ef84352 (packetio: limit the packet size of packets before handshake (#1090))
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *packetIO {
@@ -291,7 +305,10 @@ func (p *packetIO) GetSequence() uint8 {
 	return p.readWriter.Sequence()
 }
 
-func (p *packetIO) readOnePacket() ([]byte, bool, error) {
+// readOnePacket reads one packet and returns the data without header, whether there are more packets and error if any.
+// If limit >= 0, it returns an error if the packet size exceeds the limit.
+// The caller may read a trailing zero-length packet when the previous packet length equals MaxPayloadLen.
+func (p *packetIO) readOnePacket(limit int) ([]byte, bool, error) {
 	if err := ReadFull(p.readWriter, p.header[:]); err != nil {
 		return nil, false, errors.Wrap(err, ErrReadConn)
 	}
@@ -302,6 +319,9 @@ func (p *packetIO) readOnePacket() ([]byte, bool, error) {
 	p.readWriter.SetSequence(sequence + 1)
 
 	length := int(p.header[0]) | int(p.header[1])<<8 | int(p.header[2])<<16
+	if limit >= 0 && length > limit {
+		return nil, false, errors.Wrapf(ErrPacketTooLarge, "packet size %d exceeds limit %d", length, limit)
+	}
 	data := make([]byte, length)
 	if err := ReadFull(p.readWriter, data); err != nil {
 		return nil, false, errors.Wrap(err, ErrReadConn)
@@ -313,12 +333,25 @@ func (p *packetIO) readOnePacket() ([]byte, bool, error) {
 // ReadPacket reads data and removes the header
 func (p *packetIO) ReadPacket() (data []byte, err error) {
 	p.readWriter.BeginRW(rwRead)
+	checkPacketLimit := p.readPacketLimit > 0
+	remaining := p.readPacketLimit
 	for more := true; more; {
 		var buf []byte
-		buf, more, err = p.readOnePacket()
+		limit := -1
+		if checkPacketLimit {
+			limit = remaining
+		}
+		buf, more, err = p.readOnePacket(limit)
 		if err != nil {
 			err = p.wrapErr(err)
 			return
+		}
+		if checkPacketLimit {
+			remaining -= len(buf)
+			if remaining < 0 {
+				err = p.wrapErr(errors.Wrapf(ErrPacketTooLarge, "packet size exceeds limit %d", p.readPacketLimit))
+				return
+			}
 		}
 		if data == nil {
 			data = buf

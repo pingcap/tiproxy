@@ -84,13 +84,17 @@ func MakeEOFPacket(status uint16) []byte {
 	return data
 }
 
-// WriteUserError writes an unknown error to the client.
+// MakeUserError builds an error packet for the client.
 func MakeUserError(err error) []byte {
 	if err == nil {
 		return nil
 	}
-	myErr := gomysql.NewError(gomysql.ER_UNKNOWN_ERROR, err.Error())
-	return MakeErrPacket(myErr)
+	var myErr *gomysql.MyError
+	if errors.As(err, &myErr) {
+		return MakeErrPacket(myErr)
+	}
+	baseErr := gomysql.NewError(gomysql.ER_UNKNOWN_ERROR, err.Error())
+	return MakeErrPacket(baseErr)
 }
 
 type InitialHandshake struct {

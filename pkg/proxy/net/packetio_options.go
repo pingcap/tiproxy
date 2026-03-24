@@ -21,6 +21,14 @@ func WithWrapError(err error) func(pi *packetIO) {
 	}
 }
 
+// WithReadPacketLimit limits the total size of one ReadPacket call.
+// A zero or negative limit means no limit.
+func WithReadPacketLimit(limit int) func(pi *packetIO) {
+	return func(pi *packetIO) {
+		pi.readPacketLimit = limit
+	}
+}
+
 // WithRemoteAddr
 var _ proxyprotocol.AddressWrapper = &originAddr{}
 
