@@ -8,7 +8,9 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -219,6 +221,84 @@ func TestMultiAddr(t *testing.T) {
 	certManager.Close()
 }
 
+func TestPortRange(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	err := certManager.Init(&config.Config{}, lg, nil)
+	require.NoError(t, err)
+	start, end := findFreePortRange(t, 3)
+	server, err := NewSQLServer(lg, &config.Config{
+		Proxy: config.ProxyServer{
+			Addr:      fmt.Sprintf("127.0.0.1:%d", start),
+			PortRange: []int{start, end},
+		},
+	}, certManager, id.NewIDManager(), nil, nil, &mockHsHandler{})
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+
+	require.Len(t, server.listeners, 3)
+	ports := make([]int, 0, len(server.listeners))
+	for _, listener := range server.listeners {
+		tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+		require.True(t, ok)
+		ports = append(ports, tcpAddr.Port)
+
+		conn, err := net.Dial("tcp", listener.Addr().String())
+		require.NoError(t, err)
+		require.NoError(t, conn.Close())
+	}
+	slices.Sort(ports)
+	require.Equal(t, []int{start, start + 1, end}, ports)
+
+	server.PreClose()
+	require.NoError(t, server.Close())
+	certManager.Close()
+}
+
+func TestConnAddrUsesActualListenerAddr(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	require.NoError(t, certManager.Init(&config.Config{}, lg, nil))
+
+	var (
+		addrMu   sync.Mutex
+		connAddr string
+	)
+	handler := &mockHsHandler{
+		getRouter: func(ctx backend.ConnContext, _ *pnet.HandshakeResp) (router.Router, error) {
+			addrMu.Lock()
+			connAddr, _ = ctx.Value(backend.ConnContextKeyConnAddr).(string)
+			addrMu.Unlock()
+			return nil, errors.New("no router")
+		},
+	}
+	server, err := NewSQLServer(lg, &config.Config{
+		Proxy: config.ProxyServer{
+			Addr: "127.0.0.1:0",
+		},
+	}, certManager, id.NewIDManager(), nil, nil, handler)
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+	defer func() {
+		server.PreClose()
+		require.NoError(t, server.Close())
+		certManager.Close()
+	}()
+
+	_, port, err := net.SplitHostPort(server.listeners[0].Addr().String())
+	require.NoError(t, err)
+	mdb, err := sql.Open("mysql", fmt.Sprintf("root@tcp(127.0.0.1:%s)/test", port))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, mdb.Close()) }()
+
+	require.ErrorContains(t, mdb.Ping(), "no router")
+	require.Eventually(t, func() bool {
+		addrMu.Lock()
+		defer addrMu.Unlock()
+		return connAddr == server.listeners[0].Addr().String()
+	}, 3*time.Second, 10*time.Millisecond)
+}
+
 func TestWatchCfg(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil)
@@ -251,6 +331,35 @@ func TestWatchCfg(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 	server.PreClose()
 	require.NoError(t, server.Close())
+}
+
+func findFreePortRange(t *testing.T, size int) (start, end int) {
+	t.Helper()
+	for range 128 {
+		probe, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		start = probe.Addr().(*net.TCPAddr).Port
+		require.NoError(t, probe.Close())
+
+		listeners := make([]net.Listener, 0, size)
+		ok := true
+		for port := start; port < start+size; port++ {
+			listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+			if err != nil {
+				ok = false
+				break
+			}
+			listeners = append(listeners, listener)
+		}
+		for _, listener := range listeners {
+			require.NoError(t, listener.Close())
+		}
+		if ok {
+			return start, start + size - 1
+		}
+	}
+	t.Fatal("failed to find free contiguous ports")
+	return 0, 0
 }
 
 func TestRecoverPanic(t *testing.T) {
@@ -327,6 +436,7 @@ func TestPublicEndpoint(t *testing.T) {
 type mockHsHandler struct {
 	backend.DefaultHandshakeHandler
 	handshakeResp func(ctx backend.ConnContext, _ *pnet.HandshakeResp) error
+	getRouter     func(ctx backend.ConnContext, _ *pnet.HandshakeResp) (router.Router, error)
 }
 
 // HandleHandshakeResp only panics for the first connections.
@@ -342,6 +452,9 @@ func (handler *mockHsHandler) GetServerVersion() string {
 }
 
 // GetRouter returns an error for the second connection.
-func (handler *mockHsHandler) GetRouter(backend.ConnContext, *pnet.HandshakeResp) (router.Router, error) {
+func (handler *mockHsHandler) GetRouter(ctx backend.ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+	if handler.getRouter != nil {
+		return handler.getRouter(ctx, resp)
+	}
 	return nil, errors.New("no router")
 }
