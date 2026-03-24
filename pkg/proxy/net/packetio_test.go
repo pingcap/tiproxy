@@ -111,6 +111,50 @@ func TestPacketIO(t *testing.T) {
 	)
 }
 
+func TestReadPacketLimitOption(t *testing.T) {
+	cases := []struct {
+		name  string
+		limit int
+		size  int
+		ok    bool
+	}{
+		{name: "single-under", limit: 8, size: 4, ok: true},
+		{name: "single-at", limit: 8, size: 8, ok: true},
+		{name: "single-over", limit: 8, size: 9, ok: false},
+		{name: "max-payload", limit: MaxPayloadLen, size: MaxPayloadLen, ok: true},
+		{name: "multi-ok", limit: MaxPayloadLen + 20, size: MaxPayloadLen + 20, ok: true},
+		{name: "multi-over", limit: MaxPayloadLen + 10, size: MaxPayloadLen + 20, ok: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testPipeConn(t,
+				func(t *testing.T, cli *packetIO) {
+					if !tc.ok {
+						_ = cli.readWriter.SetWriteDeadline(time.Now().Add(time.Second))
+					}
+					data := make([]byte, tc.size)
+					err := cli.WritePacket(data, true)
+					if tc.ok {
+						require.NoError(t, err)
+					}
+				},
+				func(t *testing.T, srv *packetIO) {
+					srv.ApplyOpts(WithReadPacketLimit(tc.limit))
+					data, err := srv.ReadPacket()
+					if tc.ok {
+						require.NoError(t, err)
+						require.Len(t, data, tc.size)
+					} else {
+						require.ErrorIs(t, err, ErrPacketTooLarge)
+					}
+				},
+				1,
+			)
+		})
+	}
+}
+
 func TestTLS(t *testing.T) {
 	stls, ctls, err := security.CreateTLSConfigForTest()
 	require.NoError(t, err)
