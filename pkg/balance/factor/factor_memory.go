@@ -107,13 +107,13 @@ type FactorMemory struct {
 	snapshot map[string]memBackendSnapshot
 	// The updated time of the metric that we've read last time.
 	lastMetricTime      time.Time
-	mr                  metricsreader.MetricsReader
+	mr                  metricsreader.MetricsQuerier
 	bitNum              int
 	migrationsPerSecond float64
 	lg                  *zap.Logger
 }
 
-func NewFactorMemory(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorMemory {
+func NewFactorMemory(mr metricsreader.MetricsQuerier, lg *zap.Logger) *FactorMemory {
 	bitNum := 0
 	for levels := len(oomRiskLevels); ; bitNum++ {
 		if levels == 0 {

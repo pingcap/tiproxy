@@ -62,10 +62,10 @@ func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.Redire
 	return nil
 }
 
-func (mer *mockEventReceiver) OnConnClosed(from, to string, conn router.RedirectableConn) error {
+func (mer *mockEventReceiver) OnConnClosed(backendID, redirectingBackendID string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
-		from:      from,
-		to:        to,
+		from:      backendID,
+		to:        redirectingBackendID,
 		eventName: eventClose,
 	}
 	return nil
@@ -80,6 +80,7 @@ func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) event {
 type mockBackendInst struct {
 	addr     string
 	keyspace string
+	cluster  string
 	healthy  atomic.Bool
 	local    atomic.Bool
 }
@@ -94,6 +95,10 @@ func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
 }
 
 func (mbi *mockBackendInst) Addr() string {
+	return mbi.addr
+}
+
+func (mbi *mockBackendInst) ID() string {
 	return mbi.addr
 }
 
@@ -119,6 +124,10 @@ func (mbi *mockBackendInst) Keyspace() string {
 
 func (mbi *mockBackendInst) setKeyspace(k string) {
 	mbi.keyspace = k
+}
+
+func (mbi *mockBackendInst) ClusterName() string {
+	return mbi.cluster
 }
 
 type runner struct {
@@ -1041,6 +1050,41 @@ func TestGetBackendIO(t *testing.T) {
 		badAddrs = make(map[string]struct{}, 3)
 		wg.Wait()
 	}
+}
+
+func TestGetBackendIOUsesBackendDialContext(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, listener.Close()) }()
+
+	rt := router.NewStaticRouter([]string{"tidb-a.test:4000"})
+	handler := &CustomHandshakeHandler{
+		getRouter: func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+			return rt, nil
+		},
+	}
+	lg, _ := logger.CreateLoggerForTest(t)
+	var gotCluster, gotAddr string
+	mgr := NewBackendConnManager(lg, handler, &mockCapture{}, 0, &BCConfig{
+		ConnectTimeout: time.Second,
+		DialContext: func(ctx context.Context, backendInst router.BackendInst, addr string) (net.Conn, error) {
+			gotCluster = backendInst.ClusterName()
+			gotAddr = addr
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, "tcp", listener.Addr().String())
+		},
+	}, nil)
+
+	go func() {
+		conn, err := listener.Accept()
+		require.NoError(t, err)
+		require.NoError(t, conn.Close())
+	}()
+	io, err := mgr.getBackendIO(context.Background(), mgr, nil)
+	require.NoError(t, err)
+	require.NoError(t, io.Close())
+	require.Empty(t, gotCluster)
+	require.Equal(t, "tidb-a.test:4000", gotAddr)
 }
 
 func TestBackendInactive(t *testing.T) {

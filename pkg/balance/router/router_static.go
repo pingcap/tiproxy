@@ -26,7 +26,7 @@ func (r *StaticRouter) GetBackendSelector(_ ClientInfo) BackendSelector {
 			for _, backend := range r.backends {
 				found := false
 				for _, e := range excluded {
-					if e.Addr() == backend.Addr() {
+					if e.ID() == backend.ID() {
 						found = true
 						break
 					}
@@ -74,7 +74,7 @@ func (r *StaticRouter) OnRedirectFail(from, to string, conn RedirectableConn) er
 	return nil
 }
 
-func (r *StaticRouter) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
+func (r *StaticRouter) OnConnClosed(backendID, redirectingBackendID string, conn RedirectableConn) error {
 	r.cnt--
 	return nil
 }
@@ -82,6 +82,7 @@ func (r *StaticRouter) OnConnClosed(addr, redirectingAddr string, conn Redirecta
 type StaticBackend struct {
 	addr     string
 	keyspace string
+	cluster  string
 	healthy  atomic.Bool
 }
 
@@ -94,6 +95,10 @@ func NewStaticBackend(addr string) *StaticBackend {
 }
 
 func (b *StaticBackend) Addr() string {
+	return b.addr
+}
+
+func (b *StaticBackend) ID() string {
 	return b.addr
 }
 
@@ -115,4 +120,8 @@ func (b *StaticBackend) Keyspace() string {
 
 func (b *StaticBackend) SetKeyspace(k string) {
 	b.keyspace = k
+}
+
+func (b *StaticBackend) ClusterName() string {
+	return b.cluster
 }

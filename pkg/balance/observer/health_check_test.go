@@ -5,10 +5,12 @@ package observer
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/testkit"
+	httputil "github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/stretchr/testify/require"
 )
 
@@ -120,6 +123,59 @@ func TestSupportRedirection(t *testing.T) {
 	require.False(t, health.SupportRedirection)
 }
 
+func TestHealthCheckUsesClusterNetwork(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newHealthCheckConfigForTest()
+	backend, info := newBackendServer(t)
+	defer backend.close()
+	backend.setServerVersion("1.0")
+	backend.setHasSigningCert(true)
+	info.ClusterName = "cluster-a"
+
+	network := &mockBackendNetwork{
+		httpCli: httputil.NewHTTPClient(func() *tls.Config { return nil }),
+	}
+	hc := NewDefaultHealthCheckWithNetwork(network, cfg, lg)
+	health := hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	require.True(t, health.Healthy)
+	require.Contains(t, network.httpClusters(), "cluster-a")
+	require.Contains(t, network.dialClusters(), "cluster-a")
+}
+
+type mockBackendNetwork struct {
+	httpCli *httputil.Client
+	mu      sync.Mutex
+	https   []string
+	dials   []string
+}
+
+func (n *mockBackendNetwork) HTTPClient(clusterName string) *httputil.Client {
+	n.mu.Lock()
+	n.https = append(n.https, clusterName)
+	n.mu.Unlock()
+	return n.httpCli
+}
+
+func (n *mockBackendNetwork) DialContext(ctx context.Context, network, addr, clusterName string) (net.Conn, error) {
+	n.mu.Lock()
+	n.dials = append(n.dials, clusterName)
+	n.mu.Unlock()
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, network, addr)
+}
+
+func (n *mockBackendNetwork) httpClusters() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.https...)
+}
+
+func (n *mockBackendNetwork) dialClusters() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.dials...)
+}
+
 type backendServer struct {
 	t            *testing.T
 	sqlListener  net.Listener
@@ -143,6 +199,7 @@ func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
 	backend.setSqlResp(true)
 	backend.startSQLServer()
 	return backend, &BackendInfo{
+		Addr:       backend.sqlAddr,
 		IP:         backend.ip,
 		StatusPort: backend.statusPort,
 	}

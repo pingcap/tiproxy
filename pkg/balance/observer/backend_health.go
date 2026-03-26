@@ -76,13 +76,17 @@ func (bh *BackendHealth) String() string {
 
 // BackendInfo stores the status info of each backend.
 type BackendInfo struct {
-	Labels     map[string]string
-	IP         string
-	StatusPort uint
+	Addr        string
+	ClusterName string
+	Labels      map[string]string
+	IP          string
+	StatusPort  uint
 }
 
 func (bi BackendInfo) Equals(other BackendInfo) bool {
-	return bi.IP == other.IP &&
+	return bi.Addr == other.Addr &&
+		bi.ClusterName == other.ClusterName &&
+		bi.IP == other.IP &&
 		bi.StatusPort == other.StatusPort &&
 		maps.Equal(bi.Labels, other.Labels)
 }
