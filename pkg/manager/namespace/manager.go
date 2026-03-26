@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"reflect"
 	"sync"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -27,7 +26,7 @@ import (
 type NamespaceManager interface {
 	Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 		promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
-		metricsReader metricsreader.MetricsReader) error
+		metricsReader metricsreader.MetricsQuerier) error
 	CommitNamespaces(nss []*config.Namespace, nssDelete []bool) error
 	GetNamespace(nm string) (*Namespace, bool)
 	GetNamespaceByUser(user string) (*Namespace, bool)
@@ -41,7 +40,7 @@ type namespaceManager struct {
 	nsm           map[string]*Namespace
 	tpFetcher     observer.TopologyFetcher
 	promFetcher   metricsreader.PromInfoFetcher
-	metricsReader metricsreader.MetricsReader
+	metricsReader metricsreader.MetricsQuerier
 	httpCli       *http.Client
 	logger        *zap.Logger
 	cfgMgr        *mconfig.ConfigManager
@@ -54,14 +53,11 @@ func NewNamespaceManager() *namespaceManager {
 func (mgr *namespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
-	// init BackendFetcher
-	var fetcher observer.BackendFetcher
 	healthCheckCfg := config.NewDefaultHealthCheckConfig()
-	if mgr.tpFetcher != nil && !reflect.ValueOf(mgr.tpFetcher).IsNil() {
-		fetcher = observer.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), healthCheckCfg)
-	} else {
-		fetcher = observer.NewStaticFetcher(cfg.Backend.Instances)
-	}
+	// Namespace always receives a topology fetcher from the cluster manager. PDFetcher preserves
+	// legacy static backend.instances compatibility by falling back internally before any backend
+	// cluster is configured.
+	fetcher := observer.NewPDFetcher(mgr.tpFetcher, cfg.Backend.Instances, logger.Named("be_fetcher"), healthCheckCfg)
 
 	// init Router
 	rt := router.NewScoreBasedRouter(logger.Named("router"))
@@ -110,7 +106,7 @@ func (mgr *namespaceManager) CommitNamespaces(nss []*config.Namespace, nssDelete
 
 func (mgr *namespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
-	metricsReader metricsreader.MetricsReader) error {
+	metricsReader metricsreader.MetricsQuerier) error {
 	mgr.Lock()
 	mgr.tpFetcher = tpFetcher
 	mgr.promFetcher = promFetcher

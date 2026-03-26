@@ -16,14 +16,15 @@ import (
 )
 
 var (
-	ErrNoBackend = errors.New("no available backend")
+	ErrNoBackend    = errors.New("no available backend")
+	ErrPortConflict = errors.New("port routing conflict")
 )
 
 // ConnEventReceiver receives connection events.
 type ConnEventReceiver interface {
 	OnRedirectSucceed(from, to string, conn RedirectableConn) error
 	OnRedirectFail(from, to string, conn RedirectableConn) error
-	OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error
+	OnConnClosed(backendID, redirectingBackendID string, conn RedirectableConn) error
 }
 
 // Router routes client connections to backends.
@@ -74,6 +75,7 @@ type RedirectableConn interface {
 
 // BackendInst defines a backend that a connection is redirecting to.
 type BackendInst interface {
+	ID() string
 	Addr() string
 	Healthy() bool
 	Local() bool
@@ -86,6 +88,7 @@ type backendWrapper struct {
 		sync.RWMutex
 		observer.BackendHealth
 	}
+	id   string
 	addr string
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
 	// connScore = connList.Len() + incoming connections - outgoing connections.
@@ -97,9 +100,10 @@ type backendWrapper struct {
 	group *Group
 }
 
-func newBackendWrapper(addr string, health observer.BackendHealth) *backendWrapper {
+func newBackendWrapper(id string, health observer.BackendHealth) *backendWrapper {
 	wrapper := &backendWrapper{
-		addr:     addr,
+		id:       id,
+		addr:     health.Addr,
 		connList: glist.New[*connWrapper](),
 	}
 	wrapper.setHealth(health)
@@ -121,6 +125,10 @@ func (b *backendWrapper) getHealth() observer.BackendHealth {
 
 func (b *backendWrapper) ConnScore() int {
 	return b.connScore
+}
+
+func (b *backendWrapper) ID() string {
+	return b.id
 }
 
 func (b *backendWrapper) Addr() string {
@@ -176,6 +184,12 @@ func (b *backendWrapper) Keyspace() string {
 	return labels[config.KeyspaceLabelName]
 }
 
+func (b *backendWrapper) ClusterName() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.mu.BackendHealth.ClusterName
+}
+
 func (b *backendWrapper) Cidr() []string {
 	labels := b.getHealth().Labels
 	if len(labels) == 0 {
@@ -195,6 +209,14 @@ func (b *backendWrapper) Cidr() []string {
 		}
 	}
 	return cidrs
+}
+
+func (b *backendWrapper) TiProxyPort() string {
+	labels := b.getHealth().Labels
+	if len(labels) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(labels[config.TiProxyPortLabelName])
 }
 
 func (b *backendWrapper) String() string {

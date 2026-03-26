@@ -279,6 +279,7 @@ func (ts *observerTestSuite) addBackend() (string, BackendInfo) {
 	ts.backendIdx++
 	addr := fmt.Sprintf("%d", ts.backendIdx)
 	info := &BackendInfo{
+		Addr:       addr,
 		IP:         "127.0.0.1",
 		StatusPort: uint(ts.backendIdx),
 	}

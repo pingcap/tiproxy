@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -71,6 +72,9 @@ func (tester *routerTester) addBackends(num int) {
 		tester.backendID++
 		addr := strconv.Itoa(tester.backendID)
 		tester.backends[addr] = &observer.BackendHealth{
+			BackendInfo: observer.BackendInfo{
+				Addr: addr,
+			},
 			Healthy:            true,
 			SupportRedirection: true,
 		}
@@ -114,6 +118,9 @@ func (tester *routerTester) updateBackendStatusByAddr(addr string, healthy bool)
 		health.Healthy = healthy
 	} else {
 		tester.backends[addr] = &observer.BackendHealth{
+			BackendInfo: observer.BackendInfo{
+				Addr: addr,
+			},
 			SupportRedirection: true,
 			Healthy:            healthy,
 		}
@@ -136,7 +143,11 @@ func (tester *routerTester) getBackendByIndex(index int) *backendWrapper {
 }
 
 func (tester *routerTester) simpleRoute(conn RedirectableConn) BackendInst {
-	selector := tester.router.GetBackendSelector(ClientInfo{})
+	return tester.route(conn, ClientInfo{})
+}
+
+func (tester *routerTester) route(conn RedirectableConn, ci ClientInfo) BackendInst {
+	selector := tester.router.GetBackendSelector(ci)
 	backend, err := selector.Next()
 	if err != ErrNoBackend {
 		require.NoError(tester.t, err)
@@ -159,11 +170,11 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 	conns := make(map[uint64]*mockRedirectableConn, num)
 	for id, conn := range tester.conns {
 		if redirecting {
-			if len(conn.GetRedirectingAddr()) == 0 {
+			if len(conn.GetRedirectingBackendID()) == 0 {
 				continue
 			}
 		} else {
-			if len(conn.GetRedirectingAddr()) > 0 {
+			if len(conn.GetRedirectingBackendID()) > 0 {
 				continue
 			}
 		}
@@ -173,7 +184,7 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 		}
 	}
 	for _, conn := range conns {
-		err := tester.router.groups[0].OnConnClosed(conn.from.Addr(), conn.GetRedirectingAddr(), conn)
+		err := tester.router.groups[0].OnConnClosed(conn.from.ID(), conn.GetRedirectingBackendID(), conn)
 		require.NoError(tester.t, err)
 		delete(tester.conns, conn.connID)
 	}
@@ -191,7 +202,7 @@ func (tester *routerTester) rebalance(num int) {
 func (tester *routerTester) redirectFinish(num int, succeed bool) {
 	i := 0
 	for _, conn := range tester.conns {
-		if len(conn.GetRedirectingAddr()) == 0 {
+		if len(conn.GetRedirectingBackendID()) == 0 {
 			continue
 		}
 
@@ -199,11 +210,11 @@ func (tester *routerTester) redirectFinish(num int, succeed bool) {
 		prevCount, err := readMigrateCounter(from.Addr(), to.Addr(), succeed)
 		require.NoError(tester.t, err)
 		if succeed {
-			err = tester.router.groups[0].OnRedirectSucceed(from.Addr(), to.Addr(), conn)
+			err = tester.router.groups[0].OnRedirectSucceed(from.ID(), to.ID(), conn)
 			require.NoError(tester.t, err)
 			conn.redirectSucceed()
 		} else {
-			err = tester.router.groups[0].OnRedirectFail(from.Addr(), to.Addr(), conn)
+			err = tester.router.groups[0].OnRedirectFail(from.ID(), to.ID(), conn)
 			require.NoError(tester.t, err)
 			conn.redirectFail()
 		}
@@ -239,7 +250,7 @@ func (tester *routerTester) checkBalanced() {
 func (tester *routerTester) checkRedirectingNum(num int) {
 	redirectingNum := 0
 	for _, conn := range tester.conns {
-		if len(conn.GetRedirectingAddr()) > 0 {
+		if len(conn.GetRedirectingBackendID()) > 0 {
 			redirectingNum++
 		}
 	}
@@ -626,13 +637,13 @@ func TestConcurrency(t *testing.T) {
 						require.NoError(t, err)
 						selector.Finish(conn, true)
 						conn.from = backend
-					} else if len(conn.GetRedirectingAddr()) > 0 {
+					} else if len(conn.GetRedirectingBackendID()) > 0 {
 						// redirecting, 70% success, 20% fail, 10% close
 						i := rand.Intn(10)
-						from, to := conn.getAddr()
+						from, to := conn.getBackendIDs()
 						var err error
 						if i < 1 {
-							err = router.groups[0].OnConnClosed(from, conn.GetRedirectingAddr(), conn)
+							err = router.groups[0].OnConnClosed(from, conn.GetRedirectingBackendID(), conn)
 							conn = nil
 						} else if i < 3 {
 							conn.redirectFail()
@@ -647,8 +658,8 @@ func TestConcurrency(t *testing.T) {
 						i := rand.Intn(10)
 						if i < 2 {
 							// The balancer may happen to redirect it concurrently - that's exactly what may happen.
-							from, _ := conn.getAddr()
-							err := router.groups[0].OnConnClosed(from, conn.GetRedirectingAddr(), conn)
+							from, _ := conn.getBackendIDs()
+							err := router.groups[0].OnConnClosed(from, conn.GetRedirectingBackendID(), conn)
 							require.NoError(t, err)
 							conn = nil
 						}
@@ -730,10 +741,16 @@ func TestGetServerVersion(t *testing.T) {
 	t.Cleanup(rt.Close)
 	backends := map[string]*observer.BackendHealth{
 		"0": {
+			BackendInfo: observer.BackendInfo{
+				Addr: "0",
+			},
 			Healthy:       true,
 			ServerVersion: "1.0",
 		},
 		"1": {
+			BackendInfo: observer.BackendInfo{
+				Addr: "1",
+			},
 			Healthy:       true,
 			ServerVersion: "2.0",
 		},
@@ -794,8 +811,8 @@ func TestUpdateBackendHealth(t *testing.T) {
 	// Test locality of some backends are changed.
 	tester.updateBackendLocalityByAddr(tester.getBackendByIndex(0).Addr(), false)
 	tester.updateBackendLocalityByAddr(tester.getBackendByIndex(1).Addr(), true)
-	require.Equal(t, false, tester.router.backends[tester.getBackendByIndex(0).Addr()].Local())
-	require.Equal(t, true, tester.router.backends[tester.getBackendByIndex(1).Addr()].Local())
+	require.Equal(t, false, tester.router.backends[tester.getBackendByIndex(0).ID()].Local())
+	require.Equal(t, true, tester.router.backends[tester.getBackendByIndex(1).ID()].Local())
 	// Test some backends are not in the list anymore.
 	tester.removeBackends(1)
 	tester.checkBackendNum(2)
@@ -838,6 +855,55 @@ func TestWatchConfig(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return p.getConfig().Labels["k1"] == "v2"
 	}, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestChannelClosed(t *testing.T) {
+	tests := []struct {
+		name         string
+		closeChannel func(cfgCh chan *config.Config, bo *mockBackendObserver)
+	}{
+		{
+			name: "config",
+			closeChannel: func(cfgCh chan *config.Config, _ *mockBackendObserver) {
+				close(cfgCh)
+			},
+		},
+		{
+			name: "health",
+			closeChannel: func(_ chan *config.Config, bo *mockBackendObserver) {
+				bo.Close()
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lg, _ := logger.CreateLoggerForTest(t)
+			router := NewScoreBasedRouter(lg)
+			cfgCh := make(chan *config.Config)
+			cfg := &config.Config{}
+			cfgGetter := newMockConfigGetter(cfg)
+			p := &mockBalancePolicy{}
+			bpCreator := func(lg *zap.Logger) policy.BalancePolicy {
+				p.Init(cfg)
+				return p
+			}
+			bo := newMockBackendObserver()
+			router.Init(context.Background(), bo, bpCreator, cfgGetter, cfgCh)
+			t.Cleanup(bo.Close)
+			t.Cleanup(router.Close)
+
+			bo.addBackend("0", nil)
+			bo.notify(nil)
+			require.Eventually(t, func() bool {
+				router.Lock()
+				defer router.Unlock()
+				return len(router.groups) == 1
+			}, 3*time.Second, 10*time.Millisecond)
+
+			tt.closeChannel(cfgCh, bo)
+			time.Sleep(100 * time.Millisecond)
+		})
+	}
 }
 
 func TestControlSpeed(t *testing.T) {
@@ -978,10 +1044,16 @@ func TestSkipRedirection(t *testing.T) {
 	tester := newRouterTester(t, nil)
 	backends := map[string]*observer.BackendHealth{
 		"0": {
+			BackendInfo: observer.BackendInfo{
+				Addr: "0",
+			},
 			Healthy:            true,
 			SupportRedirection: false,
 		},
 		"1": {
+			BackendInfo: observer.BackendInfo{
+				Addr: "1",
+			},
 			Healthy:            true,
 			SupportRedirection: true,
 		},
@@ -1115,4 +1187,493 @@ func TestGroupBackends(t *testing.T) {
 			return group.EqualValues(test.cidrs)
 		}, 3*time.Second, 10*time.Millisecond, "test %d", i)
 	}
+}
+
+func TestGroupBackendsByPort(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
+	cfg := &config.Config{
+		Balance: config.Balance{
+			RoutingRule: config.MatchPortStr,
+		},
+	}
+	cfgGetter := newMockConfigGetter(cfg)
+	bo := newMockBackendObserver()
+	router.Init(context.Background(), bo, simpleBpCreator, cfgGetter, make(<-chan *config.Config))
+	t.Cleanup(bo.Close)
+	t.Cleanup(router.Close)
+
+	tests := []struct {
+		addr         string
+		labels       map[string]string
+		groupCount   int
+		backendCount int
+		port         string
+	}{
+		{
+			addr:         "0",
+			labels:       nil,
+			groupCount:   0,
+			backendCount: 1,
+		},
+		{
+			addr:         "1",
+			labels:       map[string]string{config.TiProxyPortLabelName: "10080"},
+			groupCount:   1,
+			backendCount: 2,
+			port:         "10080",
+		},
+		{
+			addr:         "2",
+			labels:       map[string]string{config.TiProxyPortLabelName: "10080"},
+			groupCount:   1,
+			backendCount: 3,
+			port:         "10080",
+		},
+		{
+			addr:         "3",
+			labels:       map[string]string{config.TiProxyPortLabelName: "10081"},
+			groupCount:   2,
+			backendCount: 4,
+			port:         "10081",
+		},
+	}
+
+	for i, test := range tests {
+		bo.addBackend(test.addr, test.labels)
+		bo.notify(nil)
+		require.Eventually(t, func() bool {
+			router.Lock()
+			defer router.Unlock()
+			if len(router.groups) != test.groupCount {
+				return false
+			}
+			if len(router.backends) != test.backendCount {
+				return false
+			}
+			group := router.backends[test.addr].group
+			if test.port == "" {
+				return group == nil
+			}
+			return group != nil && slices.Equal(group.values, []string{test.port})
+		}, 3*time.Second, 10*time.Millisecond, "test %d", i)
+	}
+}
+
+func TestRouteAndRebalanceByPort(t *testing.T) {
+	cfg := &config.Config{
+		Balance: config.Balance{
+			RoutingRule: config.MatchPortStr,
+		},
+	}
+	bp := &mockBalancePolicy{}
+	tester := newRouterTester(t, bp)
+	tester.router.matchType = MatchPort
+	bp.backendToRoute = func(backends []policy.BackendCtx) policy.BackendCtx {
+		if len(backends) == 0 {
+			return nil
+		}
+		return backends[0]
+	}
+	bp.backendsToBalance = func(backends []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
+		if len(backends) < 2 {
+			return nil, nil, 0, "", nil
+		}
+		var busiest, idlest policy.BackendCtx
+		for _, backend := range backends {
+			if busiest == nil || backend.ConnCount() > busiest.ConnCount() {
+				busiest = backend
+			}
+			if idlest == nil || backend.ConnCount() < idlest.ConnCount() {
+				idlest = backend
+			}
+		}
+		if busiest == nil || idlest == nil || busiest == idlest {
+			return nil, nil, 0, "", nil
+		}
+		return busiest, idlest, 100, "conn", nil
+	}
+	tester.router.cfgGetter = newMockConfigGetter(cfg)
+
+	tester.backends["1"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:   "1",
+			Labels: map[string]string{config.TiProxyPortLabelName: "10080"},
+		},
+	}
+	tester.backends["2"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:   "2",
+			Labels: map[string]string{config.TiProxyPortLabelName: "10080"},
+		},
+	}
+	tester.backends["3"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:   "3",
+			Labels: map[string]string{config.TiProxyPortLabelName: "10081"},
+		},
+	}
+	tester.notifyHealth()
+
+	for range 10 {
+		conn := tester.createConn()
+		backend := tester.route(conn, ClientInfo{ListenerAddr: "127.0.0.1:10080"})
+		require.NotNil(t, backend)
+		conn.from = backend
+		tester.conns[conn.connID] = conn
+	}
+	for _, conn := range tester.conns {
+		require.Equal(t, "10080", tester.router.backends[conn.from.ID()].TiProxyPort())
+	}
+
+	tester.rebalance(10)
+	redirecting := 0
+	for _, conn := range tester.conns {
+		if conn.to == nil || reflect.ValueOf(conn.to).IsNil() {
+			continue
+		}
+		redirecting++
+		require.Equal(t, "10080", tester.router.backends[conn.to.ID()].TiProxyPort())
+		require.NotEqual(t, "3", conn.to.Addr())
+	}
+	require.Greater(t, redirecting, 0)
+}
+
+func TestRouteByPortBlocksConflictingClusters(t *testing.T) {
+	cfg := &config.Config{
+		Balance: config.Balance{
+			RoutingRule: config.MatchPortStr,
+		},
+	}
+	cfgGetter := newMockConfigGetter(cfg)
+	bo := newMockBackendObserver()
+	router := NewScoreBasedRouter(zap.NewNop())
+	router.Init(context.Background(), bo, simpleBpCreator, cfgGetter, make(<-chan *config.Config))
+	t.Cleanup(bo.Close)
+	t.Cleanup(router.Close)
+
+	bo.addBackendWithCluster("a1", "cluster-a", map[string]string{
+		config.TiProxyPortLabelName: "10080",
+	})
+	bo.addBackendWithCluster("b1", "cluster-b", map[string]string{
+		config.TiProxyPortLabelName: "10080",
+	})
+	bo.notify(nil)
+
+	require.Eventually(t, func() bool {
+		router.Lock()
+		defer router.Unlock()
+		return len(router.groups) == 2 && router.portConflictDetector != nil
+	}, 3*time.Second, 10*time.Millisecond)
+
+	selector := router.GetBackendSelector(ClientInfo{ListenerAddr: "127.0.0.1:10080"})
+	_, err := selector.Next()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrPortConflict))
+}
+
+func TestRouteByPortRecoversAfterConflictIsRemoved(t *testing.T) {
+	cfg := &config.Config{
+		Balance: config.Balance{
+			RoutingRule: config.MatchPortStr,
+		},
+	}
+	cfgGetter := newMockConfigGetter(cfg)
+	bo := newMockBackendObserver()
+	router := NewScoreBasedRouter(zap.NewNop())
+	router.Init(context.Background(), bo, simpleBpCreator, cfgGetter, make(<-chan *config.Config))
+	t.Cleanup(bo.Close)
+	t.Cleanup(router.Close)
+
+	bo.addBackendWithCluster("a1", "cluster-a", map[string]string{
+		config.TiProxyPortLabelName: "10080",
+	})
+	bo.addBackendWithCluster("b1", "cluster-b", map[string]string{
+		config.TiProxyPortLabelName: "10080",
+	})
+	bo.notify(nil)
+
+	require.Eventually(t, func() bool {
+		selector := router.GetBackendSelector(ClientInfo{ListenerAddr: "127.0.0.1:10080"})
+		_, err := selector.Next()
+		return errors.Is(err, ErrPortConflict)
+	}, 3*time.Second, 10*time.Millisecond)
+
+	bo.healthLock.Lock()
+	delete(bo.healths, "b1")
+	bo.healthLock.Unlock()
+	bo.notify(nil)
+
+	require.Eventually(t, func() bool {
+		selector := router.GetBackendSelector(ClientInfo{ListenerAddr: "127.0.0.1:10080"})
+		backend, err := selector.Next()
+		return err == nil && backend != nil && backend.ID() == "a1"
+	}, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestKeepExistingPortGroupWhenPortLabelChanges(t *testing.T) {
+	cfg := &config.Config{
+		Balance: config.Balance{
+			RoutingRule: config.MatchPortStr,
+		},
+	}
+	cfgGetter := newMockConfigGetter(cfg)
+	bo := newMockBackendObserver()
+	lg, text := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
+	router.Init(context.Background(), bo, simpleBpCreator, cfgGetter, make(<-chan *config.Config))
+	t.Cleanup(bo.Close)
+	t.Cleanup(router.Close)
+
+	bo.addBackendWithCluster("backend-1", "cluster-a", map[string]string{
+		config.TiProxyPortLabelName: "10080",
+	})
+	bo.notify(nil)
+
+	var oldGroup *Group
+	require.Eventually(t, func() bool {
+		router.Lock()
+		defer router.Unlock()
+		oldGroup = router.backends["backend-1"].group
+		return oldGroup != nil && slices.Equal(oldGroup.values, []string{"cluster-a:10080"})
+	}, 3*time.Second, 10*time.Millisecond)
+
+	conn := newMockRedirectableConn(t, 1)
+	selector := router.GetBackendSelector(ClientInfo{ListenerAddr: "127.0.0.1:10080"})
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(conn, true)
+	conn.from = backend
+
+	bo.healthLock.Lock()
+	bo.healths["backend-1"].ClusterName = "cluster-a"
+	bo.healthLock.Unlock()
+	bo.setLabels("backend-1", map[string]string{
+		config.TiProxyPortLabelName: "10081",
+	})
+	bo.notify(nil)
+
+	require.Eventually(t, func() bool {
+		router.Lock()
+		defer router.Unlock()
+		return router.backends["backend-1"].group == oldGroup
+	}, 3*time.Second, 10*time.Millisecond)
+	require.Contains(t, text.String(), "backend routing values changed, keep the existing group until it is removed")
+
+	conn.Lock()
+	require.Equal(t, oldGroup, conn.receiver)
+	conn.Unlock()
+
+	oldSelector := router.GetBackendSelector(ClientInfo{ListenerAddr: "127.0.0.1:10080"})
+	backend, err = oldSelector.Next()
+	require.NoError(t, err)
+	require.Equal(t, "backend-1", backend.ID())
+
+	newSelector := router.GetBackendSelector(ClientInfo{ListenerAddr: "127.0.0.1:10081"})
+	_, err = newSelector.Next()
+	require.ErrorIs(t, err, ErrNoBackend)
+}
+
+func TestPortConflictGroupsStayClusterScoped(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.router.matchType = MatchPort
+	tester.backends["a1"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared-a-1:4000",
+			ClusterName: "cluster-a",
+			Labels: map[string]string{
+				config.TiProxyPortLabelName: "10080",
+			},
+		},
+	}
+	tester.backends["a2"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared-a-2:4000",
+			ClusterName: "cluster-a",
+			Labels: map[string]string{
+				config.TiProxyPortLabelName: "10080",
+			},
+		},
+	}
+	tester.backends["b1"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared-b-1:4000",
+			ClusterName: "cluster-b",
+			Labels: map[string]string{
+				config.TiProxyPortLabelName: "10080",
+			},
+		},
+	}
+	tester.backends["b2"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared-b-2:4000",
+			ClusterName: "cluster-b",
+			Labels: map[string]string{
+				config.TiProxyPortLabelName: "10080",
+			},
+		},
+	}
+	tester.notifyHealth()
+
+	groupA := findGroupByValues(t, tester.router, []string{"cluster-a:10080"})
+	groupB := findGroupByValues(t, tester.router, []string{"cluster-b:10080"})
+	require.NotSame(t, groupA, groupB)
+	for _, backend := range groupA.backends {
+		require.Equal(t, "cluster-a", backend.ClusterName())
+	}
+	for _, backend := range groupB.backends {
+		require.Equal(t, "cluster-b", backend.ClusterName())
+	}
+}
+
+func TestPortConflictBlocksRoutingButAllowsIntraClusterRebalance(t *testing.T) {
+	bp := &mockBalancePolicy{}
+	tester := newRouterTester(t, bp)
+	tester.router.matchType = MatchPort
+	bp.backendsToBalance = func(backends []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
+		if len(backends) < 2 {
+			return nil, nil, 0, "", nil
+		}
+		var busiest, idlest policy.BackendCtx
+		for _, backend := range backends {
+			if busiest == nil || backend.ConnCount() > busiest.ConnCount() {
+				busiest = backend
+			}
+			if idlest == nil || backend.ConnCount() < idlest.ConnCount() {
+				idlest = backend
+			}
+		}
+		if busiest == nil || idlest == nil || busiest == idlest {
+			return nil, nil, 0, "", nil
+		}
+		return busiest, idlest, 100, "conn", nil
+	}
+
+	tester.backends["a1"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared-a-1:4000",
+			ClusterName: "cluster-a",
+			Labels: map[string]string{
+				config.TiProxyPortLabelName: "10080",
+			},
+		},
+	}
+	tester.backends["a2"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared-a-2:4000",
+			ClusterName: "cluster-a",
+			Labels: map[string]string{
+				config.TiProxyPortLabelName: "10080",
+			},
+		},
+	}
+	tester.backends["b1"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared-b-1:4000",
+			ClusterName: "cluster-b",
+			Labels: map[string]string{
+				config.TiProxyPortLabelName: "10080",
+			},
+		},
+	}
+	tester.notifyHealth()
+
+	selector := tester.router.GetBackendSelector(ClientInfo{ListenerAddr: "127.0.0.1:10080"})
+	_, err := selector.Next()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrPortConflict))
+
+	groupA := findGroupByValues(t, tester.router, []string{"cluster-a:10080"})
+	backendA1 := tester.router.backends["a1"]
+	for range 6 {
+		conn := tester.createConn()
+		groupA.onCreateConn(backendA1, conn, true)
+		conn.from = backendA1
+		tester.conns[conn.connID] = conn
+	}
+
+	groupA.lastRedirectTime = time.Time{}
+	groupA.Balance(context.Background())
+
+	redirecting := 0
+	for _, conn := range tester.conns {
+		if conn.to == nil || reflect.ValueOf(conn.to).IsNil() {
+			continue
+		}
+		redirecting++
+		require.Equal(t, "cluster-a", tester.router.backends[conn.to.ID()].ClusterName())
+		require.Equal(t, "a2", conn.to.ID())
+	}
+	require.Greater(t, redirecting, 0)
+}
+
+func TestRouteBackendsWithSameAddrDifferentIDs(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.router.matchType = MatchAll
+	tester.backends["cluster-a/shared:4000"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared:4000",
+			ClusterName: "cluster-a",
+		},
+	}
+	tester.backends["cluster-b/shared:4000"] = &observer.BackendHealth{
+		Healthy:            true,
+		SupportRedirection: true,
+		BackendInfo: observer.BackendInfo{
+			Addr:        "shared:4000",
+			ClusterName: "cluster-b",
+		},
+	}
+	tester.notifyHealth()
+
+	selector := tester.router.GetBackendSelector(ClientInfo{})
+	first, err := selector.Next()
+	require.NoError(t, err)
+	second, err := selector.Next()
+	require.NoError(t, err)
+
+	require.Equal(t, "shared:4000", first.Addr())
+	require.Equal(t, "shared:4000", second.Addr())
+	require.NotEqual(t, first.ID(), second.ID())
+}
+
+func findGroupByValues(t *testing.T, router *ScoreBasedRouter, values []string) *Group {
+	t.Helper()
+	router.Lock()
+	defer router.Unlock()
+	for _, group := range router.groups {
+		if group.matchType == MatchPort {
+			if slices.Equal(group.values, values) {
+				return group
+			}
+			continue
+		}
+		if group.EqualValues(values) {
+			return group
+		}
+	}
+	require.FailNow(t, "group not found", "values=%v", values)
+	return nil
 }
