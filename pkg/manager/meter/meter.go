@@ -51,8 +51,8 @@ func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
 	if len(cfg.Metering.Type) == 0 || len(cfg.Metering.Bucket) == 0 {
 		return nil, nil
 	}
-	s3Config := cfg.Metering.ToProviderConfig()
-	provider, err := storage.NewObjectStorageProvider(s3Config)
+	providerConfig := cfg.Metering.ToProviderConfig()
+	provider, err := storage.NewObjectStorageProvider(providerConfig)
 	if err != nil {
 		lg.Error("Failed to create storage provider", zap.Error(err))
 		return nil, err
@@ -63,7 +63,7 @@ func NewMeter(cfg *config.Config, lg *zap.Logger) (*Meter, error) {
 		lg:     lg,
 		data:   make(map[string]MeterData),
 		writer: writer,
-		uuid:   strings.ReplaceAll(uuid.New().String(), "-", "_"), // no dash in the S3 path
+		uuid:   strings.ReplaceAll(uuid.New().String(), "-", "_"),
 	}, nil
 }
 
