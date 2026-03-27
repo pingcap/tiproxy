@@ -14,8 +14,6 @@
 # limitations under the License.
 
 GOBIN := $(shell pwd)/bin
-unexport GOROOT
-GO := $(shell env -u GOROOT go env GOROOT)/bin/go
 VERSION ?= $(shell git describe --tags --dirty --always)
 BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 COMMIT ?= $(shell git describe --match=NeVeRmAtCh --always --abbrev=40 --dirty)
@@ -49,7 +47,7 @@ cmd_%:
 	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
 golangci-lint:
-	GOBIN=$(GOBIN) GOTOOLCHAIN=go1.25.8 $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+	GOBIN=$(GOBIN) GOTOOLCHAIN=go1.25.8 go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
 go-header:
 	GOBIN=$(GOBIN) go install github.com/denis-tingaikin/go-header/cmd/go-header@latest
