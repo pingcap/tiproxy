@@ -95,13 +95,13 @@ type FactorCPU struct {
 	lastMetricTime time.Time
 	// The estimated average CPU usage used by one connection.
 	usagePerConn        float64
-	mr                  metricsreader.MetricsReader
+	mr                  metricsreader.MetricsQuerier
 	bitNum              int
 	migrationsPerSecond float64
 	lg                  *zap.Logger
 }
 
-func NewFactorCPU(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorCPU {
+func NewFactorCPU(mr metricsreader.MetricsQuerier, lg *zap.Logger) *FactorCPU {
 	fc := &FactorCPU{
 		mr:       mr,
 		bitNum:   5,

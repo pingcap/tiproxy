@@ -15,6 +15,7 @@ func TestBackendHealthToString(t *testing.T) {
 		{},
 		{
 			BackendInfo: BackendInfo{
+				Addr:       "127.0.0.1:4000",
 				IP:         "127.0.0.1",
 				StatusPort: 1,
 				Labels:     map[string]string{"k1": "v1", "k2": "v2"},
@@ -45,6 +46,7 @@ func TestBackendHealthEquals(t *testing.T) {
 		{
 			a: BackendHealth{
 				BackendInfo: BackendInfo{
+					Addr:       "127.0.0.1:4000",
 					IP:         "127.0.0.1",
 					StatusPort: 1,
 					Labels:     map[string]string{"k1": "v1", "k2": "v2"},
@@ -52,6 +54,7 @@ func TestBackendHealthEquals(t *testing.T) {
 			},
 			b: BackendHealth{
 				BackendInfo: BackendInfo{
+					Addr:       "127.0.0.1:4000",
 					IP:         "127.0.0.1",
 					StatusPort: 1,
 				},
@@ -61,6 +64,7 @@ func TestBackendHealthEquals(t *testing.T) {
 		{
 			a: BackendHealth{
 				BackendInfo: BackendInfo{
+					Addr:       "127.0.0.1:4000",
 					IP:         "127.0.0.1",
 					StatusPort: 1,
 					Labels:     map[string]string{"k1": "v1", "k2": "v2"},
@@ -68,6 +72,7 @@ func TestBackendHealthEquals(t *testing.T) {
 			},
 			b: BackendHealth{
 				BackendInfo: BackendInfo{
+					Addr:       "127.0.0.1:4000",
 					IP:         "127.0.0.1",
 					StatusPort: 1,
 					Labels:     map[string]string{"k1": "v1", "k2": "v2"},
@@ -78,6 +83,7 @@ func TestBackendHealthEquals(t *testing.T) {
 		{
 			a: BackendHealth{
 				BackendInfo: BackendInfo{
+					Addr:       "127.0.0.1:4000",
 					IP:         "127.0.0.1",
 					StatusPort: 1,
 					Labels:     map[string]string{"k1": "v1", "k2": "v2"},

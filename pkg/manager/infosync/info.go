@@ -93,6 +93,8 @@ type TopologyInfo struct {
 type TiDBTopologyInfo struct {
 	Version        string `json:"version"`
 	GitHash        string `json:"git_hash"`
+	Addr           string `json:"-"`
+	ClusterName    string `json:"-"`
 	IP             string `json:"ip"`
 	StatusPort     uint   `json:"status_port"`
 	DeployPath     string `json:"deploy_path"`
@@ -295,6 +297,7 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBTopo
 					zap.String("value", hack.String(kv.Value)), zap.Error(err))
 			} else {
 				infos[addr] = topology
+				topology.Addr = addr
 				topology.Keyspace = keyspace
 			}
 		}

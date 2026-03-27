@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,18 +36,15 @@ import (
 
 const (
 	// readerOwnerKeyPrefix is the key prefix in etcd for backend reader owner election.
-	// For global owner, the key is "/tiproxy/metric_reader/owner".
-	// For zonal owner, the key is "/tiproxy/metric_reader/{zone}/owner".
-	readerOwnerKeyPrefix = "/tiproxy/metric_reader"
+	// For the default cluster, the key is "/tiproxy/metric_reader/owner".
+	// For a named cluster, the key is "/tiproxy/metric_reader/{cluster}/owner".
 	readerOwnerKeySuffix = "owner"
 	// sessionTTL is the session's TTL in seconds for backend reader owner election.
 	sessionTTL = 15
 	// backendMetricPath is the path of backend HTTP API to read metrics.
 	backendMetricPath = "/metrics"
-	// ownerMetricPath is the path of reading backend metrics from the backend reader owner.
-	ownerMetricPath = "/api/backend/metrics"
-	goPoolSize      = 100
-	goMaxIdle       = time.Minute
+	goPoolSize        = 100
+	goMaxIdle         = time.Minute
 )
 
 var (
@@ -72,6 +70,7 @@ type BackendReader struct {
 	marshalledHistory []byte
 	cfgGetter         config.ConfigGetter
 	backendFetcher    TopologyFetcher
+	clusterName       string
 	lastZone          string
 	electionCfg       elect.ElectionConfig
 	election          elect.Election
@@ -85,6 +84,11 @@ type BackendReader struct {
 
 func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *http.Client, etcdCli *clientv3.Client,
 	backendFetcher TopologyFetcher, cfg *config.HealthCheck) *BackendReader {
+	return NewClusterBackendReader(lg, "", cfgGetter, httpCli, etcdCli, backendFetcher, cfg)
+}
+
+func NewClusterBackendReader(lg *zap.Logger, clusterName string, cfgGetter config.ConfigGetter, httpCli *http.Client, etcdCli *clientv3.Client,
+	backendFetcher TopologyFetcher, cfg *config.HealthCheck) *BackendReader {
 	return &BackendReader{
 		queryRules:        make(map[string]QueryRule),
 		queryResults:      make(map[string]QueryResult),
@@ -92,6 +96,7 @@ func NewBackendReader(lg *zap.Logger, cfgGetter config.ConfigGetter, httpCli *ht
 		lg:                lg,
 		cfgGetter:         cfgGetter,
 		backendFetcher:    backendFetcher,
+		clusterName:       strings.TrimSpace(clusterName),
 		cfg:               cfg,
 		wgp:               waitgroup.NewWaitGroupPool(goPoolSize, goMaxIdle),
 		electionCfg:       elect.DefaultElectionConfig(sessionTTL),
@@ -118,9 +123,9 @@ func (br *BackendReader) initElection(ctx context.Context, cfg *config.Config) e
 	br.lastZone = cfg.GetLocation()
 	if len(br.lastZone) > 0 {
 		// Zonal owners are responsible for the backends in the same zone or not in any TiProxy zone.
-		key = fmt.Sprintf("%s/%s/%s", readerOwnerKeyPrefix, br.lastZone, readerOwnerKeySuffix)
+		key = fmt.Sprintf("%s/%s/%s", readerOwnerKeyPrefix(br.clusterName), br.lastZone, readerOwnerKeySuffix)
 	} else {
-		key = fmt.Sprintf("%s/%s", readerOwnerKeyPrefix, readerOwnerKeySuffix)
+		key = fmt.Sprintf("%s/%s", readerOwnerKeyPrefix(br.clusterName), readerOwnerKeySuffix)
 	}
 	br.election = elect.NewElection(br.lg.Named("elect"), br.etcdCli, br.electionCfg, id, key, br)
 	br.election.Start(ctx)
@@ -213,7 +218,8 @@ func (br *BackendReader) queryAllOwners(ctx context.Context) (zones, owners []st
 	// Get all owner keys.
 	opts := []clientv3.OpOption{clientv3.WithPrefix()}
 	var kvs []*mvccpb.KeyValue
-	kvs, err = etcd.GetKVs(ctx, br.etcdCli, readerOwnerKeyPrefix, opts, br.electionCfg.Timeout, br.electionCfg.RetryIntvl, br.electionCfg.RetryCnt)
+	keyPrefix := readerOwnerKeyPrefix(br.clusterName)
+	kvs, err = etcd.GetKVs(ctx, br.etcdCli, keyPrefix, opts, br.electionCfg.Timeout, br.electionCfg.RetryIntvl, br.electionCfg.RetryCnt)
 	if err != nil {
 		return
 	}
@@ -227,7 +233,7 @@ func (br *BackendReader) queryAllOwners(ctx context.Context) (zones, owners []st
 	ownerMap := make(map[string]ownerInfo)
 	for _, kv := range kvs {
 		key := hack.String(kv.Key)
-		key = key[len(readerOwnerKeyPrefix):]
+		key = key[len(keyPrefix):]
 		if len(key) == 0 || key[0] != '/' {
 			continue
 		}
@@ -466,7 +472,7 @@ func (br *BackendReader) GetBackendMetrics() []byte {
 // If every member queries directly from backends, the backends may suffer from too much pressure.
 func (br *BackendReader) readFromOwner(ctx context.Context, ownerAddr string) error {
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(br.cfg.RetryInterval), uint64(br.cfg.MaxRetries)), ctx)
-	resp, err := br.httpCli.Get(ownerAddr, ownerMetricPath, b, br.cfg.DialTimeout)
+	resp, err := br.httpCli.Get(ownerAddr, backendMetricOwnerPath(br.clusterName), b, br.cfg.DialTimeout)
 	if err != nil {
 		return err
 	}
@@ -568,6 +574,22 @@ func (br *BackendReader) Close() {
 	if br.election != nil {
 		br.election.Close()
 	}
+}
+
+func readerOwnerKeyPrefix(clusterName string) string {
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" || clusterName == config.DefaultBackendClusterName {
+		return "/tiproxy/metric_reader"
+	}
+	return fmt.Sprintf("/tiproxy/metric_reader/%s", clusterName)
+}
+
+func backendMetricOwnerPath(clusterName string) string {
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		return "/api/backend/metrics"
+	}
+	return fmt.Sprintf("/api/backend/metrics?cluster=%s", url.QueryEscape(clusterName))
 }
 
 func purgeHistory(history []model.SamplePair, retention time.Duration, now time.Time) []model.SamplePair {
