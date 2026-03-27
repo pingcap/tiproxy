@@ -35,7 +35,7 @@ func TestReadServerVersion(t *testing.T) {
 	backend.stopSQLServer()
 
 	//test for respBody not ok
-	backend.mockHttpHandler.setHTTPRespBody("")
+	backend.setHTTPRespBody("")
 	backend.startSQLServer()
 	health = hc.Check(context.Background(), backend.sqlAddr, info)
 	require.False(t, health.Healthy)
@@ -120,7 +120,7 @@ func (srv *backendServer) setServerVersion(version string) {
 		GitHash:     "",
 	}
 	body, _ := json.Marshal(resp)
-	srv.mockHttpHandler.setHTTPRespBody(string(body))
+	srv.setHTTPRespBody(string(body))
 }
 
 func (srv *backendServer) startHTTPServer() {

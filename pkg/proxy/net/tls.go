@@ -20,7 +20,7 @@ type tlsInternalConn struct {
 }
 
 func (br *tlsInternalConn) Write(p []byte) (n int, err error) {
-	return br.packetReadWriter.DirectWrite(p)
+	return br.DirectWrite(p)
 }
 
 func (p *packetIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionState, error) {

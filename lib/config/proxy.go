@@ -102,7 +102,7 @@ type TLSConfig struct {
 }
 
 func (c TLSConfig) HasCert() bool {
-	return !(c.Cert == "" && c.Key == "")
+	return c.Cert != "" || c.Key != ""
 }
 
 func (c TLSConfig) HasCA() bool {

@@ -199,7 +199,7 @@ func (ts *testSuite) authenticateFirstTime(t *testing.T, c checker) {
 // The proxy reconnects to the proxy using preserved client data.
 // This must be called after authenticateFirstTime.
 func (ts *testSuite) authenticateSecondTime(t *testing.T, c checker) {
-	ts.mb.backendConfig.authSucceed = true
+	ts.mb.authSucceed = true
 	ts.tc.reconnectBackend(t)
 	ts.runAndCheck(t, c, nil, ts.mb.authenticate, ts.mp.authenticateSecondTime)
 	if c == nil {

@@ -53,14 +53,14 @@ func (bh *BackendHealth) String() string {
 		_, _ = sb.WriteString("down")
 	}
 	if bh.PingErr != nil {
-		_, _ = sb.WriteString(fmt.Sprintf(", err: %s", bh.PingErr.Error()))
+		_, _ = fmt.Fprintf(&sb, ", err: %s", bh.PingErr)
 	}
 	if len(bh.ServerVersion) > 0 {
 		_, _ = sb.WriteString(", version: ")
 		_, _ = sb.WriteString(bh.ServerVersion)
 	}
 	if bh.Labels != nil {
-		_, _ = sb.WriteString(fmt.Sprintf(", labels: %v", bh.Labels))
+		_, _ = fmt.Fprintf(&sb, ", labels: %v", bh.Labels)
 	}
 	return sb.String()
 }

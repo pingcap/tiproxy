@@ -199,7 +199,7 @@ func (m *election) onRetired() {
 	m.member.OnRetired()
 	m.isOwner = false
 	// Delete the metric so that it doesn't show on Grafana.
-	metrics.OwnerGauge.MetricVec.DeletePartialMatch(map[string]string{metrics.LblType: m.trimedKey})
+	metrics.OwnerGauge.DeletePartialMatch(map[string]string{metrics.LblType: m.trimedKey})
 }
 
 // waitRetire retires after another member becomes the owner so that there will always be an owner.

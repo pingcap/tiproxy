@@ -162,14 +162,14 @@ func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
 // This function normally costs 1ms, so don't call it too frequently.
 // This function may incorrectly return true if the system is extremely slow.
 func (brw *basicReadWriter) IsPeerActive() bool {
-	if err := brw.Conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+	if err := brw.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
 		return false
 	}
 	active := true
-	if _, err := brw.ReadWriter.Peek(1); err != nil {
+	if _, err := brw.Peek(1); err != nil {
 		active = !errors.Is(err, io.EOF)
 	}
-	if err := brw.Conn.SetReadDeadline(time.Time{}); err != nil {
+	if err := brw.SetReadDeadline(time.Time{}); err != nil {
 		return false
 	}
 	return active
