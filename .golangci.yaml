@@ -1,60 +1,43 @@
-version: "2"
 run:
+  timeout: 10m
   issues-exit-code: 1
+
+linters-settings:
+  errcheck:
+    exclude-functions:
+        - io.WriteString
+        - (*go.uber.org/zap/buffer.Buffer).WriteString
+        - (*go.uber.org/zap/buffer.Buffer).WriteByte
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+    - path: util/security/tls.go
+      linters:
+        - gosec
+      text: "G402:"
+    - path: util/security/cert.go
+      linters:
+        - gosec
+      text: "G402:"
+    - path: pkg/proxy/net/auth.go
+      linters:
+        - gosec
+      text: "G101:|G401:|G505:"
+    - path: pkg/util/cmd/cmd.go
+      linters:
+        - gosec
+      text: "G204:"
+    - path: ".*.go"
+      linters:
+        - gosec
+      text: "G115:"
 
 linters:
   enable:
     - gosec
-    - misspell
-  settings:
-    errcheck:
-      exclude-functions:
-        - io.WriteString
-        - (*go.uber.org/zap/buffer.Buffer).WriteString
-        - (*go.uber.org/zap/buffer.Buffer).WriteByte
-  exclusions:
-    generated: lax
-    presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
-    rules:
-      - linters:
-          - gosec
-        path: _test\.go
-      - linters:
-          - gosec
-        path: util/security/tls.go
-        text: "G402:"
-      - linters:
-          - gosec
-        path: util/security/cert.go
-        text: "G402:"
-      - linters:
-          - gosec
-        path: pkg/proxy/net/auth.go
-        text: "G101:|G401:|G505:"
-      - linters:
-          - gosec
-        path: pkg/util/cmd/cmd.go
-        text: "G204:"
-      - linters:
-          - gosec
-        path: .*.go
-        text: "G115:"
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
-
-formatters:
-  enable:
     - gofmt
     - goimports
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+    - misspell

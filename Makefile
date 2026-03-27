@@ -46,46 +46,44 @@ cmd: $(EXECUTABLE_TARGETS)
 cmd_%: OUTPUT=$(patsubst cmd_%,./bin/%,$@)
 cmd_%: SOURCE=$(patsubst cmd_%,./cmd/%,$@)
 cmd_%:
-	$(GO) build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
+	go build $(BUILDFLAGS) -o $(OUTPUT) $(SOURCE)
 
 golangci-lint:
-	GOBIN=$(GOBIN) $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
+	GOBIN=$(GOBIN) GOTOOLCHAIN=go1.25.8 $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
 go-header:
-	GOBIN=$(GOBIN) $(GO) install github.com/denis-tingaikin/go-header/cmd/go-header@latest
+	GOBIN=$(GOBIN) go install github.com/denis-tingaikin/go-header/cmd/go-header@latest
 
 header: go-header
 	NEW_GO_FILES=$(git diff --cached --diff-filter=A --name-only | grep -E '.*\.go')
 	[ ! $(NEW_GO_FILES) ] || $(GOBIN)/go-header $(NEW_GO_FILES)
 
 lint: golangci-lint tidy header
-	cd lib && $(GOBIN)/golangci-lint fmt --diff -c ../.golangci.yaml
 	cd lib && $(GOBIN)/golangci-lint run -c ../.golangci.yaml
-	$(GOBIN)/golangci-lint fmt --diff -c .golangci.yaml
 	$(GOBIN)/golangci-lint run -c .golangci.yaml
 
 gocovmerge:
-	GOBIN=$(GOBIN) $(GO) install github.com/djshow832/gocovmerge@master
+	GOBIN=$(GOBIN) go install github.com/djshow832/gocovmerge@master
 
 tidy:
-	cd lib && $(GO) mod tidy
-	$(GO) mod tidy
+	cd lib && go mod tidy
+	go mod tidy
 
 build:
-	cd lib && $(GO) build ./...
-	$(GO) build ./...
+	cd lib && go build ./...
+	go build ./...
 
 metrics:
-	$(GO) install github.com/google/go-jsonnet/cmd/jsonnet@latest
+	go install github.com/google/go-jsonnet/cmd/jsonnet@latest
 	[ -e "grafonnet-lib" ] || git clone --depth=1 https://github.com/grafana/grafonnet-lib
 	JSONNET_PATH=grafonnet-lib jsonnet ./pkg/metrics/grafana/tiproxy_summary.jsonnet > ./pkg/metrics/grafana/tiproxy_summary.json
 
 test: gocovmerge
 	rm -f .cover.*
-	$(GO) test -coverprofile=.cover.pkg ./...
-	cd lib && $(GO) test -coverprofile=../.cover.lib ./...
+	go test -coverprofile=.cover.pkg ./...
+	cd lib && go test -coverprofile=../.cover.lib ./...
 	$(GOBIN)/gocovmerge .cover.* > coverage.dat
-	$(GO) tool cover -func=coverage.dat -o .cover.func
+	go tool cover -func=coverage.dat -o .cover.func
 	tail -1 .cover.func
 	rm -f .cover.*
 #	go tool cover -html=.cover -o .cover.html
@@ -94,7 +92,7 @@ clean:
 	rm -rf bin dist grafonnet-lib
 
 docker:
-	docker build -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell $(GO) env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" --build-arg "BRANCH=$(BRANCH)" -f docker/Dockerfile .
+	docker build -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell go env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" --build-arg "BRANCH=$(BRANCH)" -f docker/Dockerfile .
 
 docker-release:
-	docker buildx build --platform linux/amd64,linux/arm64 --push -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell $(GO) env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" --build-arg "BRANCH=$(BRANCH)" -f docker/Dockerfile .
+	docker buildx build --platform linux/amd64,linux/arm64 --push -t "$(DOCKERPREFIX)tiproxy:$(IMAGE_TAG)" --build-arg "GOPROXY=$(shell go env GOPROXY)" --build-arg "VERSION=$(VERSION)" --build-arg "COMMIT=$(COMMIT)" --build-arg "BRANCH=$(BRANCH)" -f docker/Dockerfile .
