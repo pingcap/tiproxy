@@ -69,6 +69,19 @@ graceful-close-conn-timeout = 15
 # max-days = 3
 # max-backups = 3
 
+# [metering]
+# provider type: "s3", "oss", "azure", or "localfs"
+# type = "azure"
+# bucket = "my-container"
+# prefix = "tiproxy/metering"
+# endpoint = "https://my-account.blob.core.windows.net"
+#
+# [metering.azure]
+# account-name = "my-account"
+# Use either account-key or sas-token, or rely on Azure DefaultAzureCredential.
+# account-key = ""
+# sas-token = ""
+
 [security]
 # tls object is either of type server, client, or peer
 # [xxxx]

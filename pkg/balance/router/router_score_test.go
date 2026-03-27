@@ -1168,9 +1168,16 @@ func TestGroupBackends(t *testing.T) {
 			if len(router.backends) != test.backendCount {
 				return false
 			}
-			group := router.backends[test.addr].group
+			backend, ok := router.backends[test.addr]
+			if !ok {
+				return false
+			}
+			group := backend.group
 			if test.cidrs == nil {
 				return group == nil
+			}
+			if group == nil {
+				return false
 			}
 			return group.EqualValues(test.cidrs)
 		}, 3*time.Second, 10*time.Millisecond, "test %d", i)
