@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"reflect"
 	"sync"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -54,14 +53,11 @@ func NewNamespaceManager() *namespaceManager {
 func (mgr *namespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
-	// init BackendFetcher
-	var fetcher observer.BackendFetcher
 	healthCheckCfg := config.NewDefaultHealthCheckConfig()
-	if mgr.tpFetcher != nil && !reflect.ValueOf(mgr.tpFetcher).IsNil() {
-		fetcher = observer.NewPDFetcher(mgr.tpFetcher, logger.Named("be_fetcher"), healthCheckCfg)
-	} else {
-		fetcher = observer.NewStaticFetcher(cfg.Backend.Instances)
-	}
+	// Namespace always receives a topology fetcher from the cluster manager. PDFetcher preserves
+	// legacy static backend.instances compatibility by falling back internally before any backend
+	// cluster is configured.
+	fetcher := observer.NewPDFetcher(mgr.tpFetcher, cfg.Backend.Instances, logger.Named("be_fetcher"), healthCheckCfg)
 
 	// init Router
 	rt := router.NewScoreBasedRouter(logger.Named("router"))

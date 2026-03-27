@@ -47,6 +47,7 @@ When adding or modifying features, prefer extending existing packages before cre
 - `pkg/manager/config/` - Auto-reloads configuration files and provides interfaces to query them.
 - `pkg/manager/elect/` - Manages TiProxy owner elections (for example, metrics reader and VIP modules need an owner).
 - `pkg/manager/id/` - Generates global IDs.
+- `pkg/manager/backendcluster/` - Manages cluster-scoped backend runtimes and shared resources such as PD or etcd clients.
 - `pkg/manager/infosync/` - Queries the topology of TiDB and Prometheus from PD and updates TiProxy information to PD.
 - `pkg/manager/logger/` - Manages the logger service.
 - `pkg/manager/memory/` - Records heap and goroutine profiles when memory usage is high.
