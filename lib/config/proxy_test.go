@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+	mconfig "github.com/pingcap/metering_sdk/config"
+	"github.com/pingcap/metering_sdk/storage"
 	"github.com/pingcap/tiproxy/lib/util/sys"
 	"github.com/stretchr/testify/require"
 )
@@ -70,6 +72,16 @@ var testProxyConfig = Config{
 			Key:                "c",
 		},
 		RequireBackendTLS: true,
+	},
+	Metering: mconfig.MeteringConfig{
+		Type:     storage.ProviderTypeAzure,
+		Bucket:   "metering-container",
+		Prefix:   "tiproxy/metering",
+		Endpoint: "https://account.blob.core.windows.net",
+		Azure: &mconfig.MeteringAzureConfig{
+			AccountName: "account",
+			SASToken:    "sig=example",
+		},
 	},
 }
 
