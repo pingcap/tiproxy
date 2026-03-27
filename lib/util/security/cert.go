@@ -234,14 +234,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 		lg.Warn("specified auto-certs in a client tls config, ignored")
 	}
 
-	if !cfg.HasCA() {
-		if cfg.SkipCA {
-			// still enable TLS without verify server certs
-			return &tls.Config{
-				InsecureSkipVerify: true,
-				MinVersion:         GetMinTLSVer(cfg.MinTLSVersion, lg),
-			}, nil
-		}
+	if !cfg.HasCA() && !cfg.SkipCA {
 		lg.Debug("no CA to verify server connections, disable TLS")
 		return nil, nil
 	}
@@ -251,30 +244,32 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 		GetCertificate:       ci.getCert,
 		GetClientCertificate: ci.getClientCert,
 		InsecureSkipVerify:   true,
-		VerifyPeerCertificate: func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+	}
+
+	if cfg.HasCA() {
+		tcfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			return ci.verifyCA(rawCerts)
-		},
+		}
+		caPEM, err := os.ReadFile(cfg.CA)
+		if err != nil {
+			return nil, err
+		}
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caPEM) {
+			return nil, errors.New("failed to append ca certs")
+		}
+		ci.ca.Store(certPool)
+		tcfg.RootCAs = certPool
 	}
 
-	caPEM, err := os.ReadFile(cfg.CA)
-	if err != nil {
-		return nil, err
-	}
-	certPool := x509.NewCertPool()
-	if !certPool.AppendCertsFromPEM(caPEM) {
-		return nil, errors.New("failed to append ca certs")
-	}
-	ci.ca.Store(certPool)
-	tcfg.RootCAs = certPool
-
-	if !cfg.HasCert() {
+	if cfg.Cert == "" || cfg.Key == "" {
 		lg.Debug("no certificates, server may reject the connection")
 		return tcfg, nil
 	}
 
 	cert, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	ci.cert.Store(&cert)
 
