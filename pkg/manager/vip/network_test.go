@@ -45,7 +45,9 @@ func TestAddDelIP(t *testing.T) {
 	}
 
 	isOtherErr := func(err error) bool {
-		return strings.Contains(err.Error(), "command not found") || strings.Contains(err.Error(), "not in the sudoers file")
+		return strings.Contains(err.Error(), "command not found") ||
+			strings.Contains(err.Error(), "not in the sudoers file") ||
+			strings.Contains(err.Error(), "executable file not found")
 	}
 
 	for i, test := range tests {

@@ -89,7 +89,7 @@ func (crw *compressedReadWriter) ResetSequence() {
 // the client/server begins reading or writing.
 func (crw *compressedReadWriter) BeginRW(status rwStatus) {
 	if crw.rwStatus != status {
-		crw.packetReadWriter.SetSequence(crw.sequence)
+		crw.SetSequence(crw.sequence)
 		crw.rwStatus = status
 	}
 }

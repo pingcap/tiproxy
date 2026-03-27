@@ -1,6 +1,6 @@
 module github.com/pingcap/tiproxy/lib
 
-go 1.21
+go 1.25.8
 
 require (
 	github.com/cenkalti/backoff/v4 v4.2.1

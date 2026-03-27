@@ -227,7 +227,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
-	mgr.cancelFunc = cancelFunc
+	mgr.cancelFunc = func() {
+		cancelFunc()
+	}
 	mgr.lastActiveTime = endTime
 	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
 		mgr.cpt.InitConn(endTime, mgr.connectionID, mgr.authenticator.dbname)

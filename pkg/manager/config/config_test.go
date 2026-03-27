@@ -192,7 +192,7 @@ func TestFilePath(t *testing.T) {
 					// For linux, it creates another file. For macOS, it doesn't touch the file.
 					f, err = os.Create(filepath.Join(tmpdir, "cfg"))
 					require.NoError(t, err)
-					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+					_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr1)
 					require.NoError(t, err)
 					require.NoError(t, f.Close())
 				},
@@ -219,7 +219,7 @@ func TestFilePath(t *testing.T) {
 					}
 					f, err := os.Create("_tmp/cfg")
 					require.NoError(t, err)
-					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+					_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr1)
 					require.NoError(t, err)
 					require.NoError(t, f.Close())
 				},
@@ -233,7 +233,7 @@ func TestFilePath(t *testing.T) {
 					require.NoError(t, os.Mkdir("_tmp", 0755))
 					f, err := os.Create("_tmp/cfg")
 					require.NoError(t, err)
-					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr3))
+					_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr3)
 					require.NoError(t, err)
 					require.NoError(t, f.Close())
 					t.Log("write _tmp")
@@ -250,7 +250,7 @@ func TestFilePath(t *testing.T) {
 
 					f, err := os.Create(filename)
 					require.NoError(t, err)
-					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr3))
+					_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr3)
 					require.NoError(t, err)
 					require.NoError(t, f.Close())
 					require.Eventually(t, func() bool {
@@ -267,7 +267,7 @@ func TestFilePath(t *testing.T) {
 			} else {
 				f, err := os.Create(test.filename)
 				require.NoError(t, err)
-				_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+				_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr1)
 				require.NoError(t, err)
 				require.NoError(t, f.Close())
 			}

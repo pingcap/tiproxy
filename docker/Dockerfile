@@ -1,6 +1,6 @@
-FROM alpine:edge as builder
+FROM golang:1.25.8-alpine AS builder
 
-RUN apk add --no-cache --progress git make go
+RUN apk add --no-cache --progress git make
 ARG VERSION
 ARG BRANCH
 ARG COMMIT

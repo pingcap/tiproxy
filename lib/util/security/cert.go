@@ -41,10 +41,10 @@ func NewCert(server bool) *CertInfo {
 func (ci *CertInfo) Reload(lg *zap.Logger) (tlsConfig *tls.Config, err error) {
 	// Some methods to rotate server config:
 	// - For certs: customize GetCertificate / GetConfigForClient.
-	// - For CA: customize ClientAuth + VerifyPeerCertificate / GetConfigForClient
+	// - For CA: customize ClientAuth + VerifyConnection / GetConfigForClient
 	// Some methods to rotate client config:
 	// - For certs: customize GetClientCertificate
-	// - For CA: customize InsecureSkipVerify + VerifyPeerCertificate
+	// - For CA: customize InsecureSkipVerify + VerifyConnection
 	prevExpireTime := ci.getExpireTime()
 	if ci.server {
 		lg = lg.With(zap.String("tls", "server"), zap.Any("cfg", ci.cfg.Load()))
@@ -82,18 +82,9 @@ func (ci *CertInfo) getClientCert(*tls.CertificateRequestInfo) (*tls.Certificate
 	return cert, nil
 }
 
-func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-	if len(rawCerts) == 0 {
+func (ci *CertInfo) verifyPeerCertificates(certs []*x509.Certificate) error {
+	if len(certs) == 0 {
 		return nil
-	}
-
-	certs := make([]*x509.Certificate, len(rawCerts))
-	for i, asn1Data := range rawCerts {
-		cert, err := x509.ParseCertificate(asn1Data)
-		if err != nil {
-			return errors.New("tls: failed to parse certificate from server: " + err.Error())
-		}
-		certs[i] = cert
 	}
 
 	cas := ci.ca.Load()
@@ -118,6 +109,10 @@ func (ci *CertInfo) verifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certifi
 	}
 	_, err := certs[0].Verify(opts)
 	return err
+}
+
+func (ci *CertInfo) verifyConnection(cs tls.ConnectionState) error {
+	return ci.verifyPeerCertificates(cs.PeerCertificates)
 }
 
 func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
@@ -155,10 +150,10 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:            GetMinTLSVer(cfg.MinTLSVersion, lg),
-		GetCertificate:        ci.getCert,
-		GetClientCertificate:  ci.getClientCert,
-		VerifyPeerCertificate: ci.verifyPeerCertificate,
+		MinVersion:           GetMinTLSVer(cfg.MinTLSVersion, lg),
+		GetCertificate:       ci.getCert,
+		GetClientCertificate: ci.getClientCert,
+		VerifyConnection:     ci.verifyConnection,
 	}
 
 	var certPEM, keyPEM []byte
@@ -239,11 +234,11 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:            GetMinTLSVer(cfg.MinTLSVersion, lg),
-		GetCertificate:        ci.getCert,
-		GetClientCertificate:  ci.getClientCert,
-		InsecureSkipVerify:    true,
-		VerifyPeerCertificate: ci.verifyPeerCertificate,
+		MinVersion:           GetMinTLSVer(cfg.MinTLSVersion, lg),
+		GetCertificate:       ci.getCert,
+		GetClientCertificate: ci.getClientCert,
+		InsecureSkipVerify:   true,
+		VerifyConnection:     ci.verifyConnection,
 	}
 
 	certBytes, err := os.ReadFile(cfg.CA)
