@@ -80,6 +80,7 @@ func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) event {
 type mockBackendInst struct {
 	addr     string
 	keyspace string
+	cluster  string
 	healthy  atomic.Bool
 	local    atomic.Bool
 }
@@ -123,6 +124,10 @@ func (mbi *mockBackendInst) Keyspace() string {
 
 func (mbi *mockBackendInst) setKeyspace(k string) {
 	mbi.keyspace = k
+}
+
+func (mbi *mockBackendInst) ClusterName() string {
+	return mbi.cluster
 }
 
 type runner struct {
@@ -1022,11 +1027,14 @@ func TestGetBackendIO(t *testing.T) {
 	mgr := NewBackendConnManager(lg, handler, &mockCapture{}, 0, &BCConfig{ConnectTimeout: time.Second}, nil)
 	var wg waitgroup.WaitGroup
 	for i := 0; i <= len(listeners); i++ {
+		acceptedCh := make(chan error, 1)
 		wg.Run(func() {
 			if i < len(listeners) {
 				cn, err := listeners[i].Accept()
-				require.NoError(t, err)
-				require.NoError(t, cn.Close())
+				if err == nil {
+					err = cn.Close()
+				}
+				acceptedCh <- err
 			}
 		})
 		io, err := mgr.getBackendIO(context.Background(), mgr, nil)
@@ -1036,6 +1044,7 @@ func TestGetBackendIO(t *testing.T) {
 		message := fmt.Sprintf("%d: %s, %+v\n", i, badAddrs, err)
 		if i < len(listeners) {
 			require.NoError(t, err, message)
+			require.NoError(t, <-acceptedCh, message)
 			err = listeners[i].Close()
 			require.NoError(t, err, message)
 		} else {
@@ -1045,6 +1054,45 @@ func TestGetBackendIO(t *testing.T) {
 		badAddrs = make(map[string]struct{}, 3)
 		wg.Wait()
 	}
+}
+
+func TestGetBackendIOUsesBackendDialContext(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, listener.Close()) }()
+
+	rt := router.NewStaticRouter([]string{"tidb-a.test:4000"})
+	handler := &CustomHandshakeHandler{
+		getRouter: func(ctx ConnContext, resp *pnet.HandshakeResp) (router.Router, error) {
+			return rt, nil
+		},
+	}
+	lg, _ := logger.CreateLoggerForTest(t)
+	var gotCluster, gotAddr string
+	mgr := NewBackendConnManager(lg, handler, &mockCapture{}, 0, &BCConfig{
+		ConnectTimeout: time.Second,
+		DialContext: func(ctx context.Context, backendInst router.BackendInst, addr string) (net.Conn, error) {
+			gotCluster = backendInst.ClusterName()
+			gotAddr = addr
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, "tcp", listener.Addr().String())
+		},
+	}, nil)
+
+	acceptedCh := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			err = conn.Close()
+		}
+		acceptedCh <- err
+	}()
+	io, err := mgr.getBackendIO(context.Background(), mgr, nil)
+	require.NoError(t, err)
+	require.NoError(t, io.Close())
+	require.NoError(t, <-acceptedCh)
+	require.Empty(t, gotCluster)
+	require.Equal(t, "tidb-a.test:4000", gotAddr)
 }
 
 func TestBackendInactive(t *testing.T) {

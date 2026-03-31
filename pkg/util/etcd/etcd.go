@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/url"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/util/netutil"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -36,31 +38,48 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMa
 
 // InitEtcdClientWithAddrs initializes an etcd client that connects to PD ETCD servers.
 func InitEtcdClientWithAddrs(logger *zap.Logger, pdAddrs string, tlsConfig *tls.Config) (*clientv3.Client, error) {
+	return InitEtcdClientWithAddrsAndDialer(logger, pdAddrs, tlsConfig, nil)
+}
+
+func InitEtcdClientWithAddrsAndDialer(logger *zap.Logger, pdAddrs string, tlsConfig *tls.Config,
+	dnsDialer *netutil.DNSDialer) (*clientv3.Client, error) {
 	pdEndpoints := config.SplitAddrList(pdAddrs)
 	logger.Info("connect ETCD servers", zap.Strings("addrs", pdEndpoints))
+	dialOptions := []grpc.DialOption{
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:    10 * time.Second,
+			Timeout: 3 * time.Second,
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  time.Second,
+				Multiplier: 1.1,
+				Jitter:     0.1,
+				MaxDelay:   3 * time.Second,
+			},
+			MinConnectTimeout: 3 * time.Second,
+		}),
+	}
+	if dnsDialer != nil {
+		dialOptions = append(dialOptions, grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			return dnsDialer.DialContext(ctx, "tcp", addr)
+		}))
+	}
 	etcdClient, err := clientv3.New(clientv3.Config{
 		Endpoints:        pdEndpoints,
 		TLS:              tlsConfig,
 		Logger:           logger.Named("etcdcli"),
 		AutoSyncInterval: 30 * time.Second,
 		DialTimeout:      5 * time.Second,
-		DialOptions: []grpc.DialOption{
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:    10 * time.Second,
-				Timeout: 3 * time.Second,
-			}),
-			grpc.WithConnectParams(grpc.ConnectParams{
-				Backoff: backoff.Config{
-					BaseDelay:  time.Second,
-					Multiplier: 1.1,
-					Jitter:     0.1,
-					MaxDelay:   3 * time.Second,
-				},
-				MinConnectTimeout: 3 * time.Second,
-			}),
-		},
+		DialOptions:      dialOptions,
 	})
-	return etcdClient, errors.Wrapf(err, "init etcd client failed")
+	if err != nil {
+		return nil, errors.Wrapf(err, "init etcd client failed")
+	}
+	if err := syncEtcdClient(context.Background(), etcdClient); err != nil {
+		logger.Warn("sync ETCD member endpoints after init failed", zap.Error(err))
+	}
+	return etcdClient, nil
 }
 
 func GetKVs(ctx context.Context, etcdCli *clientv3.Client, key string, opts []clientv3.OpOption, timeout, retryIntvl time.Duration, retryCnt uint64) ([]*mvccpb.KeyValue, error) {
@@ -80,7 +99,15 @@ func GetKVs(ctx context.Context, etcdCli *clientv3.Client, key string, opts []cl
 
 // CreateEtcdServer creates an etcd server and is only used for testing.
 func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
-	serverURL, err := url.Parse(fmt.Sprintf("http://%s", addr))
+	listenAddr, advertiseAddr, err := allocEtcdServerAddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	serverURL, err := url.Parse(fmt.Sprintf("http://%s", listenAddr))
+	if err != nil {
+		return nil, err
+	}
+	advertiseURL, err := url.Parse(fmt.Sprintf("http://%s", advertiseAddr))
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +115,9 @@ func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
 	cfg.Dir = dir
 	cfg.ListenClientUrls = []url.URL{*serverURL}
 	cfg.ListenPeerUrls = []url.URL{*serverURL}
+	cfg.AdvertiseClientUrls = []url.URL{*advertiseURL}
+	cfg.AdvertisePeerUrls = []url.URL{*advertiseURL}
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, advertiseURL.String())
 	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(lg)
 	cfg.LogLevel = "fatal"
 	// Reuse port so that it can reboot with the same port immediately.
@@ -103,6 +133,30 @@ func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
 	return etcd, err
 }
 
+func allocEtcdServerAddr(addr string) (listenAddr, advertiseAddr string, err error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", "", err
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	if port != "0" {
+		return net.JoinHostPort(host, port), net.JoinHostPort(host, port), nil
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		return "", "", err
+	}
+	defer func() {
+		closeErr := ln.Close()
+		if err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	return ln.Addr().String(), ln.Addr().String(), nil
+}
+
 func ConfigForEtcdTest(endpoint string) *config.Config {
 	return &config.Config{
 		Proxy: config.ProxyServer{
@@ -113,4 +167,14 @@ func ConfigForEtcdTest(endpoint string) *config.Config {
 			Addr: "0.0.0.0:3080",
 		},
 	}
+}
+
+type etcdSyncer interface {
+	Sync(ctx context.Context) error
+}
+
+func syncEtcdClient(ctx context.Context, cli etcdSyncer) error {
+	syncCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return errors.WithStack(cli.Sync(syncCtx))
 }

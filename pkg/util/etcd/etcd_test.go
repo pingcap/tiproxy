@@ -58,3 +58,26 @@ func TestSplitAddrList(t *testing.T) {
 	require.Equal(t, []string{"pd1:2379", "pd2:2379"}, config.SplitAddrList("pd1:2379, pd2:2379"))
 	require.Equal(t, []string{"pd1:2379", "pd2:2379"}, config.SplitAddrList(" pd1:2379 , , pd2:2379 "))
 }
+
+func TestSyncEtcdClient(t *testing.T) {
+	err := syncEtcdClient(context.Background(), &mockEtcdSyncer{})
+	require.NoError(t, err)
+}
+
+func TestSyncEtcdClientTimeout(t *testing.T) {
+	err := syncEtcdClient(context.Background(), &mockEtcdSyncer{block: true})
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+type mockEtcdSyncer struct {
+	block bool
+}
+
+func (m *mockEtcdSyncer) Sync(ctx context.Context) error {
+	if !m.block {
+		return nil
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
