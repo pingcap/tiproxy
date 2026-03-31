@@ -27,6 +27,7 @@ type Manager struct {
 	wg      waitgroup.WaitGroup
 	cancel  context.CancelFunc
 	metrics *MetricsQuerier
+	network *NetworkRouter
 
 	mu struct {
 		sync.RWMutex
@@ -41,6 +42,7 @@ func NewManager(lg *zap.Logger, clusterTLS func() *tls.Config) *Manager {
 	}
 	mgr.mu.clusters = make(map[string]*Cluster)
 	mgr.metrics = NewMetricsQuerier(mgr)
+	mgr.network = NewNetworkRouter(mgr, clusterTLS)
 	return mgr
 }
 
@@ -164,6 +166,7 @@ func clusterReusable(cluster *Cluster, cfg config.BackendCluster) bool {
 		left.PDAddrs == right.PDAddrs &&
 		slices.Equal(left.NSServers, right.NSServers)
 }
+
 func (m *Manager) Snapshot() map[string]*Cluster {
 	m.mu.RLock()
 	snapshot := make(map[string]*Cluster, len(m.mu.clusters))
@@ -180,6 +183,10 @@ func (m *Manager) HasBackendClusters() bool {
 
 func (m *Manager) MetricsQuerier() *MetricsQuerier {
 	return m.metrics
+}
+
+func (m *Manager) NetworkRouter() *NetworkRouter {
+	return m.network
 }
 
 // PrimaryCluster returns the only configured cluster when the cluster count is exactly one.

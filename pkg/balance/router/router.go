@@ -80,6 +80,7 @@ type BackendInst interface {
 	Healthy() bool
 	Local() bool
 	Keyspace() string
+	ClusterName() string
 }
 
 // backendWrapper contains the connections on the backend.

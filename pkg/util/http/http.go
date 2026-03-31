@@ -4,9 +4,11 @@
 package http
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -21,11 +23,18 @@ type Client struct {
 }
 
 func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
+	return NewHTTPClientWithDialContext(getTLSConfig, nil)
+}
+
+func NewHTTPClientWithDialContext(getTLSConfig func() *tls.Config, dialContext func(ctx context.Context, network, addr string) (net.Conn, error)) *Client {
 	// Since TLS config will hot reload, `TLSClientConfig` need update by `getTLSConfig()`
 	// to obtain the latest TLS config.
 	return &Client{
 		cli: &http.Client{
-			Transport: &http.Transport{TLSClientConfig: getTLSConfig()},
+			Transport: &http.Transport{
+				TLSClientConfig: getTLSConfig(),
+				DialContext:     dialContext,
+			},
 		},
 		getTLSConfig: getTLSConfig,
 	}
