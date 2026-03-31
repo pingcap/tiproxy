@@ -158,17 +158,17 @@ func (g *Group) RefreshCidr() {
 	}
 }
 
-func (g *Group) AddBackend(addr string, backend *backendWrapper) {
+func (g *Group) AddBackend(backendID string, backend *backendWrapper) {
 	g.Lock()
 	defer g.Unlock()
-	g.backends[addr] = backend
+	g.backends[backendID] = backend
 	backend.group = g
 }
 
-func (g *Group) RemoveBackend(addr string) {
+func (g *Group) RemoveBackend(backendID string) {
 	g.Lock()
 	defer g.Unlock()
-	delete(g.backends, addr)
+	delete(g.backends, backendID)
 }
 
 func (g *Group) Empty() bool {
@@ -200,7 +200,7 @@ func (g *Group) Route(excluded []BackendInst) (policy.BackendCtx, error) {
 		// Exclude the backends that are already tried.
 		found := false
 		for _, e := range excluded {
-			if backend.Addr() == e.Addr() {
+			if backend.ID() == e.ID() {
 				found = true
 				break
 			}
@@ -273,7 +273,7 @@ func (g *Group) Balance(ctx context.Context) {
 func (g *Group) onCreateConn(backendInst BackendInst, conn RedirectableConn, succeed bool) {
 	g.Lock()
 	defer g.Unlock()
-	backend := g.ensureBackend(backendInst.Addr())
+	backend := g.ensureBackend(backendInst.ID())
 	if succeed {
 		connWrapper := &connWrapper{
 			RedirectableConn: conn,
@@ -319,23 +319,18 @@ func (g *Group) RedirectConnections() error {
 	return nil
 }
 
-func (g *Group) ensureBackend(addr string) *backendWrapper {
-	backend, ok := g.backends[addr]
+func (g *Group) ensureBackend(backendID string) *backendWrapper {
+	backend, ok := g.backends[backendID]
 	if ok {
 		return backend
 	}
 	// The backend should always exist if it will be needed. Add a warning and add it back.
-	g.lg.Warn("backend is not found in the router", zap.String("backend_addr", addr), zap.Stack("stack"))
-	ip, _, _ := net.SplitHostPort(addr)
-	backend = newBackendWrapper(addr, observer.BackendHealth{
-		BackendInfo: observer.BackendInfo{
-			IP:         ip,
-			StatusPort: 10080, // impossible anyway
-		},
+	g.lg.Warn("backend is not found in the router", zap.String("backend_id", backendID), zap.Stack("stack"))
+	backend = newBackendWrapper(backendID, observer.BackendHealth{
 		SupportRedirection: true,
 		Healthy:            false,
 	})
-	g.backends[addr] = backend
+	g.backends[backendID] = backend
 	return backend
 }
 
@@ -375,16 +370,16 @@ func (g *Group) onRedirectFinished(from, to string, conn RedirectableConn, succe
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
-func (g *Group) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
+func (g *Group) OnConnClosed(backendID, redirectingBackendID string, conn RedirectableConn) error {
 	g.Lock()
 	defer g.Unlock()
-	backend := g.ensureBackend(addr)
+	backend := g.ensureBackend(backendID)
 	connWrapper := getConnWrapper(conn)
 	// If this connection has not redirected yet, decrease the score of the target backend.
-	if redirectingAddr != "" {
-		redirectingBackend := g.ensureBackend(redirectingAddr)
+	if redirectingBackendID != "" {
+		redirectingBackend := g.ensureBackend(redirectingBackendID)
 		redirectingBackend.connScore--
-		metrics.PendingMigrateGuage.WithLabelValues(addr, redirectingAddr, connWrapper.Value.redirectReason).Dec()
+		metrics.PendingMigrateGuage.WithLabelValues(backendID, redirectingBackendID, connWrapper.Value.redirectReason).Dec()
 	} else {
 		backend.connScore--
 	}

@@ -5,9 +5,9 @@ package etcd
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -31,11 +31,16 @@ func InitEtcdClient(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertMa
 		// use tidb server addresses directly
 		return nil, nil
 	}
-	pdEndpoints := strings.Split(pdAddr, ",")
+	return InitEtcdClientWithAddrs(logger, pdAddr, certMgr.ClusterTLS())
+}
+
+// InitEtcdClientWithAddrs initializes an etcd client that connects to PD ETCD servers.
+func InitEtcdClientWithAddrs(logger *zap.Logger, pdAddrs string, tlsConfig *tls.Config) (*clientv3.Client, error) {
+	pdEndpoints := config.SplitAddrList(pdAddrs)
 	logger.Info("connect ETCD servers", zap.Strings("addrs", pdEndpoints))
 	etcdClient, err := clientv3.New(clientv3.Config{
 		Endpoints:        pdEndpoints,
-		TLS:              certMgr.ClusterTLS(),
+		TLS:              tlsConfig,
 		Logger:           logger.Named("etcdcli"),
 		AutoSyncInterval: 30 * time.Second,
 		DialTimeout:      5 * time.Second,

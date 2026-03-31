@@ -143,7 +143,7 @@ func (bo *DefaultBackendObserver) checkHealth(ctx context.Context, backends map[
 					return
 				}
 				lastHealth := bo.curBackends[addr]
-				health := bo.hc.Check(ctx, addr, info, lastHealth)
+				health := bo.hc.Check(ctx, info, lastHealth)
 				health.setLocal(cfg)
 				lock.Lock()
 				curBackendHealth[addr] = health

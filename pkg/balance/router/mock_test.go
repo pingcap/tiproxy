@@ -69,13 +69,13 @@ func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 	return true
 }
 
-func (conn *mockRedirectableConn) GetRedirectingAddr() string {
+func (conn *mockRedirectableConn) GetRedirectingBackendID() string {
 	conn.Lock()
 	defer conn.Unlock()
 	if conn.to == nil {
 		return ""
 	}
-	return conn.to.Addr()
+	return conn.to.ID()
 }
 
 func (conn *mockRedirectableConn) ConnectionID() uint64 {
@@ -86,14 +86,14 @@ func (conn *mockRedirectableConn) ConnInfo() []zap.Field {
 	return nil
 }
 
-func (conn *mockRedirectableConn) getAddr() (string, string) {
+func (conn *mockRedirectableConn) getBackendIDs() (string, string) {
 	conn.Lock()
 	defer conn.Unlock()
 	var to string
 	if conn.to != nil && !reflect.ValueOf(conn.to).IsNil() {
-		to = conn.to.Addr()
+		to = conn.to.ID()
 	}
-	return conn.from.Addr(), to
+	return conn.from.ID(), to
 }
 
 func (conn *mockRedirectableConn) redirectSucceed() {
@@ -138,6 +138,7 @@ func (mbo *mockBackendObserver) addBackend(addr string, labels map[string]string
 	mbo.healths[addr] = &observer.BackendHealth{
 		Healthy: true,
 		BackendInfo: observer.BackendInfo{
+			Addr:   addr,
 			Labels: labels,
 		},
 	}
@@ -182,8 +183,9 @@ func (mbo *mockBackendObserver) notify(err error) {
 func (mbo *mockBackendObserver) Close() {
 	mbo.subscriberLock.Lock()
 	defer mbo.subscriberLock.Unlock()
-	for _, subscriber := range mbo.subscribers {
+	for name, subscriber := range mbo.subscribers {
 		close(subscriber)
+		delete(mbo.subscribers, name)
 	}
 }
 

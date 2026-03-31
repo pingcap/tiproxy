@@ -25,19 +25,19 @@ func TestReadServerVersion(t *testing.T) {
 	hc := NewDefaultHealthCheck(nil, newHealthCheckConfigForTest(), lg)
 	backend, info := newBackendServer(t)
 	backend.setServerVersion("1.0")
-	health := hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health := hc.Check(context.Background(), info, nil)
 	require.Equal(t, "1.0", health.ServerVersion)
 	backend.stopSQLServer()
 	backend.setServerVersion("2.0")
 	backend.startSQLServer()
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.Equal(t, "2.0", health.ServerVersion)
 	backend.stopSQLServer()
 
 	//test for respBody not ok
 	backend.mockHttpHandler.setStatusRespBody("")
 	backend.startSQLServer()
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.False(t, health.Healthy)
 	require.NotNil(t, health.PingErr)
 	require.Equal(t, true, strings.Contains(health.PingErr.Error(), "unexpected end of JSON input"))
@@ -54,37 +54,37 @@ func TestHealthCheck(t *testing.T) {
 	defer backend.close()
 	backend.setServerVersion("1.0")
 	backend.setHasSigningCert(true)
-	health := hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health := hc.Check(context.Background(), info, nil)
 	require.True(t, health.Healthy)
 
 	backend.stopSQLServer()
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.False(t, health.Healthy)
 	backend.startSQLServer()
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.True(t, health.Healthy)
 	backend.setHTTPResp(false)
 
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.False(t, health.Healthy)
 	require.NotContains(t, text.String(), "unmarshal body")
 	require.True(t, health.SupportRedirection)
 	backend.setHTTPResp(true)
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.True(t, health.Healthy)
 
 	backend.setHTTPWait(time.Second + cfg.DialTimeout)
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.False(t, health.Healthy)
 	backend.setHTTPWait(time.Duration(0))
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.True(t, health.Healthy)
 
 	backend.setSqlResp(false)
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.False(t, health.Healthy)
 	backend.setSqlResp(true)
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.True(t, health.Healthy)
 }
 
@@ -96,27 +96,27 @@ func TestSupportRedirection(t *testing.T) {
 	defer backend.close()
 	backend.setServerVersion("1.0")
 	backend.setHasSigningCert(false)
-	health := hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health := hc.Check(context.Background(), info, nil)
 	require.True(t, health.Healthy)
 	require.False(t, health.SupportRedirection)
 
 	backend.setHasSigningCert(true)
 	health.lastCheckSigningCertTime = time.Time{}
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.True(t, health.SupportRedirection)
 
 	backend.setSqlResp(false)
 	health.lastCheckSigningCertTime = time.Time{}
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.False(t, health.Healthy)
 	require.True(t, health.SupportRedirection)
 	backend.setSqlResp(true)
-	health = hc.Check(context.Background(), backend.sqlAddr, info, nil)
+	health = hc.Check(context.Background(), info, nil)
 	require.True(t, health.Healthy)
 
 	backend.setHasSigningCert(false)
 	health.lastCheckSigningCertTime = time.Time{}
-	health = hc.Check(context.Background(), backend.sqlAddr, info, health)
+	health = hc.Check(context.Background(), info, health)
 	require.False(t, health.SupportRedirection)
 }
 
@@ -143,6 +143,7 @@ func newBackendServer(t *testing.T) (*backendServer, *BackendInfo) {
 	backend.setSqlResp(true)
 	backend.startSQLServer()
 	return backend, &BackendInfo{
+		Addr:       backend.sqlAddr,
 		IP:         backend.ip,
 		StatusPort: backend.statusPort,
 	}

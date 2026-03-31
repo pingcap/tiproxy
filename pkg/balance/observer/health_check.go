@@ -21,7 +21,7 @@ import (
 
 // HealthCheck is used to check the backends of one backend. One can pass a customized health check function to the observer.
 type HealthCheck interface {
-	Check(ctx context.Context, addr string, info *BackendInfo, lastHealth *BackendHealth) *BackendHealth
+	Check(ctx context.Context, info *BackendInfo, lastHealth *BackendHealth) *BackendHealth
 }
 
 const (
@@ -62,7 +62,7 @@ func NewDefaultHealthCheck(httpCli *http.Client, cfg *config.HealthCheck, logger
 	}
 }
 
-func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *BackendInfo, lastBh *BackendHealth) *BackendHealth {
+func (dhc *DefaultHealthCheck) Check(ctx context.Context, info *BackendInfo, lastBh *BackendHealth) *BackendHealth {
 	bh := &BackendHealth{
 		BackendInfo: *info,
 		Healthy:     true,
@@ -80,7 +80,7 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 	if !bh.Healthy {
 		return bh
 	}
-	dhc.checkSqlPort(ctx, addr, bh)
+	dhc.checkSqlPort(ctx, info, bh)
 	if !bh.Healthy {
 		return bh
 	}
@@ -88,8 +88,14 @@ func (dhc *DefaultHealthCheck) Check(ctx context.Context, addr string, info *Bac
 	return bh
 }
 
-func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, addr string, bh *BackendHealth) {
+func (dhc *DefaultHealthCheck) checkSqlPort(ctx context.Context, info *BackendInfo, bh *BackendHealth) {
 	// Also dial the SQL port just in case that the SQL port hangs.
+	if info == nil || info.Addr == "" {
+		bh.Healthy = false
+		bh.PingErr = errors.New("backend address is empty")
+		return
+	}
+	addr := info.Addr
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(dhc.cfg.RetryInterval), uint64(dhc.cfg.MaxRetries)), ctx)
 	err := http.ConnectWithRetry(func() error {
 		startTime := time.Now()

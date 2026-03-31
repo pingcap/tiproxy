@@ -62,10 +62,10 @@ func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.Redire
 	return nil
 }
 
-func (mer *mockEventReceiver) OnConnClosed(from, to string, conn router.RedirectableConn) error {
+func (mer *mockEventReceiver) OnConnClosed(backendID, redirectingBackendID string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
-		from:      from,
-		to:        to,
+		from:      backendID,
+		to:        redirectingBackendID,
 		eventName: eventClose,
 	}
 	return nil
@@ -94,6 +94,10 @@ func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
 }
 
 func (mbi *mockBackendInst) Addr() string {
+	return mbi.addr
+}
+
+func (mbi *mockBackendInst) ID() string {
 	return mbi.addr
 }
 
