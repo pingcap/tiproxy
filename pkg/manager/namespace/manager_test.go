@@ -4,16 +4,28 @@
 package namespace
 
 import (
+	"context"
 	"testing"
 
 	"github.com/pingcap/tiproxy/pkg/balance/router"
+	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
+type mockTopologyFetcher struct{}
+
+func (*mockTopologyFetcher) GetTiDBTopology(context.Context) (map[string]*infosync.TiDBTopologyInfo, error) {
+	return nil, nil
+}
+
+func (*mockTopologyFetcher) HasBackendClusters() bool {
+	return false
+}
+
 func TestReady(t *testing.T) {
 	nsMgr := NewNamespaceManager()
-	require.NoError(t, nsMgr.Init(zap.NewNop(), nil, nil, nil, nil, nil, nil))
+	require.NoError(t, nsMgr.Init(zap.NewNop(), nil, &mockTopologyFetcher{}, nil, nil, nil, nil))
 	require.False(t, nsMgr.Ready())
 
 	rt := router.NewStaticRouter([]string{})

@@ -19,9 +19,10 @@ import (
 )
 
 type mockTpFetcher struct {
-	t     *testing.T
-	infos map[string]*infosync.TiDBTopologyInfo
-	err   error
+	t           *testing.T
+	infos       map[string]*infosync.TiDBTopologyInfo
+	err         error
+	hasClusters bool
 }
 
 func newMockTpFetcher(t *testing.T) *mockTpFetcher {
@@ -32,6 +33,10 @@ func newMockTpFetcher(t *testing.T) *mockTpFetcher {
 
 func (ft *mockTpFetcher) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error) {
 	return ft.infos, ft.err
+}
+
+func (ft *mockTpFetcher) HasBackendClusters() bool {
+	return ft.hasClusters
 }
 
 type mockBackendFetcher struct {
@@ -82,11 +87,11 @@ func newMockHealthCheck() *mockHealthCheck {
 	}
 }
 
-func (mhc *mockHealthCheck) Check(_ context.Context, addr string, info *BackendInfo, _ *BackendHealth) *BackendHealth {
+func (mhc *mockHealthCheck) Check(_ context.Context, info *BackendInfo, _ *BackendHealth) *BackendHealth {
 	mhc.Lock()
 	defer mhc.Unlock()
-	mhc.backends[addr].BackendInfo = *info
-	return mhc.backends[addr]
+	mhc.backends[info.Addr].BackendInfo = *info
+	return mhc.backends[info.Addr]
 }
 
 func (mhc *mockHealthCheck) setBackend(addr string, health *BackendHealth) {

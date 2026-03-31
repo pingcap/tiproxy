@@ -591,8 +591,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	rs := &redirectResult{
-		from: mgr.ServerAddr(),
-		to:   (*backendInst).Addr(),
+		from: mgr.curBackend.ID(),
+		to:   (*backendInst).ID(),
 	}
 	defer func() {
 		// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
@@ -639,12 +639,12 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	var cn net.Conn
-	cn, rs.err = net.DialTimeout("tcp", rs.to, mgr.config.DialTimeout)
+	cn, rs.err = net.DialTimeout("tcp", (*backendInst).Addr(), mgr.config.DialTimeout)
 	if rs.err != nil {
-		mgr.handshakeHandler.OnHandshake(mgr, rs.to, rs.err, SrcBackendNetwork)
+		mgr.handshakeHandler.OnHandshake(mgr, (*backendInst).Addr(), rs.err, SrcBackendNetwork)
 		return
 	}
-	newBackendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize, pnet.WithRemoteAddr(rs.to, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn)))
+	newBackendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize, pnet.WithRemoteAddr((*backendInst).Addr(), cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn)))
 
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)
@@ -833,9 +833,7 @@ func (mgr *BackendConnManager) Close() error {
 	handErr := mgr.handshakeHandler.OnConnClose(mgr, mgr.quitSource)
 
 	var connErr error
-	var addr string
 	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
-		addr = (*backendIO).RemoteAddr().String()
 		connErr = (*backendIO).Close()
 	}
 
@@ -846,13 +844,14 @@ func (mgr *BackendConnManager) Close() error {
 			mgr.notifyRedirectResult(context.Background(), <-mgr.redirectResCh)
 		}
 		// The connection may have just received the redirecting signal.
-		if len(addr) > 0 {
-			var redirectingAddr string
+		if mgr.curBackend != nil {
+			var redirectingBackendID string
 			if redirectingBackend := mgr.redirectInfo.Load(); redirectingBackend != nil {
-				redirectingAddr = (*redirectingBackend).Addr()
+				redirectingBackendID = (*redirectingBackend).ID()
 			}
-			if err := eventReceiver.OnConnClosed(addr, redirectingAddr, mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_addr", addr), zap.NamedError("notify_err", err))
+			if err := eventReceiver.OnConnClosed(mgr.curBackend.ID(), redirectingBackendID, mgr); err != nil {
+				mgr.logger.Error("close connection error",
+					zap.String("backend_id", mgr.curBackend.ID()), zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
 			}
 		}
 	}

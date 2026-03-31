@@ -5,9 +5,11 @@ package etcd
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/stretchr/testify/require"
@@ -34,4 +36,25 @@ func TestEtcdClient(t *testing.T) {
 
 	require.NoError(t, client.Close())
 	server.Close()
+}
+
+func TestInitEtcdClientWithTrimmedAddrs(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	server, err := CreateEtcdServer("0.0.0.0:0", t.TempDir(), lg)
+	require.NoError(t, err)
+	endpoint := server.Clients[0].Addr().String()
+
+	client, err := InitEtcdClientWithAddrs(lg, fmt.Sprintf("%s, %s", endpoint, endpoint), nil)
+	require.NoError(t, err)
+
+	_, err = client.Put(context.Background(), "key", "value")
+	require.NoError(t, err)
+
+	require.NoError(t, client.Close())
+	server.Close()
+}
+
+func TestSplitAddrList(t *testing.T) {
+	require.Equal(t, []string{"pd1:2379", "pd2:2379"}, config.SplitAddrList("pd1:2379, pd2:2379"))
+	require.Equal(t, []string{"pd1:2379", "pd2:2379"}, config.SplitAddrList(" pd1:2379 , , pd2:2379 "))
 }
