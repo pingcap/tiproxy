@@ -256,6 +256,9 @@ func (g *Group) Balance(ctx context.Context) {
 	i := 0
 	for ele := fromBackend.connList.Front(); ele != nil && ctx.Err() == nil && i < count; ele = ele.Next() {
 		conn := ele.Value
+		if conn.forceClosing {
+			continue
+		}
 		switch conn.phase {
 		case phaseRedirectNotify:
 			// A connection cannot be redirected again when it has not finished redirecting.
@@ -282,11 +285,43 @@ func (g *Group) onCreateConn(backendInst BackendInst, conn RedirectableConn, suc
 			RedirectableConn: conn,
 			createTime:       time.Now(),
 			phase:            phaseNotRedirected,
+			forceClosing:     false,
 		}
 		g.addConn(backend, connWrapper)
 		conn.SetEventReceiver(g)
 	} else {
 		backend.connScore--
+	}
+}
+
+func (g *Group) CloseTimedOutFailoverConnections(now time.Time, timeout time.Duration) {
+	g.Lock()
+	defer g.Unlock()
+	for _, backend := range g.backends {
+		active, since := backend.Failover()
+		if !active {
+			continue
+		}
+		if timeout > 0 && since.Add(timeout).After(now) {
+			continue
+		}
+		for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
+			conn := ele.Value
+			if conn.phase == phaseClosed || conn.forceClosing {
+				continue
+			}
+			fields := []zap.Field{
+				zap.Uint64("connID", conn.ConnectionID()),
+				zap.String("backend_addr", backend.addr),
+				zap.String("backend_pod", backend.PodName()),
+				zap.Duration("failover_timeout", timeout),
+				zap.Duration("failover_elapsed", now.Sub(since)),
+			}
+			if conn.ForceClose() {
+				conn.forceClosing = true
+				g.lg.Warn("force close connection on failover backend", fields...)
+			}
+		}
 	}
 }
 

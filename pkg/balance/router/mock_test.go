@@ -69,6 +69,16 @@ func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 	return true
 }
 
+func (conn *mockRedirectableConn) ForceClose() bool {
+	conn.Lock()
+	defer conn.Unlock()
+	if conn.closing {
+		return false
+	}
+	conn.closing = true
+	return true
+}
+
 func (conn *mockRedirectableConn) GetRedirectingBackendID() string {
 	conn.Lock()
 	defer conn.Unlock()
