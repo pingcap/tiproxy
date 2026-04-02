@@ -24,8 +24,9 @@ const (
 	// The etcd client keeps alive every TTL/3 seconds.
 	// The TTL determines the failover time so it should be short.
 	sessionTTL = 3
-	// Refresh GARP for a short window after takeover so upstream devices have
-	// several chances to update the VIP neighbor entry.
+	// Refresh GARP for a short, bounded window after takeover so upstream
+	// devices have several chances to update the VIP neighbor entry without
+	// keeping permanent ARP noise on the network.
 	garpRefreshRounds = 10
 )
 
@@ -38,7 +39,11 @@ type VIPManager interface {
 var _ VIPManager = (*vipManager)(nil)
 
 type vipManager struct {
-	mu            sync.Mutex
+	mu sync.Mutex
+	// closing blocks late OnElected callbacks during controlled shutdown.
+	// A VIP must not be present on two nodes at the same time because upstream
+	// L3 devices cache only one VIP->MAC entry; if old and new owners both answer
+	// ARP, whichever reply is learned last may blackhole cross-subnet traffic.
 	closing       bool
 	refreshWG     sync.WaitGroup
 	refreshCancel context.CancelFunc
@@ -96,6 +101,8 @@ func (vm *vipManager) OnElected() {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
+	// Election.Close may race with an already in-flight OnElected callback.
+	// Once controlled shutdown starts, never bind the VIP again locally.
 	if vm.closing {
 		vm.lg.Info("skip adding VIP because the manager is closing")
 		return
@@ -165,6 +172,9 @@ func (vm *vipManager) startARPRefresh() {
 
 		ticker := time.NewTicker(refreshInterval)
 		defer ticker.Stop()
+		// The first burst is sent synchronously by addVIP. The follow-up bursts
+		// cover devices that probe or refresh neighbor state a little later than
+		// the handover moment.
 		for i := 0; i < garpRefreshRounds; i++ {
 			select {
 			case <-ctx.Done():
@@ -214,6 +224,9 @@ func (vm *vipManager) prepareForClose() elect.Election {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
+	// Drop the VIP before resigning. Letting the new owner add the VIP first is
+	// unsafe on real networks because upstream devices remember only one MAC for
+	// the VIP and may keep forwarding to the old node long after the overlap.
 	vm.closing = true
 	vm.stopARPRefresh()
 	vm.delVIP()
