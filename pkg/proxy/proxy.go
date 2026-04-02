@@ -15,6 +15,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
+	mgrmem "github.com/pingcap/tiproxy/pkg/manager/memory"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
@@ -51,6 +52,7 @@ type SQLServer struct {
 	logger     *zap.Logger
 	certMgr    *cert.CertManager
 	idMgr      *id.IDManager
+	memUsage   memoryStateProvider
 	hsHandler  backend.HandshakeHandler
 	cpt        capture.Capture
 	meter      backend.Meter
@@ -61,14 +63,19 @@ type SQLServer struct {
 	mu serverState
 }
 
+type memoryStateProvider interface {
+	ShouldRejectNewConn() (bool, mgrmem.UsageSnapshot, float64)
+}
+
 // NewSQLServer creates a new SQLServer.
 func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture,
-	meter backend.Meter, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
+	meter backend.Meter, hsHandler backend.HandshakeHandler, memUsage memoryStateProvider) (*SQLServer, error) {
 	var err error
 	s := &SQLServer{
 		logger:    logger,
 		certMgr:   certMgr,
 		idMgr:     idMgr,
+		memUsage:  memUsage,
 		hsHandler: hsHandler,
 		cpt:       cpt,
 		meter:     meter,
@@ -163,6 +170,10 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 }
 
 func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
+	if s.rejectConnByMemory(conn) {
+		return
+	}
+
 	tcpKeepAlive, logger, connID, clientConn := func() (bool, *zap.Logger, uint64, *client.ClientConnection) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -171,6 +182,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		maxConns := s.mu.maxConnections
 		// 'maxConns == 0' => unlimited connections
 		if maxConns != 0 && conns >= maxConns {
+			metrics.RejectConnCounter.WithLabelValues("max_connections").Inc()
 			s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.Stringer("client_addr", conn.RemoteAddr()), zap.Error(conn.Close()))
 			return false, nil, 0, nil
 		}
@@ -224,6 +236,26 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	}
 
 	clientConn.Run(ctx)
+}
+
+func (s *SQLServer) rejectConnByMemory(conn net.Conn) bool {
+	if s.memUsage == nil {
+		return false
+	}
+	reject, snapshot, threshold := s.memUsage.ShouldRejectNewConn()
+	if !reject {
+		return false
+	}
+	metrics.RejectConnCounter.WithLabelValues("memory").Inc()
+	s.logger.Warn("reject connection due to high memory usage",
+		zap.Stringer("client_addr", conn.RemoteAddr()),
+		zap.Float64("threshold", threshold),
+		zap.Float64("usage", snapshot.Usage),
+		zap.Uint64("used", snapshot.Used),
+		zap.Uint64("limit", snapshot.Limit),
+		zap.Time("last_update", snapshot.UpdateTime),
+		zap.Error(conn.Close()))
+	return true
 }
 
 func (s *SQLServer) fromPublicEndpoint(addr net.Addr) bool {

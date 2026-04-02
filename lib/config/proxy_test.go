@@ -22,11 +22,12 @@ var testProxyConfig = Config{
 		Addr:    "0.0.0.0:4000",
 		PDAddrs: "127.0.0.1:4089",
 		ProxyServerOnline: ProxyServerOnline{
-			MaxConnections:             1,
-			FrontendKeepalive:          KeepAlive{Enabled: true},
-			ProxyProtocol:              "v2",
-			GracefulWaitBeforeShutdown: 10,
-			ConnBufferSize:             32 * 1024,
+			MaxConnections:                 1,
+			HighMemoryUsageRejectThreshold: 0.9,
+			FrontendKeepalive:              KeepAlive{Enabled: true},
+			ProxyProtocol:                  "v2",
+			GracefulWaitBeforeShutdown:     10,
+			ConnBufferSize:                 32 * 1024,
 			BackendClusters: []BackendCluster{
 				{
 					Name:      "cluster-a",
@@ -114,6 +115,26 @@ func TestProxyCheck(t *testing.T) {
 		post func(*testing.T, *Config)
 		err  error
 	}{
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = -0.1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = 1.1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = 0.4
+			},
+			post: func(t *testing.T, c *Config) {
+				require.Equal(t, 0.5, c.Proxy.HighMemoryUsageRejectThreshold)
+			},
+		},
 		{
 			pre: func(t *testing.T, c *Config) {
 				c.Workdir = ""

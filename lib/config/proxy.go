@@ -52,9 +52,10 @@ type KeepAlive struct {
 }
 
 type ProxyServerOnline struct {
-	MaxConnections    uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty" reloadable:"true"`
-	ConnBufferSize    int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty" reloadable:"true"`
-	FrontendKeepalive KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
+	MaxConnections                 uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty" reloadable:"true"`
+	HighMemoryUsageRejectThreshold float64   `yaml:"high-memory-usage-reject-threshold,omitempty" toml:"high-memory-usage-reject-threshold,omitempty" json:"high-memory-usage-reject-threshold,omitempty" reloadable:"true"`
+	ConnBufferSize                 int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty" reloadable:"true"`
+	FrontendKeepalive              KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
 	// BackendHealthyKeepalive applies when the observer treats the backend as healthy.
 	// The config values should be conservative to save CPU and tolerate network fluctuation.
 	BackendHealthyKeepalive KeepAlive `yaml:"backend-healthy-keepalive" toml:"backend-healthy-keepalive" json:"backend-healthy-keepalive"`
@@ -134,6 +135,7 @@ func NewConfig() *Config {
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
 	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnhealthyKeepalive = DefaultKeepAlive()
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0.9
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 	cfg.Proxy.GracefulCloseConnTimeout = 15
 
@@ -257,6 +259,12 @@ func (cfg *Config) GetBackendClusters() []BackendCluster {
 }
 
 func (ps *ProxyServer) Check() error {
+	if ps.HighMemoryUsageRejectThreshold < 0 || ps.HighMemoryUsageRejectThreshold > 1 {
+		return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.high-memory-usage-reject-threshold")
+	}
+	if ps.HighMemoryUsageRejectThreshold > 0 && ps.HighMemoryUsageRejectThreshold < 0.5 {
+		ps.HighMemoryUsageRejectThreshold = 0.5
+	}
 	if _, err := ps.GetSQLAddrs(); err != nil {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.addr or proxy.port-range: %s", err.Error())
 	}
