@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
-	"github.com/j-keck/arping"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/util/cmd"
 	"github.com/vishvananda/netlink"
@@ -31,13 +31,17 @@ type networkOperation struct {
 	// the VIP address
 	address *netlink.Addr
 	// the network interface
-	link netlink.Link
-	lg   *zap.Logger
+	link              netlink.Link
+	lg                *zap.Logger
+	garpBurstCount    int
+	garpBurstInterval time.Duration
 }
 
-func NewNetworkOperation(addressStr, linkStr string, lg *zap.Logger) (NetworkOperation, error) {
+func NewNetworkOperation(addressStr, linkStr string, garpBurstCount int, garpBurstInterval time.Duration, lg *zap.Logger) (NetworkOperation, error) {
 	no := &networkOperation{
-		lg: lg,
+		lg:                lg,
+		garpBurstCount:    garpBurstCount,
+		garpBurstInterval: garpBurstInterval,
 	}
 	if err := no.initAddr(addressStr, linkStr); err != nil {
 		return nil, err
@@ -93,12 +97,20 @@ func (no *networkOperation) DeleteIP() error {
 }
 
 func (no *networkOperation) SendARP() error {
-	if err := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name); err != nil {
-		no.lg.Warn("gratuitous arping failed", zap.Stringer("ip", no.address.IP), zap.String("iface", no.link.Attrs().Name), zap.Error(err))
+	if no.garpBurstCount <= 0 {
+		return nil
 	}
-	// GratuitousArpOverIfaceByName may not work properly even if it returns nil, so always run a command.
-	err := no.execCmd("sudo", "arping", "-c", "3", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
-	return errors.WithStack(err)
+	for i := 0; i < no.garpBurstCount; i++ {
+		// Use "arping -c 1" repeatedly so that TiProxy controls the burst interval instead of
+		// relying on arping's built-in pacing.
+		if err := no.execCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String()); err != nil {
+			return errors.WithStack(err)
+		}
+		if no.garpBurstInterval > 0 && i+1 < no.garpBurstCount {
+			time.Sleep(no.garpBurstInterval)
+		}
+	}
+	return nil
 }
 
 func (no *networkOperation) Addr() string {

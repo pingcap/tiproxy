@@ -51,7 +51,7 @@ func TestAddDelIP(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		operation, err := NewNetworkOperation(test.virtualIP, test.link, zap.NewNop())
+		operation, err := NewNetworkOperation(test.virtualIP, test.link, 1, 0, zap.NewNop())
 		if test.initErr != "" {
 			require.Error(t, err, "case %d", i)
 			require.Contains(t, err.Error(), test.initErr, "case %d", i)
