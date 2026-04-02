@@ -13,7 +13,6 @@ require (
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/j-keck/arping v1.0.3
 	github.com/klauspost/compress v1.18.0
 	github.com/pelletier/go-toml/v2 v2.2.2
 	github.com/pingcap/kvproto v0.0.0-20250728031536-f08901d17bf4

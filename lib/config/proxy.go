@@ -108,8 +108,11 @@ type LogFile struct {
 }
 
 type HA struct {
-	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
-	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
+	VirtualIP           string        `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
+	Interface           string        `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
+	GARPBurstCount      int           `yaml:"garp-burst-count,omitempty" toml:"garp-burst-count,omitempty" json:"garp-burst-count,omitempty" reloadable:"false"`
+	GARPBurstInterval   time.Duration `yaml:"garp-burst-interval,omitempty" toml:"garp-burst-interval,omitempty" json:"garp-burst-interval,omitempty" reloadable:"false"`
+	GARPRefreshInterval time.Duration `yaml:"garp-refresh-interval,omitempty" toml:"garp-refresh-interval,omitempty" json:"garp-refresh-interval,omitempty" reloadable:"false"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
@@ -149,6 +152,8 @@ func NewConfig() *Config {
 	cfg.Security.ClusterTLS.MinTLSVersion = "1.2"
 
 	cfg.Balance = DefaultBalance()
+
+	cfg.HA.GARPBurstCount = 5
 
 	cfg.EnableTrafficReplay = true
 
@@ -191,6 +196,18 @@ func (cfg *Config) Check() error {
 
 	if err := cfg.Balance.Check(); err != nil {
 		return err
+	}
+	if cfg.HA.GARPBurstCount < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-count must be greater than or equal to 0")
+	}
+	if cfg.HA.GARPBurstInterval < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-interval must be greater than or equal to 0")
+	}
+	if cfg.HA.GARPRefreshInterval < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-refresh-interval must be greater than or equal to 0")
+	}
+	if cfg.HA.GARPBurstCount == 0 && cfg.HA.GARPRefreshInterval > 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-count must be greater than 0 when ha.garp-refresh-interval is enabled")
 	}
 
 	return nil

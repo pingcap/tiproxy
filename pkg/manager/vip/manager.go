@@ -7,7 +7,8 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sync/atomic"
+	"sync"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
@@ -23,6 +24,9 @@ const (
 	// The etcd client keeps alive every TTL/3 seconds.
 	// The TTL determines the failover time so it should be short.
 	sessionTTL = 3
+	// Refresh GARP for a short window after takeover so upstream devices have
+	// several chances to update the VIP neighbor entry.
+	garpRefreshRounds = 10
 )
 
 type VIPManager interface {
@@ -34,11 +38,14 @@ type VIPManager interface {
 var _ VIPManager = (*vipManager)(nil)
 
 type vipManager struct {
-	operation   NetworkOperation
-	cfgGetter   config.ConfigGetter
-	election    elect.Election
-	lg          *zap.Logger
-	delOnRetire atomic.Bool
+	mu            sync.Mutex
+	closing       bool
+	refreshWG     sync.WaitGroup
+	refreshCancel context.CancelFunc
+	operation     NetworkOperation
+	cfgGetter     config.ConfigGetter
+	election      elect.Election
+	lg            *zap.Logger
 }
 
 func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, error) {
@@ -54,7 +61,7 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 		vm.lg.Warn("Both address and link must be specified to enable VIP. VIP is disabled")
 		return nil, nil
 	}
-	operation, err := NewNetworkOperation(cfg.HA.VirtualIP, cfg.HA.Interface, lg)
+	operation, err := NewNetworkOperation(cfg.HA.VirtualIP, cfg.HA.Interface, cfg.HA.GARPBurstCount, cfg.HA.GARPBurstInterval, lg)
 	if err != nil {
 		vm.lg.Error("init network operation failed", zap.Error(err))
 		return nil, err
@@ -64,9 +71,12 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 }
 
 func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	vm.closing = false
+
 	// This node may have bound the VIP before last failure.
 	vm.delVIP()
-	vm.delOnRetire.Store(true)
 
 	cfg := vm.cfgGetter.GetConfig()
 	ip, port, _, err := cfg.GetIPPort()
@@ -83,13 +93,23 @@ func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error
 }
 
 func (vm *vipManager) OnElected() {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	if vm.closing {
+		vm.lg.Info("skip adding VIP because the manager is closing")
+		return
+	}
 	vm.addVIP()
+	vm.startARPRefresh()
 }
 
 func (vm *vipManager) OnRetired() {
-	if vm.delOnRetire.Load() {
-		vm.delVIP()
-	}
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	vm.stopARPRefresh()
+	vm.delVIP()
 }
 
 func (vm *vipManager) addVIP() {
@@ -130,20 +150,72 @@ func (vm *vipManager) delVIP() {
 	vm.lg.Info("deleting VIP success")
 }
 
-// PreClose resigns the owner but doesn't delete the VIP.
-// It makes use of the graceful-wait time to wait for the new owner to shorten the failover time.
+func (vm *vipManager) startARPRefresh() {
+	refreshInterval := vm.cfgGetter.GetConfig().HA.GARPRefreshInterval
+	if refreshInterval <= 0 {
+		return
+	}
+	vm.stopARPRefresh()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	vm.refreshCancel = cancel
+	vm.refreshWG.Add(1)
+	go func() {
+		defer vm.refreshWG.Done()
+
+		ticker := time.NewTicker(refreshInterval)
+		defer ticker.Stop()
+		for i := 0; i < garpRefreshRounds; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := vm.operation.SendARP(); err != nil {
+					vm.lg.Warn("refreshing GARP failed", zap.Error(err))
+					return
+				}
+			}
+		}
+	}()
+}
+
+func (vm *vipManager) stopARPRefresh() {
+	cancel := vm.refreshCancel
+	vm.refreshCancel = nil
+	if cancel != nil {
+		cancel()
+	}
+	vm.refreshWG.Wait()
+}
+
+// PreClose deletes the VIP before resigning the owner so that controlled
+// shutdowns do not expose the VIP on two nodes at the same time.
 func (vm *vipManager) PreClose() {
-	vm.delOnRetire.Store(false)
-	if vm.election != nil {
-		vm.election.Close()
+	election := vm.prepareForClose()
+	if election != nil {
+		election.Close()
 	}
 }
 
-// Close resigns the owner and deletes the VIP if it was the owner.
-// The new owner may not be elected but we won't wait anymore.
+// Close resigns the owner and makes sure the VIP is removed locally.
 func (vm *vipManager) Close() {
-	if vm.election != nil {
-		vm.election.Close()
+	election := vm.prepareForClose()
+	if election != nil {
+		election.Close()
 	}
+
+	vm.mu.Lock()
+	vm.stopARPRefresh()
 	vm.delVIP()
+	vm.mu.Unlock()
+}
+
+func (vm *vipManager) prepareForClose() elect.Election {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	vm.closing = true
+	vm.stopARPRefresh()
+	vm.delVIP()
+	return vm.election
 }

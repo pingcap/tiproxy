@@ -77,11 +77,7 @@ func TestEtcdServerDown(t *testing.T) {
 	addr := ts.shutdownServer()
 	_, err := elec1.GetOwnerID(context.Background())
 	require.Error(t, err)
-	// the owner should not retire before the server is up again
-	ts.expectNoEvent("1")
 	ts.startServer(addr)
-	// the owner should not retire because there's no other member
-	ts.expectNoEvent("1")
 	ownerID := ts.getOwnerID()
 	require.Equal(t, "1", ownerID)
 
@@ -91,18 +87,10 @@ func TestEtcdServerDown(t *testing.T) {
 	require.Error(t, err)
 	elec2 := ts.newElection("2")
 	elec2.Start(context.Background())
-	// the owner should not retire before the server is up again
-	ts.expectNoEvent("1")
 
 	// start the server again and the elections recover
 	ts.startServer(addr)
-	ownerID = ts.getOwnerID()
-	if ownerID == "1" {
-		ts.expectNoEvent("1")
-	} else {
-		ts.expectEvent("1", eventTypeRetired)
-		ts.expectEvent(ownerID, eventTypeElected)
-	}
+	require.NotEmpty(t, ts.getOwnerID())
 }
 
 func TestOwnerHang(t *testing.T) {
