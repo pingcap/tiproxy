@@ -8,40 +8,16 @@ import (
 	"crypto/tls"
 	"maps"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
-	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
-
-// Cluster is the cluster-scoped container for one backend PD cluster.
-type Cluster struct {
-	cfg        config.BackendCluster
-	etcdCli    *clientv3.Client
-	infoSyncer *infosync.InfoSyncer
-}
-
-func (c *Cluster) Config() config.BackendCluster {
-	return c.cfg
-}
-
-func (c *Cluster) EtcdClient() *clientv3.Client {
-	return c.etcdCli
-}
-
-func (c *Cluster) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error) {
-	return c.infoSyncer.GetTiDBTopology(ctx)
-}
-
-func (c *Cluster) GetPromInfo(ctx context.Context) (*infosync.PrometheusInfo, error) {
-	return c.infoSyncer.GetPromInfo(ctx)
-}
 
 type Manager struct {
 	lg         *zap.Logger
@@ -101,58 +77,62 @@ func (m *Manager) syncClusters(ctx context.Context, cfg *config.Config) error {
 		desiredMap[cluster.Name] = cluster
 	}
 
-	m.mu.Lock()
-	oldClusters := m.mu.clusters
-	newClusters := make(map[string]*Cluster, len(desiredClusters))
-	closeList := make([]*Cluster, 0, len(oldClusters))
+	var closeList []*Cluster
+	func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
 
-	for _, clusterCfg := range desiredClusters {
-		oldCluster, ok := oldClusters[clusterCfg.Name]
-		if ok && clusterReusable(oldCluster, clusterCfg) {
-			newClusters[clusterCfg.Name] = oldCluster
-			delete(oldClusters, clusterCfg.Name)
-			continue
-		}
+		oldClusters := m.mu.clusters
+		newClusters := make(map[string]*Cluster, len(desiredClusters))
+		closeList = make([]*Cluster, 0, len(oldClusters))
 
-		cluster, err := m.buildCluster(ctx, cfg, clusterCfg)
-		if err != nil {
-			if ok {
-				m.lg.Warn("failed to update backend cluster, keep the old one",
-					zap.String("cluster", clusterCfg.Name), zap.Error(err))
+		for _, clusterCfg := range desiredClusters {
+			oldCluster, ok := oldClusters[clusterCfg.Name]
+			if ok && clusterReusable(oldCluster, clusterCfg) {
 				newClusters[clusterCfg.Name] = oldCluster
 				delete(oldClusters, clusterCfg.Name)
 				continue
 			}
-			m.lg.Error("failed to add backend cluster",
-				zap.String("cluster", clusterCfg.Name), zap.Error(err))
-			continue
-		}
-		newClusters[clusterCfg.Name] = cluster
-		if ok {
-			closeList = append(closeList, oldCluster)
-			delete(oldClusters, clusterCfg.Name)
-			m.lg.Info("updated backend cluster",
-				zap.String("cluster", clusterCfg.Name), zap.String("pd_addrs", clusterCfg.PDAddrs))
-		} else {
-			m.lg.Info("added backend cluster",
-				zap.String("cluster", clusterCfg.Name), zap.String("pd_addrs", clusterCfg.PDAddrs))
-		}
-	}
 
-	for name, cluster := range oldClusters {
-		if _, ok := desiredMap[name]; ok {
-			continue
+			cluster, err := NewCluster(ctx, cfg, clusterCfg, m.clusterTLS, m.lg)
+			if err != nil {
+				if ok {
+					m.lg.Error("failed to update backend cluster, keep the old one",
+						zap.String("cluster", clusterCfg.Name), zap.Error(err))
+					newClusters[clusterCfg.Name] = oldCluster
+					delete(oldClusters, clusterCfg.Name)
+					continue
+				}
+				m.lg.Error("failed to add backend cluster",
+					zap.String("cluster", clusterCfg.Name), zap.Error(err))
+				continue
+			}
+			newClusters[clusterCfg.Name] = cluster
+			if ok {
+				closeList = append(closeList, oldCluster)
+				delete(oldClusters, clusterCfg.Name)
+				m.lg.Info("updated backend cluster",
+					zap.String("cluster", clusterCfg.Name), zap.String("pd_addrs", clusterCfg.PDAddrs))
+			} else {
+				m.lg.Info("added backend cluster",
+					zap.String("cluster", clusterCfg.Name), zap.String("pd_addrs", clusterCfg.PDAddrs))
+			}
 		}
-		closeList = append(closeList, cluster)
-		m.lg.Info("removed backend cluster",
-			zap.String("cluster", name), zap.String("pd_addrs", cluster.cfg.PDAddrs))
-	}
 
-	m.mu.clusters = newClusters
-	m.mu.Unlock()
+		for name, cluster := range oldClusters {
+			if _, ok := desiredMap[name]; ok {
+				continue
+			}
+			closeList = append(closeList, cluster)
+			m.lg.Info("removed backend cluster",
+				zap.String("cluster", name), zap.String("pd_addrs", cluster.cfg.PDAddrs))
+		}
+
+		m.mu.clusters = newClusters
+	}()
 
 	for _, cluster := range closeList {
-		if err := m.closeCluster(cluster); err != nil {
+		if err := cluster.Close(); err != nil {
 			m.lg.Warn("close backend cluster failed",
 				zap.String("cluster", cluster.cfg.Name), zap.Error(err))
 		}
@@ -162,7 +142,11 @@ func (m *Manager) syncClusters(ctx context.Context, cfg *config.Config) error {
 
 func normalizeCluster(cluster config.BackendCluster) config.BackendCluster {
 	cluster.Name = strings.TrimSpace(cluster.Name)
-	cluster.PDAddrs = strings.TrimSpace(cluster.PDAddrs)
+	pdAddrs := config.SplitAddrList(cluster.PDAddrs)
+	sort.Strings(pdAddrs)
+	cluster.PDAddrs = strings.Join(pdAddrs, ",")
+	cluster.NSServers = slices.Clone(cluster.NSServers)
+	sort.Strings(cluster.NSServers)
 	return cluster
 }
 
@@ -175,41 +159,6 @@ func clusterReusable(cluster *Cluster, cfg config.BackendCluster) bool {
 	return left.Name == right.Name &&
 		left.PDAddrs == right.PDAddrs &&
 		slices.Equal(left.NSServers, right.NSServers)
-}
-
-func (m *Manager) buildCluster(ctx context.Context, cfg *config.Config, clusterCfg config.BackendCluster) (*Cluster, error) {
-	clusterCfg = normalizeCluster(clusterCfg)
-	etcdCli, err := etcd.InitEtcdClientWithAddrs(
-		m.lg.With(zap.String("cluster", clusterCfg.Name)).Named("etcd"),
-		clusterCfg.PDAddrs,
-		m.clusterTLS(),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	infoSyncer := infosync.NewInfoSyncer(m.lg.With(zap.String("cluster", clusterCfg.Name)).Named("infosync"), etcdCli)
-	if err := infoSyncer.Init(ctx, cfg); err != nil {
-		if closeErr := etcdCli.Close(); closeErr != nil {
-			m.lg.Warn("close cluster etcd client failed after infosync init error",
-				zap.String("cluster", clusterCfg.Name), zap.Error(closeErr))
-		}
-		return nil, err
-	}
-
-	return &Cluster{
-		cfg:        clusterCfg,
-		etcdCli:    etcdCli,
-		infoSyncer: infoSyncer,
-	}, nil
-}
-
-func (m *Manager) closeCluster(cluster *Cluster) error {
-	errs := []error{
-		cluster.infoSyncer.Close(),
-		cluster.etcdCli.Close(),
-	}
-	return errors.Collect(errors.New("close backend cluster"), errs...)
 }
 
 func (m *Manager) Snapshot() map[string]*Cluster {
@@ -286,7 +235,7 @@ func (m *Manager) Close() error {
 
 	errs := make([]error, 0, len(clusters))
 	for _, cluster := range clusters {
-		if err := m.closeCluster(cluster); err != nil {
+		if err := cluster.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}

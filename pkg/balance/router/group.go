@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -326,7 +327,21 @@ func (g *Group) ensureBackend(backendID string) *backendWrapper {
 	}
 	// The backend should always exist if it will be needed. Add a warning and add it back.
 	g.lg.Warn("backend is not found in the router", zap.String("backend_id", backendID), zap.Stack("stack"))
+	// Try to parse the IP from the backendID. It's generally not suggested to parse it, but in this
+	// strange case we tried our best to recover and make the backend ip valid.
+	// For the formats of backendID, ref `backend_id.go`. It's generated and recorded in `GetTiDBTopology`
+	// for the first time.
+	addr := backendID
+	if parts := strings.Split(backendID, "/"); len(parts) > 0 {
+		addr = parts[len(parts)-1]
+	}
+	ip, _, _ := net.SplitHostPort(addr)
 	backend = newBackendWrapper(backendID, observer.BackendHealth{
+		BackendInfo: observer.BackendInfo{
+			Addr:       addr,
+			IP:         ip,
+			StatusPort: 10080, // impossible anyway
+		},
 		SupportRedirection: true,
 		Healthy:            false,
 	})
