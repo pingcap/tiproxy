@@ -108,10 +108,22 @@ type LogFile struct {
 }
 
 type HA struct {
-	VirtualIP           string        `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
-	Interface           string        `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
-	GARPBurstCount      int           `yaml:"garp-burst-count,omitempty" toml:"garp-burst-count,omitempty" json:"garp-burst-count,omitempty" reloadable:"false"`
-	GARPBurstInterval   time.Duration `yaml:"garp-burst-interval,omitempty" toml:"garp-burst-interval,omitempty" json:"garp-burst-interval,omitempty" reloadable:"false"`
+	// VirtualIP is the floating service address managed by TiProxy.
+	// It is expected to use a host route such as /32 so only the elected node
+	// answers for the VIP itself.
+	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
+	// Interface is the local NIC that binds VirtualIP and sends GARP from.
+	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
+	// GARPBurstCount is the number of GARP packets sent immediately after the
+	// new owner binds the VIP. A small burst makes takeover visible quickly even
+	// if the first packet is dropped by the host, bond driver, or upstream device.
+	GARPBurstCount int `yaml:"garp-burst-count,omitempty" toml:"garp-burst-count,omitempty" json:"garp-burst-count,omitempty" reloadable:"false"`
+	// GARPBurstInterval is the spacing inside one burst. Zero means "send the
+	// burst as fast as possible".
+	GARPBurstInterval time.Duration `yaml:"garp-burst-interval,omitempty" toml:"garp-burst-interval,omitempty" json:"garp-burst-interval,omitempty" reloadable:"false"`
+	// GARPRefreshInterval controls the delay between follow-up bursts after
+	// takeover. It is used to refresh stale neighbor caches for a short window
+	// after failover instead of emitting high-rate GARP forever.
 	GARPRefreshInterval time.Duration `yaml:"garp-refresh-interval,omitempty" toml:"garp-refresh-interval,omitempty" json:"garp-refresh-interval,omitempty" reloadable:"false"`
 }
 
@@ -153,6 +165,9 @@ func NewConfig() *Config {
 
 	cfg.Balance = DefaultBalance()
 
+	// Match the common VRRP-style default of sending a small burst immediately
+	// after takeover. Refresh is disabled by default and can be enabled when the
+	// network requires extra neighbor-cache nudges.
 	cfg.HA.GARPBurstCount = 5
 
 	cfg.EnableTrafficReplay = true
@@ -207,6 +222,8 @@ func (cfg *Config) Check() error {
 		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-refresh-interval must be greater than or equal to 0")
 	}
 	if cfg.HA.GARPBurstCount == 0 && cfg.HA.GARPRefreshInterval > 0 {
+		// Refresh reuses the same burst sender. Requiring at least one packet per
+		// burst keeps the runtime behavior and the configuration model aligned.
 		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-count must be greater than 0 when ha.garp-refresh-interval is enabled")
 	}
 

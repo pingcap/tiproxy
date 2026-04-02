@@ -31,8 +31,10 @@ type networkOperation struct {
 	// the VIP address
 	address *netlink.Addr
 	// the network interface
-	link              netlink.Link
-	lg                *zap.Logger
+	link netlink.Link
+	lg   *zap.Logger
+	// garpBurstCount and garpBurstInterval define one takeover burst. The
+	// manager may replay the whole burst later during the refresh window.
 	garpBurstCount    int
 	garpBurstInterval time.Duration
 }
@@ -101,8 +103,10 @@ func (no *networkOperation) SendARP() error {
 		return nil
 	}
 	for i := 0; i < no.garpBurstCount; i++ {
-		// Use "arping -c 1" repeatedly so that TiProxy controls the burst interval instead of
-		// relying on arping's built-in pacing.
+		// Use "arping -c 1" repeatedly so TiProxy controls both dimensions:
+		// 1. a tight burst right after takeover, and
+		// 2. later refresh bursts spaced by the manager.
+		// This keeps the behavior predictable across different arping versions.
 		if err := no.execCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String()); err != nil {
 			return errors.WithStack(err)
 		}
