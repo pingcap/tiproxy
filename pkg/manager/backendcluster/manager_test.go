@@ -207,6 +207,40 @@ func TestManagerKeepsDuplicateBackendAddrsAcrossClusters(t *testing.T) {
 	}, 5*time.Second, 100*time.Millisecond)
 }
 
+func TestClusterReusableIgnoresPDAddrOrder(t *testing.T) {
+	cluster := &Cluster{
+		cfg: config.BackendCluster{
+			Name:    "cluster-a",
+			PDAddrs: "pd1:2379, pd2:2379",
+		},
+	}
+
+	reusable := clusterReusable(cluster, config.BackendCluster{
+		Name:    " cluster-a ",
+		PDAddrs: "pd2:2379,pd1:2379",
+	})
+
+	require.True(t, reusable)
+}
+
+func TestClusterReusableIgnoresNSServerOrder(t *testing.T) {
+	cluster := &Cluster{
+		cfg: config.BackendCluster{
+			Name:      "cluster-a",
+			PDAddrs:   "pd1:2379",
+			NSServers: []string{"10.0.0.2", "10.0.0.3"},
+		},
+	}
+
+	reusable := clusterReusable(cluster, config.BackendCluster{
+		Name:      "cluster-a",
+		PDAddrs:   "pd1:2379",
+		NSServers: []string{"10.0.0.3", "10.0.0.2"},
+	})
+
+	require.True(t, reusable)
+}
+
 type managerTestConfigGetter struct {
 	mu  sync.RWMutex
 	cfg *config.Config
