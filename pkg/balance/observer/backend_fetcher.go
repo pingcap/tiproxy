@@ -16,6 +16,7 @@ import (
 
 var _ BackendFetcher = (*PDFetcher)(nil)
 var _ BackendFetcher = (*StaticFetcher)(nil)
+var _ BackendFetcher = (*FallbackFetcher)(nil)
 
 // BackendFetcher is an interface to fetch the backend list.
 type BackendFetcher interface {
@@ -25,6 +26,8 @@ type BackendFetcher interface {
 // TopologyFetcher is an interface to fetch the tidb topology from ETCD.
 type TopologyFetcher interface {
 	GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error)
+	// HasBackendClusters reports whether dynamic PD-backed clusters are configured at all.
+	HasBackendClusters() bool
 }
 
 // PDFetcher fetches backend list from PD.
@@ -46,14 +49,39 @@ func NewPDFetcher(tpFetcher TopologyFetcher, logger *zap.Logger, config *config.
 func (pf *PDFetcher) GetBackendList(ctx context.Context) (map[string]*BackendInfo, error) {
 	backends := pf.fetchBackendList(ctx)
 	infos := make(map[string]*BackendInfo, len(backends))
-	for addr, backend := range backends {
-		infos[addr] = &BackendInfo{
-			Labels:     backend.Labels,
-			IP:         backend.IP,
-			StatusPort: backend.StatusPort,
+	for key, backend := range backends {
+		infos[key] = &BackendInfo{
+			Addr:        backend.Addr,
+			ClusterName: backend.ClusterName,
+			Labels:      backend.Labels,
+			IP:          backend.IP,
+			StatusPort:  backend.StatusPort,
 		}
 	}
 	return infos, nil
+}
+
+// FallbackFetcher preserves the legacy behavior that static backend.instances still work before
+// any backend cluster is configured, and automatically switches to PD-backed topology afterwards.
+type FallbackFetcher struct {
+	tpFetcher TopologyFetcher
+	dynamic   BackendFetcher
+	static    BackendFetcher
+}
+
+func NewFallbackFetcher(tpFetcher TopologyFetcher, dynamic BackendFetcher, static BackendFetcher) *FallbackFetcher {
+	return &FallbackFetcher{
+		tpFetcher: tpFetcher,
+		dynamic:   dynamic,
+		static:    static,
+	}
+}
+
+func (ff *FallbackFetcher) GetBackendList(ctx context.Context) (map[string]*BackendInfo, error) {
+	if !ff.tpFetcher.HasBackendClusters() {
+		return ff.static.GetBackendList(ctx)
+	}
+	return ff.dynamic.GetBackendList(ctx)
 }
 
 func (pf *PDFetcher) fetchBackendList(ctx context.Context) map[string]*infosync.TiDBTopologyInfo {
@@ -98,7 +126,7 @@ func (sf *StaticFetcher) GetBackendList(context.Context) (map[string]*BackendInf
 func backendListToMap(addrs []string) map[string]*BackendInfo {
 	backends := make(map[string]*BackendInfo, len(addrs))
 	for _, addr := range addrs {
-		backends[addr] = &BackendInfo{}
+		backends[addr] = &BackendInfo{Addr: addr}
 	}
 	return backends
 }

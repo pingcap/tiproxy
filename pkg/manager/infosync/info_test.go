@@ -128,6 +128,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 			check: func(info map[string]*TiDBTopologyInfo) {
 				require.Len(ts.t, info, 1)
 				require.NotNil(ts.t, info["1.1.1.1:4000"])
+				require.Equal(ts.t, "1.1.1.1:4000", info["1.1.1.1:4000"].Addr)
 				require.Equal(ts.t, "1.1.1.1", info["1.1.1.1:4000"].IP)
 				require.Equal(ts.t, uint(10080), info["1.1.1.1:4000"].StatusPort)
 			},
@@ -144,6 +145,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 			check: func(info map[string]*TiDBTopologyInfo) {
 				require.Len(ts.t, info, 2)
 				require.NotNil(ts.t, info["2.2.2.2:4000"])
+				require.Equal(ts.t, "2.2.2.2:4000", info["2.2.2.2:4000"].Addr)
 				require.Equal(ts.t, "2.2.2.2", info["2.2.2.2:4000"].IP)
 				require.Equal(ts.t, uint(10080), info["2.2.2.2:4000"].StatusPort)
 			},
@@ -170,6 +172,7 @@ func TestFetchTiDBTopology(t *testing.T) {
 			check: func(info map[string]*TiDBTopologyInfo) {
 				require.Len(ts.t, info, 2)
 				require.NotNil(ts.t, info["3.3.3.3:4000"])
+				require.Equal(ts.t, "3.3.3.3:4000", info["3.3.3.3:4000"].Addr)
 				require.Equal(ts.t, "3.3.3.3", info["3.3.3.3:4000"].IP)
 				require.Equal(ts.t, uint(10080), info["3.3.3.3:4000"].StatusPort)
 				require.Equal(ts.t, "test", info["3.3.3.3:4000"].Keyspace)

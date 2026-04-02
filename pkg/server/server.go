@@ -11,10 +11,10 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
+	"github.com/pingcap/tiproxy/pkg/manager/backendcluster"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
-	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/memory"
 	"github.com/pingcap/tiproxy/pkg/manager/meter"
@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sctx"
 	"github.com/pingcap/tiproxy/pkg/server/api"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
-	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -43,8 +42,8 @@ type Server struct {
 	metricsManager   *metrics.MetricsManager
 	loggerManager    *logger.LoggerManager
 	certManager      *cert.CertManager
+	clusterManager   *backendcluster.Manager
 	vipManager       vip.VIPManager
-	infoSyncer       *infosync.InfoSyncer
 	metricsReader    metricsreader.MetricsReader
 	replay           mgrrp.JobManager
 	meter            *meter.Meter
@@ -107,10 +106,15 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		return
 	}
 
-	// setup etcd client
-	srv.etcdCli, err = etcd.InitEtcdClient(lg.Named("etcd"), cfg, srv.certManager)
-	if err != nil {
+	// setup backend cluster manager
+	srv.clusterManager = backendcluster.NewManager(lg.Named("backendcluster"), srv.certManager.ClusterTLS)
+	if err = srv.clusterManager.Start(ctx, srv.configManager, srv.configManager.WatchConfig()); err != nil {
 		return
+	}
+	var promFetcher metricsreader.PromInfoFetcher
+	if cluster := srv.clusterManager.PrimaryCluster(); cluster != nil {
+		srv.etcdCli = cluster.EtcdClient()
+		promFetcher = cluster
 	}
 
 	// general cluster HTTP client
@@ -118,18 +122,10 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		srv.httpCli = http.NewHTTPClient(srv.certManager.ClusterTLS)
 	}
 
-	// setup info syncer
-	if cfg.Proxy.PDAddrs != "" {
-		srv.infoSyncer = infosync.NewInfoSyncer(lg.Named("infosync"), srv.etcdCli)
-		if err = srv.infoSyncer.Init(ctx, cfg); err != nil {
-			return
-		}
-	}
-
 	// setup metrics reader
 	{
 		healthCheckCfg := config.NewDefaultHealthCheckConfig()
-		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), srv.infoSyncer, srv.infoSyncer, srv.httpCli, srv.etcdCli, healthCheckCfg, srv.configManager)
+		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), promFetcher, srv.clusterManager, srv.httpCli, srv.etcdCli, healthCheckCfg, srv.configManager)
 		if err = srv.metricsReader.Start(ctx); err != nil {
 			return
 		}
@@ -157,7 +153,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			nscs = append(nscs, nsc)
 		}
 
-		err = srv.namespaceManager.Init(lg.Named("nsmgr"), nscs, srv.infoSyncer, srv.infoSyncer, srv.httpCli, srv.configManager, srv.metricsReader)
+		err = srv.namespaceManager.Init(lg.Named("nsmgr"), nscs, srv.clusterManager, promFetcher, srv.httpCli, srv.configManager, srv.metricsReader)
 		if err != nil {
 			return
 		}
@@ -214,8 +210,12 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			return
 		}
 		if srv.vipManager != nil && !reflect.ValueOf(srv.vipManager).IsNil() {
-			if err = srv.vipManager.Start(ctx, srv.etcdCli); err != nil {
-				return
+			if srv.etcdCli != nil {
+				if err = srv.vipManager.Start(ctx, srv.etcdCli); err != nil {
+					return
+				}
+			} else {
+				lg.Info("VIP is disabled because backend cluster count is not 1")
 			}
 		}
 	}
@@ -283,9 +283,6 @@ func (s *Server) Close() error {
 	if s.memManager != nil {
 		s.memManager.Close()
 	}
-	if s.infoSyncer != nil {
-		errs = append(errs, s.infoSyncer.Close())
-	}
 	if s.configManager != nil {
 		errs = append(errs, s.configManager.Close())
 	}
@@ -295,8 +292,8 @@ func (s *Server) Close() error {
 	if s.loggerManager != nil {
 		errs = append(errs, s.loggerManager.Close())
 	}
-	if s.etcdCli != nil {
-		errs = append(errs, s.etcdCli.Close())
+	if s.clusterManager != nil {
+		errs = append(errs, s.clusterManager.Close())
 	}
 	s.wg.Wait()
 	return errors.Collect(ErrCloseServer, errs...)
