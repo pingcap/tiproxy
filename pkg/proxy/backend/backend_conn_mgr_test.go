@@ -904,6 +904,37 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 	ts.runTests(runners)
 }
 
+func TestForceClose(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// force close
+		{
+			proxy: func(_, _ pnet.PacketIO) error {
+				require.True(t, ts.mp.ForceClose())
+				return nil
+			},
+		},
+		// really closed
+		{
+			proxy: ts.checkConnClosed4Proxy,
+		},
+		{
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
+				require.False(t, ts.mp.ForceClose())
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
 func TestHandlerReturnError(t *testing.T) {
 	tests := []struct {
 		cfg        cfgOverrider

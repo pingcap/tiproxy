@@ -710,6 +710,25 @@ func (mgr *BackendConnManager) Redirect(backendInst router.BackendInst) bool {
 	return true
 }
 
+func (mgr *BackendConnManager) ForceClose() bool {
+	for {
+		status := mgr.closeStatus.Load()
+		if status >= statusClosing {
+			return false
+		}
+		if mgr.closeStatus.CompareAndSwap(status, statusClosing) {
+			break
+		}
+	}
+	mgr.quitSource = SrcProxyQuit
+	if mgr.clientIO != nil {
+		if err := mgr.clientIO.Close(); err != nil && !pnet.IsDisconnectError(err) {
+			mgr.logger.Warn("force close client IO error", zap.Error(err))
+		}
+	}
+	return true
+}
+
 func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *redirectResult) {
 	_ = ctx
 	if rs == nil {
