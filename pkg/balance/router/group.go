@@ -8,7 +8,6 @@ import (
 	"net"
 	"reflect"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
+	"github.com/pingcap/tiproxy/pkg/manager/backendcluster"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/netutil"
 	"go.uber.org/zap"
@@ -331,10 +331,7 @@ func (g *Group) ensureBackend(backendID string) *backendWrapper {
 	// strange case we tried our best to recover and make the backend ip valid.
 	// For the formats of backendID, ref `backend_id.go`. It's generated and recorded in `GetTiDBTopology`
 	// for the first time.
-	addr := backendID
-	if parts := strings.Split(backendID, "/"); len(parts) > 0 {
-		addr = parts[len(parts)-1]
-	}
+	_, addr := backendcluster.ParseBackendID(backendID)
 	ip, _, _ := net.SplitHostPort(addr)
 	backend = newBackendWrapper(backendID, observer.BackendHealth{
 		BackendInfo: observer.BackendInfo{
