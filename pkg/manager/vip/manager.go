@@ -115,7 +115,7 @@ func (vm *vipManager) OnElected() {
 
 	if vm.addVIP(ctx) {
 		vm.mu.Lock()
-		if !vm.closing && ctx.Err() == nil {
+		if !vm.closing {
 			vm.startARPRefresh(ctx)
 		}
 		vm.mu.Unlock()
@@ -131,9 +131,6 @@ func (vm *vipManager) OnRetired() {
 }
 
 func (vm *vipManager) addVIP(ctx context.Context) bool {
-	if err := ctx.Err(); err != nil {
-		return false
-	}
 	hasIP, err := vm.operation.HasIP()
 	if err != nil {
 		vm.lg.Error("checking addresses failed", zap.Error(err))
@@ -142,9 +139,6 @@ func (vm *vipManager) addVIP(ctx context.Context) bool {
 	if hasIP {
 		vm.lg.Debug("already has VIP, do nothing")
 		return true
-	}
-	if err := ctx.Err(); err != nil {
-		return false
 	}
 	if err := vm.operation.AddIP(); err != nil {
 		vm.lg.Error("adding address failed", zap.Error(err))
