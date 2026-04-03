@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -45,13 +46,13 @@ type vipManager struct {
 	// A VIP must not be present on two nodes at the same time because upstream
 	// L3 devices cache only one VIP->MAC entry; if old and new owners both answer
 	// ARP, whichever reply is learned last may blackhole cross-subnet traffic.
-	closing       bool
-	refreshWG     waitgroup.WaitGroup
-	refreshCancel context.CancelFunc
-	operation     NetworkOperation
-	cfgGetter     config.ConfigGetter
-	election      elect.Election
-	lg            *zap.Logger
+	closing   bool
+	arpCancel context.CancelFunc
+	refreshWG waitgroup.WaitGroup
+	operation NetworkOperation
+	cfgGetter config.ConfigGetter
+	election  elect.Election
+	lg        *zap.Logger
 }
 
 func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, error) {
@@ -100,16 +101,24 @@ func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error
 
 func (vm *vipManager) OnElected() {
 	vm.mu.Lock()
-	defer vm.mu.Unlock()
-
 	// Election.Close may race with an already in-flight OnElected callback.
 	// Once controlled shutdown starts, never bind the VIP again locally.
 	if vm.closing {
+		vm.mu.Unlock()
 		vm.lg.Info("skip adding VIP because the manager is closing")
 		return
 	}
-	if vm.addVIP() {
-		vm.startARPRefresh()
+	vm.stopARPRefresh()
+	ctx, cancel := context.WithCancel(context.Background())
+	vm.arpCancel = cancel
+	vm.mu.Unlock()
+
+	if vm.addVIP(ctx) {
+		vm.mu.Lock()
+		if !vm.closing && ctx.Err() == nil {
+			vm.startARPRefresh(ctx)
+		}
+		vm.mu.Unlock()
 	}
 }
 
@@ -121,7 +130,10 @@ func (vm *vipManager) OnRetired() {
 	vm.delVIP()
 }
 
-func (vm *vipManager) addVIP() bool {
+func (vm *vipManager) addVIP(ctx context.Context) bool {
+	if err := ctx.Err(); err != nil {
+		return false
+	}
 	hasIP, err := vm.operation.HasIP()
 	if err != nil {
 		vm.lg.Error("checking addresses failed", zap.Error(err))
@@ -131,11 +143,23 @@ func (vm *vipManager) addVIP() bool {
 		vm.lg.Debug("already has VIP, do nothing")
 		return true
 	}
+	if err := ctx.Err(); err != nil {
+		return false
+	}
 	if err := vm.operation.AddIP(); err != nil {
 		vm.lg.Error("adding address failed", zap.Error(err))
 		return false
 	}
-	if err := vm.operation.SendARP(); err != nil {
+	if err := ctx.Err(); err != nil {
+		vm.delVIP()
+		return false
+	}
+	if err := vm.operation.SendARP(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			vm.lg.Info("broadcast ARP canceled")
+			vm.delVIP()
+			return false
+		}
 		vm.lg.Error("broadcast ARP failed", zap.Error(err))
 		// The VIP is already bound locally. Keep the later refresh loop as a
 		// best-effort retry path for notifying upstream devices.
@@ -162,15 +186,11 @@ func (vm *vipManager) delVIP() {
 	vm.lg.Info("deleting VIP success")
 }
 
-func (vm *vipManager) startARPRefresh() {
+func (vm *vipManager) startARPRefresh(ctx context.Context) {
 	refreshInterval := vm.cfgGetter.GetConfig().HA.GARPRefreshInterval
 	if refreshInterval <= 0 {
 		return
 	}
-	vm.stopARPRefresh()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	vm.refreshCancel = cancel
 	vm.refreshWG.RunWithRecover(func() {
 		ticker := time.NewTicker(refreshInterval)
 		defer ticker.Stop()
@@ -182,7 +202,10 @@ func (vm *vipManager) startARPRefresh() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := vm.operation.SendARP(); err != nil {
+				if err := vm.operation.SendARP(ctx); err != nil {
+					if errors.Is(err, context.Canceled) {
+						return
+					}
 					vm.lg.Warn("refreshing GARP failed", zap.Error(err))
 					return
 				}
@@ -192,8 +215,8 @@ func (vm *vipManager) startARPRefresh() {
 }
 
 func (vm *vipManager) stopARPRefresh() {
-	cancel := vm.refreshCancel
-	vm.refreshCancel = nil
+	cancel := vm.arpCancel
+	vm.arpCancel = nil
 	if cancel != nil {
 		cancel()
 	}
