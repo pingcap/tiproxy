@@ -211,6 +211,25 @@ func TestGARPRefresh(t *testing.T) {
 	require.False(t, operation.hasIP.Load())
 }
 
+func TestGARPRefreshNotStartedWhenVIPNotBound(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newMockConfig()
+	cfg.HA.GARPBurstCount = 1
+	cfg.HA.GARPRefreshInterval = 10 * time.Millisecond
+	operation := newMockNetworkOperation()
+	operation.addIPErr.Store(true)
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(cfg),
+		operation: operation,
+	}
+
+	vm.OnElected()
+	time.Sleep(50 * time.Millisecond)
+	require.EqualValues(t, 0, operation.sendArpCnt.Load())
+	require.False(t, operation.hasIP.Load())
+}
+
 func TestStartAndClose(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	vm, err := NewVIPManager(lg, newMockConfigGetter(newMockConfig()))
