@@ -119,9 +119,9 @@ func (m *election) campaignLoop(ctx context.Context) {
 		m.lg.Debug("begin campaign")
 		select {
 		case <-session.Done():
-			if m.isOwner {
-				m.onRetired()
-			}
+			// Keep the local owner state until we observe a stronger signal that
+			// another member has taken over. Retiring here would trade split-brain
+			// risk for a no-owner window during etcd faults.
 			m.lg.Info("etcd session is done, creates a new one")
 			leaseID := session.Lease()
 			session, err = concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
@@ -141,9 +141,6 @@ func (m *election) campaignLoop(ctx context.Context) {
 		// The etcd server deletes this session's lease ID, but etcd session doesn't find it.
 		// In this case if we do the campaign operation, the etcd server will return ErrLeaseNotFound.
 		if errors.Is(err, rpctypes.ErrLeaseNotFound) {
-			if m.isOwner {
-				m.onRetired()
-			}
 			if session != nil {
 				err = session.Close()
 				m.lg.Warn("etcd session encounters ErrLeaseNotFound, close it", zap.Error(err))
@@ -185,9 +182,7 @@ func (m *election) campaignLoop(ctx context.Context) {
 			// It was the owner before the etcd failure and now is still the owner.
 			m.lg.Info("still the owner")
 		}
-		if m.watchOwner(ctx, session, hack.String(kv.Key)) && m.isOwner {
-			m.onRetired()
-		}
+		m.watchOwner(ctx, session, hack.String(kv.Key))
 	}
 }
 
@@ -240,32 +235,33 @@ func (m *election) getOwnerInfo(ctx context.Context) (*mvccpb.KeyValue, error) {
 	return kvs[0], nil
 }
 
-func (m *election) watchOwner(ctx context.Context, session *concurrency.Session, key string) bool {
+func (m *election) watchOwner(ctx context.Context, session *concurrency.Session, key string) {
 	watchCh := m.etcdCli.Watch(ctx, key)
 	for {
 		select {
 		case resp, ok := <-watchCh:
 			if !ok {
-				// A closed watcher only means the watch stream needs to be rebuilt.
-				// It is not a proof that the current owner has lost its lease.
 				m.lg.Info("watcher is closed, retry watching owner")
-				return false
+				return
 			}
 			if resp.Canceled {
 				m.lg.Info("watch canceled, retry watching owner")
-				return false
+				return
 			}
 
 			for _, ev := range resp.Events {
 				if ev.Type == mvccpb.DELETE {
-					m.lg.Info("watch failed, owner is deleted")
-					return true
+					// The owner key may disappear before another member campaigns.
+					// Keep the local owner state and let the next campaign round decide
+					// whether a new owner has really taken over.
+					m.lg.Info("watch found owner deleted, retry campaigning")
+					return
 				}
 			}
 		case <-session.Done():
-			return true
+			return
 		case <-ctx.Done():
-			return false
+			return
 		}
 	}
 }
