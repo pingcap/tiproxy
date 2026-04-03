@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/j-keck/arping"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/util/cmd"
 	"github.com/vishvananda/netlink"
@@ -103,11 +104,10 @@ func (no *networkOperation) SendARP() error {
 		return nil
 	}
 	for i := 0; i < no.garpBurstCount; i++ {
-		// Use "arping -c 1" repeatedly so TiProxy controls both dimensions:
-		// 1. a tight burst right after takeover, and
-		// 2. later refresh bursts spaced by the manager.
-		// This keeps the behavior predictable across different arping versions.
-		if err := no.execCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String()); err != nil {
+		// Keep both sending paths: the library path avoids depending on the
+		// external "arping" command, while the command path has proven more
+		// reliable on some customer environments. Treat either one as success.
+		if err := no.sendARPOneShot(); err != nil {
 			return errors.WithStack(err)
 		}
 		if no.garpBurstInterval > 0 && i+1 < no.garpBurstCount {
@@ -122,6 +122,21 @@ func (no *networkOperation) Addr() string {
 		return ""
 	}
 	return no.address.IP.String()
+}
+
+func (no *networkOperation) sendARPOneShot() error {
+	libErr := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
+	if libErr != nil {
+		no.lg.Warn("gratuitous arping via library failed",
+			zap.Stringer("ip", no.address.IP),
+			zap.String("iface", no.link.Attrs().Name),
+			zap.Error(libErr))
+	}
+	cmdErr := no.execCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
+	if libErr == nil || cmdErr == nil {
+		return nil
+	}
+	return errors.Wrap(errors.WithStack(cmdErr), errors.WithStack(libErr))
 }
 
 func (no *networkOperation) execCmd(args ...string) error {

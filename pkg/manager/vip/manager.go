@@ -108,8 +108,9 @@ func (vm *vipManager) OnElected() {
 		vm.lg.Info("skip adding VIP because the manager is closing")
 		return
 	}
-	vm.addVIP()
-	vm.startARPRefresh()
+	if vm.addVIP() {
+		vm.startARPRefresh()
+	}
 }
 
 func (vm *vipManager) OnRetired() {
@@ -120,25 +121,28 @@ func (vm *vipManager) OnRetired() {
 	vm.delVIP()
 }
 
-func (vm *vipManager) addVIP() {
+func (vm *vipManager) addVIP() bool {
 	hasIP, err := vm.operation.HasIP()
 	if err != nil {
 		vm.lg.Error("checking addresses failed", zap.Error(err))
-		return
+		return false
 	}
 	if hasIP {
 		vm.lg.Debug("already has VIP, do nothing")
-		return
+		return true
 	}
 	if err := vm.operation.AddIP(); err != nil {
 		vm.lg.Error("adding address failed", zap.Error(err))
-		return
+		return false
 	}
 	if err := vm.operation.SendARP(); err != nil {
 		vm.lg.Error("broadcast ARP failed", zap.Error(err))
-		return
+		// The VIP is already bound locally. Keep the later refresh loop as a
+		// best-effort retry path for notifying upstream devices.
+		return true
 	}
 	vm.lg.Info("adding VIP success")
+	return true
 }
 
 func (vm *vipManager) delVIP() {
