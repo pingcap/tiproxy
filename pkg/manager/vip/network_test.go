@@ -6,6 +6,7 @@
 package vip
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"testing"
@@ -68,7 +69,7 @@ func TestAddDelIP(t *testing.T) {
 			continue
 		}
 
-		err = operation.SendARP()
+		err = operation.SendARP(context.Background())
 		if err != nil {
 			require.True(t, isOtherErr(err))
 		}

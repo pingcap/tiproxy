@@ -108,6 +108,7 @@ Guidelines:
   - Do not start goroutines without a clear lifetime; ensure there is a way to stop them (via context cancellation or explicit shutdown).
   - Avoid bare `go func()` for managed background work. Prefer the repository `waitgroup` helpers (for example `pkg/util/waitgroup.WaitGroup.Run` or `RunWithRecover`) so goroutine lifecycle and shutdown are tracked consistently.
   - If a background goroutine should recover from panic instead of crashing the whole process, use `waitgroup.RunWithRecover()` and handle recovery through the shared helper rather than ad-hoc `recover()` logic.
+  - If a wait or sleep may delay shutdown, owner handoff, or other cancellation-sensitive flows, do not use an unconditional `time.Sleep`. Prefer `timer + context` (or an equivalent cancellable wait) so the code can exit promptly.
   - Avoid sharing mutable state across goroutines without proper synchronization.
   - Be careful when exposing channels and mutexes in public APIs; clearly document ownership and who is responsible for closing channels.
 

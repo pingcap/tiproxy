@@ -230,6 +230,43 @@ func TestGARPRefreshNotStartedWhenVIPNotBound(t *testing.T) {
 	require.False(t, operation.hasIP.Load())
 }
 
+func TestPreCloseCancelsInFlightARP(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newMockConfig()
+	cfg.HA.GARPBurstCount = 2
+	cfg.HA.GARPBurstInterval = time.Second
+	operation := newMockNetworkOperation()
+	operation.sendArpDelay.Store(int64(200 * time.Millisecond))
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(cfg),
+		operation: operation,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		vm.OnElected()
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		return operation.addIPCnt.Load() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	start := time.Now()
+	vm.PreClose()
+	require.Less(t, time.Since(start), 500*time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.False(t, operation.hasIP.Load())
+}
+
 func TestStartAndClose(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	vm, err := NewVIPManager(lg, newMockConfigGetter(newMockConfig()))

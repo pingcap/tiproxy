@@ -133,13 +133,24 @@ func (mno *mockNetworkOperation) DeleteIP() error {
 	return nil
 }
 
-func (mno *mockNetworkOperation) SendARP() error {
+func (mno *mockNetworkOperation) SendARP(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if mno.sendArpErr.Load() {
 		return errors.New("mock SendARP error")
 	}
 	delay := time.Duration(mno.sendArpDelay.Load())
 	if delay > 0 {
-		time.Sleep(delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	mno.sendArpCnt.Add(1)
 	return nil

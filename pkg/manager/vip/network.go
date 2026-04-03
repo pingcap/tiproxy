@@ -4,6 +4,7 @@
 package vip
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"syscall"
@@ -22,7 +23,7 @@ type NetworkOperation interface {
 	HasIP() (bool, error)
 	AddIP() error
 	DeleteIP() error
-	SendARP() error
+	SendARP(context.Context) error
 	Addr() string
 }
 
@@ -99,16 +100,30 @@ func (no *networkOperation) DeleteIP() error {
 	return errors.WithStack(err)
 }
 
-func (no *networkOperation) SendARP() error {
+func (no *networkOperation) SendARP(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if no.garpBurstCount <= 0 {
 		return nil
 	}
 	for i := 0; i < no.garpBurstCount; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := no.sendARPOneShot(); err != nil {
 			return err
 		}
 		if no.garpBurstInterval > 0 && i+1 < no.garpBurstCount {
-			time.Sleep(no.garpBurstInterval)
+			timer := time.NewTimer(no.garpBurstInterval)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return ctx.Err()
+			case <-timer.C:
+			}
 		}
 	}
 	return nil
