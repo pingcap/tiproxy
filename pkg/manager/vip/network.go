@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/j-keck/arping"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -35,10 +34,11 @@ type networkOperation struct {
 	// the network interface
 	link netlink.Link
 	lg   *zap.Logger
-	// garpBurstCount and garpBurstInterval define one takeover burst. The
+	// garpBurstCount defines the number of GARP packets sent immediately after the
+	// new owner binds the VIP. A small burst makes takeover visible quickly even
+	// if the first packet is dropped by the host, bond driver, or upstream device. The
 	// manager may replay the whole burst later during the refresh window.
-	garpBurstCount    int
-	garpBurstInterval time.Duration
+	garpBurstCount int
 }
 
 func NewNetworkOperation(addressStr, linkStr string, garpBurstCount int, lg *zap.Logger) (NetworkOperation, error) {
