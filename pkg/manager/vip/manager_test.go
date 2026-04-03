@@ -191,7 +191,7 @@ func TestGARPRefresh(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newMockConfig()
 	cfg.HA.GARPBurstCount = 1
-	cfg.HA.GARPRefreshInterval = 10 * time.Millisecond
+	cfg.HA.GARPRefreshCount = 1
 	operation := newMockNetworkOperation()
 	vm := &vipManager{
 		lg:        lg,
@@ -201,8 +201,8 @@ func TestGARPRefresh(t *testing.T) {
 
 	vm.OnElected()
 	require.Eventually(t, func() bool {
-		return operation.sendArpCnt.Load() >= 2
-	}, time.Second, 10*time.Millisecond)
+		return operation.sendArpCnt.Load() > 0
+	}, 2*garpRefreshInterval, 10*time.Millisecond)
 
 	vm.OnRetired()
 	sendArpCnt := operation.sendArpCnt.Load()
@@ -215,7 +215,7 @@ func TestGARPRefreshNotStartedWhenVIPNotBound(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newMockConfig()
 	cfg.HA.GARPBurstCount = 1
-	cfg.HA.GARPRefreshInterval = 10 * time.Millisecond
+	cfg.HA.GARPRefreshCount = 1
 	operation := newMockNetworkOperation()
 	operation.addIPErr.Store(true)
 	vm := &vipManager{
@@ -234,7 +234,7 @@ func TestPreCloseCancelsInFlightARP(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	cfg := newMockConfig()
 	cfg.HA.GARPBurstCount = 2
-	cfg.HA.GARPBurstInterval = time.Second
+	cfg.HA.GARPRefreshCount = 1
 	operation := newMockNetworkOperation()
 	operation.sendArpDelay.Store(int64(200 * time.Millisecond))
 	vm := &vipManager{

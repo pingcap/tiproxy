@@ -118,13 +118,10 @@ type HA struct {
 	// new owner binds the VIP. A small burst makes takeover visible quickly even
 	// if the first packet is dropped by the host, bond driver, or upstream device.
 	GARPBurstCount int `yaml:"garp-burst-count,omitempty" toml:"garp-burst-count,omitempty" json:"garp-burst-count,omitempty" reloadable:"false"`
-	// GARPBurstInterval is the spacing inside one burst. Zero means "send the
-	// burst as fast as possible".
-	GARPBurstInterval time.Duration `yaml:"garp-burst-interval,omitempty" toml:"garp-burst-interval,omitempty" json:"garp-burst-interval,omitempty" reloadable:"false"`
-	// GARPRefreshInterval controls the delay between follow-up bursts after
+	// GARPRefreshCount controls the number of follow-up bursts after
 	// takeover. It is used to refresh stale neighbor caches for a bounded window
 	// after failover instead of emitting high-rate GARP forever.
-	GARPRefreshInterval time.Duration `yaml:"garp-refresh-interval,omitempty" toml:"garp-refresh-interval,omitempty" json:"garp-refresh-interval,omitempty" reloadable:"false"`
+	GARPRefreshCount int `yaml:"garp-refresh-count,omitempty" toml:"garp-refresh-count,omitempty" json:"garp-refresh-count,omitempty" reloadable:"false"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
@@ -170,7 +167,7 @@ func NewConfig() *Config {
 	// upstream devices overwrite stale VIP->MAC entries after an abnormal owner
 	// handover.
 	cfg.HA.GARPBurstCount = 5
-	cfg.HA.GARPRefreshInterval = time.Second
+	cfg.HA.GARPRefreshCount = 30
 
 	cfg.EnableTrafficReplay = true
 
@@ -217,16 +214,11 @@ func (cfg *Config) Check() error {
 	if cfg.HA.GARPBurstCount < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-count must be greater than or equal to 0")
 	}
-	if cfg.HA.GARPBurstInterval < 0 {
-		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-interval must be greater than or equal to 0")
+	if cfg.HA.GARPBurstCount == 0 {
+		cfg.HA.GARPBurstCount = 1
 	}
-	if cfg.HA.GARPRefreshInterval < 0 {
-		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-refresh-interval must be greater than or equal to 0")
-	}
-	if cfg.HA.GARPBurstCount == 0 && cfg.HA.GARPRefreshInterval > 0 {
-		// Refresh reuses the same burst sender. Requiring at least one packet per
-		// burst keeps the runtime behavior and the configuration model aligned.
-		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-count must be greater than 0 when ha.garp-refresh-interval is enabled")
+	if cfg.HA.GARPRefreshCount < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-refresh-count must be greater than or equal to 0")
 	}
 
 	return nil

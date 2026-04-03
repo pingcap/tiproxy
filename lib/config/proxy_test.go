@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/BurntSushi/toml"
 	mconfig "github.com/pingcap/metering_sdk/config"
@@ -87,11 +86,10 @@ var testProxyConfig = Config{
 		RequireBackendTLS: true,
 	},
 	HA: HA{
-		VirtualIP:           "10.10.10.10/32",
-		Interface:           "eth0",
-		GARPBurstCount:      5,
-		GARPBurstInterval:   time.Second,
-		GARPRefreshInterval: time.Minute,
+		VirtualIP:        "10.10.10.10/32",
+		Interface:        "eth0",
+		GARPBurstCount:   5,
+		GARPRefreshCount: 30,
 	},
 	Metering: mconfig.MeteringConfig{
 		Type:     storage.ProviderTypeAzure,
@@ -204,20 +202,7 @@ func TestProxyCheck(t *testing.T) {
 		},
 		{
 			pre: func(t *testing.T, c *Config) {
-				c.HA.GARPBurstInterval = -time.Second
-			},
-			err: ErrInvalidConfigValue,
-		},
-		{
-			pre: func(t *testing.T, c *Config) {
-				c.HA.GARPRefreshInterval = -time.Second
-			},
-			err: ErrInvalidConfigValue,
-		},
-		{
-			pre: func(t *testing.T, c *Config) {
-				c.HA.GARPBurstCount = 0
-				c.HA.GARPRefreshInterval = time.Second
+				c.HA.GARPRefreshCount = -1
 			},
 			err: ErrInvalidConfigValue,
 		},
