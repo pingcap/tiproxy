@@ -215,11 +215,6 @@ func (vm *vipManager) Close() {
 	if election != nil {
 		election.Close()
 	}
-
-	vm.mu.Lock()
-	vm.stopARPRefresh()
-	vm.delVIP()
-	vm.mu.Unlock()
 }
 
 func (vm *vipManager) prepareForClose() elect.Election {
