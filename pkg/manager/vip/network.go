@@ -104,11 +104,8 @@ func (no *networkOperation) SendARP() error {
 		return nil
 	}
 	for i := 0; i < no.garpBurstCount; i++ {
-		// Keep both sending paths: the library path avoids depending on the
-		// external "arping" command, while the command path has proven more
-		// reliable on some customer environments. Treat either one as success.
 		if err := no.sendARPOneShot(); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 		if no.garpBurstInterval > 0 && i+1 < no.garpBurstCount {
 			time.Sleep(no.garpBurstInterval)
@@ -125,6 +122,10 @@ func (no *networkOperation) Addr() string {
 }
 
 func (no *networkOperation) sendARPOneShot() error {
+	// Keep both sending paths for a single logical GARP attempt: the library
+	// path avoids depending on the external "arping" command, while the command
+	// path has proven more reliable on some customer environments. Treat either
+	// one as success.
 	libErr := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
 	if libErr != nil {
 		no.lg.Warn("gratuitous arping via library failed",
@@ -132,6 +133,10 @@ func (no *networkOperation) sendARPOneShot() error {
 			zap.String("iface", no.link.Attrs().Name),
 			zap.Error(libErr))
 	}
+	// Always use "arping -c 1" here and let SendARP control the outer burst
+	// count and interval. Using "arping -c 5" would hide pacing inside the
+	// command, making takeover and refresh timing less predictable from TiProxy
+	// and harder to reason about in tests and production troubleshooting.
 	cmdErr := no.execCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
 	if libErr == nil || cmdErr == nil {
 		return nil

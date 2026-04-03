@@ -90,6 +90,7 @@ Guidelines:
 - **Error handling**
   - Prefer wrapping errors with context so they are actionable (what operation failed, which component, key parameters).
   - Reuse common error helpers from `lib/util` / `pkg/util` when available.
+  - Add `errors.WithStack()` only at the lowest layer that first creates or captures the concrete error. Higher layers should usually add context with `errors.Wrap()` / `errors.Wrapf()` instead of attaching another stack trace.
   - Do not silently ignore errors; either handle them explicitly or return them to callers.
 
 - **Comments for non-obvious logic**
