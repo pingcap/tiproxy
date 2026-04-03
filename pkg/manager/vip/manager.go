@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -29,7 +28,7 @@ const (
 	// Refresh GARP for a bounded window after takeover so upstream devices have
 	// repeated chances to overwrite stale VIP->MAC cache entries after abnormal
 	// failover, while still avoiding permanent ARP noise.
-	garpRefreshRounds = 30
+	garpRefreshInterval = 1 * time.Second
 )
 
 type VIPManager interface {
@@ -68,7 +67,7 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 		vm.lg.Warn("Both address and link must be specified to enable VIP. VIP is disabled")
 		return nil, nil
 	}
-	operation, err := NewNetworkOperation(cfg.HA.VirtualIP, cfg.HA.Interface, cfg.HA.GARPBurstCount, cfg.HA.GARPBurstInterval, lg)
+	operation, err := NewNetworkOperation(cfg.HA.VirtualIP, cfg.HA.Interface, cfg.HA.GARPBurstCount, lg)
 	if err != nil {
 		vm.lg.Error("init network operation failed", zap.Error(err))
 		return nil, err
@@ -144,16 +143,7 @@ func (vm *vipManager) addVIP(ctx context.Context) bool {
 		vm.lg.Error("adding address failed", zap.Error(err))
 		return false
 	}
-	if err := ctx.Err(); err != nil {
-		vm.delVIP()
-		return false
-	}
 	if err := vm.operation.SendARP(ctx); err != nil {
-		if errors.Is(err, context.Canceled) {
-			vm.lg.Info("broadcast ARP canceled")
-			vm.delVIP()
-			return false
-		}
 		vm.lg.Error("broadcast ARP failed", zap.Error(err))
 		// The VIP is already bound locally. Keep the later refresh loop as a
 		// best-effort retry path for notifying upstream devices.
@@ -181,25 +171,22 @@ func (vm *vipManager) delVIP() {
 }
 
 func (vm *vipManager) startARPRefresh(ctx context.Context) {
-	refreshInterval := vm.cfgGetter.GetConfig().HA.GARPRefreshInterval
-	if refreshInterval <= 0 {
+	refreshCount := vm.cfgGetter.GetConfig().HA.GARPRefreshCount
+	if refreshCount <= 0 {
 		return
 	}
 	vm.refreshWG.RunWithRecover(func() {
-		ticker := time.NewTicker(refreshInterval)
+		ticker := time.NewTicker(garpRefreshInterval)
 		defer ticker.Stop()
 		// The first burst is sent synchronously by addVIP. The follow-up bursts
 		// cover devices that probe or refresh neighbor state a little later than
 		// the handover moment.
-		for i := 0; i < garpRefreshRounds; i++ {
+		for i := 0; i < refreshCount; i++ {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				if err := vm.operation.SendARP(ctx); err != nil {
-					if errors.Is(err, context.Canceled) {
-						return
-					}
 					vm.lg.Warn("refreshing GARP failed", zap.Error(err))
 					return
 				}

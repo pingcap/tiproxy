@@ -41,11 +41,10 @@ type networkOperation struct {
 	garpBurstInterval time.Duration
 }
 
-func NewNetworkOperation(addressStr, linkStr string, garpBurstCount int, garpBurstInterval time.Duration, lg *zap.Logger) (NetworkOperation, error) {
+func NewNetworkOperation(addressStr, linkStr string, garpBurstCount int, lg *zap.Logger) (NetworkOperation, error) {
 	no := &networkOperation{
-		lg:                lg,
-		garpBurstCount:    garpBurstCount,
-		garpBurstInterval: garpBurstInterval,
+		lg:             lg,
+		garpBurstCount: garpBurstCount,
 	}
 	if err := no.initAddr(addressStr, linkStr); err != nil {
 		return nil, err
@@ -114,17 +113,6 @@ func (no *networkOperation) SendARP(ctx context.Context) error {
 		if err := no.sendARPOneShot(); err != nil {
 			return err
 		}
-		if no.garpBurstInterval > 0 && i+1 < no.garpBurstCount {
-			timer := time.NewTimer(no.garpBurstInterval)
-			select {
-			case <-ctx.Done():
-				if !timer.Stop() {
-					<-timer.C
-				}
-				return ctx.Err()
-			case <-timer.C:
-			}
-		}
 	}
 	return nil
 }
@@ -143,7 +131,8 @@ func (no *networkOperation) sendARPOneShot() error {
 	// one as success.
 	libErr := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
 	if libErr != nil {
-		no.lg.Warn("gratuitous arping via library failed",
+		// Output a debug log to avoid user anxiety.
+		no.lg.Debug("gratuitous arping via library failed",
 			zap.Stringer("ip", no.address.IP),
 			zap.String("iface", no.link.Attrs().Name),
 			zap.Error(libErr))
