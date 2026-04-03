@@ -12,6 +12,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -45,7 +46,7 @@ type vipManager struct {
 	// L3 devices cache only one VIP->MAC entry; if old and new owners both answer
 	// ARP, whichever reply is learned last may blackhole cross-subnet traffic.
 	closing       bool
-	refreshWG     sync.WaitGroup
+	refreshWG     waitgroup.WaitGroup
 	refreshCancel context.CancelFunc
 	operation     NetworkOperation
 	cfgGetter     config.ConfigGetter
@@ -166,10 +167,7 @@ func (vm *vipManager) startARPRefresh() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	vm.refreshCancel = cancel
-	vm.refreshWG.Add(1)
-	go func() {
-		defer vm.refreshWG.Done()
-
+	vm.refreshWG.RunWithRecover(func() {
 		ticker := time.NewTicker(refreshInterval)
 		defer ticker.Stop()
 		// The first burst is sent synchronously by addVIP. The follow-up bursts
@@ -186,7 +184,7 @@ func (vm *vipManager) startARPRefresh() {
 				}
 			}
 		}
-	}()
+	}, nil, vm.lg)
 }
 
 func (vm *vipManager) stopARPRefresh() {
