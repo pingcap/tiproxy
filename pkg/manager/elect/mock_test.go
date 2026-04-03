@@ -57,6 +57,14 @@ func (mo *mockMember) expectEvent(t *testing.T, expected ...int) {
 	}
 }
 
+func (mo *mockMember) expectNoEvent(t *testing.T, timeout time.Duration) {
+	select {
+	case event := <-mo.ch:
+		t.Fatalf("unexpected event %d", event)
+	case <-time.After(timeout):
+	}
+}
+
 func (mo *mockMember) hang(hang bool) {
 	mo.hangElectedMu.Lock()
 	defer mo.hangElectedMu.Unlock()
@@ -152,6 +160,11 @@ func (ts *etcdTestSuite) getOwnerID() string {
 func (ts *etcdTestSuite) expectEvent(id string, event ...int) {
 	elec := ts.getElection(id)
 	elec.member.(*mockMember).expectEvent(ts.t, event...)
+}
+
+func (ts *etcdTestSuite) expectNoEvent(id string, timeout time.Duration) {
+	elec := ts.getElection(id)
+	elec.member.(*mockMember).expectNoEvent(ts.t, timeout)
 }
 
 func (ts *etcdTestSuite) hang(id string, hang bool) {

@@ -122,7 +122,7 @@ type HA struct {
 	// burst as fast as possible".
 	GARPBurstInterval time.Duration `yaml:"garp-burst-interval,omitempty" toml:"garp-burst-interval,omitempty" json:"garp-burst-interval,omitempty" reloadable:"false"`
 	// GARPRefreshInterval controls the delay between follow-up bursts after
-	// takeover. It is used to refresh stale neighbor caches for a short window
+	// takeover. It is used to refresh stale neighbor caches for a bounded window
 	// after failover instead of emitting high-rate GARP forever.
 	GARPRefreshInterval time.Duration `yaml:"garp-refresh-interval,omitempty" toml:"garp-refresh-interval,omitempty" json:"garp-refresh-interval,omitempty" reloadable:"false"`
 }
@@ -166,9 +166,11 @@ func NewConfig() *Config {
 	cfg.Balance = DefaultBalance()
 
 	// Match the common VRRP-style default of sending a small burst immediately
-	// after takeover. Refresh is disabled by default and can be enabled when the
-	// network requires extra neighbor-cache nudges.
+	// after takeover, then keep refreshing for a short period. The refresh helps
+	// upstream devices overwrite stale VIP->MAC entries after an abnormal owner
+	// handover.
 	cfg.HA.GARPBurstCount = 5
+	cfg.HA.GARPRefreshInterval = time.Second
 
 	cfg.EnableTrafficReplay = true
 

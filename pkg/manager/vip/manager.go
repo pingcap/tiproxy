@@ -24,10 +24,10 @@ const (
 	// The etcd client keeps alive every TTL/3 seconds.
 	// The TTL determines the failover time so it should be short.
 	sessionTTL = 3
-	// Refresh GARP for a short, bounded window after takeover so upstream
-	// devices have several chances to update the VIP neighbor entry without
-	// keeping permanent ARP noise on the network.
-	garpRefreshRounds = 10
+	// Refresh GARP for a bounded window after takeover so upstream devices have
+	// repeated chances to overwrite stale VIP->MAC cache entries after abnormal
+	// failover, while still avoiding permanent ARP noise.
+	garpRefreshRounds = 30
 )
 
 type VIPManager interface {

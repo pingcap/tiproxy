@@ -75,6 +75,10 @@ func TestEtcdServerDown(t *testing.T) {
 
 	// server is down
 	addr := ts.shutdownServer()
+	// Losing etcd temporarily should not force the current owner to retire
+	// locally. Otherwise VIP owner election would turn a control-plane fault
+	// into a no-owner data-plane outage.
+	ts.expectNoEvent("1", 1500*time.Millisecond)
 	_, err := elec1.GetOwnerID(context.Background())
 	require.Error(t, err)
 	ts.startServer(addr)
