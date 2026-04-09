@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	promv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	dto "github.com/prometheus/client_model/go"
@@ -18,6 +19,7 @@ import (
 
 const (
 	LabelNameInstance = "instance"
+	LabelNameCluster  = "tiproxy_cluster"
 )
 
 // QueryExpr is used for querying Prometheus.
@@ -85,12 +87,16 @@ func (qr QueryResult) GetSamplePair4Backend(backend policy.BackendCtx) []model.S
 	}
 	matrix := qr.Value.(model.Matrix)
 	labelValue := getLabel4Backend(backend)
+	clusterValue := getLabel4Cluster(backend)
 	for _, m := range matrix {
-		if label, ok := m.Metric[LabelNameInstance]; ok {
-			if labelValue == (string)(label) {
-				return m.Values
-			}
+		label, ok := m.Metric[LabelNameInstance]
+		if !ok || labelValue != string(label) {
+			continue
 		}
+		if !matchClusterLabel(m.Metric, clusterValue) {
+			continue
+		}
+		return m.Values
 	}
 	return nil
 }
@@ -105,14 +111,25 @@ func (qr QueryResult) GetSample4Backend(backend policy.BackendCtx) *model.Sample
 	}
 	vector := qr.Value.(model.Vector)
 	labelValue := getLabel4Backend(backend)
+	clusterValue := getLabel4Cluster(backend)
 	for _, m := range vector {
-		if label, ok := m.Metric[LabelNameInstance]; ok {
-			if labelValue == (string)(label) {
-				return m
-			}
+		label, ok := m.Metric[LabelNameInstance]
+		if !ok || labelValue != string(label) {
+			continue
 		}
+		if !matchClusterLabel(m.Metric, clusterValue) {
+			continue
+		}
+		return m
 	}
 	return nil
+}
+
+func matchClusterLabel(metric model.Metric, clusterValue string) bool {
+	if label, ok := metric[LabelNameCluster]; ok {
+		return clusterValue == string(label)
+	}
+	return true
 }
 
 func getLabel4Backend(backend policy.BackendCtx) string {
@@ -126,6 +143,10 @@ func getLabel4Backend(backend policy.BackendCtx) string {
 	return net.JoinHostPort(backendInfo.IP, strconv.Itoa(int(backendInfo.StatusPort)))
 }
 
+func getLabel4Cluster(backend policy.BackendCtx) string {
+	return normalizeClusterMetricLabel(backend.GetBackendInfo().ClusterName)
+}
+
 // addr is the address of the backend status port.
 func getLabel4Addr(addr string) string {
 	if isOperatorDeployed(addr) {
@@ -134,6 +155,38 @@ func getLabel4Addr(addr string) string {
 	}
 	// In tiup deployment, the label value of `instance` is hostname:statusPort.
 	return addr
+}
+
+func normalizeClusterMetricLabel(clusterName string) string {
+	clusterName = strings.TrimSpace(clusterName)
+	if clusterName == "" {
+		return config.DefaultBackendClusterName
+	}
+	return clusterName
+}
+
+func attachClusterLabel(qr QueryResult, clusterName string) QueryResult {
+	clusterValue := model.LabelValue(normalizeClusterMetricLabel(clusterName))
+	if qr.Value == nil || reflect.ValueOf(qr.Value).IsNil() {
+		return qr
+	}
+	switch value := qr.Value.(type) {
+	case model.Vector:
+		for _, sample := range value {
+			if sample.Metric == nil {
+				sample.Metric = model.Metric{}
+			}
+			sample.Metric[LabelNameCluster] = clusterValue
+		}
+	case model.Matrix:
+		for _, stream := range value {
+			if stream.Metric == nil {
+				stream.Metric = model.Metric{}
+			}
+			stream.Metric[LabelNameCluster] = clusterValue
+		}
+	}
+	return qr
 }
 
 func isOperatorDeployed(addr string) bool {

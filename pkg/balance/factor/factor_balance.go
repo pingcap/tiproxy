@@ -30,7 +30,7 @@ type FactorBasedBalance struct {
 	factors []Factor
 	// to reduce memory allocation
 	cachedList      []scoredBackend
-	mr              metricsreader.MetricsReader
+	mr              metricsreader.MetricsQuerier
 	lg              *zap.Logger
 	factorStatus    *FactorStatus
 	factorLabel     *FactorLabel
@@ -44,7 +44,7 @@ type FactorBasedBalance struct {
 	routePolicy     string
 }
 
-func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *FactorBasedBalance {
+func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsQuerier) *FactorBasedBalance {
 	return &FactorBasedBalance{
 		lg:         lg,
 		mr:         mr,

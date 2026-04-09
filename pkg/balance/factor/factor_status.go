@@ -63,15 +63,16 @@ func (fs *FactorStatus) updateSnapshot(backends []scoredBackend) {
 	now := time.Now()
 	for i := range backends {
 		addr := backends[i].Addr()
+		key := backends[i].ID()
 		if backends[i].Healthy() {
-			delete(fs.snapshot, addr)
+			delete(fs.snapshot, key)
 			continue
 		}
-		snapshot := fs.snapshot[addr]
+		snapshot := fs.snapshot[key]
 		// The rebalance was already started, don't update it.
 		if snapshot.balanceCount > 0.0001 {
 			snapshot.lastAccess = now
-			fs.snapshot[addr] = snapshot
+			fs.snapshot[key] = snapshot
 			continue
 		}
 		balanceCount := float64(backends[i].ConnScore()) / balanceSeconds4Status
@@ -82,7 +83,7 @@ func (fs *FactorStatus) updateSnapshot(backends []scoredBackend) {
 				zap.Float64("balance_count", balanceCount),
 				zap.Int("conn_score", backends[i].ConnScore()))
 		}
-		fs.snapshot[addr] = statusBackendSnapshot{
+		fs.snapshot[key] = statusBackendSnapshot{
 			balanceCount: balanceCount,
 			lastAccess:   now,
 		}
@@ -105,7 +106,7 @@ func (fs *FactorStatus) BalanceCount(from, to scoredBackend) (BalanceAdvice, flo
 	if fs.migrationsPerSecond > 0 {
 		return AdvicePositive, fs.migrationsPerSecond, nil
 	}
-	return AdvicePositive, fs.snapshot[from.Addr()].balanceCount, nil
+	return AdvicePositive, fs.snapshot[from.ID()].balanceCount, nil
 }
 
 func (fs *FactorStatus) SetConfig(cfg *config.Config) {

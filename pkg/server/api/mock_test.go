@@ -30,7 +30,7 @@ func newMockNamespaceManager() *mockNamespaceManager {
 }
 
 func (m *mockNamespaceManager) Init(_ *zap.Logger, _ []*config.Namespace, _ observer.TopologyFetcher,
-	_ metricsreader.PromInfoFetcher, _ *http.Client, _ *mconfig.ConfigManager, _ metricsreader.MetricsReader) error {
+	_ metricsreader.PromInfoFetcher, _ *http.Client, _ *mconfig.ConfigManager, _ metricsreader.MetricsQuerier) error {
 	return nil
 }
 

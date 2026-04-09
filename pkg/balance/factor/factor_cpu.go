@@ -95,13 +95,13 @@ type FactorCPU struct {
 	lastMetricTime time.Time
 	// The estimated average CPU usage used by one connection.
 	usagePerConn        float64
-	mr                  metricsreader.MetricsReader
+	mr                  metricsreader.MetricsQuerier
 	bitNum              int
 	migrationsPerSecond float64
 	lg                  *zap.Logger
 }
 
-func NewFactorCPU(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorCPU {
+func NewFactorCPU(mr metricsreader.MetricsQuerier, lg *zap.Logger) *FactorCPU {
 	fc := &FactorCPU{
 		mr:       mr,
 		bitNum:   5,
@@ -146,6 +146,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 	now := time.Now()
 	for _, backend := range backends {
 		addr := backend.Addr()
+		key := backend.ID()
 		// If a backend exists in metrics but not in the backend list, ignore it for this round.
 		// The backend will be in the next round if it's healthy.
 		pairs := qr.GetSamplePair4Backend(backend)
@@ -155,7 +156,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 		updateTime := time.UnixMilli(int64(pairs[len(pairs)-1].Timestamp))
 		// The time point of updating each backend is different, so only partial of the backends are updated every time.
 		// If this backend is not updated, ignore it.
-		snapshot := fc.snapshot[addr]
+		snapshot := fc.snapshot[key]
 		if !snapshot.updatedTime.Before(updateTime) {
 			continue
 		}
@@ -164,7 +165,7 @@ func (fc *FactorCPU) updateSnapshot(qr metricsreader.QueryResult, backends []sco
 			continue
 		}
 		metrics.BackendMetricGauge.WithLabelValues(addr, "cpu").Set(avgUsage)
-		fc.snapshot[addr] = cpuBackendSnapshot{
+		fc.snapshot[key] = cpuBackendSnapshot{
 			avgUsage:    avgUsage,
 			latestUsage: latestUsage,
 			connCount:   backend.ConnCount(),
@@ -239,7 +240,7 @@ func (fc *FactorCPU) updateCpuPerConn() {
 
 // Estimate the current cpu usage by the latest CPU usage, the latest connection count, and the current connection count.
 func (fc *FactorCPU) getUsage(backend scoredBackend) (avgUsage, latestUsage float64) {
-	snapshot, ok := fc.snapshot[backend.Addr()]
+	snapshot, ok := fc.snapshot[backend.ID()]
 	if !ok || snapshot.avgUsage < 0 || latestUsage < 0 {
 		// The metric has missed for minutes.
 		return 1, 1
@@ -260,11 +261,11 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float6
 	fields := []zap.Field{
 		zap.Float64("from_avg_usage", fromAvgUsage),
 		zap.Float64("from_latest_usage", fromLatestUsage),
-		zap.Int("from_snapshot_conn", fc.snapshot[from.Addr()].connCount),
+		zap.Int("from_snapshot_conn", fc.snapshot[from.ID()].connCount),
 		zap.Int("from_conn", from.ConnScore()),
 		zap.Float64("to_avg_usage", toAvgUsage),
 		zap.Float64("to_latest_usage", toLatestUsage),
-		zap.Int("to_snapshot_conn", fc.snapshot[to.Addr()].connCount),
+		zap.Int("to_snapshot_conn", fc.snapshot[to.ID()].connCount),
 		zap.Int("to_conn", to.ConnScore()),
 		zap.Float64("usage_per_conn", fc.usagePerConn),
 	}
