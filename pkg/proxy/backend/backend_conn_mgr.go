@@ -91,6 +91,7 @@ type BCConfig struct {
 	HealthyKeepAlive     config.KeepAlive
 	UnhealthyKeepAlive   config.KeepAlive
 	FromPublicEndpoints  func(addr net.Addr) bool
+	DialContext          func(ctx context.Context, backend router.BackendInst, addr string) (net.Conn, error)
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
 	DialTimeout          time.Duration
@@ -314,7 +315,9 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 
 			var cn net.Conn
 			addr = backend.Addr()
-			cn, err = net.DialTimeout("tcp", addr, mgr.config.DialTimeout)
+			dialCtx, cancel := context.WithTimeout(bctx, mgr.config.DialTimeout)
+			cn, err = mgr.dialBackend(dialCtx, backend, addr)
+			cancel()
 			selector.Finish(mgr, err == nil)
 			if err != nil {
 				metrics.DialBackendFailCounter.WithLabelValues(addr).Inc()
@@ -647,7 +650,9 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	var cn net.Conn
-	cn, rs.err = net.DialTimeout("tcp", (*backendInst).Addr(), mgr.config.DialTimeout)
+	dialCtx, cancel := context.WithTimeout(ctx, mgr.config.DialTimeout)
+	cn, rs.err = mgr.dialBackend(dialCtx, *backendInst, (*backendInst).Addr())
+	cancel()
 	if rs.err != nil {
 		mgr.handshakeHandler.OnHandshake(mgr, (*backendInst).Addr(), rs.err, SrcBackendNetwork)
 		return
@@ -816,6 +821,14 @@ func (mgr *BackendConnManager) Value(key any) any {
 	v := mgr.ctxmap.m[key]
 	mgr.ctxmap.Unlock()
 	return v
+}
+
+func (mgr *BackendConnManager) dialBackend(ctx context.Context, backend router.BackendInst, addr string) (net.Conn, error) {
+	if mgr.config.DialContext != nil {
+		return mgr.config.DialContext(ctx, backend, addr)
+	}
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "tcp", addr)
 }
 
 // Close releases all resources.

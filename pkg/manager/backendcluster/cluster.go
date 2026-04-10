@@ -6,13 +6,15 @@ package backendcluster
 import (
 	"context"
 	"crypto/tls"
+	"net"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
-	"github.com/pingcap/tiproxy/pkg/util/http"
+	httputil "github.com/pingcap/tiproxy/pkg/util/http"
+	"github.com/pingcap/tiproxy/pkg/util/netutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -23,6 +25,8 @@ type Cluster struct {
 	etcdCli    *clientv3.Client
 	infoSyncer *infosync.InfoSyncer
 	metrics    *metricsreader.ClusterReader
+	httpCli    *httputil.Client
+	dialer     *netutil.DNSDialer
 }
 
 func (c *Cluster) Config() config.BackendCluster {
@@ -39,6 +43,14 @@ func (c *Cluster) GetTiDBTopology(ctx context.Context) (map[string]*infosync.TiD
 
 func (c *Cluster) GetPromInfo(ctx context.Context) (*infosync.PrometheusInfo, error) {
 	return c.infoSyncer.GetPromInfo(ctx)
+}
+
+func (c *Cluster) HTTPClient() *httputil.Client {
+	return c.httpCli
+}
+
+func (c *Cluster) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return c.dialer.DialContext(ctx, network, addr)
 }
 
 func (c *Cluster) PreClose() {
@@ -69,10 +81,18 @@ func NewCluster(
 	metricsQuerier *MetricsQuerier,
 ) (*Cluster, error) {
 	clusterCfg = normalizeCluster(clusterCfg)
-	etcdCli, err := etcd.InitEtcdClientWithAddrs(
+	nameServers, err := config.ParseNSServers(clusterCfg.NSServers)
+	if err != nil {
+		return nil, err
+	}
+	dialer := netutil.NewDNSDialer(nameServers)
+	httpCli := httputil.NewHTTPClientWithDialContext(clusterTLS, dialer.DialContext)
+
+	etcdCli, err := etcd.InitEtcdClientWithAddrsAndDialer(
 		logger.With(zap.String("cluster", clusterCfg.Name)).Named("etcd"),
 		clusterCfg.PDAddrs,
 		clusterTLS(),
+		dialer,
 	)
 	if err != nil {
 		return nil, err
@@ -91,13 +111,15 @@ func NewCluster(
 		cfg:        clusterCfg,
 		etcdCli:    etcdCli,
 		infoSyncer: infoSyncer,
+		httpCli:    httpCli,
+		dialer:     dialer,
 	}
 	cluster.metrics = metricsreader.NewClusterReader(
 		logger.With(zap.String("cluster", clusterCfg.Name)).Named("metrics"),
 		clusterCfg.Name,
 		cluster,
 		cluster,
-		http.NewHTTPClient(clusterTLS),
+		httpCli,
 		etcdCli,
 		config.NewDefaultHealthCheckConfig(),
 		cfgGetter,
