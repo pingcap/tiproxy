@@ -52,6 +52,15 @@ const (
 	DefaultConnBufferSize = 32 * 1024
 )
 
+// normalizeConnBufferSize keeps 0 as "use the default", so every caller in the
+// packet/TLS stack derives buffer sizes from the same effective value.
+func normalizeConnBufferSize(bufferSize int) int {
+	if bufferSize == 0 {
+		return DefaultConnBufferSize
+	}
+	return bufferSize
+}
+
 type rwStatus int
 
 const (
@@ -116,9 +125,7 @@ func getPooledWriter(conn net.Conn, size int) *bufio.Writer {
 }
 
 func newBasicReadWriter(conn net.Conn, bufferSize int) *basicReadWriter {
-	if bufferSize == 0 {
-		bufferSize = DefaultConnBufferSize
-	}
+	bufferSize = normalizeConnBufferSize(bufferSize)
 	return &basicReadWriter{
 		Conn:       conn,
 		ReadWriter: bufio.NewReadWriter(getPooledReader(conn, bufferSize), getPooledWriter(conn, bufferSize)),
@@ -274,7 +281,11 @@ type PacketIO interface {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type packetIO struct {
-	lastKeepAlive   config.KeepAlive
+	lastKeepAlive config.KeepAlive
+	// TLS allocates another buffered layer after the handshake. Keep the
+	// normalized base connection buffer size here so the TLS layer can scale
+	// from the caller's setting instead of falling back to unrelated constants.
+	connBufferSize  int
 	rawConn         net.Conn
 	readWriter      packetReadWriter
 	limitReader     io.LimitedReader // reuse memory to reduce allocation
@@ -288,10 +299,12 @@ type packetIO struct {
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *packetIO {
+	bufferSize = normalizeConnBufferSize(bufferSize)
 	p := &packetIO{
-		rawConn:    conn,
-		logger:     lg,
-		readWriter: newBasicReadWriter(conn, bufferSize),
+		connBufferSize: bufferSize,
+		rawConn:        conn,
+		logger:         lg,
+		readWriter:     newBasicReadWriter(conn, bufferSize),
 	}
 	p.ApplyOpts(opts...)
 	return p
