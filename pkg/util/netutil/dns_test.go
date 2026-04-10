@@ -7,6 +7,7 @@ import (
 	"context"
 	"net"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +36,7 @@ func TestDNSDialerUsesConfiguredNameServerAndCache(t *testing.T) {
 	}
 
 	dialer := NewDNSDialer([]string{dns.Addr()})
+	dialer.dialer.Timeout = 100 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -99,6 +101,7 @@ func TestDNSDialerTriesAllResolvedIPs(t *testing.T) {
 	}()
 
 	dialer := NewDNSDialer([]string{dns.Addr()})
+	dialer.dialer.Timeout = 100 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -116,4 +119,63 @@ func TestDNSDialerTriesAllResolvedIPs(t *testing.T) {
 		require.NoError(t, err)
 	default:
 	}
+}
+
+func TestDNSDialerCoalescesConcurrentLookupsAfterCacheExpiry(t *testing.T) {
+	listener, addr := testkit.StartListener(t, "127.0.0.1:0")
+	t.Cleanup(func() { require.NoError(t, listener.Close()) })
+	_, port := testkit.ParseHostPort(t, addr)
+	dns := testkit.StartDNSServer(t, map[string][]string{
+		"tidb.test": {"127.0.0.1"},
+	})
+
+	dialer := NewDNSDialer([]string{dns.Addr()})
+	dialer.cacheTTL = 20 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	accepted := make(chan error, 9)
+	for range cap(accepted) {
+		go func() {
+			conn, err := listener.Accept()
+			if err == nil {
+				err = conn.Close()
+			}
+			accepted <- err
+		}()
+	}
+
+	targetAddr := net.JoinHostPort("tidb.test", strconv.Itoa(int(port)))
+	conn, err := dialer.DialContext(ctx, "tcp", targetAddr)
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+	require.NoError(t, <-accepted)
+	initialQueries := dns.QueryCount("tidb.test")
+	require.Greater(t, initialQueries, 0)
+
+	time.Sleep(dialer.cacheTTL + 10*time.Millisecond)
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 8)
+	for range cap(errCh) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			conn, err := dialer.DialContext(ctx, "tcp", targetAddr)
+			if err == nil {
+				err = conn.Close()
+			}
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+	for range cap(errCh) {
+		require.NoError(t, <-accepted)
+	}
+	require.Equal(t, initialQueries*2, dns.QueryCount("tidb.test"))
 }

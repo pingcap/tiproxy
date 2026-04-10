@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const defaultDNSCacheTTL = 5 * time.Second
@@ -22,12 +24,13 @@ type dnsCacheEntry struct {
 // DNSDialer routes DNS lookups to configured name servers and caches lookup results briefly.
 // If no name servers are configured, it falls back to the system resolver and dialer.
 type DNSDialer struct {
-	cacheTTL   time.Duration
-	nameServer []string
-	resolver   *net.Resolver
-	dialer     net.Dialer
-	nextServer atomic.Uint64
-	mu         struct {
+	cacheTTL    time.Duration
+	nameServer  []string
+	resolver    *net.Resolver
+	dialer      net.Dialer
+	nextServer  atomic.Uint64
+	lookupGroup singleflight.Group
+	mu          struct {
 		sync.Mutex
 		cacheMap map[string]dnsCacheEntry
 	}
@@ -58,11 +61,14 @@ func NewDNSDialer(nameServers []string) *DNSDialer {
 }
 
 func (d *DNSDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if d.resolver == nil {
+		return d.dialer.DialContext(ctx, network, addr)
+	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
-	if ip := net.ParseIP(host); ip != nil || d.resolver == nil {
+	if ip := net.ParseIP(host); ip != nil {
 		return d.dialer.DialContext(ctx, network, addr)
 	}
 	ips, err := d.lookupNetIP(ctx, host)
@@ -82,28 +88,48 @@ func (d *DNSDialer) DialContext(ctx context.Context, network, addr string) (net.
 
 func (d *DNSDialer) lookupNetIP(ctx context.Context, host string) ([]net.IP, error) {
 	key := strings.TrimSuffix(strings.ToLower(host), ".")
-	now := time.Now()
-	d.mu.Lock()
-	if entry, ok := d.mu.cacheMap[key]; ok && now.Before(entry.deadline) {
-		ips := entry.ips
-		d.mu.Unlock()
+	if ips, ok := d.cachedIPs(key, time.Now()); ok {
 		return ips, nil
 	}
-	d.mu.Unlock()
 
-	ips, err := d.resolver.LookupNetIP(ctx, "ip", host)
-	if err != nil {
-		return nil, err
+	resultCh := d.lookupGroup.DoChan(key, func() (any, error) {
+		now := time.Now()
+		if ips, ok := d.cachedIPs(key, now); ok {
+			return ips, nil
+		}
+		ips, err := d.resolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		ipList := make([]net.IP, 0, len(ips))
+		for _, ip := range ips {
+			ipList = append(ipList, append(net.IP(nil), ip.AsSlice()...))
+		}
+		d.mu.Lock()
+		d.mu.cacheMap[key] = dnsCacheEntry{
+			ips:      ipList,
+			deadline: now.Add(d.cacheTTL),
+		}
+		d.mu.Unlock()
+		return ipList, nil
+	})
+	select {
+	case result := <-resultCh:
+		if result.Err != nil {
+			return nil, result.Err
+		}
+		return result.Val.([]net.IP), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	ipList := make([]net.IP, 0, len(ips))
-	for _, ip := range ips {
-		ipList = append(ipList, append(net.IP(nil), ip.AsSlice()...))
-	}
+}
+
+func (d *DNSDialer) cachedIPs(key string, now time.Time) ([]net.IP, bool) {
 	d.mu.Lock()
-	d.mu.cacheMap[key] = dnsCacheEntry{
-		ips:      ipList,
-		deadline: now.Add(d.cacheTTL),
+	defer d.mu.Unlock()
+	entry, ok := d.mu.cacheMap[key]
+	if !ok || !now.Before(entry.deadline) {
+		return nil, false
 	}
-	d.mu.Unlock()
-	return ipList, nil
+	return entry.ips, true
 }
