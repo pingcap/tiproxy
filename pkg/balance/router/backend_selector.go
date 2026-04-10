@@ -8,6 +8,8 @@ import "net"
 type ClientInfo struct {
 	ClientAddr net.Addr
 	ProxyAddr  net.Addr
+	// ListenerPort is the SQL listener port that accepted the connection.
+	ListenerPort string
 	// TODO: username, database, etc.
 }
 
