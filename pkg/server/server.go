@@ -119,6 +119,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup namespace manager
 	{
+		srv.namespaceManager.SetBackendNetwork(srv.clusterManager.NetworkRouter())
 		nscs, nerr := srv.configManager.ListAllNamespace(ctx)
 		if nerr != nil {
 			err = nerr
@@ -174,6 +175,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		if err != nil {
 			return
 		}
+		srv.proxy.SetBackendDialer(srv.clusterManager.NetworkRouter())
 		srv.proxy.Run(ctx, srv.configManager.WatchConfig())
 	}
 
