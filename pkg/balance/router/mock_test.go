@@ -133,15 +133,26 @@ func (mbo *mockBackendObserver) toggleBackendHealth(addr string) {
 }
 
 func (mbo *mockBackendObserver) addBackend(addr string, labels map[string]string) {
+	mbo.addBackendWithCluster(addr, "", labels)
+}
+
+func (mbo *mockBackendObserver) addBackendWithCluster(addr, clusterName string, labels map[string]string) {
 	mbo.healthLock.Lock()
 	defer mbo.healthLock.Unlock()
 	mbo.healths[addr] = &observer.BackendHealth{
 		Healthy: true,
 		BackendInfo: observer.BackendInfo{
-			Addr:   addr,
-			Labels: labels,
+			Addr:        addr,
+			ClusterName: clusterName,
+			Labels:      labels,
 		},
 	}
+}
+
+func (mbo *mockBackendObserver) setLabels(addr string, labels map[string]string) {
+	mbo.healthLock.Lock()
+	defer mbo.healthLock.Unlock()
+	mbo.healths[addr].Labels = labels
 }
 
 func (mbo *mockBackendObserver) Start(ctx context.Context) {

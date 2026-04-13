@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	ErrNoBackend = errors.New("no available backend")
+	ErrNoBackend    = errors.New("no available backend")
+	ErrPortConflict = errors.New("port routing conflict")
 )
 
 // ConnEventReceiver receives connection events.
@@ -188,6 +189,7 @@ func (b *backendWrapper) ClusterName() string {
 	defer b.mu.RUnlock()
 	return b.mu.BackendHealth.ClusterName
 }
+
 func (b *backendWrapper) Cidr() []string {
 	labels := b.getHealth().Labels
 	if len(labels) == 0 {
@@ -207,6 +209,14 @@ func (b *backendWrapper) Cidr() []string {
 		}
 	}
 	return cidrs
+}
+
+func (b *backendWrapper) TiProxyPort() string {
+	labels := b.getHealth().Labels
+	if len(labels) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(labels[config.TiProxyPortLabelName])
 }
 
 func (b *backendWrapper) String() string {

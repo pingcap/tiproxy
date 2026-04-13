@@ -31,6 +31,8 @@ const (
 	MatchClientCIDR
 	// Match connections based on proxy CIDR. If proxy-protocol is disabled, route by the client CIDR.
 	MatchProxyCIDR
+	// Match connections based on the local SQL listener port.
+	MatchPort
 )
 
 var _ ConnEventReceiver = (*Group)(nil)
@@ -105,7 +107,7 @@ func (g *Group) Match(clientInfo ClientInfo) bool {
 
 func (g *Group) EqualValues(values []string) bool {
 	switch g.matchType {
-	case MatchClientCIDR, MatchProxyCIDR:
+	case MatchClientCIDR, MatchProxyCIDR, MatchPort:
 		if len(g.values) != len(values) {
 			return false
 		}
@@ -124,7 +126,7 @@ func (g *Group) EqualValues(values []string) bool {
 // E.g. enable public endpoint (3 cidrs) -> enable private endpoint (6 cidrs) -> disable public endpoint (3 cidrs).
 func (g *Group) Intersect(values []string) bool {
 	switch g.matchType {
-	case MatchClientCIDR, MatchProxyCIDR:
+	case MatchClientCIDR, MatchProxyCIDR, MatchPort:
 		for _, v := range g.values {
 			if slices.Contains(values, v) {
 				return true
