@@ -282,7 +282,8 @@ func (ps *ProxyServer) Check() error {
 	return nil
 }
 
-func splitAddrList(addrs string) []string {
+// SplitAddrList splits a comma-separated address list, trims each address, and drops empty entries.
+func SplitAddrList(addrs string) []string {
 	parts := strings.Split(addrs, ",")
 	trimmed := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -295,7 +296,7 @@ func splitAddrList(addrs string) []string {
 }
 
 func validateAddrList(addrs, field string) error {
-	parts := splitAddrList(addrs)
+	parts := SplitAddrList(addrs)
 	if len(parts) == 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "%s is empty", field)
 	}
@@ -345,7 +346,7 @@ func normalizeNSServer(server string) (string, error) {
 }
 
 func (ps *ProxyServer) GetSQLAddrs() ([]string, error) {
-	addrs := splitAddrList(ps.Addr)
+	addrs := SplitAddrList(ps.Addr)
 	if len(addrs) == 0 {
 		if len(ps.PortRange) == 0 {
 			return []string{""}, nil
