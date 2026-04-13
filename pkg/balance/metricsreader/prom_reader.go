@@ -28,6 +28,7 @@ type PromReader struct {
 	queryExprs   map[string]QueryExpr
 	queryResults map[string]QueryResult
 	promFetcher  PromInfoFetcher
+	clusterName  string
 	lg           *zap.Logger
 	cfg          *config.HealthCheck
 }
@@ -64,6 +65,7 @@ func (pr *PromReader) ReadMetrics(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		qr = attachClusterLabel(qr, pr.clusterName)
 		qr.UpdateTime = time.Now()
 		results[id] = qr
 	}

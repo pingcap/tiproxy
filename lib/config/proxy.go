@@ -24,6 +24,8 @@ var (
 	ErrInvalidConfigValue              = errors.New("invalid config value")
 )
 
+const DefaultBackendClusterName = "default"
+
 type Config struct {
 	Proxy               ProxyServer           `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
 	API                 API                   `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
@@ -249,7 +251,7 @@ func (cfg *Config) GetBackendClusters() []BackendCluster {
 		return nil
 	}
 	return []BackendCluster{{
-		Name:    "default",
+		Name:    DefaultBackendClusterName,
 		PDAddrs: cfg.Proxy.PDAddrs,
 	}}
 }

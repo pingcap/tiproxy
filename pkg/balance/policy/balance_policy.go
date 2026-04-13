@@ -18,6 +18,7 @@ type BalancePolicy interface {
 }
 
 type BackendCtx interface {
+	ID() string
 	Addr() string
 	// ConnCount indicates the count of current connections.
 	ConnCount() int

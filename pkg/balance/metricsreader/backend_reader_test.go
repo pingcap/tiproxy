@@ -502,8 +502,8 @@ func TestHistory2QueryResult(t *testing.T) {
 				"key2": {ResultType: model.ValVector},
 			},
 			queryResult: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(2), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1"}}},
-				"key2": model.Vector{{Value: model.SampleValue(3), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1"}}},
+				"key1": model.Vector{{Value: model.SampleValue(2), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1", LabelNameCluster: model.LabelValue(config.DefaultBackendClusterName)}}},
+				"key2": model.Vector{{Value: model.SampleValue(3), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1", LabelNameCluster: model.LabelValue(config.DefaultBackendClusterName)}}},
 			},
 		},
 		{
@@ -527,10 +527,10 @@ func TestHistory2QueryResult(t *testing.T) {
 				"key2": {ResultType: model.ValVector},
 			},
 			queryResult: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(2), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend1"}}},
+				"key1": model.Vector{{Value: model.SampleValue(2), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend1", LabelNameCluster: model.LabelValue(config.DefaultBackendClusterName)}}},
 				"key2": model.Vector{
-					{Value: model.SampleValue(4), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend1"}},
-					{Value: model.SampleValue(6), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend2"}},
+					{Value: model.SampleValue(4), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend1", LabelNameCluster: model.LabelValue(config.DefaultBackendClusterName)}},
+					{Value: model.SampleValue(6), Timestamp: 2, Metric: model.Metric{LabelNameInstance: "backend2", LabelNameCluster: model.LabelValue(config.DefaultBackendClusterName)}},
 				},
 			},
 		},
@@ -555,10 +555,10 @@ func TestHistory2QueryResult(t *testing.T) {
 				"key2": {ResultType: model.ValMatrix},
 			},
 			queryResult: map[string]model.Value{
-				"key1": model.Vector{{Value: model.SampleValue(1), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1"}}},
+				"key1": model.Vector{{Value: model.SampleValue(1), Timestamp: 1, Metric: model.Metric{LabelNameInstance: "backend1", LabelNameCluster: model.LabelValue(config.DefaultBackendClusterName)}}},
 				"key2": model.Matrix{
-					{Values: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}}, Metric: model.Metric{LabelNameInstance: "backend1"}},
-					{Values: []model.SamplePair{{Value: model.SampleValue(3), Timestamp: 1}, {Value: model.SampleValue(4), Timestamp: 2}}, Metric: model.Metric{LabelNameInstance: "backend2"}},
+					{Values: []model.SamplePair{{Value: model.SampleValue(2), Timestamp: 1}}, Metric: model.Metric{LabelNameInstance: "backend1", LabelNameCluster: model.LabelValue(config.DefaultBackendClusterName)}},
+					{Values: []model.SamplePair{{Value: model.SampleValue(3), Timestamp: 1}, {Value: model.SampleValue(4), Timestamp: 2}}, Metric: model.Metric{LabelNameInstance: "backend2", LabelNameCluster: model.LabelValue(config.DefaultBackendClusterName)}},
 				},
 			},
 		},
@@ -1149,7 +1149,7 @@ func TestQueryAllOwners(t *testing.T) {
 	br := NewBackendReader(lg, nil, nil, suite.client, nil, nil)
 	for i, test := range tests {
 		for i, key := range test.keys {
-			key = fmt.Sprintf("%s%s", readerOwnerKeyPrefix, key)
+			key = fmt.Sprintf("%s%s", readerOwnerKeyPrefixForCluster(""), key)
 			suite.putKV(key, test.values[i])
 		}
 		zones, owners, err := br.queryAllOwners(context.Background())
@@ -1166,7 +1166,7 @@ func TestQueryAllOwners(t *testing.T) {
 			slices.Sort(zones)
 			require.Equal(t, test.zones, zones, "case %d", i)
 		}
-		suite.delKV(readerOwnerKeyPrefix)
+		suite.delKV(readerOwnerKeyPrefixForCluster(""))
 	}
 }
 
@@ -1184,7 +1184,7 @@ func TestUpdateLabel(t *testing.T) {
 	defer br.Close()
 
 	checkKeyPrefix := func(prefix string) bool {
-		kvs := suite.getKV(readerOwnerKeyPrefix)
+		kvs := suite.getKV(readerOwnerKeyPrefixForCluster(""))
 		if len(kvs) != 1 {
 			return false
 		}
@@ -1192,7 +1192,7 @@ func TestUpdateLabel(t *testing.T) {
 	}
 
 	// campaign for the global owner
-	prefix := fmt.Sprintf("%s/%s", readerOwnerKeyPrefix, readerOwnerKeySuffix)
+	prefix := fmt.Sprintf("%s/%s", readerOwnerKeyPrefixForCluster(""), readerOwnerKeySuffix)
 	require.Eventually(t, func() bool {
 		return checkKeyPrefix(prefix)
 	}, 3*time.Second, 10*time.Millisecond)
@@ -1201,7 +1201,7 @@ func TestUpdateLabel(t *testing.T) {
 	cfg.Labels = map[string]string{config.LocationLabelName: "east"}
 	err = br.ReadMetrics(context.Background())
 	require.NoError(t, err)
-	prefix = fmt.Sprintf("%s/east/%s", readerOwnerKeyPrefix, readerOwnerKeySuffix)
+	prefix = fmt.Sprintf("%s/east/%s", readerOwnerKeyPrefixForCluster(""), readerOwnerKeySuffix)
 	require.Eventually(t, func() bool {
 		return checkKeyPrefix(prefix)
 	}, 3*time.Second, 10*time.Millisecond)
@@ -1255,7 +1255,7 @@ func TestElection(t *testing.T) {
 	// setup etcd
 	suite := newEtcdTestSuite(t)
 	t.Cleanup(suite.close)
-	ownerKey := fmt.Sprintf("%s/%s", readerOwnerKeyPrefix, readerOwnerKeySuffix)
+	ownerKey := fmt.Sprintf("%s/%s", readerOwnerKeyPrefixForCluster(""), readerOwnerKeySuffix)
 	suite.putKV(ownerKey, addr)
 	require.Eventually(t, func() bool {
 		kvs := suite.getKV(ownerKey)
@@ -1329,4 +1329,38 @@ func setupTypicalBackendListener(t *testing.T, respBody string) (backendPort int
 	}
 	t.Cleanup(backendHttpHandler.Close)
 	return
+}
+
+func TestBackendMetricOwnerPath(t *testing.T) {
+	require.Equal(t, "/api/backend/metrics", backendMetricOwnerPath(""))
+	require.Equal(t, "/api/backend/metrics?cluster=cluster-a", backendMetricOwnerPath("cluster-a"))
+	require.Equal(t, "/api/backend/metrics?cluster=cluster+a%2Fb", backendMetricOwnerPath("cluster a/b"))
+}
+
+func TestReaderOwnerKeyPrefixForCluster(t *testing.T) {
+	require.Equal(t, "/tiproxy/metric_reader", readerOwnerKeyPrefixForCluster(""))
+	require.Equal(t, "/tiproxy/metric_reader", readerOwnerKeyPrefixForCluster(config.DefaultBackendClusterName))
+	require.Equal(t, "/tiproxy/metric_reader/cluster-a", readerOwnerKeyPrefixForCluster("cluster-a"))
+	require.Equal(t, "/tiproxy/metric_reader/cluster-a", readerOwnerKeyPrefixForCluster(" cluster-a "))
+}
+
+func TestQueryAllOwnersForNamedCluster(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	suite := newEtcdTestSuite(t)
+	defer suite.close()
+
+	suite.putKV("/tiproxy/metric_reader/owner/1000", "default-owner")
+	suite.putKV("/tiproxy/metric_reader/east/owner/1001", "default-east-owner")
+	suite.putKV("/tiproxy/metric_reader/cluster-a/owner/1002", "cluster-a-owner")
+	suite.putKV("/tiproxy/metric_reader/cluster-a/east/owner/1003", "cluster-a-east-owner")
+	suite.putKV("/tiproxy/metric_reader/cluster-b/owner/1004", "cluster-b-owner")
+
+	br := NewClusterBackendReader(lg, "cluster-a", nil, nil, suite.client, nil, nil)
+	zones, owners, err := br.queryAllOwners(context.Background())
+	require.NoError(t, err)
+
+	slices.Sort(zones)
+	slices.Sort(owners)
+	require.Equal(t, []string{"east"}, zones)
+	require.Equal(t, []string{"cluster-a-east-owner", "cluster-a-owner"}, owners)
 }

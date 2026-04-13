@@ -26,7 +26,7 @@ import (
 type NamespaceManager interface {
 	Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 		promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
-		metricsReader metricsreader.MetricsReader) error
+		metricsReader metricsreader.MetricsQuerier) error
 	CommitNamespaces(nss []*config.Namespace, nssDelete []bool) error
 	GetNamespace(nm string) (*Namespace, bool)
 	GetNamespaceByUser(user string) (*Namespace, bool)
@@ -40,7 +40,7 @@ type namespaceManager struct {
 	nsm           map[string]*Namespace
 	tpFetcher     observer.TopologyFetcher
 	promFetcher   metricsreader.PromInfoFetcher
-	metricsReader metricsreader.MetricsReader
+	metricsReader metricsreader.MetricsQuerier
 	httpCli       *http.Client
 	logger        *zap.Logger
 	cfgMgr        *mconfig.ConfigManager
@@ -105,7 +105,7 @@ func (mgr *namespaceManager) CommitNamespaces(nss []*config.Namespace, nssDelete
 
 func (mgr *namespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
-	metricsReader metricsreader.MetricsReader) error {
+	metricsReader metricsreader.MetricsQuerier) error {
 	mgr.Lock()
 	mgr.tpFetcher = tpFetcher
 	mgr.promFetcher = promFetcher

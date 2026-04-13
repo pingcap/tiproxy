@@ -635,7 +635,9 @@ func TestForwardUntilError(t *testing.T) {
 	wg.Run(func() {
 		testTCPConn(t,
 			func(t *testing.T, cli *packetIO) {
-				require.NoError(t, cli.Close())
+				tcpConn, ok := cli.rawConn.(*net.TCPConn)
+				require.True(t, ok)
+				require.NoError(t, tcpConn.SetLinger(0))
 			},
 			func(t *testing.T, srv2 *packetIO) {
 				srv2.ApplyOpts(WithWrapError(peerErr))

@@ -11,11 +11,11 @@ import (
 )
 
 type BackendReader interface {
-	GetBackendMetrics() []byte
+	GetBackendMetricsByCluster(cluster string) []byte
 }
 
 func (h *Server) BackendMetrics(c *gin.Context) {
-	metrics := h.mgr.BackendReader.GetBackendMetrics()
+	metrics := h.mgr.BackendReader.GetBackendMetricsByCluster(c.Query("cluster"))
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(http.StatusOK)
 	if _, err := c.Writer.Write(metrics); err != nil {
