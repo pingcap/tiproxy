@@ -710,6 +710,7 @@ func (mgr *BackendConnManager) Redirect(backendInst router.BackendInst) bool {
 	return true
 }
 
+// ForceClose forces closing the connection when the failover times out.
 func (mgr *BackendConnManager) ForceClose() bool {
 	for {
 		status := mgr.closeStatus.Load()
