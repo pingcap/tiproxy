@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -134,8 +135,10 @@ func TestShouldRejectNewConnTracksConnBufferMemory(t *testing.T) {
 	cfg := config.NewConfig()
 	cfg.Proxy.HighMemoryUsageRejectThreshold = 0.9
 	cfgGetter := mockCfgGetter{cfg: cfg}
+	var used atomic.Uint64
+	used.Store(890)
 	memory.MemUsed = func() (uint64, error) {
-		return 890, nil
+		return used.Load(), nil
 	}
 	memory.MemTotal = func() (uint64, error) {
 		return 1000, nil
@@ -153,6 +156,17 @@ func TestShouldRejectNewConnTracksConnBufferMemory(t *testing.T) {
 
 	m.UpdateConnBufferMemory(20)
 	reject, snapshot, threshold := m.ShouldRejectNewConn()
+	require.True(t, reject)
+	require.Equal(t, 0.9, threshold)
+	require.Equal(t, uint64(910), snapshot.Used)
+	require.InDelta(t, 0.91, snapshot.Usage, 0.0001)
+
+	used.Store(910)
+	snapshot, err := m.refreshUsage()
+	require.NoError(t, err)
+	require.Equal(t, uint64(910), snapshot.Used)
+	require.InDelta(t, 0.91, snapshot.Usage, 0.0001)
+	reject, snapshot, threshold = m.ShouldRejectNewConn()
 	require.True(t, reject)
 	require.Equal(t, 0.9, threshold)
 	require.Equal(t, uint64(910), snapshot.Used)

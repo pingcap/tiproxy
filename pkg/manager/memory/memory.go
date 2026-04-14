@@ -32,12 +32,11 @@ const (
 )
 
 type UsageSnapshot struct {
-	Used                   uint64
-	Limit                  uint64
-	Usage                  float64
-	UpdateTime             time.Time
-	EstimatedConnBufferMem int64
-	Valid                  bool
+	Used       uint64
+	Limit      uint64
+	Usage      float64
+	UpdateTime time.Time
+	Valid      bool
 }
 
 // MemManager is a manager for memory usage.
@@ -56,7 +55,8 @@ type MemManager struct {
 	snapshotExpire    time.Duration // used for test
 	memoryLimit       uint64
 	latestUsage       atomic.Value
-	connBufferMem     atomic.Int64
+	// connBufferMemDelta tracks the estimated buffer memory change since the latest refreshUsage.
+	connBufferMemDelta atomic.Int64
 }
 
 func NewMemManager(lg *zap.Logger, cfgGetter config.ConfigGetter) *MemManager {
@@ -142,13 +142,15 @@ func (m *MemManager) refreshUsage() (UsageSnapshot, error) {
 		m.lg.Error("get used memory failed", zap.Uint64("used", used), zap.Error(err))
 		return UsageSnapshot{}, err
 	}
+	// Start a new delta window from this sampled snapshot. Later connection create/close
+	// events only adjust the in-memory estimate relative to this refresh result.
+	m.connBufferMemDelta.Swap(0)
 	snapshot := UsageSnapshot{
-		Used:                   used,
-		Limit:                  m.memoryLimit,
-		Usage:                  float64(used) / float64(m.memoryLimit),
-		UpdateTime:             time.Now(),
-		EstimatedConnBufferMem: m.connBufferMem.Load(),
-		Valid:                  true,
+		Used:       used,
+		Limit:      m.memoryLimit,
+		Usage:      float64(used) / float64(m.memoryLimit),
+		UpdateTime: time.Now(),
+		Valid:      true,
 	}
 	m.latestUsage.Store(snapshot)
 	return snapshot, nil
@@ -163,22 +165,13 @@ func (m *MemManager) UpdateConnBufferMemory(delta int64) {
 	if m == nil || delta == 0 {
 		return
 	}
-	for {
-		current := m.connBufferMem.Load()
-		next := current + delta
-		if next < 0 {
-			next = 0
-		}
-		if m.connBufferMem.CompareAndSwap(current, next) {
-			return
-		}
-	}
+	m.connBufferMemDelta.Add(delta)
 }
 
+// adjustUsageByConnBuffer applies the connection buffer delta accumulated after the
+// latest refreshUsage, so ShouldRejectNewConn can react before the next memory sample.
 func (m *MemManager) adjustUsageByConnBuffer(snapshot UsageSnapshot) UsageSnapshot {
-	current := m.connBufferMem.Load()
-	delta := current - snapshot.EstimatedConnBufferMem
-	snapshot.EstimatedConnBufferMem = current
+	delta := m.connBufferMemDelta.Load()
 	if delta == 0 {
 		return snapshot
 	}
