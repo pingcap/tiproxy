@@ -67,6 +67,17 @@ type memoryStateProvider interface {
 	ShouldRejectNewConn() (bool, mgrmem.UsageSnapshot, float64)
 }
 
+type connBufferMemoryUpdater interface {
+	UpdateConnBufferMemory(delta int64)
+}
+
+func estimateConnBufferMemDelta(bufferSize int) int64 {
+	if bufferSize == 0 {
+		bufferSize = pnet.DefaultConnBufferSize
+	}
+	return int64(bufferSize)
+}
+
 // NewSQLServer creates a new SQLServer.
 func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture,
 	meter backend.Meter, hsHandler backend.HandshakeHandler, memUsage memoryStateProvider) (*SQLServer, error) {
@@ -174,9 +185,12 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		return
 	}
 
-	var connBufferTracker pnet.ConnBufferMemoryTracker
+	var (
+		connBufferUpdater  connBufferMemoryUpdater
+		connBufferMemDelta int64
+	)
 	if s.memUsage != nil {
-		connBufferTracker, _ = s.memUsage.(pnet.ConnBufferMemoryTracker)
+		connBufferUpdater, _ = s.memUsage.(connBufferMemoryUpdater)
 	}
 
 	tcpKeepAlive, logger, connID, clientConn := func() (bool, *zap.Logger, uint64, *client.ClientConnection) {
@@ -202,7 +216,6 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				HealthyKeepAlive:    s.mu.healthyKeepAlive,
 				UnhealthyKeepAlive:  s.mu.unhealthyKeepAlive,
 				ConnBufferSize:      s.mu.connBufferSize,
-				ConnBufferTracker:   connBufferTracker,
 				FromPublicEndpoints: s.fromPublicEndpoint,
 				DialContext: func(ctx context.Context, backendInst router.BackendInst, addr string) (net.Conn, error) {
 					if s.dialer != nil {
@@ -213,6 +226,10 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				},
 			}, s.meter)
 		s.mu.clients[connID] = clientConn
+		connBufferMemDelta = estimateConnBufferMemDelta(s.mu.connBufferSize)
+		if connBufferUpdater != nil {
+			connBufferUpdater.UpdateConnBufferMemory(connBufferMemDelta)
+		}
 		logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
 		return s.mu.tcpKeepAlive, logger, connID, clientConn
 	}()
@@ -228,6 +245,9 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		s.mu.Lock()
 		delete(s.mu.clients, connID)
 		s.mu.Unlock()
+		if connBufferUpdater != nil {
+			connBufferUpdater.UpdateConnBufferMemory(-connBufferMemDelta)
+		}
 
 		if err := clientConn.Close(); err != nil && !pnet.IsDisconnectError(err) {
 			logger.Error("close connection fails", zap.Error(err))

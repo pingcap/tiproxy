@@ -97,7 +97,6 @@ type BCConfig struct {
 	DialTimeout          time.Duration
 	ConnectTimeout       time.Duration
 	ConnBufferSize       int
-	ConnBufferTracker    pnet.ConnBufferMemoryTracker
 	ProxyProtocol        bool
 	RequireBackendTLS    bool
 }
@@ -331,7 +330,6 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			backendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize,
 				pnet.WithRemoteAddr(addr, cn.RemoteAddr()),
 				pnet.WithWrapError(ErrBackendConn),
-				pnet.WithConnBufferMemoryTracker(mgr.config.ConnBufferTracker),
 			))
 			mgr.backendIO.Store(&backendIO)
 			mgr.curBackend = backend
@@ -665,7 +663,6 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	newBackendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize,
 		pnet.WithRemoteAddr((*backendInst).Addr(), cn.RemoteAddr()),
 		pnet.WithWrapError(ErrBackendConn),
-		pnet.WithConnBufferMemoryTracker(mgr.config.ConnBufferTracker),
 	))
 
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {

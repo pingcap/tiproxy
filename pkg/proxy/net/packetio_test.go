@@ -6,7 +6,6 @@ package net
 import (
 	"encoding/binary"
 	"net"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,14 +18,6 @@ import (
 	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 )
-
-type mockConnBufferTracker struct {
-	bytes atomic.Int64
-}
-
-func (t *mockConnBufferTracker) UpdateConnBufferMemory(delta int64) {
-	t.bytes.Add(delta)
-}
 
 func testPipeConn(t *testing.T, a func(*testing.T, *packetIO), b func(*testing.T, *packetIO), loop int) {
 	lg, _ := logger.CreateLoggerForTest(t)
@@ -871,26 +862,4 @@ func TestPoolSizeMismatch(t *testing.T) {
 	require.True(t, brw1.pooled)
 	_ = p1.Close()
 	_ = p2.Close()
-}
-
-func TestPacketIOConnBufferTracking(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
-	tracker := &mockConnBufferTracker{}
-	customSize := DefaultConnBufferSize * 2
-	expected := int64(customSize * 2)
-
-	c1, c2 := net.Pipe()
-	packetIO := NewPacketIO(c1, lg, customSize, WithConnBufferMemoryTracker(tracker))
-	require.Equal(t, expected, tracker.bytes.Load())
-
-	require.NoError(t, packetIO.GracefulClose())
-	require.Equal(t, expected, tracker.bytes.Load())
-
-	require.NoError(t, packetIO.Close())
-	require.Zero(t, tracker.bytes.Load())
-
-	require.NoError(t, packetIO.Close())
-	require.Zero(t, tracker.bytes.Load())
-
-	require.NoError(t, c2.Close())
 }

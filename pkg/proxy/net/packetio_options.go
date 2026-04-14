@@ -11,10 +11,6 @@ import (
 
 type PacketIOption = func(*packetIO)
 
-type ConnBufferMemoryTracker interface {
-	UpdateConnBufferMemory(delta int64)
-}
-
 func WithProxy(pi *packetIO) {
 	pi.EnableProxyServer()
 }
@@ -30,13 +26,6 @@ func WithWrapError(err error) func(pi *packetIO) {
 func WithReadPacketLimit(limit int) func(pi *packetIO) {
 	return func(pi *packetIO) {
 		pi.readPacketLimit = limit
-	}
-}
-
-func WithConnBufferMemoryTracker(tracker ConnBufferMemoryTracker) func(pi *packetIO) {
-	return func(pi *packetIO) {
-		pi.connBufferTracker = tracker
-		pi.trackConnBufferMemory()
 	}
 }
 

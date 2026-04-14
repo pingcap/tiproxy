@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -122,6 +123,40 @@ func TestRejectConnByMemory(t *testing.T) {
 		connGaugeAfter, err := metrics.ReadGauge(metrics.ConnGauge)
 		require.NoError(t, err)
 		return rejectAfter == rejectBefore+1 && createAfter == createBefore && connGaugeAfter == connGaugeBefore
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestTrackConnBufferMemDelta(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	cfg := &config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				ConnBufferSize: 4096,
+			},
+		},
+	}
+	require.NoError(t, certManager.Init(cfg, lg, nil))
+	memUsage := &mockMemUsageProvider{}
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, nil, &mockHsHandler{}, memUsage)
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+	defer func() {
+		server.PreClose()
+		require.NoError(t, server.Close())
+		certManager.Close()
+	}()
+
+	conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return memUsage.connBufferMemDelta.Load() == int64(cfg.Proxy.ConnBufferSize)
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, conn.Close())
+	require.Eventually(t, func() bool {
+		return memUsage.connBufferMemDelta.Load() == 0
 	}, time.Second, 10*time.Millisecond)
 }
 
@@ -493,13 +528,18 @@ type mockHsHandler struct {
 }
 
 type mockMemUsageProvider struct {
-	reject    bool
-	snapshot  mgrmem.UsageSnapshot
-	threshold float64
+	reject             bool
+	snapshot           mgrmem.UsageSnapshot
+	threshold          float64
+	connBufferMemDelta atomic.Int64
 }
 
 func (m *mockMemUsageProvider) ShouldRejectNewConn() (bool, mgrmem.UsageSnapshot, float64) {
 	return m.reject, m.snapshot, m.threshold
+}
+
+func (m *mockMemUsageProvider) UpdateConnBufferMemory(delta int64) {
+	m.connBufferMemDelta.Add(delta)
 }
 
 // HandleHandshakeResp only panics for the first connections.
