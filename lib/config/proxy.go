@@ -267,10 +267,6 @@ func (ps *ProxyServer) Check() error {
 	if _, err := ps.GetSQLAddrs(); err != nil {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.addr or proxy.port-range: %s", err.Error())
 	}
-	if len(ps.BackendClusters) == 0 {
-		return nil
-	}
-
 	clusterNames := make(map[string]struct{}, len(ps.BackendClusters))
 	for i, cluster := range ps.BackendClusters {
 		name := strings.TrimSpace(cluster.Name)
@@ -288,6 +284,7 @@ func (ps *ProxyServer) Check() error {
 			return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.backend-clusters.ns-servers: %s", err.Error())
 		}
 	}
+
 	if ps.FailoverTimeout < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "proxy.failover-timeout must be greater than or equal to 0")
 	}
@@ -299,7 +296,7 @@ func (ps *ProxyServer) Check() error {
 			return errors.Wrapf(ErrInvalidConfigValue, "proxy.fail-backend-list[%d] is empty", i)
 		}
 		if _, ok := failBackendSet[backendName]; ok {
-			return errors.Wrapf(ErrInvalidConfigValue, "duplicate proxy.fail-backend-list entry %s", backendName)
+			continue
 		}
 		failBackendSet[backendName] = struct{}{}
 		failBackends = append(failBackends, backendName)

@@ -198,12 +198,6 @@ func TestProxyCheck(t *testing.T) {
 		},
 		{
 			pre: func(t *testing.T, c *Config) {
-				c.Proxy.FailBackendList = []string{"db-tidb-0", "db-tidb-0"}
-			},
-			err: ErrInvalidConfigValue,
-		},
-		{
-			pre: func(t *testing.T, c *Config) {
 				c.Proxy.FailoverTimeout = -1
 			},
 			err: ErrInvalidConfigValue,
