@@ -298,8 +298,8 @@ func (g *Group) CloseTimedOutFailoverConnections(now time.Time, timeout time.Dur
 	g.Lock()
 	defer g.Unlock()
 	for _, backend := range g.backends {
-		active, since := backend.Failover()
-		if !active {
+		since := backend.FailoverSince()
+		if since.IsZero() {
 			continue
 		}
 		if timeout > 0 && since.Add(timeout).After(now) {
@@ -319,7 +319,7 @@ func (g *Group) CloseTimedOutFailoverConnections(now time.Time, timeout time.Dur
 			}
 			if conn.ForceClose() {
 				conn.forceClosing = true
-				g.lg.Warn("force close connection on failover backend", fields...)
+				g.lg.Info("force close connection on failover backend", fields...)
 			}
 		}
 	}

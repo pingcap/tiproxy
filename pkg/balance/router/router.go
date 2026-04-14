@@ -91,8 +91,7 @@ type backendWrapper struct {
 	mu struct {
 		sync.RWMutex
 		observer.BackendHealth
-		failoverActive bool
-		failoverSince  time.Time
+		failoverSince time.Time
 	}
 	id      string
 	addr    string
@@ -145,7 +144,7 @@ func (b *backendWrapper) Addr() string {
 
 func (b *backendWrapper) Healthy() bool {
 	b.mu.RLock()
-	healthy := b.mu.Healthy && !b.mu.failoverActive
+	healthy := b.mu.Healthy && b.mu.failoverSince.IsZero()
 	b.mu.RUnlock()
 	return healthy
 }
@@ -165,24 +164,21 @@ func (b *backendWrapper) setFailover(active bool, since time.Time) (changed bool
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if active {
-		if b.mu.failoverActive {
+		if !b.mu.failoverSince.IsZero() {
 			return false, b.mu.failoverSince
 		}
-		b.mu.failoverActive = true
 		b.mu.failoverSince = since
 		return true, b.mu.failoverSince
 	}
-	if !b.mu.failoverActive {
+	if b.mu.failoverSince.IsZero() {
 		return false, time.Time{}
 	}
-	b.mu.failoverActive = false
 	b.mu.failoverSince = time.Time{}
 	return true, time.Time{}
 }
 
-func (b *backendWrapper) Failover() (active bool, since time.Time) {
+func (b *backendWrapper) FailoverSince() (since time.Time) {
 	b.mu.RLock()
-	active = b.mu.failoverActive
 	since = b.mu.failoverSince
 	b.mu.RUnlock()
 	return
