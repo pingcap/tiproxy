@@ -228,7 +228,6 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 				zap.String("backend_id", backendID), zap.String("addr", health.Addr), zap.Stringer("health", health))
 			backend = newBackendWrapper(backendID, *health)
 			router.backends[backendID] = backend
-			router.setBackendFailoverLocked(backend, now)
 			serverVersion = health.ServerVersion
 		} else if ok {
 			if !health.Equals(backend.getHealth()) {
@@ -236,7 +235,6 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 					zap.String("backend_id", backendID), zap.String("addr", health.Addr), zap.Stringer("health", health))
 			}
 			backend.setHealth(*health)
-			router.setBackendFailoverLocked(backend, now)
 			if health.Healthy {
 				serverVersion = health.ServerVersion
 			}
@@ -247,6 +245,7 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 		supportRedirection = health.SupportRedirection && supportRedirection
 	}
 
+	router.updateBackendFailoverLocked(now)
 	router.updateGroups()
 	if len(serverVersion) > 0 {
 		router.serverVersion = serverVersion
@@ -432,32 +431,36 @@ func (router *ScoreBasedRouter) setFailoverConfigLocked(cfg *config.Config) {
 	}
 	router.failoverBackends = failoverBackends
 	router.failoverTimeout = time.Duration(cfg.Proxy.FailoverTimeout) * time.Second
-	now := time.Now()
-	for _, backend := range router.backends {
-		router.setBackendFailoverLocked(backend, now)
-	}
+	router.updateBackendFailoverLocked(time.Now())
 }
 
-func (router *ScoreBasedRouter) setBackendFailoverLocked(backend *backendWrapper, now time.Time) {
-	_, active := router.failoverBackends[backend.PodName()]
-	if !active {
-		_, active = router.failoverBackends[backend.Addr()]
+func (router *ScoreBasedRouter) updateBackendFailoverLocked(now time.Time) {
+	for _, backend := range router.backends {
+		_, active := router.failoverBackends[backend.PodName()]
+		if !active {
+			// Also support IP:port.
+			_, active = router.failoverBackends[backend.Addr()]
+		}
+		since := time.Time{}
+		if active {
+			since = now
+		}
+		changed, since := backend.setFailover(since)
+		if !changed {
+			return
+		}
+		fields := []zap.Field{
+			zap.String("backend_addr", backend.Addr()),
+			zap.String("backend_pod", backend.PodName()),
+			zap.Duration("failover_timeout", router.failoverTimeout),
+		}
+		if active {
+			fields = append(fields, zap.Time("failover_since", since))
+			router.logger.Warn("backend enters failover", fields...)
+			return
+		}
+		router.logger.Info("backend exits failover", fields...)
 	}
-	changed, since := backend.setFailover(active, now)
-	if !changed {
-		return
-	}
-	fields := []zap.Field{
-		zap.String("backend_addr", backend.Addr()),
-		zap.String("backend_pod", backend.PodName()),
-		zap.Duration("failover_timeout", router.failoverTimeout),
-	}
-	if active {
-		fields = append(fields, zap.Time("failover_since", since))
-		router.logger.Warn("backend enters failover", fields...)
-		return
-	}
-	router.logger.Info("backend exits failover", fields...)
 }
 
 func (router *ScoreBasedRouter) ConnCount() int {

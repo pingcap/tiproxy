@@ -160,10 +160,10 @@ func (b *backendWrapper) PodName() string {
 	return b.podName
 }
 
-func (b *backendWrapper) setFailover(active bool, since time.Time) (changed bool, failoverSince time.Time) {
+func (b *backendWrapper) setFailover(since time.Time) (changed bool, failoverSince time.Time) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if active {
+	if !since.IsZero() {
 		if !b.mu.failoverSince.IsZero() {
 			return false, b.mu.failoverSince
 		}
