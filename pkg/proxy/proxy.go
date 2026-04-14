@@ -174,6 +174,11 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		return
 	}
 
+	var connBufferTracker pnet.ConnBufferMemoryTracker
+	if s.memUsage != nil {
+		connBufferTracker, _ = s.memUsage.(pnet.ConnBufferMemoryTracker)
+	}
+
 	tcpKeepAlive, logger, connID, clientConn := func() (bool, *zap.Logger, uint64, *client.ClientConnection) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -197,6 +202,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				HealthyKeepAlive:    s.mu.healthyKeepAlive,
 				UnhealthyKeepAlive:  s.mu.unhealthyKeepAlive,
 				ConnBufferSize:      s.mu.connBufferSize,
+				ConnBufferTracker:   connBufferTracker,
 				FromPublicEndpoints: s.fromPublicEndpoint,
 				DialContext: func(ctx context.Context, backendInst router.BackendInst, addr string) (net.Conn, error) {
 					if s.dialer != nil {

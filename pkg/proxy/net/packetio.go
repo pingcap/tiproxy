@@ -52,6 +52,17 @@ const (
 	DefaultConnBufferSize = 32 * 1024
 )
 
+func normalizeConnBufferSize(bufferSize int) int {
+	if bufferSize == 0 {
+		return DefaultConnBufferSize
+	}
+	return bufferSize
+}
+
+func estimateConnBufferMemory(bufferSize int) int64 {
+	return int64(normalizeConnBufferSize(bufferSize) * 2)
+}
+
 type rwStatus int
 
 const (
@@ -116,9 +127,7 @@ func getPooledWriter(conn net.Conn, size int) *bufio.Writer {
 }
 
 func newBasicReadWriter(conn net.Conn, bufferSize int) *basicReadWriter {
-	if bufferSize == 0 {
-		bufferSize = DefaultConnBufferSize
-	}
+	bufferSize = normalizeConnBufferSize(bufferSize)
 	return &basicReadWriter{
 		Conn:       conn,
 		ReadWriter: bufio.NewReadWriter(getPooledReader(conn, bufferSize), getPooledWriter(conn, bufferSize)),
@@ -274,26 +283,33 @@ type PacketIO interface {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type packetIO struct {
-	lastKeepAlive   config.KeepAlive
-	rawConn         net.Conn
-	readWriter      packetReadWriter
-	limitReader     io.LimitedReader // reuse memory to reduce allocation
-	logger          *zap.Logger
-	remoteAddr      net.Addr
-	wrap            error
-	header          [4]byte // reuse memory to reduce allocation
-	readPacketLimit int
-	inPackets       uint64
-	outPackets      uint64
+	lastKeepAlive      config.KeepAlive
+	rawConn            net.Conn
+	readWriter         packetReadWriter
+	limitReader        io.LimitedReader // reuse memory to reduce allocation
+	logger             *zap.Logger
+	remoteAddr         net.Addr
+	wrap               error
+	header             [4]byte // reuse memory to reduce allocation
+	readPacketLimit    int
+	inPackets          uint64
+	outPackets         uint64
+	connBufferEstimate int64
+	connBufferTracker  ConnBufferMemoryTracker
+	connBufferTracked  bool
+	releaseConnBuffer  sync.Once
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *packetIO {
+	bufferSize = normalizeConnBufferSize(bufferSize)
 	p := &packetIO{
-		rawConn:    conn,
-		logger:     lg,
-		readWriter: newBasicReadWriter(conn, bufferSize),
+		rawConn:            conn,
+		logger:             lg,
+		readWriter:         newBasicReadWriter(conn, bufferSize),
+		connBufferEstimate: estimateConnBufferMemory(bufferSize),
 	}
 	p.ApplyOpts(opts...)
+	p.trackConnBufferMemory()
 	return p
 }
 
@@ -301,6 +317,22 @@ func (p *packetIO) ApplyOpts(opts ...PacketIOption) {
 	for _, opt := range opts {
 		opt(p)
 	}
+}
+
+func (p *packetIO) trackConnBufferMemory() {
+	if p.connBufferTracked || p.connBufferTracker == nil || p.connBufferEstimate == 0 {
+		return
+	}
+	p.connBufferTracker.UpdateConnBufferMemory(p.connBufferEstimate)
+	p.connBufferTracked = true
+}
+
+func (p *packetIO) releaseConnBufferMemory() {
+	p.releaseConnBuffer.Do(func() {
+		if p.connBufferTracked && p.connBufferTracker != nil && p.connBufferEstimate != 0 {
+			p.connBufferTracker.UpdateConnBufferMemory(-p.connBufferEstimate)
+		}
+	})
 }
 
 func (p *packetIO) wrapErr(err error) error {
@@ -553,6 +585,7 @@ func (p *packetIO) GracefulClose() error {
 }
 
 func (p *packetIO) Close() error {
+	defer p.releaseConnBufferMemory()
 	var errs []error
 	/*
 		TODO: flush when we want to smoothly exit

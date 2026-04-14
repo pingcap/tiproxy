@@ -32,11 +32,12 @@ const (
 )
 
 type UsageSnapshot struct {
-	Used       uint64
-	Limit      uint64
-	Usage      float64
-	UpdateTime time.Time
-	Valid      bool
+	Used                   uint64
+	Limit                  uint64
+	Usage                  float64
+	UpdateTime             time.Time
+	EstimatedConnBufferMem int64
+	Valid                  bool
 }
 
 // MemManager is a manager for memory usage.
@@ -55,6 +56,7 @@ type MemManager struct {
 	snapshotExpire    time.Duration // used for test
 	memoryLimit       uint64
 	latestUsage       atomic.Value
+	connBufferMem     atomic.Int64
 }
 
 func NewMemManager(lg *zap.Logger, cfgGetter config.ConfigGetter) *MemManager {
@@ -141,11 +143,12 @@ func (m *MemManager) refreshUsage() (UsageSnapshot, error) {
 		return UsageSnapshot{}, err
 	}
 	snapshot := UsageSnapshot{
-		Used:       used,
-		Limit:      m.memoryLimit,
-		Usage:      float64(used) / float64(m.memoryLimit),
-		UpdateTime: time.Now(),
-		Valid:      true,
+		Used:                   used,
+		Limit:                  m.memoryLimit,
+		Usage:                  float64(used) / float64(m.memoryLimit),
+		UpdateTime:             time.Now(),
+		EstimatedConnBufferMem: m.connBufferMem.Load(),
+		Valid:                  true,
 	}
 	m.latestUsage.Store(snapshot)
 	return snapshot, nil
@@ -153,6 +156,45 @@ func (m *MemManager) refreshUsage() (UsageSnapshot, error) {
 
 func (m *MemManager) LatestUsage() UsageSnapshot {
 	snapshot, _ := m.latestUsage.Load().(UsageSnapshot)
+	return snapshot
+}
+
+func (m *MemManager) UpdateConnBufferMemory(delta int64) {
+	if m == nil || delta == 0 {
+		return
+	}
+	for {
+		current := m.connBufferMem.Load()
+		next := current + delta
+		if next < 0 {
+			next = 0
+		}
+		if m.connBufferMem.CompareAndSwap(current, next) {
+			return
+		}
+	}
+}
+
+func (m *MemManager) adjustUsageByConnBuffer(snapshot UsageSnapshot) UsageSnapshot {
+	current := m.connBufferMem.Load()
+	delta := current - snapshot.EstimatedConnBufferMem
+	snapshot.EstimatedConnBufferMem = current
+	if delta == 0 {
+		return snapshot
+	}
+	if delta > 0 {
+		snapshot.Used += uint64(delta)
+	} else {
+		released := uint64(-delta)
+		if released >= snapshot.Used {
+			snapshot.Used = 0
+		} else {
+			snapshot.Used -= released
+		}
+	}
+	if snapshot.Limit > 0 {
+		snapshot.Usage = float64(snapshot.Used) / float64(snapshot.Limit)
+	}
 	return snapshot
 }
 
@@ -172,6 +214,7 @@ func (m *MemManager) ShouldRejectNewConn() (bool, UsageSnapshot, float64) {
 	if !snapshot.Valid || time.Since(snapshot.UpdateTime) > m.snapshotExpire {
 		return false, snapshot, threshold
 	}
+	snapshot = m.adjustUsageByConnBuffer(snapshot)
 	return snapshot.Usage >= threshold, snapshot, threshold
 }
 
