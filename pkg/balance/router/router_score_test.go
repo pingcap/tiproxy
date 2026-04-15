@@ -806,10 +806,63 @@ func TestFailoverBackendByAddr(t *testing.T) {
 	require.Equal(t, toBackend.Addr(), backend.Addr())
 }
 
+func TestIgnoreFailoverListWhenItMatchesAllHealthyBackends(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1", "2"},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	tester.addBackends(2)
+
+	require.True(t, tester.getBackendByIndex(0).Healthy())
+	require.True(t, tester.getBackendByIndex(1).Healthy())
+	require.Equal(t, 2, tester.router.HealthyBackendCount())
+
+	selector := tester.router.GetBackendSelector(ClientInfo{})
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(nil, false)
+	require.NotNil(t, backend)
+}
+
+func TestFailoverListReevaluatedWithBackendHealth(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(3)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1", "2"},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+
+	require.False(t, tester.getBackendByIndex(0).Healthy())
+	require.False(t, tester.getBackendByIndex(1).Healthy())
+	require.True(t, tester.getBackendByIndex(2).Healthy())
+	require.Equal(t, 1, tester.router.HealthyBackendCount())
+
+	tester.updateBackendStatusByAddr("3", false)
+	require.True(t, tester.getBackendByIndex(0).Healthy())
+	require.True(t, tester.getBackendByIndex(1).Healthy())
+	require.Equal(t, 2, tester.router.HealthyBackendCount())
+
+	tester.updateBackendStatusByAddr("3", true)
+	require.False(t, tester.getBackendByIndex(0).Healthy())
+	require.False(t, tester.getBackendByIndex(1).Healthy())
+	require.True(t, tester.getBackendByIndex(2).Healthy())
+	require.Equal(t, 1, tester.router.HealthyBackendCount())
+}
+
 func TestFailoverTimeoutForceClose(t *testing.T) {
 	tester := newRouterTester(t, nil)
 	tester.addBackends(1)
 	tester.addConnections(3)
+	tester.addBackends(1)
 
 	backend := tester.getBackendByIndex(0)
 	tester.updateBackendRedirectSupportByAddr(backend.Addr(), false)
@@ -1007,6 +1060,7 @@ func TestWatchFailoverConfig(t *testing.T) {
 	router := NewScoreBasedRouter(lg)
 	cfgCh := make(chan *config.Config)
 	addr := "db-2033841436272623616-0f6e346b-tidb-0.peer.ns.svc:4000"
+	addr2 := "db-2033841436272623616-0f6e346b-tidb-1.peer.ns.svc:4000"
 	cfgGetter := newMockConfigGetter(&config.Config{
 		Proxy: config.ProxyServer{
 			ProxyServerOnline: config.ProxyServerOnline{
@@ -1020,6 +1074,7 @@ func TestWatchFailoverConfig(t *testing.T) {
 	t.Cleanup(router.Close)
 
 	bo.addBackend(addr, nil)
+	bo.addBackend(addr2, nil)
 	bo.notify(nil)
 	require.Eventually(t, func() bool {
 		backend := router.backends[addr]
