@@ -426,3 +426,110 @@ func TestWatchConfig(t *testing.T) {
 		}, time.Second, 10*time.Millisecond)
 	}
 }
+
+func TestReloadByFsnotify(t *testing.T) {
+	tmpdir := t.TempDir()
+	lg, _ := logger.CreateLoggerForTest(t)
+	caPath := filepath.Join(tmpdir, "ca")
+	keyPath := filepath.Join(tmpdir, "key")
+	certPath := filepath.Join(tmpdir, "cert")
+	caPath1 := filepath.Join(tmpdir, "c1", "ca")
+	keyPath1 := filepath.Join(tmpdir, "c1", "key")
+	certPath1 := filepath.Join(tmpdir, "c1", "cert")
+	caPath2 := filepath.Join(tmpdir, "c2", "ca")
+	keyPath2 := filepath.Join(tmpdir, "c2", "key")
+	certPath2 := filepath.Join(tmpdir, "c2", "cert")
+
+	createFile(t, caPath)
+	createFile(t, keyPath)
+	createFile(t, certPath)
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration, ""))
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 0, security.DefaultCertExpiration, ""))
+	copyFile(t, caPath1, caPath) // caPath1 is incorrect
+	copyFile(t, keyPath2, keyPath)
+	copyFile(t, certPath2, certPath)
+
+	certMgr := NewCertManager()
+	certMgr.SetRetryInterval(time.Hour)
+	require.NoError(t, certMgr.Init(&config.Config{
+		Workdir: tmpdir,
+		Security: config.Security{
+			ServerSQLTLS: config.TLSConfig{
+				Cert: certPath,
+				Key:  keyPath,
+			},
+			SQLTLS: config.TLSConfig{
+				CA: caPath,
+			},
+		},
+	}, lg, nil))
+	t.Cleanup(certMgr.Close)
+
+	stls := certMgr.ServerSQLTLS()
+	ctls := certMgr.SQLTLS()
+	clientErr, serverErr := connectWithTLS(ctls, stls)
+	require.ErrorContains(t, clientErr, "certificate signed by unknown authority")
+	require.ErrorContains(t, serverErr, "bad certificate")
+
+	copyFile(t, caPath2, caPath) // caPath2 is correct
+	require.Eventually(t, func() bool {
+		clientErr, serverErr = connectWithTLS(ctls, stls)
+		return clientErr == nil && serverErr == nil
+	}, 5*time.Second, 50*time.Millisecond)
+}
+
+func TestReloadByFsnotifyAfterChangeCertFile(t *testing.T) {
+	tmpdir := t.TempDir()
+	lg, _ := logger.CreateLoggerForTest(t)
+	caPath1 := filepath.Join(tmpdir, "c1", "ca")
+	keyPath1 := filepath.Join(tmpdir, "c1", "key")
+	certPath1 := filepath.Join(tmpdir, "c1", "cert")
+	caPath2 := filepath.Join(tmpdir, "c2", "ca")
+	keyPath2 := filepath.Join(tmpdir, "c2", "key")
+	certPath2 := filepath.Join(tmpdir, "c2", "cert")
+	caPath3 := filepath.Join(tmpdir, "c3", "ca")
+
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath1, keyPath1, caPath1, 0, security.DefaultCertExpiration, ""))
+	require.NoError(t, security.CreateTLSCertificates(lg, certPath2, keyPath2, caPath2, 0, security.DefaultCertExpiration, ""))
+	createFile(t, caPath3)
+	copyFile(t, caPath1, caPath3) // caPath3 is incorrect and will be added to the watcher after config update.
+
+	cfg := config.Config{
+		Workdir: tmpdir,
+		Security: config.Security{
+			ServerSQLTLS: config.TLSConfig{
+				Cert: certPath2,
+				Key:  keyPath2,
+			},
+			SQLTLS: config.TLSConfig{
+				CA: caPath2,
+			},
+		},
+	}
+	cfgCh := make(chan *config.Config, 1)
+	certMgr := NewCertManager()
+	certMgr.SetRetryInterval(time.Hour)
+	require.NoError(t, certMgr.Init(&cfg, lg, cfgCh))
+	t.Cleanup(certMgr.Close)
+
+	stls := certMgr.ServerSQLTLS()
+	ctls := certMgr.SQLTLS()
+	clientErr, serverErr := connectWithTLS(ctls, stls)
+	require.NoError(t, clientErr)
+	require.NoError(t, serverErr)
+
+	cfg.Security.SQLTLS.CA = caPath3
+	cfgCh <- &cfg
+	require.Eventually(t, func() bool {
+		clientErr, serverErr = connectWithTLS(ctls, stls)
+		return clientErr != nil && serverErr != nil &&
+			strings.Contains(clientErr.Error(), "certificate signed by unknown authority") &&
+			strings.Contains(serverErr.Error(), "bad certificate")
+	}, 5*time.Second, 50*time.Millisecond)
+
+	copyFile(t, caPath2, caPath3) // caPath3 becomes correct; success depends on the new watch entry taking effect.
+	require.Eventually(t, func() bool {
+		clientErr, serverErr = connectWithTLS(ctls, stls)
+		return clientErr == nil && serverErr == nil
+	}, 5*time.Second, 50*time.Millisecond)
+}
