@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	defaultRetryInterval = 5 * time.Minute
+	defaultRetryInterval     = 5 * time.Minute
+	watchEventDebounceWindow = 100 * time.Millisecond
 )
 
 // CertManager reloads certs and offers interfaces for fetching TLS configs.
@@ -133,16 +134,11 @@ func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Conf
 					cm.logger.Warn("cert file watcher is closed, stop watching")
 					break
 				}
-				cm.logger.Info("cert files changed, reload certs",
-					zap.String("path", event.Name),
-					zap.String("op", event.Op.String()))
-				if event.Op.Has(fsnotify.Chmod) || event.Op.Has(fsnotify.Remove) {
-					cm.logger.Info("cert file should re-add to watcher, because it may mount by Pod Secret", zap.String("path", event.Name))
-					if err := cm.watcher.Add(event.Name); err != nil {
-						cm.logger.Error("failed to re-add cert file", zap.String("path", event.Name), zap.Error(err))
-					}
+				if events := cm.debounceEvents(event); len(events) > 0 {
+					cm.logger.Info("cert file changed, reload cert", zap.Stringers("events", events))
+					cm.reAddWatchForKubeletSecret(events)
+					_ = cm.reload()
 				}
-				_ = cm.reload()
 			case err := <-cm.watcher.Errors:
 				if err != nil {
 					cm.logger.Warn("cert file watcher error, but still reload certs", zap.Error(err))
@@ -153,6 +149,40 @@ func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Conf
 			}
 		}
 	}, cm.logger)
+}
+
+func (cm *CertManager) debounceEvents(first fsnotify.Event) []fsnotify.Event {
+	events := []fsnotify.Event{first}
+	timer := time.NewTimer(watchEventDebounceWindow)
+	defer timer.Stop()
+	for {
+		select {
+		case event, ok := <-cm.watcher.Events:
+			if !ok {
+				return nil
+			}
+			events = append(events, event)
+			timer.Reset(watchEventDebounceWindow)
+		case <-timer.C:
+			return events
+		}
+	}
+}
+
+func (cm *CertManager) reAddWatchForKubeletSecret(events []fsnotify.Event) {
+	added := make(map[string]bool, len(events))
+	for _, event := range events {
+		if event.Op.Has(fsnotify.Chmod) || event.Op.Has(fsnotify.Remove) {
+			if added[event.Name] {
+				continue
+			}
+			cm.logger.Info("cert file should re-add to watcher, because it may mount by Pod Secret", zap.String("path", event.Name))
+			if err := cm.watcher.Add(event.Name); err != nil {
+				cm.logger.Error("failed to re-add cert file", zap.String("path", event.Name), zap.Error(err))
+			}
+			added[event.Name] = true
+		}
+	}
 }
 
 func collectCertWatchFiles(cfg *config.Config) []string {
