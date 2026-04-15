@@ -52,13 +52,6 @@ const (
 	DefaultConnBufferSize = 32 * 1024
 )
 
-func normalizeConnBufferSize(bufferSize int) int {
-	if bufferSize == 0 {
-		return DefaultConnBufferSize
-	}
-	return bufferSize
-}
-
 type rwStatus int
 
 const (
@@ -123,7 +116,9 @@ func getPooledWriter(conn net.Conn, size int) *bufio.Writer {
 }
 
 func newBasicReadWriter(conn net.Conn, bufferSize int) *basicReadWriter {
-	bufferSize = normalizeConnBufferSize(bufferSize)
+	if bufferSize == 0 {
+		bufferSize = DefaultConnBufferSize
+	}
 	return &basicReadWriter{
 		Conn:       conn,
 		ReadWriter: bufio.NewReadWriter(getPooledReader(conn, bufferSize), getPooledWriter(conn, bufferSize)),
@@ -293,7 +288,9 @@ type packetIO struct {
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *packetIO {
-	bufferSize = normalizeConnBufferSize(bufferSize)
+	if bufferSize == 0 {
+		bufferSize = DefaultConnBufferSize
+	}
 	p := &packetIO{
 		rawConn:    conn,
 		logger:     lg,

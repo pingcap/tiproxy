@@ -327,10 +327,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			// NOTE: should use DNS name as much as possible
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
-			backendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize,
-				pnet.WithRemoteAddr(addr, cn.RemoteAddr()),
-				pnet.WithWrapError(ErrBackendConn),
-			))
+			backendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize, pnet.WithRemoteAddr(addr, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn)))
 			mgr.backendIO.Store(&backendIO)
 			mgr.curBackend = backend
 			mgr.setKeepAlive()
@@ -660,10 +657,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		mgr.handshakeHandler.OnHandshake(mgr, (*backendInst).Addr(), rs.err, SrcBackendNetwork)
 		return
 	}
-	newBackendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize,
-		pnet.WithRemoteAddr((*backendInst).Addr(), cn.RemoteAddr()),
-		pnet.WithWrapError(ErrBackendConn),
-	))
+	newBackendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize, pnet.WithRemoteAddr((*backendInst).Addr(), cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn)))
 
 	if rs.err = mgr.authenticator.handshakeSecondTime(mgr.logger, mgr.clientIO, newBackendIO, mgr.backendTLS, sessionToken); rs.err == nil {
 		rs.err = mgr.initSessionStates(newBackendIO, sessionStates)
