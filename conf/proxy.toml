@@ -24,7 +24,8 @@
 graceful-close-conn-timeout = 15
 
 # fail-backend-list marks backend pod names or backend addresses as failed. TiProxy will stop routing new
-# connections to them and migrate existing connections away.
+# connections to them and migrate existing connections away. If the list would match all healthy backends,
+# TiProxy ignores the whole list to avoid making the cluster unavailable.
 # fail-backend-list = ["db-2033841436272623616-0f6e346b-tidb-0", "10.0.0.10:4000"]
 
 # failover-timeout is measured in seconds. If a failed backend still has remaining connections after the timeout,

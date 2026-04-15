@@ -51,17 +51,18 @@ type ScoreBasedRouter struct {
 	serverVersion string
 	// The backend supports redirection only when they have signing certs.
 	supportRedirection bool
-	failoverBackends   map[string]struct{}
+	failoverTargets    map[string]struct{}
 	failoverTimeout    time.Duration
+	ignoreFailoverList bool
 }
 
 // NewScoreBasedRouter creates a ScoreBasedRouter.
 func NewScoreBasedRouter(logger *zap.Logger) *ScoreBasedRouter {
 	return &ScoreBasedRouter{
-		logger:           logger,
-		backends:         make(map[string]*backendWrapper),
-		groups:           make([]*Group, 0),
-		failoverBackends: make(map[string]struct{}),
+		logger:          logger,
+		backends:        make(map[string]*backendWrapper),
+		groups:          make([]*Group, 0),
+		failoverTargets: make(map[string]struct{}),
 	}
 }
 
@@ -425,29 +426,61 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 }
 
 func (router *ScoreBasedRouter) setFailoverConfigLocked(cfg *config.Config) {
-	failoverBackends := make(map[string]struct{}, len(cfg.Proxy.FailBackendList))
+	failoverTargets := make(map[string]struct{}, len(cfg.Proxy.FailBackendList))
 	for _, backend := range cfg.Proxy.FailBackendList {
-		failoverBackends[backend] = struct{}{}
+		failoverTargets[backend] = struct{}{}
 	}
-	router.failoverBackends = failoverBackends
+	router.failoverTargets = failoverTargets
 	router.failoverTimeout = time.Duration(cfg.Proxy.FailoverTimeout) * time.Second
 	router.updateBackendFailoverLocked(time.Now())
 }
 
+func (router *ScoreBasedRouter) backendInFailoverListLocked(backend *backendWrapper) bool {
+	_, active := router.failoverTargets[backend.PodName()]
+	if !active {
+		// Also support IP:port.
+		_, active = router.failoverTargets[backend.Addr()]
+	}
+	return active
+}
+
 func (router *ScoreBasedRouter) updateBackendFailoverLocked(now time.Time) {
+	failoverBackendIDs := make(map[string]struct{}, len(router.backends))
+	healthyBackends := 0
+	matchedHealthyBackends := 0
 	for _, backend := range router.backends {
-		_, active := router.failoverBackends[backend.PodName()]
-		if !active {
-			// Also support IP:port.
-			_, active = router.failoverBackends[backend.Addr()]
+		matched := router.backendInFailoverListLocked(backend)
+		if matched {
+			failoverBackendIDs[backend.ID()] = struct{}{}
 		}
+		if !backend.ObservedHealthy() {
+			continue
+		}
+		healthyBackends++
+		if matched {
+			matchedHealthyBackends++
+		}
+	}
+	if healthyBackends > 0 && matchedHealthyBackends == healthyBackends {
+		if !router.ignoreFailoverList {
+			router.logger.Warn("fail-backend-list would leave no healthy backend, ignore the whole list",
+				zap.Int("healthy_backend_count", healthyBackends),
+				zap.Int("matched_healthy_backend_count", matchedHealthyBackends))
+		}
+		router.ignoreFailoverList = true
+		clear(failoverBackendIDs)
+	} else {
+		router.ignoreFailoverList = false
+	}
+	for _, backend := range router.backends {
+		_, active := failoverBackendIDs[backend.ID()]
 		since := time.Time{}
 		if active {
 			since = now
 		}
 		changed, since := backend.setFailover(since)
 		if !changed {
-			return
+			continue
 		}
 		fields := []zap.Field{
 			zap.String("backend_addr", backend.Addr()),
@@ -457,7 +490,7 @@ func (router *ScoreBasedRouter) updateBackendFailoverLocked(now time.Time) {
 		if active {
 			fields = append(fields, zap.Time("failover_since", since))
 			router.logger.Warn("backend enters failover", fields...)
-			return
+			continue
 		}
 		router.logger.Info("backend exits failover", fields...)
 	}
