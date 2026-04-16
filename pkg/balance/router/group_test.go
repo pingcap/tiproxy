@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
@@ -171,4 +172,118 @@ func TestRefreshCidr(t *testing.T) {
 		require.True(t, g1.EqualValues(test.final))
 		require.Equal(t, len(g1.values), len(g1.cidrList))
 	}
+}
+
+func TestFailoverBackendByAddr(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(2)
+
+	fromBackend := tester.getBackendByIndex(0)
+	toBackend := tester.getBackendByIndex(1)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.Addr()},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+
+	require.False(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+	selector := tester.router.GetBackendSelector(ClientInfo{})
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(nil, false)
+	require.NotNil(t, backend)
+	require.Equal(t, toBackend.Addr(), backend.Addr())
+}
+
+func TestIgnoreFailoverListWhenItMatchesAllHealthyBackends(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1", "2"},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	tester.addBackends(2)
+
+	require.True(t, tester.getBackendByIndex(0).Healthy())
+	require.True(t, tester.getBackendByIndex(1).Healthy())
+	require.Equal(t, 2, tester.router.HealthyBackendCount())
+
+	selector := tester.router.GetBackendSelector(ClientInfo{})
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(nil, false)
+	require.NotNil(t, backend)
+}
+
+func TestIgnoreFailoverListAfterExpandingToAllHealthyBackends(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(2)
+	tester.addConnections(20)
+
+	fromBackend := tester.getBackendByIndex(0)
+	toBackend := tester.getBackendByIndex(1)
+
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.PodName()},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	tester.rebalance(1)
+	tester.redirectFinish(10, true)
+	require.Equal(t, 0, fromBackend.ConnCount())
+	require.Equal(t, 20, toBackend.ConnCount())
+	require.False(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.PodName(), toBackend.PodName()},
+				FailoverTimeout: 0,
+			},
+		},
+	})
+	require.True(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+	require.Equal(t, 2, tester.router.HealthyBackendCount())
+
+	tester.router.groups[0].CloseTimedOutFailoverConnections(time.Now())
+	for _, conn := range tester.conns {
+		require.False(t, conn.closing)
+	}
+}
+
+func TestFailoverTimeoutForceClose(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(1)
+	tester.addConnections(3)
+	tester.addBackends(1)
+
+	backend := tester.getBackendByIndex(0)
+	tester.updateBackendRedirectSupportByAddr(backend.Addr(), false)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{backend.PodName()},
+				FailoverTimeout: 0,
+			},
+		},
+	})
+
+	tester.rebalance(1)
+	for _, conn := range tester.conns {
+		require.True(t, conn.closing)
+	}
+	tester.closeConnections(3, false)
+	tester.checkBackendConnMetrics()
 }

@@ -44,6 +44,16 @@ func (sbp *SimpleBalancePolicy) BackendToRoute(backends []BackendCtx) BackendCtx
 	return nil
 }
 
+func (sbp *SimpleBalancePolicy) RouteableBackends(backends []BackendCtx) []BackendCtx {
+	routeable := make([]BackendCtx, 0, len(backends))
+	for _, backend := range backends {
+		if backend.Healthy() {
+			routeable = append(routeable, backend)
+		}
+	}
+	return routeable
+}
+
 func (sbp *SimpleBalancePolicy) BackendsToBalance(backends []BackendCtx) (from, to BackendCtx, balanceCount float64, reason string, logFields []zap.Field) {
 	if len(backends) <= 1 {
 		return

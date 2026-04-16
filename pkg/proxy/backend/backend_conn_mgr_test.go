@@ -85,6 +85,22 @@ type mockBackendInst struct {
 	local    atomic.Bool
 }
 
+type countingPacketIO struct {
+	pnet.PacketIO
+	gracefulCloseCnt atomic.Int32
+	closeCnt         atomic.Int32
+}
+
+func (cp *countingPacketIO) GracefulClose() error {
+	cp.gracefulCloseCnt.Add(1)
+	return nil
+}
+
+func (cp *countingPacketIO) Close() error {
+	cp.closeCnt.Add(1)
+	return nil
+}
+
 func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
 	mbi := &mockBackendInst{
 		addr: ts.tc.backendListener.Addr().String(),
@@ -902,6 +918,53 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 		},
 	}
 	ts.runTests(runners)
+}
+
+func TestForceClose(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// force close
+		{
+			proxy: func(_, _ pnet.PacketIO) error {
+				require.True(t, ts.mp.ForceClose())
+				return nil
+			},
+		},
+		// really closed
+		{
+			proxy: ts.checkConnClosed4Proxy,
+		},
+		{
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
+				require.False(t, ts.mp.ForceClose())
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestForceCloseUsesGracefulClose(t *testing.T) {
+	mgr := NewBackendConnManager(zap.NewNop(), &DefaultHandshakeHandler{}, nil, 1, &BCConfig{}, nil)
+	clientIO := &countingPacketIO{}
+	mgr.clientIO = clientIO
+
+	require.True(t, mgr.ForceClose())
+	require.Equal(t, SrcProxyQuit, mgr.QuitSource())
+	require.Equal(t, int32(statusClosing), mgr.closeStatus.Load())
+	require.EqualValues(t, 1, clientIO.gracefulCloseCnt.Load())
+	require.Zero(t, clientIO.closeCnt.Load())
+
+	require.False(t, mgr.ForceClose())
+	require.EqualValues(t, 1, clientIO.gracefulCloseCnt.Load())
+	require.Zero(t, clientIO.closeCnt.Load())
 }
 
 func TestHandlerReturnError(t *testing.T) {
