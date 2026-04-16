@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	// When the LB DNS name changes, the certificates are also updated and TiProxy needs to reload them fast. 
+	// When the LB DNS name changes, the certificates are also updated and TiProxy needs to reload them fast.
 	// If fsnotify does not work, fast certificate reloads can serve as a fallback safeguard.
 	defaultRetryInterval     = 5 * time.Minute
 	watchEventDebounceWindow = 100 * time.Millisecond
@@ -79,7 +79,7 @@ func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger, cfgch <-chan
 		cm.watcherEvents = watcher.Events
 		cm.watcherErrors = watcher.Errors
 		if err = cm.resetCertFileWatches(collectCertWatchFiles(cfg)); err != nil {
-			return err
+			cm.logger.Warn("failed to add cert file watcher", zap.Error(err))
 		}
 	}
 
@@ -145,7 +145,7 @@ func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Conf
 					cm.watcherEvents = nil
 					break
 				}
-				if events := cm.debounceEvents(event); len(events) > 0 {
+				if events := cm.debounceEvents(ctx, event); len(events) > 0 {
 					cm.logger.Info("cert file changed, reload cert", zap.Stringers("events", events))
 					cm.reAddWatchForKubeletSecret(events)
 					_ = cm.reload()
@@ -164,12 +164,15 @@ func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Conf
 	}, cm.logger)
 }
 
-func (cm *CertManager) debounceEvents(first fsnotify.Event) []fsnotify.Event {
+// debounceEvents aggregates consecutive fsnotify events within a debounce window.
+func (cm *CertManager) debounceEvents(ctx context.Context, first fsnotify.Event) []fsnotify.Event {
 	events := []fsnotify.Event{first}
 	timer := time.NewTimer(watchEventDebounceWindow)
 	defer timer.Stop()
 	for {
 		select {
+		case <-ctx.Done():
+			return nil
 		case event, ok := <-cm.watcherEvents:
 			if !ok {
 				return nil
