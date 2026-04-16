@@ -20,6 +20,7 @@ import (
 )
 
 const (
+	// If fsnotify not working, fast certificate reloads can serve as a fallback safeguard.
 	defaultRetryInterval     = 5 * time.Minute
 	watchEventDebounceWindow = 100 * time.Millisecond
 )
