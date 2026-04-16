@@ -257,15 +257,19 @@ func (m *mockBalancePolicy) getConfig() *config.Config {
 var _ config.ConfigGetter = (*mockConfigGetter)(nil)
 
 type mockConfigGetter struct {
-	cfg *config.Config
+	cfg atomic.Pointer[config.Config]
 }
 
 func newMockConfigGetter(cfg *config.Config) *mockConfigGetter {
-	return &mockConfigGetter{
-		cfg: cfg,
-	}
+	cfgGetter := &mockConfigGetter{}
+	cfgGetter.setConfig(cfg)
+	return cfgGetter
 }
 
 func (cfgGetter *mockConfigGetter) GetConfig() *config.Config {
-	return cfgGetter.cfg
+	return cfgGetter.cfg.Load()
+}
+
+func (cfgGetter *mockConfigGetter) setConfig(cfg *config.Config) {
+	cfgGetter.cfg.Store(cfg)
 }

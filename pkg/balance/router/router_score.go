@@ -47,7 +47,6 @@ type ScoreBasedRouter struct {
 	// The routing rule for categorizing backends to groups.
 	matchType    MatchType
 	observeError error
-	currentCfg   *config.Config
 	// Only store the version of a random backend, so the client may see a wrong version when backends are upgrading.
 	serverVersion string
 	// The backend supports redirection only when they have signing certs.
@@ -84,9 +83,6 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 	default:
 		r.logger.Error("unsupported routing rule, use the default rule", zap.String("rule", cfg.Balance.RoutingRule))
 	}
-	r.Lock()
-	r.currentCfg = cfg
-	r.Unlock()
 
 	childCtx, cancelFunc := context.WithCancel(ctx)
 	r.cancelFunc = cancelFunc
@@ -355,8 +351,10 @@ func (router *ScoreBasedRouter) updateGroups() {
 				g, err := NewGroup(values, router.bpCreator, router.matchType, router.logger)
 				if err == nil {
 					group = g
-					if router.currentCfg != nil {
-						group.SetConfig(router.currentCfg)
+					if router.cfgGetter != nil {
+						if cfg := router.cfgGetter.GetConfig(); cfg != nil {
+							group.SetConfig(cfg)
+						}
 					}
 					router.groups = append(router.groups, group)
 				}
@@ -404,7 +402,6 @@ func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
 func (router *ScoreBasedRouter) setConfig(cfg *config.Config) {
 	router.Lock()
 	defer router.Unlock()
-	router.currentCfg = cfg
 	for _, group := range router.groups {
 		group.SetConfig(cfg)
 	}
