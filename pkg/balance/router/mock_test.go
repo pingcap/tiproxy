@@ -229,6 +229,16 @@ func (m *mockBalancePolicy) BackendToRoute(backends []policy.BackendCtx) policy.
 	return nil
 }
 
+func (m *mockBalancePolicy) RouteableBackends(backends []policy.BackendCtx) []policy.BackendCtx {
+	routeable := make([]policy.BackendCtx, 0, len(backends))
+	for _, backend := range backends {
+		if backend.Healthy() {
+			routeable = append(routeable, backend)
+		}
+	}
+	return routeable
+}
+
 func (m *mockBalancePolicy) BackendsToBalance(backends []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
 	if m.backendsToBalance != nil {
 		return m.backendsToBalance(backends)

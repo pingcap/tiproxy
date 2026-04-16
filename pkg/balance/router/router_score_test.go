@@ -865,7 +865,7 @@ func TestIgnoreFailoverListAfterExpandingToAllHealthyBackends(t *testing.T) {
 	require.True(t, toBackend.Healthy())
 	require.Equal(t, 2, tester.router.HealthyBackendCount())
 
-	tester.router.groups[0].CloseTimedOutFailoverConnections(time.Now(), 0)
+	tester.router.groups[0].CloseTimedOutFailoverConnections(time.Now())
 	for _, conn := range tester.conns {
 		require.False(t, conn.closing)
 	}
@@ -962,7 +962,7 @@ func TestIgnoreFailoverListWhenItMatchesAllHealthyBackendsInRouteGroup(t *testin
 	require.NotNil(t, backend)
 	require.Contains(t, []string{fromBackend.ID(), toBackend.ID()}, backend.ID())
 
-	group.CloseTimedOutFailoverConnections(time.Now(), 0)
+	group.CloseTimedOutFailoverConnections(time.Now())
 	for _, conn := range tester.conns {
 		require.False(t, conn.closing)
 	}
@@ -1079,7 +1079,7 @@ func TestIgnoreFailoverListWhenItMatchesAllLabelRoutableBackends(t *testing.T) {
 	require.NotNil(t, backend)
 	require.Contains(t, []string{"1", "2"}, backend.ID())
 
-	group.CloseTimedOutFailoverConnections(time.Now(), 0)
+	group.CloseTimedOutFailoverConnections(time.Now())
 	for _, conn := range tester.conns {
 		require.False(t, conn.closing)
 	}

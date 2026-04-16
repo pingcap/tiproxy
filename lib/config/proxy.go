@@ -71,8 +71,8 @@ type ProxyServerOnline struct {
 	// online.
 	BackendClusters []BackendCluster `yaml:"backend-clusters,omitempty" toml:"backend-clusters,omitempty" json:"backend-clusters,omitempty" reloadable:"true"`
 	// FailBackendList contains backend pod names or backend addresses (IP:port) that should be drained immediately
-	// and excluded from new routing. If the configured list would leave no healthy backend, TiProxy ignores the
-	// whole list to keep the cluster available.
+	// and excluded from new routing. If the configured list would leave no routeable backend in a routing group,
+	// TiProxy ignores the list for that group to keep routing available.
 	FailBackendList []string `yaml:"fail-backend-list,omitempty" toml:"fail-backend-list,omitempty" json:"fail-backend-list,omitempty" reloadable:"true"`
 	// FailoverTimeout is the grace period in seconds before force closing the remaining connections on failed backends.
 	FailoverTimeout int `yaml:"failover-timeout,omitempty" toml:"failover-timeout,omitempty" json:"failover-timeout,omitempty" reloadable:"true"`
