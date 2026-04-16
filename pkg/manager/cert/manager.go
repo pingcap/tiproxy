@@ -6,9 +6,11 @@ package cert
 import (
 	"context"
 	"crypto/tls"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/security"
@@ -18,8 +20,13 @@ import (
 )
 
 const (
-	defaultRetryInterval = 1 * time.Hour
+	// When the LB DNS name changes, the certificates are also updated and TiProxy needs to reload them fast.
+	// If fsnotify does not work, fast certificate reloads can serve as a fallback safeguard.
+	defaultRetryInterval     = 5 * time.Minute
+	watchEventDebounceWindow = 100 * time.Millisecond
 )
+
+var newWatcher = fsnotify.NewWatcher
 
 // CertManager reloads certs and offers interfaces for fetching TLS configs.
 // Currently, all the namespaces share the same certs but there might be per-namespace
@@ -38,6 +45,10 @@ type CertManager struct {
 	wg            waitgroup.WaitGroup
 	retryInterval atomic.Int64
 	logger        *zap.Logger
+
+	watcher       *fsnotify.Watcher
+	watcherEvents <-chan fsnotify.Event
+	watcherErrors <-chan error
 }
 
 // NewCertManager creates a new CertManager.
@@ -47,7 +58,7 @@ func NewCertManager() *CertManager {
 	return cm
 }
 
-// Init creates a CertManager and reloads certificates periodically.
+// Init creates a CertManager, reloads certificates periodically and watches cert files via fsnotify when available.
 // cfgch can be set to nil for the serverless tier because it has no config manager.
 func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger, cfgch <-chan *config.Config) error {
 	cm.logger = logger
@@ -58,6 +69,18 @@ func (cm *CertManager) Init(cfg *config.Config, logger *zap.Logger, cfgch <-chan
 	cm.setConfig(cfg)
 	if err := cm.reload(); err != nil {
 		return err
+	}
+
+	watcher, err := newWatcher()
+	if err != nil {
+		cm.logger.Warn("cert file watcher is unavailable, fallback to periodic cert reload", zap.Error(err))
+	} else {
+		cm.watcher = watcher
+		cm.watcherEvents = watcher.Events
+		cm.watcherErrors = watcher.Errors
+		if err = cm.resetCertFileWatches(collectCertWatchFiles(cfg)); err != nil {
+			cm.logger.Warn("failed to add cert file watcher", zap.Error(err))
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -95,7 +118,7 @@ func (cm *CertManager) SQLTLS() *tls.Config {
 
 // The proxy is supposed to be always online, so it should reload certs automatically,
 // rather than reloading it by restarting the proxy.
-// The proxy periodically reloads certs. If it fails, we will retry in the next round.
+// The proxy reloads certs on configuration changes, cert file changes, and periodic retries.
 // If configuration changes, it only affects new connections by returning new *tls.Config.
 func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Config) {
 	// Failing to reload certs may cause even more serious problems than TiProxy reboot, so we don't recover panics.
@@ -112,12 +135,114 @@ func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Conf
 					break
 				}
 				cm.setConfig(cfg)
+				if err := cm.resetCertFileWatches(collectCertWatchFiles(cfg)); err != nil {
+					cm.logger.Warn("failed to update cert file watcher", zap.Error(err))
+				}
+				_ = cm.reload()
+			case event, ok := <-cm.watcherEvents:
+				if !ok {
+					cm.logger.Warn("cert file watcher is closed, stop watching")
+					cm.watcherEvents = nil
+					break
+				}
+				if events := cm.debounceEvents(ctx, event); len(events) > 0 {
+					cm.logger.Info("cert file changed, reload cert", zap.Stringers("events", events))
+					cm.reAddWatchForKubeletSecret(events)
+					_ = cm.reload()
+				}
+			case err, ok := <-cm.watcherErrors:
+				if !ok {
+					cm.watcherErrors = nil
+					break
+				}
+				cm.logger.Warn("cert file watcher error, but still reload certs", zap.Error(err))
 				_ = cm.reload()
 			case <-time.After(time.Duration(cm.retryInterval.Load())):
 				_ = cm.reload()
 			}
 		}
 	}, cm.logger)
+}
+
+// debounceEvents aggregates consecutive fsnotify events within a debounce window.
+func (cm *CertManager) debounceEvents(ctx context.Context, first fsnotify.Event) []fsnotify.Event {
+	events := []fsnotify.Event{first}
+	timer := time.NewTimer(watchEventDebounceWindow)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case event, ok := <-cm.watcherEvents:
+			if !ok {
+				return nil
+			}
+			events = append(events, event)
+			timer.Reset(watchEventDebounceWindow)
+		case <-timer.C:
+			return events
+		}
+	}
+}
+
+func (cm *CertManager) reAddWatchForKubeletSecret(events []fsnotify.Event) {
+	added := make(map[string]bool, len(events))
+	for _, event := range events {
+		if event.Op.Has(fsnotify.Chmod) || event.Op.Has(fsnotify.Remove) {
+			if added[event.Name] {
+				continue
+			}
+			cm.logger.Info("cert file should re-add to watcher, because it may mount by Pod Secret", zap.String("path", event.Name))
+			if err := cm.watcher.Add(event.Name); err != nil {
+				cm.logger.Error("failed to re-add cert file", zap.String("path", event.Name), zap.Error(err))
+			}
+			added[event.Name] = true
+		}
+	}
+}
+
+func collectCertWatchFiles(cfg *config.Config) []string {
+	files := make(map[string]struct{})
+	addCertWatchFiles(files, cfg.Security.ServerSQLTLS)
+	addCertWatchFiles(files, cfg.Security.ServerHTTPTLS)
+	addCertWatchFiles(files, cfg.Security.ClusterTLS)
+	addCertWatchFiles(files, cfg.Security.SQLTLS)
+	watchFiles := make([]string, 0, len(files))
+	for file := range files {
+		watchFiles = append(watchFiles, file)
+	}
+	return watchFiles
+}
+
+func addCertWatchFiles(files map[string]struct{}, tlsCfg config.TLSConfig) {
+	if tlsCfg.Cert != "" {
+		files[filepath.Clean(tlsCfg.Cert)] = struct{}{}
+	}
+	if tlsCfg.Key != "" {
+		files[filepath.Clean(tlsCfg.Key)] = struct{}{}
+	}
+	if tlsCfg.CA != "" {
+		files[filepath.Clean(tlsCfg.CA)] = struct{}{}
+	}
+}
+
+func (cm *CertManager) resetCertFileWatches(watchFiles []string) error {
+	if cm.watcher == nil {
+		return nil
+	}
+
+	errs := make([]error, 0)
+	for _, file := range cm.watcher.WatchList() {
+		if err := cm.watcher.Remove(file); err != nil {
+			errs = append(errs, errors.Wrapf(err, "unwatch cert file %s", file))
+		}
+	}
+	for _, file := range watchFiles {
+		if err := cm.watcher.Add(file); err != nil {
+			errs = append(errs, errors.Wrapf(err, "watch cert file %s", file))
+		}
+	}
+	return errors.Collect(errors.New("update cert file watcher"), errs...)
 }
 
 // If any error happens, we still continue and use the old cert.
@@ -157,4 +282,7 @@ func (cm *CertManager) Close() {
 		cm.cancel()
 	}
 	cm.wg.Wait()
+	if cm.watcher != nil {
+		_ = cm.watcher.Close()
+	}
 }
