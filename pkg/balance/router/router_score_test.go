@@ -1376,6 +1376,57 @@ func TestWatchFailoverConfig(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 }
 
+func TestNewGroupUsesLatestConfigGetter(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	router := NewScoreBasedRouter(lg)
+	cfgCh := make(chan *config.Config)
+	cfgGetter := newMockConfigGetter(&config.Config{
+		Balance: config.Balance{
+			RoutingRule: config.MatchPortStr,
+		},
+	})
+	bo := newMockBackendObserver()
+	router.Init(context.Background(), bo, simpleBpCreator, cfgGetter, cfgCh)
+	t.Cleanup(bo.Close)
+	t.Cleanup(router.Close)
+
+	addr1 := "db-2033841436272623616-0f6e346b-tidb-0.peer.ns.svc:4000"
+	addr2 := "db-2033841436272623616-0f6e346b-tidb-1.peer.ns.svc:4000"
+	addr3 := "db-2033841436272623616-0f6e346b-tidb-2.peer.ns.svc:4000"
+	bo.addBackend(addr1, map[string]string{config.TiProxyPortLabelName: "10080"})
+	bo.notify(nil)
+	require.Eventually(t, func() bool {
+		backend := router.backends[addr1]
+		return backend != nil && backend.Healthy()
+	}, 3*time.Second, 10*time.Millisecond)
+
+	nextCfg := &config.Config{
+		Balance: config.Balance{
+			RoutingRule: config.MatchPortStr,
+		},
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{addr2},
+				FailoverTimeout: 60,
+			},
+		},
+	}
+	cfgGetter.setConfig(nextCfg)
+	cfgCh <- nextCfg
+
+	bo.addBackend(addr2, map[string]string{config.TiProxyPortLabelName: "10081"})
+	bo.addBackend(addr3, map[string]string{config.TiProxyPortLabelName: "10081"})
+	bo.notify(nil)
+	require.Eventually(t, func() bool {
+		backend := router.backends[addr2]
+		return backend != nil && !backend.Healthy()
+	}, 3*time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool {
+		backend := router.backends[addr3]
+		return backend != nil && backend.Healthy()
+	}, 3*time.Second, 10*time.Millisecond)
+}
+
 func TestControlSpeed(t *testing.T) {
 	tests := []struct {
 		balanceCount     float64
