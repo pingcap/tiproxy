@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/balance/factor"
 	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -865,6 +866,220 @@ func TestIgnoreFailoverListAfterExpandingToAllHealthyBackends(t *testing.T) {
 	require.Equal(t, 2, tester.router.HealthyBackendCount())
 
 	tester.router.groups[0].CloseTimedOutFailoverConnections(time.Now(), 0)
+	for _, conn := range tester.conns {
+		require.False(t, conn.closing)
+	}
+}
+
+func TestIgnoreFailoverListWhenItMatchesAllHealthyBackendsInRouteGroup(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.router.matchType = MatchPort
+	for _, backend := range []struct {
+		addr string
+		port string
+	}{
+		{addr: "1", port: "10080"},
+		{addr: "2", port: "10080"},
+		{addr: "3", port: "10081"},
+		{addr: "4", port: "10081"},
+		{addr: "5", port: "10081"},
+		{addr: "6", port: "10081"},
+		{addr: "7", port: "10081"},
+	} {
+		tester.backends[backend.addr] = &observer.BackendHealth{
+			Healthy:            true,
+			SupportRedirection: true,
+			BackendInfo: observer.BackendInfo{
+				Addr: backend.addr,
+				Labels: map[string]string{
+					config.TiProxyPortLabelName: backend.port,
+				},
+			},
+		}
+	}
+	tester.notifyHealth()
+
+	for range 20 {
+		conn := tester.createConn()
+		backend := tester.route(conn, ClientInfo{ListenerPort: "10080"})
+		require.NotNil(t, backend)
+		conn.from = backend
+		tester.conns[conn.connID] = conn
+	}
+
+	fromBackend := tester.router.backends["1"]
+	toBackend := tester.router.backends["2"]
+	require.NotNil(t, fromBackend)
+	require.NotNil(t, toBackend)
+	require.Equal(t, 10, fromBackend.ConnCount())
+	require.Equal(t, 10, toBackend.ConnCount())
+
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.Addr()},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	require.False(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+
+	tester.rebalance(1)
+	tester.checkRedirectingNum(10)
+	group := findGroupByValues(t, tester.router, []string{"10080"})
+	redirected := 0
+	for _, conn := range tester.conns {
+		if len(conn.GetRedirectingBackendID()) == 0 {
+			continue
+		}
+		require.NoError(t, group.OnRedirectSucceed(conn.from.ID(), conn.to.ID(), conn))
+		conn.redirectSucceed()
+		redirected++
+		if redirected >= 10 {
+			break
+		}
+	}
+	require.Equal(t, 10, redirected)
+	require.Equal(t, 0, fromBackend.ConnCount())
+	require.Equal(t, 20, toBackend.ConnCount())
+
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.Addr(), toBackend.Addr()},
+				FailoverTimeout: 0,
+			},
+		},
+	})
+	require.True(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+
+	selector := tester.router.GetBackendSelector(ClientInfo{ListenerPort: "10080"})
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(nil, false)
+	require.NotNil(t, backend)
+	require.Contains(t, []string{fromBackend.ID(), toBackend.ID()}, backend.ID())
+
+	group.CloseTimedOutFailoverConnections(time.Now(), 0)
+	for _, conn := range tester.conns {
+		require.False(t, conn.closing)
+	}
+}
+
+func TestIgnoreFailoverListWhenItMatchesAllLabelRoutableBackends(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.router.bpCreator = func(lg *zap.Logger) policy.BalancePolicy {
+		return factor.NewFactorBasedBalance(lg, nil)
+	}
+	for _, backend := range []struct {
+		addr  string
+		group string
+	}{
+		{addr: "1", group: "a"},
+		{addr: "2", group: "a"},
+		{addr: "3", group: "b"},
+		{addr: "4", group: "b"},
+		{addr: "5", group: "b"},
+		{addr: "6", group: "b"},
+		{addr: "7", group: "b"},
+	} {
+		tester.backends[backend.addr] = &observer.BackendHealth{
+			Healthy:            true,
+			SupportRedirection: true,
+			BackendInfo: observer.BackendInfo{
+				Addr: backend.addr,
+				Labels: map[string]string{
+					"group": backend.group,
+				},
+			},
+		}
+	}
+	tester.notifyHealth()
+	tester.router.setConfig(&config.Config{
+		Labels: map[string]string{
+			"group": "a",
+		},
+		Balance: config.Balance{
+			LabelName: "group",
+			Policy:    config.BalancePolicyConnection,
+			Status: config.Factor{
+				MigrationsPerSecond: 1000,
+			},
+		},
+	})
+
+	for range 10 {
+		selector := tester.router.GetBackendSelector(ClientInfo{})
+		backend, err := selector.Next()
+		require.NoError(t, err)
+		selector.Finish(nil, false)
+		require.NotNil(t, backend)
+		require.Contains(t, []string{"1", "2"}, backend.ID())
+	}
+
+	group := tester.router.groups[0]
+	toBackend := tester.router.backends["2"]
+	require.NotNil(t, toBackend)
+	for range 10 {
+		conn := tester.createConn()
+		conn.from = toBackend
+		tester.conns[conn.connID] = conn
+		group.onCreateConn(toBackend, conn, true)
+	}
+	require.Equal(t, 10, toBackend.ConnCount())
+
+	tester.router.setConfig(&config.Config{
+		Labels: map[string]string{
+			"group": "a",
+		},
+		Balance: config.Balance{
+			LabelName: "group",
+			Policy:    config.BalancePolicyConnection,
+			Status: config.Factor{
+				MigrationsPerSecond: 1000,
+			},
+		},
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1"},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	require.False(t, tester.router.backends["1"].Healthy())
+	require.True(t, toBackend.Healthy())
+
+	tester.router.setConfig(&config.Config{
+		Labels: map[string]string{
+			"group": "a",
+		},
+		Balance: config.Balance{
+			LabelName: "group",
+			Policy:    config.BalancePolicyConnection,
+			Status: config.Factor{
+				MigrationsPerSecond: 1000,
+			},
+		},
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1", "2"},
+				FailoverTimeout: 0,
+			},
+		},
+	})
+	require.True(t, tester.router.backends["1"].Healthy())
+	require.True(t, toBackend.Healthy())
+
+	selector := tester.router.GetBackendSelector(ClientInfo{})
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(nil, false)
+	require.NotNil(t, backend)
+	require.Contains(t, []string{"1", "2"}, backend.ID())
+
+	group.CloseTimedOutFailoverConnections(time.Now(), 0)
 	for _, conn := range tester.conns {
 		require.False(t, conn.closing)
 	}
