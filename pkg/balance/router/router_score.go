@@ -432,6 +432,10 @@ func (router *ScoreBasedRouter) setFailoverConfigLocked(cfg *config.Config) {
 	}
 	router.failoverTargets = failoverTargets
 	router.failoverTimeout = time.Duration(cfg.Proxy.FailoverTimeout) * time.Second
+	router.logger.Info("apply failover config",
+		zap.Strings("failover_targets", router.failoverTargetListLocked()),
+		zap.Duration("failover_timeout", router.failoverTimeout),
+		zap.Int("backend_count", len(router.backends)))
 	router.updateBackendFailoverLocked(time.Now())
 }
 
@@ -444,16 +448,43 @@ func (router *ScoreBasedRouter) backendInFailoverListLocked(backend *backendWrap
 	return active
 }
 
+func (router *ScoreBasedRouter) failoverTargetListLocked() []string {
+	targets := make([]string, 0, len(router.failoverTargets))
+	for target := range router.failoverTargets {
+		targets = append(targets, target)
+	}
+	slices.Sort(targets)
+	return targets
+}
+
+func formatFailoverSince(since time.Time) string {
+	if since.IsZero() {
+		return "zero"
+	}
+	return since.Format(time.RFC3339Nano)
+}
+
+func formatBackendFailoverState(backend *backendWrapper, matched, observedHealthy bool) string {
+	return fmt.Sprintf("id=%s addr=%s pod=%s matched=%t observed_healthy=%t healthy=%t failover_since=%s",
+		backend.ID(), backend.Addr(), backend.PodName(), matched, observedHealthy, backend.Healthy(), formatFailoverSince(backend.FailoverSince()))
+}
+
 func (router *ScoreBasedRouter) updateBackendFailoverLocked(now time.Time) {
+	prevIgnoreFailoverList := router.ignoreFailoverList
 	failoverBackendIDs := make(map[string]struct{}, len(router.backends))
 	healthyBackends := 0
 	matchedHealthyBackends := 0
+	backendStates := make([]string, 0, len(router.backends))
 	for _, backend := range router.backends {
 		matched := router.backendInFailoverListLocked(backend)
 		if matched {
 			failoverBackendIDs[backend.ID()] = struct{}{}
 		}
-		if !backend.ObservedHealthy() {
+		observedHealthy := backend.ObservedHealthy()
+		if len(router.failoverTargets) > 0 {
+			backendStates = append(backendStates, formatBackendFailoverState(backend, matched, observedHealthy))
+		}
+		if !observedHealthy {
 			continue
 		}
 		healthyBackends++
@@ -471,6 +502,16 @@ func (router *ScoreBasedRouter) updateBackendFailoverLocked(now time.Time) {
 		clear(failoverBackendIDs)
 	} else {
 		router.ignoreFailoverList = false
+	}
+	if len(router.failoverTargets) > 0 {
+		router.logger.Info("evaluate failover list",
+			zap.Strings("failover_targets", router.failoverTargetListLocked()),
+			zap.Int("backend_count", len(router.backends)),
+			zap.Int("healthy_backend_count", healthyBackends),
+			zap.Int("matched_healthy_backend_count", matchedHealthyBackends),
+			zap.Bool("ignore_failover_list_before", prevIgnoreFailoverList),
+			zap.Bool("ignore_failover_list_after", router.ignoreFailoverList),
+			zap.Strings("backend_states", backendStates))
 	}
 	for _, backend := range router.backends {
 		_, active := failoverBackendIDs[backend.ID()]

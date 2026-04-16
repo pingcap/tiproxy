@@ -723,7 +723,9 @@ func (mgr *BackendConnManager) ForceClose() bool {
 	}
 	mgr.quitSource = SrcProxyQuit
 	if mgr.clientIO != nil {
-		if err := mgr.clientIO.Close(); err != nil && !pnet.IsDisconnectError(err) {
+		// Interrupt in-flight I/O and let the normal connection teardown release buffers.
+		// Closing the PacketIO here may race with ExecuteCmd() flushing to the client.
+		if err := mgr.clientIO.GracefulClose(); err != nil && !pnet.IsDisconnectError(err) {
 			mgr.logger.Warn("force close client IO error", zap.Error(err))
 		}
 	}
