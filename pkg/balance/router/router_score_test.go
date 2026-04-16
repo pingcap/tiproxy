@@ -829,6 +829,47 @@ func TestIgnoreFailoverListWhenItMatchesAllHealthyBackends(t *testing.T) {
 	require.NotNil(t, backend)
 }
 
+func TestIgnoreFailoverListAfterExpandingToAllHealthyBackends(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(2)
+	tester.addConnections(20)
+
+	fromBackend := tester.getBackendByIndex(0)
+	toBackend := tester.getBackendByIndex(1)
+
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.PodName()},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	tester.rebalance(1)
+	tester.redirectFinish(10, true)
+	require.Equal(t, 0, fromBackend.ConnCount())
+	require.Equal(t, 20, toBackend.ConnCount())
+	require.False(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.PodName(), toBackend.PodName()},
+				FailoverTimeout: 0,
+			},
+		},
+	})
+	require.True(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+	require.Equal(t, 2, tester.router.HealthyBackendCount())
+
+	tester.router.groups[0].CloseTimedOutFailoverConnections(time.Now(), 0)
+	for _, conn := range tester.conns {
+		require.False(t, conn.closing)
+	}
+}
+
 func TestFailoverListReevaluatedWithBackendHealth(t *testing.T) {
 	tester := newRouterTester(t, nil)
 	tester.addBackends(3)
