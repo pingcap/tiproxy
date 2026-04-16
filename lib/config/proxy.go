@@ -110,8 +110,20 @@ type LogFile struct {
 }
 
 type HA struct {
+	// VirtualIP is the floating service address managed by TiProxy.
+	// It is expected to use a host route such as /32 so only the elected node
+	// answers for the VIP itself.
 	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
+	// Interface is the local NIC that binds VirtualIP and sends GARP from.
 	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
+	// GARPBurstCount is the number of GARP packets sent immediately after the
+	// new owner binds the VIP. A small burst makes takeover visible quickly even
+	// if the first packet is dropped by the host, bond driver, or upstream device.
+	GARPBurstCount int `yaml:"garp-burst-count,omitempty" toml:"garp-burst-count,omitempty" json:"garp-burst-count,omitempty" reloadable:"false"`
+	// GARPRefreshCount controls the number of follow-up bursts after
+	// takeover. It is used to refresh stale neighbor caches for a bounded window
+	// after failover instead of emitting high-rate GARP forever.
+	GARPRefreshCount int `yaml:"garp-refresh-count,omitempty" toml:"garp-refresh-count,omitempty" json:"garp-refresh-count,omitempty" reloadable:"false"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
@@ -151,6 +163,13 @@ func NewConfig() *Config {
 	cfg.Security.ClusterTLS.MinTLSVersion = "1.2"
 
 	cfg.Balance = DefaultBalance()
+
+	// Match the common VRRP-style default of sending a small burst immediately
+	// after takeover, then keep refreshing for a short period. The refresh helps
+	// upstream devices overwrite stale VIP->MAC entries after an abnormal owner
+	// handover.
+	cfg.HA.GARPBurstCount = 5
+	cfg.HA.GARPRefreshCount = 30
 
 	cfg.EnableTrafficReplay = true
 
@@ -193,6 +212,15 @@ func (cfg *Config) Check() error {
 
 	if err := cfg.Balance.Check(); err != nil {
 		return err
+	}
+	if cfg.HA.GARPBurstCount < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-count must be greater than or equal to 0")
+	}
+	if cfg.HA.GARPBurstCount == 0 {
+		cfg.HA.GARPBurstCount = 1
+	}
+	if cfg.HA.GARPRefreshCount < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-refresh-count must be greater than or equal to 0")
 	}
 
 	return nil

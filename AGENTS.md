@@ -90,7 +90,13 @@ Guidelines:
 - **Error handling**
   - Prefer wrapping errors with context so they are actionable (what operation failed, which component, key parameters).
   - Reuse common error helpers from `lib/util` / `pkg/util` when available.
+  - Add `errors.WithStack()` only at the lowest layer that first creates or captures the concrete error. Higher layers should usually add context with `errors.Wrap()` / `errors.Wrapf()` instead of attaching another stack trace.
   - Do not silently ignore errors; either handle them explicitly or return them to callers.
+
+- **Comments for non-obvious logic**
+  - Add succinct comments around code paths whose correctness depends on subtle concurrency, networking, ownership, or failure-handling assumptions.
+  - The goal is to explain *why* the code is written that way so future contributors do not "simplify" it into a regression.
+  - Avoid repeating what the code already says; focus comments on invariants, trade-offs, and external behavior.
 
 - **Logging**
   - Use the shared logging facilities (for example, logger manager) rather than creating ad-hoc loggers.
@@ -100,6 +106,9 @@ Guidelines:
 - **Concurrency and context**
   - Always pass `context.Context` through call chains where operations may block, allocate resources, or perform I/O.
   - Do not start goroutines without a clear lifetime; ensure there is a way to stop them (via context cancellation or explicit shutdown).
+  - Avoid bare `go func()` for managed background work. Prefer the repository `waitgroup` helpers (for example `pkg/util/waitgroup.WaitGroup.Run` or `RunWithRecover`) so goroutine lifecycle and shutdown are tracked consistently.
+  - If a background goroutine should recover from panic instead of crashing the whole process, use `waitgroup.RunWithRecover()` and handle recovery through the shared helper rather than ad-hoc `recover()` logic.
+  - If a wait or sleep may delay shutdown, owner handoff, or other cancellation-sensitive flows, do not use an unconditional `time.Sleep`. Prefer `timer + context` (or an equivalent cancellable wait) so the code can exit promptly.
   - Avoid sharing mutable state across goroutines without proper synchronization.
   - Be careful when exposing channels and mutexes in public APIs; clearly document ownership and who is responsible for closing channels.
 

@@ -7,10 +7,12 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sync/atomic"
+	"sync"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -23,6 +25,10 @@ const (
 	// The etcd client keeps alive every TTL/3 seconds.
 	// The TTL determines the failover time so it should be short.
 	sessionTTL = 3
+	// Refresh GARP for a bounded window after takeover so upstream devices have
+	// repeated chances to overwrite stale VIP->MAC cache entries after abnormal
+	// failover, while still avoiding permanent ARP noise.
+	garpRefreshInterval = 1 * time.Second
 )
 
 type VIPManager interface {
@@ -34,11 +40,18 @@ type VIPManager interface {
 var _ VIPManager = (*vipManager)(nil)
 
 type vipManager struct {
-	operation   NetworkOperation
-	cfgGetter   config.ConfigGetter
-	election    elect.Election
-	lg          *zap.Logger
-	delOnRetire atomic.Bool
+	mu sync.Mutex
+	// closing blocks late OnElected callbacks during controlled shutdown.
+	// A VIP must not be present on two nodes at the same time because upstream
+	// L3 devices cache only one VIP->MAC entry; if old and new owners both answer
+	// ARP, whichever reply is learned last may blackhole cross-subnet traffic.
+	closing   bool
+	arpCancel context.CancelFunc
+	refreshWG waitgroup.WaitGroup
+	operation NetworkOperation
+	cfgGetter config.ConfigGetter
+	election  elect.Election
+	lg        *zap.Logger
 }
 
 func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, error) {
@@ -54,7 +67,7 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 		vm.lg.Warn("Both address and link must be specified to enable VIP. VIP is disabled")
 		return nil, nil
 	}
-	operation, err := NewNetworkOperation(cfg.HA.VirtualIP, cfg.HA.Interface, lg)
+	operation, err := NewNetworkOperation(cfg.HA.VirtualIP, cfg.HA.Interface, cfg.HA.GARPBurstCount, lg)
 	if err != nil {
 		vm.lg.Error("init network operation failed", zap.Error(err))
 		return nil, err
@@ -64,9 +77,12 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 }
 
 func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	vm.closing = false
+
 	// This node may have bound the VIP before last failure.
 	vm.delVIP()
-	vm.delOnRetire.Store(true)
 
 	cfg := vm.cfgGetter.GetConfig()
 	ip, port, _, err := cfg.GetIPPort()
@@ -83,34 +99,58 @@ func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error
 }
 
 func (vm *vipManager) OnElected() {
-	vm.addVIP()
+	vm.mu.Lock()
+	// Election.Close may race with an already in-flight OnElected callback.
+	// Once controlled shutdown starts, never bind the VIP again locally.
+	if vm.closing {
+		vm.mu.Unlock()
+		vm.lg.Info("skip adding VIP because the manager is closing")
+		return
+	}
+	vm.stopARPRefresh()
+	ctx, cancel := context.WithCancel(context.Background())
+	vm.arpCancel = cancel
+	vm.mu.Unlock()
+
+	if vm.addVIP(ctx) {
+		vm.mu.Lock()
+		if !vm.closing {
+			vm.startARPRefresh(ctx)
+		}
+		vm.mu.Unlock()
+	}
 }
 
 func (vm *vipManager) OnRetired() {
-	if vm.delOnRetire.Load() {
-		vm.delVIP()
-	}
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	vm.stopARPRefresh()
+	vm.delVIP()
 }
 
-func (vm *vipManager) addVIP() {
+func (vm *vipManager) addVIP(ctx context.Context) bool {
 	hasIP, err := vm.operation.HasIP()
 	if err != nil {
 		vm.lg.Error("checking addresses failed", zap.Error(err))
-		return
+		return false
 	}
 	if hasIP {
 		vm.lg.Debug("already has VIP, do nothing")
-		return
+		return true
 	}
 	if err := vm.operation.AddIP(); err != nil {
 		vm.lg.Error("adding address failed", zap.Error(err))
-		return
+		return false
 	}
-	if err := vm.operation.SendARP(); err != nil {
+	if err := vm.operation.SendARP(ctx); err != nil {
 		vm.lg.Error("broadcast ARP failed", zap.Error(err))
-		return
+		// The VIP is already bound locally. Keep the later refresh loop as a
+		// best-effort retry path for notifying upstream devices.
+		return true
 	}
 	vm.lg.Info("adding VIP success")
+	return true
 }
 
 func (vm *vipManager) delVIP() {
@@ -130,20 +170,66 @@ func (vm *vipManager) delVIP() {
 	vm.lg.Info("deleting VIP success")
 }
 
-// PreClose resigns the owner but doesn't delete the VIP.
-// It makes use of the graceful-wait time to wait for the new owner to shorten the failover time.
+func (vm *vipManager) startARPRefresh(ctx context.Context) {
+	refreshCount := vm.cfgGetter.GetConfig().HA.GARPRefreshCount
+	if refreshCount <= 0 {
+		return
+	}
+	vm.refreshWG.RunWithRecover(func() {
+		ticker := time.NewTicker(garpRefreshInterval)
+		defer ticker.Stop()
+		// The first burst is sent synchronously by addVIP. The follow-up bursts
+		// cover devices that probe or refresh neighbor state a little later than
+		// the handover moment.
+		for i := 0; i < refreshCount; i++ {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := vm.operation.SendARP(ctx); err != nil {
+					vm.lg.Warn("refreshing GARP failed", zap.Error(err))
+					return
+				}
+			}
+		}
+	}, nil, vm.lg)
+}
+
+func (vm *vipManager) stopARPRefresh() {
+	cancel := vm.arpCancel
+	vm.arpCancel = nil
+	if cancel != nil {
+		cancel()
+	}
+	vm.refreshWG.Wait()
+}
+
+// PreClose deletes the VIP before resigning the owner so that controlled
+// shutdowns do not expose the VIP on two nodes at the same time.
 func (vm *vipManager) PreClose() {
-	vm.delOnRetire.Store(false)
-	if vm.election != nil {
-		vm.election.Close()
+	election := vm.prepareForClose()
+	if election != nil {
+		election.Close()
 	}
 }
 
-// Close resigns the owner and deletes the VIP if it was the owner.
-// The new owner may not be elected but we won't wait anymore.
+// Close resigns the owner and makes sure the VIP is removed locally.
 func (vm *vipManager) Close() {
-	if vm.election != nil {
-		vm.election.Close()
+	election := vm.prepareForClose()
+	if election != nil {
+		election.Close()
 	}
+}
+
+func (vm *vipManager) prepareForClose() elect.Election {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
+	// Drop the VIP before resigning. Letting the new owner add the VIP first is
+	// unsafe on real networks because upstream devices remember only one MAC for
+	// the VIP and may keep forwarding to the old node long after the overlap.
+	vm.closing = true
+	vm.stopARPRefresh()
 	vm.delVIP()
+	return vm.election
 }

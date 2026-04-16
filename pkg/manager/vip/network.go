@@ -4,6 +4,7 @@
 package vip
 
 import (
+	"context"
 	"runtime"
 	"strings"
 	"syscall"
@@ -21,7 +22,7 @@ type NetworkOperation interface {
 	HasIP() (bool, error)
 	AddIP() error
 	DeleteIP() error
-	SendARP() error
+	SendARP(context.Context) error
 	Addr() string
 }
 
@@ -33,11 +34,17 @@ type networkOperation struct {
 	// the network interface
 	link netlink.Link
 	lg   *zap.Logger
+	// garpBurstCount defines the number of GARP packets sent immediately after the
+	// new owner binds the VIP. A small burst makes takeover visible quickly even
+	// if the first packet is dropped by the host, bond driver, or upstream device. The
+	// manager may replay the whole burst later during the refresh window.
+	garpBurstCount int
 }
 
-func NewNetworkOperation(addressStr, linkStr string, lg *zap.Logger) (NetworkOperation, error) {
+func NewNetworkOperation(addressStr, linkStr string, garpBurstCount int, lg *zap.Logger) (NetworkOperation, error) {
 	no := &networkOperation{
-		lg: lg,
+		lg:             lg,
+		garpBurstCount: garpBurstCount,
 	}
 	if err := no.initAddr(addressStr, linkStr); err != nil {
 		return nil, err
@@ -92,13 +99,22 @@ func (no *networkOperation) DeleteIP() error {
 	return errors.WithStack(err)
 }
 
-func (no *networkOperation) SendARP() error {
-	if err := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name); err != nil {
-		no.lg.Warn("gratuitous arping failed", zap.Stringer("ip", no.address.IP), zap.String("iface", no.link.Attrs().Name), zap.Error(err))
+func (no *networkOperation) SendARP(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	// GratuitousArpOverIfaceByName may not work properly even if it returns nil, so always run a command.
-	err := no.execCmd("sudo", "arping", "-c", "3", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
-	return errors.WithStack(err)
+	if no.garpBurstCount <= 0 {
+		return nil
+	}
+	for i := 0; i < no.garpBurstCount; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := no.sendARPOneShot(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (no *networkOperation) Addr() string {
@@ -106,6 +122,30 @@ func (no *networkOperation) Addr() string {
 		return ""
 	}
 	return no.address.IP.String()
+}
+
+func (no *networkOperation) sendARPOneShot() error {
+	// Keep both sending paths for a single logical GARP attempt: the library
+	// path avoids depending on the external "arping" command, while the command
+	// path has proven more reliable on some customer environments. Treat either
+	// one as success.
+	libErr := arping.GratuitousArpOverIfaceByName(no.address.IP, no.link.Attrs().Name)
+	if libErr != nil {
+		// Output a debug log to avoid user anxiety.
+		no.lg.Debug("gratuitous arping via library failed",
+			zap.Stringer("ip", no.address.IP),
+			zap.String("iface", no.link.Attrs().Name),
+			zap.Error(libErr))
+	}
+	// Always use "arping -c 1" here and let SendARP control the outer burst
+	// count and interval. Using "arping -c 5" would hide pacing inside the
+	// command, making takeover and refresh timing less predictable from TiProxy
+	// and harder to reason about in tests and production troubleshooting.
+	cmdErr := no.execCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
+	if libErr == nil || cmdErr == nil {
+		return nil
+	}
+	return errors.Wrap(errors.WithStack(cmdErr), errors.WithStack(libErr))
 }
 
 func (no *networkOperation) execCmd(args ...string) error {
