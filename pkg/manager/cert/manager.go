@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	// If fsnotify not working, fast certificate reloads can serve as a fallback safeguard.
+	// When the LB DNS name changes, the certificates are also updated and TiProxy needs to reload them fast. 
+	// If fsnotify does not work, fast certificate reloads can serve as a fallback safeguard.
 	defaultRetryInterval     = 5 * time.Minute
 	watchEventDebounceWindow = 100 * time.Millisecond
 )
