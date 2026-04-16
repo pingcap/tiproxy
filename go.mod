@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go v1.55.5
 	github.com/bahlo/generic-list-go v0.2.0
 	github.com/cenkalti/backoff/v4 v4.2.1
+	github.com/fsnotify/fsnotify v1.6.0
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.10.1
 	github.com/go-mysql-org/go-mysql v1.12.0
@@ -38,6 +39,11 @@ require (
 	go.uber.org/mock v0.5.2
 	go.uber.org/ratelimit v0.2.0
 	go.uber.org/zap v1.27.0
+<<<<<<< HEAD
+=======
+	golang.org/x/net v0.48.0
+	golang.org/x/sync v0.19.0
+>>>>>>> 6dd75b36 (cert: add fsnotify to watch and reload cert files (#1127))
 	google.golang.org/grpc v1.63.2
 )
 
@@ -274,7 +280,6 @@ require (
 	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/telemetry v0.0.0-20251203150158-8fff8a5912fc // indirect
 	golang.org/x/term v0.39.0 // indirect
