@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +27,12 @@ func (c *mockCfgGetter) GetConfig() *config.Config {
 }
 
 func TestRecordProfile(t *testing.T) {
+	oldMemUsed, oldMemTotal := memory.MemUsed, memory.MemTotal
+	defer func() {
+		memory.MemUsed = oldMemUsed
+		memory.MemTotal = oldMemTotal
+	}()
+
 	dir := t.TempDir()
 	cfg := &config.Config{}
 	cfg.Log.LogFile.Filename = path.Join(dir, "proxy.log")
@@ -74,4 +81,101 @@ func TestRecordProfile(t *testing.T) {
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	require.Len(t, entries, m.maxSavedProfiles)
+}
+
+func TestShouldRejectNewConn(t *testing.T) {
+	oldMemUsed, oldMemTotal := memory.MemUsed, memory.MemTotal
+	defer func() {
+		memory.MemUsed = oldMemUsed
+		memory.MemTotal = oldMemTotal
+	}()
+
+	cfg := config.NewConfig()
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0.9
+	cfgGetter := mockCfgGetter{cfg: cfg}
+	memory.MemUsed = func() (uint64, error) {
+		return 9 * (1 << 30), nil
+	}
+	memory.MemTotal = func() (uint64, error) {
+		return 10 * (1 << 30), nil
+	}
+	m := NewMemManager(zap.NewNop(), &cfgGetter)
+	m.checkInterval = 50 * time.Millisecond
+	m.snapshotExpire = 200 * time.Millisecond
+	m.Start(context.Background())
+	defer m.Close()
+
+	require.Eventually(t, func() bool {
+		reject, snapshot, threshold := m.ShouldRejectNewConn()
+		return reject && snapshot.Valid && threshold == 0.9
+	}, time.Second, 10*time.Millisecond)
+	m.Close()
+
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0
+	reject, _, threshold := m.ShouldRejectNewConn()
+	require.False(t, reject)
+	require.Zero(t, threshold)
+
+	staleSnapshot := m.LatestUsage()
+	staleSnapshot.UpdateTime = time.Now().Add(-m.snapshotExpire - time.Second)
+	m.latestUsage.Store(staleSnapshot)
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0.9
+	reject, _, threshold = m.ShouldRejectNewConn()
+	require.False(t, reject)
+	require.Equal(t, 0.9, threshold)
+}
+
+func TestShouldRejectNewConnTracksConnBufferMemory(t *testing.T) {
+	oldMemUsed, oldMemTotal := memory.MemUsed, memory.MemTotal
+	defer func() {
+		memory.MemUsed = oldMemUsed
+		memory.MemTotal = oldMemTotal
+	}()
+
+	cfg := config.NewConfig()
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0.9
+	cfgGetter := mockCfgGetter{cfg: cfg}
+	var used atomic.Uint64
+	used.Store(890)
+	memory.MemUsed = func() (uint64, error) {
+		return used.Load(), nil
+	}
+	memory.MemTotal = func() (uint64, error) {
+		return 1000, nil
+	}
+	m := NewMemManager(zap.NewNop(), &cfgGetter)
+	m.checkInterval = 50 * time.Millisecond
+	m.snapshotExpire = time.Second
+	m.Start(context.Background())
+	defer m.Close()
+
+	require.Eventually(t, func() bool {
+		reject, snapshot, threshold := m.ShouldRejectNewConn()
+		return !reject && snapshot.Valid && threshold == 0.9 && snapshot.Used == 890
+	}, time.Second, 10*time.Millisecond)
+
+	m.UpdateConnBufferMemory(20)
+	reject, snapshot, threshold := m.ShouldRejectNewConn()
+	require.True(t, reject)
+	require.Equal(t, 0.9, threshold)
+	require.Equal(t, uint64(910), snapshot.Used)
+	require.InDelta(t, 0.91, snapshot.Usage, 0.0001)
+
+	used.Store(910)
+	snapshot, err := m.refreshUsage()
+	require.NoError(t, err)
+	require.Equal(t, uint64(910), snapshot.Used)
+	require.InDelta(t, 0.91, snapshot.Usage, 0.0001)
+	reject, snapshot, threshold = m.ShouldRejectNewConn()
+	require.True(t, reject)
+	require.Equal(t, 0.9, threshold)
+	require.Equal(t, uint64(910), snapshot.Used)
+	require.InDelta(t, 0.91, snapshot.Usage, 0.0001)
+
+	m.UpdateConnBufferMemory(-20)
+	reject, snapshot, threshold = m.ShouldRejectNewConn()
+	require.False(t, reject)
+	require.Equal(t, 0.9, threshold)
+	require.Equal(t, uint64(890), snapshot.Used)
+	require.InDelta(t, 0.89, snapshot.Usage, 0.0001)
 }
