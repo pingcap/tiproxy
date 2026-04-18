@@ -187,6 +187,7 @@ func TestCertServer(t *testing.T) {
 				require.Nil(t, c.RootCAs)
 				require.Nil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
+				require.NotNil(t, c.GetClientCertificate, "skip-ca should set GetClientCertificate")
 			},
 		},
 		{
@@ -336,6 +337,7 @@ func TestSetConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, tcfg)
 	require.True(t, tcfg.InsecureSkipVerify)
+	require.NotNil(t, tcfg.GetClientCertificate, "skip-ca should set GetClientCertificate")
 
 	cfg = config.TLSConfig{
 		SkipCA: false,
