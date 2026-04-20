@@ -214,12 +214,14 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	}
 	var serverVersion string
 	supportRedirection := true
+	now := time.Now()
 	for backendID, health := range backends {
 		backend, ok := router.backends[backendID]
 		if !ok && health.Healthy {
 			router.logger.Debug("add new backend to router",
 				zap.String("backend_id", backendID), zap.String("addr", health.Addr), zap.Stringer("health", health))
-			router.backends[backendID] = newBackendWrapper(backendID, *health)
+			backend = newBackendWrapper(backendID, *health)
+			router.backends[backendID] = backend
 			serverVersion = health.ServerVersion
 		} else if ok {
 			if !health.Equals(backend.getHealth()) {
@@ -238,6 +240,9 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	}
 
 	router.updateGroups()
+	for _, group := range router.groups {
+		group.UpdateFailover(now)
+	}
 	if len(serverVersion) > 0 {
 		router.serverVersion = serverVersion
 	}
@@ -292,7 +297,7 @@ func (router *ScoreBasedRouter) updateGroups() {
 	for _, backend := range router.backends {
 		// If connList.Len() == 0, there won't be any outgoing connections.
 		// And if also connScore == 0, there won't be any incoming connections.
-		if !backend.Healthy() && backend.connList.Len() == 0 && backend.connScore <= 0 {
+		if !backend.ObservedHealthy() && backend.connList.Len() == 0 && backend.connScore <= 0 {
 			delete(router.backends, backend.id)
 			if backend.group != nil {
 				backend.group.RemoveBackend(backend.id)
@@ -346,6 +351,11 @@ func (router *ScoreBasedRouter) updateGroups() {
 				g, err := NewGroup(values, router.bpCreator, router.matchType, router.logger)
 				if err == nil {
 					group = g
+					if router.cfgGetter != nil {
+						if cfg := router.cfgGetter.GetConfig(); cfg != nil {
+							group.SetConfig(cfg)
+						}
+					}
 					router.groups = append(router.groups, group)
 				}
 				// maybe too many logs, ignore the error now
@@ -404,11 +414,13 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	router.Lock()
 	defer router.Unlock()
 
-	if !router.supportRedirection {
-		return
+	if router.supportRedirection {
+		for _, group := range router.groups {
+			group.Balance(ctx)
+		}
 	}
 	for _, group := range router.groups {
-		group.Balance(ctx)
+		group.CloseTimedOutFailoverConnections(time.Now())
 	}
 }
 
