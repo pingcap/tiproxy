@@ -710,6 +710,28 @@ func (mgr *BackendConnManager) Redirect(backendInst router.BackendInst) bool {
 	return true
 }
 
+// ForceClose forces closing the connection when the failover times out.
+func (mgr *BackendConnManager) ForceClose() bool {
+	for {
+		status := mgr.closeStatus.Load()
+		if status >= statusClosing {
+			return false
+		}
+		if mgr.closeStatus.CompareAndSwap(status, statusClosing) {
+			break
+		}
+	}
+	mgr.quitSource = SrcProxyQuit
+	if mgr.clientIO != nil {
+		// Interrupt in-flight I/O and let the normal connection teardown release buffers.
+		// Closing the PacketIO here may race with ExecuteCmd() flushing to the client.
+		if err := mgr.clientIO.GracefulClose(); err != nil && !pnet.IsDisconnectError(err) {
+			mgr.logger.Warn("force close client IO error", zap.Error(err))
+		}
+	}
+	return true
+}
+
 func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *redirectResult) {
 	_ = ctx
 	if rs == nil {
