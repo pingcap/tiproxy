@@ -27,7 +27,7 @@ var testProxyConfig = Config{
 			FrontendKeepalive:              KeepAlive{Enabled: true},
 			ProxyProtocol:                  "v2",
 			GracefulWaitBeforeShutdown:     10,
-      FailBackendList:                []string{"db-tidb-0", "db-tidb-1"},
+			FailBackendList:                []string{"db-tidb-0", "db-tidb-1"},
 			FailoverTimeout:                60,
 			ConnBufferSize:                 32 * 1024,
 			BackendClusters: []BackendCluster{
