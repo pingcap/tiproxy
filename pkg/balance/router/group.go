@@ -37,6 +37,15 @@ const (
 
 var _ ConnEventReceiver = (*Group)(nil)
 
+type routeCheckBackend struct {
+	*backendWrapper
+	healthy bool
+}
+
+func (b routeCheckBackend) Healthy() bool {
+	return b.healthy
+}
+
 // Group is used for one backend group that can be matched by CIDR, username, database, or resource group list.
 type Group struct {
 	sync.Mutex
@@ -48,6 +57,10 @@ type Group struct {
 	// parsed CIDR list for faster match
 	cidrList []*net.IPNet
 	backends map[string]*backendWrapper
+	// failoverTargets contains backend pod names or addresses configured in fail-backend-list.
+	failoverTargets map[string]struct{}
+	failoverTimeout time.Duration
+	ignoreFailover  bool
 	// To limit the speed of redirection.
 	lastRedirectTime time.Time
 }
@@ -59,11 +72,12 @@ func NewGroup(values []string, bpCreator func(lg *zap.Logger) policy.BalancePoli
 	lg.Info("new group created")
 
 	group := &Group{
-		matchType: matchType,
-		lg:        lg,
-		values:    values,
-		backends:  make(map[string]*backendWrapper),
-		policy:    bpCreator(lg.Named("policy")),
+		matchType:       matchType,
+		lg:              lg,
+		values:          values,
+		backends:        make(map[string]*backendWrapper),
+		failoverTargets: make(map[string]struct{}),
+		policy:          bpCreator(lg.Named("policy")),
 	}
 	err := group.parseValues()
 	if err != nil {
@@ -188,6 +202,104 @@ func setConnWrapper(conn RedirectableConn, ce *glist.Element[*connWrapper]) {
 	conn.SetValue(_routerKey, ce)
 }
 
+func (g *Group) routeableObservedBackendsLocked(failoverBackendIDs map[string]struct{}) []policy.BackendCtx {
+	backends := make([]policy.BackendCtx, 0, len(g.backends))
+	for _, backend := range g.backends {
+		if !backend.ObservedHealthy() {
+			continue
+		}
+		healthy := true
+		if failoverBackendIDs != nil {
+			_, healthy = failoverBackendIDs[backend.ID()]
+			healthy = !healthy
+		}
+		backends = append(backends, routeCheckBackend{
+			backendWrapper: backend,
+			healthy:        healthy,
+		})
+	}
+	return g.policy.RouteableBackends(backends)
+}
+
+func (g *Group) backendInFailoverListLocked(backend *backendWrapper) bool {
+	_, active := g.failoverTargets[backend.PodName()]
+	if !active {
+		_, active = g.failoverTargets[backend.Addr()]
+	}
+	return active
+}
+
+func (g *Group) setFailoverConfigLocked(cfg *config.Config) {
+	targets := make(map[string]struct{}, len(cfg.Proxy.FailBackendList))
+	for _, backend := range cfg.Proxy.FailBackendList {
+		targets[backend] = struct{}{}
+	}
+	g.failoverTargets = targets
+	g.failoverTimeout = time.Duration(cfg.Proxy.FailoverTimeout) * time.Second
+}
+
+func (g *Group) updateFailoverLocked(now time.Time) {
+	failoverBackendIDs := make(map[string]struct{}, len(g.backends))
+	for _, backend := range g.backends {
+		if g.backendInFailoverListLocked(backend) {
+			failoverBackendIDs[backend.ID()] = struct{}{}
+		}
+	}
+
+	routeable := g.routeableObservedBackendsLocked(nil)
+	if len(routeable) > 0 {
+		remaining := g.routeableObservedBackendsLocked(failoverBackendIDs)
+		if len(remaining) == 0 {
+			matched := 0
+			for _, backend := range routeable {
+				if _, ok := failoverBackendIDs[backend.ID()]; ok {
+					matched++
+				}
+			}
+			if !g.ignoreFailover {
+				g.lg.Warn("fail-backend-list would leave no routeable backend in group, ignore the list for this group",
+					zap.Int("routeable_backend_count", len(routeable)),
+					zap.Int("matched_routeable_backend_count", matched))
+			}
+			g.ignoreFailover = true
+			clear(failoverBackendIDs)
+		} else {
+			g.ignoreFailover = false
+		}
+	} else {
+		g.ignoreFailover = false
+	}
+
+	for _, backend := range g.backends {
+		_, active := failoverBackendIDs[backend.ID()]
+		since := time.Time{}
+		if active {
+			since = now
+		}
+		changed, since := backend.setFailover(since)
+		if !changed {
+			continue
+		}
+		fields := []zap.Field{
+			zap.String("backend_addr", backend.Addr()),
+			zap.String("backend_pod", backend.PodName()),
+			zap.Duration("failover_timeout", g.failoverTimeout),
+		}
+		if active {
+			fields = append(fields, zap.Time("failover_since", since))
+			g.lg.Warn("backend enters failover", fields...)
+			continue
+		}
+		g.lg.Info("backend exits failover", fields...)
+	}
+}
+
+func (g *Group) UpdateFailover(now time.Time) {
+	g.Lock()
+	defer g.Unlock()
+	g.updateFailoverLocked(now)
+}
+
 func (g *Group) Route(excluded []BackendInst) (policy.BackendCtx, error) {
 	g.Lock()
 	defer g.Unlock()
@@ -256,6 +368,9 @@ func (g *Group) Balance(ctx context.Context) {
 	i := 0
 	for ele := fromBackend.connList.Front(); ele != nil && ctx.Err() == nil && i < count; ele = ele.Next() {
 		conn := ele.Value
+		if conn.forceClosing {
+			continue
+		}
 		switch conn.phase {
 		case phaseRedirectNotify:
 			// A connection cannot be redirected again when it has not finished redirecting.
@@ -282,11 +397,43 @@ func (g *Group) onCreateConn(backendInst BackendInst, conn RedirectableConn, suc
 			RedirectableConn: conn,
 			createTime:       time.Now(),
 			phase:            phaseNotRedirected,
+			forceClosing:     false,
 		}
 		g.addConn(backend, connWrapper)
 		conn.SetEventReceiver(g)
 	} else {
 		backend.connScore--
+	}
+}
+
+func (g *Group) CloseTimedOutFailoverConnections(now time.Time) {
+	g.Lock()
+	defer g.Unlock()
+	for _, backend := range g.backends {
+		since := backend.FailoverSince()
+		if since.IsZero() {
+			continue
+		}
+		if g.failoverTimeout > 0 && since.Add(g.failoverTimeout).After(now) {
+			continue
+		}
+		for ele := backend.connList.Front(); ele != nil; ele = ele.Next() {
+			conn := ele.Value
+			if conn.phase == phaseClosed || conn.forceClosing {
+				continue
+			}
+			fields := []zap.Field{
+				zap.Uint64("connID", conn.ConnectionID()),
+				zap.String("backend_addr", backend.addr),
+				zap.String("backend_pod", backend.PodName()),
+				zap.Duration("failover_timeout", g.failoverTimeout),
+				zap.Duration("failover_elapsed", now.Sub(since)),
+			}
+			if conn.ForceClose() {
+				conn.forceClosing = true
+				g.lg.Info("force close connection on failover backend", fields...)
+			}
+		}
 	}
 }
 
@@ -442,5 +589,9 @@ func (g *Group) ConnCount() int {
 }
 
 func (g *Group) SetConfig(cfg *config.Config) {
+	g.Lock()
+	defer g.Unlock()
 	g.policy.SetConfig(cfg)
+	g.setFailoverConfigLocked(cfg)
+	g.updateFailoverLocked(time.Now())
 }
