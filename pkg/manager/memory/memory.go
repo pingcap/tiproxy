@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	// Check the memory usage every 5 seconds.
-	checkInterval = 5 * time.Second
+	// Refresh the memory usage every 5 seconds.
+	refreshInterval = 5 * time.Second
 	// No need to record too frequently.
 	recordMinInterval = 5 * time.Minute
 	// Record the profiles when the memory usage is higher than 60%.
@@ -28,7 +28,7 @@ const (
 	// Remove the oldest profiles when the number of profiles exceeds this limit.
 	maxSavedProfiles = 20
 	// Fail open if the latest sampled usage is too old.
-	snapshotExpireInterval = 2 * checkInterval
+	snapshotExpireInterval = 3 * refreshInterval
 )
 
 type UsageSnapshot struct {
@@ -49,7 +49,7 @@ type MemManager struct {
 	cfgGetter         config.ConfigGetter
 	savedProfileNames []string
 	lastRecordTime    time.Time
-	checkInterval     time.Duration // used for test
+	refreshInterval   time.Duration // used for test
 	recordMinInterval time.Duration // used for test
 	maxSavedProfiles  int           // used for test
 	snapshotExpire    time.Duration // used for test
@@ -63,7 +63,7 @@ func NewMemManager(lg *zap.Logger, cfgGetter config.ConfigGetter) *MemManager {
 	mgr := &MemManager{
 		lg:                lg,
 		cfgGetter:         cfgGetter,
-		checkInterval:     checkInterval,
+		refreshInterval:   refreshInterval,
 		recordMinInterval: recordMinInterval,
 		maxSavedProfiles:  maxSavedProfiles,
 		snapshotExpire:    snapshotExpireInterval,
@@ -76,7 +76,7 @@ func (m *MemManager) Start(ctx context.Context) {
 	// Call the memory.MemTotal and memory.MemUsed in TiDB repo because they have considered cgroup.
 	limit, err := memory.MemTotal()
 	if err != nil || limit == 0 {
-		m.lg.Error("get memory limit failed", zap.Uint64("limit", limit), zap.Error(err))
+		m.lg.Warn("get memory limit failed", zap.Uint64("limit", limit), zap.Error(err))
 		return
 	}
 	m.memoryLimit = limit
@@ -86,24 +86,24 @@ func (m *MemManager) Start(ctx context.Context) {
 	childCtx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
 	m.wg.RunWithRecover(func() {
-		m.alarmLoop(childCtx)
+		m.refreshLoop(childCtx)
 	}, nil, m.lg)
 }
 
-func (m *MemManager) alarmLoop(ctx context.Context) {
-	ticker := time.NewTicker(m.checkInterval)
+func (m *MemManager) refreshLoop(ctx context.Context) {
+	ticker := time.NewTicker(m.refreshInterval)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.checkAndAlarm()
+			m.refreshAndAlarm()
 		}
 	}
 }
 
-func (m *MemManager) checkAndAlarm() {
+func (m *MemManager) refreshAndAlarm() {
 	snapshot, err := m.refreshUsage()
 	if err != nil || !snapshot.Valid {
 		return
@@ -139,7 +139,7 @@ func (m *MemManager) refreshUsage() (UsageSnapshot, error) {
 	}
 	used, err := memory.MemUsed()
 	if err != nil || used == 0 {
-		m.lg.Error("get used memory failed", zap.Uint64("used", used), zap.Error(err))
+		m.lg.Warn("get used memory failed", zap.Uint64("used", used), zap.Error(err))
 		return UsageSnapshot{}, err
 	}
 	// Start a new delta window from this sampled snapshot. Later connection create/close

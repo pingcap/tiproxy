@@ -151,7 +151,7 @@ func TestTrackConnBufferMemDelta(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		return memUsage.connBufferMemDelta.Load() == int64(cfg.Proxy.ConnBufferSize)
+		return memUsage.connBufferMemDelta.Load() == int64(cfg.Proxy.ConnBufferSize*2)
 	}, time.Second, 10*time.Millisecond)
 
 	require.NoError(t, conn.Close())

@@ -75,7 +75,8 @@ func estimateConnBufferMemDelta(bufferSize int) int64 {
 	if bufferSize == 0 {
 		bufferSize = pnet.DefaultConnBufferSize
 	}
-	return int64(bufferSize)
+	// write buffer + read buffer
+	return int64(bufferSize * 2)
 }
 
 // NewSQLServer creates a new SQLServer.

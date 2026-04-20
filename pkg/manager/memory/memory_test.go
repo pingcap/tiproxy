@@ -46,7 +46,7 @@ func TestRecordProfile(t *testing.T) {
 	m := NewMemManager(zap.NewNop(), &cfgGetter)
 	// The timestamp in file names are in seconds instead of milliseconds, so recording too frequently is useless.
 	// Instead, it may overwrite the previous files.
-	m.checkInterval = 100 * time.Millisecond
+	m.refreshInterval = 100 * time.Millisecond
 	m.recordMinInterval = 1200 * time.Millisecond
 	m.maxSavedProfiles = 2
 	m.Start(context.Background())
@@ -100,7 +100,7 @@ func TestShouldRejectNewConn(t *testing.T) {
 		return 10 * (1 << 30), nil
 	}
 	m := NewMemManager(zap.NewNop(), &cfgGetter)
-	m.checkInterval = 50 * time.Millisecond
+	m.refreshInterval = 50 * time.Millisecond
 	m.snapshotExpire = 200 * time.Millisecond
 	m.Start(context.Background())
 	defer m.Close()
@@ -144,7 +144,7 @@ func TestShouldRejectNewConnTracksConnBufferMemory(t *testing.T) {
 		return 1000, nil
 	}
 	m := NewMemManager(zap.NewNop(), &cfgGetter)
-	m.checkInterval = 50 * time.Millisecond
+	m.refreshInterval = 50 * time.Millisecond
 	m.snapshotExpire = time.Second
 	m.Start(context.Background())
 	defer m.Close()
