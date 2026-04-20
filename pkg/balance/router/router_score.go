@@ -293,11 +293,23 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 		}
 	}
 	var serverVersion string
+<<<<<<< HEAD
 	for addr, health := range backends {
 		backend, ok := router.backends[addr]
 		if !ok && health.Healthy {
 			router.logger.Debug("add new backend to router", zap.String("addr", addr), zap.Stringer("health", health))
 			router.backends[addr] = newBackendWrapper(addr, *health)
+=======
+	supportRedirection := true
+	now := time.Now()
+	for backendID, health := range backends {
+		backend, ok := router.backends[backendID]
+		if !ok && health.Healthy {
+			router.logger.Debug("add new backend to router",
+				zap.String("backend_id", backendID), zap.String("addr", health.Addr), zap.Stringer("health", health))
+			backend = newBackendWrapper(backendID, *health)
+			router.backends[backendID] = backend
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))
 			serverVersion = health.ServerVersion
 		} else if ok {
 			if !health.Equals(backend.getHealth()) {
@@ -312,9 +324,144 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 			router.logger.Debug("unhealthy backend is not in router", zap.String("addr", addr), zap.Stringer("health", health))
 		}
 	}
+<<<<<<< HEAD
 	if len(serverVersion) > 0 {
 		router.serverVersion = serverVersion
 	}
+=======
+
+	router.updateGroups()
+	for _, group := range router.groups {
+		group.UpdateFailover(now)
+	}
+	if len(serverVersion) > 0 {
+		router.serverVersion = serverVersion
+	}
+	if router.supportRedirection != supportRedirection {
+		router.logger.Info("updated supporting redirection", zap.Bool("support", supportRedirection))
+		router.supportRedirection = supportRedirection
+	}
+}
+
+func matchPortValue(clusterName, port string) string {
+	if clusterName == "" {
+		return port
+	}
+	return fmt.Sprintf("%s:%s", clusterName, port)
+}
+
+func (router *ScoreBasedRouter) backendGroupValues(backend *backendWrapper) []string {
+	switch router.matchType {
+	case MatchClientCIDR, MatchProxyCIDR:
+		return backend.Cidr()
+	case MatchPort:
+		port := backend.TiProxyPort()
+		if port != "" {
+			return []string{matchPortValue(backend.ClusterName(), port)}
+		}
+	}
+	return nil
+}
+
+func (router *ScoreBasedRouter) rebuildPortConflictDetector() {
+	if router.matchType != MatchPort {
+		router.portConflictDetector = nil
+		return
+	}
+	detector := newPortConflictDetector()
+	for _, group := range router.groups {
+		for _, value := range group.values {
+			clusterName, port, ok := strings.Cut(value, ":")
+			if !ok {
+				port = value
+				clusterName = ""
+			}
+			detector.bind(port, clusterName, group)
+		}
+	}
+	router.portConflictDetector = detector
+}
+
+// Update the groups after the backend list is updated.
+// called in the lock.
+func (router *ScoreBasedRouter) updateGroups() {
+	for _, backend := range router.backends {
+		// If connList.Len() == 0, there won't be any outgoing connections.
+		// And if also connScore == 0, there won't be any incoming connections.
+		if !backend.ObservedHealthy() && backend.connList.Len() == 0 && backend.connScore <= 0 {
+			delete(router.backends, backend.id)
+			if backend.group != nil {
+				backend.group.RemoveBackend(backend.id)
+				// remove empty groups
+				if backend.group.Empty() {
+					router.groups = slices.DeleteFunc(router.groups, func(g *Group) bool {
+						return g == backend.group
+					})
+				}
+			}
+			continue
+		}
+		// If the labels were correctly set, we won't update its group even if the labels change.
+		if backend.group != nil {
+			switch router.matchType {
+			case MatchClientCIDR, MatchProxyCIDR, MatchPort:
+				values := router.backendGroupValues(backend)
+				if !backend.group.EqualValues(values) {
+					router.logger.Warn("backend routing values changed, keep the existing group until it is removed",
+						zap.String("backend_id", backend.id),
+						zap.String("addr", backend.Addr()),
+						zap.Strings("current_values", values),
+						zap.Strings("group_values", backend.group.values))
+				}
+			}
+			continue
+		}
+
+		// If the backend is not in any group, add it to a new group if its label is set.
+		// In operator deployment, the labels are set dynamically.
+		var group *Group
+		switch router.matchType {
+		case MatchAll:
+			if len(router.groups) == 0 {
+				group, _ = NewGroup(nil, router.bpCreator, router.matchType, router.logger)
+				router.groups = append(router.groups, group)
+			}
+			group = router.groups[0]
+		case MatchClientCIDR, MatchProxyCIDR, MatchPort:
+			values := router.backendGroupValues(backend)
+			if len(values) == 0 {
+				break
+			}
+			for _, g := range router.groups {
+				if g.Intersect(values) {
+					group = g
+					break
+				}
+			}
+			if group == nil {
+				g, err := NewGroup(values, router.bpCreator, router.matchType, router.logger)
+				if err == nil {
+					group = g
+					if router.cfgGetter != nil {
+						if cfg := router.cfgGetter.GetConfig(); cfg != nil {
+							group.SetConfig(cfg)
+						}
+					}
+					router.groups = append(router.groups, group)
+				}
+				// maybe too many logs, ignore the error now
+			}
+		}
+		if group == nil {
+			continue
+		}
+		group.AddBackend(backend.id, backend)
+	}
+	for _, group := range router.groups {
+		group.RefreshCidr()
+	}
+	router.rebuildPortConflictDetector()
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))
 }
 
 func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
@@ -341,12 +488,22 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	router.Lock()
 	defer router.Unlock()
 
+<<<<<<< HEAD
 	if len(router.backends) <= 1 {
 		return
 	}
 	backends := make([]policy.BackendCtx, 0, len(router.backends))
 	for _, backend := range router.backends {
 		backends = append(backends, backend)
+=======
+	if router.supportRedirection {
+		for _, group := range router.groups {
+			group.Balance(ctx)
+		}
+	}
+	for _, group := range router.groups {
+		group.CloseTimedOutFailoverConnections(time.Now())
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))
 	}
 
 	busiestBackend, idlestBackend, balanceCount, reason, logFields := router.policy.BackendsToBalance(backends)

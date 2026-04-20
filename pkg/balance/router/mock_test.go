@@ -68,7 +68,21 @@ func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 	return true
 }
 
+<<<<<<< HEAD
 func (conn *mockRedirectableConn) GetRedirectingAddr() string {
+=======
+func (conn *mockRedirectableConn) ForceClose() bool {
+	conn.Lock()
+	defer conn.Unlock()
+	if conn.closing {
+		return false
+	}
+	conn.closing = true
+	return true
+}
+
+func (conn *mockRedirectableConn) GetRedirectingBackendID() string {
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))
 	conn.Lock()
 	defer conn.Unlock()
 	if conn.to == nil {
@@ -204,6 +218,16 @@ func (m *mockBalancePolicy) BackendToRoute(backends []policy.BackendCtx) policy.
 	return nil
 }
 
+func (m *mockBalancePolicy) RouteableBackends(backends []policy.BackendCtx) []policy.BackendCtx {
+	routeable := make([]policy.BackendCtx, 0, len(backends))
+	for _, backend := range backends {
+		if backend.Healthy() {
+			routeable = append(routeable, backend)
+		}
+	}
+	return routeable
+}
+
 func (m *mockBalancePolicy) BackendsToBalance(backends []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
 	if m.backendsToBalance != nil {
 		return m.backendsToBalance(backends)
@@ -218,3 +242,26 @@ func (m *mockBalancePolicy) SetConfig(cfg *config.Config) {
 func (m *mockBalancePolicy) getConfig() *config.Config {
 	return m.cfg.Load()
 }
+<<<<<<< HEAD
+=======
+
+var _ config.ConfigGetter = (*mockConfigGetter)(nil)
+
+type mockConfigGetter struct {
+	cfg atomic.Pointer[config.Config]
+}
+
+func newMockConfigGetter(cfg *config.Config) *mockConfigGetter {
+	cfgGetter := &mockConfigGetter{}
+	cfgGetter.setConfig(cfg)
+	return cfgGetter
+}
+
+func (cfgGetter *mockConfigGetter) GetConfig() *config.Config {
+	return cfgGetter.cfg.Load()
+}
+
+func (cfgGetter *mockConfigGetter) setConfig(cfg *config.Config) {
+	cfgGetter.cfg.Store(cfg)
+}
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))

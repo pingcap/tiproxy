@@ -59,6 +59,20 @@ type ProxyServerOnline struct {
 	// In k8s, the pod terminationGracePeriodSeconds can be set to very long so that these configs can be updated online.
 	GracefulWaitBeforeShutdown int `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty" reloadable:"true"`
 	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty" reloadable:"true"`
+<<<<<<< HEAD
+=======
+	// Public and private traffic are metered separately.
+	PublicEndpoints []string `yaml:"public-endpoints,omitempty" toml:"public-endpoints,omitempty" json:"public-endpoints,omitempty" reloadable:"true"`
+	// BackendClusters represents multiple backend clusters that the proxy can route to. It can be reloaded
+	// online.
+	BackendClusters []BackendCluster `yaml:"backend-clusters,omitempty" toml:"backend-clusters,omitempty" json:"backend-clusters,omitempty" reloadable:"true"`
+	// FailBackendList contains backend pod names or backend addresses (IP:port) that should be drained immediately
+	// and excluded from new routing. If the configured list would leave no routeable backend in a routing group,
+	// TiProxy ignores the list for that group to keep routing available.
+	FailBackendList []string `yaml:"fail-backend-list,omitempty" toml:"fail-backend-list,omitempty" json:"fail-backend-list,omitempty" reloadable:"true"`
+	// FailoverTimeout is the grace period in seconds before force closing the remaining connections on failed backends.
+	FailoverTimeout int `yaml:"failover-timeout,omitempty" toml:"failover-timeout,omitempty" json:"failover-timeout,omitempty" reloadable:"true"`
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))
 }
 
 type ProxyServer struct {
@@ -144,6 +158,7 @@ func NewConfig() *Config {
 	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnhealthyKeepalive = DefaultKeepAlive()
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 	cfg.Proxy.GracefulCloseConnTimeout = 15
+	cfg.Proxy.FailoverTimeout = 60
 
 	cfg.API.Addr = "0.0.0.0:3080"
 
@@ -168,6 +183,15 @@ func NewConfig() *Config {
 func (cfg *Config) Clone() *Config {
 	newCfg := *cfg
 	newCfg.Labels = maps.Clone(cfg.Labels)
+<<<<<<< HEAD
+=======
+	newCfg.Proxy.PublicEndpoints = slices.Clone(cfg.Proxy.PublicEndpoints)
+	newCfg.Proxy.BackendClusters = slices.Clone(cfg.Proxy.BackendClusters)
+	newCfg.Proxy.FailBackendList = slices.Clone(cfg.Proxy.FailBackendList)
+	for i := range newCfg.Proxy.BackendClusters {
+		newCfg.Proxy.BackendClusters[i].NSServers = slices.Clone(newCfg.Proxy.BackendClusters[i].NSServers)
+	}
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))
 	return &newCfg
 }
 
@@ -239,3 +263,158 @@ func (cfg *Config) GetIPPort() (ip, port, statusPort string, err error) {
 	}
 	return
 }
+<<<<<<< HEAD
+=======
+
+// GetBackendClusters returns configured backend clusters.
+// It keeps backward compatibility for the legacy `proxy.pd-addrs` setting.
+func (cfg *Config) GetBackendClusters() []BackendCluster {
+	if len(cfg.Proxy.BackendClusters) > 0 {
+		return cfg.Proxy.BackendClusters
+	}
+	if strings.TrimSpace(cfg.Proxy.PDAddrs) == "" {
+		return nil
+	}
+	return []BackendCluster{{
+		Name:    DefaultBackendClusterName,
+		PDAddrs: cfg.Proxy.PDAddrs,
+	}}
+}
+
+func (ps *ProxyServer) Check() error {
+	if _, err := ps.GetSQLAddrs(); err != nil {
+		return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.addr or proxy.port-range: %s", err.Error())
+	}
+	clusterNames := make(map[string]struct{}, len(ps.BackendClusters))
+	for i, cluster := range ps.BackendClusters {
+		name := strings.TrimSpace(cluster.Name)
+		if name == "" {
+			return errors.Wrapf(ErrInvalidConfigValue, "proxy.backend-clusters[%d].name is empty", i)
+		}
+		if _, ok := clusterNames[name]; ok {
+			return errors.Wrapf(ErrInvalidConfigValue, "duplicate proxy.backend-clusters name %s", name)
+		}
+		clusterNames[name] = struct{}{}
+		if err := validateAddrList(cluster.PDAddrs, "proxy.backend-clusters.pd-addrs"); err != nil {
+			return err
+		}
+		if _, err := ParseNSServers(cluster.NSServers); err != nil {
+			return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.backend-clusters.ns-servers: %s", err.Error())
+		}
+	}
+
+	if ps.FailoverTimeout < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "proxy.failover-timeout must be greater than or equal to 0")
+	}
+	failBackends := ps.FailBackendList[:0]
+	failBackendSet := make(map[string]struct{}, len(ps.FailBackendList))
+	for i, backendName := range ps.FailBackendList {
+		backendName = strings.TrimSpace(backendName)
+		if backendName == "" {
+			return errors.Wrapf(ErrInvalidConfigValue, "proxy.fail-backend-list[%d] is empty", i)
+		}
+		if _, ok := failBackendSet[backendName]; ok {
+			continue
+		}
+		failBackendSet[backendName] = struct{}{}
+		failBackends = append(failBackends, backendName)
+	}
+	ps.FailBackendList = failBackends
+	return nil
+}
+
+// SplitAddrList splits a comma-separated address list, trims each address, and drops empty entries.
+func SplitAddrList(addrs string) []string {
+	parts := strings.Split(addrs, ",")
+	trimmed := make([]string, 0, len(parts))
+	for _, part := range parts {
+		addr := strings.TrimSpace(part)
+		if addr != "" {
+			trimmed = append(trimmed, addr)
+		}
+	}
+	return trimmed
+}
+
+func validateAddrList(addrs, field string) error {
+	parts := SplitAddrList(addrs)
+	if len(parts) == 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "%s is empty", field)
+	}
+	for _, addr := range parts {
+		if _, _, err := net.SplitHostPort(addr); err != nil {
+			return errors.Wrapf(ErrInvalidConfigValue, "invalid %s address %s", field, addr)
+		}
+	}
+	return nil
+}
+
+func ParseNSServers(nsServers []string) ([]string, error) {
+	if len(nsServers) == 0 {
+		return nil, nil
+	}
+	normalized := make([]string, 0, len(nsServers))
+	for _, server := range nsServers {
+		addr, err := normalizeNSServer(server)
+		if err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, addr)
+	}
+	return normalized, nil
+}
+
+func normalizeNSServer(server string) (string, error) {
+	host, port, err := net.SplitHostPort(server)
+	if err == nil {
+		if host == "" {
+			return "", errors.Wrapf(ErrInvalidConfigValue, "host is empty")
+		}
+		portNum, err := strconv.Atoi(port)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			return "", errors.Wrapf(ErrInvalidConfigValue, "port is invalid")
+		}
+		return net.JoinHostPort(host, strconv.Itoa(portNum)), nil
+	}
+
+	if server == "" {
+		return "", errors.Wrapf(ErrInvalidConfigValue, "host is empty")
+	}
+	if strings.ContainsAny(server, "[]") {
+		return "", errors.Wrapf(ErrInvalidConfigValue, "host is invalid")
+	}
+	return net.JoinHostPort(server, "53"), nil
+}
+
+func (ps *ProxyServer) GetSQLAddrs() ([]string, error) {
+	addrs := SplitAddrList(ps.Addr)
+	if len(addrs) == 0 {
+		if len(ps.PortRange) == 0 {
+			return []string{""}, nil
+		}
+		return nil, errors.Wrapf(ErrInvalidConfigValue, "proxy.addr is empty")
+	}
+	if len(ps.PortRange) == 0 {
+		return addrs, nil
+	}
+	if len(ps.PortRange) != 2 {
+		return nil, errors.Wrapf(ErrInvalidConfigValue, "proxy.port-range must contain exactly two ports")
+	}
+	start, end := ps.PortRange[0], ps.PortRange[1]
+	if start < 1 || start > 65535 || end < 1 || end > 65535 || start > end {
+		return nil, errors.Wrapf(ErrInvalidConfigValue, "proxy.port-range is invalid")
+	}
+	if len(addrs) != 1 {
+		return nil, errors.Wrapf(ErrInvalidConfigValue, "proxy.addr must contain exactly one host when proxy.port-range is set")
+	}
+	host, _, err := net.SplitHostPort(addrs[0])
+	if err != nil {
+		return nil, errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.addr: %s", err.Error())
+	}
+	sqlAddrs := make([]string, 0, end-start+1)
+	for port := start; port <= end; port++ {
+		sqlAddrs = append(sqlAddrs, net.JoinHostPort(host, strconv.Itoa(port)))
+	}
+	return sqlAddrs, nil
+}
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))

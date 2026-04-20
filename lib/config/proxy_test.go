@@ -24,6 +24,8 @@ var testProxyConfig = Config{
 			FrontendKeepalive:          KeepAlive{Enabled: true},
 			ProxyProtocol:              "v2",
 			GracefulWaitBeforeShutdown: 10,
+			FailBackendList:            []string{"db-tidb-0", "db-tidb-1"},
+			FailoverTimeout:            60,
 			ConnBufferSize:             32 * 1024,
 		},
 	},
@@ -112,6 +114,73 @@ func TestProxyCheck(t *testing.T) {
 			},
 			err: ErrInvalidConfigValue,
 		},
+<<<<<<< HEAD
+=======
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.PortRange = []int{10000}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.PortRange = []int{10000, 9999}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.Addr = "0.0.0.0:6000,0.0.0.0:6001"
+				c.Proxy.PortRange = []int{10000, 10001}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = append(c.Proxy.BackendClusters, BackendCluster{})
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = []BackendCluster{{Name: "c1", PDAddrs: ""}}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = []BackendCluster{{Name: "c1", PDAddrs: "127.0.0.1"}}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = []BackendCluster{
+					{Name: "c1", PDAddrs: "127.0.0.1:2379"},
+					{Name: "c1", PDAddrs: "127.0.0.1:2380"},
+				}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.BackendClusters = []BackendCluster{{Name: "c1", PDAddrs: "127.0.0.1:2379", NSServers: []string{"10.0.0.1:abc"}}}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.FailBackendList = []string{"db-tidb-0", " "}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.FailoverTimeout = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))
 	}
 	for _, tc := range testcases {
 		cfg := testProxyConfig
@@ -174,5 +243,40 @@ func TestCloneConfig(t *testing.T) {
 	clone := cfg.Clone()
 	require.Equal(t, cfg, *clone)
 	cfg.Labels["c"] = "d"
+<<<<<<< HEAD
 	require.NotContains(t, clone.Labels, "c")
+=======
+	cfg.Proxy.PublicEndpoints[0] = "2.2.2.0/24"
+	cfg.Proxy.FailBackendList[0] = "db-tidb-9"
+	cfg.Proxy.BackendClusters[0].Name = "cluster-updated"
+	cfg.Proxy.BackendClusters[0].NSServers[0] = "10.0.0.9"
+	require.NotContains(t, clone.Labels, "c")
+	require.Equal(t, []string{"1.1.1.0/24"}, clone.Proxy.PublicEndpoints)
+	require.Equal(t, []string{"db-tidb-0", "db-tidb-1"}, clone.Proxy.FailBackendList)
+	require.Equal(t, "cluster-a", clone.Proxy.BackendClusters[0].Name)
+	require.Equal(t, []string{"10.0.0.2", "10.0.0.3"}, clone.Proxy.BackendClusters[0].NSServers)
+}
+
+func TestGetBackendClusters(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Proxy.PDAddrs = "127.0.0.1:2379,127.0.0.2:2379"
+	cfg.Proxy.BackendClusters = nil
+
+	clusters := cfg.GetBackendClusters()
+	require.Len(t, clusters, 1)
+	require.Equal(t, DefaultBackendClusterName, clusters[0].Name)
+	require.Equal(t, cfg.Proxy.PDAddrs, clusters[0].PDAddrs)
+
+	cfg.Proxy.BackendClusters = []BackendCluster{
+		{Name: "cluster-a", PDAddrs: "127.0.0.3:2379"},
+	}
+	clusters = cfg.GetBackendClusters()
+	require.Len(t, clusters, 1)
+	require.Equal(t, "cluster-a", clusters[0].Name)
+	require.Equal(t, "127.0.0.3:2379", clusters[0].PDAddrs)
+
+	cfg.Proxy.BackendClusters = nil
+	cfg.Proxy.PDAddrs = ""
+	require.Nil(t, cfg.GetBackendClusters())
+>>>>>>> c187d695 (balance, proxy: support evicting backends by config (#1116))
 }

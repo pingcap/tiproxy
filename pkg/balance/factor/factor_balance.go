@@ -202,6 +202,23 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	}
 }
 
+func (fbb *FactorBasedBalance) RouteableBackends(backends []policy.BackendCtx) []policy.BackendCtx {
+	if len(backends) == 0 {
+		return nil
+	}
+
+	fbb.Lock()
+	defer fbb.Unlock()
+	scoredBackends := fbb.updateScore(backends)
+	routeable := make([]policy.BackendCtx, 0, len(scoredBackends))
+	for _, backend := range scoredBackends {
+		if fbb.canBeRouted(backend.scoreBits) {
+			routeable = append(routeable, backend.BackendCtx)
+		}
+	}
+	return routeable
+}
+
 func (fbb *FactorBasedBalance) routeIdlest(scoredBackends []scoredBackend, fields *[]zap.Field) policy.BackendCtx {
 	// Evict the backends that are can't be routed to, and then choose the idlest one.
 	// It's like least-connection algorithm.
