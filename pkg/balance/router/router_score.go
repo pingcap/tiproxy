@@ -384,7 +384,7 @@ func (router *ScoreBasedRouter) rebalance(ctx context.Context) {
 	if migrationInterval < rebalanceInterval*2 {
 		// If we need to migrate multiple connections in each round, calculate the connection count for each round.
 		count = int((rebalanceInterval-1)/migrationInterval) + 1
-	} else if curTime.Sub(router.lastRedirectTime) >= migrationInterval {
+	} else {
 		// If we need to wait for multiple rounds to migrate a connection, calculate the interval for each connection.
 		if curTime.Sub(router.lastRedirectTime) >= migrationInterval {
 			count = 1

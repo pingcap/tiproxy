@@ -199,17 +199,24 @@ func (cfg *Config) Check() error {
 	if cfg.Proxy.ConnBufferSize > 0 && (cfg.Proxy.ConnBufferSize > 16*1024*1024 || cfg.Proxy.ConnBufferSize < 1024) {
 		return errors.Wrapf(ErrInvalidConfigValue, "conn-buffer-size must be between 1K and 16M")
 	}
+	if err := cfg.Proxy.Check(); err != nil {
+		return err
+	}
 
 	if err := cfg.Balance.Check(); err != nil {
 		return err
 	}
 
-	if cfg.Proxy.FailoverTimeout < 0 {
+	return nil
+}
+
+func (ps *ProxyServer) Check() error {
+	if ps.FailoverTimeout < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "proxy.failover-timeout must be greater than or equal to 0")
 	}
-	failBackends := cfg.Proxy.FailBackendList[:0]
-	failBackendSet := make(map[string]struct{}, len(cfg.Proxy.FailBackendList))
-	for i, backendName := range cfg.Proxy.FailBackendList {
+	failBackends := ps.FailBackendList[:0]
+	failBackendSet := make(map[string]struct{}, len(ps.FailBackendList))
+	for i, backendName := range ps.FailBackendList {
 		backendName = strings.TrimSpace(backendName)
 		if backendName == "" {
 			return errors.Wrapf(ErrInvalidConfigValue, "proxy.fail-backend-list[%d] is empty", i)
@@ -220,8 +227,7 @@ func (cfg *Config) Check() error {
 		failBackendSet[backendName] = struct{}{}
 		failBackends = append(failBackends, backendName)
 	}
-	cfg.Proxy.FailBackendList = failBackends
-
+	ps.FailBackendList = failBackends
 	return nil
 }
 
