@@ -12,36 +12,19 @@ import (
 )
 
 const (
-	// The TLS layer keeps its own post-handshake buffers, so follow the caller's
-	// connBufferSize proportionally but cap the sizes to avoid recreating the same
-	// memory pressure as the base connection buffers.
-	minTLSReadBufferSize  = 1 * 1024
-	maxTLSReadBufferSize  = 4 * 1024
-	minTLSWriteBufferSize = 1 * 1024
-	maxTLSWriteBufferSize = 16 * 1024
-	tlsReadBufferDivisor  = 4
-	tlsWriteBufferDivisor = 2
+	// Post-handshake TLS bufio sizes scale with connBufferSize but stay bounded
+	// so large base buffers do not duplicate full-size TLS memory.
+	minTLSBuffer      = 1 * 1024
+	maxTLSReadBuffer  = 4 * 1024
+	maxTLSWriteBuffer = 16 * 1024
 )
 
-func clampBufferSize(size, minSize, maxSize int) int {
-	if size < minSize {
-		return minSize
-	}
-	if size > maxSize {
-		return maxSize
-	}
-	return size
-}
-
-// TLS reads mostly serve packet-header peeks after the handshake, so a smaller
-// reader is usually enough. TLS writes are more sensitive to fragmentation, so
-// keep the writer relatively larger. Clamp both ends so tiny custom connection
-// buffers do not make TLS unusably small, and huge connection buffers do not
-// reintroduce excessive per-connection TLS memory.
+// TLS reads are mostly short peeks; writes benefit from a larger buffer. Sizes
+// are derived from the normalized connection buffer with fixed min/max caps.
 func tlsBufferSizes(connBufferSize int) (readSize int, writeSize int) {
-	connBufferSize = normalizeConnBufferSize(connBufferSize)
-	return clampBufferSize(connBufferSize/tlsReadBufferDivisor, minTLSReadBufferSize, maxTLSReadBufferSize),
-		clampBufferSize(connBufferSize/tlsWriteBufferDivisor, minTLSWriteBufferSize, maxTLSWriteBufferSize)
+	c := normalizeConnBufferSize(connBufferSize)
+	return min(max(c/4, minTLSBuffer), maxTLSReadBuffer),
+		min(max(c/2, minTLSBuffer), maxTLSWriteBuffer)
 }
 
 // tlsHandshakeConn is only used as the underlying connection in tls.Conn.
