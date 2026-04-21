@@ -31,6 +31,10 @@ func (mb *mockBackend) ConnCount() int {
 	return mb.connScore
 }
 
+func (mb *mockBackend) ID() string {
+	return ""
+}
+
 func (mb *mockBackend) Addr() string {
 	return ""
 }

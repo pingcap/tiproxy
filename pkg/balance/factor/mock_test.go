@@ -21,6 +21,7 @@ var _ policy.BackendCtx = (*mockBackend)(nil)
 
 type mockBackend struct {
 	observer.BackendInfo
+	id        string
 	addr      string
 	connScore int
 	connCount int
@@ -42,6 +43,13 @@ func (mb *mockBackend) Healthy() bool {
 
 func (mb *mockBackend) ConnScore() int {
 	return mb.connScore
+}
+
+func (mb *mockBackend) ID() string {
+	if mb.id != "" {
+		return mb.id
+	}
+	return mb.addr
 }
 
 func (mb *mockBackend) Addr() string {
@@ -172,6 +180,22 @@ func createBackend(backendIdx, connCount, connScore int) scoredBackend {
 	}
 }
 
+func createBackendWithAddrID(addr, id, ip string, statusPort uint, connCount, connScore int) scoredBackend {
+	return scoredBackend{
+		BackendCtx: &mockBackend{
+			BackendInfo: observer.BackendInfo{
+				IP:         ip,
+				StatusPort: statusPort,
+			},
+			id:        id,
+			addr:      addr,
+			connCount: connCount,
+			connScore: connScore,
+			healthy:   true,
+		},
+	}
+}
+
 func createSampleStream(values []float64, backendIdx int, curTime model.Time) *model.SampleStream {
 	host := strconv.Itoa(backendIdx)
 	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(host + ":10080")}
@@ -179,6 +203,16 @@ func createSampleStream(values []float64, backendIdx int, curTime model.Time) *m
 	for i, cpu := range values {
 		ts := curTime.Add(15 * time.Second * time.Duration(i-len(values)))
 		pairs = append(pairs, model.SamplePair{Timestamp: ts, Value: model.SampleValue(cpu)})
+	}
+	return &model.SampleStream{Metric: labelSet, Values: pairs}
+}
+
+func createSampleStreamForInstance(values []float64, instance string, curTime model.Time) *model.SampleStream {
+	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(instance)}
+	pairs := make([]model.SamplePair, 0, len(values))
+	for i, value := range values {
+		ts := curTime.Add(15 * time.Second * time.Duration(i-len(values)))
+		pairs = append(pairs, model.SamplePair{Timestamp: ts, Value: model.SampleValue(value)})
 	}
 	return &model.SampleStream{Metric: labelSet, Values: pairs}
 }
@@ -194,6 +228,12 @@ func createPairs(values []float64, ts []model.Time) []model.SamplePair {
 func createSample(value float64, backendIdx int) *model.Sample {
 	host := strconv.Itoa(backendIdx)
 	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(host + ":10080")}
+	ts := model.Time(time.Now().UnixMilli())
+	return &model.Sample{Metric: labelSet, Timestamp: ts, Value: model.SampleValue(value)}
+}
+
+func createSampleForInstance(value float64, instance string) *model.Sample {
+	labelSet := model.Metric{metricsreader.LabelNameInstance: model.LabelValue(instance)}
 	ts := model.Time(time.Now().UnixMilli())
 	return &model.Sample{Metric: labelSet, Timestamp: ts, Value: model.SampleValue(value)}
 }

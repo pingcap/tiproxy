@@ -89,6 +89,26 @@ func TestConfigReload(t *testing.T) {
 			},
 		},
 		{
+			name: "failover override",
+			precfg: `
+proxy.fail-backend-list = ["db-tidb-0", "db-tidb-1"]
+proxy.failover-timeout = 90
+`,
+			precheck: func(c *config.Config) bool {
+				return c.Proxy.FailoverTimeout == 90 &&
+					len(c.Proxy.FailBackendList) == 2 &&
+					c.Proxy.FailBackendList[0] == "db-tidb-0" &&
+					c.Proxy.FailBackendList[1] == "db-tidb-1"
+			},
+			postcfg: `
+proxy.fail-backend-list = []
+proxy.failover-timeout = 0
+`,
+			postcheck: func(c *config.Config) bool {
+				return c.Proxy.FailoverTimeout == 0 && len(c.Proxy.FailBackendList) == 0
+			},
+		},
+		{
 			name:   "non empty fields should not be override by empty fields",
 			precfg: `proxy.addr = "gg"`,
 			precheck: func(c *config.Config) bool {

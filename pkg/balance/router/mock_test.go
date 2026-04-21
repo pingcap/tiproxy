@@ -69,6 +69,16 @@ func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 	return true
 }
 
+func (conn *mockRedirectableConn) ForceClose() bool {
+	conn.Lock()
+	defer conn.Unlock()
+	if conn.closing {
+		return false
+	}
+	conn.closing = true
+	return true
+}
+
 func (conn *mockRedirectableConn) GetRedirectingBackendID() string {
 	conn.Lock()
 	defer conn.Unlock()
@@ -133,15 +143,26 @@ func (mbo *mockBackendObserver) toggleBackendHealth(addr string) {
 }
 
 func (mbo *mockBackendObserver) addBackend(addr string, labels map[string]string) {
+	mbo.addBackendWithCluster(addr, "", labels)
+}
+
+func (mbo *mockBackendObserver) addBackendWithCluster(addr, clusterName string, labels map[string]string) {
 	mbo.healthLock.Lock()
 	defer mbo.healthLock.Unlock()
 	mbo.healths[addr] = &observer.BackendHealth{
 		Healthy: true,
 		BackendInfo: observer.BackendInfo{
-			Addr:   addr,
-			Labels: labels,
+			Addr:        addr,
+			ClusterName: clusterName,
+			Labels:      labels,
 		},
 	}
+}
+
+func (mbo *mockBackendObserver) setLabels(addr string, labels map[string]string) {
+	mbo.healthLock.Lock()
+	defer mbo.healthLock.Unlock()
+	mbo.healths[addr].Labels = labels
 }
 
 func (mbo *mockBackendObserver) Start(ctx context.Context) {
@@ -208,6 +229,16 @@ func (m *mockBalancePolicy) BackendToRoute(backends []policy.BackendCtx) policy.
 	return nil
 }
 
+func (m *mockBalancePolicy) RouteableBackends(backends []policy.BackendCtx) []policy.BackendCtx {
+	routeable := make([]policy.BackendCtx, 0, len(backends))
+	for _, backend := range backends {
+		if backend.Healthy() {
+			routeable = append(routeable, backend)
+		}
+	}
+	return routeable
+}
+
 func (m *mockBalancePolicy) BackendsToBalance(backends []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
 	if m.backendsToBalance != nil {
 		return m.backendsToBalance(backends)
@@ -226,15 +257,19 @@ func (m *mockBalancePolicy) getConfig() *config.Config {
 var _ config.ConfigGetter = (*mockConfigGetter)(nil)
 
 type mockConfigGetter struct {
-	cfg *config.Config
+	cfg atomic.Pointer[config.Config]
 }
 
 func newMockConfigGetter(cfg *config.Config) *mockConfigGetter {
-	return &mockConfigGetter{
-		cfg: cfg,
-	}
+	cfgGetter := &mockConfigGetter{}
+	cfgGetter.setConfig(cfg)
+	return cfgGetter
 }
 
 func (cfgGetter *mockConfigGetter) GetConfig() *config.Config {
-	return cfgGetter.cfg
+	return cfgGetter.cfg.Load()
+}
+
+func (cfgGetter *mockConfigGetter) setConfig(cfg *config.Config) {
+	cfgGetter.cfg.Store(cfg)
 }

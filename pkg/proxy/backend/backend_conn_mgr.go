@@ -91,6 +91,7 @@ type BCConfig struct {
 	HealthyKeepAlive     config.KeepAlive
 	UnhealthyKeepAlive   config.KeepAlive
 	FromPublicEndpoints  func(addr net.Addr) bool
+	DialContext          func(ctx context.Context, backend router.BackendInst, addr string) (net.Conn, error)
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
 	DialTimeout          time.Duration
@@ -287,6 +288,14 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 		ci.ClientAddr = mgr.clientIO.RemoteAddr()
 		ci.ProxyAddr = mgr.clientIO.ProxyAddr()
 	}
+	if addr, ok := cctx.Value(ConnContextKeyConnAddr).(string); ok {
+		_, port, splitErr := net.SplitHostPort(addr)
+		if splitErr != nil {
+			mgr.logger.Error("checking port failed", zap.String("listener_addr", addr), zap.Error(splitErr))
+		} else {
+			ci.ListenerPort = port
+		}
+	}
 	selector := r.GetBackendSelector(ci)
 	startTime := time.Now()
 	var addr string
@@ -306,7 +315,9 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 
 			var cn net.Conn
 			addr = backend.Addr()
-			cn, err = net.DialTimeout("tcp", addr, mgr.config.DialTimeout)
+			dialCtx, cancel := context.WithTimeout(bctx, mgr.config.DialTimeout)
+			cn, err = mgr.dialBackend(dialCtx, backend, addr)
+			cancel()
 			selector.Finish(mgr, err == nil)
 			if err != nil {
 				metrics.DialBackendFailCounter.WithLabelValues(addr).Inc()
@@ -639,7 +650,9 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}
 
 	var cn net.Conn
-	cn, rs.err = net.DialTimeout("tcp", (*backendInst).Addr(), mgr.config.DialTimeout)
+	dialCtx, cancel := context.WithTimeout(ctx, mgr.config.DialTimeout)
+	cn, rs.err = mgr.dialBackend(dialCtx, *backendInst, (*backendInst).Addr())
+	cancel()
 	if rs.err != nil {
 		mgr.handshakeHandler.OnHandshake(mgr, (*backendInst).Addr(), rs.err, SrcBackendNetwork)
 		return
@@ -694,6 +707,28 @@ func (mgr *BackendConnManager) Redirect(backendInst router.BackendInst) bool {
 	mgr.redirectInfo.Store(&backendInst)
 	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
 	mgr.signalReceived <- signalTypeRedirect
+	return true
+}
+
+// ForceClose forces closing the connection when the failover times out.
+func (mgr *BackendConnManager) ForceClose() bool {
+	for {
+		status := mgr.closeStatus.Load()
+		if status >= statusClosing {
+			return false
+		}
+		if mgr.closeStatus.CompareAndSwap(status, statusClosing) {
+			break
+		}
+	}
+	mgr.quitSource = SrcProxyQuit
+	if mgr.clientIO != nil {
+		// Interrupt in-flight I/O and let the normal connection teardown release buffers.
+		// Closing the PacketIO here may race with ExecuteCmd() flushing to the client.
+		if err := mgr.clientIO.GracefulClose(); err != nil && !pnet.IsDisconnectError(err) {
+			mgr.logger.Warn("force close client IO error", zap.Error(err))
+		}
+	}
 	return true
 }
 
@@ -808,6 +843,14 @@ func (mgr *BackendConnManager) Value(key any) any {
 	v := mgr.ctxmap.m[key]
 	mgr.ctxmap.Unlock()
 	return v
+}
+
+func (mgr *BackendConnManager) dialBackend(ctx context.Context, backend router.BackendInst, addr string) (net.Conn, error) {
+	if mgr.config.DialContext != nil {
+		return mgr.config.DialContext(ctx, backend, addr)
+	}
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "tcp", addr)
 }
 
 // Close releases all resources.

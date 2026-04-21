@@ -30,7 +30,7 @@ type FactorBasedBalance struct {
 	factors []Factor
 	// to reduce memory allocation
 	cachedList      []scoredBackend
-	mr              metricsreader.MetricsReader
+	mr              metricsreader.MetricsQuerier
 	lg              *zap.Logger
 	factorStatus    *FactorStatus
 	factorLabel     *FactorLabel
@@ -44,7 +44,7 @@ type FactorBasedBalance struct {
 	routePolicy     string
 }
 
-func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsReader) *FactorBasedBalance {
+func NewFactorBasedBalance(lg *zap.Logger, mr metricsreader.MetricsQuerier) *FactorBasedBalance {
 	return &FactorBasedBalance{
 		lg:         lg,
 		mr:         mr,
@@ -200,6 +200,23 @@ func (fbb *FactorBasedBalance) BackendToRoute(backends []policy.BackendCtx) poli
 	default:
 		return fbb.routePreferIdle(scoredBackends, &fields)
 	}
+}
+
+func (fbb *FactorBasedBalance) RouteableBackends(backends []policy.BackendCtx) []policy.BackendCtx {
+	if len(backends) == 0 {
+		return nil
+	}
+
+	fbb.Lock()
+	defer fbb.Unlock()
+	scoredBackends := fbb.updateScore(backends)
+	routeable := make([]policy.BackendCtx, 0, len(scoredBackends))
+	for _, backend := range scoredBackends {
+		if fbb.canBeRouted(backend.scoreBits) {
+			routeable = append(routeable, backend.BackendCtx)
+		}
+	}
+	return routeable
 }
 
 func (fbb *FactorBasedBalance) routeIdlest(scoredBackends []scoredBackend, fields *[]zap.Field) policy.BackendCtx {

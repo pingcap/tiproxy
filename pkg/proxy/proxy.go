@@ -12,6 +12,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -40,6 +41,10 @@ type serverState struct {
 	gracefulClose      int // graceful-close-conn-timeout
 }
 
+type BackendDialer interface {
+	DialContext(ctx context.Context, network, addr, clusterName string) (net.Conn, error)
+}
+
 type SQLServer struct {
 	listeners  []net.Listener
 	addrs      []string
@@ -49,6 +54,7 @@ type SQLServer struct {
 	hsHandler  backend.HandshakeHandler
 	cpt        capture.Capture
 	meter      backend.Meter
+	dialer     BackendDialer
 	wg         waitgroup.WaitGroup
 	cancelFunc context.CancelFunc
 
@@ -106,6 +112,10 @@ func (s *SQLServer) reset(cfg *config.Config) {
 	s.mu.connBufferSize = cfg.Proxy.ConnBufferSize
 	s.mu.publicEndpoints = cidrList
 	s.mu.Unlock()
+}
+
+func (s *SQLServer) SetBackendDialer(dialer BackendDialer) {
+	s.dialer = dialer
 }
 
 func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
@@ -176,6 +186,13 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				UnhealthyKeepAlive:  s.mu.unhealthyKeepAlive,
 				ConnBufferSize:      s.mu.connBufferSize,
 				FromPublicEndpoints: s.fromPublicEndpoint,
+				DialContext: func(ctx context.Context, backendInst router.BackendInst, addr string) (net.Conn, error) {
+					if s.dialer != nil {
+						return s.dialer.DialContext(ctx, "tcp", addr, backendInst.ClusterName())
+					}
+					var dialer net.Dialer
+					return dialer.DialContext(ctx, "tcp", addr)
+				},
 			}, s.meter)
 		s.mu.clients[connID] = clientConn
 		logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))

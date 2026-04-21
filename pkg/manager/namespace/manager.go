@@ -24,9 +24,10 @@ import (
 )
 
 type NamespaceManager interface {
+	SetBackendNetwork(backendNetwork observer.BackendNetwork)
 	Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 		promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
-		metricsReader metricsreader.MetricsReader) error
+		metricsReader metricsreader.MetricsQuerier) error
 	CommitNamespaces(nss []*config.Namespace, nssDelete []bool) error
 	GetNamespace(nm string) (*Namespace, bool)
 	GetNamespaceByUser(user string) (*Namespace, bool)
@@ -37,13 +38,14 @@ type NamespaceManager interface {
 
 type namespaceManager struct {
 	sync.RWMutex
-	nsm           map[string]*Namespace
-	tpFetcher     observer.TopologyFetcher
-	promFetcher   metricsreader.PromInfoFetcher
-	metricsReader metricsreader.MetricsReader
-	httpCli       *http.Client
-	logger        *zap.Logger
-	cfgMgr        *mconfig.ConfigManager
+	nsm            map[string]*Namespace
+	tpFetcher      observer.TopologyFetcher
+	promFetcher    metricsreader.PromInfoFetcher
+	metricsReader  metricsreader.MetricsQuerier
+	httpCli        *http.Client
+	backendNetwork observer.BackendNetwork
+	logger         *zap.Logger
+	cfgMgr         *mconfig.ConfigManager
 }
 
 func NewNamespaceManager() *namespaceManager {
@@ -60,7 +62,7 @@ func (mgr *namespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 
 	// init Router
 	rt := router.NewScoreBasedRouter(logger.Named("router"))
-	hc := observer.NewDefaultHealthCheck(mgr.httpCli, healthCheckCfg, logger.Named("hc"))
+	hc := observer.NewDefaultHealthCheckWithNetwork(mgr.backendNetwork, healthCheckCfg, logger.Named("hc"))
 	bo := observer.NewDefaultBackendObserver(logger.Named("observer"), healthCheckCfg, fetcher, hc, mgr.cfgMgr)
 	bo.Start(context.Background())
 	bpCreator := func(lg *zap.Logger) policy.BalancePolicy {
@@ -105,7 +107,7 @@ func (mgr *namespaceManager) CommitNamespaces(nss []*config.Namespace, nssDelete
 
 func (mgr *namespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 	promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
-	metricsReader metricsreader.MetricsReader) error {
+	metricsReader metricsreader.MetricsQuerier) error {
 	mgr.Lock()
 	mgr.tpFetcher = tpFetcher
 	mgr.promFetcher = promFetcher
@@ -115,6 +117,12 @@ func (mgr *namespaceManager) Init(logger *zap.Logger, nscs []*config.Namespace, 
 	mgr.metricsReader = metricsReader
 	mgr.Unlock()
 	return mgr.CommitNamespaces(nscs, nil)
+}
+
+func (mgr *namespaceManager) SetBackendNetwork(backendNetwork observer.BackendNetwork) {
+	mgr.Lock()
+	mgr.backendNetwork = backendNetwork
+	mgr.Unlock()
 }
 
 func (mgr *namespaceManager) GetNamespace(nm string) (*Namespace, bool) {

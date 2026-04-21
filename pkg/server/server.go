@@ -10,7 +10,6 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/backendcluster"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
@@ -44,12 +43,9 @@ type Server struct {
 	certManager      *cert.CertManager
 	clusterManager   *backendcluster.Manager
 	vipManager       vip.VIPManager
-	metricsReader    metricsreader.MetricsReader
 	replay           mgrrp.JobManager
 	meter            *meter.Meter
 	memManager       *memory.MemManager
-	// etcd client
-	etcdCli *clientv3.Client
 	// HTTP client
 	httpCli *http.Client
 	// HTTP server
@@ -111,10 +107,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	if err = srv.clusterManager.Start(ctx, srv.configManager, srv.configManager.WatchConfig()); err != nil {
 		return
 	}
-	var promFetcher metricsreader.PromInfoFetcher
+	var vipEtcdCli *clientv3.Client
 	if cluster := srv.clusterManager.PrimaryCluster(); cluster != nil {
-		srv.etcdCli = cluster.EtcdClient()
-		promFetcher = cluster
+		vipEtcdCli = cluster.EtcdClient()
 	}
 
 	// general cluster HTTP client
@@ -122,17 +117,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		srv.httpCli = http.NewHTTPClient(srv.certManager.ClusterTLS)
 	}
 
-	// setup metrics reader
-	{
-		healthCheckCfg := config.NewDefaultHealthCheckConfig()
-		srv.metricsReader = metricsreader.NewDefaultMetricsReader(lg.Named("mr"), promFetcher, srv.clusterManager, srv.httpCli, srv.etcdCli, healthCheckCfg, srv.configManager)
-		if err = srv.metricsReader.Start(ctx); err != nil {
-			return
-		}
-	}
-
 	// setup namespace manager
 	{
+		srv.namespaceManager.SetBackendNetwork(srv.clusterManager.NetworkRouter())
 		nscs, nerr := srv.configManager.ListAllNamespace(ctx)
 		if nerr != nil {
 			err = nerr
@@ -153,7 +140,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			nscs = append(nscs, nsc)
 		}
 
-		err = srv.namespaceManager.Init(lg.Named("nsmgr"), nscs, srv.clusterManager, promFetcher, srv.httpCli, srv.configManager, srv.metricsReader)
+		err = srv.namespaceManager.Init(lg.Named("nsmgr"), nscs, srv.clusterManager, nil, srv.httpCli, srv.configManager, srv.clusterManager.MetricsQuerier())
 		if err != nil {
 			return
 		}
@@ -188,6 +175,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		if err != nil {
 			return
 		}
+		srv.proxy.SetBackendDialer(srv.clusterManager.NetworkRouter())
 		srv.proxy.Run(ctx, srv.configManager.WatchConfig())
 	}
 
@@ -196,7 +184,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		CfgMgr:        srv.configManager,
 		NsMgr:         srv.namespaceManager,
 		CertMgr:       srv.certManager,
-		BackendReader: srv.metricsReader,
+		BackendReader: srv.clusterManager.MetricsQuerier(),
 		ReplayJobMgr:  srv.replay,
 	}
 	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), mgrs, handler, ready); err != nil {
@@ -210,8 +198,8 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			return
 		}
 		if srv.vipManager != nil && !reflect.ValueOf(srv.vipManager).IsNil() {
-			if srv.etcdCli != nil {
-				if err = srv.vipManager.Start(ctx, srv.etcdCli); err != nil {
+			if vipEtcdCli != nil {
+				if err = srv.vipManager.Start(ctx, vipEtcdCli); err != nil {
 					return
 				}
 			} else {
@@ -247,9 +235,8 @@ func (s *Server) preClose() {
 	if s.apiServer != nil {
 		s.apiServer.PreClose()
 	}
-	// Resign the metric reader owner to make other members campaign ASAP.
-	if s.metricsReader != nil && !reflect.ValueOf(s.metricsReader).IsNil() {
-		s.metricsReader.PreClose()
+	if s.clusterManager != nil {
+		s.clusterManager.PreClose()
 	}
 	// Gracefully drain clients.
 	if s.proxy != nil {
@@ -276,9 +263,6 @@ func (s *Server) Close() error {
 	}
 	if s.namespaceManager != nil {
 		errs = append(errs, s.namespaceManager.Close())
-	}
-	if s.metricsReader != nil && !reflect.ValueOf(s.metricsReader).IsNil() {
-		s.metricsReader.Close()
 	}
 	if s.memManager != nil {
 		s.memManager.Close()

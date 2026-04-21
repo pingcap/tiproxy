@@ -24,6 +24,8 @@ var (
 	ErrInvalidConfigValue              = errors.New("invalid config value")
 )
 
+const DefaultBackendClusterName = "default"
+
 type Config struct {
 	Proxy               ProxyServer           `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
 	API                 API                   `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
@@ -68,6 +70,12 @@ type ProxyServerOnline struct {
 	// BackendClusters represents multiple backend clusters that the proxy can route to. It can be reloaded
 	// online.
 	BackendClusters []BackendCluster `yaml:"backend-clusters,omitempty" toml:"backend-clusters,omitempty" json:"backend-clusters,omitempty" reloadable:"true"`
+	// FailBackendList contains backend pod names or backend addresses (IP:port) that should be drained immediately
+	// and excluded from new routing. If the configured list would leave no routeable backend in a routing group,
+	// TiProxy ignores the list for that group to keep routing available.
+	FailBackendList []string `yaml:"fail-backend-list,omitempty" toml:"fail-backend-list,omitempty" json:"fail-backend-list,omitempty" reloadable:"true"`
+	// FailoverTimeout is the grace period in seconds before force closing the remaining connections on failed backends.
+	FailoverTimeout int `yaml:"failover-timeout,omitempty" toml:"failover-timeout,omitempty" json:"failover-timeout,omitempty" reloadable:"true"`
 }
 
 type ProxyServer struct {
@@ -134,6 +142,7 @@ func NewConfig() *Config {
 	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnhealthyKeepalive = DefaultKeepAlive()
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 	cfg.Proxy.GracefulCloseConnTimeout = 15
+	cfg.Proxy.FailoverTimeout = 60
 
 	cfg.API.Addr = "0.0.0.0:3080"
 
@@ -160,6 +169,7 @@ func (cfg *Config) Clone() *Config {
 	newCfg.Labels = maps.Clone(cfg.Labels)
 	newCfg.Proxy.PublicEndpoints = slices.Clone(cfg.Proxy.PublicEndpoints)
 	newCfg.Proxy.BackendClusters = slices.Clone(cfg.Proxy.BackendClusters)
+	newCfg.Proxy.FailBackendList = slices.Clone(cfg.Proxy.FailBackendList)
 	for i := range newCfg.Proxy.BackendClusters {
 		newCfg.Proxy.BackendClusters[i].NSServers = slices.Clone(newCfg.Proxy.BackendClusters[i].NSServers)
 	}
@@ -249,7 +259,7 @@ func (cfg *Config) GetBackendClusters() []BackendCluster {
 		return nil
 	}
 	return []BackendCluster{{
-		Name:    "default",
+		Name:    DefaultBackendClusterName,
 		PDAddrs: cfg.Proxy.PDAddrs,
 	}}
 }
@@ -258,10 +268,6 @@ func (ps *ProxyServer) Check() error {
 	if _, err := ps.GetSQLAddrs(); err != nil {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.addr or proxy.port-range: %s", err.Error())
 	}
-	if len(ps.BackendClusters) == 0 {
-		return nil
-	}
-
 	clusterNames := make(map[string]struct{}, len(ps.BackendClusters))
 	for i, cluster := range ps.BackendClusters {
 		name := strings.TrimSpace(cluster.Name)
@@ -279,6 +285,24 @@ func (ps *ProxyServer) Check() error {
 			return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.backend-clusters.ns-servers: %s", err.Error())
 		}
 	}
+
+	if ps.FailoverTimeout < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "proxy.failover-timeout must be greater than or equal to 0")
+	}
+	failBackends := ps.FailBackendList[:0]
+	failBackendSet := make(map[string]struct{}, len(ps.FailBackendList))
+	for i, backendName := range ps.FailBackendList {
+		backendName = strings.TrimSpace(backendName)
+		if backendName == "" {
+			return errors.Wrapf(ErrInvalidConfigValue, "proxy.fail-backend-list[%d] is empty", i)
+		}
+		if _, ok := failBackendSet[backendName]; ok {
+			continue
+		}
+		failBackendSet[backendName] = struct{}{}
+		failBackends = append(failBackends, backendName)
+	}
+	ps.FailBackendList = failBackends
 	return nil
 }
 

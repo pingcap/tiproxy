@@ -187,13 +187,13 @@ type errIndicator struct {
 type FactorHealth struct {
 	snapshot            map[string]healthBackendSnapshot
 	indicators          []errIndicator
-	mr                  metricsreader.MetricsReader
+	mr                  metricsreader.MetricsQuerier
 	bitNum              int
 	migrationsPerSecond float64
 	lg                  *zap.Logger
 }
 
-func NewFactorHealth(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorHealth {
+func NewFactorHealth(mr metricsreader.MetricsQuerier, lg *zap.Logger) *FactorHealth {
 	return &FactorHealth{
 		mr:         mr,
 		snapshot:   make(map[string]healthBackendSnapshot),
@@ -203,7 +203,7 @@ func NewFactorHealth(mr metricsreader.MetricsReader, lg *zap.Logger) *FactorHeal
 	}
 }
 
-func initErrIndicator(mr metricsreader.MetricsReader) []errIndicator {
+func initErrIndicator(mr metricsreader.MetricsQuerier) []errIndicator {
 	indicators := make([]errIndicator, 0, len(errDefinitions))
 	for _, def := range errDefinitions {
 		indicator := errIndicator{
@@ -268,7 +268,7 @@ func (fh *FactorHealth) UpdateScore(backends []scoredBackend) {
 		fh.updateSnapshot(backends)
 	}
 	for i := range backends {
-		score := fh.caclErrScore(backends[i].Addr())
+		score := fh.caclErrScore(backends[i].ID())
 		backends[i].addScore(score, fh.bitNum)
 	}
 }
@@ -281,6 +281,7 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 	now := time.Now()
 	for _, backend := range backends {
 		addr := backend.Addr()
+		key := backend.ID()
 		// Get the current value range.
 		updatedTime, valueRange, indicator, failureValue, totalValue := time.Time{}, valueRangeNormal, "", 0.0, 0.0
 		for _, ind := range fh.indicators {
@@ -310,7 +311,7 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 			}
 		}
 		// If the metric is unavailable, try to reuse the latest one.
-		snapshot := fh.snapshot[addr]
+		snapshot := fh.snapshot[key]
 		if updatedTime.IsZero() {
 			continue
 		}
@@ -335,7 +336,7 @@ func (fh *FactorHealth) updateSnapshot(backends []scoredBackend) {
 				zap.Float64("balance_count", balanceCount),
 				zap.Int("conn_score", backend.ConnScore()))
 		}
-		fh.snapshot[addr] = healthBackendSnapshot{
+		fh.snapshot[key] = healthBackendSnapshot{
 			updatedTime:  updatedTime,
 			valueRange:   valueRange,
 			indicator:    indicator,
@@ -391,9 +392,9 @@ func calcValueRange(failureSample, totalSample *model.Sample, indicator errIndic
 	return failureValue, totalValue, valueRangeMid
 }
 
-func (fh *FactorHealth) caclErrScore(addr string) int {
+func (fh *FactorHealth) caclErrScore(key string) int {
 	// If the backend has no metrics (not in snapshot), take it as healthy.
-	return int(fh.snapshot[addr].valueRange)
+	return int(fh.snapshot[key].valueRange)
 }
 
 func (fh *FactorHealth) ScoreBitNum() int {
@@ -402,9 +403,9 @@ func (fh *FactorHealth) ScoreBitNum() int {
 
 func (fh *FactorHealth) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
 	// Only migrate connections when one is valueRangeNormal and the other is valueRangeAbnormal.
-	fromScore := fh.caclErrScore(from.Addr())
-	toScore := fh.caclErrScore(to.Addr())
-	snapshot := fh.snapshot[from.Addr()]
+	fromScore := fh.caclErrScore(from.ID())
+	toScore := fh.caclErrScore(to.ID())
+	snapshot := fh.snapshot[from.ID()]
 	var fields []zap.Field
 	if snapshot.indicator != "" {
 		fields = append(fields,
