@@ -68,7 +68,9 @@ type Server struct {
 	lg        *zap.Logger
 	grpc      *grpc.Server
 	isClosing atomic.Bool
-	mgr       Managers
+	// unhealthyMark makes the health endpoint return unhealthy so that the external LB stops routing new traffic to this TiProxy.
+	unhealthyMark atomic.Bool
+	mgr           Managers
 }
 
 func NewServer(cfg config.API, lg *zap.Logger, mgr Managers, handler HTTPHandler, ready *atomic.Bool) (*Server, error) {
