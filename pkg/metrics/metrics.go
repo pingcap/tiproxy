@@ -98,6 +98,7 @@ func init() {
 	colls = []prometheus.Collector{
 		ConnGauge,
 		CreateConnCounter,
+		RejectConnCounter,
 		DisConnCounter,
 		MaxProcsGauge,
 		OwnerGauge,

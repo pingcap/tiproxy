@@ -9,6 +9,11 @@ import (
 	"fmt"
 	"net"
 	"strings"
+<<<<<<< HEAD
+=======
+	"sync"
+	"sync/atomic"
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 	"testing"
 	"time"
 
@@ -20,6 +25,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
+	mgrmem "github.com/pingcap/tiproxy/pkg/manager/memory"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
@@ -32,7 +38,11 @@ func TestCreateConn(t *testing.T) {
 	cfg := &config.Config{}
 	certManager := cert.NewCertManager()
 	require.NoError(t, certManager.Init(cfg, lg, nil))
+<<<<<<< HEAD
 	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{})
+=======
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, nil, &mockHsHandler{}, nil)
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 	defer func() {
@@ -69,6 +79,92 @@ func TestCreateConn(t *testing.T) {
 	checkMetrics(0, 2)
 }
 
+func TestRejectConnByMemory(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	require.NoError(t, certManager.Init(&config.Config{}, lg, nil))
+	server, err := NewSQLServer(lg, &config.Config{}, certManager, id.NewIDManager(), nil, nil, &mockHsHandler{}, &mockMemUsageProvider{
+		reject: true,
+		snapshot: mgrmem.UsageSnapshot{
+			Used:       9 * (1 << 30),
+			Limit:      10 * (1 << 30),
+			Usage:      0.9,
+			UpdateTime: time.Now(),
+			Valid:      true,
+		},
+		threshold: 0.9,
+	})
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+	defer func() {
+		server.PreClose()
+		require.NoError(t, server.Close())
+		certManager.Close()
+	}()
+
+	rejectBefore, err := metrics.ReadCounter(metrics.RejectConnCounter.WithLabelValues("memory"))
+	require.NoError(t, err)
+	createBefore, err := metrics.ReadCounter(metrics.CreateConnCounter)
+	require.NoError(t, err)
+	connGaugeBefore, err := metrics.ReadGauge(metrics.ConnGauge)
+	require.NoError(t, err)
+
+	conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	require.Eventually(t, func() bool {
+		_ = conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
+		var buf [1]byte
+		_, err := conn.Read(buf[:])
+		return err != nil
+	}, time.Second, 10*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		rejectAfter, err := metrics.ReadCounter(metrics.RejectConnCounter.WithLabelValues("memory"))
+		require.NoError(t, err)
+		createAfter, err := metrics.ReadCounter(metrics.CreateConnCounter)
+		require.NoError(t, err)
+		connGaugeAfter, err := metrics.ReadGauge(metrics.ConnGauge)
+		require.NoError(t, err)
+		return rejectAfter == rejectBefore+1 && createAfter == createBefore && connGaugeAfter == connGaugeBefore
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestTrackConnBufferMemDelta(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	cfg := &config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				ConnBufferSize: 4096,
+			},
+		},
+	}
+	require.NoError(t, certManager.Init(cfg, lg, nil))
+	memUsage := &mockMemUsageProvider{}
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, nil, &mockHsHandler{}, memUsage)
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+	defer func() {
+		server.PreClose()
+		require.NoError(t, server.Close())
+		certManager.Close()
+	}()
+
+	conn, err := net.Dial("tcp", server.listeners[0].Addr().String())
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return memUsage.connBufferMemDelta.Load() == int64(cfg.Proxy.ConnBufferSize*2)
+	}, time.Second, 10*time.Millisecond)
+
+	require.NoError(t, conn.Close())
+	require.Eventually(t, func() bool {
+		return memUsage.connBufferMemDelta.Load() == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestGracefulCloseConn(t *testing.T) {
 	// Graceful shutdown finishes immediately if there's no connection.
 	lg, _ := logger.CreateLoggerForTest(t)
@@ -80,7 +176,11 @@ func TestGracefulCloseConn(t *testing.T) {
 			},
 		},
 	}
+<<<<<<< HEAD
 	server, err := NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler)
+=======
+	server, err := NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, nil, hsHandler, nil)
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 	require.NoError(t, err)
 	finish := make(chan struct{})
 	go func() {
@@ -110,7 +210,11 @@ func TestGracefulCloseConn(t *testing.T) {
 	}
 
 	// Graceful shutdown will be blocked if there are alive connections.
+<<<<<<< HEAD
 	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler)
+=======
+	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, nil, hsHandler, nil)
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 	require.NoError(t, err)
 	clientConn := createClientConn()
 	go func() {
@@ -136,7 +240,11 @@ func TestGracefulCloseConn(t *testing.T) {
 
 	// Graceful shutdown will shut down after GracefulCloseConnTimeout.
 	cfg.Proxy.GracefulCloseConnTimeout = 1
+<<<<<<< HEAD
 	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler)
+=======
+	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, nil, hsHandler, nil)
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 	require.NoError(t, err)
 	createClientConn()
 	go func() {
@@ -164,7 +272,11 @@ func TestGracefulShutDown(t *testing.T) {
 			},
 		},
 	}
+<<<<<<< HEAD
 	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{})
+=======
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, nil, &mockHsHandler{}, nil)
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -202,7 +314,11 @@ func TestMultiAddr(t *testing.T) {
 		Proxy: config.ProxyServer{
 			Addr: "0.0.0.0:0,0.0.0.0:0",
 		},
+<<<<<<< HEAD
 	}, certManager, id.NewIDManager(), nil, &mockHsHandler{})
+=======
+	}, certManager, id.NewIDManager(), nil, nil, &mockHsHandler{}, nil)
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -218,11 +334,96 @@ func TestMultiAddr(t *testing.T) {
 	certManager.Close()
 }
 
+<<<<<<< HEAD
+=======
+func TestPortRange(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	err := certManager.Init(&config.Config{}, lg, nil)
+	require.NoError(t, err)
+	start, end := findFreePortRange(t, 3)
+	server, err := NewSQLServer(lg, &config.Config{
+		Proxy: config.ProxyServer{
+			Addr:      fmt.Sprintf("127.0.0.1:%d", start),
+			PortRange: []int{start, end},
+		},
+	}, certManager, id.NewIDManager(), nil, nil, &mockHsHandler{}, nil)
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+
+	require.Len(t, server.listeners, 3)
+	ports := make([]int, 0, len(server.listeners))
+	for _, listener := range server.listeners {
+		tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+		require.True(t, ok)
+		ports = append(ports, tcpAddr.Port)
+
+		conn, err := net.Dial("tcp", listener.Addr().String())
+		require.NoError(t, err)
+		require.NoError(t, conn.Close())
+	}
+	slices.Sort(ports)
+	require.Equal(t, []int{start, start + 1, end}, ports)
+
+	server.PreClose()
+	require.NoError(t, server.Close())
+	certManager.Close()
+}
+
+func TestConnAddrUsesActualListenerAddr(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	certManager := cert.NewCertManager()
+	require.NoError(t, certManager.Init(&config.Config{}, lg, nil))
+
+	var (
+		addrMu   sync.Mutex
+		connAddr string
+	)
+	handler := &mockHsHandler{
+		getRouter: func(ctx backend.ConnContext, _ *pnet.HandshakeResp) (router.Router, error) {
+			addrMu.Lock()
+			connAddr, _ = ctx.Value(backend.ConnContextKeyConnAddr).(string)
+			addrMu.Unlock()
+			return nil, errors.New("no router")
+		},
+	}
+	server, err := NewSQLServer(lg, &config.Config{
+		Proxy: config.ProxyServer{
+			Addr: "127.0.0.1:0",
+		},
+	}, certManager, id.NewIDManager(), nil, nil, handler, nil)
+	require.NoError(t, err)
+	server.Run(context.Background(), nil)
+	defer func() {
+		server.PreClose()
+		require.NoError(t, server.Close())
+		certManager.Close()
+	}()
+
+	_, port, err := net.SplitHostPort(server.listeners[0].Addr().String())
+	require.NoError(t, err)
+	mdb, err := sql.Open("mysql", fmt.Sprintf("root@tcp(127.0.0.1:%s)/test", port))
+	require.NoError(t, err)
+	defer func() { require.NoError(t, mdb.Close()) }()
+
+	require.ErrorContains(t, mdb.Ping(), "no router")
+	require.Eventually(t, func() bool {
+		addrMu.Lock()
+		defer addrMu.Unlock()
+		return connAddr == server.listeners[0].Addr().String()
+	}, 3*time.Second, 10*time.Millisecond)
+}
+
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 func TestWatchCfg(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil)
 	cfgch := make(chan *config.Config)
+<<<<<<< HEAD
 	server, err := NewSQLServer(lg, &config.Config{}, nil, id.NewIDManager(), nil, hsHandler)
+=======
+	server, err := NewSQLServer(lg, &config.Config{}, nil, id.NewIDManager(), nil, nil, hsHandler, nil)
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 	require.NoError(t, err)
 	server.Run(context.Background(), cfgch)
 	cfg := &config.Config{
@@ -264,7 +465,7 @@ func TestRecoverPanic(t *testing.T) {
 			}
 			return nil
 		},
-	})
+	}, nil)
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -285,9 +486,65 @@ func TestRecoverPanic(t *testing.T) {
 	certManager.Close()
 }
 
+<<<<<<< HEAD
+=======
+func TestPublicEndpoint(t *testing.T) {
+	tests := []struct {
+		publicEndpoints []string
+		publicIps       []string
+		privateIps      []string
+	}{
+		{
+			publicIps:  []string{"137.84.2.178"},
+			privateIps: []string{"10.10.10.10"},
+		},
+		{
+			publicEndpoints: []string{"10.10.10.0/24"},
+			publicIps:       []string{"137.84.2.178", "10.10.10.10"},
+			privateIps:      []string{"10.10.20.10"},
+		},
+		{
+			publicEndpoints: []string{"10.10.10.0/24", "10.10.20.10"},
+			publicIps:       []string{"137.84.2.178", "10.10.10.10", "10.10.20.10"},
+			privateIps:      []string{"10.10.20.11"},
+		},
+	}
+
+	server, err := NewSQLServer(zap.NewNop(), &config.Config{}, nil, id.NewIDManager(), nil, nil, backend.NewDefaultHandshakeHandler(nil), nil)
+	require.NoError(t, err)
+	for i, test := range tests {
+		cfg := &config.Config{}
+		cfg.Proxy.PublicEndpoints = test.publicEndpoints
+		server.reset(cfg)
+		for j, ip := range test.publicIps {
+			require.True(t, server.fromPublicEndpoint(&net.TCPAddr{IP: net.ParseIP(ip), Port: 1000}), "test %d %d", i, j)
+		}
+		for j, ip := range test.privateIps {
+			require.False(t, server.fromPublicEndpoint(&net.TCPAddr{IP: net.ParseIP(ip), Port: 1000}), "test %d %d", i, j)
+		}
+		require.False(t, server.fromPublicEndpoint(nil))
+	}
+}
+
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 type mockHsHandler struct {
 	backend.DefaultHandshakeHandler
 	handshakeResp func(ctx backend.ConnContext, _ *pnet.HandshakeResp) error
+}
+
+type mockMemUsageProvider struct {
+	reject             bool
+	snapshot           mgrmem.UsageSnapshot
+	threshold          float64
+	connBufferMemDelta atomic.Int64
+}
+
+func (m *mockMemUsageProvider) ShouldRejectNewConn() (bool, mgrmem.UsageSnapshot, float64) {
+	return m.reject, m.snapshot, m.threshold
+}
+
+func (m *mockMemUsageProvider) UpdateConnBufferMemory(delta int64) {
+	m.connBufferMemDelta.Add(delta)
 }
 
 // HandleHandshakeResp only panics for the first connections.

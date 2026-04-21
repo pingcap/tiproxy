@@ -171,7 +171,11 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup proxy server
 	{
+<<<<<<< HEAD
 		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), hsHandler)
+=======
+		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), srv.meter, hsHandler, srv.memManager)
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 		if err != nil {
 			return
 		}

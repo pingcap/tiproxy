@@ -20,6 +20,7 @@ var testProxyConfig = Config{
 		Addr:    "0.0.0.0:4000",
 		PDAddrs: "127.0.0.1:4089",
 		ProxyServerOnline: ProxyServerOnline{
+<<<<<<< HEAD
 			MaxConnections:             1,
 			FrontendKeepalive:          KeepAlive{Enabled: true},
 			ProxyProtocol:              "v2",
@@ -27,6 +28,28 @@ var testProxyConfig = Config{
 			FailBackendList:            []string{"db-tidb-0", "db-tidb-1"},
 			FailoverTimeout:            60,
 			ConnBufferSize:             32 * 1024,
+=======
+			MaxConnections:                 1,
+			HighMemoryUsageRejectThreshold: 0.9,
+			FrontendKeepalive:              KeepAlive{Enabled: true},
+			ProxyProtocol:                  "v2",
+			GracefulWaitBeforeShutdown:     10,
+			FailBackendList:                []string{"db-tidb-0", "db-tidb-1"},
+			FailoverTimeout:                60,
+			ConnBufferSize:                 32 * 1024,
+			BackendClusters: []BackendCluster{
+				{
+					Name:      "cluster-a",
+					PDAddrs:   "127.0.0.1:12379,127.0.0.1:22379",
+					NSServers: []string{"10.0.0.2", "10.0.0.3"},
+				},
+				{
+					Name:      "cluster-b",
+					PDAddrs:   "127.0.0.1:32379",
+					NSServers: []string{"10.0.0.4"},
+				},
+			},
+>>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 		},
 	},
 	API: API{
@@ -92,6 +115,26 @@ func TestProxyCheck(t *testing.T) {
 		post func(*testing.T, *Config)
 		err  error
 	}{
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = -0.1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = 1.1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = 0.4
+			},
+			post: func(t *testing.T, c *Config) {
+				require.Equal(t, 0.5, c.Proxy.HighMemoryUsageRejectThreshold)
+			},
+		},
 		{
 			pre: func(t *testing.T, c *Config) {
 				c.Workdir = ""
