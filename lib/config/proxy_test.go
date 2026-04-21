@@ -24,6 +24,8 @@ var testProxyConfig = Config{
 			FrontendKeepalive:          KeepAlive{Enabled: true},
 			ProxyProtocol:              "v2",
 			GracefulWaitBeforeShutdown: 10,
+			FailBackendList:            []string{"db-tidb-0", "db-tidb-1"},
+			FailoverTimeout:            60,
 			ConnBufferSize:             32 * 1024,
 		},
 	},
@@ -112,6 +114,18 @@ func TestProxyCheck(t *testing.T) {
 			},
 			err: ErrInvalidConfigValue,
 		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.FailBackendList = []string{"db-tidb-0", " "}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.FailoverTimeout = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
 	}
 	for _, tc := range testcases {
 		cfg := testProxyConfig
@@ -174,5 +188,7 @@ func TestCloneConfig(t *testing.T) {
 	clone := cfg.Clone()
 	require.Equal(t, cfg, *clone)
 	cfg.Labels["c"] = "d"
+	cfg.Proxy.FailBackendList[0] = "db-tidb-9"
 	require.NotContains(t, clone.Labels, "c")
+	require.Equal(t, []string{"db-tidb-0", "db-tidb-1"}, clone.Proxy.FailBackendList)
 }

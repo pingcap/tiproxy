@@ -100,6 +100,26 @@ func TestConfigReload(t *testing.T) {
 				return c.Proxy.Addr == "gg"
 			},
 		},
+		{
+			name: "failover override",
+			precfg: `
+proxy.fail-backend-list = ["db-tidb-0", "db-tidb-1"]
+proxy.failover-timeout = 90
+`,
+			precheck: func(c *config.Config) bool {
+				return c.Proxy.FailoverTimeout == 90 &&
+					len(c.Proxy.FailBackendList) == 2 &&
+					c.Proxy.FailBackendList[0] == "db-tidb-0" &&
+					c.Proxy.FailBackendList[1] == "db-tidb-1"
+			},
+			postcfg: `
+proxy.fail-backend-list = []
+proxy.failover-timeout = 0
+`,
+			postcheck: func(c *config.Config) bool {
+				return c.Proxy.FailoverTimeout == 0 && len(c.Proxy.FailBackendList) == 0
+			},
+		},
 	}
 
 	for i, tc := range cases {

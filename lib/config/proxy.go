@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,6 +60,12 @@ type ProxyServerOnline struct {
 	// In k8s, the pod terminationGracePeriodSeconds can be set to very long so that these configs can be updated online.
 	GracefulWaitBeforeShutdown int `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty" reloadable:"true"`
 	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty" reloadable:"true"`
+	// FailBackendList contains backend pod names or backend addresses (IP:port) that should be drained immediately
+	// and excluded from new routing. If the configured list would leave no routeable backend,
+	// TiProxy ignores the list to keep routing available.
+	FailBackendList []string `yaml:"fail-backend-list,omitempty" toml:"fail-backend-list,omitempty" json:"fail-backend-list,omitempty" reloadable:"true"`
+	// FailoverTimeout is the grace period in seconds before force closing the remaining connections on failed backends.
+	FailoverTimeout int `yaml:"failover-timeout,omitempty" toml:"failover-timeout,omitempty" json:"failover-timeout,omitempty" reloadable:"true"`
 }
 
 type ProxyServer struct {
@@ -144,6 +151,7 @@ func NewConfig() *Config {
 	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnhealthyKeepalive = DefaultKeepAlive()
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 	cfg.Proxy.GracefulCloseConnTimeout = 15
+	cfg.Proxy.FailoverTimeout = 60
 
 	cfg.API.Addr = "0.0.0.0:3080"
 
@@ -168,6 +176,7 @@ func NewConfig() *Config {
 func (cfg *Config) Clone() *Config {
 	newCfg := *cfg
 	newCfg.Labels = maps.Clone(cfg.Labels)
+	newCfg.Proxy.FailBackendList = slices.Clone(cfg.Proxy.FailBackendList)
 	return &newCfg
 }
 
@@ -190,11 +199,35 @@ func (cfg *Config) Check() error {
 	if cfg.Proxy.ConnBufferSize > 0 && (cfg.Proxy.ConnBufferSize > 16*1024*1024 || cfg.Proxy.ConnBufferSize < 1024) {
 		return errors.Wrapf(ErrInvalidConfigValue, "conn-buffer-size must be between 1K and 16M")
 	}
+	if err := cfg.Proxy.Check(); err != nil {
+		return err
+	}
 
 	if err := cfg.Balance.Check(); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+func (ps *ProxyServer) Check() error {
+	if ps.FailoverTimeout < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "proxy.failover-timeout must be greater than or equal to 0")
+	}
+	failBackends := ps.FailBackendList[:0]
+	failBackendSet := make(map[string]struct{}, len(ps.FailBackendList))
+	for i, backendName := range ps.FailBackendList {
+		backendName = strings.TrimSpace(backendName)
+		if backendName == "" {
+			return errors.Wrapf(ErrInvalidConfigValue, "proxy.fail-backend-list[%d] is empty", i)
+		}
+		if _, ok := failBackendSet[backendName]; ok {
+			continue
+		}
+		failBackendSet[backendName] = struct{}{}
+		failBackends = append(failBackends, backendName)
+	}
+	ps.FailBackendList = failBackends
 	return nil
 }
 
