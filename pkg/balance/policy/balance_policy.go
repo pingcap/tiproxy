@@ -12,6 +12,8 @@ import (
 type BalancePolicy interface {
 	Init(cfg *config.Config)
 	BackendToRoute(backends []BackendCtx) BackendCtx
+	// RouteableBackends returns the backends that are eligible for routing under the current policy.
+	RouteableBackends(backends []BackendCtx) []BackendCtx
 	// balanceCount is the count of connections to balance per second.
 	BackendsToBalance(backends []BackendCtx) (from, to BackendCtx, balanceCount float64, reason string, logFields []zap.Field)
 	SetConfig(cfg *config.Config)

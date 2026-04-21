@@ -20,13 +20,14 @@ import (
 
 type mockRedirectableConn struct {
 	sync.Mutex
-	t        *testing.T
-	kv       map[any]any
-	connID   uint64
-	from     BackendInst
-	to       BackendInst
-	receiver ConnEventReceiver
-	closing  bool
+	t             *testing.T
+	kv            map[any]any
+	connID        uint64
+	from          BackendInst
+	to            BackendInst
+	receiver      ConnEventReceiver
+	closing       bool
+	blockRedirect bool
 }
 
 func newMockRedirectableConn(t *testing.T, id uint64) *mockRedirectableConn {
@@ -62,9 +63,22 @@ func (conn *mockRedirectableConn) Redirect(inst BackendInst) bool {
 	if conn.closing {
 		return false
 	}
+	if conn.blockRedirect {
+		return false
+	}
 	require.Nil(conn.t, conn.to)
 	require.True(conn.t, inst.Healthy())
 	conn.to = inst
+	return true
+}
+
+func (conn *mockRedirectableConn) ForceClose() bool {
+	conn.Lock()
+	defer conn.Unlock()
+	if conn.closing {
+		return false
+	}
+	conn.closing = true
 	return true
 }
 
@@ -202,6 +216,16 @@ func (m *mockBalancePolicy) BackendToRoute(backends []policy.BackendCtx) policy.
 		return m.backendToRoute(backends)
 	}
 	return nil
+}
+
+func (m *mockBalancePolicy) RouteableBackends(backends []policy.BackendCtx) []policy.BackendCtx {
+	routeable := make([]policy.BackendCtx, 0, len(backends))
+	for _, backend := range backends {
+		if backend.Healthy() {
+			routeable = append(routeable, backend)
+		}
+	}
+	return routeable
 }
 
 func (m *mockBalancePolicy) BackendsToBalance(backends []policy.BackendCtx) (from policy.BackendCtx, to policy.BackendCtx, balanceCount float64, reason string, logFields []zapcore.Field) {
