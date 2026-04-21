@@ -71,12 +71,8 @@ func estimateConnBufferMemDelta(bufferSize int) int64 {
 }
 
 // NewSQLServer creates a new SQLServer.
-<<<<<<< HEAD
-func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
-=======
 func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture,
-	meter backend.Meter, hsHandler backend.HandshakeHandler, memUsage memoryStateProvider) (*SQLServer, error) {
->>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
+	hsHandler backend.HandshakeHandler, memUsage memoryStateProvider) (*SQLServer, error) {
 	var err error
 	s := &SQLServer{
 		logger:    logger,
@@ -183,12 +179,8 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		maxConns := s.mu.maxConnections
 		// 'maxConns == 0' => unlimited connections
 		if maxConns != 0 && conns >= maxConns {
-<<<<<<< HEAD
-			s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
-=======
 			metrics.RejectConnCounter.WithLabelValues("max_connections").Inc()
 			s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.Stringer("client_addr", conn.RemoteAddr()), zap.Error(conn.Close()))
->>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 			return false, nil, 0, nil
 		}
 
@@ -242,8 +234,6 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	clientConn.Run(ctx)
 }
 
-<<<<<<< HEAD
-=======
 func (s *SQLServer) rejectConnByMemory(conn net.Conn) bool {
 	if s.memUsage == nil {
 		return false
@@ -264,32 +254,6 @@ func (s *SQLServer) rejectConnByMemory(conn net.Conn) bool {
 	return true
 }
 
-func (s *SQLServer) fromPublicEndpoint(addr net.Addr) bool {
-	if addr == nil || reflect.ValueOf(addr).IsNil() {
-		return false
-	}
-	s.mu.RLock()
-	publicEndpoints := s.mu.publicEndpoints
-	s.mu.RUnlock()
-	ip, err := netutil.NetAddr2IP(addr)
-	if err != nil {
-		s.logger.Warn("failed to check public endpoint", zap.Any("addr", addr), zap.Error(err))
-		return false
-	}
-	contains, err := netutil.CIDRContainsIP(publicEndpoints, ip)
-	if err != nil {
-		s.logger.Warn("failed to check public endpoint", zap.Any("ip", ip), zap.Error(err))
-		return false
-	}
-	if contains {
-		return true
-	}
-	// The public NLB may enable preserveIP, and the incoming address is the client address, which may be a public address.
-	// Even if the private NLB enables preserveIP, the client address is still a private address.
-	return !netutil.IsPrivate(ip)
-}
-
->>>>>>> 92599f29 (memory, config: reject connections when memory usage is high (#1120))
 func (s *SQLServer) PreClose() {
 	// Step 1: HTTP status returns unhealthy so that NLB takes this instance offline and then new connections won't come.
 	s.mu.Lock()
