@@ -13,12 +13,25 @@ import (
 
 func (h *Server) DebugHealth(c *gin.Context) {
 	status := http.StatusOK
-	if h.isClosing.Load() || !h.mgr.NsMgr.Ready() {
+	health := config.HealthInfo{
+		ConfigChecksum: h.mgr.CfgMgr.GetConfigChecksum(),
+	}
+	if h.unhealthyMark.Load() {
+		status = http.StatusBadGateway
+	} else if h.isClosing.Load() || !h.mgr.NsMgr.Ready() {
 		status = http.StatusBadGateway
 	}
-	c.JSON(status, config.HealthInfo{
-		ConfigChecksum: h.mgr.CfgMgr.GetConfigChecksum(),
-	})
+	c.JSON(status, health)
+}
+
+func (h *Server) DebugSetHealthUnhealthy(c *gin.Context) {
+	h.unhealthyMark.Store(true)
+	c.JSON(http.StatusOK, "")
+}
+
+func (h *Server) DebugUnsetHealthUnhealthy(c *gin.Context) {
+	h.unhealthyMark.Store(false)
+	c.JSON(http.StatusOK, "")
 }
 
 func (h *Server) DebugRedirect(c *gin.Context) {
@@ -39,5 +52,7 @@ func (h *Server) DebugRedirect(c *gin.Context) {
 func (h *Server) registerDebug(group *gin.RouterGroup) {
 	group.POST("/redirect", h.DebugRedirect)
 	group.GET("/health", h.DebugHealth)
+	group.POST("/health/unhealthy", h.DebugSetHealthUnhealthy)
+	group.DELETE("/health/unhealthy", h.DebugUnsetHealthUnhealthy)
 	pprof.RouteRegister(group, "/pprof")
 }
