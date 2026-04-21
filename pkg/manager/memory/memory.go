@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tidb/pkg/util/memory"
@@ -18,15 +19,25 @@ import (
 )
 
 const (
-	// Check the memory usage every 30 seconds.
-	checkInterval = 30 * time.Second
+	// Refresh the memory usage every 5 seconds.
+	refreshInterval = 5 * time.Second
 	// No need to record too frequently.
 	recordMinInterval = 5 * time.Minute
 	// Record the profiles when the memory usage is higher than 60%.
 	alarmThreshold = 0.6
 	// Remove the oldest profiles when the number of profiles exceeds this limit.
 	maxSavedProfiles = 20
+	// Fail open if the latest sampled usage is too old.
+	snapshotExpireInterval = 3 * refreshInterval
 )
+
+type UsageSnapshot struct {
+	Used       uint64
+	Limit      uint64
+	Usage      float64
+	UpdateTime time.Time
+	Valid      bool
+}
 
 // MemManager is a manager for memory usage.
 // Although the continuous profiling collects profiles periodically, when TiProxy runs in the replayer mode,
@@ -38,77 +49,166 @@ type MemManager struct {
 	cfgGetter         config.ConfigGetter
 	savedProfileNames []string
 	lastRecordTime    time.Time
-	checkInterval     time.Duration // used for test
+	refreshInterval   time.Duration // used for test
 	recordMinInterval time.Duration // used for test
 	maxSavedProfiles  int           // used for test
+	snapshotExpire    time.Duration // used for test
 	memoryLimit       uint64
+	latestUsage       atomic.Value
+	// connBufferMemDelta tracks the estimated buffer memory change since the latest refreshUsage.
+	connBufferMemDelta atomic.Int64
 }
 
 func NewMemManager(lg *zap.Logger, cfgGetter config.ConfigGetter) *MemManager {
-	return &MemManager{
+	mgr := &MemManager{
 		lg:                lg,
 		cfgGetter:         cfgGetter,
-		checkInterval:     checkInterval,
+		refreshInterval:   refreshInterval,
 		recordMinInterval: recordMinInterval,
 		maxSavedProfiles:  maxSavedProfiles,
+		snapshotExpire:    snapshotExpireInterval,
 	}
+	mgr.latestUsage.Store(UsageSnapshot{})
+	return mgr
 }
 
 func (m *MemManager) Start(ctx context.Context) {
 	// Call the memory.MemTotal and memory.MemUsed in TiDB repo because they have considered cgroup.
 	limit, err := memory.MemTotal()
 	if err != nil || limit == 0 {
-		m.lg.Error("get memory limit failed", zap.Uint64("limit", limit), zap.Error(err))
+		m.lg.Warn("get memory limit failed", zap.Uint64("limit", limit), zap.Error(err))
 		return
 	}
 	m.memoryLimit = limit
+	if _, err = m.refreshUsage(); err != nil {
+		return
+	}
 	childCtx, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
 	m.wg.RunWithRecover(func() {
-		m.alarmLoop(childCtx)
+		m.refreshLoop(childCtx)
 	}, nil, m.lg)
 }
 
-func (m *MemManager) alarmLoop(ctx context.Context) {
-	ticker := time.NewTicker(m.checkInterval)
+func (m *MemManager) refreshLoop(ctx context.Context) {
+	ticker := time.NewTicker(m.refreshInterval)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			m.checkAndAlarm()
+			m.refreshAndAlarm()
 		}
 	}
 }
 
-func (m *MemManager) checkAndAlarm() {
+func (m *MemManager) refreshAndAlarm() {
+	snapshot, err := m.refreshUsage()
+	if err != nil || !snapshot.Valid {
+		return
+	}
+	if snapshot.Usage < alarmThreshold {
+		return
+	}
 	if time.Since(m.lastRecordTime) < m.recordMinInterval {
 		return
 	}
 	// The filename is hot-reloadable.
-	logPath := m.cfgGetter.GetConfig().Log.LogFile.Filename
+	cfg := m.cfgGetter.GetConfig()
+	if cfg == nil {
+		return
+	}
+	logPath := cfg.Log.LogFile.Filename
 	if logPath == "" {
 		return
 	}
 	recordDir := filepath.Dir(logPath)
 
-	used, err := memory.MemUsed()
-	if err != nil || used == 0 {
-		m.lg.Error("get used memory failed", zap.Uint64("used", used), zap.Error(err))
-		return
-	}
-	memoryUsage := float64(used) / float64(m.memoryLimit)
-	if memoryUsage < alarmThreshold {
-		return
-	}
-
-	m.lastRecordTime = time.Now()
-	m.lg.Warn("memory usage alarm", zap.Uint64("limit", m.memoryLimit), zap.Uint64("used", used), zap.Float64("usage", memoryUsage))
+	m.lastRecordTime = snapshot.UpdateTime
+	m.lg.Warn("memory usage alarm", zap.Uint64("limit", snapshot.Limit), zap.Uint64("used", snapshot.Used), zap.Float64("usage", snapshot.Usage))
 	now := time.Now().Format(time.RFC3339)
 	m.recordHeap(filepath.Join(recordDir, "heap_"+now))
 	m.recordGoroutine(filepath.Join(recordDir, "goroutine_"+now))
 	m.rmExpiredProfiles()
+}
+
+func (m *MemManager) refreshUsage() (UsageSnapshot, error) {
+	if m.memoryLimit == 0 {
+		return UsageSnapshot{}, nil
+	}
+	used, err := memory.MemUsed()
+	if err != nil || used == 0 {
+		m.lg.Warn("get used memory failed", zap.Uint64("used", used), zap.Error(err))
+		return UsageSnapshot{}, err
+	}
+	// Start a new delta window from this sampled snapshot. Later connection create/close
+	// events only adjust the in-memory estimate relative to this refresh result.
+	m.connBufferMemDelta.Swap(0)
+	snapshot := UsageSnapshot{
+		Used:       used,
+		Limit:      m.memoryLimit,
+		Usage:      float64(used) / float64(m.memoryLimit),
+		UpdateTime: time.Now(),
+		Valid:      true,
+	}
+	m.latestUsage.Store(snapshot)
+	return snapshot, nil
+}
+
+func (m *MemManager) LatestUsage() UsageSnapshot {
+	snapshot, _ := m.latestUsage.Load().(UsageSnapshot)
+	return snapshot
+}
+
+func (m *MemManager) UpdateConnBufferMemory(delta int64) {
+	if m == nil || delta == 0 {
+		return
+	}
+	m.connBufferMemDelta.Add(delta)
+}
+
+// adjustUsageByConnBuffer applies the connection buffer delta accumulated after the
+// latest refreshUsage, so ShouldRejectNewConn can react before the next memory sample.
+func (m *MemManager) adjustUsageByConnBuffer(snapshot UsageSnapshot) UsageSnapshot {
+	delta := m.connBufferMemDelta.Load()
+	if delta == 0 {
+		return snapshot
+	}
+	if delta > 0 {
+		snapshot.Used += uint64(delta)
+	} else {
+		released := uint64(-delta)
+		if released >= snapshot.Used {
+			snapshot.Used = 0
+		} else {
+			snapshot.Used -= released
+		}
+	}
+	if snapshot.Limit > 0 {
+		snapshot.Usage = float64(snapshot.Used) / float64(snapshot.Limit)
+	}
+	return snapshot
+}
+
+func (m *MemManager) ShouldRejectNewConn() (bool, UsageSnapshot, float64) {
+	if m == nil || m.cfgGetter == nil {
+		return false, UsageSnapshot{}, 0
+	}
+	cfg := m.cfgGetter.GetConfig()
+	if cfg == nil {
+		return false, UsageSnapshot{}, 0
+	}
+	threshold := cfg.Proxy.HighMemoryUsageRejectThreshold
+	if threshold == 0 {
+		return false, UsageSnapshot{}, 0
+	}
+	snapshot := m.LatestUsage()
+	if !snapshot.Valid || time.Since(snapshot.UpdateTime) > m.snapshotExpire {
+		return false, snapshot, threshold
+	}
+	snapshot = m.adjustUsageByConnBuffer(snapshot)
+	return snapshot.Usage >= threshold, snapshot, threshold
 }
 
 func (m *MemManager) recordHeap(fileName string) {
