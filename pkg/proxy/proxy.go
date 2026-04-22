@@ -15,6 +15,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
+	mgrmem "github.com/pingcap/tiproxy/pkg/manager/memory"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
@@ -44,6 +45,7 @@ type SQLServer struct {
 	logger     *zap.Logger
 	certMgr    *cert.CertManager
 	idMgr      *id.IDManager
+	memUsage   memoryStateProvider
 	hsHandler  backend.HandshakeHandler
 	cpt        capture.Capture
 	wg         waitgroup.WaitGroup
@@ -52,13 +54,31 @@ type SQLServer struct {
 	mu serverState
 }
 
+type memoryStateProvider interface {
+	ShouldRejectNewConn() (bool, mgrmem.UsageSnapshot, float64)
+}
+
+type connBufferMemoryUpdater interface {
+	UpdateConnBufferMemory(delta int64)
+}
+
+func estimateConnBufferMemDelta(bufferSize int) int64 {
+	if bufferSize == 0 {
+		bufferSize = pnet.DefaultConnBufferSize
+	}
+	// write buffer + read buffer
+	return int64(bufferSize * 2)
+}
+
 // NewSQLServer creates a new SQLServer.
-func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture, hsHandler backend.HandshakeHandler) (*SQLServer, error) {
+func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture,
+	hsHandler backend.HandshakeHandler, memUsage memoryStateProvider) (*SQLServer, error) {
 	var err error
 	s := &SQLServer{
 		logger:    logger,
 		certMgr:   certMgr,
 		idMgr:     idMgr,
+		memUsage:  memUsage,
 		hsHandler: hsHandler,
 		cpt:       cpt,
 		mu: serverState{
@@ -139,6 +159,18 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 }
 
 func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
+	if s.rejectConnByMemory(conn) {
+		return
+	}
+
+	var (
+		connBufferUpdater  connBufferMemoryUpdater
+		connBufferMemDelta int64
+	)
+	if s.memUsage != nil {
+		connBufferUpdater, _ = s.memUsage.(connBufferMemoryUpdater)
+	}
+
 	tcpKeepAlive, logger, connID, clientConn := func() (bool, *zap.Logger, uint64, *client.ClientConnection) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -147,7 +179,8 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		maxConns := s.mu.maxConnections
 		// 'maxConns == 0' => unlimited connections
 		if maxConns != 0 && conns >= maxConns {
-			s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.String("client_addr", conn.RemoteAddr().Network()), zap.Error(conn.Close()))
+			metrics.RejectConnCounter.WithLabelValues("max_connections").Inc()
+			s.logger.Warn("too many connections", zap.Uint64("max connections", maxConns), zap.Stringer("client_addr", conn.RemoteAddr()), zap.Error(conn.Close()))
 			return false, nil, 0, nil
 		}
 
@@ -163,6 +196,10 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				ConnBufferSize:     s.mu.connBufferSize,
 			})
 		s.mu.clients[connID] = clientConn
+		connBufferMemDelta = estimateConnBufferMemDelta(s.mu.connBufferSize)
+		if connBufferUpdater != nil {
+			connBufferUpdater.UpdateConnBufferMemory(connBufferMemDelta)
+		}
 		logger.Debug("new connection", zap.Bool("proxy-protocol", s.mu.proxyProtocol), zap.Bool("require_backend_tls", s.mu.requireBackendTLS))
 		return s.mu.tcpKeepAlive, logger, connID, clientConn
 	}()
@@ -178,6 +215,9 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		s.mu.Lock()
 		delete(s.mu.clients, connID)
 		s.mu.Unlock()
+		if connBufferUpdater != nil {
+			connBufferUpdater.UpdateConnBufferMemory(-connBufferMemDelta)
+		}
 
 		if err := clientConn.Close(); err != nil && !pnet.IsDisconnectError(err) {
 			logger.Error("close connection fails", zap.Error(err))
@@ -192,6 +232,26 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	}
 
 	clientConn.Run(ctx)
+}
+
+func (s *SQLServer) rejectConnByMemory(conn net.Conn) bool {
+	if s.memUsage == nil {
+		return false
+	}
+	reject, snapshot, threshold := s.memUsage.ShouldRejectNewConn()
+	if !reject {
+		return false
+	}
+	metrics.RejectConnCounter.WithLabelValues("memory").Inc()
+	s.logger.Warn("reject connection due to high memory usage",
+		zap.Stringer("client_addr", conn.RemoteAddr()),
+		zap.Float64("threshold", threshold),
+		zap.Float64("usage", snapshot.Usage),
+		zap.Uint64("used", snapshot.Used),
+		zap.Uint64("limit", snapshot.Limit),
+		zap.Time("last_update", snapshot.UpdateTime),
+		zap.Error(conn.Close()))
+	return true
 }
 
 func (s *SQLServer) PreClose() {

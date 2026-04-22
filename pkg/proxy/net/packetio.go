@@ -239,6 +239,9 @@ type packetIO struct {
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *packetIO {
+	if bufferSize == 0 {
+		bufferSize = DefaultConnBufferSize
+	}
 	p := &packetIO{
 		rawConn:    conn,
 		logger:     lg,
