@@ -241,7 +241,7 @@ func TestPendingCmds(t *testing.T) {
 		return err != nil
 	}, 5*time.Second, 10*time.Millisecond)
 	progress, _, done, err := replay.Progress()
-	require.NotEqualValues(t, 1, progress)
+	require.NotEqualValues(t, 1.0, progress)
 	require.True(t, done)
 	require.Contains(t, err.Error(), "too many pending commands")
 	logs := text.String()
