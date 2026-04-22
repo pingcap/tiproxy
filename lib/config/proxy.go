@@ -213,6 +213,12 @@ func (cfg *Config) Check() error {
 }
 
 func (ps *ProxyServer) Check() error {
+	if ps.HighMemoryUsageRejectThreshold < 0 || ps.HighMemoryUsageRejectThreshold > 1 {
+		return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.high-memory-usage-reject-threshold")
+	}
+	if ps.HighMemoryUsageRejectThreshold > 0 && ps.HighMemoryUsageRejectThreshold < 0.5 {
+		ps.HighMemoryUsageRejectThreshold = 0.5
+	}
 	if ps.FailoverTimeout < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "proxy.failover-timeout must be greater than or equal to 0")
 	}

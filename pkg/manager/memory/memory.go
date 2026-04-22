@@ -14,7 +14,7 @@ import (
 
 	"github.com/pingcap/tidb/pkg/util/memory"
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"go.uber.org/zap"
 )
 
