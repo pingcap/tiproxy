@@ -81,8 +81,8 @@ func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
 	}
 	cfg := embed.NewConfig()
 	cfg.Dir = dir
-	cfg.LCUrls = []url.URL{*serverURL}
-	cfg.LPUrls = []url.URL{*serverURL}
+	cfg.ListenClientUrls = []url.URL{*serverURL}
+	cfg.ListenPeerUrls = []url.URL{*serverURL}
 	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(lg)
 	cfg.LogLevel = "fatal"
 	// Reuse port so that it can reboot with the same port immediately.
