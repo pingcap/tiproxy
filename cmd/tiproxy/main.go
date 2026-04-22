@@ -24,7 +24,7 @@ func main() {
 		Short:   "start the proxy server",
 		Version: fmt.Sprintf("%s, commit %s", versioninfo.TiProxyVersion, versioninfo.TiProxyGitHash),
 	}
-	rootCmd.SetOutput(os.Stdout)
+	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 
 	sctx := &sctx.Context{}

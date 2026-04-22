@@ -22,7 +22,7 @@ func GetRootCmd(tlsConfig *tls.Config) *cobra.Command {
 		Short:        "cli",
 		SilenceUsage: true,
 	}
-	rootCmd.SetOutput(os.Stdout)
+	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 
 	ctx := &Context{}
