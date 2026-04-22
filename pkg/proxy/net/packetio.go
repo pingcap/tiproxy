@@ -234,32 +234,19 @@ type PacketIO interface {
 // PacketIO is a helper to read and write sql and proxy protocol.
 type packetIO struct {
 	lastKeepAlive config.KeepAlive
-<<<<<<< HEAD
-	rawConn       net.Conn
-	readWriter    packetReadWriter
-	limitReader   io.LimitedReader // reuse memory to reduce allocation
-	logger        *zap.Logger
-	remoteAddr    net.Addr
-	wrap          error
-	header        [4]byte // reuse memory to reduce allocation
-	inPackets     uint64
-	outPackets    uint64
-=======
 	// TLS allocates another buffered layer after the handshake. Keep the
 	// normalized base connection buffer size here so the TLS layer can scale
 	// from the caller's setting instead of falling back to unrelated constants.
-	connBufferSize  int
-	rawConn         net.Conn
-	readWriter      packetReadWriter
-	limitReader     io.LimitedReader // reuse memory to reduce allocation
-	logger          *zap.Logger
-	remoteAddr      net.Addr
-	wrap            error
-	header          [4]byte // reuse memory to reduce allocation
-	readPacketLimit int
-	inPackets       uint64
-	outPackets      uint64
->>>>>>> 039f9ccc (net: reduce the TLS buffer size to reduce memory usage (#1121))
+	connBufferSize int
+	rawConn        net.Conn
+	readWriter     packetReadWriter
+	limitReader    io.LimitedReader // reuse memory to reduce allocation
+	logger         *zap.Logger
+	remoteAddr     net.Addr
+	wrap           error
+	header         [4]byte // reuse memory to reduce allocation
+	inPackets      uint64
+	outPackets     uint64
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *packetIO {
