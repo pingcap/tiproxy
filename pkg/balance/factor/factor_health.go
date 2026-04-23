@@ -109,12 +109,12 @@ var (
 				Range2Value: generalRange2Value,
 				ResultType:  model.ValVector,
 			},
-			totalPromQL: `sum(increase(tidb_tikvclient_request_counter[2m])) by (instance)`,
+			totalPromQL: `sum(increase(tidb_tikvclient_request_seconds_count[2m])) by (instance)`,
 			queryTotalRule: metricsreader.QueryRule{
-				Names:     []string{"tidb_tikvclient_request_counter"},
+				Names:     []string{"tidb_tikvclient_request_seconds_count"},
 				Retention: 2 * time.Minute,
 				Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
-					return generalMetric2Value(mfs, "tidb_tikvclient_request_counter", "")
+					return generalMetric2Value(mfs, "tidb_tikvclient_request_seconds_count", "")
 				},
 				Range2Value: generalRange2Value,
 				ResultType:  model.ValVector,
