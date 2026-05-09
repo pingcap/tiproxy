@@ -74,25 +74,12 @@ var testProxyConfig = Config{
 		},
 		RequireBackendTLS: true,
 	},
-<<<<<<< HEAD
-=======
 	HA: HA{
 		VirtualIP:        "10.10.10.10/32",
 		Interface:        "eth0",
 		GARPBurstCount:   5,
 		GARPRefreshCount: 30,
 	},
-	Metering: mconfig.MeteringConfig{
-		Type:     storage.ProviderTypeAzure,
-		Bucket:   "metering-container",
-		Prefix:   "tiproxy/metering",
-		Endpoint: "https://account.blob.core.windows.net",
-		Azure: &mconfig.MeteringAzureConfig{
-			AccountName: "account",
-			SASToken:    "sig=example",
-		},
-	},
->>>>>>> f5fefd30 (vip, config: avoid multiple VIP owners exist at the same time (#1118))
 }
 
 func TestProxyConfig(t *testing.T) {
