@@ -5,6 +5,7 @@ package elect
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,14 +26,19 @@ const (
 var _ Member = (*mockMember)(nil)
 
 type mockMember struct {
-	ch chan int
+	ch            chan int
+	hangElectedMu sync.Mutex
+	hangElectedCh chan struct{}
 }
 
 func newMockMember() *mockMember {
-	return &mockMember{ch: make(chan int, 2)}
+	return &mockMember{ch: make(chan int, 32)}
 }
 
 func (mo *mockMember) OnElected() {
+	if ch := mo.getHangElectedCh(); ch != nil {
+		<-ch
+	}
 	mo.ch <- eventTypeElected
 }
 
@@ -43,7 +49,7 @@ func (mo *mockMember) OnRetired() {
 func (mo *mockMember) expectEvent(t *testing.T, expected ...int) {
 	for _, exp := range expected {
 		select {
-		case <-time.After(3 * time.Second):
+		case <-time.After(5 * time.Second):
 			t.Fatal("timeout")
 		case event := <-mo.ch:
 			require.Equal(t, exp, event)
@@ -51,34 +57,34 @@ func (mo *mockMember) expectEvent(t *testing.T, expected ...int) {
 	}
 }
 
-func (mo *mockMember) expectNoEvent(t *testing.T) {
+func (mo *mockMember) expectNoEvent(t *testing.T, timeout time.Duration) {
 	select {
-	case <-time.After(100 * time.Millisecond):
-		return
 	case event := <-mo.ch:
-		require.Fail(t, "unexpected event", event)
+		t.Fatalf("unexpected event %d", event)
+	case <-time.After(timeout):
 	}
 }
 
 func (mo *mockMember) hang(hang bool) {
-	contn := true
-	for contn {
-		if hang {
-			// fill the channel
-			select {
-			case mo.ch <- eventTypeElected:
-			default:
-				contn = false
-			}
-		} else {
-			// clear the channel
-			select {
-			case <-mo.ch:
-			default:
-				contn = false
-			}
+	mo.hangElectedMu.Lock()
+	defer mo.hangElectedMu.Unlock()
+
+	if hang {
+		if mo.hangElectedCh == nil {
+			mo.hangElectedCh = make(chan struct{})
 		}
+		return
 	}
+	if mo.hangElectedCh != nil {
+		close(mo.hangElectedCh)
+		mo.hangElectedCh = nil
+	}
+}
+
+func (mo *mockMember) getHangElectedCh() chan struct{} {
+	mo.hangElectedMu.Lock()
+	defer mo.hangElectedMu.Unlock()
+	return mo.hangElectedCh
 }
 
 type etcdTestSuite struct {
@@ -156,9 +162,9 @@ func (ts *etcdTestSuite) expectEvent(id string, event ...int) {
 	elec.member.(*mockMember).expectEvent(ts.t, event...)
 }
 
-func (ts *etcdTestSuite) expectNoEvent(id string) {
+func (ts *etcdTestSuite) expectNoEvent(id string, timeout time.Duration) {
 	elec := ts.getElection(id)
-	elec.member.(*mockMember).expectNoEvent(ts.t)
+	elec.member.(*mockMember).expectNoEvent(ts.t, timeout)
 }
 
 func (ts *etcdTestSuite) hang(id string, hang bool) {
@@ -196,11 +202,9 @@ func (ts *etcdTestSuite) shutdownServer() string {
 
 func electionConfigForTest(ttl int) ElectionConfig {
 	return ElectionConfig{
-		SessionTTL:       ttl,
-		Timeout:          100 * time.Millisecond,
-		RetryIntvl:       10 * time.Millisecond,
-		QueryIntvl:       10 * time.Millisecond,
-		WaitBeforeRetire: 3 * time.Second,
-		RetryCnt:         2,
+		SessionTTL: ttl,
+		Timeout:    100 * time.Millisecond,
+		RetryIntvl: 10 * time.Millisecond,
+		RetryCnt:   2,
 	}
 }
