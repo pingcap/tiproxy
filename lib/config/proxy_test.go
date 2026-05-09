@@ -88,6 +88,12 @@ var testProxyConfig = Config{
 		},
 		RequireBackendTLS: true,
 	},
+	HA: HA{
+		VirtualIP:        "10.10.10.10/32",
+		Interface:        "eth0",
+		GARPBurstCount:   5,
+		GARPRefreshCount: 30,
+	},
 	Metering: mconfig.MeteringConfig{
 		Type:     storage.ProviderTypeAzure,
 		Bucket:   "metering-container",
@@ -220,6 +226,18 @@ func TestProxyCheck(t *testing.T) {
 		{
 			pre: func(t *testing.T, c *Config) {
 				c.Proxy.FailoverTimeout = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.HA.GARPBurstCount = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.HA.GARPRefreshCount = -1
 			},
 			err: ErrInvalidConfigValue,
 		},
