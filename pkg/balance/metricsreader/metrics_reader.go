@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/util/http"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -101,7 +101,7 @@ func (dmr *DefaultMetricsReader) readMetrics(ctx context.Context) {
 	}
 	backendErr := dmr.backendReader.ReadMetrics(ctx)
 	if backendErr == nil {
-		dmr.setSource(sourceBackend, nil)
+		dmr.setSource(sourceBackend, promErr)
 		return
 	}
 	dmr.lg.Warn("read metrics failed", zap.NamedError("prometheus", promErr), zap.NamedError("backends", backendErr))

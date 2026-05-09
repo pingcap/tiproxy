@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/retry"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"go.uber.org/zap"
 )
 
@@ -69,6 +70,7 @@ func (pf *PDFetcher) fetchBackendList(ctx context.Context) map[string]*infosync.
 				return
 			}
 			pf.logger.Error("fetch backend list failed, retrying", zap.Error(err))
+			metrics.ServerErrCounter.WithLabelValues("fetchBackendList").Inc()
 		}, 10)
 
 	// Must be cancelled if err != nil, we do not log errors.
