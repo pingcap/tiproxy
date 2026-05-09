@@ -126,7 +126,6 @@ func TestNetworkOperation(t *testing.T) {
 		cfgGetter: newMockConfigGetter(newMockConfig()),
 		operation: operation,
 	}
-	vm.delOnRetire.Store(true)
 	vm.election = newMockElection(ch, vm)
 	childCtx, cancel := context.WithCancel(context.Background())
 	vm.election.Start(childCtx)
@@ -145,6 +144,127 @@ func TestNetworkOperation(t *testing.T) {
 	}
 	cancel()
 	vm.Close()
+}
+
+func TestPreCloseDeletesVIPBeforeCloseElection(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	operation := newMockNetworkOperation()
+	operation.hasIP.Store(true)
+
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(newMockConfig()),
+		operation: operation,
+	}
+	vm.election = &closeHookElection{
+		closeFn: func() {
+			require.False(t, operation.hasIP.Load())
+			require.EqualValues(t, 1, operation.delIPCnt.Load())
+		},
+	}
+
+	vm.PreClose()
+}
+
+func TestPreClosePreventsReacquireDuringElectionClose(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	operation := newMockNetworkOperation()
+	operation.hasIP.Store(true)
+
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(newMockConfig()),
+		operation: operation,
+	}
+	vm.election = &closeHookElection{
+		closeFn: func() {
+			vm.OnElected()
+		},
+	}
+
+	vm.PreClose()
+	require.False(t, operation.hasIP.Load())
+	require.EqualValues(t, 0, operation.addIPCnt.Load())
+}
+
+func TestGARPRefresh(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newMockConfig()
+	cfg.HA.GARPBurstCount = 1
+	cfg.HA.GARPRefreshCount = 1
+	operation := newMockNetworkOperation()
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(cfg),
+		operation: operation,
+	}
+
+	vm.OnElected()
+	require.Eventually(t, func() bool {
+		return operation.sendArpCnt.Load() > 0
+	}, 2*garpRefreshInterval, 10*time.Millisecond)
+
+	vm.OnRetired()
+	sendArpCnt := operation.sendArpCnt.Load()
+	time.Sleep(50 * time.Millisecond)
+	require.Equal(t, sendArpCnt, operation.sendArpCnt.Load())
+	require.False(t, operation.hasIP.Load())
+}
+
+func TestGARPRefreshNotStartedWhenVIPNotBound(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newMockConfig()
+	cfg.HA.GARPBurstCount = 1
+	cfg.HA.GARPRefreshCount = 1
+	operation := newMockNetworkOperation()
+	operation.addIPErr.Store(true)
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(cfg),
+		operation: operation,
+	}
+
+	vm.OnElected()
+	time.Sleep(50 * time.Millisecond)
+	require.EqualValues(t, 0, operation.sendArpCnt.Load())
+	require.False(t, operation.hasIP.Load())
+}
+
+func TestPreCloseCancelsInFlightARP(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newMockConfig()
+	cfg.HA.GARPBurstCount = 2
+	cfg.HA.GARPRefreshCount = 1
+	operation := newMockNetworkOperation()
+	operation.sendArpDelay.Store(int64(200 * time.Millisecond))
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(cfg),
+		operation: operation,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		vm.OnElected()
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		return operation.addIPCnt.Load() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	start := time.Now()
+	vm.PreClose()
+	require.Less(t, time.Since(start), 500*time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.False(t, operation.hasIP.Load())
 }
 
 func TestStartAndClose(t *testing.T) {
@@ -215,4 +335,24 @@ func TestMultiVIP(t *testing.T) {
 	vm2.PreClose()
 	vm1.Close()
 	vm2.Close()
+}
+
+type closeHookElection struct {
+	closeFn func()
+}
+
+func (e *closeHookElection) Start(context.Context) {}
+
+func (e *closeHookElection) ID() string {
+	return ""
+}
+
+func (e *closeHookElection) GetOwnerID(context.Context) (string, error) {
+	return "", nil
+}
+
+func (e *closeHookElection) Close() {
+	if e.closeFn != nil {
+		e.closeFn()
+	}
 }
