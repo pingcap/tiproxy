@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/siddontang/go/hack"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -104,7 +104,7 @@ func (m *election) Start(ctx context.Context) {
 	// Don't recover because we don't know what will happen after recovery.
 	m.wg.Run(func() {
 		m.campaignLoop(clientCtx)
-	})
+	}, m.lg)
 }
 
 func (m *election) ID() string {
@@ -114,7 +114,9 @@ func (m *election) ID() string {
 func (m *election) campaignLoop(ctx context.Context) {
 	session, err := concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
 	if err != nil {
-		m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+		if !errors.Is(err, context.Canceled) {
+			m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+		}
 		return
 	}
 	for {
@@ -125,7 +127,9 @@ func (m *election) campaignLoop(ctx context.Context) {
 			leaseID := session.Lease()
 			session, err = concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
 			if err != nil {
-				m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+				if !errors.Is(err, context.Canceled) {
+					m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+				}
 				m.revokeLease(leaseID)
 				return
 			}

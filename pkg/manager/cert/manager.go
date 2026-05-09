@@ -12,8 +12,8 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/security"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
 
@@ -117,7 +117,7 @@ func (cm *CertManager) reloadLoop(ctx context.Context, cfgch <-chan *config.Conf
 				_ = cm.reload()
 			}
 		}
-	})
+	}, cm.logger)
 }
 
 // If any error happens, we still continue and use the old cert.
