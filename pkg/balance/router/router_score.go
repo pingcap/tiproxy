@@ -70,16 +70,12 @@ func (r *ScoreBasedRouter) Init(ctx context.Context, ob observer.BackendObserver
 	// Failing to route connections may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	r.wg.Run(func() {
 		r.rebalanceLoop(childCtx)
-<<<<<<< HEAD
-	}, nil, r.logger)
+	}, r.logger)
 
 	r.Lock()
 	r.setFailoverConfigLocked(cfg)
 	r.updateFailoverLocked(time.Now())
 	r.Unlock()
-=======
-	}, r.logger)
->>>>>>> 23dcc97e (*: increase the server error counter for more errors (#842))
 }
 
 // GetBackendSelector implements Router.GetBackendSelector interface.
