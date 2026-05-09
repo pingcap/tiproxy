@@ -115,7 +115,7 @@ func (mno *mockNetworkOperation) HasIP() (bool, error) {
 	return hasIP, nil
 }
 
-func (mno *mockNetworkOperation) AddIP() error {
+func (mno *mockNetworkOperation) AddIP(ctx context.Context) error {
 	if mno.addIPErr.Load() {
 		return errors.New("mock AddIP error")
 	}
@@ -124,7 +124,7 @@ func (mno *mockNetworkOperation) AddIP() error {
 	return nil
 }
 
-func (mno *mockNetworkOperation) DeleteIP() error {
+func (mno *mockNetworkOperation) DeleteIP(ctx context.Context) error {
 	if mno.delIPErr.Load() {
 		return errors.New("mock DeleteIP error")
 	}

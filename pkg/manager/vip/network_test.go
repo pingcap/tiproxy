@@ -62,7 +62,7 @@ func TestAddDelIP(t *testing.T) {
 		require.NotNil(t, operation, "case %d", i)
 		require.Equal(t, test.addr, operation.Addr(), "case %d", i)
 
-		err = operation.AddIP()
+		err = operation.AddIP(context.Background())
 		// Maybe the command is not installed.
 		if err != nil {
 			require.True(t, isOtherErr(err))
@@ -74,7 +74,7 @@ func TestAddDelIP(t *testing.T) {
 			require.True(t, isOtherErr(err))
 		}
 
-		if err := operation.DeleteIP(); test.delErr != "" {
+		if err := operation.DeleteIP(context.Background()); test.delErr != "" {
 			require.Error(t, err, "case %d", i)
 			require.Contains(t, err.Error(), test.delErr, "case %d", i)
 		} else {

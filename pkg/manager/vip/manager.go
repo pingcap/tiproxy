@@ -82,7 +82,7 @@ func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error
 	vm.closing = false
 
 	// This node may have bound the VIP before last failure.
-	vm.delVIP()
+	vm.delVIP(ctx)
 
 	cfg := vm.cfgGetter.GetConfig()
 	ip, port, _, err := cfg.GetIPPort()
@@ -126,7 +126,7 @@ func (vm *vipManager) OnRetired() {
 	defer vm.mu.Unlock()
 
 	vm.stopARPRefresh()
-	vm.delVIP()
+	vm.delVIP(context.Background())
 }
 
 func (vm *vipManager) addVIP(ctx context.Context) bool {
@@ -139,7 +139,7 @@ func (vm *vipManager) addVIP(ctx context.Context) bool {
 		vm.lg.Debug("already has VIP, do nothing")
 		return true
 	}
-	if err := vm.operation.AddIP(); err != nil {
+	if err := vm.operation.AddIP(ctx); err != nil {
 		vm.lg.Error("adding address failed", zap.Error(err))
 		return false
 	}
@@ -153,7 +153,7 @@ func (vm *vipManager) addVIP(ctx context.Context) bool {
 	return true
 }
 
-func (vm *vipManager) delVIP() {
+func (vm *vipManager) delVIP(ctx context.Context) {
 	hasIP, err := vm.operation.HasIP()
 	if err != nil {
 		vm.lg.Error("checking addresses failed", zap.Error(err))
@@ -163,7 +163,7 @@ func (vm *vipManager) delVIP() {
 		vm.lg.Debug("does not have VIP, do nothing")
 		return
 	}
-	if err := vm.operation.DeleteIP(); err != nil {
+	if err := vm.operation.DeleteIP(ctx); err != nil {
 		vm.lg.Error("deleting address failed", zap.Error(err))
 		return
 	}
@@ -230,6 +230,6 @@ func (vm *vipManager) prepareForClose() elect.Election {
 	// the VIP and may keep forwarding to the old node long after the overlap.
 	vm.closing = true
 	vm.stopARPRefresh()
-	vm.delVIP()
+	vm.delVIP(context.Background())
 	return vm.election
 }

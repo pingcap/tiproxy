@@ -20,8 +20,8 @@ import (
 // Extract the operations into an interface to make testing easier.
 type NetworkOperation interface {
 	HasIP() (bool, error)
-	AddIP() error
-	DeleteIP() error
+	AddIP(context.Context) error
+	DeleteIP(context.Context) error
 	SendARP(context.Context) error
 	Addr() string
 }
@@ -82,19 +82,25 @@ func (no *networkOperation) HasIP() (bool, error) {
 	return false, nil
 }
 
-func (no *networkOperation) AddIP() error {
+func (no *networkOperation) AddIP(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	err := netlink.AddrAdd(no.link, no.address)
 	// If TiProxy is deployed by TiUP, the user that runs TiProxy only has the sudo permission.
 	if err != nil && errors.Is(err, syscall.EPERM) {
-		err = no.execCmd("sudo", "ip", "addr", "add", no.address.String(), "dev", no.link.Attrs().Name)
+		err = no.execCmd(ctx, "sudo", "ip", "addr", "add", no.address.String(), "dev", no.link.Attrs().Name)
 	}
 	return errors.WithStack(err)
 }
 
-func (no *networkOperation) DeleteIP() error {
+func (no *networkOperation) DeleteIP(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	err := netlink.AddrDel(no.link, no.address)
 	if err != nil && errors.Is(err, syscall.EPERM) {
-		err = no.execCmd("sudo", "ip", "addr", "del", no.address.String(), "dev", no.link.Attrs().Name)
+		err = no.execCmd(ctx, "sudo", "ip", "addr", "del", no.address.String(), "dev", no.link.Attrs().Name)
 	}
 	return errors.WithStack(err)
 }
@@ -110,7 +116,7 @@ func (no *networkOperation) SendARP(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := no.sendARPOneShot(); err != nil {
+		if err := no.sendARPOneShot(ctx); err != nil {
 			return err
 		}
 	}
@@ -124,7 +130,7 @@ func (no *networkOperation) Addr() string {
 	return no.address.IP.String()
 }
 
-func (no *networkOperation) sendARPOneShot() error {
+func (no *networkOperation) sendARPOneShot(ctx context.Context) error {
 	// Keep both sending paths for a single logical GARP attempt: the library
 	// path avoids depending on the external "arping" command, while the command
 	// path has proven more reliable on some customer environments. Treat either
@@ -141,15 +147,15 @@ func (no *networkOperation) sendARPOneShot() error {
 	// count and interval. Using "arping -c 5" would hide pacing inside the
 	// command, making takeover and refresh timing less predictable from TiProxy
 	// and harder to reason about in tests and production troubleshooting.
-	cmdErr := no.execCmd("sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
+	cmdErr := no.execCmd(ctx, "sudo", "arping", "-c", "1", "-U", "-I", no.link.Attrs().Name, no.address.IP.String())
 	if libErr == nil || cmdErr == nil {
 		return nil
 	}
 	return errors.Wrap(errors.WithStack(cmdErr), errors.WithStack(libErr))
 }
 
-func (no *networkOperation) execCmd(args ...string) error {
-	output, err := cmd.ExecCmd(args[0], args[1:]...)
+func (no *networkOperation) execCmd(ctx context.Context, args ...string) error {
+	output, err := cmd.ExecCmd(ctx, args[0], args[1:]...)
 	no.lg.Info("executed cmd", zap.String("cmd", strings.Join(args, " ")), zap.String("output", output), zap.Error(err))
 	return err
 }
