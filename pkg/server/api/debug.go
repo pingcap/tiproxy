@@ -5,11 +5,19 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/tiproxy/lib/config"
 )
+
+const manualHealthStatusUnhealthy = "unhealthy"
+
+type manualHealthOverride struct {
+	Status string `json:"status"`
+	Reason string `json:"reason"`
+}
 
 func (h *Server) DebugHealth(c *gin.Context) {
 	status := http.StatusOK
@@ -18,6 +26,7 @@ func (h *Server) DebugHealth(c *gin.Context) {
 	}
 	if h.unhealthyMark.Load() {
 		status = http.StatusBadGateway
+		health.UnhealthyReason = h.unhealthyReason.Load()
 	} else if h.isClosing.Load() || !h.mgr.NsMgr.Ready() {
 		status = http.StatusBadGateway
 	}
@@ -25,12 +34,28 @@ func (h *Server) DebugHealth(c *gin.Context) {
 }
 
 func (h *Server) DebugSetHealthUnhealthy(c *gin.Context) {
+	var req manualHealthOverride
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, "bad health override json")
+		return
+	}
+	if req.Status != manualHealthStatusUnhealthy {
+		c.JSON(http.StatusBadRequest, "bad health override status")
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		c.JSON(http.StatusBadRequest, "health override reason is required")
+		return
+	}
+	h.unhealthyReason.Store(reason)
 	h.unhealthyMark.Store(true)
 	c.JSON(http.StatusOK, "")
 }
 
 func (h *Server) DebugUnsetHealthUnhealthy(c *gin.Context) {
 	h.unhealthyMark.Store(false)
+	h.unhealthyReason.Store("")
 	c.JSON(http.StatusOK, "")
 }
 
@@ -52,7 +77,7 @@ func (h *Server) DebugRedirect(c *gin.Context) {
 func (h *Server) registerDebug(group *gin.RouterGroup) {
 	group.POST("/redirect", h.DebugRedirect)
 	group.GET("/health", h.DebugHealth)
-	group.POST("/health/unhealthy", h.DebugSetHealthUnhealthy)
-	group.DELETE("/health/unhealthy", h.DebugUnsetHealthUnhealthy)
+	group.PUT("/health", h.DebugSetHealthUnhealthy)
+	group.DELETE("/health", h.DebugUnsetHealthUnhealthy)
 	pprof.RouteRegister(group, "/pprof")
 }
