@@ -6,7 +6,8 @@ package config
 import "time"
 
 type HealthInfo struct {
-	ConfigChecksum uint32 `json:"config_checksum"`
+	ConfigChecksum  uint32 `json:"config_checksum"`
+	UnhealthyReason string `json:"unhealthy_reason,omitempty"`
 }
 
 const (

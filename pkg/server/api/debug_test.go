@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -52,18 +53,19 @@ func TestDebugHealthManualUnhealthy(t *testing.T) {
 		require.False(t, ok)
 	})
 
-	doHTTP(t, http.MethodPost, "/api/debug/health/unhealthy", httpOpts{}, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodPut, "/api/debug/health", httpOpts{
+		reader: bytes.NewBufferString(`{"status":"unhealthy","reason":"graceful-shutdown"}`),
+	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusBadGateway, r.StatusCode)
 		var health map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
-		_, ok := health["unhealthy_reason"]
-		require.False(t, ok)
+		require.Equal(t, "graceful-shutdown", health["unhealthy_reason"])
 	})
 
-	doHTTP(t, http.MethodDelete, "/api/debug/health/unhealthy", httpOpts{}, func(t *testing.T, r *http.Response) {
+	doHTTP(t, http.MethodDelete, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
