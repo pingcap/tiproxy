@@ -12,11 +12,9 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 )
 
-const manualHealthStatusUnhealthy = "unhealthy"
-
 type manualHealthOverride struct {
-	Status string `json:"status"`
-	Reason string `json:"reason"`
+	Healthy bool   `json:"healthy"`
+	Reason  string `json:"reason"`
 }
 
 func (h *Server) DebugHealth(c *gin.Context) {
@@ -24,38 +22,38 @@ func (h *Server) DebugHealth(c *gin.Context) {
 	health := config.HealthInfo{
 		ConfigChecksum: h.mgr.CfgMgr.GetConfigChecksum(),
 	}
-	if h.unhealthyMark.Load() {
-		status = http.StatusBadGateway
-		health.UnhealthyReason = h.unhealthyReason.Load()
+	if healthOverride := h.manualHealthOverride.Load(); healthOverride != nil {
+		if !healthOverride.Healthy {
+			status = http.StatusBadGateway
+			health.UnhealthyReason = healthOverride.Reason
+		}
 	} else if h.isClosing.Load() || !h.mgr.NsMgr.Ready() {
 		status = http.StatusBadGateway
 	}
 	c.JSON(status, health)
 }
 
-func (h *Server) DebugSetHealthUnhealthy(c *gin.Context) {
+func (h *Server) DebugSetManualHealthOverride(c *gin.Context) {
 	var req manualHealthOverride
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, "bad health override json")
 		return
 	}
-	if req.Status != manualHealthStatusUnhealthy {
-		c.JSON(http.StatusBadRequest, "bad health override status")
-		return
-	}
 	reason := strings.TrimSpace(req.Reason)
-	if reason == "" {
+	if !req.Healthy && reason == "" {
 		c.JSON(http.StatusBadRequest, "health override reason is required")
 		return
 	}
-	h.unhealthyReason.Store(reason)
-	h.unhealthyMark.Store(true)
+	override := &manualHealthOverride{
+		Healthy: req.Healthy,
+		Reason:  reason,
+	}
+	h.manualHealthOverride.Store(override)
 	c.JSON(http.StatusOK, "")
 }
 
-func (h *Server) DebugUnsetHealthUnhealthy(c *gin.Context) {
-	h.unhealthyMark.Store(false)
-	h.unhealthyReason.Store("")
+func (h *Server) DebugClearManualHealthOverride(c *gin.Context) {
+	h.manualHealthOverride.Store(nil)
 	c.JSON(http.StatusOK, "")
 }
 
@@ -77,7 +75,7 @@ func (h *Server) DebugRedirect(c *gin.Context) {
 func (h *Server) registerDebug(group *gin.RouterGroup) {
 	group.POST("/redirect", h.DebugRedirect)
 	group.GET("/health", h.DebugHealth)
-	group.PUT("/health", h.DebugSetHealthUnhealthy)
-	group.DELETE("/health", h.DebugUnsetHealthUnhealthy)
+	group.PUT("/health", h.DebugSetManualHealthOverride)
+	group.DELETE("/health", h.DebugClearManualHealthOverride)
 	pprof.RouteRegister(group, "/pprof")
 }
