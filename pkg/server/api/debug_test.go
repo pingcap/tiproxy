@@ -54,7 +54,7 @@ func TestDebugHealthManualUnhealthy(t *testing.T) {
 	})
 
 	doHTTP(t, http.MethodPut, "/api/debug/health", httpOpts{
-		reader: bytes.NewBufferString(`{"status":"unhealthy","reason":"graceful-shutdown"}`),
+		reader: bytes.NewBufferString(`{"healthy":false,"reason":"graceful-shutdown"}`),
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
@@ -74,5 +74,34 @@ func TestDebugHealthManualUnhealthy(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
 		_, ok := health["unhealthy_reason"]
 		require.False(t, ok)
+	})
+}
+
+func TestDebugHealthManualHealthyOverride(t *testing.T) {
+	server, doHTTP := createServer(t)
+
+	server.mgr.NsMgr.(*mockNamespaceManager).success.Store(false)
+	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadGateway, r.StatusCode)
+	})
+
+	doHTTP(t, http.MethodPut, "/api/debug/health", httpOpts{
+		reader: bytes.NewBufferString(`{"healthy":true,"reason":"manual-restore"}`),
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+		var health map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
+		_, ok := health["unhealthy_reason"]
+		require.False(t, ok)
+	})
+
+	doHTTP(t, http.MethodDelete, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusBadGateway, r.StatusCode)
 	})
 }
