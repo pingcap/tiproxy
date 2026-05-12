@@ -31,7 +31,7 @@ func TestDebug(t *testing.T) {
 		require.Equal(t, http.StatusBadGateway, r.StatusCode)
 		var health map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
-		require.Equal(t, "namespace manager is not ready", health["unhealthy_reason"])
+		require.Equal(t, "server is not ready", health["unhealthy_reason"])
 	})
 
 	server.mgr.NsMgr.(*mockNamespaceManager).success.Store(true)
@@ -79,7 +79,7 @@ func TestDebugHealthManualOverride(t *testing.T) {
 	assertHealth(http.StatusOK, "")
 
 	server.mgr.NsMgr.(*mockNamespaceManager).success.Store(false)
-	assertHealth(http.StatusBadGateway, "namespace manager is not ready")
+	assertHealth(http.StatusBadGateway, "server is not ready")
 
 	doHTTP(t, http.MethodPut, "/api/debug/health", httpOpts{
 		reader: bytes.NewBufferString(`{"healthy":true,"reason":"manual-restore"}`),
@@ -91,5 +91,5 @@ func TestDebugHealthManualOverride(t *testing.T) {
 	doHTTP(t, http.MethodDelete, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	assertHealth(http.StatusBadGateway, "namespace manager is not ready")
+	assertHealth(http.StatusBadGateway, "server is not ready")
 }
