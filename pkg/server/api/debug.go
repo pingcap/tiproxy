@@ -27,8 +27,12 @@ func (h *Server) DebugHealth(c *gin.Context) {
 			status = http.StatusBadGateway
 			health.UnhealthyReason = healthOverride.Reason
 		}
-	} else if h.isClosing.Load() || !h.mgr.NsMgr.Ready() {
+	} else if h.isClosing.Load() {
 		status = http.StatusBadGateway
+		health.UnhealthyReason = "server is closing"
+	} else if !h.mgr.NsMgr.Ready() {
+		status = http.StatusBadGateway
+		health.UnhealthyReason = "namespace manager is not ready"
 	}
 	c.JSON(status, health)
 }
@@ -40,10 +44,6 @@ func (h *Server) DebugSetManualHealthOverride(c *gin.Context) {
 		return
 	}
 	reason := strings.TrimSpace(req.Reason)
-	if !req.Healthy && reason == "" {
-		c.JSON(http.StatusBadRequest, "health override reason is required")
-		return
-	}
 	override := &manualHealthOverride{
 		Healthy: req.Healthy,
 		Reason:  reason,
