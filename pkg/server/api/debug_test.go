@@ -29,6 +29,9 @@ func TestDebug(t *testing.T) {
 	server.mgr.NsMgr.(*mockNamespaceManager).success.Store(false)
 	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusBadGateway, r.StatusCode)
+		var health map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
+		require.Equal(t, "namespace manager is not ready", health["unhealthy_reason"])
 	})
 
 	server.mgr.NsMgr.(*mockNamespaceManager).success.Store(true)
@@ -39,69 +42,54 @@ func TestDebug(t *testing.T) {
 	server.PreClose()
 	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusBadGateway, r.StatusCode)
+		var health map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
+		require.Equal(t, "server is closing", health["unhealthy_reason"])
 	})
 }
 
-func TestDebugHealthManualUnhealthy(t *testing.T) {
-	_, doHTTP := createServer(t)
+func TestDebugHealthManualOverride(t *testing.T) {
+	server, doHTTP := createServer(t)
+	assertHealth := func(statusCode int, unhealthyReason string) {
+		doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+			require.Equal(t, statusCode, r.StatusCode)
+			var health map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
+			if unhealthyReason == "" {
+				_, ok := health["unhealthy_reason"]
+				require.False(t, ok)
+			} else {
+				require.Equal(t, unhealthyReason, health["unhealthy_reason"])
+			}
+		})
+	}
 
-	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusOK, r.StatusCode)
-		var health map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
-		_, ok := health["unhealthy_reason"]
-		require.False(t, ok)
-	})
+	assertHealth(http.StatusOK, "")
 
 	doHTTP(t, http.MethodPut, "/api/debug/health", httpOpts{
-		reader: bytes.NewBufferString(`{"healthy":false,"reason":"graceful-shutdown"}`),
+		reader: bytes.NewBufferString(`{"healthy":false}`),
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusBadGateway, r.StatusCode)
-		var health map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
-		require.Equal(t, "graceful-shutdown", health["unhealthy_reason"])
-	})
+	assertHealth(http.StatusBadGateway, "")
 
 	doHTTP(t, http.MethodDelete, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusOK, r.StatusCode)
-		var health map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
-		_, ok := health["unhealthy_reason"]
-		require.False(t, ok)
-	})
-}
-
-func TestDebugHealthManualHealthyOverride(t *testing.T) {
-	server, doHTTP := createServer(t)
+	assertHealth(http.StatusOK, "")
 
 	server.mgr.NsMgr.(*mockNamespaceManager).success.Store(false)
-	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusBadGateway, r.StatusCode)
-	})
+	assertHealth(http.StatusBadGateway, "namespace manager is not ready")
 
 	doHTTP(t, http.MethodPut, "/api/debug/health", httpOpts{
 		reader: bytes.NewBufferString(`{"healthy":true,"reason":"manual-restore"}`),
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusOK, r.StatusCode)
-		var health map[string]any
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
-		_, ok := health["unhealthy_reason"]
-		require.False(t, ok)
-	})
+	assertHealth(http.StatusOK, "")
 
 	doHTTP(t, http.MethodDelete, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
-	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
-		require.Equal(t, http.StatusBadGateway, r.StatusCode)
-	})
+	assertHealth(http.StatusBadGateway, "namespace manager is not ready")
 }
