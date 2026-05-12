@@ -32,7 +32,7 @@ func (h *Server) DebugHealth(c *gin.Context) {
 		health.UnhealthyReason = "server is closing"
 	} else if !h.mgr.NsMgr.Ready() {
 		status = http.StatusBadGateway
-		health.UnhealthyReason = "namespace manager is not ready"
+		health.UnhealthyReason = "server is not ready"
 	}
 	c.JSON(status, health)
 }
