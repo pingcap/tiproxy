@@ -35,10 +35,6 @@ func (m *mockCapture) InitConn(startTime time.Time, connID uint64, db string) {
 func (m *mockCapture) Capture(stmtInfo capture.StmtInfo) {
 }
 
-func (m *mockCapture) MaxPacketSize() int {
-	return 0
-}
-
 func (m *mockCapture) Close() {
 }
 
