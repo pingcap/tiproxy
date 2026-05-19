@@ -17,9 +17,9 @@ import (
 // executeCmd forwards requests and responses between the client and the backend.
 // holdRequest: should the proxy send the request to the new backend.
 // err: unexpected errors or MySQL errors.
-func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO pnet.PacketIO, waitingRedirect bool) (holdRequest bool, err error) {
+func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO pnet.PacketIO, waitingRedirect, streamingForward bool) (holdRequest bool, err error) {
 	backendIO.ResetSequence()
-	if waitingRedirect && cp.needHoldRequest(request) {
+	if waitingRedirect && !streamingForward && cp.needHoldRequest(request) {
 		var response []byte
 		if _, response, err = cp.query(backendIO, "COMMIT"); err != nil {
 			// If commit fails, forward the response to the client.
@@ -33,13 +33,20 @@ func (cp *CmdProcessor) executeCmd(request []byte, clientIO, backendIO pnet.Pack
 		}
 		return true, err
 	}
-	return false, cp.forwardCommand(clientIO, backendIO, request)
+	return false, cp.forwardCommand(clientIO, backendIO, request, streamingForward)
 }
 
-func (cp *CmdProcessor) forwardCommand(clientIO, backendIO pnet.PacketIO, request []byte) error {
+func (cp *CmdProcessor) forwardCommand(clientIO, backendIO pnet.PacketIO, request []byte, streamingForward bool) error {
+	if streamingForward {
+		var err error
+		// The returned request is a prefix to avoid OOM. Generally, the stmtID is enough.
+		if request, err = clientIO.ForwardPacketTo(backendIO, 1024); err != nil {
+			return err
+		}
+	}
 	cmd := pnet.Command(request[0])
 	// ComChangeUser is special: we need to modify the packet before forwarding.
-	if cmd != pnet.ComChangeUser {
+	if cmd != pnet.ComChangeUser && !streamingForward {
 		if err := backendIO.WritePacket(request, true); err != nil {
 			return err
 		}

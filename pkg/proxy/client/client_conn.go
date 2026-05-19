@@ -70,16 +70,11 @@ clean:
 func (cc *ClientConnection) processMsg(ctx context.Context) error {
 	for {
 		cc.pkt.ResetSequence()
-		clientPkt, err := cc.pkt.ReadPacket()
-		if err != nil {
-			cc.connMgr.SetQuitSourceByErr(err)
-			return err
-		}
-		err = cc.connMgr.ExecuteCmd(ctx, clientPkt)
+		cmd, err := cc.connMgr.ExecuteCmd(ctx)
 		if err != nil && !pnet.IsMySQLError(err) {
 			return err
 		}
-		if pnet.Command(clientPkt[0]) == pnet.ComQuit {
+		if cmd == pnet.ComQuit {
 			return nil
 		}
 	}
