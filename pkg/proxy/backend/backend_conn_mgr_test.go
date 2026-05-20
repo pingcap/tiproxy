@@ -1430,6 +1430,18 @@ func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
 		t.Skip("allocates a ~32MiB COM_QUERY payload")
 	}
 	ts := newBackendMgrTester(t)
+	clientRunner := func(size int) func(packetIO pnet.PacketIO) error {
+		return func(packetIO pnet.PacketIO) error {
+			packetIO.ResetSequence()
+			data := make([]byte, size)
+			data[0] = pnet.ComQuery.Byte()
+			if err := packetIO.WritePacket(data, true); err != nil {
+				return err
+			}
+			_, err := packetIO.ReadPacket()
+			return err
+		}
+	}
 	runners := []runner{
 		{
 			client:  ts.mc.authenticate,
@@ -1437,30 +1449,17 @@ func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
 			backend: ts.handshake4Backend,
 		},
 		{
-			client: func(packetIO pnet.PacketIO) error {
-				packetIO.ResetSequence()
-				data := make([]byte, pnet.MaxPayloadLen+10)
-				data[0] = pnet.ComQuery.Byte()
-				if err := packetIO.WritePacket(data, true); err != nil {
-					return err
-				}
-				_, err := packetIO.ReadPacket()
-				return err
-			},
+			client:  clientRunner(pnet.MaxPayloadLen),
 			proxy:   ts.forwardCmd4Proxy,
 			backend: ts.respondWithNoTxn4Backend,
 		},
 		{
-			client: func(packetIO pnet.PacketIO) error {
-				packetIO.ResetSequence()
-				data := make([]byte, 2*pnet.MaxPayloadLen)
-				data[0] = pnet.ComQuery.Byte()
-				if err := packetIO.WritePacket(data, true); err != nil {
-					return err
-				}
-				_, err := packetIO.ReadPacket()
-				return err
-			},
+			client:  clientRunner(pnet.MaxPayloadLen + 10),
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		{
+			client:  clientRunner(2 * pnet.MaxPayloadLen),
 			proxy:   ts.forwardCmd4Proxy,
 			backend: ts.respondWithNoTxn4Backend,
 		},
