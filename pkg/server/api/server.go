@@ -68,7 +68,9 @@ type Server struct {
 	lg        *zap.Logger
 	grpc      *grpc.Server
 	isClosing atomic.Bool
-	mgr       Managers
+	// manualHealthOverride is nil unless the debug API forces the health endpoint response.
+	manualHealthOverride atomic.Pointer[manualHealthOverride]
+	mgr                  Managers
 }
 
 func NewServer(cfg config.API, lg *zap.Logger, mgr Managers, handler HTTPHandler, ready *atomic.Bool) (*Server, error) {
