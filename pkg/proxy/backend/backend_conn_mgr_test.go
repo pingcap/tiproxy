@@ -1427,7 +1427,7 @@ func TestCloseWhileConnect(t *testing.T) {
 // instead of buffering the whole logical packet.
 func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
 	if testing.Short() {
-		t.Skip("allocates a ~16MiB COM_QUERY payload")
+		t.Skip("allocates a ~32MiB COM_QUERY payload")
 	}
 	ts := newBackendMgrTester(t)
 	runners := []runner{
@@ -1439,7 +1439,21 @@ func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
 		{
 			client: func(packetIO pnet.PacketIO) error {
 				packetIO.ResetSequence()
-				data := make([]byte, 1+pnet.MaxPayloadLen+15)
+				data := make([]byte, pnet.MaxPayloadLen+10)
+				data[0] = pnet.ComQuery.Byte()
+				if err := packetIO.WritePacket(data, true); err != nil {
+					return err
+				}
+				_, err := packetIO.ReadPacket()
+				return err
+			},
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		{
+			client: func(packetIO pnet.PacketIO) error {
+				packetIO.ResetSequence()
+				data := make([]byte, 2*pnet.MaxPayloadLen)
 				data[0] = pnet.ComQuery.Byte()
 				if err := packetIO.WritePacket(data, true); err != nil {
 					return err
@@ -1456,32 +1470,46 @@ func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
 
 func TestCloseWhileExecute(t *testing.T) {
 	ts := newBackendMgrTester(t)
-	runners := []runner{
-		// 1st handshake
+	tests := []struct {
+		runner  runner
+		checker checker
+	}{
 		{
-			client:  ts.mc.authenticate,
-			proxy:   ts.firstHandshake4Proxy,
-			backend: ts.handshake4Backend,
-		},
-		// execute cmd while force close
-		{
-			client: ts.mc.request,
-			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				clientIO.ResetSequence()
-				if _, _, err := clientIO.PeekPacketFirstByte(); err != nil {
-					return err
-				}
-				go func() {
-					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
-				}()
-				_, err := ts.mp.ExecuteCmd(context.Background())
-				return err
+			// 1st handshake
+			runner: runner{
+				client:  ts.mc.authenticate,
+				proxy:   ts.firstHandshake4Proxy,
+				backend: ts.handshake4Backend,
 			},
-			backend: ts.startTxn4Backend,
+		},
+		{
+			// execute cmd while force close
+			runner: runner{
+				client: ts.mc.request,
+				proxy: func(clientIO, backendIO pnet.PacketIO) error {
+					clientIO.ResetSequence()
+					go func() {
+						require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+					}()
+					_, err := ts.mp.ExecuteCmd(context.Background())
+					return err
+				},
+				backend: ts.startTxn4Backend,
+			},
+			checker: func(t *testing.T, ts *testSuite) {
+				if ts.mp.err != nil {
+					require.ErrorIs(t, ts.mp.err, ErrClosing)
+				}
+				if ts.mb.err != nil {
+					require.True(t, pnet.IsDisconnectError(ts.mb.err))
+				}
+			},
 		},
 	}
 
-	ts.runTests(runners)
+	for _, test := range tests {
+		ts.runAndCheck(ts.t, test.checker, test.runner.client, test.runner.backend, test.runner.proxy)
+	}
 }
 
 func TestCloseWhileGracefulClose(t *testing.T) {

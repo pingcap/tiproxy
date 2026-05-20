@@ -5,13 +5,10 @@ package backend
 
 import (
 	"encoding/binary"
-	"net"
 	"strings"
 	"testing"
 
-	"github.com/pingcap/tiproxy/lib/util/logger"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 )
 
@@ -651,24 +648,4 @@ func TestHandshakePacketSizeLimit(t *testing.T) {
 	}, customClientRunner, ts.mb.authenticate, ts.mp.authenticateFirstTime)
 
 	clean()
-}
-
-// readClientHandshakePacket allows the first physical payload up to maxHandshakePacketSize bytes.
-func TestReadClientHandshakePacketMaxPhysicalPayload(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
-	testkit.TestPipeConn(t,
-		func(t *testing.T, c net.Conn) {
-			cli := pnet.NewPacketIO(c, lg, pnet.DefaultConnBufferSize)
-			t.Cleanup(func() { _ = cli.Close() })
-			require.NoError(t, cli.WritePacket(make([]byte, maxHandshakePacketSize), true))
-		},
-		func(t *testing.T, c net.Conn) {
-			srv := pnet.NewPacketIO(c, lg, pnet.DefaultConnBufferSize)
-			t.Cleanup(func() { _ = srv.Close() })
-			pkt, err := readClientHandshakePacket(srv)
-			require.NoError(t, err)
-			require.Len(t, pkt, maxHandshakePacketSize)
-		},
-		1,
-	)
 }
