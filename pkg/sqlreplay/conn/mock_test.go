@@ -9,18 +9,17 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/pingcap/tiproxy/pkg/proxy/net"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 )
 
 var _ BackendConnManager = (*mockBackendConnMgr)(nil)
 
 type mockBackendConnMgr struct {
-	clientIO net.PacketIO
+	clientIO pnet.PacketIO
 	closed   bool
 }
 
-func (m *mockBackendConnMgr) Connect(ctx context.Context, clientIO net.PacketIO, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, username, password, dbName string) error {
+func (m *mockBackendConnMgr) Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, username, password, dbName string) error {
 	m.clientIO = clientIO
 	return nil
 }
@@ -29,8 +28,8 @@ func (m *mockBackendConnMgr) ConnectionID() uint64 {
 	return 1
 }
 
-func (m *mockBackendConnMgr) ExecuteCmd(ctx context.Context, request []byte) error {
-	return nil
+func (m *mockBackendConnMgr) ExecuteCmd(ctx context.Context) (pnet.Command, error) {
+	return 0, nil
 }
 
 func (m *mockBackendConnMgr) Close() error {
