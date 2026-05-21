@@ -39,3 +39,70 @@ func TestDebug(t *testing.T) {
 		require.Equal(t, http.StatusBadGateway, r.StatusCode)
 	})
 }
+<<<<<<< HEAD
+=======
+
+func TestDebugHealthManualOverride(t *testing.T) {
+	server, doHTTP := createServer(t)
+	assertHealth := func(statusCode int, unhealthyReason string) {
+		doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+			require.Equal(t, statusCode, r.StatusCode)
+			var health map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
+			if unhealthyReason == "" {
+				_, ok := health["unhealthy_reason"]
+				require.False(t, ok)
+			} else {
+				require.Equal(t, unhealthyReason, health["unhealthy_reason"])
+			}
+		})
+	}
+
+	assertHealth(http.StatusOK, "")
+
+	doHTTP(t, http.MethodPut, "/api/debug/health", httpOpts{
+		reader: bytes.NewBufferString(`{"healthy":false}`),
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	assertHealth(http.StatusBadGateway, "")
+
+	doHTTP(t, http.MethodDelete, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	assertHealth(http.StatusOK, "")
+
+	server.mgr.NsMgr.(*mockNamespaceManager).success.Store(false)
+	assertHealth(http.StatusBadGateway, "server is not ready")
+
+	doHTTP(t, http.MethodPut, "/api/debug/health", httpOpts{
+		reader: bytes.NewBufferString(`{"healthy":true,"reason":"manual-restore"}`),
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	assertHealth(http.StatusOK, "")
+
+	doHTTP(t, http.MethodDelete, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	assertHealth(http.StatusBadGateway, "server is not ready")
+}
+
+func TestDebugHealthAllowsHTTPWithHTTPTLS(t *testing.T) {
+	_, doHTTP, doHTTPS := createServerWithConfig(t, `security.server-http-tls.auto-certs = true`)
+
+	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTP(t, http.MethodGet, "/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+
+	doHTTPS(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTPS(t, http.MethodGet, "/api/metrics", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+}
+>>>>>>> 44711cce (api: allow HTTP health check with TLS config (#1153))
