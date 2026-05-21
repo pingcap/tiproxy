@@ -331,6 +331,38 @@ func TestClusterReusableIgnoresNSServerOrder(t *testing.T) {
 	require.True(t, reusable)
 }
 
+func TestManagerGetTiDBTopologySkipsUnavailableCluster(t *testing.T) {
+	clusterA := newManagerTestEtcdCluster(t)
+	clusterB := newManagerTestEtcdCluster(t)
+	t.Cleanup(func() { clusterA.close(t) })
+	t.Cleanup(func() { clusterB.close(t) })
+
+	clusterA.putTopology(t, "10.0.0.1:4000", &infosync.TiDBTopologyInfo{IP: "10.0.0.1", StatusPort: 10080})
+
+	lg := zapLoggerForTest(t)
+	mgr := NewManager(lg, nilClusterTLS)
+	mgr.mu.clusters = map[string]*Cluster{
+		"cluster-a": {
+			infoSyncer: infosync.NewInfoSyncer(lg.Named("cluster-a"), clusterA.client),
+		},
+		"cluster-b": {
+			infoSyncer: infosync.NewInfoSyncer(lg.Named("cluster-b"), clusterB.client),
+		},
+	}
+	clusterB.shutdownServer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	topology, err := mgr.GetTiDBTopology(ctx)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.Less(t, elapsed, 3*time.Second)
+	require.Contains(t, topology, backendID("cluster-a", "10.0.0.1:4000"))
+	require.NotContains(t, topology, backendID("cluster-b", "10.0.0.2:4000"))
+}
+
 type managerTestConfigGetter struct {
 	mu  sync.RWMutex
 	cfg *config.Config
@@ -376,7 +408,15 @@ func newManagerTestEtcdCluster(t *testing.T) *managerTestEtcdCluster {
 
 func (tec *managerTestEtcdCluster) close(t *testing.T) {
 	require.NoError(t, tec.client.Close())
+	if tec.etcd != nil {
+		tec.etcd.Close()
+	}
+}
+
+func (tec *managerTestEtcdCluster) shutdownServer(t *testing.T) {
+	require.NotNil(t, tec.etcd)
 	tec.etcd.Close()
+	tec.etcd = nil
 }
 
 func (tec *managerTestEtcdCluster) putTopology(t *testing.T, sqlAddr string, info *infosync.TiDBTopologyInfo) {
