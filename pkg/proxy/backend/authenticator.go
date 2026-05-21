@@ -34,11 +34,6 @@ const ER_INVALID_SEQUENCE = 8052
 // Ref https://dev.mysql.com/doc/dev/mysql-server/9.5.0/page_protocol_connection_phase_packets_protocol_handshake_response.html
 const maxHandshakePacketSize = 1 << 20
 
-// maxPacketSize limits the size of a single packet to avoid OOM.
-// The configuration `max_allowed_packet` is at most 1GB in TiDB, so we set the limit
-// to 1GB as well.
-const maxPacketSize = 1 << 30
-
 // SupportedServerCapabilities is the default supported capabilities. Other server capabilities are not supported.
 // TiDB supports ClientDeprecateEOF since v6.3.0.
 // TiDB supports ClientCompress and ClientZstdCompressionAlgorithm since v7.2.0.
@@ -104,12 +99,6 @@ type backendIOGetter func(ctx context.Context, cctx ConnContext, resp *pnet.Hand
 func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.Logger, cctx ConnContext, clientIO pnet.PacketIO, handshakeHandler HandshakeHandler,
 	getBackendIO backendIOGetter, frontendTLSConfig, backendTLSConfig *tls.Config) error {
 	clientIO.ResetSequence()
-	clientIO.ApplyOpts(pnet.WithReadPacketLimit(maxHandshakePacketSize))
-	// TODO: now we only limit the size with the greatest limit, we assume that all clients with proper
-	// user / password will send reasonable packets. However, it's not true when the TiProxy is shared by
-	// many TiDBs keyspaces and customers.
-	defer clientIO.ApplyOpts(pnet.WithReadPacketLimit(maxPacketSize))
-
 	proxyCapability := handshakeHandler.GetCapability()
 	if frontendTLSConfig == nil {
 		proxyCapability ^= pnet.ClientSSL
@@ -124,7 +113,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 	if err := clientIO.WritePacket(pnet.MakeInitialHandshake(proxyCapability, salt, pnet.AuthNativePassword, handshakeHandler.GetServerVersion(), cid), true); err != nil {
 		return err
 	}
-	pkt, err := clientIO.ReadPacket()
+	pkt, err := readClientHandshakePacket(clientIO)
 	if err != nil {
 		return err
 	}
@@ -141,7 +130,7 @@ func (auth *Authenticator) handshakeFirstTime(ctx context.Context, logger *zap.L
 		if _, err = clientIO.ServerTLSHandshake(frontendTLSConfig); err != nil {
 			return errors.Wrap(ErrClientHandshake, err)
 		}
-		pkt, err = clientIO.ReadPacket()
+		pkt, err = readClientHandshakePacket(clientIO)
 		if err != nil {
 			return err
 		}
@@ -287,20 +276,22 @@ loop:
 				// caching_sha2_password fast path
 				continue loop
 			}
-			if _, err = forwardMsg(clientIO, backendIO); err != nil {
+			if _, err = clientIO.ForwardPacketTo(backendIO, 0); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func forwardMsg(srcIO, destIO pnet.PacketIO) (data []byte, err error) {
-	data, err = srcIO.ReadPacket()
+func readClientHandshakePacket(clientIO pnet.PacketIO) ([]byte, error) {
+	_, firstPktLen, err := clientIO.PeekPacketFirstByte()
 	if err != nil {
-		return
+		return nil, err
 	}
-	err = destIO.WritePacket(data, true)
-	return
+	if firstPktLen > maxHandshakePacketSize {
+		return nil, errors.Wrapf(pnet.ErrPacketTooLarge, "handshake packet exceeds %d bytes", maxHandshakePacketSize)
+	}
+	return clientIO.ReadPacket()
 }
 
 // handshake with backend directly without the clientIO

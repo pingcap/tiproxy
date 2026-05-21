@@ -17,6 +17,7 @@ import (
 var _ pnet.PacketIO = (*packetIO)(nil)
 
 type packetIO struct {
+	request  []byte
 	resp     bytes.Buffer
 	saveResp bool // Discard responses by default because the result may be huge and causes OOM.
 }
@@ -27,8 +28,10 @@ func newPacketIO() *packetIO {
 
 // ReadPacket implements net.PacketIO.
 func (p *packetIO) ReadPacket() (data []byte, err error) {
-	// TODO: support LOAD DATA INFILE
-	return nil, errors.New("command not supported")
+	if p.request == nil {
+		return nil, errors.New("no request")
+	}
+	return p.request, nil
 }
 
 // WritePacket implements net.PacketIO.
@@ -50,6 +53,7 @@ func (p *packetIO) Flush() error {
 func (p *packetIO) Reset() {
 	p.resp.Reset()
 	p.saveResp = false
+	p.request = nil
 }
 
 func (p *packetIO) GetResp() []byte {
@@ -60,6 +64,29 @@ func (p *packetIO) GetResp() []byte {
 // ForwardUntil won't be called on the client side, so no need to implement it.
 func (p *packetIO) ForwardUntil(dest pnet.PacketIO, isEnd func(firstByte byte, firstPktLen int) (end bool, needData bool), process func(response []byte) error) error {
 	return errors.New("command not supported")
+}
+
+// ForwardPacketTo implements [net.PacketIO].
+func (p *packetIO) ForwardPacketTo(destIO pnet.PacketIO, captureLimit int) (data []byte, err error) {
+	if p.request == nil {
+		return nil, errors.New("no request")
+	}
+	if err := destIO.WritePacket(p.request, true); err != nil {
+		return nil, err
+	}
+	if captureLimit > 0 {
+		n := min(captureLimit, len(p.request))
+		return p.request[:n], nil
+	}
+	return nil, nil
+}
+
+// PeekPacketFirstByte implements [net.PacketIO].
+func (p *packetIO) PeekPacketFirstByte() (firstByte byte, firstPktLen int, err error) {
+	if p.request == nil {
+		return 0, 0, errors.New("no request")
+	}
+	return p.request[0], len(p.request), nil
 }
 
 // ClientTLSHandshake implements net.PacketIO.
