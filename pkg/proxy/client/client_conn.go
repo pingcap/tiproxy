@@ -70,15 +70,19 @@ clean:
 func (cc *ClientConnection) processMsg(ctx context.Context) error {
 	for {
 		cc.pkt.ResetSequence()
+<<<<<<< HEAD
 		clientPkt, err := cc.pkt.ReadPacket()
 		if err != nil {
 			return err
 		}
 		err = cc.connMgr.ExecuteCmd(ctx, clientPkt)
+=======
+		cmd, err := cc.connMgr.ExecuteCmd(ctx)
+>>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 		if err != nil && !pnet.IsMySQLError(err) {
 			return err
 		}
-		if pnet.Command(clientPkt[0]) == pnet.ComQuit {
+		if cmd == pnet.ComQuit {
 			return nil
 		}
 	}

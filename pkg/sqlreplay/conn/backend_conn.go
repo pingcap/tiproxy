@@ -18,8 +18,13 @@ import (
 )
 
 type BackendConnManager interface {
+<<<<<<< HEAD
 	Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password string) error
 	ExecuteCmd(ctx context.Context, request []byte) error
+=======
+	Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password, dbName string) error
+	ExecuteCmd(ctx context.Context) (pnet.Command, error)
+>>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 	ConnectionID() uint64
 	Close() error
 }
@@ -69,6 +74,7 @@ func (bc *backendConn) Connect(ctx context.Context) error {
 	return err
 }
 
+<<<<<<< HEAD
 func (bc *backendConn) ConnID() uint64 {
 	return bc.backendConnMgr.ConnectionID()
 }
@@ -125,6 +131,23 @@ func (bc *backendConn) updatePreparedStmts(request, response []byte) {
 			}
 		}
 	}
+=======
+func (bc *backendConn) ExecuteCmd(ctx context.Context, request []byte) (execResp ExecuteResp) {
+	bc.clientIO.request = request
+	switch request[0] {
+	case pnet.ComStmtPrepare.Byte():
+		bc.clientIO.saveResp = true
+		_, execResp.Err = bc.backendConnMgr.ExecuteCmd(ctx)
+		if execResp.Err == nil {
+			resp := bc.clientIO.GetResp()
+			execResp.StmtID, execResp.ParamNum = pnet.ParsePrepareStmtResp(resp)
+		}
+	default:
+		_, execResp.Err = bc.backendConnMgr.ExecuteCmd(ctx)
+	}
+	bc.clientIO.Reset()
+	return
+>>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 }
 
 func (bc *backendConn) GetPreparedStmt(stmtID uint32) (string, int, []byte) {
@@ -137,14 +160,21 @@ func (bc *backendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []an
 	if err != nil {
 		return err
 	}
-	err = bc.backendConnMgr.ExecuteCmd(ctx, request)
+	bc.clientIO.request = request
+	_, err = bc.backendConnMgr.ExecuteCmd(ctx)
 	bc.clientIO.Reset()
 	return err
 }
 
 func (bc *backendConn) PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error) {
 	request := pnet.MakePrepareStmtRequest(stmt)
+<<<<<<< HEAD
 	err = bc.backendConnMgr.ExecuteCmd(ctx, request)
+=======
+	bc.clientIO.saveResp = true
+	bc.clientIO.request = request
+	_, err = bc.backendConnMgr.ExecuteCmd(ctx)
+>>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 	if err == nil {
 		resp := bc.clientIO.GetResp()
 		stmtID = binary.LittleEndian.Uint32(resp[1:5])
@@ -155,7 +185,8 @@ func (bc *backendConn) PrepareStmt(ctx context.Context, stmt string) (stmtID uin
 
 func (bc *backendConn) Query(ctx context.Context, stmt string) error {
 	request := pnet.MakeQueryPacket(stmt)
-	err := bc.backendConnMgr.ExecuteCmd(ctx, request)
+	bc.clientIO.request = request
+	_, err := bc.backendConnMgr.ExecuteCmd(ctx)
 	bc.clientIO.Reset()
 	return err
 }
