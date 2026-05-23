@@ -157,7 +157,7 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 	cfg.Addr = c.PostForm("addr")
 	cfg.DryRun = strings.EqualFold(c.PostForm("dryrun"), "true")
 	cfg.FilterCommandWithRetry = strings.EqualFold(c.PostForm("filtercommandwithretry"), "true")
-	if wl := strings.TrimSpace(c.PostForm("userallowlist")); wl != "" {
+	if wl := strings.TrimSpace(c.PostForm("user-allowlist")); wl != "" {
 		for _, part := range strings.Split(wl, ",") {
 			if u := strings.TrimSpace(part); u != "" {
 				cfg.UserAllowlist = append(cfg.UserAllowlist, strings.ToLower(u))

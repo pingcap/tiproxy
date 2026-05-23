@@ -101,7 +101,7 @@ func TestTraffic(t *testing.T) {
 	})
 	// replay succeeds
 	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
-		reader: cli.GetFormReader(map[string]string{"input": "/tmp", "speed": "2.0", "username": "u1", "password": "p1", "userallowlist": " Root, APP "}),
+		reader: cli.GetFormReader(map[string]string{"input": "/tmp", "speed": "2.0", "username": "u1", "password": "p1", "user-allowlist": " Root, APP "}),
 		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
