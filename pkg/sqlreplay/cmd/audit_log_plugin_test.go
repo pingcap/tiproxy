@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -674,6 +675,57 @@ func TestDecodeSingleLine(t *testing.T) {
 		}
 		require.Equal(t, test.cmds, cmds, "case %d", i)
 	}
+}
+
+func TestDecodeUserAllowlist(t *testing.T) {
+	mkLine := func(user string, connID int, sel string) string {
+		return fmt.Sprintf(`[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=%s] [DATABASES="[]"] [TABLES="[]"] [SQL_TEXT="select %s"] [ROWS=0] [CONNECTION_ID=%d] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Set] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`, user, sel, connID)
+	}
+	lines := mkLine("admin", 1, "1") + "\n" + mkLine("root", 2, "2") + "\n"
+
+	t.Run("no filter returns both", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		mr := mockReader{data: []byte(lines), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Len(t, cmds, 2)
+		require.Contains(t, string(cmds[1].Payload), "select 2")
+	})
+
+	t.Run("allowlist match is case insensitive", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetUserAllowlist([]string{"ROOT"})
+		one := mkLine("root", 9, "9") + "\n"
+		mr := mockReader{data: []byte(one), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Len(t, cmds, 1)
+		require.Contains(t, string(cmds[0].Payload), "select 9")
+	})
+
+	t.Run("allowlist root skips admin", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetUserAllowlist([]string{"root"})
+		mr := mockReader{data: []byte(lines), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Len(t, cmds, 1)
+		require.Contains(t, string(cmds[0].Payload), "select 2")
+		require.Equal(t, uint64(2), cmds[0].UpstreamConnID)
+	})
+
+	t.Run("blank-only allowlist disables filter", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetUserAllowlist([]string{"", "  ", "\t"})
+		mr := mockReader{data: []byte(lines), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Len(t, cmds, 2)
+	})
 }
 
 func TestDecodeMultiLines(t *testing.T) {

@@ -30,6 +30,7 @@ const (
 	auditPluginKeyCostTime       = "COST_TIME"
 	auditPluginKeyPreparedStmtID = "PREPARED_STMT_ID"
 	auditPluginKeyRetry          = "RETRY"
+	auditPluginKeyUser           = "USER"
 
 	auditPluginClassGeneral     = "GENERAL"
 	auditPluginClassTableAccess = "TABLE_ACCESS"
@@ -105,9 +106,11 @@ type AuditLogPluginDecoder struct {
 	pendingCmds            []*Command
 	psCloseStrategy        PSCloseStrategy
 	filterCommandWithRetry bool
-	idAllocator            *ConnIDAllocator
-	dedup                  *DeDup
-	lg                     *zap.Logger
+	// userAllowlist, when non-empty, causes Decode to skip lines whose [USER=...] is not in the set.
+	userAllowlist map[string]struct{}
+	idAllocator   *ConnIDAllocator
+	dedup         *DeDup
+	lg            *zap.Logger
 }
 
 // ConnIDAllocator allocates connection IDs for new connections.
@@ -170,6 +173,12 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		if endTs.Before(decoder.commandEndTime) {
 			// Ignore the commands before CommandEndTime.
 			continue
+		}
+		if decoder.userAllowlist != nil {
+			user := strings.ToLower(strings.TrimSpace(kvs[auditPluginKeyUser]))
+			if _, ok := decoder.userAllowlist[user]; !ok {
+				continue
+			}
 		}
 
 		var connID uint64
@@ -656,4 +665,27 @@ func (decoder *AuditLogPluginDecoder) isDuplicatedWrite(lastCmd *Command, kvs ma
 // EnableFilterCommandWithRetry enables filtering out commands that are retries according to the audit log.
 func (decoder *AuditLogPluginDecoder) EnableFilterCommandWithRetry() {
 	decoder.filterCommandWithRetry = true
+}
+
+// SetUserAllowlist restricts decoding to audit log lines whose USER field is in the list.
+// Matching is case-insensitive; names are stored in lowercase. Empty or all-blank entries are ignored.
+// When users is empty after trimming, filtering is disabled.
+func (decoder *AuditLogPluginDecoder) SetUserAllowlist(users []string) {
+	if len(users) == 0 {
+		decoder.userAllowlist = nil
+		return
+	}
+	m := make(map[string]struct{})
+	for _, u := range users {
+		u = strings.ToLower(strings.TrimSpace(u))
+		if u == "" {
+			continue
+		}
+		m[u] = struct{}{}
+	}
+	if len(m) == 0 {
+		decoder.userAllowlist = nil
+	} else {
+		decoder.userAllowlist = m
+	}
 }
