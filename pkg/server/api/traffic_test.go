@@ -101,7 +101,7 @@ func TestTraffic(t *testing.T) {
 	})
 	// replay succeeds
 	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
-		reader: cli.GetFormReader(map[string]string{"input": "/tmp", "speed": "2.0", "username": "u1", "password": "p1"}),
+		reader: cli.GetFormReader(map[string]string{"input": "/tmp", "speed": "2.0", "username": "u1", "password": "p1", "user-allowlist": " Root, APP "}),
 		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
 	}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
@@ -111,7 +111,7 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, "replay", mgr.curJob)
 		startTime := mgr.replayCfg.StartTime
 		require.False(t, startTime.IsZero())
-		require.Equal(t, replay.ReplayConfig{Input: "/tmp", Username: "u1", Password: "p1", Speed: 2.0, StartTime: startTime, PSCloseStrategy: cmd.PSCloseStrategyDirected}, mgr.replayCfg)
+		require.Equal(t, replay.ReplayConfig{Input: "/tmp", Username: "u1", Password: "p1", Speed: 2.0, StartTime: startTime, PSCloseStrategy: cmd.PSCloseStrategyDirected, UserAllowlist: []string{"root", "app"}}, mgr.replayCfg)
 	})
 	// show succeeds
 	doHTTP(t, http.MethodGet, "/api/traffic/show", httpOpts{}, func(t *testing.T, r *http.Response) {

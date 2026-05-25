@@ -124,6 +124,10 @@ type ReplayConfig struct {
 	Addr string
 	// FilterCommandWithRetry indicates whether to filter out commands that are retries according to the audit log.
 	FilterCommandWithRetry bool
+	// UserAllowlist is only used for audit log plugin format. When non-empty, lines whose [USER=...] value
+	// is not in this list are ignored (comma-separated in HTTP form; repeated or comma-separated CLI flag).
+	// Matching is case-insensitive; HTTP form values are stored lowercased, and the audit decoder lowercases for lookup.
+	UserAllowlist []string
 	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
 	WaitOnEOF bool
 	// the following fields are for testing
@@ -619,6 +623,9 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 
 		if r.cfg.FilterCommandWithRetry {
 			auditLogDecoder.EnableFilterCommandWithRetry()
+		}
+		if len(r.cfg.UserAllowlist) > 0 {
+			auditLogDecoder.SetUserAllowlist(r.cfg.UserAllowlist)
 		}
 	}
 
