@@ -31,6 +31,7 @@ const (
 	auditPluginKeyPreparedStmtID = "PREPARED_STMT_ID"
 	auditPluginKeyRetry          = "RETRY"
 	auditPluginKeyUser           = "USER"
+	auditPluginKeyTables         = "TABLES"
 
 	auditPluginClassGeneral     = "GENERAL"
 	auditPluginClassTableAccess = "TABLE_ACCESS"
@@ -108,9 +109,12 @@ type AuditLogPluginDecoder struct {
 	filterCommandWithRetry bool
 	// userAllowlist, when non-empty, causes Decode to skip lines whose [USER=...] is not in the set.
 	userAllowlist map[string]struct{}
-	idAllocator   *ConnIDAllocator
-	dedup         *DeDup
-	lg            *zap.Logger
+	// tableSuffixAllowlist, when non-empty, causes Decode to skip GENERAL/TABLE_ACCESS lines unless
+	// every table in [TABLES=...] ends with _<digits> and each digit string is in this set.
+	tableSuffixAllowlist map[string]struct{}
+	idAllocator          *ConnIDAllocator
+	dedup                *DeDup
+	lg                   *zap.Logger
 }
 
 // ConnIDAllocator allocates connection IDs for new connections.
@@ -181,6 +185,16 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 			}
 		}
 
+		eventClass := kvs[auditPluginKeyClass]
+		if decoder.tableSuffixAllowlist != nil {
+			switch eventClass {
+			case auditPluginClassGeneral, auditPluginClassTableAccess:
+				if !tablesFieldMatchesSuffixAllowlist(kvs[auditPluginKeyTables], decoder.tableSuffixAllowlist) {
+					continue
+				}
+			}
+		}
+
 		var connID uint64
 		if connCtx, ok := decoder.connInfo[upstreamConnID]; ok {
 			connID = connCtx.connID
@@ -196,7 +210,6 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		}
 
 		var cmds []*Command
-		eventClass := kvs[auditPluginKeyClass]
 		switch eventClass {
 		case auditPluginClassGeneral, auditPluginClassTableAccess:
 			cmds, err = decoder.parseGeneralEvent(kvs, startTs, endTs, upstreamConnID)
@@ -667,6 +680,73 @@ func (decoder *AuditLogPluginDecoder) EnableFilterCommandWithRetry() {
 	decoder.filterCommandWithRetry = true
 }
 
+// parseAuditTablesField parses the audit log TABLES value, e.g. `"[t1,t2]"` or `[t1,t2]`.
+func parseAuditTablesField(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if raw[0] == '"' {
+		u, err := strconv.Unquote(raw)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unquote TABLES field")
+		}
+		raw = strings.TrimSpace(u)
+	}
+	if raw == "" {
+		return nil, nil
+	}
+	if raw[0] == '[' && raw[len(raw)-1] == ']' {
+		raw = strings.TrimSpace(raw[1 : len(raw)-1])
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// tableUnderscoreDigitSuffix reports whether name ends with '_' followed only by ASCII digits,
+// and returns that digit string (e.g. t_123 -> 123).
+func tableUnderscoreDigitSuffix(name string) (digits string, ok bool) {
+	idx := strings.LastIndexByte(name, '_')
+	if idx < 0 || idx == len(name)-1 {
+		return "", false
+	}
+	suf := name[idx+1:]
+	for i := 0; i < len(suf); i++ {
+		if suf[i] < '0' || suf[i] > '9' {
+			return "", false
+		}
+	}
+	return suf, true
+}
+
+func tablesFieldMatchesSuffixAllowlist(rawTables string, allow map[string]struct{}) bool {
+	if len(allow) == 0 {
+		return true
+	}
+	names, err := parseAuditTablesField(rawTables)
+	if err != nil || len(names) == 0 {
+		return false
+	}
+	for _, name := range names {
+		dig, ok := tableUnderscoreDigitSuffix(name)
+		if !ok {
+			return false
+		}
+		if _, ok := allow[dig]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // SetUserAllowlist restricts decoding to audit log lines whose USER field is in the list.
 // Matching is case-insensitive; names are stored in lowercase. Empty or all-blank entries are ignored.
 // When users is empty after trimming, filtering is disabled.
@@ -687,5 +767,28 @@ func (decoder *AuditLogPluginDecoder) SetUserAllowlist(users []string) {
 		decoder.userAllowlist = nil
 	} else {
 		decoder.userAllowlist = m
+	}
+}
+
+// SetTableSuffixAllowlist restricts decoding (GENERAL and TABLE_ACCESS only) to lines whose TABLES list
+// is non-empty and every table name ends with _<digits> where <digits> is in suffixes.
+// Empty or all-blank entries in suffixes are ignored. When no valid suffix remains, filtering is disabled.
+func (decoder *AuditLogPluginDecoder) SetTableSuffixAllowlist(suffixes []string) {
+	if len(suffixes) == 0 {
+		decoder.tableSuffixAllowlist = nil
+		return
+	}
+	m := make(map[string]struct{})
+	for _, s := range suffixes {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		m[s] = struct{}{}
+	}
+	if len(m) == 0 {
+		decoder.tableSuffixAllowlist = nil
+	} else {
+		decoder.tableSuffixAllowlist = m
 	}
 }

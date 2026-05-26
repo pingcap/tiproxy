@@ -62,6 +62,7 @@ func main() {
 	startTime := rootCmd.PersistentFlags().Time("start-time", time.Now(), []string{time.RFC3339, time.RFC3339Nano}, "the time to start the replay. Format is RFC3339. Default is the current time.")
 	filterCommandWithRetry := rootCmd.PersistentFlags().Bool("filter-command-with-retry", false, "filter out commands that are retries according to the audit log.")
 	userAllowlist := rootCmd.PersistentFlags().StringSlice("user-allowlist", nil, "for audit log format only: USER values to replay (case-insensitive, normalized to lowercase); if set, lines whose [USER=...] is not listed are skipped (repeat flag or use comma-separated values).")
+	tableSuffixList := rootCmd.PersistentFlags().StringSlice("table-suffix-list", nil, "for audit log format only: replay GENERAL/TABLE_ACCESS SQL only when [TABLES=...] is non-empty and every table name ends with _<digits> and each digit string is in this list (repeat flag or comma-separated).")
 	waitOnEOF := rootCmd.PersistentFlags().Bool("wait-on-eof", false, "wait for the next file when all the files are read.")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
@@ -152,6 +153,7 @@ func main() {
 				OutputPath:             *outputPath,
 				FilterCommandWithRetry: *filterCommandWithRetry,
 				UserAllowlist:          *userAllowlist,
+				TableSuffixList:        *tableSuffixList,
 				WaitOnEOF:              *waitOnEOF,
 			}
 			if err := r.StartReplay(replayCfg); err != nil {

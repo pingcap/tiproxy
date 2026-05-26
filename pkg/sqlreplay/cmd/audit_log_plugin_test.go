@@ -728,6 +728,90 @@ func TestDecodeUserAllowlist(t *testing.T) {
 	})
 }
 
+func mkGeneralLine(tables, sql string, connID int) string {
+	return fmt.Sprintf(`[2025/09/08 21:16:29.585 +08:00] [INFO] [logger.go:77] [ID=17573373891] [TIMESTAMP=2025/09/06 16:16:29.585 +08:10] [EVENT_CLASS=GENERAL] [EVENT_SUBCLASS=] [STATUS_CODE=0] [COST_TIME=1057.834] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[]"] [TABLES=%s] [SQL_TEXT=%s] [ROWS=0] [CONNECTION_ID=%d] [CLIENT_PORT=52611] [PID=89967] [COMMAND=Query] [SQL_STATEMENTS=Select] [EXECUTE_PARAMS="[]"] [CURRENT_DB=] [EVENT=COMPLETED]`, tables, sql, connID)
+}
+
+func TestDecodeTableSuffixAllowlist(t *testing.T) {
+	t.Run("match replays", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetTableSuffixAllowlist([]string{"123", "456"})
+		line := mkGeneralLine(`"[t_123,n_456]"`, `"select 1"`, 1)
+		mr := mockReader{data: []byte(line + "\n"), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Len(t, cmds, 1)
+		require.Contains(t, string(cmds[0].Payload), "select 1")
+	})
+
+	t.Run("wrong suffix skips", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetTableSuffixAllowlist([]string{"123"})
+		line := mkGeneralLine(`"[t_456]"`, `"select 1"`, 1)
+		mr := mockReader{data: []byte(line + "\n"), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Empty(t, cmds)
+	})
+
+	t.Run("empty tables skips", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetTableSuffixAllowlist([]string{"123"})
+		line := mkGeneralLine(`"[]"`, `"select 1"`, 1)
+		mr := mockReader{data: []byte(line + "\n"), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Empty(t, cmds)
+	})
+
+	t.Run("non digit suffix skips", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetTableSuffixAllowlist([]string{"123"})
+		line := mkGeneralLine(`"[t_12x]"`, `"select 1"`, 1)
+		mr := mockReader{data: []byte(line + "\n"), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Empty(t, cmds)
+	})
+
+	t.Run("disconnect not filtered", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetTableSuffixAllowlist([]string{"999"})
+		lines := mkGeneralLine(`"[t_999]"`, `"select 1"`, 3552575510) + "\n" +
+			`[2025/09/08 21:16:35.621 +08:00] [INFO] [logger.go:77] [ID=17573373350] [TIMESTAMP=2025/09/08 21:16:35.621 +08:10] [EVENT_CLASS=CONNECTION] [EVENT_SUBCLASS=Disconnect] [STATUS_CODE=0] [COST_TIME=0] [HOST=127.0.0.1] [CLIENT_IP=127.0.0.1] [USER=root] [DATABASES="[test]"] [TABLES="[]"] [SQL_TEXT=] [ROWS=0] [CLIENT_PORT=49278] [CONNECTION_ID=3552575510] [CONNECTION_TYPE=SSL/TLS] [SERVER_ID=1] [SERVER_PORT=4000] [DURATION=22716.871792] [SERVER_OS_LOGIN_USER=test] [OS_VERSION=darwin.arm64] [CLIENT_VERSION=] [SERVER_VERSION=v9.0.0] [AUDIT_VERSION=] [SSL_VERSION=TLSv1.3] [PID=89967] [Reason=]` + "\n"
+		mr := mockReader{data: []byte(lines), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Len(t, cmds, 2)
+		require.Equal(t, pnet.ComQuit, cmds[1].Type)
+	})
+
+	t.Run("blank-only suffix disables filter", func(t *testing.T) {
+		decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+		decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+		decoder.SetTableSuffixAllowlist([]string{"", "  "})
+		line := mkGeneralLine(`"[]"`, `"select 9"`, 1)
+		mr := mockReader{data: []byte(line + "\n"), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Len(t, cmds, 1)
+	})
+}
+
+func TestParseAuditTablesFieldAndSuffixMatch(t *testing.T) {
+	names, err := parseAuditTablesField(`"[t_123,n_456]"`)
+	require.NoError(t, err)
+	require.Equal(t, []string{"t_123", "n_456"}, names)
+	allow := map[string]struct{}{"123": {}, "456": {}}
+	require.True(t, tablesFieldMatchesSuffixAllowlist(`"[t_123,n_456]"`, allow))
+	require.False(t, tablesFieldMatchesSuffixAllowlist(`"[t_123,t_789]"`, allow))
+}
+
 func TestDecodeMultiLines(t *testing.T) {
 	tests := []struct {
 		lines string
