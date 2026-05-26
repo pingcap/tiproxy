@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
+	"github.com/soheilhy/cmux"
 	"go.uber.org/atomic"
 	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
@@ -130,20 +131,47 @@ func NewServer(cfg config.API, lg *zap.Logger, mgr Managers, handler HTTPHandler
 	}
 
 	if tlscfg := mgr.CertMgr.ServerHTTPTLS(); tlscfg != nil {
-		h.listener = tls.NewListener(h.listener, tlscfg)
+		mux := cmux.New(h.listener)
+		mux.SetReadTimeout(DefConnTimeout)
+		plainHealthListener := mux.Match(cmux.HTTP1Fast())
+		tlsListener := tls.NewListener(mux.Match(cmux.TLS()), tlscfg)
+
+		h.serveHTTP("HTTP health", plainHealthListener, h.newHTTPHealthHandler())
+		h.serveHTTP("HTTPS", tlsListener, engine.Handler())
+		h.wg.RunWithRecover(func() {
+			lg.Info("HTTP mux closed", zap.Error(mux.Serve()))
+		}, nil, h.lg)
+		return h, nil
 	}
 
+	h.serveHTTP("HTTP", h.listener, engine.Handler())
+	return h, nil
+}
+
+func (h *Server) serveHTTP(name string, listener net.Listener, handler http.Handler) {
 	hsrv := http.Server{
-		Handler:           engine.Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: DefConnTimeout,
 		IdleTimeout:       DefConnTimeout,
 	}
 
 	h.wg.RunWithRecover(func() {
-		lg.Info("HTTP closed", zap.Error(hsrv.Serve(h.listener)))
+		h.lg.Info(name+" closed", zap.Error(hsrv.Serve(listener)))
 	}, nil, h.lg)
+}
 
-	return h, nil
+func (h *Server) newHTTPHealthHandler() http.Handler {
+	engine := gin.New()
+	engine.Use(
+		gin.Recovery(),
+		h.rateLimit,
+		h.readyState,
+		h.attachLogger,
+	)
+	// Keep the plaintext health routes consistent with the main server.
+	engine.GET("/api/debug/health", h.DebugHealth)
+	engine.GET("/debug/health", h.DebugHealth)
+	return engine.Handler()
 }
 
 func (h *Server) rateLimit(c *gin.Context) {

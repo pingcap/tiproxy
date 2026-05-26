@@ -93,3 +93,21 @@ func TestDebugHealthManualOverride(t *testing.T) {
 	})
 	assertHealth(http.StatusBadGateway, "server is not ready")
 }
+
+func TestDebugHealthAllowsHTTPWithHTTPTLS(t *testing.T) {
+	_, doHTTP, doHTTPS := createServerWithConfig(t, `security.server-http-tls.auto-certs = true`)
+
+	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTP(t, http.MethodGet, "/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+
+	doHTTPS(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTPS(t, http.MethodGet, "/api/metrics", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+}
