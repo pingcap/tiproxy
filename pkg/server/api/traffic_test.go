@@ -132,6 +132,17 @@ func TestTraffic(t *testing.T) {
 		require.Equal(t, "", mgr.curJob)
 		require.Equal(t, manager.CancelConfig{Type: manager.Replay, Graceful: true}, mgr.cancelCfg)
 	})
+	// replay with table-suffix-list
+	doHTTP(t, http.MethodPost, "/api/traffic/replay", httpOpts{
+		reader: cli.GetFormReader(map[string]string{"input": "/tmp2", "speed": "1.0", "username": "u2", "password": "p2", "table-suffix-list": "123, 456"}),
+		header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"},
+	}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+		startTime := mgr.replayCfg.StartTime
+		require.False(t, startTime.IsZero())
+		require.Equal(t, replay.ReplayConfig{Input: "/tmp2", Username: "u2", Password: "p2", Speed: 1.0, StartTime: startTime, PSCloseStrategy: cmd.PSCloseStrategyDirected, TableSuffixList: []string{"123", "456"}}, mgr.replayCfg)
+	})
+	cancelJob(t, doHTTP)
 }
 
 func cancelJob(t *testing.T, doHTTP doHTTPFunc) {

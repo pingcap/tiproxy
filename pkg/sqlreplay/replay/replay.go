@@ -128,6 +128,10 @@ type ReplayConfig struct {
 	// is not in this list are ignored (comma-separated in HTTP form; repeated or comma-separated CLI flag).
 	// Matching is case-insensitive; HTTP form values are stored lowercased, and the audit decoder lowercases for lookup.
 	UserAllowlist []string
+	// TableSuffixList is only used for audit log plugin format. When non-empty, GENERAL and TABLE_ACCESS lines
+	// are replayed only if TABLES is non-empty and every listed table name ends with _<digits> and each digit
+	// string appears in this list (comma-separated in HTTP form; repeated or comma-separated CLI flag).
+	TableSuffixList []string
 	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
 	WaitOnEOF bool
 	// the following fields are for testing
@@ -626,6 +630,9 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 		}
 		if len(r.cfg.UserAllowlist) > 0 {
 			auditLogDecoder.SetUserAllowlist(r.cfg.UserAllowlist)
+		}
+		if len(r.cfg.TableSuffixList) > 0 {
+			auditLogDecoder.SetTableSuffixAllowlist(r.cfg.TableSuffixList)
 		}
 	}
 

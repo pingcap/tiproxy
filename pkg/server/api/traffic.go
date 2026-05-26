@@ -164,6 +164,13 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 			}
 		}
 	}
+	if tsl := strings.TrimSpace(c.PostForm("table-suffix-list")); tsl != "" {
+		for _, part := range strings.Split(tsl, ",") {
+			if s := strings.TrimSpace(part); s != "" {
+				cfg.TableSuffixList = append(cfg.TableSuffixList, s)
+			}
+		}
+	}
 	cfg.WaitOnEOF = strings.EqualFold(c.PostForm("wait-on-eof"), "true")
 	h.lg.Info("request: traffic replay", zap.Any("cfg", cfg))
 
