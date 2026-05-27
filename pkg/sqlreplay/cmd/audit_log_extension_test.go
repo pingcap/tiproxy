@@ -4,6 +4,8 @@
 package cmd
 
 import (
+	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -375,6 +377,62 @@ func TestDecodeAuditExtensionInNeverMode(t *testing.T) {
 	}
 }
 
+func TestDecodeAuditExtensionUserAllowlist(t *testing.T) {
+	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+	decoder.SetUserAllowlist([]string{" ROOT "})
+	lines := auditExtensionLine("root", "1", "QUERY,QUERY_DML,SELECT", `"SELECT 1"`, "") + "\n" +
+		auditExtensionLine("app", "2", "QUERY,QUERY_DML,SELECT", `"SELECT 2"`, "") + "\n"
+	mr := mockReader{data: []byte(lines)}
+
+	cmds, err := decodeCmds(decoder, &mr)
+	require.ErrorIs(t, err, io.EOF)
+	require.Len(t, cmds, 1)
+	require.Equal(t, append([]byte{pnet.ComQuery.Byte()}, []byte("SELECT 1")...), cmds[0].Payload)
+}
+
+func TestDecodeAuditExtensionDoesNotPrintToStdout(t *testing.T) {
+	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+	mr := mockReader{data: []byte(auditExtensionLine("root", "1", "QUERY,QUERY_DML,SELECT", `"SELECT 1"`, "") + "\n")}
+
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+	cmd, decodeErr := decoder.Decode(&mr)
+	require.NoError(t, w.Close())
+	os.Stdout = stdout
+	t.Cleanup(func() {
+		os.Stdout = stdout
+		r.Close()
+	})
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	require.NoError(t, decodeErr)
+	require.NotNil(t, cmd)
+	require.Empty(t, string(out))
+}
+
+func TestDecodeAuditExtensionInvalidTimestamp(t *testing.T) {
+	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+	line := `[not-a-time] [INFO] [EVENT="[QUERY,QUERY_DML,SELECT]"] [USER=root] [CONNECTION_ID=1] [STATUS_CODE=1] [CURRENT_DB=test] [SQL_TEXT="SELECT 1"]`
+	mr := mockReader{data: []byte(line + "\n")}
+
+	cmd, err := decoder.Decode(&mr)
+	require.Nil(t, cmd)
+	require.ErrorContains(t, err, "parsing timestamp failed: not-a-time")
+}
+
+func TestDecodeAuditExtensionExecuteWithoutParams(t *testing.T) {
+	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+	decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+	mr := mockReader{data: []byte(auditExtensionLine("root", "1", "QUERY,EXECUTE,SELECT", `"SELECT ?"`, "") + "\n")}
+
+	cmds, err := decodeCmds(decoder, &mr)
+	require.ErrorIs(t, err, io.EOF)
+	require.Empty(t, cmds)
+}
+
 func TestParseExecuteParamsForExtension(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -437,6 +495,11 @@ func TestParseExecuteParamsForExtension(t *testing.T) {
 			hasError: false,
 		},
 		{
+			input:    `"[\"\"]"`,
+			expected: []any{""},
+			hasError: false,
+		},
+		{
 			input:    `"[1.5,2.75,3.14]"`,
 			expected: []any{"1.5", "2.75", "3.14"},
 			hasError: false,
@@ -466,15 +529,30 @@ func TestParseExecuteParamsForExtension(t *testing.T) {
 			expected: nil,
 			hasError: true,
 		},
+		{
+			input:    `""`,
+			expected: nil,
+			hasError: true,
+		},
 	}
 
 	for _, tt := range tests {
-		result, err := parseExecuteParamsForExtension(tt.input)
-		if tt.hasError {
-			require.Error(t, err)
-		} else {
-			require.NoError(t, err)
-			require.Equal(t, tt.expected, result)
-		}
+		require.NotPanics(t, func() {
+			result, err := parseExecuteParamsForExtension(tt.input)
+			if tt.hasError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tt.expected, result)
+			}
+		})
 	}
+}
+
+func auditExtensionLine(user, connID, event, sql, params string) string {
+	line := `[2026/01/08 19:44:11.099 +08:00] [INFO] [EVENT="[` + event + `]"] [USER=` + user + `] [ROLES="[]"] [CONNECTION_ID=` + connID + `] [SESSION_ALIAS=] [TABLES="[]"] [STATUS_CODE=1] [CURRENT_DB=test] [SQL_TEXT=` + sql + `]`
+	if params != "" {
+		line += ` [EXECUTE_PARAMS=` + params + `]`
+	}
+	return line
 }
