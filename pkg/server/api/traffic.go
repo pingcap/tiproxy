@@ -154,6 +154,12 @@ func (h *Server) TrafficReplay(c *gin.Context) {
 		cfg.ReplayerIndex = replayerIndex
 	}
 	cfg.OutputPath = c.PostForm("outputpath")
+	cfg.Kafka.Brokers = c.PostForm("kafka-brokers")
+	cfg.Kafka.Topic = c.PostForm("kafka-topic")
+	cfg.Kafka.SecurityProtocol = c.PostForm("kafka-security-protocol")
+	cfg.Kafka.SASLMechanism = c.PostForm("kafka-sasl-mechanism")
+	cfg.Kafka.SASLUsername = c.PostForm("kafka-sasl-username")
+	cfg.Kafka.SASLPassword = c.PostForm("kafka-sasl-password")
 	cfg.Addr = c.PostForm("addr")
 	cfg.DryRun = strings.EqualFold(c.PostForm("dryrun"), "true")
 	cfg.FilterCommandWithRetry = strings.EqualFold(c.PostForm("filtercommandwithretry"), "true")
