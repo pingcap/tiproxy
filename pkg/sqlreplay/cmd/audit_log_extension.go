@@ -4,7 +4,6 @@
 package cmd
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ type AuditLogExtensionDecoder struct {
 	// pendingCmds contains the commands that has not been returned yet.
 	pendingCmds     []*Command
 	psCloseStrategy PSCloseStrategy
+	userAllowlist   map[string]struct{}
 	idAllocator     *ConnIDAllocator
 	lg              *zap.Logger
 }
@@ -42,7 +42,23 @@ func (decoder *AuditLogExtensionDecoder) EnableFilterCommandWithRetry() {
 
 // SetUserAllowlist implements [AuditLogDecoder].
 func (decoder *AuditLogExtensionDecoder) SetUserAllowlist(users []string) {
-	// do nothing for extension decoder, it's not supported yet
+	if len(users) == 0 {
+		decoder.userAllowlist = nil
+		return
+	}
+	m := make(map[string]struct{})
+	for _, u := range users {
+		u = strings.ToLower(strings.TrimSpace(u))
+		if u == "" {
+			continue
+		}
+		m[u] = struct{}{}
+	}
+	if len(m) == 0 {
+		decoder.userAllowlist = nil
+	} else {
+		decoder.userAllowlist = m
+	}
 }
 
 // SetCommandEndTime implements [AuditLogDecoder].
@@ -66,11 +82,6 @@ func (decoder *AuditLogExtensionDecoder) SetCommandStartTime(t time.Time) {
 }
 
 func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Command, err error) {
-	defer func() {
-		if retCmd != nil {
-			fmt.Println("Decoded command:", retCmd.ConnID, retCmd.Line, retCmd.StartTs, retCmd.EndTs, "error:", err)
-		}
-	}()
 	if len(decoder.pendingCmds) > 0 {
 		cmd := decoder.pendingCmds[0]
 		decoder.pendingCmds = decoder.pendingCmds[1:]
@@ -99,9 +110,18 @@ func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Comm
 
 		// TODO: add both startTs and endTs in extension log. We only have the endTS is the current format.
 		endTs, err := time.Parse(timeLayout, kvs[auditPluginKeyLogTime])
+		if err != nil {
+			return nil, errors.Errorf("%s, line %d: parsing timestamp failed: %s", filename, lineIdx, kvs[auditPluginKeyLogTime])
+		}
 		if endTs.Before(decoder.commandEndTime) {
 			// Ignore the commands before CommandEndTime.
 			continue
+		}
+		if decoder.userAllowlist != nil {
+			user := strings.ToLower(strings.TrimSpace(kvs[auditPluginKeyUser]))
+			if _, ok := decoder.userAllowlist[user]; !ok {
+				continue
+			}
 		}
 
 		var connID uint64
@@ -189,6 +209,7 @@ func (decoder *AuditLogExtensionDecoder) parseQueryEvent(kvs map[string]string, 
 	if events[0] == "QUERY" && len(events) > 1 && events[1] == "EXECUTE" {
 		params, ok := kvs[auditPluginKeyParams]
 		if !ok {
+			// Redacted extension logs omit EXECUTE_PARAMS, and the original prepared values can't be recovered.
 			return nil, nil
 		}
 		args, err := parseExecuteParamsForExtension(params)
@@ -276,6 +297,9 @@ func parseExecuteParamsForExtension(value string) ([]any, error) {
 	v, err := strconv.Unquote(value)
 	if err != nil {
 		return nil, errors.Wrapf(err, "unquote execute params failed: %s", value)
+	}
+	if len(v) == 0 {
+		return nil, errors.Errorf("no brackets in params: %s", value)
 	}
 	if v[0] != '[' || v[len(v)-1] != ']' {
 		return nil, errors.Errorf("no brackets in params: %s", value)
