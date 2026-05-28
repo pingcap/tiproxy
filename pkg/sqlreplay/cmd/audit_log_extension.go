@@ -20,11 +20,12 @@ type AuditLogExtensionDecoder struct {
 	connInfo       map[uint64]auditLogPluginConnCtx
 	commandEndTime time.Time
 	// pendingCmds contains the commands that has not been returned yet.
-	pendingCmds     []*Command
-	psCloseStrategy PSCloseStrategy
-	userAllowlist   map[string]struct{}
-	idAllocator     *ConnIDAllocator
-	lg              *zap.Logger
+	pendingCmds          []*Command
+	psCloseStrategy      PSCloseStrategy
+	userAllowlist        map[string]struct{}
+	tableSuffixAllowlist map[string]struct{}
+	idAllocator          *ConnIDAllocator
+	lg                   *zap.Logger
 }
 
 func NewAuditLogExtensionDecoder(lg *zap.Logger) AuditLogDecoder {
@@ -38,6 +39,27 @@ func NewAuditLogExtensionDecoder(lg *zap.Logger) AuditLogDecoder {
 // EnableFilterCommandWithRetry implements [AuditLogDecoder].
 func (decoder *AuditLogExtensionDecoder) EnableFilterCommandWithRetry() {
 	// do nothing for extension decoder, it's not supported yet
+}
+
+// SetTableSuffixAllowlist implements [AuditLogDecoder].
+func (decoder *AuditLogExtensionDecoder) SetTableSuffixAllowlist(suffixes []string) {
+	if len(suffixes) == 0 {
+		decoder.tableSuffixAllowlist = nil
+		return
+	}
+	m := make(map[string]struct{})
+	for _, s := range suffixes {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		m[s] = struct{}{}
+	}
+	if len(m) == 0 {
+		decoder.tableSuffixAllowlist = nil
+	} else {
+		decoder.tableSuffixAllowlist = m
+	}
 }
 
 // SetUserAllowlist implements [AuditLogDecoder].
@@ -120,6 +142,12 @@ func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Comm
 		if decoder.userAllowlist != nil {
 			user := strings.ToLower(strings.TrimSpace(kvs[auditPluginKeyUser]))
 			if _, ok := decoder.userAllowlist[user]; !ok {
+				continue
+			}
+		}
+
+		if decoder.tableSuffixAllowlist != nil {
+			if !tablesFieldMatchesSuffixAllowlist(kvs[auditPluginKeyTables], decoder.tableSuffixAllowlist) {
 				continue
 			}
 		}

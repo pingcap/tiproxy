@@ -113,6 +113,7 @@ type AuditLogDecoder interface {
 	SetCommandEndTime(t time.Time)
 	EnableFilterCommandWithRetry()
 	SetUserAllowlist(users []string)
+	SetTableSuffixAllowlist(suffixes []string)
 }
 
 type AuditLogPluginDecoder struct {
