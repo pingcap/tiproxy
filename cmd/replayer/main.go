@@ -23,6 +23,7 @@ import (
 	replaycmd "github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay/execinfo"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
 	"github.com/spf13/cobra"
 	"go.uber.org/atomic"
@@ -57,6 +58,12 @@ func main() {
 	replayerCount := rootCmd.PersistentFlags().Uint64("replayer-count", 1, "the total number of replayer instances running concurrently. Used only when dynamic-input is enabled.")
 	replayerIndex := rootCmd.PersistentFlags().Uint64("replayer-index", 0, "the index of this replayer instance. Used only when dynamic-input is enabled.")
 	outputPath := rootCmd.PersistentFlags().String("output-path", "", "the file path to store replayed sql. Empty indicates do not output replayed sql.")
+	kafkaBrokers := rootCmd.PersistentFlags().String("kafka-brokers", "", "comma-separated Kafka broker addresses for replayed sql exec info output")
+	kafkaTopic := rootCmd.PersistentFlags().String("kafka-topic", "", "Kafka topic for replayed sql exec info output")
+	kafkaSecurityProtocol := rootCmd.PersistentFlags().String("kafka-security-protocol", "", "Kafka security.protocol: PLAINTEXT, SASL_PLAINTEXT, or SASL_SSL")
+	kafkaSASLMechanism := rootCmd.PersistentFlags().String("kafka-sasl-mechanism", "", "Kafka sasl.mechanism, only PLAIN is supported")
+	kafkaSASLUsername := rootCmd.PersistentFlags().String("kafka-sasl-username", "", "Kafka SASL username (PlainLoginModule)")
+	kafkaSASLPassword := rootCmd.PersistentFlags().String("kafka-sasl-password", "", "Kafka SASL password (PlainLoginModule)")
 	serviceMode := rootCmd.PersistentFlags().Bool("service-mode", false, "run replayer in service mode")
 	logLevel := rootCmd.PersistentFlags().String("log-level", "info", "the log level: debug, info, warn, error, dpanic, panic, fatal")
 	startTime := rootCmd.PersistentFlags().Time("start-time", time.Now(), []string{time.RFC3339, time.RFC3339Nano}, "the time to start the replay. Format is RFC3339. Default is the current time.")
@@ -133,24 +140,32 @@ func main() {
 		} else {
 			// start replay
 			replayCfg := replay.ReplayConfig{
-				Input:                  *input,
-				Speed:                  *speed,
-				Username:               *username,
-				Password:               *password,
-				Format:                 *format,
-				ReadOnly:               *readonly,
-				StartTime:              *startTime,
-				CommandStartTime:       *cmdStartTime,
-				CommandEndTime:         *cmdEndTime,
-				IgnoreErrs:             *ignoreErrs,
-				BufSize:                *bufSize,
-				PSCloseStrategy:        replaycmd.PSCloseStrategy(*psCloseStrategy),
-				DryRun:                 *dryRun,
-				CheckPointFilePath:     *checkPointFilePath,
-				DynamicInput:           *dynamicInput,
-				ReplayerCount:          *replayerCount,
-				ReplayerIndex:          *replayerIndex,
-				OutputPath:             *outputPath,
+				Input:              *input,
+				Speed:              *speed,
+				Username:           *username,
+				Password:           *password,
+				Format:             *format,
+				ReadOnly:           *readonly,
+				StartTime:          *startTime,
+				CommandStartTime:   *cmdStartTime,
+				CommandEndTime:     *cmdEndTime,
+				IgnoreErrs:         *ignoreErrs,
+				BufSize:            *bufSize,
+				PSCloseStrategy:    replaycmd.PSCloseStrategy(*psCloseStrategy),
+				DryRun:             *dryRun,
+				CheckPointFilePath: *checkPointFilePath,
+				DynamicInput:       *dynamicInput,
+				ReplayerCount:      *replayerCount,
+				ReplayerIndex:      *replayerIndex,
+				OutputPath:         *outputPath,
+				Kafka: execinfo.KafkaConfig{
+					Brokers:          *kafkaBrokers,
+					Topic:            *kafkaTopic,
+					SecurityProtocol: *kafkaSecurityProtocol,
+					SASLMechanism:    *kafkaSASLMechanism,
+					SASLUsername:     *kafkaSASLUsername,
+					SASLPassword:     *kafkaSASLPassword,
+				},
 				FilterCommandWithRetry: *filterCommandWithRetry,
 				UserAllowlist:          *userAllowlist,
 				TableSuffixList:        *tableSuffixList,
