@@ -15,23 +15,19 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
-	"github.com/pingcap/tidb/pkg/parser"
-	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
-	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay/execinfo"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -59,8 +55,6 @@ const (
 
 	checkpointSaveInterval = 100 * time.Millisecond
 	stateSaveRetryInterval = 10 * time.Second
-
-	outputTimeFormat = "20060102 15:04:05.999"
 )
 
 var (
@@ -120,6 +114,8 @@ type ReplayConfig struct {
 	ReplayerIndex uint64
 	// OutputPath is the path to output replayed sql.
 	OutputPath string
+	// Kafka configures writing replayed sql exec info to Kafka.
+	Kafka execinfo.KafkaConfig
 	// Addr is the downstream address to connect to
 	Addr string
 	// FilterCommandWithRetry indicates whether to filter out commands that are retries according to the audit log.
@@ -213,6 +209,9 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	}
 	if !cfg.Format.IsAuditLogFormat() && !cfg.CommandEndTime.IsZero() {
 		return storages, errors.New("command end time is only supported for `audit_log_plugin` format")
+	}
+	if err := cfg.Kafka.Validate(); err != nil {
+		return storages, err
 	}
 
 	if cfg.Format == cmd.FormatAuditLogExtension {
@@ -930,44 +929,32 @@ func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
 }
 
 func (r *replay) recordExecInfoLoop() {
-	var lg *zap.Logger
-	if len(r.cfg.OutputPath) > 0 {
-		var err error
-		lg, _, _, err = logger.BuildLogger(&config.Log{
-			Encoder: "json",
-			Simple:  true,
-			LogOnline: config.LogOnline{
-				LogFile: config.LogFile{
-					Filename: r.cfg.OutputPath,
-					MaxSize:  100,
-				},
-			},
-		})
-		if err != nil {
-			r.lg.Error("build logger failed", zap.Error(err))
-		}
+	sinks, sinkErr := execinfo.NewSinks(r.cfg.OutputPath, r.cfg.Kafka)
+	if sinkErr != nil {
+		r.lg.Error("build exec info sinks failed", zap.Error(sinkErr))
 	}
+	defer func() {
+		for _, sink := range sinks {
+			if err := sink.Close(); err != nil {
+				r.lg.Warn("close exec info sink failed", zap.Error(err))
+			}
+		}
+	}()
 
 	// Iterate until the channel is closed, even if the context has been canceled.
 	for info := range r.execInfoCh {
-		if lg == nil {
+		if sinkErr != nil || len(sinks) == 0 {
 			continue
 		}
-		var sql string
-		switch info.Command.Type {
-		case pnet.ComStmtExecute:
-			sql = info.Command.PreparedStmt
-		case pnet.ComQuery:
-			sql = hack.String(info.Command.Payload[1:])
-			sql = parser.Normalize(sql, "ON")
-		}
-		if len(sql) == 0 {
+		rec, ok := execinfo.NewRecord(info)
+		if !ok {
 			continue
 		}
-		lg.Info("exec info", zap.String("sql", sql),
-			zap.String("db", info.Command.CurDB),
-			zap.String("cost", strconv.FormatFloat(float64(info.CostTime)/1000000.0, 'f', 3, 64)),
-			zap.String("ex_time", info.StartTime.Format(outputTimeFormat)))
+		for _, sink := range sinks {
+			if err := sink.Write(rec); err != nil {
+				r.lg.Error("write exec info failed", zap.Error(err))
+			}
+		}
 	}
 }
 
