@@ -812,6 +812,18 @@ func TestParseAuditTablesFieldAndSuffixMatch(t *testing.T) {
 	allow := map[string]struct{}{"123": {}, "456": {}}
 	require.True(t, tablesFieldMatchesSuffixAllowlist(`"[t_123,n_456]"`, allow))
 	require.False(t, tablesFieldMatchesSuffixAllowlist(`"[t_123,t_789]"`, allow))
+
+	require.Equal(t, "t_123", auditTableNameForSuffix("t_123"))
+	require.Equal(t, "n_456", auditTableNameForSuffix("n_456"))
+
+	extTables := `"[` + "`test`.`customer_123`,`test`.`warehouse_456`" + `]"`
+	extNames, err := parseAuditTablesField(extTables)
+	require.NoError(t, err)
+	require.Equal(t, []string{"`test`.`customer_123`", "`test`.`warehouse_456`"}, extNames)
+	require.Equal(t, "customer_123", auditTableNameForSuffix("`test`.`customer_123`"))
+	require.True(t, tablesFieldMatchesSuffixAllowlist(extTables, allow))
+	require.False(t, tablesFieldMatchesSuffixAllowlist(
+		`"[`+"`test`.`customer_789`"+`]"`, allow))
 }
 
 func TestDecodeMultiLines(t *testing.T) {

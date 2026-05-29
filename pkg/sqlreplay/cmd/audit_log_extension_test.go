@@ -550,9 +550,38 @@ func TestParseExecuteParamsForExtension(t *testing.T) {
 }
 
 func auditExtensionLine(user, connID, event, sql, params string) string {
-	line := `[2026/01/08 19:44:11.099 +08:00] [INFO] [EVENT="[` + event + `]"] [USER=` + user + `] [ROLES="[]"] [CONNECTION_ID=` + connID + `] [SESSION_ALIAS=] [TABLES="[]"] [STATUS_CODE=1] [CURRENT_DB=test] [SQL_TEXT=` + sql + `]`
+	return auditExtensionLineWithTables(user, connID, event, `"[]"`, sql, params)
+}
+
+func auditExtensionLineWithTables(user, connID, event, tables, sql, params string) string {
+	line := `[2026/01/08 19:44:11.099 +08:00] [INFO] [EVENT="[` + event + `]"] [USER=` + user + `] [ROLES="[]"] [CONNECTION_ID=` + connID + `] [SESSION_ALIAS=] [TABLES=` + tables + `] [STATUS_CODE=1] [CURRENT_DB=test] [SQL_TEXT=` + sql + `]`
 	if params != "" {
 		line += ` [EXECUTE_PARAMS=` + params + `]`
 	}
 	return line
+}
+
+func TestDecodeTableSuffixAllowlistForExtension(t *testing.T) {
+	tables := `"[` + "`test`.`customer_123`,`test`.`warehouse_456`" + `]"`
+	t.Run("match replays", func(t *testing.T) {
+		decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+		decoder.SetTableSuffixAllowlist([]string{"123", "456"})
+		line := auditExtensionLineWithTables("root", "1", "QUERY,QUERY_DML,SELECT", tables, `"select 1"`, "")
+		mr := mockReader{data: []byte(line + "\n"), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Len(t, cmds, 1)
+		require.Contains(t, string(cmds[0].Payload), "select 1")
+	})
+
+	t.Run("wrong suffix skips", func(t *testing.T) {
+		decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+		decoder.SetTableSuffixAllowlist([]string{"123"})
+		badTables := `"[` + "`test`.`customer_789`" + `]"`
+		line := auditExtensionLineWithTables("root", "1", "QUERY,QUERY_DML,SELECT", badTables, `"select 1"`, "")
+		mr := mockReader{data: []byte(line + "\n"), filename: "f"}
+		cmds, err := decodeCmds(decoder, &mr)
+		require.ErrorIs(t, err, io.EOF)
+		require.Empty(t, cmds)
+	})
 }
