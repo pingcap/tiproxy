@@ -100,7 +100,8 @@ func (decoder *AuditLogExtensionDecoder) SetPSCloseStrategy(s PSCloseStrategy) {
 
 // SetCommandStartTime implements [AuditLogDecoder].
 func (decoder *AuditLogExtensionDecoder) SetCommandStartTime(t time.Time) {
-	// do nothing for extension decoder
+	// commandStartTime is not supported for extension decoder, use commandEndTime instead.
+	decoder.commandEndTime = t
 }
 
 func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Command, err error) {
