@@ -218,9 +218,6 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 		if cfg.FilterCommandWithRetry {
 			return storages, errors.New("filtering commands with retry is not supported for audit log plugin v2 format")
 		}
-		if !cfg.CommandStartTime.IsZero() {
-			return storages, errors.New("command start time filter is not supported for audit log plugin v2 format")
-		}
 	}
 
 	if cfg.DynamicInput {

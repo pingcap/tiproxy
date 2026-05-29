@@ -377,6 +377,31 @@ func TestDecodeAuditExtensionInNeverMode(t *testing.T) {
 	}
 }
 
+func TestDecodeAuditExtensionWithCommandStartTime(t *testing.T) {
+	lines := `[2026/01/08 19:44:11.099 +08:00] [INFO] [ID=f1c681c2-8d80-4677-9dd4-6b7222610aa8-0009] [EVENT="[QUERY,QUERY_DDL]"] [USER=root] [ROLES="[]"] [CONNECTION_ID=260047062] [SESSION_ALIAS=] [TABLES="[]"] [STATUS_CODE=1] [CURRENT_DB=test] [SQL_TEXT="CREATE TABLE t (id INT)"]
+[2026/01/08 19:44:11.110 +08:00] [INFO] [ID=f1c681c2-8d80-4677-9dd4-6b7222610aa8-000a] [EVENT="[QUERY,QUERY_DML,INSERT]"] [USER=root] [ROLES="[]"] [CONNECTION_ID=260047062] [SESSION_ALIAS=] [TABLES="[]"] [STATUS_CODE=1] [CURRENT_DB=test] [SQL_TEXT="INSERT INTO t VALUES (1)"]`
+
+	commandStartTime := time.Date(2026, 1, 8, 19, 44, 11, 110000000, time.Local)
+	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+	decoder.SetCommandStartTime(commandStartTime)
+	mr := mockReader{data: append([]byte(lines), '\n')}
+	cmds, err := decodeCmds(decoder, &mr)
+	require.ErrorContains(t, err, "EOF")
+	require.Equal(t, []*Command{
+		{
+			CurDB:          "test",
+			StartTs:        time.Date(2026, 1, 8, 19, 44, 11, 110000000, time.Local),
+			EndTs:          time.Date(2026, 1, 8, 19, 44, 11, 110000000, time.Local),
+			ConnID:         260047062,
+			UpstreamConnID: 260047062,
+			Type:           pnet.ComQuery,
+			Payload:        append([]byte{pnet.ComQuery.Byte()}, []byte("INSERT INTO t VALUES (1)")...),
+			Line:           2,
+			Success:        true,
+		},
+	}, cmds)
+}
+
 func TestDecodeAuditExtensionUserAllowlist(t *testing.T) {
 	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
 	decoder.SetUserAllowlist([]string{" ROOT "})
