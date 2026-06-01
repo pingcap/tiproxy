@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,9 +47,10 @@ type KeepAlive struct {
 }
 
 type ProxyServerOnline struct {
-	MaxConnections    uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty" reloadable:"true"`
-	ConnBufferSize    int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty" reloadable:"true"`
-	FrontendKeepalive KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
+	MaxConnections                 uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty" reloadable:"true"`
+	HighMemoryUsageRejectThreshold float64   `yaml:"high-memory-usage-reject-threshold,omitempty" toml:"high-memory-usage-reject-threshold,omitempty" json:"high-memory-usage-reject-threshold,omitempty" reloadable:"true"`
+	ConnBufferSize                 int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty" reloadable:"true"`
+	FrontendKeepalive              KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
 	// BackendHealthyKeepalive applies when the observer treats the backend as healthy.
 	// The config values should be conservative to save CPU and tolerate network fluctuation.
 	BackendHealthyKeepalive KeepAlive `yaml:"backend-healthy-keepalive" toml:"backend-healthy-keepalive" json:"backend-healthy-keepalive"`
@@ -59,6 +61,12 @@ type ProxyServerOnline struct {
 	// In k8s, the pod terminationGracePeriodSeconds can be set to very long so that these configs can be updated online.
 	GracefulWaitBeforeShutdown int `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty" reloadable:"true"`
 	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty" reloadable:"true"`
+	// FailBackendList contains backend pod names or backend addresses (IP:port) that should be drained immediately
+	// and excluded from new routing. If the configured list would leave no routeable backend,
+	// TiProxy ignores the list to keep routing available.
+	FailBackendList []string `yaml:"fail-backend-list,omitempty" toml:"fail-backend-list,omitempty" json:"fail-backend-list,omitempty" reloadable:"true"`
+	// FailoverTimeout is the grace period in seconds before force closing the remaining connections on failed backends.
+	FailoverTimeout int `yaml:"failover-timeout,omitempty" toml:"failover-timeout,omitempty" json:"failover-timeout,omitempty" reloadable:"true"`
 }
 
 type ProxyServer struct {
@@ -118,8 +126,20 @@ type Security struct {
 }
 
 type HA struct {
+	// VirtualIP is the floating service address managed by TiProxy.
+	// It is expected to use a host route such as /32 so only the elected node
+	// answers for the VIP itself.
 	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
+	// Interface is the local NIC that binds VirtualIP and sends GARP from.
 	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
+	// GARPBurstCount is the number of GARP packets sent immediately after the
+	// new owner binds the VIP. A small burst makes takeover visible quickly even
+	// if the first packet is dropped by the host, bond driver, or upstream device.
+	GARPBurstCount int `yaml:"garp-burst-count,omitempty" toml:"garp-burst-count,omitempty" json:"garp-burst-count,omitempty" reloadable:"false"`
+	// GARPRefreshCount controls the number of follow-up bursts after
+	// takeover. It is used to refresh stale neighbor caches for a bounded window
+	// after failover instead of emitting high-rate GARP forever.
+	GARPRefreshCount int `yaml:"garp-refresh-count,omitempty" toml:"garp-refresh-count,omitempty" json:"garp-refresh-count,omitempty" reloadable:"false"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
@@ -142,8 +162,10 @@ func NewConfig() *Config {
 
 	cfg.Proxy.Addr = "0.0.0.0:6000"
 	cfg.Proxy.FrontendKeepalive, cfg.Proxy.BackendHealthyKeepalive, cfg.Proxy.BackendUnhealthyKeepalive = DefaultKeepAlive()
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0.9
 	cfg.Proxy.PDAddrs = "127.0.0.1:2379"
 	cfg.Proxy.GracefulCloseConnTimeout = 15
+	cfg.Proxy.FailoverTimeout = 60
 
 	cfg.API.Addr = "0.0.0.0:3080"
 
@@ -160,6 +182,13 @@ func NewConfig() *Config {
 
 	cfg.Balance = DefaultBalance()
 
+	// Match the common VRRP-style default of sending a small burst immediately
+	// after takeover, then keep refreshing for a short period. The refresh helps
+	// upstream devices overwrite stale VIP->MAC entries after an abnormal owner
+	// handover.
+	cfg.HA.GARPBurstCount = 5
+	cfg.HA.GARPRefreshCount = 30
+
 	cfg.EnableTrafficReplay = true
 
 	return &cfg
@@ -168,6 +197,7 @@ func NewConfig() *Config {
 func (cfg *Config) Clone() *Config {
 	newCfg := *cfg
 	newCfg.Labels = maps.Clone(cfg.Labels)
+	newCfg.Proxy.FailBackendList = slices.Clone(cfg.Proxy.FailBackendList)
 	return &newCfg
 }
 
@@ -190,11 +220,50 @@ func (cfg *Config) Check() error {
 	if cfg.Proxy.ConnBufferSize > 0 && (cfg.Proxy.ConnBufferSize > 16*1024*1024 || cfg.Proxy.ConnBufferSize < 1024) {
 		return errors.Wrapf(ErrInvalidConfigValue, "conn-buffer-size must be between 1K and 16M")
 	}
+	if err := cfg.Proxy.Check(); err != nil {
+		return err
+	}
 
 	if err := cfg.Balance.Check(); err != nil {
 		return err
 	}
+	if cfg.HA.GARPBurstCount < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-count must be greater than or equal to 0")
+	}
+	if cfg.HA.GARPBurstCount == 0 {
+		cfg.HA.GARPBurstCount = 1
+	}
+	if cfg.HA.GARPRefreshCount < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-refresh-count must be greater than or equal to 0")
+	}
 
+	return nil
+}
+
+func (ps *ProxyServer) Check() error {
+	if ps.HighMemoryUsageRejectThreshold < 0 || ps.HighMemoryUsageRejectThreshold > 1 {
+		return errors.Wrapf(ErrInvalidConfigValue, "invalid proxy.high-memory-usage-reject-threshold")
+	}
+	if ps.HighMemoryUsageRejectThreshold > 0 && ps.HighMemoryUsageRejectThreshold < 0.5 {
+		ps.HighMemoryUsageRejectThreshold = 0.5
+	}
+	if ps.FailoverTimeout < 0 {
+		return errors.Wrapf(ErrInvalidConfigValue, "proxy.failover-timeout must be greater than or equal to 0")
+	}
+	failBackends := ps.FailBackendList[:0]
+	failBackendSet := make(map[string]struct{}, len(ps.FailBackendList))
+	for i, backendName := range ps.FailBackendList {
+		backendName = strings.TrimSpace(backendName)
+		if backendName == "" {
+			return errors.Wrapf(ErrInvalidConfigValue, "proxy.fail-backend-list[%d] is empty", i)
+		}
+		if _, ok := failBackendSet[backendName]; ok {
+			continue
+		}
+		failBackendSet[backendName] = struct{}{}
+		failBackends = append(failBackends, backendName)
+	}
+	ps.FailBackendList = failBackends
 	return nil
 }
 

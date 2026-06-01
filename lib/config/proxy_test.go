@@ -20,11 +20,14 @@ var testProxyConfig = Config{
 		Addr:    "0.0.0.0:4000",
 		PDAddrs: "127.0.0.1:4089",
 		ProxyServerOnline: ProxyServerOnline{
-			MaxConnections:             1,
-			FrontendKeepalive:          KeepAlive{Enabled: true},
-			ProxyProtocol:              "v2",
-			GracefulWaitBeforeShutdown: 10,
-			ConnBufferSize:             32 * 1024,
+			MaxConnections:                 1,
+			HighMemoryUsageRejectThreshold: 0.9,
+			FrontendKeepalive:              KeepAlive{Enabled: true},
+			ProxyProtocol:                  "v2",
+			GracefulWaitBeforeShutdown:     10,
+			FailBackendList:                []string{"db-tidb-0", "db-tidb-1"},
+			FailoverTimeout:                60,
+			ConnBufferSize:                 32 * 1024,
 		},
 	},
 	API: API{
@@ -71,6 +74,12 @@ var testProxyConfig = Config{
 		},
 		RequireBackendTLS: true,
 	},
+	HA: HA{
+		VirtualIP:        "10.10.10.10/32",
+		Interface:        "eth0",
+		GARPBurstCount:   5,
+		GARPRefreshCount: 30,
+	},
 }
 
 func TestProxyConfig(t *testing.T) {
@@ -92,6 +101,26 @@ func TestProxyCheck(t *testing.T) {
 	}{
 		{
 			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = -0.1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = 1.1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.HighMemoryUsageRejectThreshold = 0.4
+			},
+			post: func(t *testing.T, c *Config) {
+				require.Equal(t, 0.5, c.Proxy.HighMemoryUsageRejectThreshold)
+			},
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
 				c.Workdir = ""
 			},
 			post: func(t *testing.T, c *Config) {
@@ -109,6 +138,30 @@ func TestProxyCheck(t *testing.T) {
 		{
 			pre: func(t *testing.T, c *Config) {
 				c.Proxy.ConnBufferSize = 100 * 1024 * 1024
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.FailBackendList = []string{"db-tidb-0", " "}
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Proxy.FailoverTimeout = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.HA.GARPBurstCount = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.HA.GARPRefreshCount = -1
 			},
 			err: ErrInvalidConfigValue,
 		},
@@ -174,5 +227,7 @@ func TestCloneConfig(t *testing.T) {
 	clone := cfg.Clone()
 	require.Equal(t, cfg, *clone)
 	cfg.Labels["c"] = "d"
+	cfg.Proxy.FailBackendList[0] = "db-tidb-9"
 	require.NotContains(t, clone.Labels, "c")
+	require.Equal(t, []string{"db-tidb-0", "db-tidb-1"}, clone.Proxy.FailBackendList)
 }

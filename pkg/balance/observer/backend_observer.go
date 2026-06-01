@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
 
@@ -77,7 +77,7 @@ func (bo *DefaultBackendObserver) Start(ctx context.Context) {
 	// Failing to observe backends may cause even more serious problems than TiProxy reboot, so we don't recover panics.
 	bo.wg.Run(func() {
 		bo.observe(childCtx)
-	})
+	}, bo.logger)
 }
 
 // Refresh indicates the observer to refresh immediately.
@@ -96,6 +96,7 @@ func (bo *DefaultBackendObserver) observe(ctx context.Context) {
 		var result HealthResult
 		if err != nil {
 			bo.logger.Error("fetching backends encounters error", zap.Error(err))
+			metrics.ServerErrCounter.WithLabelValues("fetchBackendList").Inc()
 			result.err = err
 		} else {
 			result.backends = bo.checkHealth(ctx, backendInfo)

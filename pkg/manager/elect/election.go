@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/siddontang/go/hack"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -38,27 +38,23 @@ type Election interface {
 	ID() string
 	// GetOwnerID gets the owner ID.
 	GetOwnerID(ctx context.Context) (string, error)
-	// Close resigns and but doesn't retire.
+	// Close stops campaigning and retires if this member currently owns the key.
 	Close()
 }
 
 type ElectionConfig struct {
-	Timeout          time.Duration
-	RetryIntvl       time.Duration
-	QueryIntvl       time.Duration
-	WaitBeforeRetire time.Duration
-	RetryCnt         uint64
-	SessionTTL       int
+	Timeout    time.Duration
+	RetryIntvl time.Duration
+	RetryCnt   uint64
+	SessionTTL int
 }
 
 func DefaultElectionConfig(sessionTTL int) ElectionConfig {
 	return ElectionConfig{
-		Timeout:          2 * time.Second,
-		RetryIntvl:       500 * time.Millisecond,
-		QueryIntvl:       1 * time.Second,
-		WaitBeforeRetire: 3 * time.Second,
-		RetryCnt:         3,
-		SessionTTL:       sessionTTL,
+		Timeout:    2 * time.Second,
+		RetryIntvl: 500 * time.Millisecond,
+		RetryCnt:   3,
+		SessionTTL: sessionTTL,
 	}
 }
 
@@ -104,7 +100,7 @@ func (m *election) Start(ctx context.Context) {
 	// Don't recover because we don't know what will happen after recovery.
 	m.wg.Run(func() {
 		m.campaignLoop(clientCtx)
-	})
+	}, m.lg)
 }
 
 func (m *election) ID() string {
@@ -114,18 +110,25 @@ func (m *election) ID() string {
 func (m *election) campaignLoop(ctx context.Context) {
 	session, err := concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
 	if err != nil {
-		m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+		if !errors.Is(err, context.Canceled) {
+			m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+		}
 		return
 	}
 	for {
 		m.lg.Debug("begin campaign")
 		select {
 		case <-session.Done():
+			// Keep the local owner state until we observe a stronger signal that
+			// another member has taken over. Retiring here would trade split-brain
+			// risk for a no-owner window during etcd faults.
 			m.lg.Info("etcd session is done, creates a new one")
 			leaseID := session.Lease()
 			session, err = concurrency.NewSession(m.etcdCli, concurrency.WithTTL(m.cfg.SessionTTL), concurrency.WithContext(ctx))
 			if err != nil {
-				m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+				if !errors.Is(err, context.Canceled) {
+					m.lg.Error("new session failed, break campaign loop", zap.Error(errors.WithStack(err)))
+				}
 				m.revokeLease(leaseID)
 				return
 			}
@@ -145,26 +148,22 @@ func (m *election) campaignLoop(ctx context.Context) {
 			continue
 		}
 
-		var wg waitgroup.WaitGroup
-		childCtx, cancel := context.WithCancel(ctx)
-		if m.isOwner {
-			// Check if another member becomes the new owner during campaign.
-			wg.RunWithRecover(func() {
-				m.waitRetire(childCtx)
-			}, nil, m.lg)
-		}
-
 		elec := concurrency.NewElection(session, m.key)
 		err = elec.Campaign(ctx, m.id)
-		cancel()
-		wg.Wait()
 		if err != nil {
+			// Campaign may fail because etcd is temporarily unavailable while the
+			// current owner lease is still valid. Retiring immediately here would
+			// turn a transient etcd error into a local no-owner window.
 			m.lg.Info("failed to campaign", zap.Error(errors.WithStack(err)))
 			continue
 		}
 
 		kv, err := m.getOwnerInfo(ctx)
 		if err != nil {
+			// Failing to read the owner key does not necessarily mean this member
+			// has lost its lease. Keep the current owner state until we see a
+			// stronger signal such as session.Done, ErrLeaseNotFound, or an owner
+			// mismatch.
 			m.lg.Warn("failed to get owner info", zap.Error(err))
 			continue
 		}
@@ -200,30 +199,6 @@ func (m *election) onRetired() {
 	m.isOwner = false
 	// Delete the metric so that it doesn't show on Grafana.
 	metrics.OwnerGauge.DeletePartialMatch(map[string]string{metrics.LblType: m.trimedKey})
-}
-
-// waitRetire retires after another member becomes the owner so that there will always be an owner.
-// It's allowed if multiple members act as the owner for some time but it's not allowed if no member acts as the owner.
-// E.g. at least one member needs to bind the VIP even if the etcd server leader is down.
-func (m *election) waitRetire(ctx context.Context) {
-	ticker := time.NewTicker(m.cfg.QueryIntvl)
-	defer ticker.Stop()
-	for ctx.Err() == nil {
-		select {
-		case <-ticker.C:
-			id, err := m.GetOwnerID(ctx)
-			if err != nil {
-				continue
-			}
-			// Another member becomes the owner, retire.
-			if id != m.id {
-				m.onRetired()
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
 }
 
 // revokeLease revokes the session lease so that other members can compaign immediately.
@@ -266,17 +241,20 @@ func (m *election) watchOwner(ctx context.Context, session *concurrency.Session,
 		select {
 		case resp, ok := <-watchCh:
 			if !ok {
-				m.lg.Info("watcher is closed, no owner")
+				m.lg.Info("watcher is closed, retry watching owner")
 				return
 			}
 			if resp.Canceled {
-				m.lg.Info("watch canceled, no owner")
+				m.lg.Info("watch canceled, retry watching owner")
 				return
 			}
 
 			for _, ev := range resp.Events {
 				if ev.Type == mvccpb.DELETE {
-					m.lg.Info("watch failed, owner is deleted")
+					// The owner key may disappear before another member campaigns.
+					// Keep the local owner state and let the next campaign round decide
+					// whether a new owner has really taken over.
+					m.lg.Info("watch found owner deleted, retry campaigning")
 					return
 				}
 			}

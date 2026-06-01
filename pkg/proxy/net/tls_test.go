@@ -5,6 +5,7 @@ package net
 
 import (
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"testing"
@@ -25,7 +26,10 @@ func TestTLSReadWrite(t *testing.T) {
 			conn := &tlsInternalConn{brw}
 			tlsConn := tls.Client(conn, ctls)
 			require.NoError(t, tlsConn.Handshake())
-			trw := newTLSReadWriter(brw, tlsConn)
+			trw := newTLSReadWriter(brw, tlsConn, DefaultConnBufferSize)
+			readBufferSize, writeBufferSize := tlsBufferSizes(DefaultConnBufferSize)
+			require.Equal(t, readBufferSize, trw.buf.Reader.Size())
+			require.Equal(t, writeBufferSize, trw.buf.Writer.Size())
 			// check tls connection state
 			require.True(t, trw.TLSConnectionState().HandshakeComplete)
 			// check out bytes
@@ -49,7 +53,10 @@ func TestTLSReadWrite(t *testing.T) {
 			conn := &tlsInternalConn{brw}
 			tlsConn := tls.Server(conn, stls)
 			require.NoError(t, tlsConn.Handshake())
-			trw := newTLSReadWriter(brw, tlsConn)
+			trw := newTLSReadWriter(brw, tlsConn, DefaultConnBufferSize)
+			readBufferSize, writeBufferSize := tlsBufferSizes(DefaultConnBufferSize)
+			require.Equal(t, readBufferSize, trw.buf.Reader.Size())
+			require.Equal(t, writeBufferSize, trw.buf.Writer.Size())
 			// check tls connection state
 			require.True(t, trw.TLSConnectionState().HandshakeComplete)
 			// check in bytes
@@ -81,4 +88,59 @@ func TestTLSReadWrite(t *testing.T) {
 			require.Equal(t, len(data), n)
 			require.Equal(t, message[1:], data)
 		}, 1)
+}
+
+func TestTLSBufferSizes(t *testing.T) {
+	cases := []struct {
+		connBufferSize  int
+		readBufferSize  int
+		writeBufferSize int
+	}{
+		{connBufferSize: 0, readBufferSize: 4 * 1024, writeBufferSize: 16 * 1024},
+		{connBufferSize: 1 * 1024, readBufferSize: 1 * 1024, writeBufferSize: 1 * 1024},
+		{connBufferSize: 4 * 1024, readBufferSize: 1 * 1024, writeBufferSize: 2 * 1024},
+		{connBufferSize: DefaultConnBufferSize, readBufferSize: 4 * 1024, writeBufferSize: 16 * 1024},
+		{connBufferSize: DefaultConnBufferSize * 2, readBufferSize: 4 * 1024, writeBufferSize: 16 * 1024},
+	}
+
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("conn-%d", tc.connBufferSize), func(t *testing.T) {
+			readBufferSize, writeBufferSize := tlsBufferSizes(tc.connBufferSize)
+			require.Equal(t, tc.readBufferSize, readBufferSize)
+			require.Equal(t, tc.writeBufferSize, writeBufferSize)
+		})
+	}
+}
+
+func TestPacketIOTLSBufferSizes(t *testing.T) {
+	stls, ctls, err := security.CreateTLSConfigForTest()
+	require.NoError(t, err)
+
+	for _, connBufferSize := range []int{1 * 1024, 4 * 1024, DefaultConnBufferSize, DefaultConnBufferSize * 2} {
+		t.Run(fmt.Sprintf("conn-%d", connBufferSize), func(t *testing.T) {
+			readBufferSize, writeBufferSize := tlsBufferSizes(connBufferSize)
+			testkit.TestTCPConn(t,
+				func(t *testing.T, c net.Conn) {
+					cli := NewPacketIO(c, nil, connBufferSize)
+					require.NoError(t, cli.ClientTLSHandshake(ctls))
+					trw, ok := cli.readWriter.(*tlsReadWriter)
+					require.True(t, ok)
+					require.Equal(t, readBufferSize, trw.buf.Reader.Size())
+					require.Equal(t, writeBufferSize, trw.buf.Writer.Size())
+					require.NoError(t, cli.Close())
+				},
+				func(t *testing.T, c net.Conn) {
+					srv := NewPacketIO(c, nil, connBufferSize)
+					_, err := srv.ServerTLSHandshake(stls)
+					require.NoError(t, err)
+					trw, ok := srv.readWriter.(*tlsReadWriter)
+					require.True(t, ok)
+					require.Equal(t, readBufferSize, trw.buf.Reader.Size())
+					require.Equal(t, writeBufferSize, trw.buf.Writer.Size())
+					require.NoError(t, srv.Close())
+				},
+				1,
+			)
+		})
+	}
 }

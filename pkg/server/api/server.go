@@ -11,19 +11,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_ctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/sysutil"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	mgrcrt "github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/atomic"
 	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
@@ -73,11 +72,11 @@ func NewServer(cfg config.API, lg *zap.Logger, mgr Managers, handler HTTPHandler
 		ready: ready,
 		lg:    lg,
 		grpc: grpc.NewServer(
-			grpc_middleware.WithUnaryServerChain(
+			grpc.ChainUnaryInterceptor(
 				grpc_ctxtags.UnaryServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),
 				grpc_zap.UnaryServerInterceptor(lg.Named("grpcu"), grpcOpts...),
 			),
-			grpc_middleware.WithStreamServerChain(
+			grpc.ChainStreamInterceptor(
 				grpc_ctxtags.StreamServerInterceptor(grpc_ctxtags.WithFieldExtractor(grpc_ctxtags.CodeGenRequestFieldExtractor)),
 				grpc_zap.StreamServerInterceptor(lg.Named("grpcs"), grpcOpts...),
 			),

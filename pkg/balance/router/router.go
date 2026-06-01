@@ -4,6 +4,8 @@
 package router
 
 import (
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +18,15 @@ import (
 var (
 	ErrNoBackend = errors.New("no available backend")
 )
+
+type routeCheckBackend struct {
+	*backendWrapper
+	healthy bool
+}
+
+func (b routeCheckBackend) Healthy() bool {
+	return b.healthy
+}
 
 // ConnEventReceiver receives connection events.
 type ConnEventReceiver interface {
@@ -69,6 +80,8 @@ type RedirectableConn interface {
 	Value(key any) any
 	// Redirect returns false if the current conn is not redirectable.
 	Redirect(backend BackendInst) bool
+	// ForceClose closes the connection immediately and returns false if it's already closing.
+	ForceClose() bool
 	ConnectionID() uint64
 	ConnInfo() []zap.Field
 }
@@ -85,8 +98,10 @@ type backendWrapper struct {
 	mu struct {
 		sync.RWMutex
 		observer.BackendHealth
+		failoverSince time.Time
 	}
-	addr string
+	addr    string
+	podName string
 	// connScore is used for calculating backend scores and check if the backend can be removed from the list.
 	// connScore = connList.Len() + incoming connections - outgoing connections.
 	connScore int
@@ -98,6 +113,7 @@ type backendWrapper struct {
 func newBackendWrapper(addr string, health observer.BackendHealth) *backendWrapper {
 	wrapper := &backendWrapper{
 		addr:     addr,
+		podName:  backendPodNameFromAddr(addr),
 		connList: glist.New[*connWrapper](),
 	}
 	wrapper.setHealth(health)
@@ -127,9 +143,44 @@ func (b *backendWrapper) Addr() string {
 
 func (b *backendWrapper) Healthy() bool {
 	b.mu.RLock()
+	healthy := b.mu.Healthy && b.mu.failoverSince.IsZero()
+	b.mu.RUnlock()
+	return healthy
+}
+
+func (b *backendWrapper) ObservedHealthy() bool {
+	b.mu.RLock()
 	healthy := b.mu.Healthy
 	b.mu.RUnlock()
 	return healthy
+}
+
+func (b *backendWrapper) PodName() string {
+	return b.podName
+}
+
+func (b *backendWrapper) setFailover(since time.Time) (changed bool, failoverSince time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !since.IsZero() {
+		if !b.mu.failoverSince.IsZero() {
+			return false, b.mu.failoverSince
+		}
+		b.mu.failoverSince = since
+		return true, b.mu.failoverSince
+	}
+	if b.mu.failoverSince.IsZero() {
+		return false, time.Time{}
+	}
+	b.mu.failoverSince = time.Time{}
+	return true, time.Time{}
+}
+
+func (b *backendWrapper) FailoverSince() (since time.Time) {
+	b.mu.RLock()
+	since = b.mu.failoverSince
+	b.mu.RUnlock()
+	return
 }
 
 func (b *backendWrapper) ServerVersion() string {
@@ -180,4 +231,22 @@ type connWrapper struct {
 	lastRedirect time.Time
 	createTime   time.Time
 	phase        connPhase
+	forceClosing bool
+}
+
+func backendPodNameFromAddr(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return ""
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return host
+	}
+	if idx := strings.IndexByte(host, '.'); idx >= 0 {
+		return host[:idx]
+	}
+	return host
 }

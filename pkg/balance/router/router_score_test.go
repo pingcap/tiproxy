@@ -707,6 +707,174 @@ func TestSetBackendStatus(t *testing.T) {
 	}
 }
 
+func TestBackendPodNameFromAddr(t *testing.T) {
+	require.Equal(t, "db-2033841436272623616-0f6e346b-tidb-0", backendPodNameFromAddr("db-2033841436272623616-0f6e346b-tidb-0.peer.ns.svc:4000"))
+	require.Equal(t, "127.0.0.1", backendPodNameFromAddr("127.0.0.1:4000"))
+	require.Equal(t, "backend-host", backendPodNameFromAddr("backend-host"))
+}
+
+func TestFailoverBackendByAddr(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(2)
+	fromBackend := tester.getBackendByIndex(0)
+	toBackend := tester.getBackendByIndex(1)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.Addr()},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	require.False(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+	selector := tester.router.GetBackendSelector()
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(nil, false)
+	require.NotNil(t, backend)
+	require.Equal(t, toBackend.Addr(), backend.Addr())
+}
+
+func TestIgnoreFailoverListWhenItMatchesAllHealthyBackends(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1", "2"},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	tester.addBackends(2)
+	require.True(t, tester.getBackendByIndex(0).Healthy())
+	require.True(t, tester.getBackendByIndex(1).Healthy())
+	require.Equal(t, 2, tester.router.HealthyBackendCount())
+	selector := tester.router.GetBackendSelector()
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(nil, false)
+	require.NotNil(t, backend)
+}
+
+func TestIgnoreFailoverListAfterExpandingToAllHealthyBackends(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(2)
+	tester.addConnections(20)
+	fromBackend := tester.getBackendByIndex(0)
+	toBackend := tester.getBackendByIndex(1)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.PodName()},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	tester.rebalance(1)
+	tester.redirectFinish(10, true)
+	require.Equal(t, 0, fromBackend.ConnCount())
+	require.Equal(t, 20, toBackend.ConnCount())
+	require.False(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.PodName(), toBackend.PodName()},
+				FailoverTimeout: 0,
+			},
+		},
+	})
+	require.True(t, fromBackend.Healthy())
+	require.True(t, toBackend.Healthy())
+	require.Equal(t, 2, tester.router.HealthyBackendCount())
+	tester.rebalance(1)
+	for _, conn := range tester.conns {
+		require.False(t, conn.closing)
+	}
+}
+
+func TestFailoverTimeoutForceClose(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(1)
+	tester.addConnections(3)
+	for _, conn := range tester.conns {
+		conn.blockRedirect = true
+	}
+	tester.addBackends(1)
+	backend := tester.getBackendByIndex(0)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{backend.PodName()},
+				FailoverTimeout: 0,
+			},
+		},
+	})
+	tester.rebalance(1)
+	for _, conn := range tester.conns {
+		require.True(t, conn.closing)
+	}
+	tester.closeConnections(3, false)
+	tester.checkBackendConnMetrics()
+}
+
+func TestFailoverListReevaluatedWithBackendHealth(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(3)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1", "2"},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	require.False(t, tester.getBackendByIndex(0).Healthy())
+	require.False(t, tester.getBackendByIndex(1).Healthy())
+	require.True(t, tester.getBackendByIndex(2).Healthy())
+	require.Equal(t, 1, tester.router.HealthyBackendCount())
+	tester.updateBackendStatusByAddr("3", false)
+	require.True(t, tester.getBackendByIndex(0).Healthy())
+	require.True(t, tester.getBackendByIndex(1).Healthy())
+	require.Equal(t, 2, tester.router.HealthyBackendCount())
+	tester.updateBackendStatusByAddr("3", true)
+	require.False(t, tester.getBackendByIndex(0).Healthy())
+	require.False(t, tester.getBackendByIndex(1).Healthy())
+	require.True(t, tester.getBackendByIndex(2).Healthy())
+	require.Equal(t, 1, tester.router.HealthyBackendCount())
+}
+
+func TestFailoverBackend(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(2)
+	tester.addConnections(20)
+	fromBackend := tester.getBackendByIndex(0)
+	toBackend := tester.getBackendByIndex(1)
+	tester.router.setConfig(&config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{fromBackend.PodName()},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	require.False(t, fromBackend.Healthy())
+	selector := tester.router.GetBackendSelector()
+	backend, err := selector.Next()
+	require.NoError(t, err)
+	selector.Finish(nil, false)
+	require.NotNil(t, backend)
+	require.Equal(t, toBackend.Addr(), backend.Addr())
+	tester.rebalance(1)
+	require.Equal(t, 10, fromBackend.ConnCount())
+	tester.checkRedirectingNum(10)
+	tester.redirectFinish(10, true)
+	require.Equal(t, 0, fromBackend.ConnCount())
+	require.Equal(t, 20, toBackend.ConnCount())
+	tester.checkBackendConnMetrics()
+}
+
 func TestGetServerVersion(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	rt := NewScoreBasedRouter(lg)

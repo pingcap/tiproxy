@@ -1033,7 +1033,8 @@ func TestNetworkError(t *testing.T) {
 	}
 	backendErrChecker := func(t *testing.T, ts *testSuite) {
 		require.True(t, pnet.IsDisconnectError(ts.mp.err))
-		require.True(t, pnet.IsDisconnectError(ts.mb.err))
+		// The backend mock may finish writing the error packet before the proxy actively closes the backend side.
+		require.True(t, ts.mb.err == nil || pnet.IsDisconnectError(ts.mb.err))
 	}
 	proxyErrChecker := func(t *testing.T, ts *testSuite) {
 		require.True(t, pnet.IsDisconnectError(ts.mp.err))

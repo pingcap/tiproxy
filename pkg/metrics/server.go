@@ -34,6 +34,14 @@ var (
 			Help:      "Number of create connections.",
 		})
 
+	RejectConnCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelServer,
+			Name:      "reject_connection_total",
+			Help:      "Number of rejected connections.",
+		}, []string{LblType})
+
 	DisConnCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: ModuleProxy,

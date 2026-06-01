@@ -10,13 +10,13 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
+	"github.com/pingcap/tiproxy/pkg/manager/memory"
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/pingcap/tiproxy/pkg/manager/vip"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -45,6 +46,7 @@ type Server struct {
 	infoSyncer       *infosync.InfoSyncer
 	metricsReader    metricsreader.MetricsReader
 	replay           mgrrp.JobManager
+	memManager       *memory.MemManager
 	// etcd client
 	etcdCli *clientv3.Client
 	// HTTP client
@@ -94,6 +96,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	// setup metrics
 	srv.metricsManager.Init(ctx, lg.Named("metrics"))
 	metrics.ServerEventCounter.WithLabelValues(metrics.EventStart).Inc()
+
+	srv.memManager = memory.NewMemManager(lg, srv.configManager)
+	srv.memManager.Start(ctx)
 
 	// setup certs
 	if err = srv.certManager.Init(cfg, lg.Named("cert"), srv.configManager.WatchConfig()); err != nil {
@@ -171,7 +176,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup proxy server
 	{
-		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), hsHandler)
+		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), hsHandler, srv.memManager)
 		if err != nil {
 			return
 		}
@@ -258,6 +263,9 @@ func (s *Server) Close() error {
 	}
 	if s.metricsReader != nil && !reflect.ValueOf(s.metricsReader).IsNil() {
 		s.metricsReader.Close()
+	}
+	if s.memManager != nil {
+		s.memManager.Close()
 	}
 	if s.infoSyncer != nil {
 		errs = append(errs, s.infoSyncer.Close())

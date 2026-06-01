@@ -19,14 +19,14 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tidb/parser"
+	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
@@ -342,7 +342,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 			cmd, data := pnet.Command(request[0]), request[1:]
 			var query string
 			if cmd == pnet.ComQuery {
-				query = parser.Normalize(pnet.ParseQueryPacket(data))
+				query = parser.Normalize(pnet.ParseQueryPacket(data), "ON")
 				if len(query) > 256 {
 					query = query[:256]
 				}
@@ -629,6 +629,28 @@ func (mgr *BackendConnManager) Redirect(backendInst router.BackendInst) bool {
 	mgr.redirectInfo.Store(&backendInst)
 	// Generally, it won't wait because the caller won't send another signal before the previous one finishes.
 	mgr.signalReceived <- signalTypeRedirect
+	return true
+}
+
+// ForceClose forces closing the connection when the failover times out.
+func (mgr *BackendConnManager) ForceClose() bool {
+	for {
+		status := mgr.closeStatus.Load()
+		if status >= statusClosing {
+			return false
+		}
+		if mgr.closeStatus.CompareAndSwap(status, statusClosing) {
+			break
+		}
+	}
+	mgr.quitSource = SrcProxyQuit
+	if mgr.clientIO != nil {
+		// Interrupt in-flight I/O and let the normal connection teardown release buffers.
+		// Closing the PacketIO here may race with ExecuteCmd() flushing to the client.
+		if err := mgr.clientIO.GracefulClose(); err != nil && !pnet.IsDisconnectError(err) {
+			mgr.logger.Warn("force close client IO error", zap.Error(err))
+		}
+	}
 	return true
 }
 

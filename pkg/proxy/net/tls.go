@@ -11,6 +11,22 @@ import (
 	"github.com/pingcap/tiproxy/pkg/util/bufio"
 )
 
+const (
+	// Post-handshake TLS bufio sizes scale with connBufferSize but stay bounded
+	// so large base buffers do not duplicate full-size TLS memory.
+	minTLSBuffer      = 1 * 1024
+	maxTLSReadBuffer  = 4 * 1024
+	maxTLSWriteBuffer = 16 * 1024
+)
+
+// TLS reads are mostly short peeks; writes benefit from a larger buffer. Sizes
+// are derived from the normalized connection buffer with fixed min/max caps.
+func tlsBufferSizes(connBufferSize int) (readSize int, writeSize int) {
+	c := normalizeConnBufferSize(connBufferSize)
+	return min(max(c/4, minTLSBuffer), maxTLSReadBuffer),
+		min(max(c/2, minTLSBuffer), maxTLSWriteBuffer)
+}
+
 // tlsHandshakeConn is only used as the underlying connection in tls.Conn.
 // TLS handshake must read from the buffered reader because the handshake data may be already buffered in the reader.
 // TLS handshake can not use the buffered writer directly because it assumes the data will be flushed automatically,
@@ -30,7 +46,7 @@ func (p *packetIO) ServerTLSHandshake(tlsConfig *tls.Config) (tls.ConnectionStat
 	if err := tlsConn.Handshake(); err != nil {
 		return tls.ConnectionState{}, p.wrapErr(errors.Wrap(errors.WithStack(err), ErrHandshakeTLS))
 	}
-	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn)
+	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn, p.connBufferSize)
 	return tlsConn.ConnectionState(), nil
 }
 
@@ -41,7 +57,7 @@ func (p *packetIO) ClientTLSHandshake(tlsConfig *tls.Config) error {
 	if err := tlsConn.Handshake(); err != nil {
 		return p.wrapErr(errors.Wrap(errors.WithStack(err), ErrHandshakeTLS))
 	}
-	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn)
+	p.readWriter = newTLSReadWriter(p.readWriter, tlsConn, p.connBufferSize)
 	return nil
 }
 
@@ -57,10 +73,15 @@ type tlsReadWriter struct {
 	conn *tls.Conn
 }
 
-func newTLSReadWriter(rw packetReadWriter, tlsConn *tls.Conn) *tlsReadWriter {
+func newTLSReadWriter(rw packetReadWriter, tlsConn *tls.Conn, connBufferSize int) *tlsReadWriter {
 	// Can not modify rw and reuse it because tlsConn is using rw internally.
-	// We must create another buffer.
-	buf := bufio.NewReadWriter(bufio.NewReaderSize(tlsConn, DefaultConnBufferSize), bufio.NewWriterSize(tlsConn, DefaultConnBufferSize))
+	// We must create another buffer. Size it from the base connection buffer so
+	// custom connBufferSize values keep a consistent memory profile after TLS.
+	readBufferSize, writeBufferSize := tlsBufferSizes(connBufferSize)
+	buf := bufio.NewReadWriter(
+		bufio.NewReaderSize(tlsConn, readBufferSize),
+		bufio.NewWriterSize(tlsConn, writeBufferSize),
+	)
 	return &tlsReadWriter{
 		packetReadWriter: rw,
 		buf:              buf,

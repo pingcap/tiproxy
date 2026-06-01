@@ -321,10 +321,10 @@ func TestHealthQueryRule(t *testing.T) {
 tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 10
 pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"} 10
 pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"} 100
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="Get"} 20
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="Get"} 30
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="BatchGet"} 20
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="BatchGet"} 30
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 20
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 30
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 20
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 30
 `,
 			curValue:   []model.SampleValue{10, 100, 0, 100},
 			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), model.SampleValue(math.NaN())},
@@ -335,10 +335,10 @@ tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 20
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 100
 pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"} 20
 pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"} 200
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="Get"} 50
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="Get"} 50
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="BatchGet"} 50
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="BatchGet"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 50
 `,
 			curValue:   []model.SampleValue{20, 200, 100, 200},
 			finalValue: []model.SampleValue{10, 100, 100, 100},
@@ -349,10 +349,10 @@ tidb_tikvclient_backoff_seconds_count{type="pdRPC"} 20
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 150
 pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"} 20
 pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"} 300
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="Get"} 100
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="Get"} 100
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="BatchGet"} 100
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type="BatchGet"} 100
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 100
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="Get"} 100
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="BatchGet"} 100
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="2",type="BatchGet"} 100
 `,
 			curValue:   []model.SampleValue{20, 300, 150, 400},
 			finalValue: []model.SampleValue{10, 200, 150, 300},
@@ -362,7 +362,7 @@ tidb_tikvclient_request_counter{scope="false",stale_read="false",store="2",type=
 tidb_tikvclient_backoff_seconds_count{type="tikvRPC"} 10
 pd_client_cmd_handle_failed_cmds_duration_seconds_count{type="tso"} 5
 pd_client_cmd_handle_cmds_duration_seconds_count{type="tso"} 50
-tidb_tikvclient_request_counter{scope="false",stale_read="false",store="1",type="Get"} 50
+tidb_tikvclient_request_seconds_count{scope="false",stale_read="false",store="1",type="Get"} 50
 `,
 			curValue:   []model.SampleValue{5, 50, 10, 50},
 			finalValue: []model.SampleValue{model.SampleValue(math.NaN()), model.SampleValue(math.NaN()), 10, model.SampleValue(math.NaN())},

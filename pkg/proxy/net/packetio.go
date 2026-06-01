@@ -30,8 +30,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/pingcap/tidb/errno"
-	"github.com/pingcap/tidb/util/dbterror"
+	"github.com/pingcap/tidb/pkg/errno"
+	"github.com/pingcap/tidb/pkg/util/dbterror"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
@@ -47,6 +47,15 @@ var (
 const (
 	DefaultConnBufferSize = 32 * 1024
 )
+
+// normalizeConnBufferSize keeps 0 as "use the default", so every caller in the
+// packet/TLS stack derives buffer sizes from the same effective value.
+func normalizeConnBufferSize(bufferSize int) int {
+	if bufferSize == 0 {
+		return DefaultConnBufferSize
+	}
+	return bufferSize
+}
 
 type rwStatus int
 
@@ -90,9 +99,7 @@ type basicReadWriter struct {
 }
 
 func newBasicReadWriter(conn net.Conn, bufferSize int) *basicReadWriter {
-	if bufferSize == 0 {
-		bufferSize = DefaultConnBufferSize
-	}
+	bufferSize = normalizeConnBufferSize(bufferSize)
 	return &basicReadWriter{
 		Conn:       conn,
 		ReadWriter: bufio.NewReadWriter(bufio.NewReaderSize(conn, bufferSize), bufio.NewWriterSize(conn, bufferSize)),
@@ -227,22 +234,28 @@ type PacketIO interface {
 // PacketIO is a helper to read and write sql and proxy protocol.
 type packetIO struct {
 	lastKeepAlive config.KeepAlive
-	rawConn       net.Conn
-	readWriter    packetReadWriter
-	limitReader   io.LimitedReader // reuse memory to reduce allocation
-	logger        *zap.Logger
-	remoteAddr    net.Addr
-	wrap          error
-	header        [4]byte // reuse memory to reduce allocation
-	inPackets     uint64
-	outPackets    uint64
+	// TLS allocates another buffered layer after the handshake. Keep the
+	// normalized base connection buffer size here so the TLS layer can scale
+	// from the caller's setting instead of falling back to unrelated constants.
+	connBufferSize int
+	rawConn        net.Conn
+	readWriter     packetReadWriter
+	limitReader    io.LimitedReader // reuse memory to reduce allocation
+	logger         *zap.Logger
+	remoteAddr     net.Addr
+	wrap           error
+	header         [4]byte // reuse memory to reduce allocation
+	inPackets      uint64
+	outPackets     uint64
 }
 
 func NewPacketIO(conn net.Conn, lg *zap.Logger, bufferSize int, opts ...PacketIOption) *packetIO {
+	bufferSize = normalizeConnBufferSize(bufferSize)
 	p := &packetIO{
-		rawConn:    conn,
-		logger:     lg,
-		readWriter: newBasicReadWriter(conn, bufferSize),
+		connBufferSize: bufferSize,
+		rawConn:        conn,
+		logger:         lg,
+		readWriter:     newBasicReadWriter(conn, bufferSize),
 	}
 	p.ApplyOpts(opts...)
 	return p

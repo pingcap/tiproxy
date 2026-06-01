@@ -160,8 +160,8 @@ func TestProgress(t *testing.T) {
 	now := time.Now()
 	defer loader.Close()
 
-	// If the channel size is too small, there may be a deadlock.
-	// ExecuteCmd waits for cmdCh <- data in a lock, while Progress() waits for the lock.
+	// Buffer so ExecuteCmd (cmdCh send) and Progress (replay lock) cannot deadlock; keep cmdCh
+	// large enough that readCommands is not blocked before the test reads.
 	cmdCh := make(chan *cmd.Command, 10)
 	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
@@ -197,6 +197,9 @@ func TestProgress(t *testing.T) {
 			// Maybe unstable due to goroutine schedule.
 			// require.LessOrEqual(t, progress, float64(i+2)/10)
 		}
+		// Wait for readCommands to finish before the next Start, otherwise a new Start replaces
+		// r.closeCh while the previous readCommands is still draining close events and can hang.
+		replay.Stop(nil)
 	}
 }
 
@@ -241,7 +244,7 @@ func TestPendingCmds(t *testing.T) {
 		return err != nil
 	}, 5*time.Second, 10*time.Millisecond)
 	progress, _, done, err := replay.Progress()
-	require.NotEqualValues(t, 1, progress)
+	require.NotEqualValues(t, 1.0, progress)
 	require.True(t, done)
 	require.Contains(t, err.Error(), "too many pending commands")
 	logs := text.String()
