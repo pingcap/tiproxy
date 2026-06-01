@@ -1,4 +1,4 @@
-FROM golang:1.25.8-alpine AS builder
+FROM golang:1.25.10-alpine AS builder
 
 RUN apk add --no-cache --progress git make
 ARG VERSION
