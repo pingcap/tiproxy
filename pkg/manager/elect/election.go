@@ -198,7 +198,7 @@ func (m *election) onRetired() {
 	m.member.OnRetired()
 	m.isOwner = false
 	// Delete the metric so that it doesn't show on Grafana.
-	metrics.OwnerGauge.MetricVec.DeletePartialMatch(map[string]string{metrics.LblType: m.trimedKey})
+	metrics.OwnerGauge.DeletePartialMatch(map[string]string{metrics.LblType: m.trimedKey})
 }
 
 // revokeLease revokes the session lease so that other members can compaign immediately.

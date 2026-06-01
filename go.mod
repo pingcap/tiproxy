@@ -1,6 +1,6 @@
 module github.com/pingcap/tiproxy
 
-go 1.23.12
+go 1.25.10
 
 require (
 	github.com/BurntSushi/toml v1.5.0

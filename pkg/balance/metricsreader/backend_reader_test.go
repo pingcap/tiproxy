@@ -832,7 +832,7 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	const initialRules, initialBackends = 3, 3
 	var buf strings.Builder
 	for i := 0; i < initialRules+1; i++ {
-		buf.WriteString(fmt.Sprintf("name%d 100\n", i))
+		_, _ = fmt.Fprintf(&buf, "name%d 100\n", i)
 	}
 	resp := buf.String()
 

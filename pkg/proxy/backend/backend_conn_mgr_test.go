@@ -1272,7 +1272,7 @@ func TestCloseWhileConnect(t *testing.T) {
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				go func() {
-					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+					require.NoError(ts.t, ts.mp.Close())
 				}()
 				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 				if err == nil {
@@ -1307,7 +1307,7 @@ func TestCloseWhileExecute(t *testing.T) {
 					return err
 				}
 				go func() {
-					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+					require.NoError(ts.t, ts.mp.Close())
 				}()
 				return ts.mp.ExecuteCmd(context.Background(), request)
 			},
@@ -1331,7 +1331,7 @@ func TestCloseWhileGracefulClose(t *testing.T) {
 		{
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				go func() {
-					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+					require.NoError(ts.t, ts.mp.Close())
 				}()
 				ts.mp.GracefulClose()
 				return nil

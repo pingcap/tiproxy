@@ -210,7 +210,7 @@ func (b *backendWrapper) GetBackendInfo() observer.BackendInfo {
 
 func (b *backendWrapper) Equals(health observer.BackendHealth) bool {
 	b.mu.RLock()
-	equal := b.mu.BackendHealth.Equals(health)
+	equal := b.mu.Equals(health)
 	b.mu.RUnlock()
 	return equal
 }

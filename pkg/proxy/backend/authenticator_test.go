@@ -68,11 +68,11 @@ func TestUnsupportedCapability(t *testing.T) {
 	for _, cfgs := range cfgOverriders {
 		ts, clean := newTestSuite(t, tc, cfgs...)
 		ts.authenticateFirstTime(t, func(t *testing.T, _ *testSuite) {
-			if ts.mc.clientConfig.capability&requiredFrontendCaps != requiredFrontendCaps {
+			if ts.mc.capability&requiredFrontendCaps != requiredFrontendCaps {
 				require.ErrorIs(t, ts.mp.err, ErrClientCap)
 				require.Nil(t, ErrToClient(ts.mp.err))
 				require.Equal(t, SrcClientHandshake, Error2Source(ts.mp.err))
-			} else if ts.mb.backendConfig.capability&defRequiredBackendCaps != defRequiredBackendCaps {
+			} else if ts.mb.capability&defRequiredBackendCaps != defRequiredBackendCaps {
 				require.ErrorIs(t, ts.mp.err, ErrBackendCap)
 				require.Equal(t, ErrBackendCap, ErrToClient(ts.mp.err))
 				require.Equal(t, SrcBackendHandshake, Error2Source(ts.mp.err))
@@ -583,8 +583,8 @@ func TestUpgradeBackendCap(t *testing.T) {
 			require.Equal(t, pnet.Capability(0), ts.mb.capability&pnet.ClientCompress)
 		})
 		// After upgrade, the backend also supports compression.
-		ts.mb.backendConfig.capability |= pnet.ClientCompress
-		ts.mb.backendConfig.capability |= pnet.ClientZstdCompressionAlgorithm
+		ts.mb.capability |= pnet.ClientCompress
+		ts.mb.capability |= pnet.ClientZstdCompressionAlgorithm
 		ts.authenticateSecondTime(t, func(t *testing.T, ts *testSuite) {
 			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientCompress, ts.mc.capability&pnet.ClientCompress)
 			require.Equal(t, referCfg.clientConfig.capability&pnet.ClientCompress, ts.mp.authenticator.capability&pnet.ClientCompress)
