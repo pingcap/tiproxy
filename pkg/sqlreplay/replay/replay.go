@@ -124,7 +124,7 @@ type ReplayConfig struct {
 	// is not in this list are ignored (comma-separated in HTTP form; repeated or comma-separated CLI flag).
 	// Matching is case-insensitive; HTTP form values are stored lowercased, and the audit decoder lowercases for lookup.
 	UserAllowlist []string
-	// TableSuffixList is only used for audit log plugin format. When non-empty, GENERAL and TABLE_ACCESS lines
+	// TableSuffixList is used for audit log plugin and extension formats. When non-empty, lines
 	// are replayed only if TABLES is non-empty and every listed table name ends with _<digits> and each digit
 	// string appears in this list (comma-separated in HTTP form; repeated or comma-separated CLI flag).
 	TableSuffixList []string

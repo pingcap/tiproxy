@@ -702,7 +702,9 @@ func (decoder *AuditLogPluginDecoder) EnableFilterCommandWithRetry() {
 	decoder.filterCommandWithRetry = true
 }
 
-// parseAuditTablesField parses the audit log TABLES value, e.g. `"[t1,t2]"` or `[t1,t2]`.
+// parseAuditTablesField parses the audit log TABLES value.
+// Plugin format: `"[t1,t2]"` or `[t1,t2]`.
+// Extension format: `"[`db`.`table`,`db`.`table2`]"` (comma-separated backtick-qualified names).
 func parseAuditTablesField(raw string) ([]string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -721,16 +723,59 @@ func parseAuditTablesField(raw string) ([]string, error) {
 	if raw[0] == '[' && raw[len(raw)-1] == ']' {
 		raw = strings.TrimSpace(raw[1 : len(raw)-1])
 	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		out = append(out, p)
+	return splitAuditTablesList(raw), nil
+}
+
+// splitAuditTablesList splits a TABLES list on commas outside backtick-quoted identifiers.
+func splitAuditTablesList(inner string) []string {
+	inner = strings.TrimSpace(inner)
+	if inner == "" {
+		return nil
 	}
-	return out, nil
+	var (
+		parts      []string
+		b          strings.Builder
+		inBacktick bool
+	)
+	flush := func() {
+		if s := strings.TrimSpace(b.String()); s != "" {
+			parts = append(parts, s)
+		}
+		b.Reset()
+	}
+	for i := 0; i < len(inner); i++ {
+		switch inner[i] {
+		case '`':
+			inBacktick = !inBacktick
+			b.WriteByte('`')
+		case ',':
+			if inBacktick {
+				b.WriteByte(',')
+			} else {
+				flush()
+			}
+		default:
+			b.WriteByte(inner[i])
+		}
+	}
+	flush()
+	return parts
+}
+
+// auditTableNameForSuffix returns the table identifier used for _<digits> suffix matching.
+// Plugin format uses plain names (e.g. t_123) with no schema/db prefix.
+// Extension format uses backtick-qualified names (e.g. `db`.`table_123`).
+func auditTableNameForSuffix(name string) string {
+	name = strings.TrimSpace(name)
+	if !strings.Contains(name, "`") {
+		return name
+	}
+	name = strings.Trim(name, "`")
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		name = name[idx+1:]
+		name = strings.Trim(name, "`")
+	}
+	return name
 }
 
 // tableUnderscoreDigitSuffix reports whether name ends with '_' followed only by ASCII digits,
@@ -758,7 +803,7 @@ func tablesFieldMatchesSuffixAllowlist(rawTables string, allow map[string]struct
 		return false
 	}
 	for _, name := range names {
-		dig, ok := tableUnderscoreDigitSuffix(name)
+		dig, ok := tableUnderscoreDigitSuffix(auditTableNameForSuffix(name))
 		if !ok {
 			return false
 		}
