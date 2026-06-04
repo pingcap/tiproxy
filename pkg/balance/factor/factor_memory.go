@@ -244,8 +244,11 @@ func calcMemUsage(usageHistory []model.SamplePair) (latestUsage float64, timeToO
 				continue
 			}
 			usageDiff := latestUsage - value
-			if usageDiff > 1e-4 {
+			if usageDiff > 1e-4 && latestUsage > 1e-4 {
 				timeToOOM = time.Duration(float64(timeDiff) * (oomMemoryUsage - latestUsage) / usageDiff)
+				// When the backend just starts, the memory usage usually bursts but is actually safe.
+				// Adjust timeToOOM so that the same growth rate is less urgent at lower memory usage.
+				timeToOOM = time.Duration(float64(timeToOOM) / latestUsage * 0.6)
 			}
 			break
 		}
