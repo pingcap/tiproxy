@@ -912,7 +912,7 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				},
 				CostTime: time.Second,
 			},
-			log: "{\"sql\":\"select ?\",\"db\":\"db1\",\"cost\":\"1000.000\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+			log: "{\"sql\":\"select ?\",\"db\":\"db1\",\"cost\":1000000,\"ex_time\":\"20250906 17:03:50\"}\n",
 		},
 		{
 			execInfo: conn.ExecInfo{
@@ -923,7 +923,7 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				},
 				CostTime: time.Millisecond,
 			},
-			log: "{\"sql\":\"insert into `t` values ( ? )\",\"db\":\"db1\",\"cost\":\"1.000\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+			log: "{\"sql\":\"insert into `t` values ( ? )\",\"db\":\"db1\",\"cost\":1000,\"ex_time\":\"20250906 17:03:50\"}\n",
 		},
 		{
 			execInfo: conn.ExecInfo{
@@ -934,7 +934,7 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				},
 				CostTime: 1234567,
 			},
-			log: "{\"sql\":\"insert into `t` values ( ... )\",\"db\":\"db1\",\"cost\":\"1.235\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+			log: "{\"sql\":\"insert into `t` values ( ... )\",\"db\":\"db1\",\"cost\":1234,\"ex_time\":\"20250906 17:03:50\"}\n",
 		},
 		{
 			execInfo: conn.ExecInfo{
@@ -945,7 +945,7 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				},
 				CostTime: 1234567,
 			},
-			log: "{\"sql\":\"select * from where `id` in ( ... )\",\"db\":\"db1\",\"cost\":\"1.235\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+			log: "{\"sql\":\"select * from where `id` in ( ... )\",\"db\":\"db1\",\"cost\":1234,\"ex_time\":\"20250906 17:03:50\"}\n",
 		},
 		{
 			execInfo: conn.ExecInfo{
@@ -955,7 +955,7 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				},
 				CostTime: 9999 * time.Microsecond,
 			},
-			log: "{\"sql\":\"select ?\",\"db\":\"\",\"cost\":\"9.999\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+			log: "{\"sql\":\"select ?\",\"db\":\"\",\"cost\":9999,\"ex_time\":\"20250906 17:03:50\"}\n",
 		},
 		{
 			execInfo: conn.ExecInfo{
@@ -965,7 +965,7 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				},
 				CostTime: 9999 * time.Microsecond,
 			},
-			log: "{\"sql\":\"select \\n\\\"\\\"\",\"db\":\"\",\"cost\":\"9.999\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+			log: "{\"sql\":\"select \\n\\\"\\\"\",\"db\":\"\",\"cost\":9999,\"ex_time\":\"20250906 17:03:50\"}\n",
 		},
 		{
 			execInfo: conn.ExecInfo{

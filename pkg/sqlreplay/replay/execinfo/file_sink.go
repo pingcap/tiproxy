@@ -34,7 +34,7 @@ func (s *fileSink) Write(rec Record) error {
 	s.lg.Info("exec info",
 		zap.String("sql", rec.SQL),
 		zap.String("db", rec.DB),
-		zap.String("cost", rec.Cost),
+		zap.Int64("cost", rec.Cost),
 		zap.String("ex_time", rec.ExTime))
 	return nil
 }
