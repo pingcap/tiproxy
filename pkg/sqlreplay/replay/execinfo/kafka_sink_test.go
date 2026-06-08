@@ -31,7 +31,7 @@ func TestKafkaSinkWrite(t *testing.T) {
 	rec := Record{
 		SQL:    "select ?",
 		DB:     "db1",
-		Cost:   "1.000",
+		Cost:   1000,
 		ExTime: "20250906 17:03:50.222",
 	}
 	require.NoError(t, sink.Write(rec))

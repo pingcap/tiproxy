@@ -4,8 +4,6 @@
 package execinfo
 
 import (
-	"strconv"
-
 	"github.com/pingcap/tidb/pkg/parser"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
@@ -13,13 +11,13 @@ import (
 	"github.com/siddontang/go/hack"
 )
 
-const outputTimeFormat = "20060102 15:04:05.999"
+const outputTimeFormat = "20060102 15:04:05"
 
 // Record is the JSON payload written for each executed SQL.
 type Record struct {
 	SQL    string `json:"sql"`
 	DB     string `json:"db"`
-	Cost   string `json:"cost"`
+	Cost   int64  `json:"cost"`
 	ExTime string `json:"ex_time"`
 }
 
@@ -33,7 +31,7 @@ func NewRecord(info conn.ExecInfo) (Record, bool) {
 	return Record{
 		SQL:    sql,
 		DB:     info.Command.CurDB,
-		Cost:   strconv.FormatFloat(float64(info.CostTime)/1000000.0, 'f', 3, 64),
+		Cost:   int64(info.CostTime) / 1000,
 		ExTime: info.StartTime.Format(outputTimeFormat),
 	}, true
 }

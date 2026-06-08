@@ -28,7 +28,7 @@ func TestNewRecord(t *testing.T) {
 	require.Equal(t, Record{
 		SQL:    "select ?",
 		DB:     "db1",
-		Cost:   "1000.000",
+		Cost:   1000,
 		ExTime: "20250906 17:03:50.222",
 	}, rec)
 
