@@ -74,7 +74,7 @@ func (r *StaticRouter) OnRedirectFail(from, to string, conn RedirectableConn) er
 	return nil
 }
 
-func (r *StaticRouter) OnConnClosed(backendID, redirectingBackendID string, conn RedirectableConn) error {
+func (r *StaticRouter) OnConnClosed(backendID string, conn RedirectableConn) error {
 	r.cnt--
 	return nil
 }

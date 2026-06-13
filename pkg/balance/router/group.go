@@ -395,6 +395,7 @@ func (g *Group) onCreateConn(backendInst BackendInst, conn RedirectableConn, suc
 	if succeed {
 		connWrapper := &connWrapper{
 			RedirectableConn: conn,
+			scoreOwner:       backend,
 			createTime:       time.Now(),
 			phase:            phaseNotRedirected,
 			forceClosing:     false,
@@ -437,12 +438,31 @@ func (g *Group) CloseTimedOutFailoverConnections(now time.Time) {
 	}
 }
 
-func (g *Group) removeConn(backend *backendWrapper, ce *glist.Element[*connWrapper]) {
+// removeConn removes the connection from the connList that actually contains it.
+// Always remove by `physicalOwner` instead of by the backend that the connection is physically on:
+// they differ when a redirect result has not been processed yet, and glist.Remove silently
+// does nothing if the element is not in the given list, which leaks the connection forever.
+func (g *Group) removeConn(ce *glist.Element[*connWrapper]) {
+	backend := ce.Value.physicalOwner
+	if backend == nil {
+		g.lg.Error("unexpected nil physical owner for connection")
+		return
+	}
+	oldLen := backend.connList.Len()
 	backend.connList.Remove(ce)
-	setBackendConnMetrics(backend.addr, backend.connList.Len())
+	newLen := backend.connList.Len()
+	if newLen != oldLen-1 {
+		g.lg.Error("the connection is not in the list", zap.String("backend", backend.id))
+	}
+	ce.Value.physicalOwner = nil
+	setBackendConnMetrics(backend.addr, newLen)
 }
 
 func (g *Group) addConn(backend *backendWrapper, conn *connWrapper) {
+	if conn.physicalOwner != nil {
+		g.lg.Error("unexpected non-nil physical owner for connection")
+	}
+	conn.physicalOwner = backend
 	ce := backend.connList.PushBack(conn)
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	setConnWrapper(conn, ce)
@@ -513,39 +533,38 @@ func (g *Group) onRedirectFinished(from, to string, conn RedirectableConn, succe
 	fromBackend := g.ensureBackend(from)
 	toBackend := g.ensureBackend(to)
 	connWrapper := getConnWrapper(conn).Value
-	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 	// The connection may be closed when this function is waiting for the lock.
 	if connWrapper.phase == phaseClosed {
 		return
 	}
 
+	addMigrateMetrics(fromBackend.addr, toBackend.addr, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 	if succeed {
-		g.removeConn(fromBackend, getConnWrapper(conn))
+		g.removeConn(getConnWrapper(conn))
 		g.addConn(toBackend, connWrapper)
 		connWrapper.phase = phaseRedirectEnd
 	} else {
-		fromBackend.connScore++
-		toBackend.connScore--
+		connWrapper.transferScore(fromBackend)
 		connWrapper.phase = phaseRedirectFail
 	}
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
-func (g *Group) OnConnClosed(backendID, redirectingBackendID string, conn RedirectableConn) error {
+func (g *Group) OnConnClosed(backendID string, conn RedirectableConn) error {
 	g.Lock()
 	defer g.Unlock()
-	backend := g.ensureBackend(backendID)
 	connWrapper := getConnWrapper(conn)
-	// If this connection has not redirected yet, decrease the score of the target backend.
-	if redirectingBackendID != "" {
-		redirectingBackend := g.ensureBackend(redirectingBackendID)
-		redirectingBackend.connScore--
-		metrics.PendingMigrateGuage.WithLabelValues(backendID, redirectingBackendID, connWrapper.Value.redirectReason).Dec()
-	} else {
-		backend.connScore--
+	cw := connWrapper.Value
+	// If the physical owner mismatches the score owner, it means the redirect result has not been processed yet.
+	if cw.physicalOwner != cw.scoreOwner && cw.physicalOwner != nil && cw.scoreOwner != nil {
+		addMigrateMetrics(cw.physicalOwner.addr, cw.scoreOwner.addr, cw.redirectReason, false, cw.lastRedirect)
 	}
-	g.removeConn(backend, connWrapper)
-	connWrapper.Value.phase = phaseClosed
+	cw.transferScore(nil)
+	// A redirect result may have not been processed yet, in which case the connection is still
+	// in the old backend's connList while `backendID` is the new backend, so remove the connection
+	// by its physicalOwner. onRedirectFinished won't touch the list once the phase is phaseClosed.
+	g.removeConn(connWrapper)
+	cw.phase = phaseClosed
 	return nil
 }
 
@@ -564,8 +583,7 @@ func (g *Group) redirectConn(conn *connWrapper, fromBackend *backendWrapper, toB
 	succeed := conn.Redirect(toBackend)
 	if succeed {
 		g.lg.Debug("begin redirect connection", fields...)
-		fromBackend.connScore--
-		toBackend.connScore++
+		conn.transferScore(toBackend)
 		conn.phase = phaseRedirectNotify
 		conn.redirectReason = reason
 		metrics.PendingMigrateGuage.WithLabelValues(fromBackend.addr, toBackend.addr, reason).Inc()
