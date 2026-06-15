@@ -182,16 +182,16 @@ func (g *Group) AddBackend(backendID string, backend *backendWrapper) {
 	backend.group = g
 }
 
-func (g *Group) RemoveBackend(backendID string) {
+// removeBackendIfIdle removes the backend from the group only if it has no connections and no
+// pending incoming/outgoing scores.
+func (g *Group) removeBackendIfIdle(backendID string, backend *backendWrapper) (removed, empty bool) {
 	g.Lock()
 	defer g.Unlock()
+	if backend.connList.Len() != 0 || backend.connScore > 0 {
+		return false, false
+	}
 	delete(g.backends, backendID)
-}
-
-func (g *Group) Empty() bool {
-	g.Lock()
-	defer g.Unlock()
-	return len(g.backends) == 0
+	return true, len(g.backends) == 0
 }
 
 func getConnWrapper(conn RedirectableConn) *glist.Element[*connWrapper] {

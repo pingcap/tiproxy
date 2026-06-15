@@ -295,20 +295,25 @@ func (router *ScoreBasedRouter) rebuildPortConflictDetector() {
 // called in the lock.
 func (router *ScoreBasedRouter) updateGroups() {
 	for _, backend := range router.backends {
-		// If connList.Len() == 0, there won't be any outgoing connections.
-		// And if also connScore == 0, there won't be any incoming connections.
-		if !backend.ObservedHealthy() && backend.connList.Len() == 0 && backend.connScore <= 0 {
-			delete(router.backends, backend.id)
+		// An unhealthy backend can be removed once it has no connections. connList and connScore are
+		// protected by the group lock instead of the router lock, so read them through
+		// removeBackendIfIdle to avoid racing with connection events. A backend without a group has
+		// never been routed to, so it has no connections and can be removed directly.
+		if !backend.ObservedHealthy() {
+			removed, empty := true, false
 			if backend.group != nil {
-				backend.group.RemoveBackend(backend.id)
+				removed, empty = backend.group.removeBackendIfIdle(backend.id, backend)
+			}
+			if removed {
+				delete(router.backends, backend.id)
 				// remove empty groups
-				if backend.group.Empty() {
+				if backend.group != nil && empty {
 					router.groups = slices.DeleteFunc(router.groups, func(g *Group) bool {
 						return g == backend.group
 					})
 				}
+				continue
 			}
-			continue
 		}
 		// If the labels were correctly set, we won't update its group even if the labels change.
 		if backend.group != nil {
