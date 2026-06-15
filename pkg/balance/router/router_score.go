@@ -327,6 +327,138 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	if len(serverVersion) > 0 {
 		router.serverVersion = serverVersion
 	}
+<<<<<<< HEAD
+=======
+	if router.supportRedirection != supportRedirection {
+		router.logger.Info("updated supporting redirection", zap.Bool("support", supportRedirection))
+		router.supportRedirection = supportRedirection
+	}
+}
+
+func matchPortValue(clusterName, port string) string {
+	if clusterName == "" {
+		return port
+	}
+	return fmt.Sprintf("%s:%s", clusterName, port)
+}
+
+func (router *ScoreBasedRouter) backendGroupValues(backend *backendWrapper) []string {
+	switch router.matchType {
+	case MatchClientCIDR, MatchProxyCIDR:
+		return backend.Cidr()
+	case MatchPort:
+		port := backend.TiProxyPort()
+		if port != "" {
+			return []string{matchPortValue(backend.ClusterName(), port)}
+		}
+	}
+	return nil
+}
+
+func (router *ScoreBasedRouter) rebuildPortConflictDetector() {
+	if router.matchType != MatchPort {
+		router.portConflictDetector = nil
+		return
+	}
+	detector := newPortConflictDetector()
+	for _, group := range router.groups {
+		for _, value := range group.values {
+			clusterName, port, ok := strings.Cut(value, ":")
+			if !ok {
+				port = value
+				clusterName = ""
+			}
+			detector.bind(port, clusterName, group)
+		}
+	}
+	router.portConflictDetector = detector
+}
+
+// Update the groups after the backend list is updated.
+// called in the lock.
+func (router *ScoreBasedRouter) updateGroups() {
+	for _, backend := range router.backends {
+		// An unhealthy backend can be removed once it has no connections. connList and connScore are
+		// protected by the group lock instead of the router lock, so read them through
+		// removeBackendIfIdle to avoid racing with connection events. A backend without a group has
+		// never been routed to, so it has no connections and can be removed directly.
+		if !backend.ObservedHealthy() {
+			removed, empty := true, false
+			if backend.group != nil {
+				removed, empty = backend.group.removeBackendIfIdle(backend.id, backend)
+			}
+			if removed {
+				delete(router.backends, backend.id)
+				// remove empty groups
+				if backend.group != nil && empty {
+					router.groups = slices.DeleteFunc(router.groups, func(g *Group) bool {
+						return g == backend.group
+					})
+				}
+				continue
+			}
+		}
+		// If the labels were correctly set, we won't update its group even if the labels change.
+		if backend.group != nil {
+			switch router.matchType {
+			case MatchClientCIDR, MatchProxyCIDR, MatchPort:
+				values := router.backendGroupValues(backend)
+				if !backend.group.EqualValues(values) {
+					router.logger.Warn("backend routing values changed, keep the existing group until it is removed",
+						zap.String("backend_id", backend.id),
+						zap.String("addr", backend.Addr()),
+						zap.Strings("current_values", values),
+						zap.Strings("group_values", backend.group.values))
+				}
+			}
+			continue
+		}
+
+		// If the backend is not in any group, add it to a new group if its label is set.
+		// In operator deployment, the labels are set dynamically.
+		var group *Group
+		switch router.matchType {
+		case MatchAll:
+			if len(router.groups) == 0 {
+				group, _ = NewGroup(nil, router.bpCreator, router.matchType, router.logger)
+				router.groups = append(router.groups, group)
+			}
+			group = router.groups[0]
+		case MatchClientCIDR, MatchProxyCIDR, MatchPort:
+			values := router.backendGroupValues(backend)
+			if len(values) == 0 {
+				break
+			}
+			for _, g := range router.groups {
+				if g.Intersect(values) {
+					group = g
+					break
+				}
+			}
+			if group == nil {
+				g, err := NewGroup(values, router.bpCreator, router.matchType, router.logger)
+				if err == nil {
+					group = g
+					if router.cfgGetter != nil {
+						if cfg := router.cfgGetter.GetConfig(); cfg != nil {
+							group.SetConfig(cfg)
+						}
+					}
+					router.groups = append(router.groups, group)
+				}
+				// maybe too many logs, ignore the error now
+			}
+		}
+		if group == nil {
+			continue
+		}
+		group.AddBackend(backend.id, backend)
+	}
+	for _, group := range router.groups {
+		group.RefreshCidr()
+	}
+	router.rebuildPortConflictDetector()
+>>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
 }
 
 func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {

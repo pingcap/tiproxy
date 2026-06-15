@@ -258,7 +258,24 @@ func (mgr *BackendConnManager) newExponentialBackOff() *backoff.ExponentialBackO
 	return b
 }
 
+// abandonRoutedBackend removes the registration left by a previous successful dial during handshake.
+// It is called at the beginning of getBackendIO before routing to another backend.
+func (mgr *BackendConnManager) abandonRoutedBackend() {
+	receiver := mgr.getEventReceiver()
+	if receiver == nil || mgr.curBackend == nil {
+		return
+	}
+	if err := receiver.OnConnClosed(mgr.curBackend.ID(), mgr); err != nil {
+		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_id", mgr.curBackend.ID()),
+			zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
+	}
+	// Clear the receiver so that Close() won't clean up again.
+	mgr.eventReceiver.Store(nil)
+	mgr.redirectInfo.Store(nil)
+}
+
 func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
+	mgr.abandonRoutedBackend()
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
 		return nil, errors.Wrap(err, ErrProxyErr)
@@ -545,6 +562,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}()
 	// Even if the connection is closing, the redirection result must still be sent to recover the connection scores.
 	if mgr.closeStatus.Load() >= statusNotifyClose || ctx.Err() != nil {
+		rs.err = ErrClosing
 		return
 	}
 	// It may have been too long since the redirection signal was sent, and the target backend may be unhealthy now.
@@ -798,10 +816,13 @@ func (mgr *BackendConnManager) Close() error {
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
 		// Notify the receiver if there's any event.
-		if len(mgr.redirectResCh) > 0 {
-			mgr.notifyRedirectResult(context.Background(), <-mgr.redirectResCh)
+		select {
+		case rs := <-mgr.redirectResCh:
+			mgr.notifyRedirectResult(context.Background(), rs)
+		default:
 		}
 		// The connection may have just received the redirecting signal.
+<<<<<<< HEAD
 		if len(addr) > 0 {
 			var redirectingAddr string
 			if redirectingBackend := mgr.redirectInfo.Load(); redirectingBackend != nil {
@@ -809,6 +830,12 @@ func (mgr *BackendConnManager) Close() error {
 			}
 			if err := eventReceiver.OnConnClosed(addr, redirectingAddr, mgr); err != nil {
 				mgr.logger.Error("close connection error", zap.String("backend_addr", addr), zap.NamedError("notify_err", err))
+=======
+		if mgr.curBackend != nil {
+			if err := eventReceiver.OnConnClosed(mgr.curBackend.ID(), mgr); err != nil {
+				mgr.logger.Error("close connection error", zap.String("backend_id", mgr.curBackend.ID()),
+					zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
+>>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
 			}
 		}
 	}
