@@ -445,14 +445,14 @@ func (g *Group) CloseTimedOutFailoverConnections(now time.Time) {
 func (g *Group) removeConn(ce *glist.Element[*connWrapper]) {
 	backend := ce.Value.physicalOwner
 	if backend == nil {
-		g.lg.Error("unexpected nil physical owner for connection")
+		g.lg.Warn("unexpected nil physical owner for connection")
 		return
 	}
 	oldLen := backend.connList.Len()
 	backend.connList.Remove(ce)
 	newLen := backend.connList.Len()
 	if newLen != oldLen-1 {
-		g.lg.Error("the connection is not in the list", zap.String("backend", backend.id))
+		g.lg.Warn("the connection is not in the list", zap.String("backend", backend.id))
 	}
 	ce.Value.physicalOwner = nil
 	setBackendConnMetrics(backend.addr, newLen)
@@ -460,7 +460,7 @@ func (g *Group) removeConn(ce *glist.Element[*connWrapper]) {
 
 func (g *Group) addConn(backend *backendWrapper, conn *connWrapper) {
 	if conn.physicalOwner != nil {
-		g.lg.Error("unexpected non-nil physical owner for connection")
+		g.lg.Warn("unexpected non-nil physical owner for connection")
 	}
 	conn.physicalOwner = backend
 	ce := backend.connList.PushBack(conn)
