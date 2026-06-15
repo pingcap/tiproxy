@@ -62,10 +62,9 @@ func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.Redire
 	return nil
 }
 
-func (mer *mockEventReceiver) OnConnClosed(backendID, redirectingBackendID string, conn router.RedirectableConn) error {
+func (mer *mockEventReceiver) OnConnClosed(backendID string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
 		from:      backendID,
-		to:        redirectingBackendID,
 		eventName: eventClose,
 	}
 	return nil
@@ -886,6 +885,38 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 		{
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
+}
+
+// Test that the redirection aborted by closing is reported as a failure instead of a success.
+// Otherwise, the router moves the connection to the target backend in the connList, which
+// leaks the connection in the list.
+func TestRedirectAbortedByCloseReportsFail(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		{
+			proxy: func(_, _ pnet.PacketIO) error {
+				// Simulate the race that the redirect signal is received but the connection
+				// starts closing before tryRedirect processes the signal.
+				backendInst := router.BackendInst(newMockBackendInst(ts))
+				ts.mp.redirectInfo.Store(&backendInst)
+				ts.mp.closeStatus.Store(statusNotifyClose)
+				ts.mp.processLock.Lock()
+				ts.mp.tryRedirect(context.Background())
+				ts.mp.processLock.Unlock()
+				// The aborted redirection must be reported as a failure, not a success.
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
+				ts.mp.closeStatus.Store(statusActive)
 				return nil
 			},
 		},
