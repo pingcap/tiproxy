@@ -239,13 +239,8 @@ func (fc *FactorCPU) updateCpuPerConn() {
 
 // Estimate the current cpu usage by the latest CPU usage, the latest connection count, and the current connection count.
 func (fc *FactorCPU) getUsage(backend scoredBackend) (avgUsage, latestUsage float64) {
-<<<<<<< HEAD
 	snapshot, ok := fc.snapshot[backend.Addr()]
-	if !ok || snapshot.avgUsage < 0 || latestUsage < 0 {
-=======
-	snapshot, ok := fc.snapshot[backend.ID()]
 	if !ok || snapshot.avgUsage < 0 || snapshot.latestUsage < 0 {
->>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
 		// The metric has missed for minutes.
 		return 1, 1
 	}

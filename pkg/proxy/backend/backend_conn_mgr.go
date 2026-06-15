@@ -265,9 +265,8 @@ func (mgr *BackendConnManager) abandonRoutedBackend() {
 	if receiver == nil || mgr.curBackend == nil {
 		return
 	}
-	if err := receiver.OnConnClosed(mgr.curBackend.ID(), mgr); err != nil {
-		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_id", mgr.curBackend.ID()),
-			zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
+	if err := receiver.OnConnClosed(mgr.curBackend.Addr(), mgr); err != nil {
+		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
 	}
 	// Clear the receiver so that Close() won't clean up again.
 	mgr.eventReceiver.Store(nil)
@@ -807,9 +806,7 @@ func (mgr *BackendConnManager) Close() error {
 	handErr := mgr.handshakeHandler.OnConnClose(mgr, mgr.quitSource)
 
 	var connErr error
-	var addr string
 	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
-		addr = (*backendIO).RemoteAddr().String()
 		connErr = (*backendIO).Close()
 	}
 
@@ -822,20 +819,9 @@ func (mgr *BackendConnManager) Close() error {
 		default:
 		}
 		// The connection may have just received the redirecting signal.
-<<<<<<< HEAD
-		if len(addr) > 0 {
-			var redirectingAddr string
-			if redirectingBackend := mgr.redirectInfo.Load(); redirectingBackend != nil {
-				redirectingAddr = (*redirectingBackend).Addr()
-			}
-			if err := eventReceiver.OnConnClosed(addr, redirectingAddr, mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_addr", addr), zap.NamedError("notify_err", err))
-=======
 		if mgr.curBackend != nil {
-			if err := eventReceiver.OnConnClosed(mgr.curBackend.ID(), mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_id", mgr.curBackend.ID()),
-					zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
->>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
+			if err := eventReceiver.OnConnClosed(mgr.curBackend.Addr(), mgr); err != nil {
+				mgr.logger.Error("close connection error", zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
 			}
 		}
 	}

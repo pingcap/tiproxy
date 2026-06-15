@@ -62,16 +62,9 @@ func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.Redire
 	return nil
 }
 
-<<<<<<< HEAD
-func (mer *mockEventReceiver) OnConnClosed(from, to string, conn router.RedirectableConn) error {
+func (mer *mockEventReceiver) OnConnClosed(backendAddr string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
-		from:      from,
-		to:        to,
-=======
-func (mer *mockEventReceiver) OnConnClosed(backendID string, conn router.RedirectableConn) error {
-	mer.eventCh <- event{
-		from:      backendID,
->>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
+		from:      backendAddr,
 		eventName: eventClose,
 	}
 	return nil
@@ -792,7 +785,6 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 	ts.runTests(runners)
 }
 
-<<<<<<< HEAD
 type countingPacketIO struct {
 	pnet.PacketIO
 	gracefulCloseCnt atomic.Int32
@@ -807,7 +799,8 @@ func (cp *countingPacketIO) GracefulClose() error {
 func (cp *countingPacketIO) Close() error {
 	cp.closeCnt.Add(1)
 	return nil
-=======
+}
+
 // Test that the redirection aborted by closing is reported as a failure instead of a success.
 // Otherwise, the router moves the connection to the target backend in the connList, which
 // leaks the connection in the list.
@@ -838,30 +831,6 @@ func TestRedirectAbortedByCloseReportsFail(t *testing.T) {
 		},
 	}
 	ts.runTests(runners)
-}
-
-func TestGracefulCloseBeforeHandshake(t *testing.T) {
-	ts := newBackendMgrTester(t)
-	runners := []runner{
-		// try to gracefully close before handshake
-		{
-			proxy: func(_, _ pnet.PacketIO) error {
-				ts.mp.GracefulClose()
-				return nil
-			},
-		},
-		// connect fails
-		{
-			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "", "")
-				require.Error(ts.t, err)
-				require.Equal(t, SrcProxyQuit, ts.mp.QuitSource())
-				return nil
-			},
-		},
-	}
-	ts.runTests(runners)
->>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
 }
 
 func TestForceClose(t *testing.T) {

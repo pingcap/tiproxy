@@ -32,11 +32,7 @@ func (b routeCheckBackend) Healthy() bool {
 type ConnEventReceiver interface {
 	OnRedirectSucceed(from, to string, conn RedirectableConn) error
 	OnRedirectFail(from, to string, conn RedirectableConn) error
-<<<<<<< HEAD
-	OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error
-=======
-	OnConnClosed(backendID string, conn RedirectableConn) error
->>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
+	OnConnClosed(backendAddr string, conn RedirectableConn) error
 }
 
 // Router routes client connections to backends.

@@ -74,11 +74,7 @@ func (r *StaticRouter) OnRedirectFail(from, to string, conn RedirectableConn) er
 	return nil
 }
 
-<<<<<<< HEAD
-func (r *StaticRouter) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
-=======
-func (r *StaticRouter) OnConnClosed(backendID string, conn RedirectableConn) error {
->>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
+func (r *StaticRouter) OnConnClosed(backendAddr string, conn RedirectableConn) error {
 	r.cnt--
 	return nil
 }

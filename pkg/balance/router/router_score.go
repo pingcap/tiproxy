@@ -157,6 +157,7 @@ func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn Redir
 	if succeed {
 		connWrapper := &connWrapper{
 			RedirectableConn: conn,
+			scoreOwner:       backend,
 			createTime:       time.Now(),
 			phase:            phaseNotRedirected,
 			forceClosing:     false,
@@ -168,13 +169,32 @@ func (router *ScoreBasedRouter) onCreateConn(backendInst BackendInst, conn Redir
 	}
 }
 
-func (router *ScoreBasedRouter) removeConn(backend *backendWrapper, ce *glist.Element[*connWrapper]) {
+// removeConn removes the connection from the connList that actually contains it.
+// Always remove by `physicalOwner` instead of by the backend that the connection is physically on:
+// they differ when a redirect result has not been processed yet, and glist.Remove silently
+// does nothing if the element is not in the given list, which leaks the connection forever.
+func (router *ScoreBasedRouter) removeConn(ce *glist.Element[*connWrapper]) {
+	backend := ce.Value.physicalOwner
+	if backend == nil {
+		router.logger.Warn("unexpected nil physical owner for connection")
+		return
+	}
+	oldLen := backend.connList.Len()
 	backend.connList.Remove(ce)
-	setBackendConnMetrics(backend.addr, backend.connList.Len())
+	newLen := backend.connList.Len()
+	if newLen != oldLen-1 {
+		router.logger.Warn("the connection is not in the list", zap.String("backend", backend.addr))
+	}
+	ce.Value.physicalOwner = nil
+	setBackendConnMetrics(backend.addr, newLen)
 	router.removeBackendIfEmpty(backend)
 }
 
 func (router *ScoreBasedRouter) addConn(backend *backendWrapper, conn *connWrapper) {
+	if conn.physicalOwner != nil {
+		router.logger.Warn("unexpected non-nil physical owner for connection")
+	}
+	conn.physicalOwner = backend
 	ce := backend.connList.PushBack(conn)
 	setBackendConnMetrics(backend.addr, backend.connList.Len())
 	router.setConnWrapper(conn, ce)
@@ -243,41 +263,38 @@ func (router *ScoreBasedRouter) onRedirectFinished(from, to string, conn Redirec
 	fromBackend := router.ensureBackend(from)
 	toBackend := router.ensureBackend(to)
 	connWrapper := router.getConnWrapper(conn).Value
-	addMigrateMetrics(from, to, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 	// The connection may be closed when this function is waiting for the lock.
 	if connWrapper.phase == phaseClosed {
 		return
 	}
 
+	addMigrateMetrics(fromBackend.addr, toBackend.addr, connWrapper.redirectReason, succeed, connWrapper.lastRedirect)
 	if succeed {
-		router.removeConn(fromBackend, router.getConnWrapper(conn))
+		router.removeConn(router.getConnWrapper(conn))
 		router.addConn(toBackend, connWrapper)
 		connWrapper.phase = phaseRedirectEnd
 	} else {
-		fromBackend.connScore++
-		toBackend.connScore--
-		router.removeBackendIfEmpty(toBackend)
+		connWrapper.transferScore(fromBackend)
 		connWrapper.phase = phaseRedirectFail
 	}
 }
 
 // OnConnClosed implements ConnEventReceiver.OnConnClosed interface.
-func (router *ScoreBasedRouter) OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error {
+func (router *ScoreBasedRouter) OnConnClosed(backendAddr string, conn RedirectableConn) error {
 	router.Lock()
 	defer router.Unlock()
-	backend := router.ensureBackend(addr)
 	connWrapper := router.getConnWrapper(conn)
-	// If this connection has not redirected yet, decrease the score of the target backend.
-	if redirectingAddr != "" {
-		redirectingBackend := router.ensureBackend(redirectingAddr)
-		redirectingBackend.connScore--
-		router.removeBackendIfEmpty(redirectingBackend)
-		metrics.PendingMigrateGuage.WithLabelValues(addr, redirectingAddr, connWrapper.Value.redirectReason).Dec()
-	} else {
-		backend.connScore--
+	cw := connWrapper.Value
+	// If the physical owner mismatches the score owner, it means the redirect result has not been processed yet.
+	if cw.physicalOwner != cw.scoreOwner && cw.physicalOwner != nil && cw.scoreOwner != nil {
+		addMigrateMetrics(cw.physicalOwner.addr, cw.scoreOwner.addr, cw.redirectReason, false, cw.lastRedirect)
 	}
-	router.removeConn(backend, connWrapper)
-	connWrapper.Value.phase = phaseClosed
+	cw.transferScore(nil)
+	// A redirect result may have not been processed yet, in which case the connection is still
+	// in the old backend's connList while `backendAddr` is the new backend, so remove the connection
+	// by its physicalOwner. onRedirectFinished won't touch the list once the phase is phaseClosed.
+	router.removeConn(connWrapper)
+	cw.phase = phaseClosed
 	return nil
 }
 
@@ -327,138 +344,6 @@ func (router *ScoreBasedRouter) updateBackendHealth(healthResults observer.Healt
 	if len(serverVersion) > 0 {
 		router.serverVersion = serverVersion
 	}
-<<<<<<< HEAD
-=======
-	if router.supportRedirection != supportRedirection {
-		router.logger.Info("updated supporting redirection", zap.Bool("support", supportRedirection))
-		router.supportRedirection = supportRedirection
-	}
-}
-
-func matchPortValue(clusterName, port string) string {
-	if clusterName == "" {
-		return port
-	}
-	return fmt.Sprintf("%s:%s", clusterName, port)
-}
-
-func (router *ScoreBasedRouter) backendGroupValues(backend *backendWrapper) []string {
-	switch router.matchType {
-	case MatchClientCIDR, MatchProxyCIDR:
-		return backend.Cidr()
-	case MatchPort:
-		port := backend.TiProxyPort()
-		if port != "" {
-			return []string{matchPortValue(backend.ClusterName(), port)}
-		}
-	}
-	return nil
-}
-
-func (router *ScoreBasedRouter) rebuildPortConflictDetector() {
-	if router.matchType != MatchPort {
-		router.portConflictDetector = nil
-		return
-	}
-	detector := newPortConflictDetector()
-	for _, group := range router.groups {
-		for _, value := range group.values {
-			clusterName, port, ok := strings.Cut(value, ":")
-			if !ok {
-				port = value
-				clusterName = ""
-			}
-			detector.bind(port, clusterName, group)
-		}
-	}
-	router.portConflictDetector = detector
-}
-
-// Update the groups after the backend list is updated.
-// called in the lock.
-func (router *ScoreBasedRouter) updateGroups() {
-	for _, backend := range router.backends {
-		// An unhealthy backend can be removed once it has no connections. connList and connScore are
-		// protected by the group lock instead of the router lock, so read them through
-		// removeBackendIfIdle to avoid racing with connection events. A backend without a group has
-		// never been routed to, so it has no connections and can be removed directly.
-		if !backend.ObservedHealthy() {
-			removed, empty := true, false
-			if backend.group != nil {
-				removed, empty = backend.group.removeBackendIfIdle(backend.id, backend)
-			}
-			if removed {
-				delete(router.backends, backend.id)
-				// remove empty groups
-				if backend.group != nil && empty {
-					router.groups = slices.DeleteFunc(router.groups, func(g *Group) bool {
-						return g == backend.group
-					})
-				}
-				continue
-			}
-		}
-		// If the labels were correctly set, we won't update its group even if the labels change.
-		if backend.group != nil {
-			switch router.matchType {
-			case MatchClientCIDR, MatchProxyCIDR, MatchPort:
-				values := router.backendGroupValues(backend)
-				if !backend.group.EqualValues(values) {
-					router.logger.Warn("backend routing values changed, keep the existing group until it is removed",
-						zap.String("backend_id", backend.id),
-						zap.String("addr", backend.Addr()),
-						zap.Strings("current_values", values),
-						zap.Strings("group_values", backend.group.values))
-				}
-			}
-			continue
-		}
-
-		// If the backend is not in any group, add it to a new group if its label is set.
-		// In operator deployment, the labels are set dynamically.
-		var group *Group
-		switch router.matchType {
-		case MatchAll:
-			if len(router.groups) == 0 {
-				group, _ = NewGroup(nil, router.bpCreator, router.matchType, router.logger)
-				router.groups = append(router.groups, group)
-			}
-			group = router.groups[0]
-		case MatchClientCIDR, MatchProxyCIDR, MatchPort:
-			values := router.backendGroupValues(backend)
-			if len(values) == 0 {
-				break
-			}
-			for _, g := range router.groups {
-				if g.Intersect(values) {
-					group = g
-					break
-				}
-			}
-			if group == nil {
-				g, err := NewGroup(values, router.bpCreator, router.matchType, router.logger)
-				if err == nil {
-					group = g
-					if router.cfgGetter != nil {
-						if cfg := router.cfgGetter.GetConfig(); cfg != nil {
-							group.SetConfig(cfg)
-						}
-					}
-					router.groups = append(router.groups, group)
-				}
-				// maybe too many logs, ignore the error now
-			}
-		}
-		if group == nil {
-			continue
-		}
-		group.AddBackend(backend.id, backend)
-	}
-	for _, group := range router.groups {
-		group.RefreshCidr()
-	}
-	router.rebuildPortConflictDetector()
->>>>>>> 9fafc2f1 (balance, proxy: fix TiDB CPU imbalance when balance.policy="resource" (#1173))
 }
 
 func (router *ScoreBasedRouter) rebalanceLoop(ctx context.Context) {
@@ -564,9 +449,7 @@ func (router *ScoreBasedRouter) redirectConn(conn *connWrapper, fromBackend *bac
 	succeed := conn.Redirect(toBackend)
 	if succeed {
 		router.logger.Debug("begin redirect connection", fields...)
-		fromBackend.connScore--
-		router.removeBackendIfEmpty(fromBackend)
-		toBackend.connScore++
+		conn.transferScore(toBackend)
 		conn.phase = phaseRedirectNotify
 		conn.redirectReason = reason
 		metrics.PendingMigrateGuage.WithLabelValues(fromBackend.addr, toBackend.addr, reason).Inc()
