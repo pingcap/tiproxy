@@ -1418,6 +1418,8 @@ func TestNewGroupUsesLatestConfigGetter(t *testing.T) {
 	bo.addBackend(addr1, map[string]string{config.TiProxyPortLabelName: "10080"})
 	bo.notify(nil)
 	require.Eventually(t, func() bool {
+		router.Lock()
+		defer router.Unlock()
 		backend := router.backends[addr1]
 		return backend != nil && backend.Healthy()
 	}, 3*time.Second, 10*time.Millisecond)
@@ -1983,7 +1985,11 @@ func TestKeepExistingPortGroupWhenPortLabelChanges(t *testing.T) {
 	require.Eventually(t, func() bool {
 		router.Lock()
 		defer router.Unlock()
-		oldGroup = router.backends["backend-1"].group
+		backend := router.backends["backend-1"]
+		if backend == nil {
+			return false
+		}
+		oldGroup = backend.group
 		return oldGroup != nil && slices.Equal(oldGroup.values, []string{"cluster-a:10080"})
 	}, 3*time.Second, 10*time.Millisecond)
 
@@ -2005,7 +2011,8 @@ func TestKeepExistingPortGroupWhenPortLabelChanges(t *testing.T) {
 	require.Eventually(t, func() bool {
 		router.Lock()
 		defer router.Unlock()
-		return router.backends["backend-1"].group == oldGroup
+		backend := router.backends["backend-1"]
+		return backend != nil && backend.group == oldGroup
 	}, 3*time.Second, 10*time.Millisecond)
 	require.Eventually(t, func() bool {
 		return strings.Contains(text.String(), "backend routing values changed, keep the existing group until it is removed")

@@ -289,6 +289,7 @@ func (mgr *BackendConnManager) abandonRoutedBackend() {
 	}
 	// Clear the receiver so that Close() won't clean up again.
 	mgr.eventReceiver.Store(nil)
+	mgr.redirectInfo.Store(nil)
 }
 
 func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
@@ -923,8 +924,10 @@ func (mgr *BackendConnManager) Close() error {
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
 		// Notify the receiver if there's any event.
-		if len(mgr.redirectResCh) > 0 {
-			mgr.notifyRedirectResult(context.Background(), <-mgr.redirectResCh)
+		select {
+		case rs := <-mgr.redirectResCh:
+			mgr.notifyRedirectResult(context.Background(), rs)
+		default:
 		}
 		// The connection may have just received the redirecting signal.
 		if mgr.curBackend != nil {
