@@ -32,7 +32,7 @@ func (b routeCheckBackend) Healthy() bool {
 type ConnEventReceiver interface {
 	OnRedirectSucceed(from, to string, conn RedirectableConn) error
 	OnRedirectFail(from, to string, conn RedirectableConn) error
-	OnConnClosed(addr, redirectingAddr string, conn RedirectableConn) error
+	OnConnClosed(backendAddr string, conn RedirectableConn) error
 }
 
 // Router routes client connections to backends.
@@ -225,6 +225,12 @@ func (b *backendWrapper) String() string {
 // connWrapper wraps RedirectableConn.
 type connWrapper struct {
 	RedirectableConn
+	// The backend whose connList contains this connection. It may differ from the backend that the
+	// connection is physically on when a redirect result is not processed yet, so removing the
+	// connection from the list must always go through `physicalOwner`.
+	physicalOwner *backendWrapper
+	// The backend whose connScore includes this connection.
+	scoreOwner *backendWrapper
 	// The reason why the redirection happens.
 	redirectReason string
 	// Last redirect start time of this connection.
@@ -232,6 +238,16 @@ type connWrapper struct {
 	createTime   time.Time
 	phase        connPhase
 	forceClosing bool
+}
+
+func (c *connWrapper) transferScore(to *backendWrapper) {
+	if c.scoreOwner != nil {
+		c.scoreOwner.connScore--
+	}
+	c.scoreOwner = to
+	if to != nil {
+		to.connScore++
+	}
 }
 
 func backendPodNameFromAddr(addr string) string {

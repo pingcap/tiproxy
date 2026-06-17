@@ -240,7 +240,7 @@ func (fc *FactorCPU) updateCpuPerConn() {
 // Estimate the current cpu usage by the latest CPU usage, the latest connection count, and the current connection count.
 func (fc *FactorCPU) getUsage(backend scoredBackend) (avgUsage, latestUsage float64) {
 	snapshot, ok := fc.snapshot[backend.Addr()]
-	if !ok || snapshot.avgUsage < 0 || latestUsage < 0 {
+	if !ok || snapshot.avgUsage < 0 || snapshot.latestUsage < 0 {
 		// The metric has missed for minutes.
 		return 1, 1
 	}
