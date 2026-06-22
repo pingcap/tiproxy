@@ -256,7 +256,7 @@ func (br *BackendReader) queryAllOwners(ctx context.Context) (zones, owners []st
 
 		if info, ok := ownerMap[zone]; !ok || info.revision > kv.CreateRevision {
 			ownerMap[zone] = ownerInfo{
-				addr:     hack.String(kv.Value),
+				addr:     string(kv.Value),
 				revision: kv.CreateRevision,
 			}
 		}

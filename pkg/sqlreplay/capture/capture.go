@@ -375,7 +375,7 @@ func (c *capture) Capture(stmtInfo StmtInfo) {
 			if st.preparedStmtTexts == nil {
 				st.preparedStmtTexts = make(map[uint32]string)
 			}
-			st.preparedStmtTexts[stmtInfo.StmtID] = hack.String(command.Payload[1:])
+			st.preparedStmtTexts[stmtInfo.StmtID] = string(command.Payload[1:])
 			command.CapturedPsID = stmtInfo.StmtID
 		}
 	case pnet.ComStmtExecute:
