@@ -34,6 +34,9 @@ func NewHTTPClientWithDialContext(getTLSConfig func() *tls.Config, dialContext f
 			Transport: &http.Transport{
 				TLSClientConfig: getTLSConfig(),
 				DialContext:     dialContext,
+				// When all the TiProxy/backend instances restart at once, the DNS entries may not be updated immediately.
+				// TiProxy may keep using the wrong connection to any owner or backend, so we disable keep-alive to avoid this issue.
+				DisableKeepAlives: true,
 			},
 		},
 		getTLSConfig: getTLSConfig,
