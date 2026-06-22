@@ -436,7 +436,7 @@ func ParseChangeUser(data []byte, capability Capability) (*ChangeUserReq, error)
 	req := new(ChangeUserReq)
 	pos := 1
 	// username
-	req.User = hack.String(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
+	req.User = string(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
 	pos += len(req.User) + 1
 	// auth data
 	if capability&ClientSecureConnection > 0 {
@@ -449,7 +449,7 @@ func ParseChangeUser(data []byte, capability Capability) (*ChangeUserReq, error)
 		pos += len(req.AuthData) + 1
 	}
 	// db
-	req.DB = hack.String(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
+	req.DB = string(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
 	pos += len(req.DB) + 1
 	if pos >= len(data) {
 		return req, nil
@@ -459,7 +459,7 @@ func ParseChangeUser(data []byte, capability Capability) (*ChangeUserReq, error)
 	pos += 2
 	// auth plugin
 	if capability&ClientPluginAuth > 0 {
-		req.AuthPlugin = hack.String(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
+		req.AuthPlugin = string(data[pos : pos+bytes.IndexByte(data[pos:], 0)])
 		pos += len(req.AuthPlugin) + 1
 	}
 	// attrs
@@ -508,9 +508,9 @@ func ParseErrorPacket(data []byte) *gomysql.MyError {
 	e.Code = binary.LittleEndian.Uint16(data[pos:])
 	pos += 2
 	pos++
-	e.State = hack.String(data[pos : pos+5])
+	e.State = string(data[pos : pos+5])
 	pos += 5
-	e.Message = hack.String(data[pos:])
+	e.Message = string(data[pos:])
 	return e
 }
 
@@ -578,7 +578,7 @@ func ParseQueryPacket(data []byte) string {
 	if len(data) > 0 && data[len(data)-1] == 0 {
 		data = data[:len(data)-1]
 	}
-	return hack.String(data)
+	return string(data)
 }
 
 func MakeQueryPacket(stmt string) []byte {
@@ -864,7 +864,7 @@ func ParseExecuteStmtRequest(data []byte, paramNum int, paramTypes []byte) (stmt
 			if isNull {
 				args[i] = nil
 			} else {
-				args[i] = hack.String(v)
+				args[i] = string(v)
 			}
 			pos += n
 		default:

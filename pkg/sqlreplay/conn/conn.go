@@ -250,7 +250,7 @@ func (c *conn) isReadOnly(command *cmd.Command) bool {
 func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp ExecuteResp) {
 	switch request[0] {
 	case pnet.ComStmtPrepare.Byte():
-		stmt := hack.String(request[1:])
+		stmt := string(request[1:])
 		c.preparedStmts[resp.StmtID] = preparedStmt{text: stmt, paramNum: resp.ParamNum}
 		c.psIDMapping[capturedPsID] = resp.StmtID
 	case pnet.ComStmtExecute.Byte():
