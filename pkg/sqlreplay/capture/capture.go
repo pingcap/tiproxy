@@ -299,45 +299,6 @@ func (c *capture) Capture(packet []byte, startTime time.Time, connID uint64, ini
 	}
 	c.Lock()
 	defer c.Unlock()
-<<<<<<< HEAD
-=======
-	// Maintain prepared statement lifecycle.
-	switch command.Type {
-	case pnet.ComStmtPrepare:
-		if stmtInfo.StmtID > 0 {
-			if st.preparedStmtTexts == nil {
-				st.preparedStmtTexts = make(map[uint32]string)
-			}
-			st.preparedStmtTexts[stmtInfo.StmtID] = string(command.Payload[1:])
-			command.CapturedPsID = stmtInfo.StmtID
-		}
-	case pnet.ComStmtExecute:
-		if len(command.Payload) >= 5 {
-			stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-			command.CapturedPsID = stmtID
-			if command.PreparedStmt == "" {
-				if stmt, ok := st.preparedStmtTexts[stmtID]; ok && stmt != "" {
-					command.PreparedStmt = stmt
-				}
-			}
-		}
-	case pnet.ComStmtClose:
-		if len(command.Payload) >= 5 {
-			stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-			command.CapturedPsID = stmtID
-			if st.preparedStmtTexts != nil {
-				delete(st.preparedStmtTexts, stmtID)
-			}
-		}
-	case pnet.ComStmtSendLongData, pnet.ComStmtFetch, pnet.ComStmtReset:
-		if len(command.Payload) >= 5 {
-			stmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-			command.CapturedPsID = stmtID
-		}
-	case pnet.ComResetConnection, pnet.ComChangeUser:
-		clear(st.preparedStmtTexts)
-	}
->>>>>>> b02569c7 (*: remove unsafe hack functions (#1179))
 	c.putCommand(command)
 }
 

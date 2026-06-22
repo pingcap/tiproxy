@@ -111,54 +111,8 @@ func (c *conn) Run(ctx context.Context) {
 				}
 			}
 			c.replayStats.ReplayedCmds.Add(1)
-<<<<<<< HEAD
 			if command.Value.Type == pnet.ComQuit {
 				return
-=======
-		}
-	}
-}
-
-func (c *conn) isReadOnly(command *cmd.Command) bool {
-	switch command.Type {
-	case pnet.ComQuery, pnet.ComStmtPrepare:
-		// If the statement is not readonly, it won't be prepared.
-		return lex.IsReadOnly(hack.String(command.Payload[1:]))
-	case pnet.ComStmtExecute, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch, pnet.ComStmtClose:
-		// If the statement is prepared successfully, then it's readonly.
-		captureStmtID := binary.LittleEndian.Uint32(command.Payload[1:5])
-		_, ok := c.psIDMapping[captureStmtID]
-		return ok
-	case pnet.ComCreateDB, pnet.ComDropDB, pnet.ComDelayedInsert:
-		return false
-	}
-	// Treat ComStmtPrepare and ComStmtClose as read-only to make prepared stmt IDs in capture and replay phases the same.
-	// The problem is that it still requires write privilege. Better solutions are much more complex:
-	// - Replace all prepared DML statements with `SELECT 1`, including ComStmtPrepare and `SET SESSION_STATES`.
-	// - Remove all prepared DML statements and map catpure prepared stmt ID to replay prepared stmt ID, including ComStmtPrepare and `SET SESSION_STATES`.
-	return true
-}
-
-// Maintain prepared statement info so that we can find its info when getting the failed statement and params.
-func (c *conn) updatePreparedStmts(capturedPsID uint32, request []byte, resp ExecuteResp) {
-	switch request[0] {
-	case pnet.ComStmtPrepare.Byte():
-		stmt := string(request[1:])
-		c.preparedStmts[resp.StmtID] = preparedStmt{text: stmt, paramNum: resp.ParamNum}
-		c.psIDMapping[capturedPsID] = resp.StmtID
-	case pnet.ComStmtExecute.Byte():
-		stmtID := binary.LittleEndian.Uint32(request[1:5])
-		ps, ok := c.preparedStmts[stmtID]
-		// paramNum is contained in the ComStmtPrepare while paramTypes is contained in the first ComStmtExecute.
-		// Following ComStmtExecute requests will reuse the paramTypes from the first ComStmtExecute.
-		if ok && ps.paramNum > 0 && len(ps.paramTypes) == 0 {
-			_, _, paramTypes, err := pnet.ParseExecuteStmtRequest(request, ps.paramNum, ps.paramTypes)
-			if err != nil {
-				c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("stmt_id", stmtID), zap.Error(err))
-			} else {
-				ps.paramTypes = paramTypes
-				c.preparedStmts[stmtID] = ps
->>>>>>> b02569c7 (*: remove unsafe hack functions (#1179))
 			}
 		}
 	}
