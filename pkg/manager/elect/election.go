@@ -218,7 +218,7 @@ func (m *election) GetOwnerID(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return hack.String(kv.Value), nil
+	return string(kv.Value), nil
 }
 
 func (m *election) getOwnerInfo(ctx context.Context) (*mvccpb.KeyValue, error) {
