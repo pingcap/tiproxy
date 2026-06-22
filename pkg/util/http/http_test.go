@@ -23,9 +23,6 @@ func TestNewHTTPClientDisableKeepAlives(t *testing.T) {
 		"NewHTTPClient": func() *Client {
 			return NewHTTPClient(func() *tls.Config { return nil })
 		},
-		"NewHTTPClientWithDialContext": func() *Client {
-			return NewHTTPClientWithDialContext(func() *tls.Config { return nil }, nil)
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			client := newClient()
@@ -58,7 +55,8 @@ func TestNewHTTPClientDisableKeepAlivesNoConnectionReuse(t *testing.T) {
 		wg.Wait()
 	}()
 
-	client := NewHTTPClientWithDialContext(func() *tls.Config { return nil }, dialContext)
+	client := NewHTTPClient(func() *tls.Config { return nil })
+	client.cli.Transport.(*http.Transport).DialContext = dialContext
 	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Millisecond), 1), context.Background())
 
 	_, err := client.Get(addr, "", b, time.Second)
