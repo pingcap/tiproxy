@@ -25,17 +25,12 @@ func NewHTTPClient(getTLSConfig func() *tls.Config) *Client {
 	// to obtain the latest TLS config.
 	return &Client{
 		cli: &http.Client{
-<<<<<<< HEAD
-			Transport: &http.Transport{TLSClientConfig: getTLSConfig()},
-=======
 			Transport: &http.Transport{
 				TLSClientConfig: getTLSConfig(),
-				DialContext:     dialContext,
 				// When all the TiProxy/backend instances restart at once, the DNS entries may not be updated immediately.
 				// TiProxy may keep using the wrong connection to any owner or backend, so we disable keep-alive to avoid this issue.
 				DisableKeepAlives: true,
 			},
->>>>>>> 56a7f033 (util: Disable keepalive for HTTP connections in metrics reader and health check (#1177))
 		},
 		getTLSConfig: getTLSConfig,
 	}
