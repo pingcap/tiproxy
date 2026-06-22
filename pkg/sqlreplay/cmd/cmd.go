@@ -135,7 +135,7 @@ func (c *Command) Digest() string {
 func (c *Command) QueryText() string {
 	switch c.Type {
 	case pnet.ComQuery, pnet.ComStmtPrepare:
-		return hack.String(c.Payload[1:])
+		return string(c.Payload[1:])
 	case pnet.ComStmtExecute:
 		return fmt.Sprintf("%s params=%v", c.PreparedStmt, c.Params)
 	case pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:

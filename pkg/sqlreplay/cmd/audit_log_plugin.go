@@ -420,7 +420,7 @@ func parseSingleParam(value string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return hack.Slice(str), nil
+		return []byte(str), nil
 	case "KindMysqlDuration", "KindMysqlEnum", "KindInterface", "KindMinNotNull", "KindMaxValue", "KindRaw":
 		return nil, errors.Errorf("unsupported param type: %s", tpStr)
 	}
