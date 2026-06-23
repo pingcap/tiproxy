@@ -349,7 +349,7 @@ func (br *BackendReader) readFromBackendAddrs(ctx context.Context, addrs []strin
 				}
 				resp, err := br.readBackendMetric(ctx, addr)
 				if err != nil {
-					br.lg.Debug("read metrics from backend failed", zap.String("addr", addr), zap.Error(err))
+					br.lg.Warn("read metrics from backend failed", zap.String("addr", addr), zap.Error(err))
 					return
 				}
 				text := filterMetrics(hack.String(resp), allNames)
