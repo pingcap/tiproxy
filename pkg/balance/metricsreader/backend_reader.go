@@ -216,6 +216,7 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 		}
 	}
 
+	// If the metrics of some backends are missing, read directly from the backends.
 	missingAddrs := br.findMissingBackendAddrs(addrsFromTopology(backends, nil))
 	if len(missingAddrs) > 0 {
 		br.lg.Info("some backend metrics are missing, reading them directly from backends", zap.Strings("addrs", missingAddrs))
