@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// test getBackendAddrs
+// test addrsFromTopology and fetchBackendTopology
 func TestGetBackendAddrs(t *testing.T) {
 	tests := []struct {
 		backends     map[string]*infosync.TiDBTopologyInfo
@@ -126,11 +126,11 @@ func TestGetBackendAddrs(t *testing.T) {
 		} else {
 			fetcher.err = nil
 		}
-		addrs, err := br.getBackendAddrs(context.Background(), test.excludeZones)
 		if test.hasErr {
+			_, err := br.fetchBackendTopology(context.Background())
 			require.Error(t, err, "case %d", i)
 		} else {
-			require.NoError(t, err, "case %d", i)
+			addrs := addrsFromTopology(test.backends, test.excludeZones)
 			slices.Sort(addrs)
 			require.Equal(t, test.expected, addrs, "case %d", i)
 		}
@@ -890,15 +890,21 @@ func TestQueryBackendConcurrently(t *testing.T) {
 	var wg waitgroup.WaitGroup
 	childCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	// fill the initial query result to ensure the result is always non-empty
-	backends, err := br.readFromBackends(childCtx, nil)
+	backends, err := br.fetchBackendTopology(childCtx)
 	require.NoError(t, err)
-	require.Len(t, backends, initialBackends)
+	addrs := addrsFromTopology(backends, nil)
+	_, err = br.readFromBackendAddrs(childCtx, addrs)
+	require.NoError(t, err)
+	require.Len(t, addrs, initialBackends)
 	br.history2QueryResult()
 	wg.Run(func() {
 		for childCtx.Err() == nil {
-			backends, err := br.readFromBackends(childCtx, nil)
+			backends, err := br.fetchBackendTopology(childCtx)
 			require.NoError(t, err)
-			require.Len(t, backends, initialBackends)
+			addrs := addrsFromTopology(backends, nil)
+			_, err = br.readFromBackendAddrs(childCtx, addrs)
+			require.NoError(t, err)
+			require.Len(t, addrs, initialBackends)
 			br.purgeHistory()
 		}
 	})
@@ -1363,4 +1369,149 @@ func TestQueryAllOwnersForNamedCluster(t *testing.T) {
 	slices.Sort(owners)
 	require.Equal(t, []string{"east"}, zones)
 	require.Equal(t, []string{"cluster-a-east-owner", "cluster-a-owner"}, owners)
+}
+
+func TestFindMissingBackendAddrs(t *testing.T) {
+	now := model.Time(time.Now().UnixMilli())
+	backendLabel := "127.0.0.1:10080"
+	infos := map[string]*infosync.TiDBTopologyInfo{
+		"127.0.0.1:4000": {
+			IP:         "127.0.0.1",
+			StatusPort: 10080,
+		},
+	}
+	tests := []struct {
+		history  map[string]map[string]backendHistory
+		rules    []string
+		expected []string
+	}{
+		{
+			rules:    []string{"rule1", "rule2"},
+			expected: []string{"127.0.0.1:10080"},
+		},
+		{
+			rules: []string{"rule1", "rule2"},
+			history: map[string]map[string]backendHistory{
+				"rule1": {
+					backendLabel: {
+						Step2History: []model.SamplePair{{Timestamp: now, Value: 1}},
+					},
+				},
+			},
+		},
+		{
+			rules: []string{"rule1"},
+			history: map[string]map[string]backendHistory{
+				"rule1": {
+					backendLabel: {
+						Step1History: []model.SamplePair{{Timestamp: now, Value: 1}},
+					},
+				},
+			},
+			expected: []string{"127.0.0.1:10080"},
+		},
+	}
+
+	lg, _ := logger.CreateLoggerForTest(t)
+	healthCfg := newHealthCheckConfigForTest()
+	fetcher := newMockBackendFetcher(infos, nil)
+	br := NewBackendReader(lg, nil, nil, nil, fetcher, healthCfg)
+	for i, test := range tests {
+		br.history = test.history
+		br.queryRules = make(map[string]QueryRule, len(test.rules))
+		for _, rule := range test.rules {
+			br.queryRules[rule] = QueryRule{}
+		}
+		addrs := addrsFromTopology(infos, nil)
+		missing := br.findMissingBackendAddrs(addrs)
+		if len(test.expected) == 0 {
+			require.Empty(t, missing, "case %d", i)
+		} else {
+			require.Equal(t, test.expected, missing, "case %d", i)
+		}
+	}
+}
+
+func TestReadMetricsFallback(t *testing.T) {
+	now := model.Time(time.Now().UnixMilli())
+	backend1Handler := newMockHttpHandler(t)
+	backend1Handler.getRespBody.Store(ptrFunc(func(string) string { return "cpu 10.0\n" }))
+	backend1Port := backend1Handler.Start()
+	t.Cleanup(backend1Handler.Close)
+
+	backend2Handler := newMockHttpHandler(t)
+	backend2Handler.getRespBody.Store(ptrFunc(func(string) string { return "cpu 20.0\n" }))
+	backend2Port := backend2Handler.Start()
+	t.Cleanup(backend2Handler.Close)
+
+	backend1Key := net.JoinHostPort("127.0.0.1", strconv.Itoa(backend1Port))
+	history := map[string]map[string]backendHistory{
+		"rule_id1": {
+			backend1Key: {
+				Step1History: []model.SamplePair{{Timestamp: now, Value: 10.0}},
+				Step2History: []model.SamplePair{{Timestamp: now, Value: 10.0}},
+			},
+		},
+	}
+	historyText, err := json.Marshal(history)
+	require.NoError(t, err)
+
+	rule := QueryRule{
+		Names:     []string{"cpu"},
+		Retention: time.Minute,
+		Metric2Value: func(mfs map[string]*dto.MetricFamily) model.SampleValue {
+			return model.SampleValue(*mfs["cpu"].Metric[0].Untyped.Value)
+		},
+		Range2Value: func(pairs []model.SamplePair) model.SampleValue {
+			return pairs[len(pairs)-1].Value
+		},
+		ResultType: model.ValVector,
+	}
+
+	ownerHttpHandler := newMockHttpHandler(t)
+	ownerPort := ownerHttpHandler.Start()
+	ownerAddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(ownerPort))
+	ownerHttpHandler.getRespBody.Store(ptrFunc(func(string) string { return string(historyText) }))
+	t.Cleanup(ownerHttpHandler.Close)
+
+	suite := newEtcdTestSuite(t)
+	t.Cleanup(suite.close)
+	ownerKey := fmt.Sprintf("%s/%s", readerOwnerKeyPrefixForCluster(""), readerOwnerKeySuffix)
+	suite.putKV(ownerKey, ownerAddr)
+	require.Eventually(t, func() bool {
+		kvs := suite.getKV(ownerKey)
+		return len(kvs) == 1 && string(kvs[0].Value) == ownerAddr
+	}, 3*time.Second, 10*time.Millisecond)
+
+	lg, _ := logger.CreateLoggerForTest(t)
+	healthCfg := newHealthCheckConfigForTest()
+	cfg := config.NewConfig()
+	cfgGetter := newMockConfigGetter(cfg)
+	infos := map[string]*infosync.TiDBTopologyInfo{
+		"127.0.0.1:4000": {IP: "127.0.0.1", StatusPort: uint(backend1Port)},
+		"127.0.0.1:4001": {IP: "127.0.0.1", StatusPort: uint(backend2Port)},
+	}
+	fetcher := newMockBackendFetcher(infos, nil)
+	httpCli := httputil.NewHTTPClient(func() *tls.Config { return nil })
+	br := NewBackendReader(lg, cfgGetter, httpCli, suite.client, fetcher, healthCfg)
+	err = br.Start(context.Background())
+	require.NoError(t, err)
+	br.AddQueryRule("rule_id1", rule)
+	t.Cleanup(br.Close)
+
+	err = br.ReadMetrics(context.Background())
+	require.NoError(t, err)
+	qr := br.GetQueryResult("rule_id1")
+	require.False(t, qr.Empty())
+	vector := qr.Value.(model.Vector)
+	require.Len(t, vector, 2)
+	sort.Slice(vector, func(i, j int) bool {
+		return vector[i].Value < vector[j].Value
+	})
+	require.Equal(t, model.SampleValue(10.0), vector[0].Value)
+	require.Equal(t, model.SampleValue(20.0), vector[1].Value)
+}
+
+func ptrFunc(f func(string) string) *func(string) string {
+	return &f
 }
