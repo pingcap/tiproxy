@@ -1336,8 +1336,6 @@ func setupTypicalBackendListener(t *testing.T, respBody string) (backendPort int
 	t.Cleanup(backendHttpHandler.Close)
 	return
 }
-<<<<<<< HEAD
-=======
 
 func TestBackendMetricOwnerPath(t *testing.T) {
 	require.Equal(t, "/api/backend/metrics", backendMetricOwnerPath(""))
@@ -1517,4 +1515,3 @@ func TestReadMetricsFallback(t *testing.T) {
 func ptrFunc(f func(string) string) *func(string) string {
 	return &f
 }
->>>>>>> 1e326b07 (balance: read metrics directly from backends when failing to query from owners (#1185))
