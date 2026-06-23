@@ -367,18 +367,6 @@ func (br *BackendReader) readFromBackendAddrs(ctx context.Context, addrs []strin
 	return backendLabels, nil
 }
 
-func mergeBackendLabels(labels, more []string) []string {
-	if len(more) == 0 {
-		return labels
-	}
-	for _, label := range more {
-		if !slices.Contains(labels, label) {
-			labels = append(labels, label)
-		}
-	}
-	return labels
-}
-
 func (br *BackendReader) collectAllNames() []string {
 	br.Lock()
 	defer br.Unlock()
