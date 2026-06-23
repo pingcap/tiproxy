@@ -143,12 +143,14 @@ func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Comm
 		if decoder.userAllowlist != nil {
 			user := strings.ToLower(strings.TrimSpace(kvs[auditPluginKeyUser]))
 			if _, ok := decoder.userAllowlist[user]; !ok {
+				decoder.lg.Debug("skipping command because user is not in allowlist", zap.String("user", user))
 				continue
 			}
 		}
 
 		if decoder.tableSuffixAllowlist != nil {
 			if !tablesFieldMatchesSuffixAllowlist(kvs[auditPluginKeyTables], decoder.tableSuffixAllowlist) {
+				decoder.lg.Debug("skipping command because table suffix is not in allowlist", zap.String("tables", kvs[auditPluginKeyTables]))
 				continue
 			}
 		}
@@ -192,6 +194,7 @@ func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Comm
 		}
 		// The log is ignored, skip.
 		if len(cmds) == 0 {
+			decoder.lg.Debug("skipping command because it is empty", zap.String("event", events[0]))
 			continue
 		}
 

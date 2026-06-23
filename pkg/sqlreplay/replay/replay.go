@@ -483,6 +483,7 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 		}
 
 		var command *cmd.Command
+		r.lg.Debug("decoding command", zap.Any("decoder", decoder))
 		if command, err = decoder.Decode(); err != nil {
 			if errors.Is(err, io.EOF) {
 				r.lg.Info("replay reads EOF")
@@ -490,6 +491,7 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 				break
 			}
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				r.lg.Debug("cancelled")
 				err = nil
 				break
 			}
@@ -502,6 +504,7 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 				break
 			}
 		}
+		r.lg.Debug("decoded command", zap.Any("command", command))
 		r.replayStats.CurCmdTs.Store(command.StartTs.UnixNano())
 		if !command.EndTs.IsZero() {
 			r.replayStats.CurCmdEndTs.Store(command.EndTs.UnixNano())
