@@ -248,6 +248,7 @@ func (decoder *AuditLogExtensionDecoder) parseQueryEvent(kvs map[string]string, 
 		if err != nil {
 			return nil, err
 		}
+		args = coerceLimitParams(sql, args)
 
 		var stmtID uint32
 		var shouldPrepare bool
@@ -368,4 +369,156 @@ func parseExecuteParamsForExtension(value string) ([]any, error) {
 	}
 
 	return params, nil
+}
+
+// coerceLimitParams converts string params bound to LIMIT/OFFSET placeholders to integers.
+// TiDB rejects string params in LIMIT while other contexts allow implicit conversion.
+func coerceLimitParams(sql string, args []any) []any {
+	indices := limitParamIndices(sql)
+	if len(indices) == 0 {
+		return args
+	}
+	for _, idx := range indices {
+		if idx >= len(args) {
+			continue
+		}
+		s, ok := args[idx].(string)
+		if !ok {
+			continue
+		}
+		if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+			args[idx] = i
+			continue
+		}
+		if u, err := strconv.ParseUint(s, 10, 64); err == nil {
+			args[idx] = u
+		}
+	}
+	return args
+}
+
+func limitParamIndices(sql string) []int {
+	indexSet := make(map[int]struct{})
+	paramIdx := 0
+	parenDepth := 0
+	limitDepth := -1
+
+	for i := 0; i < len(sql); {
+		if isSQLSpace(sql[i]) {
+			i++
+			continue
+		}
+		if next, ok := skipSQLToken(sql, i); ok {
+			i = next
+			continue
+		}
+
+		switch sql[i] {
+		case '(':
+			parenDepth++
+			i++
+		case ')':
+			if limitDepth >= 0 && parenDepth == limitDepth {
+				limitDepth = -1
+			}
+			parenDepth--
+			i++
+		case '?':
+			if limitDepth >= 0 && parenDepth == limitDepth {
+				indexSet[paramIdx] = struct{}{}
+			}
+			paramIdx++
+			i++
+		default:
+			if limitDepth >= 0 && parenDepth == limitDepth {
+				if matched, kwLen := matchSQLKeyword(sql, i, "for"); matched {
+					limitDepth = -1
+					i += kwLen
+					continue
+				}
+			}
+			if matched, kwLen := matchSQLKeyword(sql, i, "limit"); matched {
+				limitDepth = parenDepth
+				i += kwLen
+				continue
+			}
+			if matched, kwLen := matchSQLKeyword(sql, i, "offset"); matched {
+				limitDepth = parenDepth
+				i += kwLen
+				continue
+			}
+			i++
+		}
+	}
+
+	indices := make([]int, 0, len(indexSet))
+	for idx := range indexSet {
+		indices = append(indices, idx)
+	}
+	return indices
+}
+
+func isSQLSpace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+}
+
+func isSQLIdentChar(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_'
+}
+
+func matchSQLKeyword(sql string, pos int, keyword string) (bool, int) {
+	if pos+len(keyword) > len(sql) {
+		return false, 0
+	}
+	if !strings.EqualFold(sql[pos:pos+len(keyword)], keyword) {
+		return false, 0
+	}
+	if pos > 0 && isSQLIdentChar(sql[pos-1]) {
+		return false, 0
+	}
+	next := pos + len(keyword)
+	if next < len(sql) && isSQLIdentChar(sql[next]) {
+		return false, 0
+	}
+	return true, len(keyword)
+}
+
+func skipSQLToken(sql string, pos int) (int, bool) {
+	switch sql[pos] {
+	case '\'':
+		end := skipQuotes(sql[pos+1:], true)
+		if end == -1 {
+			return len(sql), true
+		}
+		return pos + end + 2, true
+	case '"':
+		end := skipQuotes(sql[pos+1:], false)
+		if end == -1 {
+			return len(sql), true
+		}
+		return pos + end + 2, true
+	case '`':
+		end := strings.IndexByte(sql[pos+1:], '`')
+		if end == -1 {
+			return len(sql), true
+		}
+		return pos + end + 2, true
+	case '-':
+		if pos+1 < len(sql) && sql[pos+1] == '-' {
+			end := strings.IndexByte(sql[pos:], '\n')
+			if end == -1 {
+				return len(sql), true
+			}
+			return pos + end + 1, true
+		}
+	case '/':
+		if pos+1 < len(sql) && sql[pos+1] == '*' {
+			end := strings.Index(sql[pos+2:], "*/")
+			if end == -1 {
+				return len(sql), true
+			}
+			return pos + end + 4, true
+		}
+	}
+	return pos, false
 }

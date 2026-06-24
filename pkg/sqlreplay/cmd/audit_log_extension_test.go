@@ -574,6 +574,55 @@ func TestParseExecuteParamsForExtension(t *testing.T) {
 	}
 }
 
+func TestLimitParamIndices(t *testing.T) {
+	tests := []struct {
+		sql      string
+		expected []int
+	}{
+		{sql: "SELECT * FROM t WHERE id = ?", expected: nil},
+		{sql: "SELECT * FROM t LIMIT ?", expected: []int{0}},
+		{sql: "SELECT * FROM t WHERE id = ? LIMIT ?", expected: []int{1}},
+		{sql: "SELECT * FROM t LIMIT ?, ?", expected: []int{0, 1}},
+		{sql: "SELECT * FROM t LIMIT ? OFFSET ?", expected: []int{0, 1}},
+		{sql: "SELECT * FROM t OFFSET ? LIMIT ?", expected: []int{0, 1}},
+		{sql: "SELECT * FROM (SELECT * FROM t2 LIMIT ?) x WHERE y = ? LIMIT ?", expected: []int{0, 2}},
+		{sql: "SELECT * FROM t WHERE `limit` = ? LIMIT ?", expected: []int{1}},
+	}
+	for _, tt := range tests {
+		require.ElementsMatch(t, tt.expected, limitParamIndices(tt.sql), "sql: %s", tt.sql)
+	}
+}
+
+func TestCoerceLimitParams(t *testing.T) {
+	args := []any{"100", "10"}
+	coerced := coerceLimitParams("SELECT * FROM t WHERE id = ? LIMIT ?", args)
+	require.Equal(t, []any{"100", int64(10)}, coerced)
+
+	args = []any{"10", "20"}
+	coerced = coerceLimitParams("SELECT * FROM t LIMIT ?, ?", args)
+	require.Equal(t, []any{int64(10), int64(20)}, coerced)
+
+	args = []any{"10"}
+	coerced = coerceLimitParams("SELECT * FROM t WHERE id = ?", args)
+	require.Equal(t, []any{"10"}, coerced)
+}
+
+func TestDecodeAuditExtensionLimitParams(t *testing.T) {
+	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+	decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+	line := auditExtensionLine("root", "1", "QUERY,EXECUTE,SELECT", `"SELECT * FROM t WHERE id = ? LIMIT ?"`, `"[1,10]"`) + "\n"
+	mr := mockReader{data: []byte(line), filename: "f"}
+	cmds, err := decodeCmds(decoder, &mr)
+	require.ErrorIs(t, err, io.EOF)
+	require.Len(t, cmds, 3)
+
+	executeReq, err := pnet.MakeExecuteStmtRequest(1, []any{"1", int64(10)}, true)
+	require.NoError(t, err)
+	require.Equal(t, pnet.ComStmtExecute, cmds[1].Type)
+	require.Equal(t, []any{"1", int64(10)}, cmds[1].Params)
+	require.Equal(t, executeReq, cmds[1].Payload)
+}
+
 func auditExtensionLine(user, connID, event, sql, params string) string {
 	return auditExtensionLineWithTables(user, connID, event, `"[]"`, sql, params)
 }
