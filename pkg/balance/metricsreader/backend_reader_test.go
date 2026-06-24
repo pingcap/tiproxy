@@ -1442,7 +1442,7 @@ func TestReadMetricsFallback(t *testing.T) {
 
 	suite := newEtcdTestSuite(t)
 	t.Cleanup(suite.close)
-	ownerKey := fmt.Sprintf("%s/%s", readerOwnerKeyPrefixForCluster(""), readerOwnerKeySuffix)
+	ownerKey := fmt.Sprintf("%s/%s", readerOwnerKeyPrefix, readerOwnerKeySuffix)
 	suite.putKV(ownerKey, ownerAddr)
 	require.Eventually(t, func() bool {
 		kvs := suite.getKV(ownerKey)
