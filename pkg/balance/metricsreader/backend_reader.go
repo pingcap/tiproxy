@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/elect"
+	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
@@ -172,14 +173,25 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 		return err
 	}
 
-	// If self is a owner, read the backends that are not read by any other owners.
+	// If self is a owner, read backends except excludeZones. The backends in those zones are read by other zonal owners.
+	//
+	// If the zone is not set, there is only one global owner, who queries all backends.
+	// If the zone is set, there are several zonal owners, who query the backends in the same zone.
+	// There are some exceptions:
+	// 1. In k8s, the zone is not set at startup and then is set by HTTP API, so there may temporarily exist both global and zonal owners.
+	// 2. Some backends may not be in the same zone with any owner. E.g. there are only 2 TiProxy in a 3-AZ cluster.
+	// In any way, the owner queries the backends that are not queried by other owners.
 	var errs []error
+	backends, topologyErr := br.fetchBackendTopology(ctx)
+	if topologyErr != nil {
+		errs = append(errs, topologyErr)
+	}
 	var backendLabels []string
-	if br.isOwner.Load() {
+	if br.isOwner.Load() && topologyErr == nil {
 		if idx := slices.Index(zones, zone); idx >= 0 {
 			zones = slices.Delete(zones, idx, idx+1)
 		}
-		backendLabels, err = br.readFromBackends(ctx, zones)
+		backendLabels, err = br.readFromBackendAddrs(ctx, addrsFromTopology(backends, zones))
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -190,6 +202,15 @@ func (br *BackendReader) ReadMetrics(ctx context.Context) error {
 			continue
 		}
 		if err = br.readFromOwner(ctx, owner); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	// If the metrics of some backends are missing, read directly from the backends.
+	missingAddrs := br.findMissingBackendAddrs(addrsFromTopology(backends, nil))
+	if len(missingAddrs) > 0 {
+		br.lg.Info("some backend metrics are missing, reading them directly from backends", zap.Strings("addrs", missingAddrs))
+		if _, err = br.readFromBackendAddrs(ctx, missingAddrs); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -264,19 +285,40 @@ func (br *BackendReader) queryAllOwners(ctx context.Context) (zones, owners []st
 	return
 }
 
-// If self is a owner, read backends except excludeZones. The backends in those zones are read by other zonal owners.
-//
-// If the zone is not set, there is only one global owner, who queries all backends.
-// If the zone is set, there are several zonal owners, who query the backends in the same zone.
-// There are some exceptions:
-// 1. In k8s, the zone is not set at startup and then is set by HTTP API, so there may temporarily exist both global and zonal owners.
-// 2. Some backends may not be in the same zone with any owner. E.g. there are only 2 TiProxy in a 3-AZ cluster.
-// In any way, the owner queries the backends that are not queried by other owners.
-func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []string) ([]string, error) {
-	addrs, err := br.getBackendAddrs(ctx, excludeZones)
-	if err != nil {
-		return nil, err
+// findMissingBackendAddrs returns backends that have no metrics in any query rule.
+// If any rule already has Step2History for a backend, the owner query is considered successful.
+func (br *BackendReader) findMissingBackendAddrs(addrs []string) []string {
+	br.Lock()
+	defer br.Unlock()
+	if len(br.queryRules) == 0 || len(addrs) == 0 {
+		return nil
 	}
+	missing := make([]string, 0)
+	for _, addr := range addrs {
+		label := getLabel4Addr(addr)
+		if br.backendNeedsFallbackLocked(label) {
+			missing = append(missing, addr)
+		}
+	}
+	return missing
+}
+
+// If a backend has metrics in any query rule, it means the metrics are pulled.
+func (br *BackendReader) backendNeedsFallbackLocked(label string) bool {
+	for ruleKey := range br.queryRules {
+		ruleHistory, ok := br.history[ruleKey]
+		if !ok {
+			continue
+		}
+		beHistory, ok := ruleHistory[label]
+		if ok && len(beHistory.Step2History) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (br *BackendReader) readFromBackendAddrs(ctx context.Context, addrs []string) ([]string, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
@@ -297,7 +339,7 @@ func (br *BackendReader) readFromBackends(ctx context.Context, excludeZones []st
 				}
 				resp, err := br.readBackendMetric(ctx, addr)
 				if err != nil {
-					br.lg.Debug("read metrics from backend failed", zap.String("addr", addr), zap.Error(err))
+					br.lg.Warn("read metrics from backend failed", zap.String("addr", addr), zap.Error(err))
 					return
 				}
 				text := filterMetrics(hack.String(resp), allNames)
@@ -539,13 +581,17 @@ func (br *BackendReader) marshalHistory(backends []string) error {
 	return nil
 }
 
-func (br *BackendReader) getBackendAddrs(ctx context.Context, excludeZones []string) ([]string, error) {
+func (br *BackendReader) fetchBackendTopology(ctx context.Context) (map[string]*infosync.TiDBTopologyInfo, error) {
 	backends, err := br.backendFetcher.GetTiDBTopology(ctx)
 	if err != nil {
 		br.lg.Error("failed to get backend addresses, stop reading metrics", zap.Error(err))
 		metrics.ServerErrCounter.WithLabelValues("backend_metrics").Inc()
 		return nil, err
 	}
+	return backends, nil
+}
+
+func addrsFromTopology(backends map[string]*infosync.TiDBTopologyInfo, excludeZones []string) []string {
 	addrs := make([]string, 0, len(backends))
 	for _, backend := range backends {
 		if len(excludeZones) > 0 {
@@ -555,7 +601,7 @@ func (br *BackendReader) getBackendAddrs(ctx context.Context, excludeZones []str
 		}
 		addrs = append(addrs, net.JoinHostPort(backend.IP, strconv.Itoa(int(backend.StatusPort))))
 	}
-	return addrs, nil
+	return addrs
 }
 
 func (br *BackendReader) PreClose() {
