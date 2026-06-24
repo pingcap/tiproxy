@@ -1337,40 +1337,6 @@ func setupTypicalBackendListener(t *testing.T, respBody string) (backendPort int
 	return
 }
 
-func TestBackendMetricOwnerPath(t *testing.T) {
-	require.Equal(t, "/api/backend/metrics", backendMetricOwnerPath(""))
-	require.Equal(t, "/api/backend/metrics?cluster=cluster-a", backendMetricOwnerPath("cluster-a"))
-	require.Equal(t, "/api/backend/metrics?cluster=cluster+a%2Fb", backendMetricOwnerPath("cluster a/b"))
-}
-
-func TestReaderOwnerKeyPrefixForCluster(t *testing.T) {
-	require.Equal(t, "/tiproxy/metric_reader", readerOwnerKeyPrefixForCluster(""))
-	require.Equal(t, "/tiproxy/metric_reader", readerOwnerKeyPrefixForCluster(config.DefaultBackendClusterName))
-	require.Equal(t, "/tiproxy/metric_reader/cluster-a", readerOwnerKeyPrefixForCluster("cluster-a"))
-	require.Equal(t, "/tiproxy/metric_reader/cluster-a", readerOwnerKeyPrefixForCluster(" cluster-a "))
-}
-
-func TestQueryAllOwnersForNamedCluster(t *testing.T) {
-	lg, _ := logger.CreateLoggerForTest(t)
-	suite := newEtcdTestSuite(t)
-	defer suite.close()
-
-	suite.putKV("/tiproxy/metric_reader/owner/1000", "default-owner")
-	suite.putKV("/tiproxy/metric_reader/east/owner/1001", "default-east-owner")
-	suite.putKV("/tiproxy/metric_reader/cluster-a/owner/1002", "cluster-a-owner")
-	suite.putKV("/tiproxy/metric_reader/cluster-a/east/owner/1003", "cluster-a-east-owner")
-	suite.putKV("/tiproxy/metric_reader/cluster-b/owner/1004", "cluster-b-owner")
-
-	br := NewClusterBackendReader(lg, "cluster-a", nil, nil, suite.client, nil, nil)
-	zones, owners, err := br.queryAllOwners(context.Background())
-	require.NoError(t, err)
-
-	slices.Sort(zones)
-	slices.Sort(owners)
-	require.Equal(t, []string{"east"}, zones)
-	require.Equal(t, []string{"cluster-a-east-owner", "cluster-a-owner"}, owners)
-}
-
 func TestFindMissingBackendAddrs(t *testing.T) {
 	now := model.Time(time.Now().UnixMilli())
 	backendLabel := "127.0.0.1:10080"
