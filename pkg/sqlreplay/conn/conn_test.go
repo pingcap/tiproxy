@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -872,6 +873,38 @@ func TestExecInfo(t *testing.T) {
 			require.Equal(t, test.sqlText, hack.String(test.cmd.Payload[1:]), "case %d", i)
 		}
 	}
+}
+
+func TestOnExecuteFailedMySQLErrorLog(t *testing.T) {
+	lg, log := logger.CreateLoggerForTest(t)
+	conn := NewConn(lg, ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    make(chan Exception, 1),
+		CloseCh:        make(chan uint64, 1),
+		ExecInfoCh:     make(chan ExecInfo, 1),
+		ReplayStats:    &ReplayStats{},
+	})
+	myErr := mysql.NewError(mysql.ER_PARSE_ERROR, "syntax error")
+	command := &cmd.Command{
+		Type:         pnet.ComStmtExecute,
+		PreparedStmt: "SELECT * FROM t WHERE id = ?",
+		Params:       []any{int64(1)},
+		FileName:     "tidb-audit-2025-01-01.log",
+		Line:         42,
+	}
+	conn.onExecuteFailed(command, myErr)
+
+	logStr := log.String()
+	require.Contains(t, logStr, "replay got mysql error")
+	require.Contains(t, logStr, "SELECT * FROM t WHERE id = ?")
+	require.Contains(t, logStr, "audit_line")
+	require.Contains(t, logStr, "42")
+	require.Contains(t, logStr, "tidb-audit-2025-01-01.log")
+	require.Contains(t, logStr, "params")
 }
 
 func TestNoBlockReplay(t *testing.T) {

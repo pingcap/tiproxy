@@ -459,7 +459,13 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 		if !pnet.IsMySQLError(err) {
 			return
 		} else {
-			mgr.logger.Debug("got a mysql error", zap.Error(err), zap.Stringer("cmd", cmd))
+			fields := []zap.Field{zap.Error(err), zap.Stringer("cmd", cmd)}
+			if cmd == pnet.ComStmtExecute && !streamingForward {
+				if params := parseStmtExecuteParams(request); len(params) > 0 {
+					fields = append(fields, zap.Any("params", params))
+				}
+			}
+			mgr.logger.Debug("got a mysql error", fields...)
 		}
 	}
 	if err == nil {
@@ -990,4 +996,22 @@ func (mgr *BackendConnManager) ConnInfo() []zap.Field {
 		zap.Time("create_time", mgr.createTime),
 		zap.Time("last_active_time", mgr.lastActiveTime))
 	return fields
+}
+
+const stmtExecuteHeaderLen = 1 + 4 + 1 + 4
+
+// parseStmtExecuteParams parses parameters from a COM_STMT_EXECUTE request for logging.
+// It only works when new_params_bound_flag is set in the packet.
+func parseStmtExecuteParams(request []byte) []any {
+	for paramNum := 1; paramNum <= 256; paramNum++ {
+		flagPos := stmtExecuteHeaderLen + ((paramNum + 7) >> 3)
+		if flagPos >= len(request) || request[flagPos] != 1 {
+			continue
+		}
+		_, args, _, err := pnet.ParseExecuteStmtRequest(request, paramNum, nil)
+		if err == nil && len(args) > 0 {
+			return args
+		}
+	}
+	return nil
 }

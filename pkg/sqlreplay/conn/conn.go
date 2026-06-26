@@ -348,11 +348,41 @@ func (c *conn) onDisconnected(err error) {
 
 func (c *conn) onExecuteFailed(command *cmd.Command, err error) {
 	c.replayStats.ExceptionCmds.Add(1)
+	if pnet.IsMySQLError(err) {
+		c.lg.Warn("replay got mysql error", c.mysqlErrorLogFields(command, err)...)
+	}
 	// Reporting should not block replaying.
 	select {
 	case c.exceptionCh <- NewFailException(err, command):
 	default:
 	}
+}
+
+func (c *conn) mysqlErrorLogFields(command *cmd.Command, err error) []zap.Field {
+	fields := []zap.Field{
+		zap.Error(err),
+		zap.Stringer("cmd", command.Type),
+	}
+	if command.FileName != "" {
+		fields = append(fields, zap.String("audit_file", command.FileName))
+	}
+	if command.Line > 0 {
+		fields = append(fields, zap.Int("audit_line", command.Line))
+	}
+	switch command.Type {
+	case pnet.ComQuery, pnet.ComStmtPrepare:
+		fields = append(fields, zap.String("sql", hack.String(command.Payload[1:])))
+	case pnet.ComStmtExecute:
+		fields = append(fields, zap.String("sql", command.PreparedStmt))
+		if len(command.Params) > 0 {
+			fields = append(fields, zap.Any("params", command.Params))
+		}
+	default:
+		if sql := command.QueryText(); sql != "" {
+			fields = append(fields, zap.String("sql", sql))
+		}
+	}
+	return fields
 }
 
 // ExecuteCmd executes a command asynchronously by adding it to the list.
