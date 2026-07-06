@@ -93,6 +93,18 @@ type Command struct {
 	Success bool
 }
 
+// AuditDuration returns the execution duration recorded in the audit log.
+// It returns 0 if the duration is unavailable, e.g. audit_log_extension only has a single timestamp.
+func (c *Command) AuditDuration() time.Duration {
+	if c == nil || c.StartTs.IsZero() || c.EndTs.IsZero() {
+		return 0
+	}
+	if d := c.EndTs.Sub(c.StartTs); d > 0 {
+		return d
+	}
+	return 0
+}
+
 func NewCommand(packet []byte, startTs time.Time, connID uint64) *Command {
 	if len(packet) == 0 {
 		return nil

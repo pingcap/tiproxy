@@ -53,6 +53,8 @@ const (
 	minSpeed          = 0.1
 	maxSpeed          = 10.0
 	reportLogInterval = 10 * time.Second
+	// pendingBacklogWarnThreshold logs extra diagnostics when pending commands keep growing.
+	pendingBacklogWarnThreshold = int64(10000)
 
 	checkpointSaveInterval = 100 * time.Millisecond
 	stateSaveRetryInterval = 10 * time.Second
@@ -301,6 +303,8 @@ type replay struct {
 	decodedCmds      atomic.Uint64
 	backendTLSConfig *tls.Config
 	lg               *zap.Logger
+	lastReportDecodedCmds uint64
+	lastReportReplayedCmds uint64
 }
 
 func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
@@ -858,12 +862,37 @@ func (r *replay) reportLoop(ctx context.Context) {
 		case <-ticker.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
+			decodedCmds := r.decodedCmds.Load()
+			replayedCmds := r.replayStats.ReplayedCmds.Load()
+			decodeRate := float64(decodedCmds-r.lastReportDecodedCmds) / reportLogInterval.Seconds()
+			replayRate := float64(replayedCmds-r.lastReportReplayedCmds) / reportLogInterval.Seconds()
+			r.lastReportDecodedCmds = decodedCmds
+			r.lastReportReplayedCmds = replayedCmds
+			maxConnQueue := r.replayStats.MaxConnQueue.Swap(0)
+			pendingCmds := r.replayStats.PendingCmds.Load()
 			fields := append(r.commonFields(), []zap.Field{
-				zap.Int64("pending_cmds", r.replayStats.PendingCmds.Load()), // if too many, replay is slower than decode
+				zap.Int64("pending_cmds", pendingCmds), // if too many, replay is slower than decode
 				zap.Int("pending_exec_info", len(r.execInfoCh)),             // if too many, recording sql is slow
 				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)),
+				zap.Float64("decode_rate", decodeRate),
+				zap.Float64("replay_rate", replayRate),
+				zap.Int64("max_conn_queue", maxConnQueue),
 			}...)
 			r.lg.Info("replay progress", fields...)
+			if pendingCmds >= pendingBacklogWarnThreshold {
+				r.lg.Warn("replay backlog growing",
+					zap.Int64("pending_cmds", pendingCmds),
+					zap.Float64("decode_rate", decodeRate),
+					zap.Float64("replay_rate", replayRate),
+					zap.Float64("decode_replay_gap", decodeRate-replayRate),
+					zap.Int64("max_conn_queue", maxConnQueue),
+					zap.Uint64("slow_exec_cmds", r.replayStats.SlowExecCmds.Load()),
+					zap.Uint64("slow_connects", r.replayStats.SlowConnects.Load()),
+					zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
+					zap.Uint64("disconnects", r.replayStats.DisconnectCmds.Load()),
+					zap.Int("pending_exec_info", len(r.execInfoCh)),
+				)
+			}
 		}
 	}
 }
@@ -1025,6 +1054,8 @@ func (r *replay) commonFields() []zap.Field {
 		zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
 		zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
 		zap.Uint64("disconnects", r.replayStats.DisconnectCmds.Load()),
+		zap.Uint64("slow_exec_cmds", r.replayStats.SlowExecCmds.Load()),
+		zap.Uint64("slow_connects", r.replayStats.SlowConnects.Load()),
 		zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 		zap.Duration("replay_elapsed", time.Since(r.startTime)),

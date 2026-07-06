@@ -48,6 +48,12 @@ type ReplayStats struct {
 	ExceptionCmds atomic.Uint64
 	// DisconnectCmds is the number of unexpected network disconnections.
 	DisconnectCmds atomic.Uint64
+	// SlowExecCmds is the number of commands whose replay latency is much higher than audit log duration.
+	SlowExecCmds atomic.Uint64
+	// SlowConnects is the number of backend connects slower than the diagnostic threshold.
+	SlowConnects atomic.Uint64
+	// MaxConnQueue is the maximum per-connection command queue length observed since the last report reset.
+	MaxConnQueue atomic.Int64
 }
 
 type ExecInfo struct {
@@ -90,6 +96,7 @@ type conn struct {
 	upstreamConnID  uint64 // the original upstream connection ID in capture
 	replayStats     *ReplayStats
 	lastPendingCmds int // last pending cmds reported to the stats
+	lastQueueWarnLevel int
 	readonly        bool
 }
 
@@ -175,7 +182,11 @@ func (c *conn) Run(ctx context.Context) {
 			// Connect to the backend for the first time or after unexpected disconnection.
 			// If the backend is upgrading, the connections may drop but the QPS should not drop too much.
 			if !connected {
-				if err := c.backendConn.Connect(ctx, command.Value.CurDB); err != nil {
+				connectStart := time.Now()
+				err := c.backendConn.Connect(ctx, command.Value.CurDB)
+				connectLatency := time.Since(connectStart)
+				c.maybeLogSlowConnect(connectLatency, command.Value.CurDB, err)
+				if err != nil {
 					c.lg.Info("failed to connect backend", zap.String("db", command.Value.CurDB), zap.Error(err))
 					c.onDisconnected(err)
 					continue
@@ -201,6 +212,7 @@ func (c *conn) Run(ctx context.Context) {
 			startTime := time.Now()
 			resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload)
 			latency := time.Since(startTime)
+			c.maybeLogSlowExec(command.Value, latency)
 			if resp.Err != nil {
 				if errors.Is(resp.Err, backend.ErrClosing) || pnet.IsDisconnectError(resp.Err) {
 					c.onDisconnected(resp.Err)
@@ -397,7 +409,9 @@ func (c *conn) ExecuteCmd(command *cmd.Command) {
 	c.cmdList.PushFront(command)
 	pendingCmds := c.cmdList.Len()
 	c.updatePendingCmds(pendingCmds)
+	updateMaxConnQueue(c.replayStats, pendingCmds)
 	c.cmdLock.Unlock()
+	c.maybeLogQueueBacklog(pendingCmds)
 	select {
 	case c.cmdCh <- struct{}{}:
 	default:
