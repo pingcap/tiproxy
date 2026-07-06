@@ -74,18 +74,17 @@ func main() {
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
-		cfg := &config.Config{
-			Log: config.Log{
-				LogOnline: config.LogOnline{
-					Level:   *logLevel,
-					LogFile: config.LogFile{Filename: *logFile},
-				},
+		cfg := config.NewConfig()
+		cfg.Log = config.Log{
+			LogOnline: config.LogOnline{
+				Level:   *logLevel,
+				LogFile: config.LogFile{Filename: *logFile},
 			},
-			API: config.API{
-				Addr: *pprofAddr,
-			},
-			EnableTrafficReplay: true,
 		}
+		cfg.API = config.API{
+			Addr: *pprofAddr,
+		}
+		cfg.EnableTrafficReplay = true
 		lgMgr, lg, err := logger.NewLoggerManager(&cfg.Log)
 		if err != nil {
 			return err

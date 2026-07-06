@@ -46,6 +46,8 @@ type ReplayStats struct {
 	CurCmdEndTs atomic.Int64
 	// The number of exception commands.
 	ExceptionCmds atomic.Uint64
+	// DisconnectCmds is the number of unexpected network disconnections.
+	DisconnectCmds atomic.Uint64
 }
 
 type ExecInfo struct {
@@ -337,6 +339,7 @@ func (c *conn) updateExecuteStmt(ctx context.Context, command *cmd.Command) erro
 
 func (c *conn) onDisconnected(err error) {
 	c.replayStats.ExceptionCmds.Add(1)
+	c.replayStats.DisconnectCmds.Add(1)
 	// Reporting should not block replaying.
 	select {
 	case c.exceptionCh <- NewOtherException(err, c.upstreamConnID):

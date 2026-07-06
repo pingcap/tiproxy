@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/metrics"
@@ -310,6 +311,7 @@ func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 }
 
 func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
+	bcConfig = ensureReplayBCConfig(bcConfig)
 	err := cfg.LoadFromCheckpoint()
 	if err != nil {
 		return err
@@ -1022,6 +1024,7 @@ func (r *replay) commonFields() []zap.Field {
 		zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
 		zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
 		zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
+		zap.Uint64("disconnects", r.replayStats.DisconnectCmds.Load()),
 		zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 		zap.Duration("replay_elapsed", time.Since(r.startTime)),
@@ -1065,4 +1068,15 @@ func getDirForInput(input string) (string, error) {
 	}
 	parsedURL.Path = filepath.Dir(parsedURL.Path)
 	return parsedURL.String(), nil
+}
+
+func ensureReplayBCConfig(bcConfig *backend.BCConfig) *backend.BCConfig {
+	if bcConfig == nil {
+		bcConfig = &backend.BCConfig{}
+	}
+	cfg := *bcConfig
+	if !cfg.HealthyKeepAlive.Enabled {
+		_, cfg.HealthyKeepAlive, cfg.UnhealthyKeepAlive = config.DefaultKeepAlive()
+	}
+	return &cfg
 }
