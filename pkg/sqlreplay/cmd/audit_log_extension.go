@@ -85,6 +85,9 @@ func (decoder *AuditLogExtensionDecoder) SetUserAllowlist(users []string) {
 
 // SetCommandEndTime implements [AuditLogDecoder].
 func (decoder *AuditLogExtensionDecoder) SetCommandEndTime(t time.Time) {
+	if t.IsZero() {
+		return
+	}
 	decoder.commandEndTime = t
 }
 
