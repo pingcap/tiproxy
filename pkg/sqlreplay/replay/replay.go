@@ -929,7 +929,7 @@ func (r *replay) fetchCurrentCheckpoint() replayCheckpoint {
 }
 
 func (r *replay) recordExecInfoLoop() {
-	sinks, sinkErr := execinfo.NewSinks(r.cfg.OutputPath, r.cfg.Kafka)
+	sinks, sinkErr := execinfo.NewSinks(r.lg.Named("execinfo"), r.cfg.OutputPath, r.cfg.Kafka)
 	if sinkErr != nil {
 		r.lg.Error("build exec info sinks failed", zap.Error(sinkErr))
 	}

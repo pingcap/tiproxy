@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	"go.uber.org/zap"
 )
 
 // Sink writes formatted exec info records.
@@ -17,7 +18,7 @@ type Sink interface {
 
 // NewSinks creates sinks from file output path and optional Kafka config.
 // Returns nil when neither output is configured.
-func NewSinks(outputPath string, kafka KafkaConfig) ([]Sink, error) {
+func NewSinks(lg *zap.Logger, outputPath string, kafka KafkaConfig) ([]Sink, error) {
 	var sinks []Sink
 	if len(outputPath) > 0 {
 		fileSink, err := newFileSink(outputPath)
@@ -33,7 +34,7 @@ func NewSinks(outputPath string, kafka KafkaConfig) ([]Sink, error) {
 			}
 			return nil, err
 		}
-		kafkaSink, err := newKafkaSink(kafka)
+		kafkaSink, err := newKafkaSink(lg, kafka)
 		if err != nil {
 			for _, s := range sinks {
 				_ = s.Close()

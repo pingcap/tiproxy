@@ -6,10 +6,12 @@ package execinfo
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/segmentio/kafka-go"
+	"go.uber.org/zap"
 )
 
 const (
@@ -19,6 +21,14 @@ const (
 	kafkaBatchSize = 4096
 	// kafkaBatchTimeout flushes a partial batch instead of waiting for it to fill.
 	kafkaBatchTimeout = 50 * time.Millisecond
+
+	kafkaWorkerCount = 4
+	// kafkaRecordsChBuf decouples replay from kafka workers.
+	kafkaRecordsChBuf = 1 << 16
+	// kafkaSinkBatchSize is the number of messages each worker sends per WriteMessages call.
+	kafkaSinkBatchSize = 256
+	// kafkaSinkFlushTimeout flushes a partial worker batch.
+	kafkaSinkFlushTimeout = 50 * time.Millisecond
 )
 
 type kafkaProducer interface {
@@ -27,10 +37,13 @@ type kafkaProducer interface {
 }
 
 type kafkaSink struct {
-	writer kafkaProducer
+	writer    kafkaProducer
+	recordsCh chan kafka.Message
+	wg        sync.WaitGroup
+	lg        *zap.Logger
 }
 
-func newKafkaSink(cfg KafkaConfig) (*kafkaSink, error) {
+func newKafkaSink(lg *zap.Logger, cfg KafkaConfig) (*kafkaSink, error) {
 	if len(cfg.Topic) == 0 {
 		return nil, errors.New("kafka topic is required")
 	}
@@ -42,17 +55,28 @@ func newKafkaSink(cfg KafkaConfig) (*kafkaSink, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &kafkaSink{
+	s := &kafkaSink{
 		writer: kafka.NewWriter(kafka.WriterConfig{
-			Brokers:       brokers,
-			Topic:         cfg.Topic,
-			Dialer:        dialer,
-			Balancer:      &kafka.LeastBytes{},
-			RequiredAcks:  kafkaRequiredAcks,
-			BatchSize:     kafkaBatchSize,
-			BatchTimeout:  kafkaBatchTimeout,
+			Brokers:      brokers,
+			Topic:        cfg.Topic,
+			Dialer:       dialer,
+			Balancer:     &kafka.LeastBytes{},
+			RequiredAcks: kafkaRequiredAcks,
+			BatchSize:    kafkaBatchSize,
+			BatchTimeout: kafkaBatchTimeout,
 		}),
-	}, nil
+		recordsCh: make(chan kafka.Message, kafkaRecordsChBuf),
+		lg:        lg,
+	}
+	s.startWorkers()
+	return s, nil
+}
+
+func (s *kafkaSink) startWorkers() {
+	for range kafkaWorkerCount {
+		s.wg.Add(1)
+		go s.worker()
+	}
 }
 
 func (s *kafkaSink) Write(rec Record) error {
@@ -60,12 +84,56 @@ func (s *kafkaSink) Write(rec Record) error {
 	if err != nil {
 		return errors.Wrapf(err, "marshal exec info record")
 	}
-	if err := s.writer.WriteMessages(context.Background(), kafka.Message{Value: value}); err != nil {
-		return errors.Wrapf(err, "write exec info to kafka")
-	}
+	s.recordsCh <- kafka.Message{Value: value}
 	return nil
 }
 
+func (s *kafkaSink) worker() {
+	defer s.wg.Done()
+
+	batch := make([]kafka.Message, 0, kafkaSinkBatchSize)
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if err := s.writer.WriteMessages(context.Background(), batch...); err != nil && s.lg != nil {
+			s.lg.Warn("write exec info batch to kafka failed",
+				zap.Error(err),
+				zap.Int("batch_size", len(batch)))
+		}
+		batch = batch[:0]
+	}
+
+	flushTimer := time.NewTimer(kafkaSinkFlushTimeout)
+	defer flushTimer.Stop()
+
+	for {
+		select {
+		case msg, ok := <-s.recordsCh:
+			if !ok {
+				flush()
+				return
+			}
+			batch = append(batch, msg)
+			if len(batch) >= kafkaSinkBatchSize {
+				flush()
+				if !flushTimer.Stop() {
+					select {
+					case <-flushTimer.C:
+					default:
+					}
+				}
+				flushTimer.Reset(kafkaSinkFlushTimeout)
+			}
+		case <-flushTimer.C:
+			flush()
+			flushTimer.Reset(kafkaSinkFlushTimeout)
+		}
+	}
+}
+
 func (s *kafkaSink) Close() error {
+	close(s.recordsCh)
+	s.wg.Wait()
 	return s.writer.Close()
 }
