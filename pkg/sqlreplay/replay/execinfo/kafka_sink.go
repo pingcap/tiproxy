@@ -6,9 +6,19 @@ package execinfo
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/segmentio/kafka-go"
+)
+
+const (
+	// RequireOne waits only for the leader ack instead of all replicas (default RequireAll).
+	kafkaRequiredAcks = int(kafka.RequireOne)
+	// kafkaBatchSize is larger than the kafka-go default (100) to reduce produce round trips.
+	kafkaBatchSize = 4096
+	// kafkaBatchTimeout flushes a partial batch instead of waiting for it to fill.
+	kafkaBatchTimeout = 50 * time.Millisecond
 )
 
 type kafkaProducer interface {
@@ -34,10 +44,13 @@ func newKafkaSink(cfg KafkaConfig) (*kafkaSink, error) {
 	}
 	return &kafkaSink{
 		writer: kafka.NewWriter(kafka.WriterConfig{
-			Brokers:  brokers,
-			Topic:    cfg.Topic,
-			Dialer:   dialer,
-			Balancer: &kafka.LeastBytes{},
+			Brokers:       brokers,
+			Topic:         cfg.Topic,
+			Dialer:        dialer,
+			Balancer:      &kafka.LeastBytes{},
+			RequiredAcks:  kafkaRequiredAcks,
+			BatchSize:     kafkaBatchSize,
+			BatchTimeout:  kafkaBatchTimeout,
 		}),
 	}, nil
 }
