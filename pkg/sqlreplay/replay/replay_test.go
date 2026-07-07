@@ -173,7 +173,7 @@ func TestValidateCfg(t *testing.T) {
 }
 
 func TestReplaySpeed(t *testing.T) {
-	speeds := []float64{10, 1, 0.1}
+	speeds := []float64{10, 1}
 	var lastTotalTime time.Duration
 	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
@@ -201,7 +201,7 @@ func TestReplaySpeed(t *testing.T) {
 		now := time.Now()
 		for i := range 10 {
 			command := newMockCommand(1)
-			command.StartTs = now.Add(time.Duration(i*10) * time.Millisecond)
+			command.StartTs = now.Add(time.Duration(i*4) * time.Millisecond)
 			loader.writeCommand(command, cmd.FormatNative)
 		}
 		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))

@@ -281,30 +281,31 @@ func (cfg *ReplayConfig) LoadFromCheckpoint() error {
 
 type replay struct {
 	sync.Mutex
-	cfg              ReplayConfig
-	meta             store.Meta
-	storages         []storage.ExternalStorage
-	replayStats      conn.ReplayStats
-	dedup            *cmd.DeDup
-	idMgr            *id.IDManager
-	exceptionCh      chan conn.Exception
-	closeConnCh      chan uint64
-	execInfoCh       chan conn.ExecInfo
-	decodeCtx        context.Context
-	decodeCancel     context.CancelFunc
-	wg               waitgroup.WaitGroup
-	cancel           context.CancelFunc
-	connCreator      conn.ConnCreator
-	report           report.Report
-	err              error
-	startTime        time.Time
-	endTime          time.Time
-	progress         float64
-	decodedCmds      atomic.Uint64
-	backendTLSConfig *tls.Config
-	lg               *zap.Logger
-	lastReportDecodedCmds uint64
+	cfg                    ReplayConfig
+	meta                   store.Meta
+	storages               []storage.ExternalStorage
+	replayStats            conn.ReplayStats
+	dedup                  *cmd.DeDup
+	idMgr                  *id.IDManager
+	exceptionCh            chan conn.Exception
+	closeConnCh            chan uint64
+	execInfoCh             chan conn.ExecInfo
+	decodeCtx              context.Context
+	decodeCancel           context.CancelFunc
+	wg                     waitgroup.WaitGroup
+	cancel                 context.CancelFunc
+	connCreator            conn.ConnCreator
+	report                 report.Report
+	err                    error
+	startTime              time.Time
+	endTime                time.Time
+	progress               float64
+	decodedCmds            atomic.Uint64
+	backendTLSConfig       *tls.Config
+	lg                     *zap.Logger
+	lastReportDecodedCmds  uint64
 	lastReportReplayedCmds uint64
+	dispatchLimiter        dispatchLimiter
 }
 
 func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
@@ -338,6 +339,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.endTime = time.Time{}
 	r.progress = 0
 	r.decodedCmds.Store(0)
+	r.dispatchLimiter.reset()
 	r.err = nil
 	r.replayStats = conn.ReplayStats{}
 	r.dedup = cmd.NewDeDup()
@@ -473,6 +475,7 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 	}
 
 	var captureStartTs, replayStartTs time.Time
+	var lastDispatchLimitedCaptureTs, lastDispatchLimitedReplayTs time.Time
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
 	connCount := 0                      // alive connection count
 	maxPendingCmds := int64(0)
@@ -489,7 +492,6 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 		}
 
 		var command *cmd.Command
-		r.lg.Debug("decoding command", zap.Any("decoder", decoder))
 		if command, err = decoder.Decode(); err != nil {
 			if errors.Is(err, io.EOF) {
 				r.lg.Info("replay reads EOF")
@@ -510,7 +512,6 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 				break
 			}
 		}
-		r.lg.Debug("decoded command", zap.Any("command", command))
 		r.replayStats.CurCmdTs.Store(command.StartTs.UnixNano())
 		if !command.EndTs.IsZero() {
 			r.replayStats.CurCmdEndTs.Store(command.EndTs.UnixNano())
@@ -524,6 +525,10 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 			replayStartTs = time.Now()
 			r.replayStats.ReplayStartTs.Store(replayStartTs.UnixNano())
 			r.replayStats.FirstCmdTs.Store(command.StartTs.UnixNano())
+			if isDispatchLimitedCmd(command) {
+				lastDispatchLimitedCaptureTs = command.StartTs
+				lastDispatchLimitedReplayTs = replayStartTs
+			}
 		} else {
 			pendingCmds := r.replayStats.PendingCmds.Load()
 			if pendingCmds > maxPendingCmds {
@@ -544,6 +549,13 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
 			expectedInterval = max(time.Until(replayStartTs.Add(expectedInterval)), 0)
+			if pendingCmds <= r.cfg.slowDownThreshold && isDispatchLimitedCmd(command) {
+				dispatchCaptureGap := command.StartTs.Sub(lastDispatchLimitedCaptureTs)
+				if r.cfg.Speed != 1 {
+					dispatchCaptureGap = time.Duration(float64(dispatchCaptureGap) / r.cfg.Speed)
+				}
+				expectedInterval = applyShortenDispatchWait(expectedInterval, dispatchCaptureGap, lastDispatchLimitedReplayTs)
+			}
 			// If there are too many pending commands, slow it down to reduce memory usage.
 			if pendingCmds > r.cfg.slowDownThreshold {
 				extraWait := time.Duration(pendingCmds-r.cfg.slowDownThreshold) * r.cfg.slowDownFactor
@@ -552,16 +564,26 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 				metrics.ReplayWaitTime.Set(float64(extraWaitTime.Nanoseconds()))
 				r.replayStats.ExtraWaitTime.Store(extraWaitTime.Nanoseconds())
 			}
-			if expectedInterval > time.Microsecond {
-				r.replayStats.TotalWaitTime.Add(expectedInterval.Nanoseconds())
+			var dispatchWait time.Duration
+			if isDispatchLimitedCmd(command) {
+				dispatchWait = r.dispatchLimiter.waitDuration(pendingCmds)
+			}
+			totalWait := max(expectedInterval, dispatchWait)
+			if totalWait > time.Microsecond {
+				r.replayStats.TotalWaitTime.Add(totalWait.Nanoseconds())
 				select {
 				case <-execCtx.Done():
 					err = execCtx.Err()
 					break
-				case <-time.After(expectedInterval):
+				case <-time.After(totalWait):
 				case <-decodeCtx.Done():
 					stopDecoding = true
 				}
+			}
+			if isDispatchLimitedCmd(command) {
+				r.dispatchLimiter.markDispatched()
+				lastDispatchLimitedCaptureTs = command.StartTs
+				lastDispatchLimitedReplayTs = time.Now()
 			}
 		}
 		if execCtx.Err() == nil {
@@ -622,7 +644,7 @@ func (r *replay) constructMergeDecoders(ctx context.Context, readers []cmd.LineR
 		return decoders[0], nil
 	}
 
-	return newMergeDecoder(decoders...), nil
+	return newMergeDecoder(ctx, decoders...), nil
 }
 
 func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineReader, id int) (decoder, error) {
@@ -675,7 +697,7 @@ func (r *replay) constructStaticDecoder(ctx context.Context, readers []cmd.LineR
 }
 
 func (r *replay) constructDynamicDecoder(ctx context.Context) (decoder, error) {
-	decoder := newMergeDecoder()
+	decoder := newMergeDecoder(ctx)
 
 	parsedURL, err := url.Parse(r.cfg.Input)
 	if err != nil {
@@ -871,12 +893,13 @@ func (r *replay) reportLoop(ctx context.Context) {
 			maxConnQueue := r.replayStats.MaxConnQueue.Swap(0)
 			pendingCmds := r.replayStats.PendingCmds.Load()
 			fields := append(r.commonFields(), []zap.Field{
-				zap.Int64("pending_cmds", pendingCmds), // if too many, replay is slower than decode
-				zap.Int("pending_exec_info", len(r.execInfoCh)),             // if too many, recording sql is slow
+				zap.Int64("pending_cmds", pendingCmds),          // if too many, replay is slower than decode
+				zap.Int("pending_exec_info", len(r.execInfoCh)), // if too many, recording sql is slow
 				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)),
 				zap.Float64("decode_rate", decodeRate),
 				zap.Float64("replay_rate", replayRate),
 				zap.Int64("max_conn_queue", maxConnQueue),
+				zap.Float64("dispatch_qps", calcAutoDispatchQPS(pendingCmds)),
 			}...)
 			r.lg.Info("replay progress", fields...)
 			if pendingCmds >= pendingBacklogWarnThreshold {

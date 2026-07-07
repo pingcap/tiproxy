@@ -458,14 +458,6 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	if err != nil {
 		if !pnet.IsMySQLError(err) {
 			return
-		} else {
-			fields := []zap.Field{zap.Error(err), zap.Stringer("cmd", cmd)}
-			if cmd == pnet.ComStmtExecute && !streamingForward {
-				if params := parseStmtExecuteParams(request); len(params) > 0 {
-					fields = append(fields, zap.Any("params", params))
-				}
-			}
-			mgr.logger.Debug("got a mysql error", fields...)
 		}
 	}
 	if err == nil {

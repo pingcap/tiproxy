@@ -4,12 +4,14 @@
 package replay
 
 import (
+	"context"
 	"io"
 	"math/rand"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/stretchr/testify/require"
 )
@@ -44,7 +46,7 @@ func TestMergeDecoderSingleDecoder(t *testing.T) {
 	}
 
 	decoder := newMockDecoder(commands)
-	merger := newMergeDecoder(decoder)
+	merger := newMergeDecoder(context.Background(), decoder)
 
 	for i, expected := range commands {
 		cmd, err := merger.Decode()
@@ -75,7 +77,7 @@ func TestMergeDecoderMultipleDecoders(t *testing.T) {
 
 	decoder1 := newMockDecoder(commands1)
 	decoder2 := newMockDecoder(commands2)
-	merger := newMergeDecoder(decoder1, decoder2)
+	merger := newMergeDecoder(context.Background(), decoder1, decoder2)
 
 	expectedOrder := []uint64{1, 2, 1, 2, 1, 2}
 	expectedTimes := []time.Time{
@@ -137,7 +139,7 @@ func TestMergeDecoderRandomizedCommands(t *testing.T) {
 		return allCommands[i].StartTs.Before(allCommands[j].StartTs)
 	})
 
-	merger := newMergeDecoder(decoders...)
+	merger := newMergeDecoder(context.Background(), decoders...)
 
 	for i, expected := range allCommands {
 		cmd, err := merger.Decode()
@@ -153,9 +155,128 @@ func TestMergeDecoderRandomizedCommands(t *testing.T) {
 func TestMergeDecoderEmptyDecoders(t *testing.T) {
 	decoder1 := newMockDecoder([]*cmd.Command{})
 	decoder2 := newMockDecoder([]*cmd.Command{})
-	merger := newMergeDecoder(decoder1, decoder2)
+	merger := newMergeDecoder(context.Background(), decoder1, decoder2)
 
 	// Should return EOF immediately
 	_, err := merger.Decode()
 	require.Equal(t, io.EOF, err)
+}
+
+type waitingMockDecoder struct {
+	commands []*cmd.Command
+	index    int
+	waitCh   chan struct{}
+}
+
+func newWaitingMockDecoder(commands []*cmd.Command) *waitingMockDecoder {
+	return &waitingMockDecoder{
+		commands: commands,
+		waitCh:   make(chan struct{}),
+	}
+}
+
+func (d *waitingMockDecoder) Decode() (*cmd.Command, error) {
+	if d.index == 0 {
+		<-d.waitCh
+	}
+	if d.index >= len(d.commands) {
+		return nil, io.EOF
+	}
+	cmd := d.commands[d.index]
+	d.index++
+	return cmd, nil
+}
+
+func TestMergeDecoderWaitingDecoder(t *testing.T) {
+	now := time.Now()
+	readyCommands := []*cmd.Command{
+		{ConnID: 1, StartTs: now.Add(10 * time.Millisecond)},
+		{ConnID: 1, StartTs: now.Add(20 * time.Millisecond)},
+	}
+	waitingDecoder := newWaitingMockDecoder([]*cmd.Command{
+		{ConnID: 2, StartTs: now.Add(5 * time.Millisecond)},
+	})
+	readyDecoder := newMockDecoder(readyCommands)
+	merger := newMergeDecoder(context.Background(), waitingDecoder, readyDecoder)
+
+	cmd, err := merger.Decode()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), cmd.ConnID)
+
+	cmd, err = merger.Decode()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), cmd.ConnID)
+
+	close(waitingDecoder.waitCh)
+	cmd, err = merger.Decode()
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), cmd.ConnID)
+
+	_, err = merger.Decode()
+	require.Equal(t, io.EOF, err)
+}
+
+type sequentialDecoder struct {
+	results []decodeOutcome
+	index   int
+}
+
+type decodeOutcome struct {
+	cmd *cmd.Command
+	err error
+}
+
+func (d *sequentialDecoder) Decode() (*cmd.Command, error) {
+	if d.index >= len(d.results) {
+		return nil, io.EOF
+	}
+	outcome := d.results[d.index]
+	d.index++
+	return outcome.cmd, outcome.err
+}
+
+func TestMergeDecoderDecodeError(t *testing.T) {
+	now := time.Now()
+	errDecode := errors.New("decode failed")
+	decoder := &sequentialDecoder{
+		results: []decodeOutcome{
+			{cmd: &cmd.Command{ConnID: 1, StartTs: now}},
+			{err: errDecode},
+		},
+	}
+	merger := newMergeDecoder(context.Background(), decoder)
+
+	cmd, err := merger.Decode()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), cmd.ConnID)
+
+	_, err = merger.Decode()
+	require.ErrorIs(t, err, errDecode)
+}
+
+func TestMergeDecoderCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now()
+	waitingDecoder := newWaitingMockDecoder([]*cmd.Command{
+		{ConnID: 1, StartTs: now},
+	})
+	merger := newMergeDecoder(ctx, waitingDecoder)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := merger.Decode()
+		done <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("decode did not return after cancellation")
+	}
 }
