@@ -926,3 +926,93 @@ func TestNoBlockReplay(t *testing.T) {
 		conn.onExecuteFailed(&cmd.Command{}, errors.New("exec err"))
 	}
 }
+
+const betRecordsSQLWithHint = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_3027 b
+WHERE
+  bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?
+  AND currency = ?
+ORDER BY
+  bet_time DESC
+LIMIT
+  ?, ?`
+
+func TestStripTiflashHintOnReplay(t *testing.T) {
+	exceptionCh, closeCh, execInfoCh := make(chan Exception, 1), make(chan uint64, 1), make(chan ExecInfo, 10)
+	stats := &ReplayStats{}
+	conn := NewConn(zap.NewNop(), ConnOpts{
+		Username:       "u1",
+		IdMgr:          id.NewIDManager(),
+		ConnID:         1,
+		UpstreamConnID: 1,
+		BcConfig:       &backend.BCConfig{},
+		ExceptionCh:    exceptionCh,
+		CloseCh:        closeCh,
+		ExecInfoCh:     execInfoCh,
+		ReplayStats:    stats,
+	})
+	backendConn := newMockBackendConn()
+	conn.backendConn = backendConn
+
+	var wg waitgroup.WaitGroup
+	childCtx, cancel := context.WithCancel(context.Background())
+	wg.RunWithRecover(func() {
+		conn.Run(childCtx)
+	}, nil, zap.NewNop())
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	conn.ExecuteCmd(&cmd.Command{
+		CapturedPsID:   1,
+		Type:           pnet.ComStmtPrepare,
+		Payload:        pnet.MakePrepareStmtRequest(betRecordsSQLWithHint),
+		ConnID:         1,
+		UpstreamConnID: 1,
+	})
+	require.Eventually(t, func() bool {
+		return stats.PendingCmds.Load() == 0
+	}, 3*time.Second, 10*time.Millisecond)
+
+	reqs := backendConn.allRequests()
+	require.GreaterOrEqual(t, len(reqs), 1)
+	require.Equal(t, pnet.ComStmtPrepare.Byte(), reqs[0][0])
+	preparedSQL := hack.String(reqs[0][1:])
+	require.Contains(t, preparedSQL, "SQL_TAG")
+	require.NotContains(t, preparedSQL, "read_from_storage")
+	require.Contains(t, preparedSQL, "bc_bet_records_3027")
+}

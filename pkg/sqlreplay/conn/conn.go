@@ -19,6 +19,7 @@ import (
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/sessionstates"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/sqlrewrite"
 	"github.com/pingcap/tiproxy/pkg/util/lex"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
@@ -97,7 +98,7 @@ type conn struct {
 	replayStats     *ReplayStats
 	lastPendingCmds int // last pending cmds reported to the stats
 	lastQueueWarnLevel int
-	readonly        bool
+	readonly bool
 }
 
 type ConnOpts struct {
@@ -112,8 +113,8 @@ type ConnOpts struct {
 	ExceptionCh      chan<- Exception
 	CloseCh          chan<- uint64
 	ExecInfoCh       chan<- ExecInfo
-	ReplayStats      *ReplayStats
-	Readonly         bool
+	ReplayStats *ReplayStats
+	Readonly    bool
 }
 
 func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
@@ -131,8 +132,8 @@ func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
 		exceptionCh:    opts.ExceptionCh,
 		closeCh:        opts.CloseCh,
 		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, opts.HsHandler, opts.BcConfig, opts.BackendTLSConfig, opts.Username, opts.Password),
-		replayStats:    opts.ReplayStats,
-		readonly:       opts.Readonly,
+		replayStats: opts.ReplayStats,
+		readonly:    opts.Readonly,
 	}
 	return c
 }
@@ -204,6 +205,7 @@ func (c *conn) Run(ctx context.Context) {
 				}
 				curDB = command.Value.CurDB
 			}
+			sqlrewrite.DefaultRewriter().RewriteCommand(command.Value)
 			// update psID, SQL, and params for the command.
 			if err := c.updateExecuteStmt(ctx, command.Value); err != nil {
 				c.onExecuteFailed(command.Value, err)

@@ -385,8 +385,8 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 					ExceptionCh:      r.exceptionCh,
 					CloseCh:          r.closeConnCh,
 					ExecInfoCh:       r.execInfoCh,
-					ReplayStats:      &r.replayStats,
-					Readonly:         cfg.ReadOnly,
+					ReplayStats: &r.replayStats,
+					Readonly:    cfg.ReadOnly,
 				})
 			}
 		}

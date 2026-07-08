@@ -168,8 +168,8 @@ func main() {
 				},
 				FilterCommandWithRetry: *filterCommandWithRetry,
 				UserAllowlist:          *userAllowlist,
-				TableSuffixList:        *tableSuffixList,
-				WaitOnEOF:              *waitOnEOF,
+				TableSuffixList: *tableSuffixList,
+				WaitOnEOF:       *waitOnEOF,
 				QPSLimit:               *qpsLimit,
 			}
 			if err := r.StartReplay(replayCfg); err != nil {
