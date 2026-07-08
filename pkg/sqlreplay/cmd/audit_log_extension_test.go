@@ -607,6 +607,16 @@ func TestCoerceLimitParams(t *testing.T) {
 	require.Equal(t, []any{"10"}, coerced)
 }
 
+func TestDecodeAuditExtensionInvalidExecuteRequest(t *testing.T) {
+	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+	decoder.SetPSCloseStrategy(PSCloseStrategyAlways)
+	line := auditExtensionLine("root", "1", "QUERY,EXECUTE,SELECT", `"SELECT * FROM t WHERE id = ? AND site = ?"`, `"[1]"`) + "\n"
+	mr := mockReader{data: []byte(line), filename: "f"}
+	cmds, err := decodeCmds(decoder, &mr)
+	require.ErrorIs(t, err, io.EOF)
+	require.Empty(t, cmds)
+}
+
 func TestDecodeAuditExtensionLimitParams(t *testing.T) {
 	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
 	decoder.SetPSCloseStrategy(PSCloseStrategyAlways)

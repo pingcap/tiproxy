@@ -190,7 +190,7 @@ func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Comm
 				}}
 			}
 		case "QUERY":
-			cmds, err = decoder.parseQueryEvent(kvs, events, upstreamConnID)
+			cmds, err = decoder.parseQueryEvent(kvs, events, upstreamConnID, hack.String(line))
 		}
 		if err != nil {
 			return nil, errors.Wrapf(err, "%s, line %d", filename, lineIdx)
@@ -221,7 +221,7 @@ func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Comm
 	}
 }
 
-func (decoder *AuditLogExtensionDecoder) parseQueryEvent(kvs map[string]string, events []string, connID uint64) ([]*Command, error) {
+func (decoder *AuditLogExtensionDecoder) parseQueryEvent(kvs map[string]string, events []string, connID uint64, auditLine string) ([]*Command, error) {
 	connInfo := decoder.connInfo[connID]
 	if connInfo.preparedStmt == nil {
 		connInfo.preparedStmt = make(map[uint32]struct{})
@@ -290,6 +290,10 @@ func (decoder *AuditLogExtensionDecoder) parseQueryEvent(kvs map[string]string, 
 		executeReq, err := pnet.MakeExecuteStmtRequest(stmtID, args, true)
 		if err != nil {
 			return nil, errors.Wrapf(err, "make execute request failed")
+		}
+		if err := validateExecuteRequest(sql, args, executeReq); err != nil {
+			logAndSkipInvalidExecuteRequest(decoder.lg, auditLine, sql, args, err)
+			return nil, nil
 		}
 		cmds = append(cmds, &Command{
 			CapturedPsID: stmtID,
