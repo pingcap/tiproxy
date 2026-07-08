@@ -71,6 +71,7 @@ func main() {
 	userAllowlist := rootCmd.PersistentFlags().StringSlice("user-allowlist", nil, "for audit log format only: USER values to replay (case-insensitive, normalized to lowercase); if set, lines whose [USER=...] is not listed are skipped (repeat flag or use comma-separated values).")
 	tableSuffixList := rootCmd.PersistentFlags().StringSlice("table-suffix-list", nil, "for audit log format only: replay GENERAL/TABLE_ACCESS SQL only when [TABLES=...] is non-empty and every table name ends with _<digits> and each digit string is in this list (repeat flag or comma-separated).")
 	waitOnEOF := rootCmd.PersistentFlags().Bool("wait-on-eof", false, "wait for the next file when all the files are read.")
+	qpsLimit := rootCmd.PersistentFlags().Float64("qps-limit", 1200, "the base dispatch QPS limit; actual limit is qps_limit - 260 + pending_cmds/1000")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
@@ -169,6 +170,7 @@ func main() {
 				UserAllowlist:          *userAllowlist,
 				TableSuffixList:        *tableSuffixList,
 				WaitOnEOF:              *waitOnEOF,
+				QPSLimit:               *qpsLimit,
 			}
 			if err := r.StartReplay(replayCfg); err != nil {
 				cancel()

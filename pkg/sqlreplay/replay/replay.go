@@ -133,6 +133,8 @@ type ReplayConfig struct {
 	TableSuffixList []string
 	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
 	WaitOnEOF bool
+	// QPSLimit is the base dispatch QPS limit. The actual limit is QPSLimit - 260 + pending_cmds/1000.
+	QPSLimit float64
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -201,6 +203,11 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	}
 	if cfg.reportLogInterval == 0 {
 		cfg.reportLogInterval = reportLogInterval
+	}
+	if cfg.QPSLimit == 0 {
+		cfg.QPSLimit = defaultQPSLimit
+	} else if cfg.QPSLimit < 1 {
+		return storages, errors.New("qps_limit should be at least 1")
 	}
 	if cfg.Format == cmd.FormatNative && cfg.PSCloseStrategy != cmd.PSCloseStrategyDirected {
 		return storages, errors.New("only `directed` prepared statement close strategy is supported for `native` format")
@@ -339,7 +346,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.endTime = time.Time{}
 	r.progress = 0
 	r.decodedCmds.Store(0)
-	r.dispatchLimiter.reset()
+	r.dispatchLimiter.reset(cfg.QPSLimit)
 	r.err = nil
 	r.replayStats = conn.ReplayStats{}
 	r.dedup = cmd.NewDeDup()
@@ -899,7 +906,7 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Float64("decode_rate", decodeRate),
 				zap.Float64("replay_rate", replayRate),
 				zap.Int64("max_conn_queue", maxConnQueue),
-				zap.Float64("dispatch_qps", calcAutoDispatchQPS(pendingCmds)),
+				zap.Float64("dispatch_qps", calcDispatchQPS(r.cfg.QPSLimit, pendingCmds)),
 			}...)
 			r.lg.Info("replay progress", fields...)
 			if pendingCmds >= pendingBacklogWarnThreshold {

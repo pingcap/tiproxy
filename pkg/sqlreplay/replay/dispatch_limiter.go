@@ -12,15 +12,20 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 )
 
-func calcAutoDispatchQPS(pending int64) float64 {
+const (
+	defaultQPSLimit        = 1200
+	dispatchQPSPendingBase = 260
+)
+
+func calcDispatchQPS(qpsLimit float64, pending int64) float64 {
 	if pending < 0 {
 		pending = 0
 	}
-	extra := pending / 1000
-	if extra > 260 {
-		extra = 260
+	qps := qpsLimit - dispatchQPSPendingBase + float64(pending)/1000
+	if qps < 1 {
+		return 1
 	}
-	return float64(500 + extra)
+	return qps
 }
 
 func isDispatchLimitedCmd(command *cmd.Command) bool {
@@ -63,16 +68,18 @@ func applyShortenDispatchWait(timelineWait, dispatchCaptureGap time.Duration, la
 type dispatchLimiter struct {
 	mu           sync.Mutex
 	lastDispatch time.Time
+	qpsLimit     float64
 }
 
-func (l *dispatchLimiter) reset() {
+func (l *dispatchLimiter) reset(qpsLimit float64) {
 	l.mu.Lock()
 	l.lastDispatch = time.Time{}
+	l.qpsLimit = qpsLimit
 	l.mu.Unlock()
 }
 
 func (l *dispatchLimiter) waitDuration(pending int64) time.Duration {
-	qps := calcAutoDispatchQPS(pending)
+	qps := calcDispatchQPS(l.qpsLimit, pending)
 	interval := time.Duration(float64(time.Second) / qps)
 
 	l.mu.Lock()

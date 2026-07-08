@@ -21,12 +21,12 @@ func TestIsDispatchLimitedCmd(t *testing.T) {
 	require.False(t, isDispatchLimitedCmd(nil))
 }
 
-func TestCalcAutoDispatchQPS(t *testing.T) {
-	require.InDelta(t, 500.0, calcAutoDispatchQPS(0), 1e-9)
-	require.InDelta(t, 501.0, calcAutoDispatchQPS(1000), 1e-9)
-	require.InDelta(t, 550.0, calcAutoDispatchQPS(50000), 1e-9)
-	require.InDelta(t, 760.0, calcAutoDispatchQPS(260000), 1e-9)
-	require.InDelta(t, 760.0, calcAutoDispatchQPS(1000000), 1e-9)
+func TestCalcDispatchQPS(t *testing.T) {
+	require.InDelta(t, 940.0, calcDispatchQPS(1200, 0), 1e-9)
+	require.InDelta(t, 941.0, calcDispatchQPS(1200, 1000), 1e-9)
+	require.InDelta(t, 990.0, calcDispatchQPS(1200, 50000), 1e-9)
+	require.InDelta(t, 1200.0, calcDispatchQPS(1200, 260000), 1e-9)
+	require.InDelta(t, 2140.0, calcDispatchQPS(1200, 1200000), 1e-9)
 }
 
 func TestShortenDispatchWait(t *testing.T) {
@@ -57,22 +57,20 @@ func TestApplyShortenDispatchWait(t *testing.T) {
 
 func TestDispatchLimiterWait(t *testing.T) {
 	limiter := &dispatchLimiter{}
+	limiter.reset(defaultQPSLimit)
 
 	start := time.Now()
 	require.NoError(t, limiter.wait(context.Background(), 0))
 	first := time.Since(start)
 	require.Less(t, first, 5*time.Millisecond)
 
+	lowPendingWait := limiter.waitDuration(0)
+	highPendingWait := limiter.waitDuration(260000)
+	require.Greater(t, lowPendingWait, highPendingWait)
+
 	start = time.Now()
 	require.NoError(t, limiter.wait(context.Background(), 0))
 	elapsed := time.Since(start)
-	require.Greater(t, elapsed, time.Millisecond)
-	require.Less(t, elapsed, 10*time.Millisecond)
-
-	limiter.reset()
-	start = time.Now()
-	require.NoError(t, limiter.wait(context.Background(), 0))
-	require.NoError(t, limiter.wait(context.Background(), 260000))
-	highPendingElapsed := time.Since(start)
-	require.Less(t, highPendingElapsed, elapsed)
+	require.Greater(t, elapsed, 200*time.Microsecond)
+	require.Less(t, elapsed, 5*time.Millisecond)
 }
