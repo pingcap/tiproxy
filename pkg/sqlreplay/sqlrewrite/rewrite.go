@@ -61,12 +61,66 @@ ORDER BY
 LIMIT
   ?, ?`
 
+	// findBetRecordsListBySettleTimeSQL filters by category_id and settle_time.
+	findBetRecordsListBySettleTimeSQL = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+ORDER BY
+  settle_time DESC
+LIMIT
+  ?, ?`
+
 	defaultRewriter = &Rewriter{
-		digestAllowlist: map[string]struct{}{
-			ReplayDigest(findBetRecordsListSQL): {},
-		},
+		digestAllowlist: newDigestAllowlist(
+			findBetRecordsListSQL,
+			findBetRecordsListBySettleTimeSQL,
+		),
 	}
 )
+
+func newDigestAllowlist(sqls ...string) map[string]struct{} {
+	allowlist := make(map[string]struct{}, len(sqls))
+	for _, sql := range sqls {
+		allowlist[ReplayDigest(sql)] = struct{}{}
+	}
+	return allowlist
+}
 
 // Rewriter rewrites SQL statements before replay execution.
 type Rewriter struct {

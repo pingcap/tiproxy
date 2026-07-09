@@ -102,6 +102,62 @@ LIMIT
 	require.Contains(t, defaultRewriter.digestAllowlist, digest3027)
 }
 
+func TestReplayDigestIgnoresHintAndShardSuffixForSettleTimeQuery(t *testing.T) {
+	digest280 := ReplayDigest(findBetRecordsListBySettleTimeSQL)
+	digest3027 := ReplayDigest(`/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_3027 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+ORDER BY
+  settle_time DESC
+LIMIT
+  ?, ?`)
+
+	require.Equal(t, digest280, digest3027)
+	require.Contains(t, defaultRewriter.digestAllowlist, digest280)
+}
+
+func TestDefaultRewriterSettleTimeQuery(t *testing.T) {
+	rewriter := DefaultRewriter()
+	_, ok := rewriter.MaybeRewrite(findBetRecordsListBySettleTimeSQL)
+	require.True(t, ok)
+}
+
 func TestStripTiflashReadHintKeepsSQLTag(t *testing.T) {
 	stripped := StripTiflashReadHint(findBetRecordsListSQL)
 	require.Contains(t, stripped, "/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */")
@@ -117,6 +173,9 @@ func TestDefaultRewriter(t *testing.T) {
 	require.False(t, ok)
 
 	_, ok = rewriter.MaybeRewrite(findBetRecordsListSQL)
+	require.True(t, ok)
+
+	_, ok = rewriter.MaybeRewrite(findBetRecordsListBySettleTimeSQL)
 	require.True(t, ok)
 }
 
