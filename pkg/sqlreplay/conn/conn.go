@@ -41,9 +41,9 @@ type ReplayStats struct {
 	ReplayStartTs atomic.Int64
 	// The timestamp (ns) of the first command.
 	FirstCmdTs atomic.Int64
-	// The current decoded command timestamp.
+	// The maximum decoded command start timestamp (ns) observed so far.
 	CurCmdTs atomic.Int64
-	// The end timestamp of the current decoded command.
+	// The maximum decoded command end timestamp (ns) observed so far.
 	CurCmdEndTs atomic.Int64
 	// The number of exception commands.
 	ExceptionCmds atomic.Uint64
@@ -55,6 +55,30 @@ type ReplayStats struct {
 	SlowConnects atomic.Uint64
 	// MaxConnQueue is the maximum per-connection command queue length observed since the last report reset.
 	MaxConnQueue atomic.Int64
+}
+
+func (stats *ReplayStats) UpdateCurCmdTs(ts int64) {
+	for {
+		cur := stats.CurCmdTs.Load()
+		if ts <= cur {
+			return
+		}
+		if stats.CurCmdTs.CompareAndSwap(cur, ts) {
+			return
+		}
+	}
+}
+
+func (stats *ReplayStats) UpdateCurCmdEndTs(ts int64) {
+	for {
+		cur := stats.CurCmdEndTs.Load()
+		if ts <= cur {
+			return
+		}
+		if stats.CurCmdEndTs.CompareAndSwap(cur, ts) {
+			return
+		}
+	}
 }
 
 type ExecInfo struct {
@@ -98,7 +122,8 @@ type conn struct {
 	replayStats     *ReplayStats
 	lastPendingCmds int // last pending cmds reported to the stats
 	lastQueueWarnLevel int
-	readonly bool
+	readonly           bool
+	onCmdDone          func(fileName string)
 }
 
 type ConnOpts struct {
@@ -115,6 +140,7 @@ type ConnOpts struct {
 	ExecInfoCh       chan<- ExecInfo
 	ReplayStats *ReplayStats
 	Readonly    bool
+	OnCmdDone   func(fileName string)
 }
 
 func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
@@ -134,6 +160,7 @@ func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
 		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, opts.HsHandler, opts.BcConfig, opts.BackendTLSConfig, opts.Username, opts.Password),
 		replayStats: opts.ReplayStats,
 		readonly:    opts.Readonly,
+		onCmdDone:   opts.OnCmdDone,
 	}
 	return c
 }
@@ -168,77 +195,88 @@ func (c *conn) Run(ctx context.Context) {
 			if command == nil {
 				break
 			}
-			if c.readonly && !c.isReadOnly(command.Value) {
-				c.replayStats.FilteredCmds.Add(1)
-				continue
-			}
-			// Quit the connection in the next round no matter what exception happens (like disconnection).
-			if command.Value.Type == pnet.ComQuit {
-				finished = true
-				if !connected {
-					continue
-				}
-			}
-
-			// Connect to the backend for the first time or after unexpected disconnection.
-			// If the backend is upgrading, the connections may drop but the QPS should not drop too much.
-			if !connected {
-				connectStart := time.Now()
-				err := c.backendConn.Connect(ctx, command.Value.CurDB)
-				connectLatency := time.Since(connectStart)
-				c.maybeLogSlowConnect(connectLatency, command.Value.CurDB, err)
-				if err != nil {
-					c.lg.Info("failed to connect backend", zap.String("db", command.Value.CurDB), zap.Error(err))
-					c.onDisconnected(err)
-					continue
-				}
-				connected = true
-				curDB = command.Value.CurDB
-			}
-
-			if curDB != command.Value.CurDB && command.Value.CurDB != "" {
-				// Maybe there's a USE statement already, never mind.
-				if resp := c.backendConn.ExecuteCmd(ctx, pnet.MakeInitDBRequest(command.Value.CurDB)); resp.Err != nil {
-					c.onExecuteFailed(command.Value, resp.Err)
-					c.lg.Info("failed to use database", zap.String("db", command.Value.CurDB), zap.Error(resp.Err))
-					continue
-				}
-				curDB = command.Value.CurDB
-			}
-			sqlrewrite.DefaultRewriter().RewriteCommand(command.Value)
-			// update psID, SQL, and params for the command.
-			if err := c.updateExecuteStmt(ctx, command.Value); err != nil {
-				c.onExecuteFailed(command.Value, err)
-				continue
-			}
-			startTime := time.Now()
-			resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload)
-			latency := time.Since(startTime)
-			c.maybeLogSlowExec(command.Value, latency)
-			if resp.Err != nil {
-				if errors.Is(resp.Err, backend.ErrClosing) || pnet.IsDisconnectError(resp.Err) {
-					c.onDisconnected(resp.Err)
-					c.lg.Info("backend connection disconnected", zap.Error(resp.Err))
-					connected = false
-					curDB = ""
-					continue
-				}
-				c.onExecuteFailed(command.Value, resp.Err)
-			} else {
-				c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
-			}
-			// Logging should not block replaying.
-			select {
-			case c.execInfoCh <- ExecInfo{
-				Command:   command.Value,
-				StartTime: startTime,
-				CostTime:  latency,
-			}:
-			default:
-			}
-
-			c.replayStats.ReplayedCmds.Add(1)
+			c.processCommand(ctx, command, &finished, &connected, &curDB)
 		}
+	}
+}
+
+func (c *conn) processCommand(ctx context.Context, command *glist.Element[*cmd.Command], finished *bool, connected *bool, curDB *string) {
+	defer c.notifyCmdDone(command.Value)
+	if c.readonly && !c.isReadOnly(command.Value) {
+		c.replayStats.FilteredCmds.Add(1)
+		return
+	}
+	// Quit the connection in the next round no matter what exception happens (like disconnection).
+	if command.Value.Type == pnet.ComQuit {
+		*finished = true
+		if !*connected {
+			return
+		}
+	}
+
+	// Connect to the backend for the first time or after unexpected disconnection.
+	// If the backend is upgrading, the connections may drop but the QPS should not drop too much.
+	if !*connected {
+		connectStart := time.Now()
+		err := c.backendConn.Connect(ctx, command.Value.CurDB)
+		connectLatency := time.Since(connectStart)
+		c.maybeLogSlowConnect(connectLatency, command.Value.CurDB, err)
+		if err != nil {
+			c.lg.Info("failed to connect backend", zap.String("db", command.Value.CurDB), zap.Error(err))
+			c.onDisconnected(err)
+			return
+		}
+		*connected = true
+		*curDB = command.Value.CurDB
+	}
+
+	if *curDB != command.Value.CurDB && command.Value.CurDB != "" {
+		// Maybe there's a USE statement already, never mind.
+		if resp := c.backendConn.ExecuteCmd(ctx, pnet.MakeInitDBRequest(command.Value.CurDB)); resp.Err != nil {
+			c.onExecuteFailed(command.Value, resp.Err)
+			c.lg.Info("failed to use database", zap.String("db", command.Value.CurDB), zap.Error(resp.Err))
+			return
+		}
+		*curDB = command.Value.CurDB
+	}
+	sqlrewrite.DefaultRewriter().RewriteCommand(command.Value)
+	// update psID, SQL, and params for the command.
+	if err := c.updateExecuteStmt(ctx, command.Value); err != nil {
+		c.onExecuteFailed(command.Value, err)
+		return
+	}
+	startTime := time.Now()
+	resp := c.backendConn.ExecuteCmd(ctx, command.Value.Payload)
+	latency := time.Since(startTime)
+	c.maybeLogSlowExec(command.Value, latency)
+	if resp.Err != nil {
+		if errors.Is(resp.Err, backend.ErrClosing) || pnet.IsDisconnectError(resp.Err) {
+			c.onDisconnected(resp.Err)
+			c.lg.Info("backend connection disconnected", zap.Error(resp.Err))
+			*connected = false
+			*curDB = ""
+			return
+		}
+		c.onExecuteFailed(command.Value, resp.Err)
+		return
+	}
+	c.updatePreparedStmts(command.Value.CapturedPsID, command.Value.Payload, resp)
+	// Logging should not block replaying.
+	select {
+	case c.execInfoCh <- ExecInfo{
+		Command:   command.Value,
+		StartTime: startTime,
+		CostTime:  latency,
+	}:
+	default:
+	}
+
+	c.replayStats.ReplayedCmds.Add(1)
+}
+
+func (c *conn) notifyCmdDone(command *cmd.Command) {
+	if c.onCmdDone != nil && command != nil && command.FileName != "" {
+		c.onCmdDone(command.FileName)
 	}
 }
 

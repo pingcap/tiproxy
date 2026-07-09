@@ -14,6 +14,8 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 )
 
+type fileParsedCallback func(fileName string)
+
 // decoder is used to decode commands from one or multiple readers.
 type decoder interface {
 	Decode() (*cmd.Command, error)
@@ -255,18 +257,39 @@ func (d *mergeDecoder) AddDecoder(decoder decoder) {
 }
 
 type singleDecoder struct {
-	decoder cmd.CmdDecoder
-	reader  cmd.LineReader
+	decoder      cmd.CmdDecoder
+	reader       cmd.LineReader
+	onFileParsed fileParsedCallback
+	lastFileName string
 }
 
-func newSingleDecoder(decoder cmd.CmdDecoder, reader cmd.LineReader) *singleDecoder {
+func newSingleDecoder(decoder cmd.CmdDecoder, reader cmd.LineReader, onFileParsed fileParsedCallback) *singleDecoder {
 	return &singleDecoder{
-		decoder: decoder,
-		reader:  reader,
+		decoder:      decoder,
+		reader:       reader,
+		onFileParsed: onFileParsed,
 	}
 }
 
 // Decode decodes a command from the single reader.
 func (d *singleDecoder) Decode() (*cmd.Command, error) {
-	return d.decoder.Decode(d.reader)
+	cmd, err := d.decoder.Decode(d.reader)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			d.markFileParsed(d.lastFileName)
+		}
+		return nil, err
+	}
+	if cmd != nil && cmd.FileName != "" && cmd.FileName != d.lastFileName {
+		d.markFileParsed(d.lastFileName)
+		d.lastFileName = cmd.FileName
+	}
+	return cmd, err
+}
+
+func (d *singleDecoder) markFileParsed(fileName string) {
+	if fileName == "" || d.onFileParsed == nil {
+		return
+	}
+	d.onFileParsed(fileName)
 }

@@ -58,7 +58,7 @@ func (c *conn) maybeLogQueueBacklog(queueLen int) {
 		return
 	}
 	c.lastQueueWarnLevel = level
-	c.lg.Warn("connection command queue backlog",
+	c.lg.Debug("connection command queue backlog",
 		zap.Int("queue_len", queueLen),
 		zap.Int64("global_pending_cmds", c.replayStats.PendingCmds.Load()),
 	)

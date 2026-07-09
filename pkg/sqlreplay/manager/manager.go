@@ -86,8 +86,13 @@ func (jm *jobManager) updateProgress() {
 		case Replay:
 			progress, endTime, curCmdTs, curCmdEndTs, done, err := jm.replay.Progress()
 			job.SetProgress(progress, endTime, done, err)
-			job.(*replayJob).lastCmdTs = curCmdTs
-			job.(*replayJob).lastCmdEndTs = curCmdEndTs
+			replayJob := job.(*replayJob)
+			if curCmdTs.After(replayJob.lastCmdTs) {
+				replayJob.lastCmdTs = curCmdTs
+			}
+			if curCmdEndTs.After(replayJob.lastCmdEndTs) {
+				replayJob.lastCmdEndTs = curCmdEndTs
+			}
 		}
 	}
 }

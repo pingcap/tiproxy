@@ -12,20 +12,13 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 )
 
-const (
-	defaultQPSLimit        = 1200
-	dispatchQPSPendingBase = 260
-)
+const defaultQPSLimit = 1200
 
-func calcDispatchQPS(qpsLimit float64, pending int64) float64 {
-	if pending < 0 {
-		pending = 0
-	}
-	qps := qpsLimit - dispatchQPSPendingBase + float64(pending)/1000
-	if qps < 1 {
+func calcDispatchQPS(qpsLimit float64) float64 {
+	if qpsLimit < 1 {
 		return 1
 	}
-	return qps
+	return qpsLimit
 }
 
 func isDispatchLimitedCmd(command *cmd.Command) bool {
@@ -33,36 +26,6 @@ func isDispatchLimitedCmd(command *cmd.Command) bool {
 		return false
 	}
 	return command.Type == pnet.ComQuery || command.Type == pnet.ComStmtExecute
-}
-
-func shortenDispatchWait(wait time.Duration) time.Duration {
-	if wait <= 0 {
-		return 0
-	}
-	qps := float64(time.Second) / float64(wait)
-	if qps >= 200 {
-		return wait
-	}
-	reduction := (200 - qps) / 100
-	if reduction >= 1 {
-		return 0
-	}
-	return time.Duration(float64(wait) * (1 - reduction))
-}
-
-// applyShortenDispatchWait accelerates replay only when the QPS between dispatch-limited
-// commands in the capture is low. timelineWait follows the full capture timeline, while
-// dispatchCaptureGap is the interval since the previous dispatch-limited command.
-func applyShortenDispatchWait(timelineWait, dispatchCaptureGap time.Duration, lastDispatchReplayTs time.Time) time.Duration {
-	if dispatchCaptureGap <= 0 || lastDispatchReplayTs.IsZero() {
-		return timelineWait
-	}
-	shortenedGap := shortenDispatchWait(dispatchCaptureGap)
-	if shortenedGap >= dispatchCaptureGap {
-		return timelineWait
-	}
-	shortenedWait := max(time.Until(lastDispatchReplayTs.Add(shortenedGap)), 0)
-	return min(timelineWait, shortenedWait)
 }
 
 type dispatchLimiter struct {
@@ -78,8 +41,8 @@ func (l *dispatchLimiter) reset(qpsLimit float64) {
 	l.mu.Unlock()
 }
 
-func (l *dispatchLimiter) waitDuration(pending int64) time.Duration {
-	qps := calcDispatchQPS(l.qpsLimit, pending)
+func (l *dispatchLimiter) waitDuration() time.Duration {
+	qps := calcDispatchQPS(l.qpsLimit)
 	interval := time.Duration(float64(time.Second) / qps)
 
 	l.mu.Lock()
@@ -100,8 +63,8 @@ func (l *dispatchLimiter) markDispatched() {
 	l.mu.Unlock()
 }
 
-func (l *dispatchLimiter) wait(ctx context.Context, pending int64) error {
-	wait := l.waitDuration(pending)
+func (l *dispatchLimiter) wait(ctx context.Context) error {
+	wait := l.waitDuration()
 	if wait <= 0 {
 		l.markDispatched()
 		return nil

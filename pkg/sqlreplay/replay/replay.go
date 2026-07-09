@@ -133,7 +133,7 @@ type ReplayConfig struct {
 	TableSuffixList []string
 	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
 	WaitOnEOF bool
-	// QPSLimit is the base dispatch QPS limit. The actual limit is QPSLimit - 260 + pending_cmds/1000.
+	// QPSLimit is the hard dispatch QPS limit for ComQuery and ComStmtExecute.
 	QPSLimit float64
 	// the following fields are for testing
 	readers           []cmd.LineReader
@@ -313,12 +313,14 @@ type replay struct {
 	lastReportDecodedCmds  uint64
 	lastReportReplayedCmds uint64
 	dispatchLimiter        dispatchLimiter
+	fileTracker            *fileTracker
 }
 
 func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
 	return &replay{
-		lg:    lg,
-		idMgr: idMgr,
+		lg:          lg,
+		idMgr:       idMgr,
+		fileTracker: newFileTracker(lg),
 	}
 }
 
@@ -347,6 +349,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.progress = 0
 	r.decodedCmds.Store(0)
 	r.dispatchLimiter.reset(cfg.QPSLimit)
+	r.fileTracker = newFileTracker(r.lg)
 	r.err = nil
 	r.replayStats = conn.ReplayStats{}
 	r.dedup = cmd.NewDeDup()
@@ -369,6 +372,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 					closeCh:    r.closeConnCh,
 					execInfoCh: r.execInfoCh,
 					stats:      &r.replayStats,
+					onCmdDone:  r.fileTracker.onExecuted,
 				}
 			}
 		} else {
@@ -387,6 +391,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 					ExecInfoCh:       r.execInfoCh,
 					ReplayStats: &r.replayStats,
 					Readonly:    cfg.ReadOnly,
+					OnCmdDone:   r.fileTracker.onExecuted,
 				})
 			}
 		}
@@ -482,7 +487,6 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 	}
 
 	var captureStartTs, replayStartTs time.Time
-	var lastDispatchLimitedCaptureTs, lastDispatchLimitedReplayTs time.Time
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
 	connCount := 0                      // alive connection count
 	maxPendingCmds := int64(0)
@@ -519,12 +523,12 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 				break
 			}
 		}
-		r.replayStats.CurCmdTs.Store(command.StartTs.UnixNano())
+		r.replayStats.UpdateCurCmdTs(command.StartTs.UnixNano())
 		if !command.EndTs.IsZero() {
-			r.replayStats.CurCmdEndTs.Store(command.EndTs.UnixNano())
+			r.replayStats.UpdateCurCmdEndTs(command.EndTs.UnixNano())
 		} else {
 			// fallback to StartTs if EndTs is not available.
-			r.replayStats.CurCmdEndTs.Store(command.StartTs.UnixNano())
+			r.replayStats.UpdateCurCmdEndTs(command.StartTs.UnixNano())
 		}
 		if captureStartTs.IsZero() {
 			// first command
@@ -532,10 +536,6 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 			replayStartTs = time.Now()
 			r.replayStats.ReplayStartTs.Store(replayStartTs.UnixNano())
 			r.replayStats.FirstCmdTs.Store(command.StartTs.UnixNano())
-			if isDispatchLimitedCmd(command) {
-				lastDispatchLimitedCaptureTs = command.StartTs
-				lastDispatchLimitedReplayTs = replayStartTs
-			}
 		} else {
 			pendingCmds := r.replayStats.PendingCmds.Load()
 			if pendingCmds > maxPendingCmds {
@@ -556,13 +556,6 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
 			}
 			expectedInterval = max(time.Until(replayStartTs.Add(expectedInterval)), 0)
-			if pendingCmds <= r.cfg.slowDownThreshold && isDispatchLimitedCmd(command) {
-				dispatchCaptureGap := command.StartTs.Sub(lastDispatchLimitedCaptureTs)
-				if r.cfg.Speed != 1 {
-					dispatchCaptureGap = time.Duration(float64(dispatchCaptureGap) / r.cfg.Speed)
-				}
-				expectedInterval = applyShortenDispatchWait(expectedInterval, dispatchCaptureGap, lastDispatchLimitedReplayTs)
-			}
 			// If there are too many pending commands, slow it down to reduce memory usage.
 			if pendingCmds > r.cfg.slowDownThreshold {
 				extraWait := time.Duration(pendingCmds-r.cfg.slowDownThreshold) * r.cfg.slowDownFactor
@@ -573,7 +566,7 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 			}
 			var dispatchWait time.Duration
 			if isDispatchLimitedCmd(command) {
-				dispatchWait = r.dispatchLimiter.waitDuration(pendingCmds)
+				dispatchWait = r.dispatchLimiter.waitDuration()
 			}
 			totalWait := max(expectedInterval, dispatchWait)
 			if totalWait > time.Microsecond {
@@ -589,8 +582,6 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 			}
 			if isDispatchLimitedCmd(command) {
 				r.dispatchLimiter.markDispatched()
-				lastDispatchLimitedCaptureTs = command.StartTs
-				lastDispatchLimitedReplayTs = time.Now()
 			}
 		}
 		if execCtx.Err() == nil {
@@ -683,7 +674,7 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 	}
 
 	var decoder decoder
-	decoder = newSingleDecoder(cmdDecoder, reader)
+	decoder = newSingleDecoder(cmdDecoder, reader, r.fileTracker.onFileParsed)
 	if chanBufForEachDecoder > 0 {
 		decoder = newBufferedDecoder(ctx, decoder, chanBufForEachDecoder, r.cfg.IgnoreErrs)
 	}
@@ -846,6 +837,9 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map
 	if conn != nil && !reflect.ValueOf(conn).IsNil() {
 		conn.ExecuteCmd(command)
 	}
+	if r.fileTracker != nil {
+		r.fileTracker.onDispatched(command.FileName)
+	}
 	r.decodedCmds.Add(1)
 }
 
@@ -906,7 +900,7 @@ func (r *replay) reportLoop(ctx context.Context) {
 				zap.Float64("decode_rate", decodeRate),
 				zap.Float64("replay_rate", replayRate),
 				zap.Int64("max_conn_queue", maxConnQueue),
-				zap.Float64("dispatch_qps", calcDispatchQPS(r.cfg.QPSLimit, pendingCmds)),
+				zap.Float64("dispatch_qps", calcDispatchQPS(r.cfg.QPSLimit)),
 			}...)
 			r.lg.Info("replay progress", fields...)
 			if pendingCmds >= pendingBacklogWarnThreshold {
