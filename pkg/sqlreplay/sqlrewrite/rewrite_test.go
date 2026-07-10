@@ -154,8 +154,10 @@ LIMIT
 
 func TestDefaultRewriterSettleTimeQuery(t *testing.T) {
 	rewriter := DefaultRewriter()
-	_, ok := rewriter.MaybeRewrite(findBetRecordsListBySettleTimeSQL)
+	rewritten, ok := rewriter.MaybeRewrite(findBetRecordsListBySettleTimeSQL)
 	require.True(t, ok)
+	require.NotContains(t, rewritten, "read_from_storage")
+	require.NotContains(t, rewritten, "ignore_plan_cache")
 }
 
 func TestStripTiflashReadHintKeepsSQLTag(t *testing.T) {
@@ -163,6 +165,19 @@ func TestStripTiflashReadHintKeepsSQLTag(t *testing.T) {
 	require.Contains(t, stripped, "/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */")
 	require.NotContains(t, stripped, "read_from_storage")
 	require.Contains(t, stripped, "bc_bet_records_3027")
+}
+
+func TestPrependIgnorePlanCacheBeforeTiflashHint(t *testing.T) {
+	sql := "SELECT /*+ read_from_storage(tiflash[b]) */ 1"
+	rewritten, ok := PrependIgnorePlanCacheBeforeTiflashHint(sql)
+	require.True(t, ok)
+	require.Equal(t, "SELECT /*+ ignore_plan_cache() */ /*+ read_from_storage(tiflash[b]) */ 1", rewritten)
+
+	_, ok = PrependIgnorePlanCacheBeforeTiflashHint(rewritten)
+	require.False(t, ok)
+
+	_, ok = PrependIgnorePlanCacheBeforeTiflashHint("SELECT 1")
+	require.False(t, ok)
 }
 
 func TestDefaultRewriter(t *testing.T) {
@@ -177,6 +192,11 @@ func TestDefaultRewriter(t *testing.T) {
 
 	_, ok = rewriter.MaybeRewrite(findBetRecordsListBySettleTimeSQL)
 	require.True(t, ok)
+
+	rewritten, ok := rewriter.MaybeRewrite("SELECT /*+ read_from_storage(tiflash[t]) */ 1")
+	require.True(t, ok)
+	require.Contains(t, rewritten, "ignore_plan_cache")
+	require.Contains(t, rewritten, "read_from_storage")
 }
 
 func TestRewriteCommandComQuery(t *testing.T) {
@@ -187,6 +207,7 @@ func TestRewriteCommandComQuery(t *testing.T) {
 	}
 	require.True(t, rewriter.RewriteCommand(command))
 	require.NotContains(t, string(command.Payload[1:]), "read_from_storage")
+	require.NotContains(t, string(command.Payload[1:]), "ignore_plan_cache")
 	require.Contains(t, string(command.Payload[1:]), "SQL_TAG")
 }
 
@@ -198,6 +219,7 @@ func TestRewriteCommandComStmtPrepare(t *testing.T) {
 	}
 	require.True(t, rewriter.RewriteCommand(command))
 	require.NotContains(t, string(command.Payload[1:]), "read_from_storage")
+	require.NotContains(t, string(command.Payload[1:]), "ignore_plan_cache")
 }
 
 func TestRewriteCommandComStmtExecute(t *testing.T) {
@@ -209,5 +231,6 @@ func TestRewriteCommandComStmtExecute(t *testing.T) {
 	}
 	require.True(t, rewriter.RewriteCommand(command))
 	require.NotContains(t, command.PreparedStmt, "read_from_storage")
+	require.NotContains(t, command.PreparedStmt, "ignore_plan_cache")
 	require.Contains(t, command.PreparedStmt, "SQL_TAG")
 }

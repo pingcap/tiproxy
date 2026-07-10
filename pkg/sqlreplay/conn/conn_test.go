@@ -1014,5 +1014,6 @@ func TestStripTiflashHintOnReplay(t *testing.T) {
 	preparedSQL := hack.String(reqs[0][1:])
 	require.Contains(t, preparedSQL, "SQL_TAG")
 	require.NotContains(t, preparedSQL, "read_from_storage")
+	require.NotContains(t, preparedSQL, "ignore_plan_cache")
 	require.Contains(t, preparedSQL, "bc_bet_records_3027")
 }
