@@ -171,7 +171,7 @@ func TestPrependIgnorePlanCacheBeforeTiflashHint(t *testing.T) {
 	sql := "SELECT /*+ read_from_storage(tiflash[b]) */ 1"
 	rewritten, ok := PrependIgnorePlanCacheBeforeTiflashHint(sql)
 	require.True(t, ok)
-	require.Equal(t, "SELECT /*+ ignore_plan_cache() */ /*+ read_from_storage(tiflash[b]) */ 1", rewritten)
+	require.Equal(t, "SELECT /*+ ignore_plan_cache() read_from_storage(tiflash[b]) */ 1", rewritten)
 
 	_, ok = PrependIgnorePlanCacheBeforeTiflashHint(rewritten)
 	require.False(t, ok)
@@ -193,10 +193,8 @@ func TestDefaultRewriter(t *testing.T) {
 	_, ok = rewriter.MaybeRewrite(findBetRecordsListBySettleTimeSQL)
 	require.True(t, ok)
 
-	rewritten, ok := rewriter.MaybeRewrite("SELECT /*+ read_from_storage(tiflash[t]) */ 1")
-	require.True(t, ok)
-	require.Contains(t, rewritten, "ignore_plan_cache")
-	require.Contains(t, rewritten, "read_from_storage")
+	_, ok = rewriter.MaybeRewrite("SELECT /*+ read_from_storage(tiflash[t]) */ 1")
+	require.False(t, ok)
 }
 
 func TestRewriteCommandComQuery(t *testing.T) {

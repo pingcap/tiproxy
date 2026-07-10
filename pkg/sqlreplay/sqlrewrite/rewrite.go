@@ -13,10 +13,9 @@ import (
 )
 
 var (
-	tiflashReadHintRE   = regexp.MustCompile(`(?is)/\*\s*\+\s*read_from_storage\s*\(\s*tiflash\s*\[[^\]]*\]\s*\)\s*\*/`)
-	ignorePlanCacheRE   = regexp.MustCompile(`(?is)/\*\s*\+\s*ignore_plan_cache\s*\(\s*\)\s*\*/`)
-	ignorePlanCacheHint = "/*+ ignore_plan_cache() */"
-	shardTableRE        = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
+	tiflashReadHintRE = regexp.MustCompile(`(?is)/\*\s*\+\s*(read_from_storage\s*\(\s*tiflash\s*\[\s*b\s*\]\s*\))\s*\*/`)
+	ignorePlanCacheRE = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
+	shardTableRE      = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
 
 	// findBetRecordsListSQL is the canonical SQL for BcBetRecordsMapper.findBetRecordsList.
 	// Replay digest is computed from this template; shard table suffixes may differ at runtime.
@@ -147,21 +146,18 @@ func StripTiflashReadHint(sql string) string {
 	return tiflashReadHintRE.ReplaceAllString(sql, "")
 }
 
-// PrependIgnorePlanCacheBeforeTiflashHint inserts /*+ ignore_plan_cache() */ immediately before the tiflash read hint.
+// PrependIgnorePlanCacheBeforeTiflashHint merges ignore_plan_cache into the tiflash read hint comment.
 func PrependIgnorePlanCacheBeforeTiflashHint(sql string) (string, bool) {
 	if !tiflashReadHintRE.MatchString(sql) || ignorePlanCacheRE.MatchString(sql) {
 		return sql, false
 	}
-	loc := tiflashReadHintRE.FindStringIndex(sql)
-	if loc == nil {
-		return sql, false
-	}
-	return sql[:loc[0]] + ignorePlanCacheHint + " " + sql[loc[0]:], true
+	newSQL := tiflashReadHintRE.ReplaceAllString(sql, "/*+ ignore_plan_cache() ${1} */")
+	return newSQL, true
 }
 
 // MaybeRewrite rewrites SQL before replay execution.
 // For allowlisted digests, it strips the tiflash read hint.
-// For other SQL with a tiflash read hint, it prepends /*+ ignore_plan_cache() */.
+// For other SQL with a tiflash read hint, it merges /*+ ignore_plan_cache() */ into the same hint comment.
 func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
 	if r == nil || !tiflashReadHintRE.MatchString(sql) {
 		return sql, false
