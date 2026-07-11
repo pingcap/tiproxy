@@ -7,8 +7,8 @@ import (
 	"regexp"
 
 	"github.com/pingcap/tidb/pkg/parser"
-	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/siddontang/go/hack"
 )
 
@@ -17,9 +17,7 @@ var (
 	ignorePlanCacheRE = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
 	shardTableRE      = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
 
-	// findBetRecordsListSQL is the canonical SQL for BcBetRecordsMapper.findBetRecordsList.
-	// Replay digest is computed from this template; shard table suffixes may differ at runtime.
-	findBetRecordsListSQL = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+	sql1 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
 SELECT
   /*+ read_from_storage(tiflash[b]) */
   b.record_id,
@@ -62,8 +60,7 @@ ORDER BY
 LIMIT
   ?, ?`
 
-	// findBetRecordsListBySettleTimeSQL filters by category_id and settle_time.
-	findBetRecordsListBySettleTimeSQL = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+	sql2 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
 SELECT
   /*+ read_from_storage(tiflash[b]) */
   b.record_id,
@@ -107,10 +104,182 @@ ORDER BY
 LIMIT
   ?, ?`
 
+	sql3 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_3030 b
+WHERE
+  category_id IN (?)
+  AND bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?
+  AND currency = ?
+ORDER BY
+  bet_time DESC
+LIMIT
+  ?, ?`
+
+	sql6 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_1226 b
+WHERE
+  platform_id = ?
+  AND bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?
+  AND currency = ?
+ORDER BY
+  bet_time DESC
+LIMIT
+  ?, ?`
+
+	sql7 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_3238 b
+WHERE
+  settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+ORDER BY
+  settle_time DESC
+LIMIT
+  ?, ?`
+
+	sql8 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_669 b
+WHERE
+  bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?
+ORDER BY
+  bet_time DESC
+LIMIT
+  ?, ?`
+
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
-			findBetRecordsListSQL,
-			findBetRecordsListBySettleTimeSQL,
+			sql1, sql2, sql3, sql6, sql7, sql8,
 		),
 	}
 )
