@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	tiflashReadHintRE = regexp.MustCompile(`(?is)/\*\s*\+\s*(read_from_storage\s*\(\s*tiflash\s*\[\s*b\s*\]\s*\))\s*\*/`)
-	ignorePlanCacheRE = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
-	shardTableRE           = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
-	gameSummaryTableRE     = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
+	tiflashReadHintRE       = regexp.MustCompile(`(?is)/\*\s*\+\s*(read_from_storage\s*\(\s*tiflash\s*\[\s*b\s*\]\s*\))\s*\*/`)
+	ignorePlanCacheRE       = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
+	shardTableRE            = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
+	gameSummaryTableRE      = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
 	gameSummaryForceIndexRE = regexp.MustCompile(`(?i)(\bbc_order_account_game_summary_\d+)\s+(\w+)`)
 
 	sql1 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
@@ -148,6 +148,96 @@ WHERE
   AND currency = ?
 ORDER BY
   bet_time DESC
+LIMIT
+  ?, ?`
+
+	sql4 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+  AND all_bet >= ?
+ORDER BY
+  settle_time DESC
+LIMIT
+  ?, ?`
+
+	sql5 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND all_bet >= ?
+ORDER BY
+  net_profit DESC,
+  id DESC
 LIMIT
   ?, ?`
 
@@ -304,7 +394,7 @@ GROUP BY
 
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
-			sql1, sql2, sql3, sql6, sql7, sql8,
+			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8,
 		),
 		forceIndexDigestAllowlist: newDigestAllowlist(sql9),
 	}
