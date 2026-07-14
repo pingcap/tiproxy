@@ -5,6 +5,7 @@ package sqlrewrite
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/pingcap/tidb/pkg/parser"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -15,7 +16,9 @@ import (
 var (
 	tiflashReadHintRE = regexp.MustCompile(`(?is)/\*\s*\+\s*(read_from_storage\s*\(\s*tiflash\s*\[\s*b\s*\]\s*\))\s*\*/`)
 	ignorePlanCacheRE = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
-	shardTableRE      = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
+	shardTableRE           = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
+	gameSummaryTableRE     = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
+	gameSummaryForceIndexRE = regexp.MustCompile(`(?i)(\bbc_order_account_game_summary_\d+)\s+(\w+)`)
 
 	sql1 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
 SELECT
@@ -277,10 +280,33 @@ ORDER BY
 LIMIT
   ?, ?`
 
+	sql9 = `/* SQL_TAG(BcOrderAccountGameSummaryMapper.getJackPotPool) */
+SELECT
+  site_code,
+  game_category_id,
+  game_platform_id,
+  currency,
+  sum(profit_total) profit_total
+FROM
+  bc_order_account_game_summary t
+WHERE
+  game_id < 0
+  AND settle_day >= ?
+  AND settle_day <= ?
+  AND site_code IN (?)
+  AND currency IS NOT NULL
+  AND currency != ''
+GROUP BY
+  site_code,
+  game_category_id,
+  game_platform_id,
+  currency`
+
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
 			sql1, sql2, sql3, sql6, sql7, sql8,
 		),
+		forceIndexDigestAllowlist: newDigestAllowlist(sql9),
 	}
 )
 
@@ -294,7 +320,8 @@ func newDigestAllowlist(sqls ...string) map[string]struct{} {
 
 // Rewriter rewrites SQL statements before replay execution.
 type Rewriter struct {
-	digestAllowlist map[string]struct{}
+	digestAllowlist           map[string]struct{}
+	forceIndexDigestAllowlist map[string]struct{}
 }
 
 // DefaultRewriter returns the built-in rewriter for known SQL patterns.
@@ -306,6 +333,7 @@ func DefaultRewriter() *Rewriter {
 func ReplayDigest(sql string) string {
 	sql = tiflashReadHintRE.ReplaceAllString(sql, "")
 	sql = shardTableRE.ReplaceAllString(sql, "bc_bet_records")
+	sql = gameSummaryTableRE.ReplaceAllString(sql, "bc_order_account_game_summary")
 	_, digest := parser.NormalizeDigest(sql)
 	return digest.String()
 }
@@ -324,11 +352,32 @@ func PrependIgnorePlanCacheBeforeTiflashHint(sql string) (string, bool) {
 	return newSQL, true
 }
 
+// AddGameSummaryForceIndex adds FORCE INDEX (idx_gameid_settleday) to matching shard tables.
+func AddGameSummaryForceIndex(sql string) (string, bool) {
+	if strings.Contains(strings.ToUpper(sql), "FORCE INDEX") {
+		return sql, false
+	}
+	if !gameSummaryForceIndexRE.MatchString(sql) {
+		return sql, false
+	}
+	newSQL := gameSummaryForceIndexRE.ReplaceAllString(sql, `${1} ${2} FORCE INDEX (idx_gameid_settleday)`)
+	return newSQL, newSQL != sql
+}
+
 // MaybeRewrite rewrites SQL before replay execution.
-// For allowlisted digests, it strips the tiflash read hint.
+// For allowlisted digests on game summary queries, it adds FORCE INDEX (idx_gameid_settleday).
+// For allowlisted digests with a tiflash read hint, it strips the tiflash read hint.
 // For other SQL with a tiflash read hint, it merges /*+ ignore_plan_cache() */ into the same hint comment.
 func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
-	if r == nil || !tiflashReadHintRE.MatchString(sql) {
+	if r == nil {
+		return sql, false
+	}
+	if len(r.forceIndexDigestAllowlist) > 0 {
+		if _, ok := r.forceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
+			return AddGameSummaryForceIndex(sql)
+		}
+	}
+	if !tiflashReadHintRE.MatchString(sql) {
 		return sql, false
 	}
 	if len(r.digestAllowlist) > 0 {

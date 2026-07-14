@@ -102,6 +102,95 @@ LIMIT
 	require.Contains(t, defaultRewriter.digestAllowlist, digest3027)
 }
 
+func TestReplayDigestIgnoresGameSummaryShardSuffix(t *testing.T) {
+	digestBase := ReplayDigest(sql9)
+	digest1161 := ReplayDigest(`/* SQL_TAG(BcOrderAccountGameSummaryMapper.getJackPotPool) */
+SELECT
+  site_code,
+  game_category_id,
+  game_platform_id,
+  currency,
+  sum(profit_total) profit_total
+FROM
+  bc_order_account_game_summary_1161 t
+WHERE
+  game_id < 0
+  AND settle_day >= ?
+  AND settle_day <= ?
+  AND site_code IN (?)
+  AND currency IS NOT NULL
+  AND currency != ''
+GROUP BY
+  site_code,
+  game_category_id,
+  game_platform_id,
+  currency`)
+
+	require.Equal(t, digestBase, digest1161)
+	require.Contains(t, defaultRewriter.forceIndexDigestAllowlist, digestBase)
+}
+
+func TestMaybeRewriteAddsGameSummaryForceIndex(t *testing.T) {
+	sql := `/* SQL_TAG(BcOrderAccountGameSummaryMapper.getJackPotPool) */
+SELECT
+  site_code,
+  game_category_id,
+  game_platform_id,
+  currency,
+  sum(profit_total) profit_total
+FROM
+  bc_order_account_game_summary_1161 t
+WHERE
+  game_id < 0
+  AND settle_day >= ?
+  AND settle_day <= ?
+  AND site_code IN (?)
+  AND currency IS NOT NULL
+  AND currency != ''
+GROUP BY
+  site_code,
+  game_category_id,
+  game_platform_id,
+  currency`
+
+	rewriter := DefaultRewriter()
+	newSQL, ok := rewriter.MaybeRewrite(sql)
+	require.True(t, ok)
+	require.Contains(t, newSQL, "bc_order_account_game_summary_1161 t FORCE INDEX (idx_gameid_settleday)")
+}
+
+func TestRewriteCommandGameSummaryComQuery(t *testing.T) {
+	sql := `/* SQL_TAG(BcOrderAccountGameSummaryMapper.getJackPotPool) */
+SELECT
+  site_code,
+  game_category_id,
+  game_platform_id,
+  currency,
+  sum(profit_total) profit_total
+FROM
+  bc_order_account_game_summary_1161 t
+WHERE
+  game_id < 0
+  AND settle_day >= ?
+  AND settle_day <= ?
+  AND site_code IN (?)
+  AND currency IS NOT NULL
+  AND currency != ''
+GROUP BY
+  site_code,
+  game_category_id,
+  game_platform_id,
+  currency`
+
+	rewriter := DefaultRewriter()
+	command := &cmd.Command{
+		Type:    pnet.ComQuery,
+		Payload: append([]byte{pnet.ComQuery.Byte()}, []byte(sql)...),
+	}
+	require.True(t, rewriter.RewriteCommand(command))
+	require.Contains(t, string(command.Payload[1:]), "FORCE INDEX (idx_gameid_settleday)")
+}
+
 func TestRewriteCommandComQuery(t *testing.T) {
 	rewriter := DefaultRewriter()
 	command := &cmd.Command{
