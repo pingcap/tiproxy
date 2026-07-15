@@ -19,6 +19,7 @@ var (
 	shardTableRE            = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
 	gameSummaryTableRE      = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
 	gameSummaryForceIndexRE = regexp.MustCompile(`(?i)(\bbc_order_account_game_summary_\d+)\s+(\w+)`)
+	betRecordSumForceIndexRE = regexp.MustCompile(`(?i)FORCE\s+INDEX\s*\(\s*idx_account_bettime\s*\)`)
 
 	sql1 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
 SELECT
@@ -392,11 +393,76 @@ GROUP BY
   game_platform_id,
   currency`
 
+	sql10 = `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
+SELECT
+  count(1) AS total,
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit,
+  SUM(tax) AS total_tax,
+  SUM(rake) AS total_rake,
+  SUM(insurance) AS total_insurance,
+  SUM(props) AS total_props
+FROM
+  bc_bet_records_2798 b FORCE INDEX(idx_account_bettime)
+WHERE
+  account = ?
+  AND bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?
+  AND currency = ?`
+
+	sql11 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_3050 b FORCE INDEX(idx_account_bettime)
+WHERE
+  account = ?
+  AND bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?
+  AND currency = ?
+ORDER BY
+  net_profit DESC,
+  id DESC
+LIMIT
+  ?, ?`
+
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
 			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8,
 		),
-		forceIndexDigestAllowlist: newDigestAllowlist(sql9),
+		forceIndexDigestAllowlist:             newDigestAllowlist(sql9),
+		betRecordSumForceIndexDigestAllowlist: newDigestAllowlist(sql10),
+		betRecordListForceIndexDigestAllowlist: newDigestAllowlist(sql11),
 	}
 )
 
@@ -410,8 +476,10 @@ func newDigestAllowlist(sqls ...string) map[string]struct{} {
 
 // Rewriter rewrites SQL statements before replay execution.
 type Rewriter struct {
-	digestAllowlist           map[string]struct{}
-	forceIndexDigestAllowlist map[string]struct{}
+	digestAllowlist                        map[string]struct{}
+	forceIndexDigestAllowlist              map[string]struct{}
+	betRecordSumForceIndexDigestAllowlist  map[string]struct{}
+	betRecordListForceIndexDigestAllowlist map[string]struct{}
 }
 
 // DefaultRewriter returns the built-in rewriter for known SQL patterns.
@@ -454,7 +522,33 @@ func AddGameSummaryForceIndex(sql string) (string, bool) {
 	return newSQL, newSQL != sql
 }
 
+// ReplaceBetRecordSumForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_account_sum_bet_amount).
+func ReplaceBetRecordSumForceIndex(sql string) (string, bool) {
+	if strings.Contains(strings.ToLower(sql), "idx_account_sum_bet_amount") {
+		return sql, false
+	}
+	if !betRecordSumForceIndexRE.MatchString(sql) {
+		return sql, false
+	}
+	newSQL := betRecordSumForceIndexRE.ReplaceAllString(sql, "FORCE INDEX(idx_account_sum_bet_amount)")
+	return newSQL, newSQL != sql
+}
+
+// ReplaceBetRecordListForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_catagory_account_bet_time_net_profit).
+func ReplaceBetRecordListForceIndex(sql string) (string, bool) {
+	if strings.Contains(strings.ToLower(sql), "idx_catagory_account_bet_time_net_profit") {
+		return sql, false
+	}
+	if !betRecordSumForceIndexRE.MatchString(sql) {
+		return sql, false
+	}
+	newSQL := betRecordSumForceIndexRE.ReplaceAllString(sql, "FORCE INDEX(idx_catagory_account_bet_time_net_profit)")
+	return newSQL, newSQL != sql
+}
+
 // MaybeRewrite rewrites SQL before replay execution.
+// For allowlisted digests on bet record list queries, it replaces FORCE INDEX(idx_account_bettime).
+// For allowlisted digests on bet record sum queries, it replaces FORCE INDEX(idx_account_bettime).
 // For allowlisted digests on game summary queries, it adds FORCE INDEX (idx_gameid_settleday).
 // For allowlisted digests with a tiflash read hint, it strips the tiflash read hint.
 // For other SQL with a tiflash read hint, it merges /*+ ignore_plan_cache() */ into the same hint comment.
@@ -465,6 +559,16 @@ func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
 	if len(r.forceIndexDigestAllowlist) > 0 {
 		if _, ok := r.forceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
 			return AddGameSummaryForceIndex(sql)
+		}
+	}
+	if len(r.betRecordSumForceIndexDigestAllowlist) > 0 {
+		if _, ok := r.betRecordSumForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
+			return ReplaceBetRecordSumForceIndex(sql)
+		}
+	}
+	if len(r.betRecordListForceIndexDigestAllowlist) > 0 {
+		if _, ok := r.betRecordListForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
+			return ReplaceBetRecordListForceIndex(sql)
 		}
 	}
 	if !tiflashReadHintRE.MatchString(sql) {
