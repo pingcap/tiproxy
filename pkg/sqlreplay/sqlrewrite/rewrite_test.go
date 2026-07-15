@@ -216,6 +216,79 @@ WHERE
 	require.Contains(t, defaultRewriter.betRecordSumForceIndexDigestAllowlist, digestBase)
 }
 
+func TestReplayDigestIgnoresBetRecordSumCountOnlyShardSuffix(t *testing.T) {
+	digestBase := ReplayDigest(sql12)
+	digest1073 := ReplayDigest(`/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
+SELECT
+  count(1) AS total
+FROM
+  bc_bet_records_1073 b FORCE INDEX(idx_account_bettime)
+WHERE
+  account = ?
+  AND bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?`)
+
+	require.Equal(t, digestBase, digest1073)
+	require.Contains(t, defaultRewriter.betRecordSumForceIndexDigestAllowlist, digestBase)
+}
+
+func TestReplayDigestIgnoresCombinedTiflashHintForSumBetRecordAmount(t *testing.T) {
+	digestBase := ReplayDigest(sql13)
+	digest1073 := ReplayDigest(`/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  count(1) AS total,
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit,
+  SUM(tax) AS total_tax,
+  SUM(rake) AS total_rake,
+  SUM(insurance) AS total_insurance,
+  SUM(props) AS total_props
+FROM
+  bc_bet_records_1073 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+  AND all_bet >= ?`)
+	digestNoHint := ReplayDigest(`/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
+SELECT
+  count(1) AS total,
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit,
+  SUM(tax) AS total_tax,
+  SUM(rake) AS total_rake,
+  SUM(insurance) AS total_insurance,
+  SUM(props) AS total_props
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+  AND all_bet >= ?`)
+
+	require.Equal(t, digestBase, digest1073)
+	require.Equal(t, digestBase, digestNoHint)
+	require.Contains(t, defaultRewriter.digestAllowlist, digestBase)
+}
+
+func TestMaybeRewriteStripsCombinedTiflashHintForSumBetRecordAmount(t *testing.T) {
+	rewriter := DefaultRewriter()
+	rewritten, ok := rewriter.MaybeRewrite(sql13)
+	require.True(t, ok)
+	require.NotContains(t, rewritten, "read_from_storage")
+	require.NotContains(t, rewritten, "ignore_plan_cache")
+	require.Contains(t, rewritten, "bc_bet_records_280")
+}
+
 func TestMaybeRewriteReplacesBetRecordSumForceIndex(t *testing.T) {
 	sql := `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
 SELECT

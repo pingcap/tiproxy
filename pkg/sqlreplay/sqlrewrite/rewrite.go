@@ -14,11 +14,11 @@ import (
 )
 
 var (
-	tiflashReadHintRE       = regexp.MustCompile(`(?is)/\*\s*\+\s*(read_from_storage\s*\(\s*tiflash\s*\[\s*b\s*\]\s*\))\s*\*/`)
-	ignorePlanCacheRE       = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
-	shardTableRE            = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
-	gameSummaryTableRE      = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
-	gameSummaryForceIndexRE = regexp.MustCompile(`(?i)(\bbc_order_account_game_summary_\d+)\s+(\w+)`)
+	tiflashReadHintRE        = regexp.MustCompile(`(?is)/\*\s*\+\s*(read_from_storage\s*\(\s*tiflash\s*\[\s*b\s*\]\s*\))\s*\*/`)
+	ignorePlanCacheRE        = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
+	shardTableRE             = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
+	gameSummaryTableRE       = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
+	gameSummaryForceIndexRE  = regexp.MustCompile(`(?i)(\bbc_order_account_game_summary_\d+)\s+(\w+)`)
 	betRecordSumForceIndexRE = regexp.MustCompile(`(?i)FORCE\s+INDEX\s*\(\s*idx_account_bettime\s*\)`)
 
 	sql1 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
@@ -412,6 +412,38 @@ WHERE
   AND site_code = ?
   AND currency = ?`
 
+	sql12 = `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
+SELECT
+  count(1) AS total
+FROM
+  bc_bet_records_169 b FORCE INDEX(idx_account_bettime)
+WHERE
+  account = ?
+  AND bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?`
+
+	sql13 = `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  count(1) AS total,
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit,
+  SUM(tax) AS total_tax,
+  SUM(rake) AS total_rake,
+  SUM(insurance) AS total_insurance,
+  SUM(props) AS total_props
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+  AND all_bet >= ?`
+
 	sql11 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
 SELECT
   b.record_id,
@@ -458,10 +490,10 @@ LIMIT
 
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
-			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8,
+			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8, sql13,
 		),
-		forceIndexDigestAllowlist:             newDigestAllowlist(sql9),
-		betRecordSumForceIndexDigestAllowlist: newDigestAllowlist(sql10),
+		forceIndexDigestAllowlist:              newDigestAllowlist(sql9),
+		betRecordSumForceIndexDigestAllowlist:  newDigestAllowlist(sql10, sql12),
 		betRecordListForceIndexDigestAllowlist: newDigestAllowlist(sql11),
 	}
 )
