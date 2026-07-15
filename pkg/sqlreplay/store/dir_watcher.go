@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore"
+	"github.com/pingcap/tidb/pkg/objstore/s3like"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"go.uber.org/zap"
 )
@@ -24,14 +24,14 @@ type dirWatcher struct {
 	lg *zap.Logger
 
 	pathPrefix string
-	storage    storage.ExternalStorage
+	storage    storeapi.Storage
 
 	recordedDirs map[string]struct{}
 	onNewDir     func(path string) error
 }
 
 // NewDirWatcher creates a new dirWatcher.
-func NewDirWatcher(lg *zap.Logger, pathPrefix string, onNewDir func(filename string) error, storage storage.ExternalStorage) *dirWatcher {
+func NewDirWatcher(lg *zap.Logger, pathPrefix string, onNewDir func(filename string) error, storage storeapi.Storage) *dirWatcher {
 	return &dirWatcher{
 		lg:           lg,
 		pathPrefix:   pathPrefix,
@@ -65,12 +65,12 @@ func (c *dirWatcher) WalkFiles(ctx context.Context) error {
 	var dirs []string
 
 	switch c.storage.(type) {
-	case *storage.S3Storage:
+	case *s3like.Storage:
 		dirs, err = c.listFilesForS3(ctx)
 		if err != nil {
 			return err
 		}
-	case *storage.LocalStorage:
+	case *objstore.LocalStorage:
 		dirs, err = c.listFilesForLocal()
 		if err != nil {
 			return err
@@ -97,31 +97,41 @@ func (c *dirWatcher) WalkFiles(ctx context.Context) error {
 }
 
 func (c *dirWatcher) listFilesForS3(ctx context.Context) ([]string, error) {
-	// Assumes that we don't have more than 1000 directories under one prefix.
-	s := c.storage.(*storage.S3Storage)
-	options := s.GetOptions()
-	req := &s3.ListObjectsInput{
-		Bucket:    aws.String(options.Bucket),
-		Prefix:    aws.String(c.pathPrefix),
-		MaxKeys:   aws.Int64(1000),
-		Delimiter: aws.String("/"),
+	s, ok := c.storage.(*s3like.Storage)
+	if !ok {
+		return nil, errors.New("not s3 storage")
 	}
-
-	res, err := s.GetS3APIHandle().ListObjectsWithContext(ctx, req)
+	dirs := make(map[string]struct{})
+	err := s.WalkDir(ctx, &storeapi.WalkOption{ObjPrefix: c.pathPrefix}, func(name string, size int64) error {
+		if !strings.HasPrefix(name, c.pathPrefix) {
+			return nil
+		}
+		rest := strings.TrimPrefix(name, c.pathPrefix)
+		if rest == "" {
+			return nil
+		}
+		if idx := strings.Index(rest, "/"); idx >= 0 {
+			dirs[c.pathPrefix+rest[:idx+1]] = struct{}{}
+			return nil
+		}
+		if strings.HasSuffix(name, "/") || size <= 0 {
+			dirs[name] = struct{}{}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	var dirs []string
-	for _, dir := range res.CommonPrefixes {
-		dirs = append(dirs, *dir.Prefix)
+	ret := make([]string, 0, len(dirs))
+	for dir := range dirs {
+		ret = append(ret, dir)
 	}
-
-	return dirs, nil
+	return ret, nil
 }
 
 func (c *dirWatcher) listFilesForLocal() ([]string, error) {
 	var dirs []string
-	s := c.storage.(*storage.LocalStorage)
+	s := c.storage.(*objstore.LocalStorage)
 	err := filepath.WalkDir(s.Base(), func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
