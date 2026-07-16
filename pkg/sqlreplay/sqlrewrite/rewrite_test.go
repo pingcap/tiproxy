@@ -449,6 +449,16 @@ LIMIT
 	require.NotContains(t, newSQL, "idx_account_bettime")
 }
 
+func TestMaybeRewriteReplacesBetRecordListForceIndexAscOrder(t *testing.T) {
+	rewriter := DefaultRewriter()
+	newSQL, ok := rewriter.MaybeRewrite(sql18)
+	require.True(t, ok)
+	require.Contains(t, newSQL, "bc_bet_records_878")
+	require.Contains(t, newSQL, "FORCE INDEX(idx_catagory_account_bet_time_net_profit)")
+	require.NotContains(t, newSQL, "idx_account_bettime")
+	require.Contains(t, newSQL, "net_profit ASC")
+}
+
 func TestRewriteCommandComQuery(t *testing.T) {
 	rewriter := DefaultRewriter()
 	command := &cmd.Command{

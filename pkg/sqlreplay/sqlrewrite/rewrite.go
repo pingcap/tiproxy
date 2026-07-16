@@ -412,6 +412,50 @@ WHERE
   AND site_code = ?
   AND currency = ?`
 
+	sql11 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+  SELECT
+    b.record_id,
+    b.order_no,
+    b.round_id,
+    b.account,
+    b.third_user_name,
+    b.third_game_code,
+    b.site_code,
+    b.platform_id,
+    b.category_id gameCategoryId,
+    b.bet_time,
+    b.settle_time,
+    b.all_bet,
+    b.valid_bet,
+    b.net_profit,
+    b.after_balance,
+    b.tax,
+    b.rake,
+    b.insurance,
+    b.props,
+    b.settle_status,
+    b.winlost_time,
+    b.pull_time,
+    b.currency,
+    b.game_id,
+    b.device,
+    b.odds_type,
+    b.odds,
+    b.is_combo
+  FROM
+    bc_bet_records_3050 b FORCE INDEX(idx_account_bettime)
+  WHERE
+    account = ?
+    AND bet_time >= ?
+    AND bet_time <= ?
+    AND site_code = ?
+    AND currency = ?
+  ORDER BY
+    net_profit DESC,
+    id DESC
+  LIMIT
+    ?, ?`
+
 	sql12 = `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
 SELECT
   count(1) AS total
@@ -444,7 +488,217 @@ WHERE
   AND currency = ?
   AND all_bet >= ?`
 
-	sql11 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+	sql14 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND all_bet >= ?
+ORDER BY
+  settle_time DESC
+LIMIT
+  ?, ?`
+
+	sql15 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_2868 b
+WHERE
+  game_id IN (
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?,
+    ?
+  )
+  AND category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+  AND all_bet >= ?
+ORDER BY
+  settle_time DESC
+LIMIT
+  ?, ?`
+
+	sql16 = `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  count(1) AS total,
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit,
+  SUM(tax) AS total_tax,
+  SUM(rake) AS total_rake,
+  SUM(insurance) AS total_insurance,
+  SUM(props) AS total_props
+FROM
+  bc_bet_records_2868 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND currency = ?
+  AND all_bet >= ?`
+
+	sql17 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?
+  AND all_bet >= ?
+ORDER BY
+  settle_time DESC
+LIMIT
+  ?, ?`
+
+	sql18 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
 SELECT
   b.record_id,
   b.order_no,
@@ -475,7 +729,7 @@ SELECT
   b.odds,
   b.is_combo
 FROM
-  bc_bet_records_3050 b FORCE INDEX(idx_account_bettime)
+  bc_bet_records_878 b FORCE INDEX(idx_account_bettime)
 WHERE
   account = ?
   AND bet_time >= ?
@@ -483,18 +737,18 @@ WHERE
   AND site_code = ?
   AND currency = ?
 ORDER BY
-  net_profit DESC,
-  id DESC
+  net_profit ASC,
+  id
 LIMIT
   ?, ?`
 
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
-			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8, sql13,
+			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8, sql13, sql14, sql15, sql16, sql17,
 		),
 		forceIndexDigestAllowlist:              newDigestAllowlist(sql9),
 		betRecordSumForceIndexDigestAllowlist:  newDigestAllowlist(sql10, sql12),
-		betRecordListForceIndexDigestAllowlist: newDigestAllowlist(sql11),
+		betRecordListForceIndexDigestAllowlist: newDigestAllowlist(sql11, sql18),
 	}
 )
 
