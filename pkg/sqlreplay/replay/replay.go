@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -136,7 +136,7 @@ type ReplayConfig struct {
 	reportLogInterval time.Duration
 }
 
-func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
+func (cfg *ReplayConfig) Validate() ([]storeapi.Storage, error) {
 	if cfg.Input == "" {
 		return nil, errors.New("input is required")
 	}
@@ -144,24 +144,24 @@ func (cfg *ReplayConfig) Validate() ([]storage.ExternalStorage, error) {
 	if len(inputs) > 1 && cfg.Format != cmd.FormatAuditLogPlugin {
 		return nil, errors.New("only `audit_log_plugin` format supports multiple input files")
 	}
-	var storages []storage.ExternalStorage
+	var storages []storeapi.Storage
 	var err error
 	for _, input := range inputs {
-		var storage storage.ExternalStorage
+		var inputStorage storeapi.Storage
 		if cfg.DynamicInput {
 			input, err = getDirForInput(input)
 			if err != nil {
 				return nil, errors.Wrapf(err, "invalid input url %s", input)
 			}
 		}
-		storage, err = store.NewStorage(input)
+		inputStorage, err = store.NewStorage(input)
 		if err != nil {
 			for _, s := range storages {
 				s.Close()
 			}
 			return nil, errors.Wrapf(err, "invalid input %s", input)
 		}
-		storages = append(storages, storage)
+		storages = append(storages, inputStorage)
 	}
 	if !cfg.DryRun && cfg.Username == "" {
 		return storages, errors.New("username is required")
@@ -264,7 +264,7 @@ type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig
 	meta             store.Meta
-	storages         []storage.ExternalStorage
+	storages         []storeapi.Storage
 	replayStats      conn.ReplayStats
 	dedup            *cmd.DeDup
 	idMgr            *id.IDManager
@@ -729,7 +729,7 @@ func (r *replay) constructDynamicDecoder(ctx context.Context) (decoder, error) {
 	return decoder, nil
 }
 
-func (r *replay) constructReaderForDir(storage storage.ExternalStorage, dir string, filterTime time.Time) (cmd.LineReader, error) {
+func (r *replay) constructReaderForDir(inputStorage storeapi.Storage, dir string, filterTime time.Time) (cmd.LineReader, error) {
 	cfg := store.ReaderCfg{
 		Format:             r.cfg.Format,
 		Dir:                dir,
@@ -741,7 +741,7 @@ func (r *replay) constructReaderForDir(storage storage.ExternalStorage, dir stri
 	if cfg.FileNameFilterTime.IsZero() {
 		cfg.FileNameFilterTime = r.cfg.CommandStartTime
 	}
-	reader, err := store.NewReader(r.lg.Named("loader"), storage, cfg)
+	reader, err := store.NewReader(r.lg.Named("loader"), inputStorage, cfg)
 	if err != nil {
 		reader.Close()
 		return nil, err

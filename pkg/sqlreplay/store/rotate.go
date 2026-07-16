@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3iface"
-	backuppb "github.com/pingcap/kvproto/pkg/brpb"
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore"
+	"github.com/pingcap/tidb/pkg/objstore/objectio"
+	"github.com/pingcap/tidb/pkg/objstore/ossstore"
+	"github.com/pingcap/tidb/pkg/objstore/s3like"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -36,7 +36,7 @@ var _ io.WriteCloser = (*rotateWriter)(nil)
 // - If it's written too frequently, the previous file may be overwritten.
 type rotateWriter struct {
 	cfg      WriterCfg
-	storage  storage.ExternalStorage
+	storage  storeapi.Storage
 	lg       *zap.Logger
 	writeLen int
 	buf      *bytes.Buffer
@@ -47,7 +47,7 @@ type rotateWriter struct {
 	lastFileTS string
 }
 
-func newRotateWriter(lg *zap.Logger, externalStorage storage.ExternalStorage, cfg WriterCfg) (*rotateWriter, error) {
+func newRotateWriter(lg *zap.Logger, externalStorage storeapi.Storage, cfg WriterCfg) (*rotateWriter, error) {
 	if cfg.FileSize == 0 {
 		cfg.FileSize = fileSize
 	}
@@ -124,7 +124,7 @@ func (w *rotateWriter) flush(force bool) error {
 	fileName := fmt.Sprintf("%s%s%s%s", fileNamePrefix, tsStr, fileNameSuffix, ext)
 	// rotateWriter -> encryptWriter -> compressWriter -> file
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-	fileWriter, err := w.storage.Create(ctx, fileName, &storage.WriterOption{})
+	fileWriter, err := w.storage.Create(ctx, fileName, &storeapi.WriterOption{})
 	cancel()
 	if err != nil {
 		return errors.WithStack(err)
@@ -166,7 +166,7 @@ type fileMeta struct {
 
 type fileReader struct {
 	fileName string
-	reader   storage.ExternalFileReader
+	reader   objectio.Reader
 }
 
 type rotateReader struct {
@@ -174,20 +174,21 @@ type rotateReader struct {
 	absolutePath string
 	reader       io.Reader
 	externalFile fileReader
-	storage      storage.ExternalStorage
+	storage      storeapi.Storage
 	lg           *zap.Logger
 	fileCh       chan fileReader
 	wg           waitgroup.WaitGroup
 	cancel       context.CancelFunc
 	eof          bool
 
-	// fileMetaCache and fileMetaCacheIdx are used to access and cache file metadata.
-	// The fileMeta in the cache should be sorted by file index in ascending order.
+	// fileMetaCache and fileMetaCacheIdx cache file metadata returned by WalkDir.
+	// Up to walkBatchSize entries are cached per batch so openFileLoop can pick the
+	// next file without listing the whole directory again.
 	fileMetaCache    []fileMeta
 	fileMetaCacheIdx int
 }
 
-func newRotateReader(lg *zap.Logger, store storage.ExternalStorage, cfg ReaderCfg) (*rotateReader, error) {
+func newRotateReader(lg *zap.Logger, store storeapi.Storage, cfg ReaderCfg) (*rotateReader, error) {
 	r := &rotateReader{
 		cfg:     cfg,
 		lg:      lg,
@@ -308,8 +309,8 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			}
 		}
 		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
-		var fr storage.ExternalFileReader
-		fr, err = r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
+		var fr objectio.Reader
+		fr, err = r.storage.Open(ctx, minFileName, &storeapi.ReaderOption{})
 		if err != nil {
 			err = errors.WithStack(err)
 			break
@@ -348,106 +349,121 @@ func (r *rotateReader) nextReader() error {
 	return err
 }
 
-// walkFile walks through the files in the storage and applies the given function to each file.
-// The return value of the function indicates whether this file is valid or not.
-// For S3 storage and audit log format, it'll stop walking once the fn returns true.
-func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func(string, int64) (bool, error)) error {
-	if s3, ok := r.storage.(*storage.S3Storage); ok {
-		return r.walkS3(ctx, curfileName, s3.GetS3APIHandle(), s3.GetOptions(), fn)
+const walkBatchSize = 1000
+
+var errWalkBatchEnd = errors.New("walk batch end")
+
+// isS3LikeStorage reports whether the storage uses S3-like paginated ListObjects.
+func isS3LikeStorage(s storeapi.Storage) bool {
+	switch s.(type) {
+	case *s3like.Storage, *ossstore.OSSStore:
+		return true
+	default:
+		return false
 	}
-	return r.storage.WalkDir(ctx, &storage.WalkOption{}, func(name string, size int64) error {
-		_, err := fn(name, size)
-		return err
-	})
 }
 
-// walkS3 is a special implementation to list files from S3.
-// The reason is that the file name contains timestamp info, and we may
-// want to start from a specific time point. The normal WalkDir implementation
-// just lists all files in the directory, which is not efficient when there are
-// many files.
-// Most of the code is copied from storage/s3.go's WalkDir implementation.
-func (r *rotateReader) walkS3(ctx context.Context, curFileName string, s3api s3iface.S3API, options *backuppb.S3, fn func(string, int64) (bool, error)) error {
-	for ; r.fileMetaCacheIdx < len(r.fileMetaCache); r.fileMetaCacheIdx++ {
-		meta := r.fileMetaCache[r.fileMetaCacheIdx]
-		valid, err := fn(meta.fileName, meta.fileSize)
+func (r *rotateReader) buildWalkOption(curfileName string) *storeapi.WalkOption {
+	fileNamePrefix := getFileNamePrefix(r.cfg.Format)
+	walkOpt := &storeapi.WalkOption{}
+	switch r.storage.(type) {
+	case *objstore.GCSStorage:
+		walkOpt.ObjPrefix = fileNamePrefix
+		if curfileName != "" {
+			walkOpt.StartAfter = curfileName
+		} else if !r.cfg.FileNameFilterTime.IsZero() {
+			t := r.cfg.FileNameFilterTime.In(time.Local)
+			walkOpt.StartAfter = fmt.Sprintf("%s%s", fileNamePrefix, t.Format(logTimeLayout))
+		}
+	case *objstore.LocalStorage:
+		// Local relies on openFileLoop's fileTime filter for curfileName. Do not
+		// set StartAfter to curfileName here: logTimeLayout omits ".000" for zero
+		// milliseconds, so lexicographic StartAfter can skip later files incorrectly.
+		if !r.cfg.FileNameFilterTime.IsZero() {
+			t := r.cfg.FileNameFilterTime.In(time.Local)
+			walkOpt.StartAfter = fmt.Sprintf("%s%s", fileNamePrefix, t.Format(logTimeLayout))
+		}
+	default:
+		if !isS3LikeStorage(r.storage) {
+			break
+		}
+		walkOpt.ObjPrefix = fileNamePrefix
+		walkOpt.ListCount = walkBatchSize
+		if curfileName != "" {
+			walkOpt.StartAfter = curfileName
+		} else if !r.cfg.FileNameFilterTime.IsZero() {
+			t := r.cfg.FileNameFilterTime.In(time.Local)
+			walkOpt.StartAfter = fmt.Sprintf("%s%s", fileNamePrefix, t.Format(logTimeLayout))
+		}
+	}
+	return walkOpt
+}
+
+// walkFile walks through the files in the storage and applies the given function to each file.
+// The return value of the function indicates whether this file is valid or not.
+// Once the best match in a batch is found, the remaining entries in that batch are cached
+// so that subsequent calls can reuse metadata without invoking WalkDir again.
+func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func(string, int64) (bool, error)) error {
+	if r.fileMetaCacheIdx < len(r.fileMetaCache) {
+		selectedIdx := -1
+		for i := r.fileMetaCacheIdx; i < len(r.fileMetaCache); i++ {
+			meta := r.fileMetaCache[i]
+			valid, err := fn(meta.fileName, meta.fileSize)
+			if err != nil {
+				return err
+			}
+			if valid {
+				selectedIdx = i
+			}
+		}
+		if selectedIdx >= 0 {
+			r.fileMetaCacheIdx = selectedIdx + 1
+			return nil
+		}
+		r.fileMetaCache = r.fileMetaCache[:0]
+		r.fileMetaCacheIdx = 0
+	}
+
+	walkOpt := r.buildWalkOption(curfileName)
+	batch := make([]fileMeta, 0, walkBatchSize)
+	selectedIdx := -1
+	err := r.storage.WalkDir(ctx, walkOpt, func(name string, size int64) error {
+		if size <= 0 && strings.HasSuffix(name, "/") {
+			return nil
+		}
+		idx := len(batch)
+		batch = append(batch, fileMeta{
+			fileName: name,
+			fileSize: size,
+		})
+		valid, err := fn(name, size)
 		if err != nil {
 			return err
 		}
 		if valid {
-			r.fileMetaCacheIdx++
-			return nil
+			selectedIdx = idx
 		}
-	}
-
-	// The cache is used up, and we didn't find the valid file yet.
-	pathPrefix := options.Prefix
-	if len(pathPrefix) > 0 && !strings.HasSuffix(pathPrefix, "/") {
-		pathPrefix += "/"
-	}
-
-	prefix := pathPrefix + getFileNamePrefix(r.cfg.Format)
-
-	var marker string
-	if curFileName != "" {
-		marker = pathPrefix + curFileName
-	} else if !r.cfg.FileNameFilterTime.IsZero() {
-		t := r.cfg.FileNameFilterTime.In(time.Local)
-		marker = fmt.Sprintf("%s%s", prefix, t.Format(logTimeLayout))
-	}
-
-	req := &s3.ListObjectsInput{
-		Bucket:  aws.String(options.Bucket),
-		Prefix:  aws.String(prefix),
-		MaxKeys: aws.Int64(1000),
-		Marker:  aws.String(marker),
-	}
-	// The first result of `ListObjects` may include the `marker` file itself, so
-	// we still need to walk and filter it. It's possible to further optimize to
-	// skip the first file and take the second one if the file name is exactly the
-	// same with the `marker`.
-	res, err := s3api.ListObjectsWithContext(ctx, req)
-	if err != nil {
+		if len(batch) >= walkBatchSize {
+			return errWalkBatchEnd
+		}
+		return nil
+	})
+	if err != nil && !errors.Is(err, errWalkBatchEnd) {
 		return err
 	}
 
-	startAppendingFileToCache := false
-	for _, file := range res.Contents {
-		// when walk on specify directory, the result include storage.Prefix,
-		// which can not be reuse in other API(Open/Read) directly.
-		// so we use TrimPrefix to filter Prefix for next Open/Read.
-		path := strings.TrimPrefix(*file.Key, options.Prefix)
-		// trim the prefix '/' to ensure that the path returned is consistent with the local storage
-		path = strings.TrimPrefix(path, "/")
-		itemSize := *file.Size
-
-		// filter out s3's empty directory items
-		if itemSize <= 0 && strings.HasSuffix(path, "/") {
-			continue
+	if selectedIdx+1 < len(batch) {
+		if r.fileMetaCache == nil {
+			r.fileMetaCache = make([]fileMeta, 0, len(batch)-selectedIdx-1)
+		} else {
+			r.fileMetaCache = r.fileMetaCache[:0]
 		}
-		if startAppendingFileToCache {
-			r.fileMetaCache = append(r.fileMetaCache, fileMeta{
-				fileName: path,
-				fileSize: itemSize,
-			})
-			continue
-		}
-
-		valid, err := fn(path, itemSize)
-		if err != nil {
-			return err
-		}
-		if valid {
-			startAppendingFileToCache = true
-			if r.fileMetaCache == nil {
-				r.fileMetaCache = make([]fileMeta, 0, 1000)
-			} else {
-				r.fileMetaCache = r.fileMetaCache[:0]
-			}
-			r.fileMetaCacheIdx = 0
-		}
+		r.fileMetaCache = append(r.fileMetaCache, batch[selectedIdx+1:]...)
+		r.fileMetaCacheIdx = 0
+	} else {
+		r.fileMetaCache = r.fileMetaCache[:0]
+		r.fileMetaCacheIdx = 0
 	}
-
 	return nil
 }
 

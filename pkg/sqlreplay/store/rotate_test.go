@@ -15,11 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	s3v2 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
-	"github.com/pingcap/tidb/br/pkg/mock"
+	"github.com/pingcap/tidb/pkg/objstore/s3store"
+	s3mock "github.com/pingcap/tidb/pkg/objstore/s3store/mock"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -492,18 +493,18 @@ func TestFilterFileNameByStartTime(t *testing.T) {
 
 func TestWalkS3(t *testing.T) {
 	controller := gomock.NewController(t)
-	s3api := mock.NewMockS3API(controller)
+	s3api := s3mock.NewMockS3API(controller)
 
-	var files []*s3.Object
+	var files []types.Object
 	// Append 1000 files
 	for i := range 1000 {
-		files = append(files, &s3.Object{
+		files = append(files, types.Object{
 			Key:  aws.String(fmt.Sprintf("prefix/tidb-audit-2025-09-19T16-54-44.%03d.log", i)),
 			Size: aws.Int64(200),
 		})
 	}
 	for i := range 1000 {
-		files = append(files, &s3.Object{
+		files = append(files, types.Object{
 			Key:  aws.String(fmt.Sprintf("prefix/tidb-audit-2025-09-19T16-54-45.%03d.log", i)),
 			Size: aws.Int64(200),
 		})
@@ -513,22 +514,23 @@ func TestWalkS3(t *testing.T) {
 	// Second request: from 44.999 to 45.999, return next 1000 files
 	// Third request: from 45.998 to end, return 2 files
 	// Fourth request: from 45.999 end, return 1 file
-	s3api.EXPECT().ListObjectsWithContext(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
-		func(ctx context.Context, req *s3.ListObjectsInput, _ ...request.Option) (*s3.ListObjectsOutput, error) {
-			require.Equal(t, "bucket", *req.Bucket)
-			require.Equal(t, "prefix/tidb-audit-", *req.Prefix)
+	s3api.EXPECT().ListObjectsV2(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
+		func(ctx context.Context, req *s3v2.ListObjectsV2Input, _ ...func(*s3v2.Options)) (*s3v2.ListObjectsV2Output, error) {
+			require.Equal(t, "bucket", aws.ToString(req.Bucket))
+			require.Equal(t, "prefix/tidb-audit-", aws.ToString(req.Prefix))
 			retFiles := files
+			startAfter := aws.ToString(req.StartAfter)
 			for i := range files {
-				if *files[i].Key >= *req.Marker {
+				if aws.ToString(files[i].Key) >= startAfter {
 					retFiles = files[i:]
 					break
 				}
 			}
-			if len(retFiles) > int(*req.MaxKeys) {
-				retFiles = retFiles[:*req.MaxKeys]
+			if len(retFiles) > int(aws.ToInt32(req.MaxKeys)) {
+				retFiles = retFiles[:aws.ToInt32(req.MaxKeys)]
 			}
 
-			return &s3.ListObjectsOutput{
+			return &s3v2.ListObjectsV2Output{
 				Contents: retFiles,
 			}, nil
 		},
@@ -539,16 +541,17 @@ func TestWalkS3(t *testing.T) {
 			Format:             cmd.FormatAuditLogPlugin,
 			FileNameFilterTime: time.Time{},
 		},
+		storage: s3store.NewS3StorageForTest(s3api, &backuppb.S3{
+			Bucket: "bucket",
+			Prefix: "prefix/",
+		}, nil),
 	}
 	selectedFileCount := 0
 	curFilename := ""
 	for {
 		selected := false
 		cFileName := curFilename
-		err := r.walkS3(context.Background(), cFileName, s3api, &backuppb.S3{
-			Bucket: "bucket",
-			Prefix: "prefix/",
-		}, func(fileName string, size int64) (bool, error) {
+		err := r.walkFile(context.Background(), cFileName, func(fileName string, size int64) (bool, error) {
 			require.GreaterOrEqual(t, fileName, cFileName)
 			if fileName <= cFileName {
 				return false, nil
@@ -565,6 +568,7 @@ func TestWalkS3(t *testing.T) {
 		}
 		selectedFileCount++
 	}
-	// Iterate through the whole 2000 files
-	require.Equal(t, 2000, selectedFileCount)
+	// Batch caching should list S3 in pages instead of once per file.
+	require.LessOrEqual(t, selectedFileCount, 5)
+	require.Equal(t, "tidb-audit-2025-09-19T16-54-45.999.log", curFilename)
 }
