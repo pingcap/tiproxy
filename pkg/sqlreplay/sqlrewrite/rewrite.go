@@ -19,8 +19,6 @@ var (
 	shardTableRE             = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
 	gameSummaryTableRE       = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
 	gameSummaryForceIndexRE  = regexp.MustCompile(`(?i)(\bbc_order_account_game_summary_\d+)\s+(\w+)`)
-	betRecordSumForceIndexRE = regexp.MustCompile(`(?i)FORCE\s+INDEX\s*\(\s*idx_account_bettime\s*\)`)
-
 	sql1 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
 SELECT
   /*+ read_from_storage(tiflash[b]) */
@@ -808,28 +806,32 @@ func AddGameSummaryForceIndex(sql string) (string, bool) {
 	return newSQL, newSQL != sql
 }
 
+const betRecordAccountBettimeIndexName = "idx_account_bettime"
+
+// replaceForceIndexName replaces an index name using case-insensitive string matching.
+func replaceForceIndexName(sql, fromIndex, toIndex string) (string, bool) {
+	lowerSQL := strings.ToLower(sql)
+	lowerFrom := strings.ToLower(fromIndex)
+	lowerTo := strings.ToLower(toIndex)
+	if strings.Contains(lowerSQL, lowerTo) {
+		return sql, false
+	}
+	start := strings.Index(lowerSQL, lowerFrom)
+	if start < 0 {
+		return sql, false
+	}
+	end := start + len(fromIndex)
+	return sql[:start] + toIndex + sql[end:], true
+}
+
 // ReplaceBetRecordSumForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_account_sum_bet_amount).
 func ReplaceBetRecordSumForceIndex(sql string) (string, bool) {
-	if strings.Contains(strings.ToLower(sql), "idx_account_sum_bet_amount") {
-		return sql, false
-	}
-	if !betRecordSumForceIndexRE.MatchString(sql) {
-		return sql, false
-	}
-	newSQL := betRecordSumForceIndexRE.ReplaceAllString(sql, "FORCE INDEX(idx_account_sum_bet_amount)")
-	return newSQL, newSQL != sql
+	return replaceForceIndexName(sql, betRecordAccountBettimeIndexName, "idx_account_sum_bet_amount")
 }
 
 // ReplaceBetRecordListForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_catagory_account_bet_time_net_profit).
 func ReplaceBetRecordListForceIndex(sql string) (string, bool) {
-	if strings.Contains(strings.ToLower(sql), "idx_catagory_account_bet_time_net_profit") {
-		return sql, false
-	}
-	if !betRecordSumForceIndexRE.MatchString(sql) {
-		return sql, false
-	}
-	newSQL := betRecordSumForceIndexRE.ReplaceAllString(sql, "FORCE INDEX(idx_catagory_account_bet_time_net_profit)")
-	return newSQL, newSQL != sql
+	return replaceForceIndexName(sql, betRecordAccountBettimeIndexName, "idx_catagory_account_bet_time_net_profit")
 }
 
 // MaybeRewrite rewrites SQL before replay execution.

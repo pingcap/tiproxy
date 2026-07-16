@@ -4,6 +4,7 @@
 package sqlrewrite
 
 import (
+	"strings"
 	"testing"
 
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -313,6 +314,17 @@ WHERE
 	newSQL, ok := rewriter.MaybeRewrite(sql)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "FORCE INDEX(idx_account_sum_bet_amount)")
+	require.NotContains(t, newSQL, "idx_account_bettime")
+}
+
+func TestMaybeRewriteReplacesBetRecordSumForceIndexCountOnlyUserSQL(t *testing.T) {
+	sql := `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */ select       count(1) as total       from bc_bet_records_2762 b             force index(idx_account_bettime)                WHERE  account = ?                                     and bet_time >= ? and bet_time <= ?                         and site_code = ?`
+
+	rewriter := DefaultRewriter()
+	newSQL, ok := rewriter.MaybeRewrite(sql)
+	require.True(t, ok)
+	require.Contains(t, newSQL, "bc_bet_records_2762")
+	require.Contains(t, strings.ToLower(newSQL), "force index(idx_account_sum_bet_amount)")
 	require.NotContains(t, newSQL, "idx_account_bettime")
 }
 
