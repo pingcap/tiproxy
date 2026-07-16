@@ -15,12 +15,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/request"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	s3v2 "github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	backup "github.com/pingcap/kvproto/pkg/brpb"
-	"github.com/pingcap/tidb/br/pkg/mock"
-	"github.com/pingcap/tidb/br/pkg/storage"
+	"github.com/pingcap/tidb/pkg/objstore"
+	"github.com/pingcap/tidb/pkg/objstore/s3store"
+	s3mock "github.com/pingcap/tidb/pkg/objstore/s3store/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
@@ -29,9 +30,9 @@ import (
 func TestLocalDirWatcher(t *testing.T) {
 	tempDir := t.TempDir()
 	pathPrefix := filepath.Join(tempDir, "dir_watcher_test_")
-	backend, err := storage.ParseBackend(tempDir, &storage.BackendOptions{})
+	backend, err := objstore.ParseBackend(tempDir, &objstore.BackendOptions{})
 	require.NoError(t, err)
-	s, err := storage.New(context.Background(), backend, nil)
+	s, err := objstore.New(context.Background(), backend, nil)
 	require.NoError(t, err)
 
 	dirWatcherPollInterval = time.Millisecond * 10
@@ -115,35 +116,30 @@ func TestLocalDirWatcher(t *testing.T) {
 
 func TestS3DirWatcher(t *testing.T) {
 	controller := gomock.NewController(t)
-	s3api := mock.NewMockS3API(controller)
+	s3api := s3mock.NewMockS3API(controller)
 	currentFiles := atomic.Pointer[[]string]{}
 
 	dirWatcherPollInterval = time.Millisecond * 10
 
-	s3api.EXPECT().ListObjectsWithContext(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
-		func(ctx context.Context, req *s3.ListObjectsInput, _ ...request.Option) (*s3.ListObjectsOutput, error) {
-			var retFiles []*s3.CommonPrefix
+	s3api.EXPECT().ListObjectsV2(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
+		func(ctx context.Context, req *s3v2.ListObjectsV2Input, _ ...func(*s3v2.Options)) (*s3v2.ListObjectsV2Output, error) {
+			var retFiles []types.Object
 			files := currentFiles.Load()
 			if files != nil {
+				prefix := aws.ToString(req.Prefix)
 				for _, f := range *files {
-					if !strings.HasPrefix(f, *req.Prefix) {
+					if !strings.HasPrefix(f, prefix) {
 						continue
 					}
-					if !strings.HasSuffix(f, "/") {
-						continue
-					}
-					if strings.Count(f, "/")-strings.Count(*req.Prefix, "/") != 1 {
-						continue
-					}
-
-					retFiles = append(retFiles, &s3.CommonPrefix{
-						Prefix: aws.String(f),
+					retFiles = append(retFiles, types.Object{
+						Key:  aws.String(f),
+						Size: aws.Int64(1),
 					})
 				}
 			}
 
-			return &s3.ListObjectsOutput{
-				CommonPrefixes: retFiles,
+			return &s3v2.ListObjectsV2Output{
+				Contents: retFiles,
 			}, nil
 		},
 	)
@@ -159,9 +155,9 @@ func TestS3DirWatcher(t *testing.T) {
 		"dir_watcher_test_file",
 	})
 
-	s := storage.NewS3StorageForTest(s3api, &backup.S3{
+	s := s3store.NewS3StorageForTest(s3api, &backup.S3{
 		Bucket: "test-bucket",
-	})
+	}, nil)
 
 	logger := zap.NewNop()
 	t.Run("WalkFiles will call callbacks on dir", func(t *testing.T) {
@@ -225,9 +221,9 @@ func TestS3DirWatcherWithRealS3(t *testing.T) {
 		t.Skip("S3_URL_FOR_TEST not set, skipping real S3 test")
 	}
 
-	backend, err := storage.ParseBackend(url, &storage.BackendOptions{})
+	backend, err := objstore.ParseBackend(url, &objstore.BackendOptions{})
 	require.NoError(t, err)
-	s, err := storage.New(context.Background(), backend, nil)
+	s, err := objstore.New(context.Background(), backend, nil)
 	require.NoError(t, err)
 
 	dirWatcherPollInterval = time.Millisecond * 10
