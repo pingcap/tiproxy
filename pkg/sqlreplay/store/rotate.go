@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/tidb/pkg/objstore"
 	"github.com/pingcap/tidb/pkg/objstore/objectio"
+	"github.com/pingcap/tidb/pkg/objstore/ossstore"
 	"github.com/pingcap/tidb/pkg/objstore/s3like"
 	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -179,8 +181,9 @@ type rotateReader struct {
 	cancel       context.CancelFunc
 	eof          bool
 
-	// fileMetaCache and fileMetaCacheIdx are used to access and cache file metadata.
-	// The fileMeta in the cache should be sorted by file index in ascending order.
+	// fileMetaCache and fileMetaCacheIdx cache file metadata returned by WalkDir.
+	// Up to walkBatchSize entries are cached per batch so openFileLoop can pick the
+	// next file without listing the whole directory again.
 	fileMetaCache    []fileMeta
 	fileMetaCacheIdx int
 }
@@ -346,77 +349,120 @@ func (r *rotateReader) nextReader() error {
 	return err
 }
 
-var errS3PageEnd = errors.New("s3 page end")
+const walkBatchSize = 1000
 
-// walkFile walks through the files in the storage and applies the given function to each file.
-// The return value of the function indicates whether this file is valid or not.
-// For S3 storage and audit log format, it'll stop walking once the fn returns true.
-func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func(string, int64) (bool, error)) error {
-	for ; r.fileMetaCacheIdx < len(r.fileMetaCache); r.fileMetaCacheIdx++ {
-		meta := r.fileMetaCache[r.fileMetaCacheIdx]
-		valid, err := fn(meta.fileName, meta.fileSize)
-		if err != nil {
-			return err
-		}
-		if valid {
-			r.fileMetaCacheIdx++
-			return nil
-		}
+var errWalkBatchEnd = errors.New("walk batch end")
+
+// isS3LikeStorage reports whether the storage uses S3-like paginated ListObjects.
+func isS3LikeStorage(s storeapi.Storage) bool {
+	switch s.(type) {
+	case *s3like.Storage, *ossstore.OSSStore:
+		return true
+	default:
+		return false
 	}
+}
 
-	_, isS3 := r.storage.(*s3like.Storage)
+func (r *rotateReader) buildWalkOption(curfileName string) *storeapi.WalkOption {
+	fileNamePrefix := getFileNamePrefix(r.cfg.Format)
 	walkOpt := &storeapi.WalkOption{}
-	if isS3 {
-		walkOpt.ObjPrefix = getFileNamePrefix(r.cfg.Format)
-		walkOpt.ListCount = 1000
+	switch r.storage.(type) {
+	case *objstore.GCSStorage:
+		walkOpt.ObjPrefix = fileNamePrefix
 		if curfileName != "" {
 			walkOpt.StartAfter = curfileName
 		} else if !r.cfg.FileNameFilterTime.IsZero() {
 			t := r.cfg.FileNameFilterTime.In(time.Local)
-			walkOpt.StartAfter = fmt.Sprintf("%s%s", getFileNamePrefix(r.cfg.Format), t.Format(logTimeLayout))
+			walkOpt.StartAfter = fmt.Sprintf("%s%s", fileNamePrefix, t.Format(logTimeLayout))
+		}
+	case *objstore.LocalStorage:
+		// Local relies on openFileLoop's fileTime filter for curfileName. Do not
+		// set StartAfter to curfileName here: logTimeLayout omits ".000" for zero
+		// milliseconds, so lexicographic StartAfter can skip later files incorrectly.
+		if !r.cfg.FileNameFilterTime.IsZero() {
+			t := r.cfg.FileNameFilterTime.In(time.Local)
+			walkOpt.StartAfter = fmt.Sprintf("%s%s", fileNamePrefix, t.Format(logTimeLayout))
+		}
+	default:
+		if !isS3LikeStorage(r.storage) {
+			break
+		}
+		walkOpt.ObjPrefix = fileNamePrefix
+		walkOpt.ListCount = walkBatchSize
+		if curfileName != "" {
+			walkOpt.StartAfter = curfileName
+		} else if !r.cfg.FileNameFilterTime.IsZero() {
+			t := r.cfg.FileNameFilterTime.In(time.Local)
+			walkOpt.StartAfter = fmt.Sprintf("%s%s", fileNamePrefix, t.Format(logTimeLayout))
 		}
 	}
+	return walkOpt
+}
 
-	startAppendingFileToCache := false
-	itemsProcessed := 0
+// walkFile walks through the files in the storage and applies the given function to each file.
+// The return value of the function indicates whether this file is valid or not.
+// Once the best match in a batch is found, the remaining entries in that batch are cached
+// so that subsequent calls can reuse metadata without invoking WalkDir again.
+func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func(string, int64) (bool, error)) error {
+	if r.fileMetaCacheIdx < len(r.fileMetaCache) {
+		selectedIdx := -1
+		for i := r.fileMetaCacheIdx; i < len(r.fileMetaCache); i++ {
+			meta := r.fileMetaCache[i]
+			valid, err := fn(meta.fileName, meta.fileSize)
+			if err != nil {
+				return err
+			}
+			if valid {
+				selectedIdx = i
+			}
+		}
+		if selectedIdx >= 0 {
+			r.fileMetaCacheIdx = selectedIdx + 1
+			return nil
+		}
+		r.fileMetaCache = r.fileMetaCache[:0]
+		r.fileMetaCacheIdx = 0
+	}
+
+	walkOpt := r.buildWalkOption(curfileName)
+	batch := make([]fileMeta, 0, walkBatchSize)
+	selectedIdx := -1
 	err := r.storage.WalkDir(ctx, walkOpt, func(name string, size int64) error {
 		if size <= 0 && strings.HasSuffix(name, "/") {
 			return nil
 		}
-		if isS3 {
-			itemsProcessed++
-			if startAppendingFileToCache {
-				r.fileMetaCache = append(r.fileMetaCache, fileMeta{
-					fileName: name,
-					fileSize: size,
-				})
-				if itemsProcessed >= 1000 {
-					return errS3PageEnd
-				}
-				return nil
-			}
-		}
-
+		idx := len(batch)
+		batch = append(batch, fileMeta{
+			fileName: name,
+			fileSize: size,
+		})
 		valid, err := fn(name, size)
 		if err != nil {
 			return err
 		}
-		if valid && isS3 {
-			startAppendingFileToCache = true
-			if r.fileMetaCache == nil {
-				r.fileMetaCache = make([]fileMeta, 0, 1000)
-			} else {
-				r.fileMetaCache = r.fileMetaCache[:0]
-			}
-			r.fileMetaCacheIdx = 0
+		if valid {
+			selectedIdx = idx
 		}
-		if isS3 && itemsProcessed >= 1000 && !valid {
-			return errS3PageEnd
+		if len(batch) >= walkBatchSize {
+			return errWalkBatchEnd
 		}
 		return nil
 	})
-	if err != nil && !errors.Is(err, errS3PageEnd) {
+	if err != nil && !errors.Is(err, errWalkBatchEnd) {
 		return err
+	}
+
+	if selectedIdx+1 < len(batch) {
+		if r.fileMetaCache == nil {
+			r.fileMetaCache = make([]fileMeta, 0, len(batch)-selectedIdx-1)
+		} else {
+			r.fileMetaCache = r.fileMetaCache[:0]
+		}
+		r.fileMetaCache = append(r.fileMetaCache, batch[selectedIdx+1:]...)
+		r.fileMetaCacheIdx = 0
+	} else {
+		r.fileMetaCache = r.fileMetaCache[:0]
+		r.fileMetaCacheIdx = 0
 	}
 	return nil
 }

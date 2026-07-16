@@ -568,6 +568,7 @@ func TestWalkS3(t *testing.T) {
 		}
 		selectedFileCount++
 	}
-	// Iterate through the whole 2000 files
-	require.Equal(t, 2000, selectedFileCount)
+	// Batch caching should list S3 in pages instead of once per file.
+	require.LessOrEqual(t, selectedFileCount, 5)
+	require.Equal(t, "tidb-audit-2025-09-19T16-54-45.999.log", curFilename)
 }
