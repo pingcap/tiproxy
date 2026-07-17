@@ -636,50 +636,39 @@ func TestReadPacketEmptyPayload(t *testing.T) {
 }
 
 func TestForwardUntilError(t *testing.T) {
-	srvCh := make(chan *packetIO)
-	exitCh := make(chan struct{})
-	var wg waitgroup.WaitGroup
+	// upCli -> src -> dest -> peerCli; close peerCli, then forward one packet.
+	// dest write/flush must return peerErr, not selfErr (#1051).
+	// needData toggles WritePacket vs ReadFrom paths.
+	lg, _ := logger.CreateLoggerForTest(t)
 	selfErr, peerErr := errors.New("self"), errors.New("peer")
-	// client1 writes to server1
-	// server1 forwards to server2
-	// server2 writes to client2 while client2 closes
-	wg.Run(func() {
-		testTCPConn(t,
-			func(t *testing.T, cli *packetIO) {
-				data := make([]byte, DefaultConnBufferSize*2)
-				data[0] = byte(0)
-				require.NoError(t, cli.WritePacket(data, true))
-			},
-			func(t *testing.T, srv1 *packetIO) {
-				srv1.ApplyOpts(WithWrapError(selfErr))
-				srv2 := <-srvCh
-				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
-					return true, true
-				}, func(response []byte) error {
-					return srv2.Flush()
-				})
-				require.ErrorIs(t, err, peerErr)
-				exitCh <- struct{}{}
-			},
-			1,
-		)
-	})
-	wg.Run(func() {
-		testTCPConn(t,
-			func(t *testing.T, cli *packetIO) {
-				tcpConn, ok := cli.rawConn.(*net.TCPConn)
-				require.True(t, ok)
-				require.NoError(t, tcpConn.SetLinger(0))
-			},
-			func(t *testing.T, srv2 *packetIO) {
-				srv2.ApplyOpts(WithWrapError(peerErr))
-				srvCh <- srv2
-				<-exitCh
-			},
-			1,
-		)
-	})
-	wg.Wait()
+
+	for _, needData := range []bool{true, false} {
+		upCli, upSrv := net.Pipe()
+		peerCli, peerSrv := net.Pipe()
+
+		src := NewPacketIO(upSrv, lg, DefaultConnBufferSize)
+		src.ApplyOpts(WithWrapError(selfErr))
+		dest := NewPacketIO(peerSrv, lg, DefaultConnBufferSize)
+		dest.ApplyOpts(WithWrapError(peerErr))
+		require.NoError(t, peerCli.Close())
+
+		isEnd := func(byte, int) (bool, bool) { return true, needData }
+		var forwardErr error
+		var wg waitgroup.WaitGroup
+		wg.Run(func() {
+			forwardErr = src.ForwardUntil(dest, isEnd, func([]byte) error { return dest.Flush() })
+		})
+		cli := NewPacketIO(upCli, lg, DefaultConnBufferSize)
+		require.NoError(t, cli.WritePacket([]byte{0}, true))
+		require.NoError(t, cli.Close())
+		wg.Wait()
+
+		require.ErrorIs(t, forwardErr, peerErr)
+		require.NotErrorIs(t, forwardErr, selfErr)
+		require.NoError(t, upCli.Close())
+		require.NoError(t, upSrv.Close())
+		require.NoError(t, peerSrv.Close())
+	}
 }
 
 func BenchmarkWritePacket(b *testing.B) {
