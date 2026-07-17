@@ -111,16 +111,16 @@ type conn struct {
 	// Only stores binary encoded prepared statements. The id is the replayed ps id.
 	preparedStmts map[uint32]preparedStmt
 	// map capture prepared stmt ID to replay prepared stmt ID
-	psIDMapping     map[uint32]uint32
-	exceptionCh     chan<- Exception
-	closeCh         chan<- uint64
-	execInfoCh      chan<- ExecInfo
-	lg              *zap.Logger
-	backendConn     BackendConn
-	connID          uint64 // logical connection ID, not replay ID and also not capture ID. It's the same with the `ConnID` of the first command.
-	upstreamConnID  uint64 // the original upstream connection ID in capture
-	replayStats     *ReplayStats
-	lastPendingCmds int // last pending cmds reported to the stats
+	psIDMapping        map[uint32]uint32
+	exceptionCh        chan<- Exception
+	closeCh            chan<- uint64
+	execInfoCh         chan<- ExecInfo
+	lg                 *zap.Logger
+	backendConn        BackendConn
+	connID             uint64 // logical connection ID, not replay ID and also not capture ID. It's the same with the `ConnID` of the first command.
+	upstreamConnID     uint64 // the original upstream connection ID in capture
+	replayStats        *ReplayStats
+	lastPendingCmds    int // last pending cmds reported to the stats
 	lastQueueWarnLevel int
 	readonly           bool
 	onCmdDone          func(fileName string)
@@ -138,9 +138,9 @@ type ConnOpts struct {
 	ExceptionCh      chan<- Exception
 	CloseCh          chan<- uint64
 	ExecInfoCh       chan<- ExecInfo
-	ReplayStats *ReplayStats
-	Readonly    bool
-	OnCmdDone   func(fileName string)
+	ReplayStats      *ReplayStats
+	Readonly         bool
+	OnCmdDone        func(fileName string)
 }
 
 func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
@@ -158,9 +158,9 @@ func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
 		exceptionCh:    opts.ExceptionCh,
 		closeCh:        opts.CloseCh,
 		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, opts.HsHandler, opts.BcConfig, opts.BackendTLSConfig, opts.Username, opts.Password),
-		replayStats: opts.ReplayStats,
-		readonly:    opts.Readonly,
-		onCmdDone:   opts.OnCmdDone,
+		replayStats:    opts.ReplayStats,
+		readonly:       opts.Readonly,
+		onCmdDone:      opts.OnCmdDone,
 	}
 	return c
 }
@@ -239,7 +239,7 @@ func (c *conn) processCommand(ctx context.Context, command *glist.Element[*cmd.C
 		}
 		*curDB = command.Value.CurDB
 	}
-	sqlrewrite.DefaultRewriter().RewriteCommand(command.Value)
+	sqlrewrite.DefaultRewriter(c.lg).RewriteCommand(command.Value)
 	// update psID, SQL, and params for the command.
 	if err := c.updateExecuteStmt(ctx, command.Value); err != nil {
 		c.onExecuteFailed(command.Value, err)

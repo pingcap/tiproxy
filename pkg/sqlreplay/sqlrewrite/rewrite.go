@@ -11,15 +11,16 @@ import (
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/siddontang/go/hack"
+	"go.uber.org/zap"
 )
 
 var (
-	tiflashReadHintRE        = regexp.MustCompile(`(?is)/\*\s*\+\s*(read_from_storage\s*\(\s*tiflash\s*\[\s*b\s*\]\s*\))\s*\*/`)
-	ignorePlanCacheRE        = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
-	shardTableRE             = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
-	gameSummaryTableRE       = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
-	gameSummaryForceIndexRE  = regexp.MustCompile(`(?i)(\bbc_order_account_game_summary_\d+)\s+(\w+)`)
-	sql1 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+	tiflashReadHintRE       = regexp.MustCompile(`(?is)/\*\s*\+\s*(read_from_storage\s*\(\s*tiflash\s*\[\s*b\s*\]\s*\))\s*\*/`)
+	ignorePlanCacheRE       = regexp.MustCompile(`(?is)ignore_plan_cache\s*\(\s*\)`)
+	shardTableRE            = regexp.MustCompile(`(?i)\bbc_bet_records_\d+\b`)
+	gameSummaryTableRE      = regexp.MustCompile(`(?i)\bbc_order_account_game_summary_\d+\b`)
+	gameSummaryForceIndexRE = regexp.MustCompile(`(?i)(\bbc_order_account_game_summary_\d+)\s+(\w+)`)
+	sql1                    = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
 SELECT
   /*+ read_from_storage(tiflash[b]) */
   b.record_id,
@@ -740,9 +741,56 @@ ORDER BY
 LIMIT
   ?, ?`
 
+	sql19 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND platform_id = ?
+  AND bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?
+  AND currency = ?
+  AND all_bet >= ?
+  AND all_bet <= ?
+ORDER BY
+  bet_time DESC
+LIMIT
+  ?, ?`
+
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
-			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8, sql13, sql14, sql15, sql16, sql17,
+			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8, sql13, sql14, sql15, sql16, sql17, sql19,
 		),
 		forceIndexDigestAllowlist:              newDigestAllowlist(sql9),
 		betRecordSumForceIndexDigestAllowlist:  newDigestAllowlist(sql10, sql12),
@@ -760,6 +808,7 @@ func newDigestAllowlist(sqls ...string) map[string]struct{} {
 
 // Rewriter rewrites SQL statements before replay execution.
 type Rewriter struct {
+	lg                                     *zap.Logger
 	digestAllowlist                        map[string]struct{}
 	forceIndexDigestAllowlist              map[string]struct{}
 	betRecordSumForceIndexDigestAllowlist  map[string]struct{}
@@ -767,7 +816,8 @@ type Rewriter struct {
 }
 
 // DefaultRewriter returns the built-in rewriter for known SQL patterns.
-func DefaultRewriter() *Rewriter {
+func DefaultRewriter(lg *zap.Logger) *Rewriter {
+	defaultRewriter.lg = lg
 	return defaultRewriter
 }
 
@@ -851,7 +901,15 @@ func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
 	}
 	if len(r.betRecordSumForceIndexDigestAllowlist) > 0 {
 		if _, ok := r.betRecordSumForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
-			return ReplaceBetRecordSumForceIndex(sql)
+			replacedSql, replaced := ReplaceBetRecordSumForceIndex(sql)
+			if ReplayDigest(sql) == ReplayDigest(sql12) && r.lg != nil {
+				if !replaced {
+					r.lg.Info("match sql12", zap.Bool("replaced", replaced), zap.String("sql", sql))
+				} else {
+					r.lg.Info("match sql12", zap.Bool("replaced", replaced))
+				}
+			}
+			return replacedSql, replaced
 		}
 	}
 	if len(r.betRecordListForceIndexDigestAllowlist) > 0 {

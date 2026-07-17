@@ -154,7 +154,7 @@ GROUP BY
   game_platform_id,
   currency`
 
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	newSQL, ok := rewriter.MaybeRewrite(sql)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "bc_order_account_game_summary_1161 t FORCE INDEX (idx_gameid_settleday)")
@@ -183,7 +183,7 @@ GROUP BY
   game_platform_id,
   currency`
 
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	command := &cmd.Command{
 		Type:    pnet.ComQuery,
 		Payload: append([]byte{pnet.ComQuery.Byte()}, []byte(sql)...),
@@ -282,7 +282,7 @@ WHERE
 }
 
 func TestMaybeRewriteStripsCombinedTiflashHintForSumBetRecordAmount(t *testing.T) {
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	rewritten, ok := rewriter.MaybeRewrite(sql13)
 	require.True(t, ok)
 	require.NotContains(t, rewritten, "read_from_storage")
@@ -310,7 +310,7 @@ WHERE
   AND site_code = ?
   AND currency = ?`
 
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	newSQL, ok := rewriter.MaybeRewrite(sql)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "FORCE INDEX(idx_account_sum_bet_amount)")
@@ -320,7 +320,7 @@ WHERE
 func TestMaybeRewriteReplacesBetRecordSumForceIndexCountOnlyUserSQL(t *testing.T) {
 	sql := `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmount) */ select       count(1) as total       from bc_bet_records_2762 b             force index(idx_account_bettime)                WHERE  account = ?                                     and bet_time >= ? and bet_time <= ?                         and site_code = ?`
 
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	newSQL, ok := rewriter.MaybeRewrite(sql)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "bc_bet_records_2762")
@@ -348,7 +348,7 @@ WHERE
   AND site_code = ?
   AND currency = ?`
 
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	command := &cmd.Command{
 		Type:    pnet.ComQuery,
 		Payload: append([]byte{pnet.ComQuery.Byte()}, []byte(sql)...),
@@ -453,7 +453,7 @@ ORDER BY
 LIMIT
   ?, ?`
 
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	newSQL, ok := rewriter.MaybeRewrite(sql)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "bc_bet_records_3050")
@@ -462,7 +462,7 @@ LIMIT
 }
 
 func TestMaybeRewriteReplacesBetRecordListForceIndexAscOrder(t *testing.T) {
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	newSQL, ok := rewriter.MaybeRewrite(sql18)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "bc_bet_records_878")
@@ -472,7 +472,7 @@ func TestMaybeRewriteReplacesBetRecordListForceIndexAscOrder(t *testing.T) {
 }
 
 func TestRewriteCommandComQuery(t *testing.T) {
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	command := &cmd.Command{
 		Type:    pnet.ComQuery,
 		Payload: append([]byte{pnet.ComQuery.Byte()}, []byte(sql1)...),
@@ -484,7 +484,7 @@ func TestRewriteCommandComQuery(t *testing.T) {
 }
 
 func TestRewriteCommandComStmtPrepare(t *testing.T) {
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	command := &cmd.Command{
 		Type:    pnet.ComStmtPrepare,
 		Payload: append([]byte{pnet.ComStmtPrepare.Byte()}, []byte(sql1)...),
@@ -495,7 +495,7 @@ func TestRewriteCommandComStmtPrepare(t *testing.T) {
 }
 
 func TestRewriteCommandComStmtExecute(t *testing.T) {
-	rewriter := DefaultRewriter()
+	rewriter := DefaultRewriter(nil)
 	command := &cmd.Command{
 		Type:         pnet.ComStmtExecute,
 		PreparedStmt: sql1,
