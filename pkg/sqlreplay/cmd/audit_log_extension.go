@@ -63,6 +63,10 @@ func (decoder *AuditLogExtensionDecoder) SetUserAllowlist(users []string) {
 
 // SetCommandEndTime implements [AuditLogDecoder].
 func (decoder *AuditLogExtensionDecoder) SetCommandEndTime(t time.Time) {
+	if t.IsZero() {
+		// The command end time may not be set.
+		return
+	}
 	decoder.commandEndTime = t
 }
 
@@ -79,7 +83,7 @@ func (decoder *AuditLogExtensionDecoder) SetPSCloseStrategy(s PSCloseStrategy) {
 // SetCommandStartTime implements [AuditLogDecoder].
 func (decoder *AuditLogExtensionDecoder) SetCommandStartTime(t time.Time) {
 	// commandStartTime is not supported for extension decoder, use commandEndTime instead.
-	decoder.commandEndTime = t
+	decoder.SetCommandEndTime(t)
 }
 
 func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Command, err error) {

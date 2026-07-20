@@ -12,6 +12,8 @@ import (
 
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type mockDecoder struct {
@@ -158,4 +160,73 @@ func TestMergeDecoderEmptyDecoders(t *testing.T) {
 	// Should return EOF immediately
 	_, err := merger.Decode()
 	require.Equal(t, io.EOF, err)
+}
+
+type mockCmdDecoder struct {
+	commands []*cmd.Command
+	index    int
+}
+
+func (d *mockCmdDecoder) Decode(_ cmd.LineReader) (*cmd.Command, error) {
+	if d.index >= len(d.commands) {
+		return nil, io.EOF
+	}
+	cmd := d.commands[d.index]
+	d.index++
+	return cmd, nil
+}
+
+func (d *mockCmdDecoder) SetCommandStartTime(time.Time) {}
+
+func TestSingleDecoderFileOverlapWarn(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	base := time.Date(2025, 9, 10, 10, 0, 0, 0, time.UTC)
+	decoder := newSingleDecoder(&mockCmdDecoder{commands: []*cmd.Command{
+		{FileName: "/data/tidb-audit-1.log", StartTs: base, EndTs: base.Add(5 * time.Minute)},
+		{FileName: "/data/tidb-audit-2.log", StartTs: base.Add(3 * time.Minute), EndTs: base.Add(8 * time.Minute)},
+	}}, nil, zap.New(core), nil, nil)
+
+	for range 2 {
+		_, err := decoder.Decode()
+		require.NoError(t, err)
+	}
+
+	entries := observed.FilterMessage("consecutive replay files have overlapping SQL timestamps").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, 2*time.Minute, entries[0].ContextMap()["overlap"].(time.Duration))
+}
+
+func TestSingleDecoderFileOverlapNoWarnWithinThreshold(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	base := time.Date(2025, 9, 10, 10, 0, 0, 0, time.UTC)
+	decoder := newSingleDecoder(&mockCmdDecoder{commands: []*cmd.Command{
+		{FileName: "/data/tidb-audit-1.log", StartTs: base, EndTs: base.Add(5 * time.Minute)},
+		{FileName: "/data/tidb-audit-2.log", StartTs: base.Add(4*time.Minute + 30*time.Second), EndTs: base.Add(8 * time.Minute)},
+	}}, nil, zap.New(core), nil, nil)
+
+	for range 2 {
+		_, err := decoder.Decode()
+		require.NoError(t, err)
+	}
+
+	require.Empty(t, observed.All())
+}
+
+func TestSingleDecoderFileOverlapUsesLastEndTs(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	base := time.Date(2025, 9, 10, 10, 0, 0, 0, time.UTC)
+	decoder := newSingleDecoder(&mockCmdDecoder{commands: []*cmd.Command{
+		{FileName: "/data/tidb-audit-1.log", StartTs: base, EndTs: base.Add(3 * time.Minute)},
+		{FileName: "/data/tidb-audit-1.log", StartTs: base.Add(2 * time.Minute), EndTs: base.Add(6 * time.Minute)},
+		{FileName: "/data/tidb-audit-2.log", StartTs: base.Add(4 * time.Minute)},
+	}}, nil, zap.New(core), nil, nil)
+
+	for range 3 {
+		_, err := decoder.Decode()
+		require.NoError(t, err)
+	}
+
+	entries := observed.FilterMessage("consecutive replay files have overlapping SQL timestamps").All()
+	require.Len(t, entries, 1)
+	require.Equal(t, 2*time.Minute, entries[0].ContextMap()["overlap"].(time.Duration))
 }

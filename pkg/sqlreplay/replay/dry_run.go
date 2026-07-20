@@ -17,12 +17,16 @@ type nopConn struct {
 	execInfoCh chan<- conn.ExecInfo
 	connID     uint64
 	stats      *conn.ReplayStats
+	onCmdDone  func(fileName string)
 }
 
 func (c *nopConn) ExecuteCmd(command *cmd.Command) {
 	c.stats.ReplayedCmds.Add(1)
 	c.execInfoCh <- conn.ExecInfo{
 		Command: command,
+	}
+	if c.onCmdDone != nil && command != nil && command.FileName != "" {
+		c.onCmdDone(command.FileName)
 	}
 }
 

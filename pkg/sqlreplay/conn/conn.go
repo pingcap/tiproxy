@@ -46,6 +46,8 @@ type ReplayStats struct {
 	CurCmdEndTs atomic.Int64
 	// The number of exception commands.
 	ExceptionCmds atomic.Uint64
+	// Disconnects is the number of backend disconnections during replay.
+	Disconnects atomic.Uint64
 }
 
 type ExecInfo struct {
@@ -82,6 +84,7 @@ type conn struct {
 	exceptionCh     chan<- Exception
 	closeCh         chan<- uint64
 	execInfoCh      chan<- ExecInfo
+	onCmdDone       func(fileName string)
 	lg              *zap.Logger
 	backendConn     BackendConn
 	connID          uint64 // logical connection ID, not replay ID and also not capture ID. It's the same with the `ConnID` of the first command.
@@ -103,6 +106,7 @@ type ConnOpts struct {
 	ExceptionCh      chan<- Exception
 	CloseCh          chan<- uint64
 	ExecInfoCh       chan<- ExecInfo
+	OnCmdDone        func(fileName string)
 	ReplayStats      *ReplayStats
 	Readonly         bool
 }
@@ -121,6 +125,7 @@ func NewConn(lg *zap.Logger, opts ConnOpts) *conn {
 		psIDMapping:    make(map[uint32]uint32),
 		exceptionCh:    opts.ExceptionCh,
 		closeCh:        opts.CloseCh,
+		onCmdDone:      opts.OnCmdDone,
 		backendConn:    NewBackendConn(lg.Named("be"), backendConnID, opts.HsHandler, opts.BcConfig, opts.BackendTLSConfig, opts.Username, opts.Password),
 		replayStats:    opts.ReplayStats,
 		readonly:       opts.Readonly,
@@ -158,6 +163,7 @@ func (c *conn) Run(ctx context.Context) {
 			if command == nil {
 				break
 			}
+			c.notifyCmdDone(command.Value)
 			if c.readonly && !c.isReadOnly(command.Value) {
 				c.replayStats.FilteredCmds.Add(1)
 				continue
@@ -336,6 +342,7 @@ func (c *conn) updateExecuteStmt(ctx context.Context, command *cmd.Command) erro
 }
 
 func (c *conn) onDisconnected(err error) {
+	c.replayStats.Disconnects.Add(1)
 	c.replayStats.ExceptionCmds.Add(1)
 	// Reporting should not block replaying.
 	select {
@@ -383,10 +390,19 @@ func (c *conn) updatePendingCmds(pendingCmds int) {
 	}
 }
 
+func (c *conn) notifyCmdDone(command *cmd.Command) {
+	if c.onCmdDone != nil && command != nil && command.FileName != "" {
+		c.onCmdDone(command.FileName)
+	}
+}
+
 func (c *conn) close() {
 	c.cmdLock.Lock()
 	if c.cmdList.Len() > 0 {
 		c.lg.Debug("backend connection closed while there are still pending commands", zap.Int("pending_cmds", c.cmdList.Len()))
+		for command := c.cmdList.Front(); command != nil; command = command.Next() {
+			c.notifyCmdDone(command.Value)
+		}
 	}
 	c.updatePendingCmds(0)
 	c.cmdLock.Unlock()
