@@ -4,10 +4,13 @@
 package replay
 
 import (
+	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"go.uber.org/zap"
 )
 
 // decoder is used to decode commands from one or multiple readers.
@@ -89,19 +92,88 @@ func (d *mergeDecoder) AddDecoder(decoder decoder) {
 	d.buf[decoder] = nil
 }
 
+type fileCallback func(fileName string)
+
 type singleDecoder struct {
-	decoder cmd.CmdDecoder
-	reader  cmd.LineReader
+	decoder       cmd.CmdDecoder
+	reader        cmd.LineReader
+	lg            *zap.Logger
+	onDecoded     fileCallback
+	markDecodeDone fileCallback
+	curFile       string
+	curEnd        time.Time
 }
 
-func newSingleDecoder(decoder cmd.CmdDecoder, reader cmd.LineReader) *singleDecoder {
+func newSingleDecoder(decoder cmd.CmdDecoder, reader cmd.LineReader, lg *zap.Logger, onDecoded, markDecodeDone fileCallback) *singleDecoder {
 	return &singleDecoder{
-		decoder: decoder,
-		reader:  reader,
+		decoder:        decoder,
+		reader:         reader,
+		lg:             lg,
+		onDecoded:      onDecoded,
+		markDecodeDone: markDecodeDone,
 	}
 }
 
-// Decode decodes a command from the single reader.
+// Decode decodes a command from the single reader. FileName switches here are per-reader,
+// so they genuinely mean the previous file of this reader is fully decoded.
 func (d *singleDecoder) Decode() (*cmd.Command, error) {
-	return d.decoder.Decode(d.reader)
+	cmd, err := d.decoder.Decode(d.reader)
+	if err != nil {
+		// EOF: the last file of this reader is done.
+		if errors.Is(err, io.EOF) && d.curFile != "" && d.markDecodeDone != nil {
+			d.markDecodeDone(d.curFile)
+			d.curFile = ""
+			d.curEnd = time.Time{}
+		}
+		return cmd, err
+	}
+	if cmd == nil || cmd.FileName == "" || cmd.StartTs.IsZero() {
+		return cmd, err
+	}
+
+	endTs := cmd.StartTs
+	if !cmd.EndTs.IsZero() {
+		endTs = cmd.EndTs
+	}
+
+	if d.curFile == "" {
+		d.curFile = cmd.FileName
+		d.curEnd = endTs
+		if d.onDecoded != nil {
+			d.onDecoded(cmd.FileName)
+		}
+		return cmd, nil
+	}
+
+	if cmd.FileName == d.curFile {
+		if endTs.After(d.curEnd) {
+			d.curEnd = endTs
+		}
+		if d.onDecoded != nil {
+			d.onDecoded(cmd.FileName)
+		}
+		return cmd, nil
+	}
+
+	if overlap := d.curEnd.Sub(cmd.StartTs); overlap > time.Minute {
+		d.lg.Warn("consecutive replay files have overlapping SQL timestamps",
+			zap.String("prev_file", d.curFile),
+			zap.String("cur_file", cmd.FileName),
+			zap.Duration("overlap", overlap),
+			zap.Time("prev_end", d.curEnd),
+			zap.Time("cur_start", cmd.StartTs),
+		)
+	}
+
+	// The previous file of this reader is fully decoded.
+	prevFile := d.curFile
+	d.curFile = cmd.FileName
+	d.curEnd = endTs
+	if d.markDecodeDone != nil {
+		d.markDecodeDone(prevFile)
+	}
+	if d.onDecoded != nil {
+		d.onDecoded(cmd.FileName)
+	}
+	return cmd, nil
 }

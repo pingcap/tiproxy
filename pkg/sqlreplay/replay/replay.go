@@ -284,6 +284,7 @@ type replay struct {
 	exceptionCh      chan conn.Exception
 	closeConnCh      chan uint64
 	execInfoCh       chan conn.ExecInfo
+	fileExecTracker  *fileExecTracker
 	decodeCtx        context.Context
 	decodeCancel     context.CancelFunc
 	wg               waitgroup.WaitGroup
@@ -335,6 +336,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.exceptionCh = make(chan conn.Exception, maxPendingExceptions)
 	r.closeConnCh = make(chan uint64, maxPendingCloseRequests)
 	r.execInfoCh = make(chan conn.ExecInfo, maxPendingExecInfo)
+	r.fileExecTracker = newFileExecTracker(r.lg)
 	key, err := store.LoadEncryptionKey(r.meta.EncryptMethod, cfg.KeyFile)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load encryption key")
@@ -350,6 +352,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 					connID:     connID,
 					closeCh:    r.closeConnCh,
 					execInfoCh: r.execInfoCh,
+					onCmdDone:  r.fileExecTracker.onExecuted,
 					stats:      &r.replayStats,
 				}
 			}
@@ -367,6 +370,7 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 					ExceptionCh:      r.exceptionCh,
 					CloseCh:          r.closeConnCh,
 					ExecInfoCh:       r.execInfoCh,
+					OnCmdDone:        r.fileExecTracker.onExecuted,
 					ReplayStats:      &r.replayStats,
 					Readonly:         cfg.ReadOnly,
 				})
@@ -639,7 +643,7 @@ func (r *replay) constructDecoderForReader(ctx context.Context, reader cmd.LineR
 	}
 
 	var decoder decoder
-	decoder = newSingleDecoder(cmdDecoder, reader)
+	decoder = newSingleDecoder(cmdDecoder, reader, r.lg, r.fileExecTracker.onDecoded, r.fileExecTracker.markDecodeDone)
 	if chanBufForEachDecoder > 0 {
 		decoder = newBufferedDecoder(ctx, decoder, chanBufForEachDecoder, r.cfg.IgnoreErrs)
 	}
@@ -1025,6 +1029,7 @@ func (r *replay) commonFields() []zap.Field {
 		zap.Uint64("filtered_cmds", r.replayStats.FilteredCmds.Load()),
 		zap.Uint64("decoded_cmds", r.decodedCmds.Load()),
 		zap.Uint64("exceptions", r.replayStats.ExceptionCmds.Load()),
+		zap.Uint64("disconnects", r.replayStats.Disconnects.Load()),
 		zap.Duration("total_wait_time", time.Duration(r.replayStats.TotalWaitTime.Load())), // if too short, decode is low
 		zap.Duration("extra_wait_time", time.Duration(r.replayStats.ExtraWaitTime.Load())), // if non-zero, replay is slow
 		zap.Duration("replay_elapsed", time.Since(r.startTime)),
