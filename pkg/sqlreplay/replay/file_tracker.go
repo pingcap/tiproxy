@@ -1,4 +1,4 @@
-// Copyright 2025 PingCAP, Inc.
+// Copyright 2026 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 package replay

@@ -95,13 +95,13 @@ func (d *mergeDecoder) AddDecoder(decoder decoder) {
 type fileCallback func(fileName string)
 
 type singleDecoder struct {
-	decoder       cmd.CmdDecoder
-	reader        cmd.LineReader
-	lg            *zap.Logger
-	onDecoded     fileCallback
+	decoder        cmd.CmdDecoder
+	reader         cmd.LineReader
+	lg             *zap.Logger
+	onDecoded      fileCallback
 	markDecodeDone fileCallback
-	curFile       string
-	curEnd        time.Time
+	curFile        string
+	curEnd         time.Time
 }
 
 func newSingleDecoder(decoder cmd.CmdDecoder, reader cmd.LineReader, lg *zap.Logger, onDecoded, markDecodeDone fileCallback) *singleDecoder {

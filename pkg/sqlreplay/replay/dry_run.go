@@ -22,11 +22,8 @@ type nopConn struct {
 
 func (c *nopConn) ExecuteCmd(command *cmd.Command) {
 	c.stats.ReplayedCmds.Add(1)
-	select {
-	case c.execInfoCh <- conn.ExecInfo{
+	c.execInfoCh <- conn.ExecInfo{
 		Command: command,
-	}:
-	default:
 	}
 	if c.onCmdDone != nil && command != nil && command.FileName != "" {
 		c.onCmdDone(command.FileName)
