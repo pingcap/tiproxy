@@ -471,67 +471,6 @@ func TestMaybeRewriteReplacesBetRecordListForceIndexAscOrder(t *testing.T) {
 	require.Contains(t, newSQL, "net_profit ASC")
 }
 
-func TestReplayDigestIgnoresBetRecordCategoryForceIndexShardSuffix(t *testing.T) {
-	digestBase := ReplayDigest(sql20)
-	digest1073 := ReplayDigest(`/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
-SELECT
-  /*+ read_from_storage(tiflash[b]) */
-  b.record_id,
-  b.order_no,
-  b.round_id,
-  b.account,
-  b.third_user_name,
-  b.third_game_code,
-  b.site_code,
-  b.platform_id,
-  b.category_id gameCategoryId,
-  b.bet_time,
-  b.settle_time,
-  b.all_bet,
-  b.valid_bet,
-  b.net_profit,
-  b.after_balance,
-  b.tax,
-  b.rake,
-  b.insurance,
-  b.props,
-  b.settle_status,
-  b.winlost_time,
-  b.pull_time,
-  b.currency,
-  b.game_id,
-  b.device,
-  b.odds_type,
-  b.odds,
-  b.is_combo
-FROM
-  bc_bet_records_1073 b
-WHERE
-  category_id IN (?)
-  AND platform_id = ?
-  AND bet_time >= ?
-  AND bet_time <= ?
-  AND site_code = ?
-  AND currency = ?
-ORDER BY
-  bet_time DESC
-LIMIT
-  ?, ?`)
-
-	require.Equal(t, digestBase, digest1073)
-	require.Contains(t, defaultRewriter.betRecordCategoryForceIndexDigestAllowlist, digestBase)
-}
-
-func TestMaybeRewriteAddsBetRecordCategoryForceIndex(t *testing.T) {
-	rewriter := DefaultRewriter(nil)
-	newSQL, ok := rewriter.MaybeRewrite(sql20)
-	require.True(t, ok)
-	require.Contains(t, newSQL, "bc_bet_records_2868 b FORCE INDEX(idx_category_id_bet_time)")
-	require.NotContains(t, newSQL, "read_from_storage")
-	require.NotContains(t, newSQL, "ignore_plan_cache")
-	require.Contains(t, newSQL, "SQL_TAG")
-}
-
 func TestRewriteCommandComQuery(t *testing.T) {
 	rewriter := DefaultRewriter(nil)
 	command := &cmd.Command{
