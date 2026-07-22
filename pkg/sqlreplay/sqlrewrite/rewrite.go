@@ -916,7 +916,20 @@ func AddBetRecordCategoryForceIndex(sql string) (string, bool) {
 	return newSQL, newSQL != sql
 }
 
-const betRecordAccountBettimeIndexName = "idx_account_bettime"
+const (
+	betRecordAccountBettimeIndexName      = "idx_account_bettime"
+	betRecordAccountSumBetAmountIndexName = "idx_account_sum_bet_amount"
+)
+
+var accountBettimeIndexRE = regexp.MustCompile(`(?i)idx_account_bettime`)
+
+// ReplaceAllAccountBettimeIndex replaces every idx_account_bettime with idx_account_sum_bet_amount.
+func ReplaceAllAccountBettimeIndex(sql string) (string, bool) {
+	if !accountBettimeIndexRE.MatchString(sql) {
+		return sql, false
+	}
+	return accountBettimeIndexRE.ReplaceAllString(sql, betRecordAccountSumBetAmountIndexName), true
+}
 
 // replaceForceIndexName replaces an index name using case-insensitive string matching.
 func replaceForceIndexName(sql, fromIndex, toIndex string) (string, bool) {
@@ -936,7 +949,7 @@ func replaceForceIndexName(sql, fromIndex, toIndex string) (string, bool) {
 
 // ReplaceBetRecordSumForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_account_sum_bet_amount).
 func ReplaceBetRecordSumForceIndex(sql string) (string, bool) {
-	return replaceForceIndexName(sql, betRecordAccountBettimeIndexName, "idx_account_sum_bet_amount")
+	return replaceForceIndexName(sql, betRecordAccountBettimeIndexName, betRecordAccountSumBetAmountIndexName)
 }
 
 // ReplaceBetRecordListForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_catagory_account_bet_time_net_profit).
@@ -945,10 +958,8 @@ func ReplaceBetRecordListForceIndex(sql string) (string, bool) {
 }
 
 // MaybeRewrite rewrites SQL before replay execution.
-// For allowlisted digests on bet record list queries, it replaces FORCE INDEX(idx_account_bettime).
-// For allowlisted digests on bet record sum queries, it replaces FORCE INDEX(idx_account_bettime).
+// It replaces every idx_account_bettime with idx_account_sum_bet_amount.
 // For allowlisted digests on game summary queries, it adds FORCE INDEX (idx_gameid_settleday).
-// For allowlisted digests on category+platform+bet_time list queries, it strips tiflash hints and adds FORCE INDEX(idx_category_id_bet_time).
 // For allowlisted digests with a tiflash read hint, it strips the tiflash read hint.
 // For other SQL with a tiflash read hint, it merges /*+ ignore_plan_cache() */ into the same hint comment.
 func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
@@ -960,23 +971,28 @@ func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
 			return AddGameSummaryForceIndex(sql)
 		}
 	}
-	if len(r.betRecordSumForceIndexDigestAllowlist) > 0 {
-		if _, ok := r.betRecordSumForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
-			replacedSql, replaced := ReplaceBetRecordSumForceIndex(sql)
-			if ReplayDigest(sql) == ReplayDigest(sql12) && r.lg != nil {
-				if !replaced {
-					r.lg.Info("match sql12", zap.Bool("replaced", replaced), zap.String("sql", sql))
-				} else {
-					r.lg.Info("match sql12", zap.Bool("replaced", replaced))
-				}
-			}
-			return replacedSql, replaced
-		}
-	}
+	// Previously only allowlisted sum queries replaced idx_account_bettime with idx_account_sum_bet_amount.
+	// Now all SQL does that replacement above; keep the allowlisted SQL samples but disable this path.
+	// if len(r.betRecordSumForceIndexDigestAllowlist) > 0 {
+	// 	if _, ok := r.betRecordSumForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
+	// 		replacedSql, replaced := ReplaceBetRecordSumForceIndex(sql)
+	// 		if ReplayDigest(sql) == ReplayDigest(sql12) && r.lg != nil {
+	// 			if !replaced {
+	// 				r.lg.Info("match sql12", zap.Bool("replaced", replaced), zap.String("sql", sql))
+	// 			} else {
+	// 				r.lg.Info("match sql12", zap.Bool("replaced", replaced))
+	// 			}
+	// 		}
+	// 		return replacedSql, replaced
+	// 	}
+	// }
 	if len(r.betRecordListForceIndexDigestAllowlist) > 0 {
 		if _, ok := r.betRecordListForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
 			return ReplaceBetRecordListForceIndex(sql)
 		}
+	}
+	if newSQL, ok := ReplaceAllAccountBettimeIndex(sql); ok {
+		return newSQL, true
 	}
 	if !tiflashReadHintRE.MatchString(sql) {
 		return sql, false
