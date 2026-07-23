@@ -834,13 +834,57 @@ ORDER BY
 LIMIT
   ?, ?`
 
+	sql21 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  /*+ read_from_storage(tiflash[b]) */
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_280 b
+WHERE
+  category_id IN (?)
+  AND bet_time >= ?
+  AND bet_time <= ?
+  AND site_code = ?
+ORDER BY
+  bet_time DESC
+LIMIT
+  ?, ?`
+
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
 			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8, sql13, sql14, sql15, sql16, sql17, sql19,
 		),
-		forceIndexDigestAllowlist:              newDigestAllowlist(sql9),
-		betRecordSumForceIndexDigestAllowlist:  newDigestAllowlist(sql10, sql12),
-		betRecordListForceIndexDigestAllowlist: newDigestAllowlist(sql11, sql18, sql20),
+		forceIndexDigestAllowlist:                  newDigestAllowlist(sql9),
+		betRecordSumForceIndexDigestAllowlist:      newDigestAllowlist(sql10, sql12),
+		betRecordListForceIndexDigestAllowlist:     newDigestAllowlist(sql11, sql18, sql20),
+		betRecordCategoryForceIndexDigestAllowlist: newDigestAllowlist(sql21),
 	}
 )
 
@@ -854,11 +898,12 @@ func newDigestAllowlist(sqls ...string) map[string]struct{} {
 
 // Rewriter rewrites SQL statements before replay execution.
 type Rewriter struct {
-	lg                                     *zap.Logger
-	digestAllowlist                        map[string]struct{}
-	forceIndexDigestAllowlist              map[string]struct{}
-	betRecordSumForceIndexDigestAllowlist  map[string]struct{}
-	betRecordListForceIndexDigestAllowlist map[string]struct{}
+	lg                                         *zap.Logger
+	digestAllowlist                            map[string]struct{}
+	forceIndexDigestAllowlist                  map[string]struct{}
+	betRecordSumForceIndexDigestAllowlist      map[string]struct{}
+	betRecordListForceIndexDigestAllowlist     map[string]struct{}
+	betRecordCategoryForceIndexDigestAllowlist map[string]struct{}
 }
 
 // DefaultRewriter returns the built-in rewriter for known SQL patterns.
@@ -916,6 +961,16 @@ func AddBetRecordCategoryForceIndex(sql string) (string, bool) {
 	return newSQL, newSQL != sql
 }
 
+// StripTiflashAndAddCategoryForceIndex strips the tiflash read hint and adds FORCE INDEX(idx_category_id_bet_time).
+func StripTiflashAndAddCategoryForceIndex(sql string) (string, bool) {
+	newSQL := StripTiflashReadHint(sql)
+	forced, added := AddBetRecordCategoryForceIndex(newSQL)
+	if added {
+		return forced, true
+	}
+	return newSQL, newSQL != sql
+}
+
 const (
 	betRecordAccountBettimeIndexName      = "idx_account_bettime"
 	betRecordAccountSumBetAmountIndexName = "idx_account_sum_bet_amount"
@@ -960,6 +1015,7 @@ func ReplaceBetRecordListForceIndex(sql string) (string, bool) {
 // MaybeRewrite rewrites SQL before replay execution.
 // It replaces every idx_account_bettime with idx_account_sum_bet_amount.
 // For allowlisted digests on game summary queries, it adds FORCE INDEX (idx_gameid_settleday).
+// For allowlisted digests on category+bet_time list queries, it strips tiflash hints and adds FORCE INDEX(idx_category_id_bet_time).
 // For allowlisted digests with a tiflash read hint, it strips the tiflash read hint.
 // For other SQL with a tiflash read hint, it merges /*+ ignore_plan_cache() */ into the same hint comment.
 func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
@@ -993,6 +1049,11 @@ func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
 	}
 	if newSQL, ok := ReplaceAllAccountBettimeIndex(sql); ok {
 		return newSQL, true
+	}
+	if len(r.betRecordCategoryForceIndexDigestAllowlist) > 0 {
+		if _, ok := r.betRecordCategoryForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
+			return StripTiflashAndAddCategoryForceIndex(sql)
+		}
 	}
 	if !tiflashReadHintRE.MatchString(sql) {
 		return sql, false
