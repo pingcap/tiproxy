@@ -349,6 +349,58 @@ WHERE
 	require.NotContains(t, newSQL, "idx_account_settletime")
 }
 
+func TestMaybeRewriteReplacesSumTotalBetByDateTimePlatformSettimeForceIndex(t *testing.T) {
+	sql := `/* SQL_TAG(BcBetPromotionMapper.sumTotalBetByDateTime) */
+SELECT
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit
+FROM
+  bc_bet_records_280 bru FORCE INDEX(idx_account_settletime)
+WHERE
+  (
+    (
+      platform_id = ?
+    )
+  )
+  AND account IN (?)
+  AND settle_status = ?
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?`
+
+	rewriter := DefaultRewriter(nil)
+	newSQL, ok := rewriter.MaybeRewrite(sql)
+	require.True(t, ok)
+	require.Contains(t, newSQL, "FORCE INDEX(idx_account_platform_settime)")
+	require.NotContains(t, newSQL, "idx_account_settletime")
+	require.NotContains(t, newSQL, "idx_account_settle_time_status_category_cover")
+}
+
+func TestReplayDigestIgnoresPlatformSettimeForceIndexShardSuffix(t *testing.T) {
+	digestBase := ReplayDigest(sql23)
+	digestOtherShard := ReplayDigest(`/* SQL_TAG(BcBetPromotionMapper.sumTotalBetByDateTime) */
+SELECT
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit
+FROM
+  bc_bet_records_9999 bru FORCE INDEX(idx_account_settletime)
+WHERE
+  (
+    (
+      platform_id = ?
+    )
+  )
+  AND account IN (?)
+  AND settle_status = ?
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?`)
+	require.Equal(t, digestBase, digestOtherShard)
+	require.Contains(t, defaultRewriter.betRecordPlatformSettimeForceIndexDigestAllowlist, digestBase)
+}
+
 func TestMaybeRewriteReplacesAccountSettletimeForceIndexCaseInsensitive(t *testing.T) {
 	sql := `select b.record_id from bc_bet_records_100 b force index(idx_account_settletime) where account = ? and settle_time >= ? and settle_time <= ?`
 
