@@ -918,6 +918,28 @@ WHERE
   AND settle_time <= ?
   AND site_code = ?`
 
+	sql24 = `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmountForGo) */
+SELECT
+  count(1) AS total,
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit,
+  SUM(tax) AS total_tax
+FROM
+  bc_bet_records_3209 b FORCE INDEX(idx_account_category_settime)
+WHERE
+  account = ?
+  AND category_id = ?
+  AND settle_status IN (1, 2, 3)
+  AND (
+    (
+      settle_time >= ?
+      AND settle_time <= ?
+    )
+    OR settle_time = '2100-01-01 00:00:00'
+  )
+  AND site_code = ?`
+
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
 			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8, sql13, sql14, sql15, sql16, sql17, sql19,
@@ -926,7 +948,7 @@ WHERE
 		betRecordSumForceIndexDigestAllowlist:             newDigestAllowlist(sql10, sql12),
 		betRecordListForceIndexDigestAllowlist:            newDigestAllowlist(sql11, sql18, sql20),
 		betRecordCategoryForceIndexDigestAllowlist:        newDigestAllowlist(sql21),
-		betRecordCategorySettimeForceIndexDigestAllowlist: newDigestAllowlist(sql22),
+		betRecordCategorySettimeForceIndexDigestAllowlist: newDigestAllowlist(sql22, sql24),
 		betRecordPlatformSettimeForceIndexDigestAllowlist: newDigestAllowlist(sql23),
 	}
 )
