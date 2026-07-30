@@ -313,7 +313,7 @@ WHERE
 	rewriter := DefaultRewriter(nil)
 	newSQL, ok := rewriter.MaybeRewrite(sql)
 	require.True(t, ok)
-	require.Contains(t, newSQL, "FORCE INDEX(idx_account_sum_bet_amount)")
+	require.Contains(t, newSQL, "FORCE INDEX(idx_account_bet_time_cover)")
 	require.NotContains(t, newSQL, "idx_account_bettime")
 }
 
@@ -324,8 +324,105 @@ func TestMaybeRewriteReplacesBetRecordSumForceIndexCountOnlyUserSQL(t *testing.T
 	newSQL, ok := rewriter.MaybeRewrite(sql)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "bc_bet_records_2762")
-	require.Contains(t, strings.ToLower(newSQL), "force index(idx_account_sum_bet_amount)")
+	require.Contains(t, strings.ToLower(newSQL), "force index(idx_account_bet_time_cover)")
 	require.NotContains(t, newSQL, "idx_account_bettime")
+}
+
+func TestMaybeRewriteReplacesAccountSettletimeForceIndex(t *testing.T) {
+	sql := `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsList) */
+SELECT
+  b.record_id,
+  b.account,
+  b.settle_time
+FROM
+  bc_bet_records_280 b FORCE INDEX(idx_account_settletime)
+WHERE
+  account = ?
+  AND settle_time >= ?
+  AND settle_time <= ?
+  AND site_code = ?`
+
+	rewriter := DefaultRewriter(nil)
+	newSQL, ok := rewriter.MaybeRewrite(sql)
+	require.True(t, ok)
+	require.Contains(t, newSQL, "FORCE INDEX(idx_account_settle_time_status_category_cover)")
+	require.NotContains(t, newSQL, "idx_account_settletime")
+}
+
+func TestMaybeRewriteReplacesAccountSettletimeForceIndexCaseInsensitive(t *testing.T) {
+	sql := `select b.record_id from bc_bet_records_100 b force index(idx_account_settletime) where account = ? and settle_time >= ? and settle_time <= ?`
+
+	rewriter := DefaultRewriter(nil)
+	newSQL, ok := rewriter.MaybeRewrite(sql)
+	require.True(t, ok)
+	require.Contains(t, strings.ToLower(newSQL), "force index(idx_account_settle_time_status_category_cover)")
+	require.NotContains(t, strings.ToLower(newSQL), "idx_account_settletime")
+}
+
+func TestMaybeRewriteReplacesAccountCategorySettimeForceIndex(t *testing.T) {
+	sql := `/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmountForGo) */
+SELECT
+  count(1) AS total,
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit,
+  SUM(tax) AS total_tax
+FROM
+  bc_bet_records_1150 b FORCE INDEX(idx_account_category_settime)
+WHERE
+  account = ?
+  AND category_id = ?
+  AND settle_status = ?
+  AND (
+    (
+      settle_time >= ?
+      AND settle_time <= ?
+    )
+    OR settle_time = '2100-01-01 00:00:00'
+  )
+  AND site_code = ?`
+
+	rewriter := DefaultRewriter(nil)
+	newSQL, ok := rewriter.MaybeRewrite(sql)
+	require.True(t, ok)
+	require.Contains(t, newSQL, "FORCE INDEX(idx_account_settle_time_status_category_cover)")
+	require.NotContains(t, newSQL, "idx_account_category_settime")
+}
+
+func TestMaybeRewriteSkipsUnmatchedAccountCategorySettimeForceIndex(t *testing.T) {
+	sql := `SELECT count(1) AS total FROM bc_bet_records_1150 b FORCE INDEX(idx_account_category_settime) WHERE account = ?`
+
+	rewriter := DefaultRewriter(nil)
+	newSQL, ok := rewriter.MaybeRewrite(sql)
+	require.False(t, ok)
+	require.Contains(t, newSQL, "FORCE INDEX(idx_account_category_settime)")
+}
+
+func TestReplayDigestIgnoresCategorySettimeForceIndexShardSuffix(t *testing.T) {
+	digestBase := ReplayDigest(sql22)
+	digestOtherShard := ReplayDigest(`/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmountForGo) */
+SELECT
+  count(1) AS total,
+  SUM(all_bet) AS total_all_bet,
+  SUM(valid_bet) AS total_valid_bet,
+  SUM(net_profit) AS total_net_profit,
+  SUM(tax) AS total_tax
+FROM
+  bc_bet_records_9999 b FORCE INDEX(idx_account_category_settime)
+WHERE
+  account = ?
+  AND category_id = ?
+  AND settle_status = ?
+  AND (
+    (
+      settle_time >= ?
+      AND settle_time <= ?
+    )
+    OR settle_time = '2100-01-01 00:00:00'
+  )
+  AND site_code = ?`)
+	require.Equal(t, digestBase, digestOtherShard)
+	require.Contains(t, defaultRewriter.betRecordCategorySettimeForceIndexDigestAllowlist, digestBase)
 }
 
 func TestRewriteCommandBetRecordSumComQuery(t *testing.T) {
@@ -354,7 +451,7 @@ WHERE
 		Payload: append([]byte{pnet.ComQuery.Byte()}, []byte(sql)...),
 	}
 	require.True(t, rewriter.RewriteCommand(command))
-	require.Contains(t, string(command.Payload[1:]), "FORCE INDEX(idx_account_sum_bet_amount)")
+	require.Contains(t, string(command.Payload[1:]), "FORCE INDEX(idx_account_bet_time_cover)")
 	require.NotContains(t, string(command.Payload[1:]), "idx_account_bettime")
 }
 
@@ -457,7 +554,7 @@ LIMIT
 	newSQL, ok := rewriter.MaybeRewrite(sql)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "bc_bet_records_3050")
-	require.Contains(t, newSQL, "FORCE INDEX(idx_catagory_account_bet_time_net_profit)")
+	require.Contains(t, newSQL, "FORCE INDEX(idx_account_bet_time_cover)")
 	require.NotContains(t, newSQL, "idx_account_bettime")
 }
 
@@ -466,7 +563,7 @@ func TestMaybeRewriteReplacesBetRecordListForceIndexAscOrder(t *testing.T) {
 	newSQL, ok := rewriter.MaybeRewrite(sql18)
 	require.True(t, ok)
 	require.Contains(t, newSQL, "bc_bet_records_878")
-	require.Contains(t, newSQL, "FORCE INDEX(idx_catagory_account_bet_time_net_profit)")
+	require.Contains(t, newSQL, "FORCE INDEX(idx_account_bet_time_cover)")
 	require.NotContains(t, newSQL, "idx_account_bettime")
 	require.Contains(t, newSQL, "net_profit ASC")
 }
