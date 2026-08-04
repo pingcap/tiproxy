@@ -450,47 +450,6 @@ func TestMaybeRewriteSkipsUnmatchedAccountCategorySettimeForceIndex(t *testing.T
 	require.Contains(t, newSQL, "FORCE INDEX(idx_account_category_settime)")
 }
 
-func TestMaybeRewriteReplacesAccountGidSettletimeForceIndex(t *testing.T) {
-	rewriter := DefaultRewriter(nil)
-	newSQL, ok := rewriter.MaybeRewrite(sql25)
-	require.True(t, ok)
-	require.Contains(t, newSQL, "FORCE INDEX(idx_account_settle_time_status_category_cover)")
-	require.NotContains(t, newSQL, "idx_account_gid_settletime")
-}
-
-func TestMaybeRewriteReplacesAccountGidSettletimeForceIndexWithDifferentGameIDINCounts(t *testing.T) {
-	rewriter := DefaultRewriter(nil)
-
-	// Multi-element IN: 2 and 3+ placeholders share a digest and both rewrite.
-	sqlTwo := sql25
-	sqlThree := strings.Replace(sql25, "game_id IN (?, ?)", "game_id IN (?, ?, ?)", 1)
-	sqlFive := strings.Replace(sql25, "game_id IN (?, ?)", "game_id IN (?, ?, ?, ?, ?)", 1)
-
-	require.Equal(t, ReplayDigest(sqlTwo), ReplayDigest(sqlThree))
-	require.Equal(t, ReplayDigest(sqlTwo), ReplayDigest(sqlFive))
-
-	for _, sql := range []string{sqlTwo, sqlThree, sqlFive} {
-		newSQL, ok := rewriter.MaybeRewrite(sql)
-		require.True(t, ok, "sql=%s", sql)
-		require.Contains(t, newSQL, "FORCE INDEX(idx_account_settle_time_status_category_cover)")
-		require.NotContains(t, newSQL, "idx_account_gid_settletime")
-	}
-
-	// Single-element IN has a different digest and should not be rewritten.
-	sqlSingle := strings.Replace(sql25, "game_id IN (?, ?)", "game_id IN (?)", 1)
-	require.NotEqual(t, ReplayDigest(sql25), ReplayDigest(sqlSingle))
-	newSQL, ok := rewriter.MaybeRewrite(sqlSingle)
-	require.False(t, ok)
-	require.Contains(t, newSQL, "FORCE INDEX(idx_account_gid_settletime)")
-}
-
-func TestReplayDigestIgnoresGidSettletimeForceIndexShardSuffix(t *testing.T) {
-	digestBase := ReplayDigest(sql25)
-	digestOtherShard := strings.Replace(sql25, "bc_bet_records_2865", "bc_bet_records_9999", 1)
-	require.Equal(t, digestBase, ReplayDigest(digestOtherShard))
-	require.Contains(t, defaultRewriter.betRecordGidSettletimeForceIndexDigestAllowlist, digestBase)
-}
-
 func TestReplayDigestIgnoresCategorySettimeForceIndexShardSuffix(t *testing.T) {
 	digestBase := ReplayDigest(sql22)
 	digestOtherShard := ReplayDigest(`/* SQL_TAG(BcBetRecordsMapper.sumBetRecordAmountForGo) */
