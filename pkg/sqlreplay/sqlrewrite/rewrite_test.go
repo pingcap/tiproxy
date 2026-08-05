@@ -441,6 +441,21 @@ WHERE
 	require.NotContains(t, newSQL, "idx_account_category_settime")
 }
 
+func TestMaybeRewriteReplacesFindBetRecordsForGoCustomPageCategorySettimeForceIndex(t *testing.T) {
+	rewriter := DefaultRewriter(nil)
+	newSQL, ok := rewriter.MaybeRewrite(sql25)
+	require.True(t, ok)
+	require.Contains(t, newSQL, "FORCE INDEX(idx_account_settle_time_status_category_cover)")
+	require.NotContains(t, newSQL, "idx_account_category_settime")
+}
+
+func TestReplayDigestIgnoresFindBetRecordsForGoCustomPageShardSuffix(t *testing.T) {
+	digestBase := ReplayDigest(sql25)
+	digestOtherShard := strings.Replace(sql25, "bc_bet_records_1316", "bc_bet_records_9999", 1)
+	require.Equal(t, digestBase, ReplayDigest(digestOtherShard))
+	require.Contains(t, defaultRewriter.betRecordCategorySettimeForceIndexDigestAllowlist, digestBase)
+}
+
 func TestMaybeRewriteSkipsUnmatchedAccountCategorySettimeForceIndex(t *testing.T) {
 	sql := `SELECT count(1) AS total FROM bc_bet_records_1150 b FORCE INDEX(idx_account_category_settime) WHERE account = ?`
 

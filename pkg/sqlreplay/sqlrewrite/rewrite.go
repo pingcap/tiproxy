@@ -940,6 +940,55 @@ WHERE
   )
 	AND site_code = ?`
 
+	sql25 = `/* SQL_TAG(BcBetRecordsMapper.findBetRecordsForGoCustomPage) */
+SELECT
+  b.record_id,
+  b.order_no,
+  b.round_id,
+  b.account,
+  b.third_user_name,
+  b.third_game_code,
+  b.site_code,
+  b.platform_id,
+  b.category_id gameCategoryId,
+  b.bet_time,
+  b.settle_time,
+  b.all_bet,
+  b.valid_bet,
+  b.net_profit,
+  b.after_balance,
+  b.tax,
+  b.rake,
+  b.insurance,
+  b.props,
+  b.settle_status,
+  b.winlost_time,
+  b.pull_time,
+  b.currency,
+  b.game_id,
+  b.device,
+  b.odds_type,
+  b.odds,
+  b.is_combo
+FROM
+  bc_bet_records_1316 b FORCE INDEX(idx_account_category_settime)
+WHERE
+  account = ?
+  AND category_id = ?
+  AND settle_status = ?
+  AND (
+    (
+      settle_time >= ?
+      AND settle_time <= ?
+    )
+    OR settle_time = '2100-01-01 00:00:00'
+  )
+  AND site_code = ?
+ORDER BY
+  settle_time DESC
+LIMIT
+  ?, ?`
+
 	defaultRewriter = &Rewriter{
 		digestAllowlist: newDigestAllowlist(
 			sql1, sql2, sql3, sql4, sql5, sql6, sql7, sql8, sql13, sql14, sql15, sql16, sql17, sql19,
@@ -948,7 +997,7 @@ WHERE
 		betRecordSumForceIndexDigestAllowlist:             newDigestAllowlist(sql10, sql12),
 		betRecordListForceIndexDigestAllowlist:            newDigestAllowlist(sql11, sql18, sql20),
 		betRecordCategoryForceIndexDigestAllowlist:        newDigestAllowlist(sql21),
-		betRecordCategorySettimeForceIndexDigestAllowlist: newDigestAllowlist(sql22, sql24),
+		betRecordCategorySettimeForceIndexDigestAllowlist: newDigestAllowlist(sql22, sql24, sql25),
 		betRecordPlatformSettimeForceIndexDigestAllowlist: newDigestAllowlist(sql23),
 	}
 )
@@ -1124,7 +1173,8 @@ func ReplaceBetRecordListForceIndex(sql string) (string, bool) {
 // It replaces every idx_account_bettime with idx_account_bet_time_cover.
 // It replaces every idx_account_settletime with idx_account_settle_time_status_category_cover,
 // except allowlisted digests on sumTotalBetByDateTime which use idx_account_platform_settime instead.
-// For allowlisted digests on sumBetRecordAmountForGo, it replaces FORCE INDEX(idx_account_category_settime)
+// For allowlisted digests on sumBetRecordAmountForGo / findBetRecordsForGoCustomPage,
+// it replaces FORCE INDEX(idx_account_category_settime)
 // with FORCE INDEX(idx_account_settle_time_status_category_cover).
 // For allowlisted digests on game summary queries, it adds FORCE INDEX (idx_gameid_settleday).
 // For allowlisted digests on category+bet_time list queries, it strips tiflash hints and adds FORCE INDEX(idx_category_id_bet_time).
