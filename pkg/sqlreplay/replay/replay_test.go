@@ -173,61 +173,43 @@ func TestValidateCfg(t *testing.T) {
 }
 
 func TestReplaySpeed(t *testing.T) {
-	speeds := []float64{10, 1}
-	var lastTotalTime time.Duration
 	replay := NewReplay(zap.NewNop(), id.NewIDManager())
 	defer replay.Close()
-	for _, speed := range speeds {
-		cmdCh := make(chan *cmd.Command, 10)
-		loader := newMockNormalLoader()
-		cfg := ReplayConfig{
-			Input:     t.TempDir(),
-			Username:  "u1",
-			Speed:     speed,
-			StartTime: time.Now(),
-			readers:   []cmd.LineReader{loader},
-			report:    newMockReport(replay.exceptionCh),
-			connCreator: func(connID uint64, _ uint64) conn.Conn {
-				return &mockConn{
-					connID:  connID,
-					cmdCh:   cmdCh,
-					closeCh: replay.closeConnCh,
-					closed:  make(chan struct{}),
-				}
-			},
-			PSCloseStrategy: cmd.PSCloseStrategyDirected,
-		}
 
-		now := time.Now()
-		for i := range 10 {
-			command := newMockCommand(1)
-			command.StartTs = now.Add(time.Duration(i*4) * time.Millisecond)
-			loader.writeCommand(command, cmd.FormatNative)
-		}
-		require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
-
-		var firstTime, lastTime time.Time
-		for i := range 10 {
-			<-cmdCh
-			if i == 0 {
-				firstTime = time.Now()
-				lastTime = firstTime
-			} else {
-				now = time.Now()
-				interval := now.Sub(lastTime)
-				lastTime = now
-				t.Logf("speed: %f, i: %d, interval: %s", speed, i, interval)
-				// CI is too unstable, comment this.
-				// require.Greater(t, interval, time.Duration(float64(10*time.Millisecond)/speed)/2, "speed: %f, i: %d", speed, i)
+	cmdCh := make(chan *cmd.Command, 10)
+	loader := newMockNormalLoader()
+	cfg := ReplayConfig{
+		Input:     t.TempDir(),
+		Username:  "u1",
+		Speed:     1,
+		StartTime: time.Now(),
+		readers:   []cmd.LineReader{loader},
+		report:    newMockReport(replay.exceptionCh),
+		connCreator: func(connID uint64, _ uint64) conn.Conn {
+			return &mockConn{
+				connID:  connID,
+				cmdCh:   cmdCh,
+				closeCh: replay.closeConnCh,
+				closed:  make(chan struct{}),
 			}
-		}
-		totalTime := lastTime.Sub(firstTime)
-		require.Greater(t, totalTime, lastTotalTime, "speed: %f", speed)
-		lastTotalTime = totalTime
-
-		replay.Stop(nil, false)
-		loader.Close()
+		},
+		PSCloseStrategy: cmd.PSCloseStrategyDirected,
 	}
+
+	now := time.Now()
+	for i := range 10 {
+		command := newMockCommand(1)
+		command.StartTs = now.Add(time.Duration(i*4) * time.Millisecond)
+		loader.writeCommand(command, cmd.FormatNative)
+	}
+	require.NoError(t, replay.Start(cfg, nil, nil, &backend.BCConfig{}))
+
+	for range 10 {
+		<-cmdCh
+	}
+
+	replay.Stop(nil, false)
+	loader.Close()
 }
 
 func TestProgress(t *testing.T) {

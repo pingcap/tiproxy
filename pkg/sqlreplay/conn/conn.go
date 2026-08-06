@@ -29,6 +29,8 @@ import (
 type ReplayStats struct {
 	// ReplayedCmds is the number of executed commands.
 	ReplayedCmds atomic.Uint64
+	// ReplayedQueries is the number of executed ComQuery and ComStmtExecute commands.
+	ReplayedQueries atomic.Uint64
 	// PendingCmds is the number of decoded but not executed commands.
 	PendingCmds atomic.Int64
 	// FilteredCmds is the number of filtered commands.
@@ -272,6 +274,9 @@ func (c *conn) processCommand(ctx context.Context, command *glist.Element[*cmd.C
 	}
 
 	c.replayStats.ReplayedCmds.Add(1)
+	if command.Value.Type == pnet.ComQuery || command.Value.Type == pnet.ComStmtExecute {
+		c.replayStats.ReplayedQueries.Add(1)
+	}
 }
 
 func (c *conn) notifyCmdDone(command *cmd.Command) {

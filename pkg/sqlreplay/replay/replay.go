@@ -288,32 +288,33 @@ func (cfg *ReplayConfig) LoadFromCheckpoint() error {
 
 type replay struct {
 	sync.Mutex
-	cfg                    ReplayConfig
-	meta                   store.Meta
-	storages               []storage.ExternalStorage
-	replayStats            conn.ReplayStats
-	dedup                  *cmd.DeDup
-	idMgr                  *id.IDManager
-	exceptionCh            chan conn.Exception
-	closeConnCh            chan uint64
-	execInfoCh             chan conn.ExecInfo
-	decodeCtx              context.Context
-	decodeCancel           context.CancelFunc
-	wg                     waitgroup.WaitGroup
-	cancel                 context.CancelFunc
-	connCreator            conn.ConnCreator
-	report                 report.Report
-	err                    error
-	startTime              time.Time
-	endTime                time.Time
-	progress               float64
-	decodedCmds            atomic.Uint64
-	backendTLSConfig       *tls.Config
-	lg                     *zap.Logger
-	lastReportDecodedCmds  uint64
-	lastReportReplayedCmds uint64
-	dispatchLimiter        dispatchLimiter
-	fileTracker            *fileTracker
+	cfg                 ReplayConfig
+	meta                store.Meta
+	storages            []storage.ExternalStorage
+	replayStats         conn.ReplayStats
+	dedup               *cmd.DeDup
+	idMgr               *id.IDManager
+	exceptionCh         chan conn.Exception
+	closeConnCh         chan uint64
+	execInfoCh          chan conn.ExecInfo
+	decodeCtx           context.Context
+	decodeCancel        context.CancelFunc
+	wg                  waitgroup.WaitGroup
+	cancel              context.CancelFunc
+	connCreator         conn.ConnCreator
+	report              report.Report
+	err                 error
+	startTime           time.Time
+	endTime             time.Time
+	progress            float64
+	decodedCmds         atomic.Uint64
+	decodedQueries      atomic.Uint64
+	backendTLSConfig    *tls.Config
+	lg                  *zap.Logger
+	lastDecodedQueries  uint64
+	lastReplayedQueries uint64
+	dispatchLimiter     dispatchLimiter
+	fileTracker         *fileTracker
 }
 
 func NewReplay(lg *zap.Logger, idMgr *id.IDManager) *replay {
@@ -348,7 +349,10 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	r.endTime = time.Time{}
 	r.progress = 0
 	r.decodedCmds.Store(0)
-	r.dispatchLimiter.reset(cfg.QPSLimit)
+	r.decodedQueries.Store(0)
+	r.lastDecodedQueries = 0
+	r.lastReplayedQueries = 0
+	r.dispatchLimiter.reset(cfg.QPSLimit, cfg.reportLogInterval)
 	r.fileTracker = newFileTracker(r.lg)
 	r.err = nil
 	r.replayStats = conn.ReplayStats{}
@@ -389,9 +393,9 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 					ExceptionCh:      r.exceptionCh,
 					CloseCh:          r.closeConnCh,
 					ExecInfoCh:       r.execInfoCh,
-					ReplayStats: &r.replayStats,
-					Readonly:    cfg.ReadOnly,
-					OnCmdDone:   r.fileTracker.onExecuted,
+					ReplayStats:      &r.replayStats,
+					Readonly:         cfg.ReadOnly,
+					OnCmdDone:        r.fileTracker.onExecuted,
 				})
 			}
 		}
@@ -486,7 +490,6 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 		}
 	}
 
-	var captureStartTs, replayStartTs time.Time
 	conns := make(map[uint64]conn.Conn) // both alive and dead connections
 	connCount := 0                      // alive connection count
 	maxPendingCmds := int64(0)
@@ -530,11 +533,8 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 			// fallback to StartTs if EndTs is not available.
 			r.replayStats.UpdateCurCmdEndTs(command.StartTs.UnixNano())
 		}
-		if captureStartTs.IsZero() {
-			// first command
-			captureStartTs = command.StartTs
-			replayStartTs = time.Now()
-			r.replayStats.ReplayStartTs.Store(replayStartTs.UnixNano())
+		if r.replayStats.ReplayStartTs.Load() == 0 {
+			r.replayStats.ReplayStartTs.Store(time.Now().UnixNano())
 			r.replayStats.FirstCmdTs.Store(command.StartTs.UnixNano())
 		} else {
 			pendingCmds := r.replayStats.PendingCmds.Load()
@@ -549,26 +549,18 @@ func (r *replay) readCommands(decodeCtx context.Context, execCtx context.Context
 				break
 			}
 
-			// Do not calculate the wait time by the duration since last command because the go scheduler
-			// may wait a little bit longer than expected, and then the difference becomes larger and larger.
-			expectedInterval := command.StartTs.Sub(captureStartTs)
-			if r.cfg.Speed != 1 {
-				expectedInterval = time.Duration(float64(expectedInterval) / r.cfg.Speed)
-			}
-			expectedInterval = max(time.Until(replayStartTs.Add(expectedInterval)), 0)
+			var totalWait time.Duration
 			// If there are too many pending commands, slow it down to reduce memory usage.
 			if pendingCmds > r.cfg.slowDownThreshold {
 				extraWait := time.Duration(pendingCmds-r.cfg.slowDownThreshold) * r.cfg.slowDownFactor
 				extraWaitTime += extraWait
-				expectedInterval += extraWait
+				totalWait = extraWait
 				metrics.ReplayWaitTime.Set(float64(extraWaitTime.Nanoseconds()))
 				r.replayStats.ExtraWaitTime.Store(extraWaitTime.Nanoseconds())
 			}
-			var dispatchWait time.Duration
 			if isDispatchLimitedCmd(command) {
-				dispatchWait = r.dispatchLimiter.waitDuration()
+				totalWait = max(totalWait, r.dispatchLimiter.waitDuration())
 			}
-			totalWait := max(expectedInterval, dispatchWait)
 			if totalWait > time.Microsecond {
 				r.replayStats.TotalWaitTime.Add(totalWait.Nanoseconds())
 				select {
@@ -841,6 +833,9 @@ func (r *replay) executeCmd(ctx context.Context, command *cmd.Command, conns map
 		r.fileTracker.onDispatched(command.FileName)
 	}
 	r.decodedCmds.Add(1)
+	if isDispatchLimitedCmd(command) {
+		r.decodedQueries.Add(1)
+	}
 }
 
 func (r *replay) closeConn(connID uint64, conns map[uint64]conn.Conn, connCount *int) {
@@ -885,30 +880,33 @@ func (r *replay) reportLoop(ctx context.Context) {
 		case <-ticker.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			decodedCmds := r.decodedCmds.Load()
-			replayedCmds := r.replayStats.ReplayedCmds.Load()
-			decodeRate := float64(decodedCmds-r.lastReportDecodedCmds) / reportLogInterval.Seconds()
-			replayRate := float64(replayedCmds-r.lastReportReplayedCmds) / reportLogInterval.Seconds()
-			r.lastReportDecodedCmds = decodedCmds
-			r.lastReportReplayedCmds = replayedCmds
+			decodedQueries := r.decodedQueries.Load()
+			replayedQueries := r.replayStats.ReplayedQueries.Load()
+			decodeCount := decodedQueries - r.lastDecodedQueries
+			decodeQPS := float64(decodeCount) / reportLogInterval.Seconds()
+			replayQPS := float64(replayedQueries-r.lastReplayedQueries) / reportLogInterval.Seconds()
+			r.lastDecodedQueries = decodedQueries
+			r.lastReplayedQueries = replayedQueries
+			r.dispatchLimiter.updateDecodeCount(decodeCount)
+			dispatchQPS := r.dispatchLimiter.currentQPS()
 			maxConnQueue := r.replayStats.MaxConnQueue.Swap(0)
 			pendingCmds := r.replayStats.PendingCmds.Load()
 			fields := append(r.commonFields(), []zap.Field{
 				zap.Int64("pending_cmds", pendingCmds),          // if too many, replay is slower than decode
 				zap.Int("pending_exec_info", len(r.execInfoCh)), // if too many, recording sql is slow
 				zap.String("sys_memory", fmt.Sprintf("%.2fMB", float64(m.Sys)/1024/1024)),
-				zap.Float64("decode_rate", decodeRate),
-				zap.Float64("replay_rate", replayRate),
+				zap.Float64("decode_qps", decodeQPS),
+				zap.Float64("replay_qps", replayQPS),
 				zap.Int64("max_conn_queue", maxConnQueue),
-				zap.Float64("dispatch_qps", calcDispatchQPS(r.cfg.QPSLimit)),
+				zap.Float64("dispatch_qps", dispatchQPS),
 			}...)
 			r.lg.Info("replay progress", fields...)
 			if pendingCmds >= pendingBacklogWarnThreshold {
 				r.lg.Warn("replay backlog growing",
 					zap.Int64("pending_cmds", pendingCmds),
-					zap.Float64("decode_rate", decodeRate),
-					zap.Float64("replay_rate", replayRate),
-					zap.Float64("decode_replay_gap", decodeRate-replayRate),
+					zap.Float64("decode_qps", decodeQPS),
+					zap.Float64("replay_qps", replayQPS),
+					zap.Float64("decode_replay_gap", decodeQPS-replayQPS),
 					zap.Int64("max_conn_queue", maxConnQueue),
 					zap.Uint64("slow_exec_cmds", r.replayStats.SlowExecCmds.Load()),
 					zap.Uint64("slow_connects", r.replayStats.SlowConnects.Load()),
