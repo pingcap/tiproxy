@@ -997,7 +997,6 @@ LIMIT
 		betRecordSumForceIndexDigestAllowlist:             newDigestAllowlist(sql10, sql12),
 		betRecordListForceIndexDigestAllowlist:            newDigestAllowlist(sql11, sql18, sql20),
 		betRecordCategoryForceIndexDigestAllowlist:        newDigestAllowlist(sql21),
-		betRecordCategorySettimeForceIndexDigestAllowlist: newDigestAllowlist(sql22, sql24, sql25),
 		betRecordPlatformSettimeForceIndexDigestAllowlist: newDigestAllowlist(sql23),
 	}
 )
@@ -1018,7 +1017,6 @@ type Rewriter struct {
 	betRecordSumForceIndexDigestAllowlist             map[string]struct{}
 	betRecordListForceIndexDigestAllowlist            map[string]struct{}
 	betRecordCategoryForceIndexDigestAllowlist        map[string]struct{}
-	betRecordCategorySettimeForceIndexDigestAllowlist map[string]struct{}
 	betRecordPlatformSettimeForceIndexDigestAllowlist map[string]struct{}
 }
 
@@ -1091,14 +1089,14 @@ const (
 	betRecordAccountBettimeIndexName                       = "idx_account_bettime"
 	betRecordAccountBetTimeCoverIndexName                  = "idx_account_bet_time_cover"
 	betRecordAccountSettletimeIndexName                    = "idx_account_settletime"
-	betRecordAccountCategorySettimeIndexName               = "idx_account_category_settime"
 	betRecordAccountPlatformSettimeIndexName               = "idx_account_platform_settime"
 	betRecordAccountSettleTimeStatusCategoryCoverIndexName = "idx_account_settle_time_status_category_cover"
 )
 
 var (
-	accountBettimeIndexRE    = regexp.MustCompile(`(?i)idx_account_bettime`)
-	accountSettletimeIndexRE = regexp.MustCompile(`(?i)idx_account_settletime`)
+	accountBettimeIndexRE         = regexp.MustCompile(`(?i)idx_account_bettime`)
+	accountSettletimeIndexRE      = regexp.MustCompile(`(?i)idx_account_settletime`)
+	accountCategorySettimeIndexRE = regexp.MustCompile(`(?i)idx_account_category_settime`)
 )
 
 // ReplaceAllAccountBettimeIndex replaces every idx_account_bettime with idx_account_bet_time_cover.
@@ -1117,10 +1115,12 @@ func ReplaceAllAccountSettletimeIndex(sql string) (string, bool) {
 	return accountSettletimeIndexRE.ReplaceAllString(sql, betRecordAccountSettleTimeStatusCategoryCoverIndexName), true
 }
 
-// ReplaceAccountCategorySettimeForceIndex replaces FORCE INDEX(idx_account_category_settime)
-// with FORCE INDEX(idx_account_settle_time_status_category_cover).
-func ReplaceAccountCategorySettimeForceIndex(sql string) (string, bool) {
-	return replaceForceIndexName(sql, betRecordAccountCategorySettimeIndexName, betRecordAccountSettleTimeStatusCategoryCoverIndexName)
+// ReplaceAllAccountCategorySettimeIndex replaces every idx_account_category_settime with idx_account_settle_time_status_category_cover.
+func ReplaceAllAccountCategorySettimeIndex(sql string) (string, bool) {
+	if !accountCategorySettimeIndexRE.MatchString(sql) {
+		return sql, false
+	}
+	return accountCategorySettimeIndexRE.ReplaceAllString(sql, betRecordAccountSettleTimeStatusCategoryCoverIndexName), true
 }
 
 // ReplaceAccountPlatformSettimeForceIndex replaces FORCE INDEX(idx_account_settletime)
@@ -1137,6 +1137,10 @@ func replaceAccountIndexNames(sql string) (string, bool) {
 		changed = true
 	}
 	if newSQL, ok := ReplaceAllAccountSettletimeIndex(sql); ok {
+		sql = newSQL
+		changed = true
+	}
+	if newSQL, ok := ReplaceAllAccountCategorySettimeIndex(sql); ok {
 		sql = newSQL
 		changed = true
 	}
@@ -1173,9 +1177,7 @@ func ReplaceBetRecordListForceIndex(sql string) (string, bool) {
 // It replaces every idx_account_bettime with idx_account_bet_time_cover.
 // It replaces every idx_account_settletime with idx_account_settle_time_status_category_cover,
 // except allowlisted digests on sumTotalBetByDateTime which use idx_account_platform_settime instead.
-// For allowlisted digests on sumBetRecordAmountForGo / findBetRecordsForGoCustomPage,
-// it replaces FORCE INDEX(idx_account_category_settime)
-// with FORCE INDEX(idx_account_settle_time_status_category_cover).
+// It replaces every idx_account_category_settime with idx_account_settle_time_status_category_cover.
 // For allowlisted digests on game summary queries, it adds FORCE INDEX (idx_gameid_settleday).
 // For allowlisted digests on category+bet_time list queries, it strips tiflash hints and adds FORCE INDEX(idx_category_id_bet_time).
 // For allowlisted digests with a tiflash read hint, it strips the tiflash read hint.
@@ -1207,11 +1209,6 @@ func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
 	if len(r.betRecordListForceIndexDigestAllowlist) > 0 {
 		if _, ok := r.betRecordListForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
 			return ReplaceBetRecordListForceIndex(sql)
-		}
-	}
-	if len(r.betRecordCategorySettimeForceIndexDigestAllowlist) > 0 {
-		if _, ok := r.betRecordCategorySettimeForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
-			return ReplaceAccountCategorySettimeForceIndex(sql)
 		}
 	}
 	// Higher priority than the global idx_account_settletime rewrite below.

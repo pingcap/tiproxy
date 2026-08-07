@@ -15,7 +15,7 @@ import (
 const (
 	defaultQPSLimit   = 1200
 	minDispatchQPS    = 100
-	dispatchQPSFactor = 1.5
+	dispatchQPSFactor = 1.3
 	dispatchQPSWindow = 30 * time.Minute
 )
 
