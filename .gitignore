@@ -11,3 +11,4 @@ work
 coverage.dat
 grafonnet-lib
 dist
+pkg/sqlreplay/sqlrewrite/digest_mapping.local.md
