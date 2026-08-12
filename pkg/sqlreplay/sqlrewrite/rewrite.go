@@ -36,9 +36,7 @@ const (
 	digest7  = "96eb81fdedb4e77ff9e36a7de21ab0e30110e99dff2086c525fb18620f256832"
 	digest8  = "67b2ed88bbf05ef9eab0c3657c481487217bb491ea9107e76fdd1f3d70676e73"
 	digest9  = "578d0b725ef6ffbd966b889275c980c850ad8cde06934c2e44c0dabd79aa21bd"
-	digest10 = "65061f7ddbda2cd113e8457d54f5b4890d112bee2ab63ad9ef714ad5f75c0ee5"
 	digest11 = "ecde82e73ea947a76e1c4f7e756615b575c7430739aaac6ea7c1ab7f4e44e540"
-	digest12 = "dce4e4910c87b2ab1f3b00a9d911d158d7e18be43b510ee3350d4e1d1d2e0ff5"
 	digest18 = "ec91ab8947937c2883bab57e529f8d9fe38f66ca18dc061ccaf3a9c23f6636ce"
 	digest21 = "d89dfac1dcb5938ab130998b3da1897d16150a9ddf008faff76a1c0bd7ba7029"
 )
@@ -49,7 +47,6 @@ var (
 			digest1, digest2, digest3, digest5, digest6, digest7, digest8,
 		),
 		forceIndexDigestAllowlist:                  newDigestSet(digest9),
-		betRecordSumForceIndexDigestAllowlist:      newDigestSet(digest10, digest12),
 		betRecordListForceIndexDigestAllowlist:     newDigestSet(digest11, digest18),
 		betRecordCategoryForceIndexDigestAllowlist: newDigestSet(digest21),
 	}
@@ -68,7 +65,6 @@ type Rewriter struct {
 	lg                                         *zap.Logger
 	digestAllowlist                            map[string]struct{}
 	forceIndexDigestAllowlist                  map[string]struct{}
-	betRecordSumForceIndexDigestAllowlist      map[string]struct{}
 	betRecordListForceIndexDigestAllowlist     map[string]struct{}
 	betRecordCategoryForceIndexDigestAllowlist map[string]struct{}
 }
@@ -140,7 +136,7 @@ func StripTiflashAndAddCategoryForceIndex(sql string) (string, bool) {
 
 const (
 	betRecordAccountBettimeIndexName                       = "idx_account_bettime"
-	betRecordAccountBetTimeCoverIndexName                  = "idx_account_bet_time_cover"
+	betRecordAccountBetTimeCoverIndexName                  = "idx_account_bet_time_cover_new"
 	betRecordAccountSettleTimeStatusCategoryCoverIndexName = "idx_account_settle_time_status_category_cover_new"
 )
 
@@ -150,9 +146,10 @@ var (
 	accountCategorySettimeIndexRE = regexp.MustCompile(`(?i)idx_account_category_settime`)
 	accountPlatformSettimeIndexRE = regexp.MustCompile(`(?i)idx_account_platform_settime`)
 	accountGidSettimeIndexRE      = regexp.MustCompile(`(?i)idx_account_gid_settletime`)
+	accountGidBettimeIndexRE      = regexp.MustCompile(`(?i)idx_account_gid_bettime`)
 )
 
-// ReplaceAllAccountBettimeIndex replaces every idx_account_bettime with idx_account_bet_time_cover.
+// ReplaceAllAccountBettimeIndex replaces every idx_account_bettime with idx_account_bet_time_cover_new.
 func ReplaceAllAccountBettimeIndex(sql string) (string, bool) {
 	if !accountBettimeIndexRE.MatchString(sql) {
 		return sql, false
@@ -192,10 +189,22 @@ func ReplaceAllAccountGidSettimeIndex(sql string) (string, bool) {
 	return accountGidSettimeIndexRE.ReplaceAllString(sql, betRecordAccountSettleTimeStatusCategoryCoverIndexName), true
 }
 
+// ReplaceAllAccountGidBettimeIndex replaces every idx_account_gid_bettime with idx_account_bet_time_cover_new.
+func ReplaceAllAccountGidBettimeIndex(sql string) (string, bool) {
+	if !accountGidBettimeIndexRE.MatchString(sql) {
+		return sql, false
+	}
+	return accountGidBettimeIndexRE.ReplaceAllString(sql, betRecordAccountBetTimeCoverIndexName), true
+}
+
 // replaceAccountIndexNames applies all global account index renames.
 func replaceAccountIndexNames(sql string) (string, bool) {
 	changed := false
 	if newSQL, ok := ReplaceAllAccountBettimeIndex(sql); ok {
+		sql = newSQL
+		changed = true
+	}
+	if newSQL, ok := ReplaceAllAccountGidBettimeIndex(sql); ok {
 		sql = newSQL
 		changed = true
 	}
@@ -234,18 +243,14 @@ func replaceForceIndexName(sql, fromIndex, toIndex string) (string, bool) {
 	return sql[:start] + toIndex + sql[end:], true
 }
 
-// ReplaceBetRecordSumForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_account_bet_time_cover).
-func ReplaceBetRecordSumForceIndex(sql string) (string, bool) {
-	return replaceForceIndexName(sql, betRecordAccountBettimeIndexName, betRecordAccountBetTimeCoverIndexName)
-}
-
-// ReplaceBetRecordListForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_account_bet_time_cover).
+// ReplaceBetRecordListForceIndex replaces FORCE INDEX(idx_account_bettime) with FORCE INDEX(idx_account_bet_time_cover_new).
 func ReplaceBetRecordListForceIndex(sql string) (string, bool) {
 	return replaceForceIndexName(sql, betRecordAccountBettimeIndexName, betRecordAccountBetTimeCoverIndexName)
 }
 
 // MaybeRewrite rewrites SQL before replay execution.
-// It replaces every idx_account_bettime with idx_account_bet_time_cover.
+// It replaces every idx_account_bettime with idx_account_bet_time_cover_new.
+// It replaces every idx_account_gid_bettime with idx_account_bet_time_cover_new.
 // It replaces every idx_account_settletime with idx_account_settle_time_status_category_cover_new.
 // It replaces every idx_account_category_settime with idx_account_settle_time_status_category_cover_new.
 // It replaces every idx_account_platform_settime with idx_account_settle_time_status_category_cover_new.
@@ -263,21 +268,6 @@ func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
 			return AddGameSummaryForceIndex(sql)
 		}
 	}
-	// Previously only allowlisted sum queries replaced idx_account_bettime with idx_account_bet_time_cover.
-	// Now all SQL does that replacement above; keep the allowlisted SQL samples but disable this path.
-	// if len(r.betRecordSumForceIndexDigestAllowlist) > 0 {
-	// 	if _, ok := r.betRecordSumForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
-	// 		replacedSql, replaced := ReplaceBetRecordSumForceIndex(sql)
-	// 		if ReplayDigest(sql) == digest12 && r.lg != nil {
-	// 			if !replaced {
-	// 				r.lg.Info("match sql12", zap.Bool("replaced", replaced), zap.String("sql", sql))
-	// 			} else {
-	// 				r.lg.Info("match sql12", zap.Bool("replaced", replaced))
-	// 			}
-	// 		}
-	// 		return replacedSql, replaced
-	// 	}
-	// }
 	if len(r.betRecordListForceIndexDigestAllowlist) > 0 {
 		if _, ok := r.betRecordListForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
 			return ReplaceBetRecordListForceIndex(sql)
