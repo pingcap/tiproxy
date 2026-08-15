@@ -39,6 +39,7 @@ const (
 	digest11 = "ecde82e73ea947a76e1c4f7e756615b575c7430739aaac6ea7c1ab7f4e44e540"
 	digest18 = "ec91ab8947937c2883bab57e529f8d9fe38f66ca18dc061ccaf3a9c23f6636ce"
 	digest21 = "d89dfac1dcb5938ab130998b3da1897d16150a9ddf008faff76a1c0bd7ba7029"
+	digest26 = "6b353458a3dcf2c6dd41b0799bd1b013db11df78b4219fec9478447c863773fc"
 )
 
 var (
@@ -49,6 +50,7 @@ var (
 		forceIndexDigestAllowlist:                  newDigestSet(digest9),
 		betRecordListForceIndexDigestAllowlist:     newDigestSet(digest11, digest18),
 		betRecordCategoryForceIndexDigestAllowlist: newDigestSet(digest21),
+		betRecordPlatformForceIndexDigestAllowlist: newDigestSet(digest26),
 	}
 )
 
@@ -67,6 +69,7 @@ type Rewriter struct {
 	forceIndexDigestAllowlist                  map[string]struct{}
 	betRecordListForceIndexDigestAllowlist     map[string]struct{}
 	betRecordCategoryForceIndexDigestAllowlist map[string]struct{}
+	betRecordPlatformForceIndexDigestAllowlist map[string]struct{}
 }
 
 // DefaultRewriter returns the built-in rewriter for known SQL patterns.
@@ -110,7 +113,10 @@ func AddGameSummaryForceIndex(sql string) (string, bool) {
 	return newSQL, newSQL != sql
 }
 
-const betRecordCategoryBetTimeIndexName = "idx_category_id_bet_time"
+const (
+	betRecordCategoryBetTimeIndexName = "idx_category_id_bet_time"
+	betRecordPlatformBetTimeIndexName = "idx_platform_id_bet_time"
+)
 
 // AddBetRecordCategoryForceIndex adds FORCE INDEX(idx_category_id_bet_time) to matching shard tables.
 func AddBetRecordCategoryForceIndex(sql string) (string, bool) {
@@ -128,6 +134,28 @@ func AddBetRecordCategoryForceIndex(sql string) (string, bool) {
 func StripTiflashAndAddCategoryForceIndex(sql string) (string, bool) {
 	newSQL := StripTiflashReadHint(sql)
 	forced, added := AddBetRecordCategoryForceIndex(newSQL)
+	if added {
+		return forced, true
+	}
+	return newSQL, newSQL != sql
+}
+
+// AddBetRecordPlatformForceIndex adds FORCE INDEX(idx_platform_id_bet_time) to matching shard tables.
+func AddBetRecordPlatformForceIndex(sql string) (string, bool) {
+	if strings.Contains(strings.ToUpper(sql), "FORCE INDEX") {
+		return sql, false
+	}
+	if !betRecordForceIndexRE.MatchString(sql) {
+		return sql, false
+	}
+	newSQL := betRecordForceIndexRE.ReplaceAllString(sql, `${1} ${2} FORCE INDEX(`+betRecordPlatformBetTimeIndexName+`)`)
+	return newSQL, newSQL != sql
+}
+
+// StripTiflashAndAddPlatformForceIndex strips the tiflash read hint and adds FORCE INDEX(idx_platform_id_bet_time).
+func StripTiflashAndAddPlatformForceIndex(sql string) (string, bool) {
+	newSQL := StripTiflashReadHint(sql)
+	forced, added := AddBetRecordPlatformForceIndex(newSQL)
 	if added {
 		return forced, true
 	}
@@ -257,6 +285,7 @@ func ReplaceBetRecordListForceIndex(sql string) (string, bool) {
 // It replaces every idx_account_gid_settletime with idx_account_settle_time_status_category_cover_new.
 // For allowlisted digests on game summary queries, it adds FORCE INDEX (idx_gameid_settleday).
 // For allowlisted digests on category+bet_time list queries, it strips tiflash hints and adds FORCE INDEX(idx_category_id_bet_time).
+// For allowlisted digests on platform+bet_time list queries, it strips tiflash hints and adds FORCE INDEX(idx_platform_id_bet_time).
 // For allowlisted digests with a tiflash read hint, it strips the tiflash read hint.
 // For other SQL with a tiflash read hint, it merges /*+ ignore_plan_cache() */ into the same hint comment.
 func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
@@ -279,6 +308,11 @@ func (r *Rewriter) MaybeRewrite(sql string) (string, bool) {
 	if len(r.betRecordCategoryForceIndexDigestAllowlist) > 0 {
 		if _, ok := r.betRecordCategoryForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
 			return StripTiflashAndAddCategoryForceIndex(sql)
+		}
+	}
+	if len(r.betRecordPlatformForceIndexDigestAllowlist) > 0 {
+		if _, ok := r.betRecordPlatformForceIndexDigestAllowlist[ReplayDigest(sql)]; ok {
+			return StripTiflashAndAddPlatformForceIndex(sql)
 		}
 	}
 	if !tiflashReadHintRE.MatchString(sql) {
