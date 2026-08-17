@@ -61,6 +61,21 @@ func TestNewMeter(t *testing.T) {
 			hasErr: false,
 			isNil:  false,
 		},
+		{
+			cfg: config.Config{
+				Metering: mconfig.MeteringConfig{
+					Type:   storage.ProviderTypeCOS,
+					Region: "ap-beijing",
+					Bucket: "metering-1234567890",
+					COS: &mconfig.MeteringCOSConfig{
+						AccessKey:       "access-key",
+						SecretAccessKey: "secret-access-key",
+					},
+				},
+			},
+			hasErr: false,
+			isNil:  false,
+		},
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
