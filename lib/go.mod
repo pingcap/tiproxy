@@ -47,18 +47,24 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.27.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.31.1 // indirect
 	github.com/aws/smithy-go v1.22.5 // indirect
+	github.com/clbanning/mxj v1.8.4 // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
+	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
+	github.com/mitchellh/mapstructure v1.4.3 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/mozillazg/go-httpheader v0.2.1 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.127 // indirect
+	github.com/tencentyun/cos-go-sdk-v5 v0.7.74 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
@@ -71,7 +77,7 @@ require (
 
 require (
 	github.com/BurntSushi/toml v1.5.0
-	github.com/pingcap/metering_sdk v0.0.0-20260324055927-14fead745f1d
+	github.com/pingcap/metering_sdk v0.0.0-20260814062708-9e3b68cd9adf
 	go.uber.org/multierr v1.11.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
