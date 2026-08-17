@@ -117,6 +117,48 @@ func TestProxyConfig(t *testing.T) {
 	require.Equal(t, data1, data2)
 }
 
+func TestProxyConfigCOS(t *testing.T) {
+	data := []byte(`
+[metering]
+type = "cos"
+region = "ap-beijing"
+bucket = "metering-1234567890"
+prefix = "tiproxy/metering"
+
+[metering.cos]
+assume-role-arn = "qcs::cam::uin/1234567890:roleName/metering"
+access-key = "access-key"
+secret-access-key = "secret-access-key"
+session-token = "session-token"
+`)
+	var cfg Config
+	require.NoError(t, toml.Unmarshal(data, &cfg))
+	require.Equal(t, mconfig.MeteringConfig{
+		Type:   storage.ProviderTypeCOS,
+		Region: "ap-beijing",
+		Bucket: "metering-1234567890",
+		Prefix: "tiproxy/metering",
+		COS: &mconfig.MeteringCOSConfig{
+			AssumeRoleARN:   "qcs::cam::uin/1234567890:roleName/metering",
+			AccessKey:       "access-key",
+			SecretAccessKey: "secret-access-key",
+			SessionToken:    "session-token",
+		},
+	}, cfg.Metering)
+
+	providerCfg := cfg.Metering.ToProviderConfig()
+	require.Equal(t, storage.ProviderTypeCOS, providerCfg.Type)
+	require.Equal(t, "ap-beijing", providerCfg.Region)
+	require.Equal(t, "metering-1234567890", providerCfg.Bucket)
+	require.Equal(t, "tiproxy/metering", providerCfg.Prefix)
+	require.Equal(t, &storage.COSConfig{
+		AssumeRoleARN:   "qcs::cam::uin/1234567890:roleName/metering",
+		AccessKey:       "access-key",
+		SecretAccessKey: "secret-access-key",
+		SessionToken:    "session-token",
+	}, providerCfg.COS)
+}
+
 func TestProxyCheck(t *testing.T) {
 	testcases := []struct {
 		pre  func(*testing.T, *Config)

@@ -79,7 +79,7 @@ graceful-close-conn-timeout = 15
 # max-backups = 3
 
 # [metering]
-# provider type: "s3", "oss", "azure", or "localfs"
+# provider type: "s3", "oss", "cos", "azure", or "localfs"
 # type = "azure"
 # bucket = "my-container"
 # prefix = "tiproxy/metering"
@@ -90,6 +90,15 @@ graceful-close-conn-timeout = 15
 # Use either account-key or sas-token, or rely on Azure DefaultAzureCredential.
 # account-key = ""
 # sas-token = ""
+#
+# For Tencent Cloud COS, set type = "cos", region, and a bucket whose name
+# includes the app ID (for example, "my-bucket-1250000000").
+# [metering.cos]
+# Use an access key pair, assume-role-arn, or the Tencent Cloud default credential chain.
+# assume-role-arn = ""
+# access-key = ""
+# secret-access-key = ""
+# session-token = ""
 
 [security]
 # tls object is either of type server, client, or peer
