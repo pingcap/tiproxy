@@ -14,4 +14,5 @@ const (
 	fileSize            = 300 << 20
 	bufferSize          = 1 << 20
 	opTimeout           = 10 * time.Second
+	readerRetryInterval = time.Second
 )
