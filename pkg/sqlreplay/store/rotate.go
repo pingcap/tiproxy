@@ -296,6 +296,9 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			})
 		cancel()
 		if err != nil {
+			if r.waitForStorageRetry(ctx, "list traffic files", err) {
+				continue
+			}
 			break
 		}
 		if minFileName == "" {
@@ -309,9 +312,17 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		}
 		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
 		var fr storage.ExternalFileReader
-		fr, err = r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
-		if err != nil {
+		for {
+			fr, err = r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
+			if err == nil {
+				break
+			}
 			err = errors.WithStack(err)
+			if !r.waitForStorageRetry(ctx, "open traffic file", err) {
+				break
+			}
+		}
+		if err != nil {
 			break
 		}
 		curFileTime = minFileTime
@@ -326,6 +337,20 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 	}
 	close(r.fileCh)
 	return err
+}
+
+func (r *rotateReader) waitForStorageRetry(ctx context.Context, operation string, err error) bool {
+	// WaitOnEOF only controls a successful empty listing. Storage failures must recover in both modes.
+	if ctx.Err() != nil {
+		return false
+	}
+	r.lg.Warn("traffic storage operation failed, retrying",
+		zap.String("operation", operation),
+		zap.String("storage", r.storage.URI()),
+		zap.Duration("retry_after", readerRetryInterval),
+		zap.Error(err))
+	time.Sleep(readerRetryInterval)
+	return ctx.Err() == nil
 }
 
 func (r *rotateReader) nextReader() error {
