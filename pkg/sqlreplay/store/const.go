@@ -14,4 +14,7 @@ const (
 	fileSize            = 300 << 20
 	bufferSize          = 1 << 20
 	opTimeout           = 10 * time.Second
+	readerPollInterval  = time.Second
+	readerRetryInitial  = time.Second
+	readerRetryMax      = 30 * time.Second
 )

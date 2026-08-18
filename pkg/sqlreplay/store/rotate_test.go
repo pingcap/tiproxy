@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/pingcap/tidb/br/pkg/mock"
+	brstorage "github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -291,6 +292,191 @@ func TestWaitOnEOF(t *testing.T) {
 	require.Equal(t, fileName, <-fileCh)
 	require.NoError(t, l.Close())
 	wg.Wait()
+}
+
+func TestWaitOnEOFRecoversFromWalkError(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+
+	l := &rotateReader{
+		cfg: ReaderCfg{
+			Dir:       dir,
+			Format:    cmd.FormatAuditLogPlugin,
+			WaitOnEOF: true,
+		},
+		storage: storage,
+		lg:      zap.NewNop(),
+		fileCh:  make(chan fileReader, 1),
+	}
+	walkFailed := make(chan struct{})
+	firstAttempt := true
+	loopErr := startRotateReaderWithWalker(l, func(ctx context.Context, curFileName string, fn func(string, int64) (bool, error)) error {
+		if firstAttempt {
+			firstAttempt = false
+			close(walkFailed)
+			return context.DeadlineExceeded
+		}
+		return l.walkFile(ctx, curFileName, fn)
+	})
+
+	nextReaderErr := make(chan error, 1)
+	go func() {
+		nextReaderErr <- l.nextReader()
+	}()
+	select {
+	case <-walkFailed:
+	case <-time.After(time.Second):
+		t.Fatal("reader did not encounter the injected storage error")
+	}
+
+	fileName := "tidb-audit-2025-09-10T17-01-56.073.log"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, fileName), nil, 0666))
+	select {
+	case err := <-nextReaderErr:
+		require.NoError(t, err)
+		require.Equal(t, fileName, l.externalFile.fileName)
+	case <-time.After(3 * time.Second):
+		t.Fatal("reader did not recover after the storage error")
+	}
+	require.NoError(t, l.Close())
+	require.NoError(t, <-loopErr)
+}
+
+func TestRotateReaderPropagatesWalkError(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+
+	l := &rotateReader{
+		cfg:     ReaderCfg{Dir: dir, Format: cmd.FormatAuditLogPlugin},
+		storage: storage,
+		lg:      zap.NewNop(),
+		fileCh:  make(chan fileReader, 1),
+	}
+	walkErr := errors.New("walk failed")
+	loopErr := startRotateReaderWithWalker(l, func(context.Context, string, func(string, int64) (bool, error)) error {
+		return walkErr
+	})
+	err = l.nextReader()
+	require.ErrorIs(t, err, walkErr)
+	require.NoError(t, l.Close())
+	require.ErrorIs(t, <-loopErr, walkErr)
+}
+
+func TestWaitOnEOFRetriesSameFileAfterOpenError(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+
+	firstFile := "tidb-audit-2025-09-10T17-01-56.073.log"
+	secondFile := "tidb-audit-2025-09-10T17-02-56.073.log"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, firstFile), nil, 0666))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, secondFile), nil, 0666))
+	l := &rotateReader{
+		cfg: ReaderCfg{
+			Dir:       dir,
+			Format:    cmd.FormatAuditLogPlugin,
+			WaitOnEOF: true,
+		},
+		storage: storage,
+		lg:      zap.NewNop(),
+		fileCh:  make(chan fileReader, 1),
+	}
+	walkCount := 0
+	walkFile := func(_ context.Context, _ string, fn func(string, int64) (bool, error)) error {
+		fileName := firstFile
+		if walkCount > 0 {
+			fileName = secondFile
+		}
+		walkCount++
+		_, err := fn(fileName, 0)
+		return err
+	}
+	openCount := 0
+	openFile := func(ctx context.Context, name string, option *brstorage.ReaderOption) (brstorage.ExternalFileReader, error) {
+		openCount++
+		if openCount == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return storage.Open(ctx, name, option)
+	}
+	loopErr := startRotateReaderWithStorage(l, walkFile, openFile)
+
+	nextReaderErr := make(chan error, 1)
+	go func() {
+		nextReaderErr <- l.nextReader()
+	}()
+	select {
+	case err := <-nextReaderErr:
+		require.NoError(t, err)
+		require.Equal(t, firstFile, l.externalFile.fileName)
+	case <-time.After(3 * time.Second):
+		t.Fatal("reader did not recover from the open error")
+	}
+	require.NoError(t, l.Close())
+	require.NoError(t, <-loopErr)
+}
+
+func TestWaitOnEOFCloseInterruptsPoll(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+
+	l := &rotateReader{
+		cfg: ReaderCfg{
+			Dir:       dir,
+			Format:    cmd.FormatAuditLogPlugin,
+			WaitOnEOF: true,
+		},
+		storage: storage,
+		lg:      zap.NewNop(),
+		fileCh:  make(chan fileReader, 1),
+	}
+	walkDone := make(chan struct{}, 1)
+	loopErr := startRotateReaderWithWalker(l, func(ctx context.Context, curFileName string, fn func(string, int64) (bool, error)) error {
+		err := l.walkFile(ctx, curFileName, fn)
+		select {
+		case walkDone <- struct{}{}:
+		default:
+		}
+		return err
+	})
+	select {
+	case <-walkDone:
+	case <-time.After(time.Second):
+		t.Fatal("reader did not finish the initial file listing")
+	}
+
+	closed := make(chan error, 1)
+	go func() {
+		closed <- l.Close()
+	}()
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(readerPollInterval / 2):
+		t.Fatal("reader close did not interrupt the poll interval")
+	}
+	require.NoError(t, <-loopErr)
+}
+
+func startRotateReaderWithWalker(l *rotateReader, walkFile walkFileFunc) <-chan error {
+	return startRotateReaderWithStorage(l, walkFile, l.storage.Open)
+}
+
+func startRotateReaderWithStorage(l *rotateReader, walkFile walkFileFunc, openFile openFileFunc) <-chan error {
+	ctx, cancel := context.WithCancel(context.Background())
+	l.cancel = cancel
+	loopErr := make(chan error, 1)
+	l.wg.Run(func() {
+		loopErr <- l.openFileLoopWithStorage(ctx, walkFile, openFile)
+	}, l.lg)
+	return loopErr
 }
 
 func TestReadGZip(t *testing.T) {

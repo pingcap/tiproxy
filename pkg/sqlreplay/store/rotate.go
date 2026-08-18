@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/cenkalti/backoff/v4"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/pingcap/tidb/br/pkg/storage"
 	"github.com/pingcap/tiproxy/lib/util/errors"
@@ -169,6 +170,9 @@ type fileReader struct {
 	reader   storage.ExternalFileReader
 }
 
+type walkFileFunc func(context.Context, string, func(string, int64) (bool, error)) error
+type openFileFunc func(context.Context, string, *storage.ReaderOption) (storage.ExternalFileReader, error)
+
 type rotateReader struct {
 	cfg          ReaderCfg
 	absolutePath string
@@ -180,6 +184,7 @@ type rotateReader struct {
 	wg           waitgroup.WaitGroup
 	cancel       context.CancelFunc
 	eof          bool
+	terminalErr  error
 
 	// fileMetaCache and fileMetaCacheIdx are used to access and cache file metadata.
 	// The fileMeta in the cache should be sorted by file index in ascending order.
@@ -262,16 +267,30 @@ func (r *rotateReader) closeFile() error {
 }
 
 func (r *rotateReader) openFileLoop(ctx context.Context) error {
+	return r.openFileLoopWithWalker(ctx, r.walkFile)
+}
+
+func (r *rotateReader) openFileLoopWithWalker(ctx context.Context, walkFile walkFileFunc) error {
+	return r.openFileLoopWithStorage(ctx, walkFile, r.storage.Open)
+}
+
+func (r *rotateReader) openFileLoopWithStorage(ctx context.Context, walkFile walkFileFunc, openFile openFileFunc) error {
 	var curFileTime time.Time
 	var curFileName string
 	var err error
+	retryBackoff := backoff.NewExponentialBackOff()
+	retryBackoff.InitialInterval = readerRetryInitial
+	retryBackoff.MaxInterval = readerRetryMax
+	retryBackoff.MaxElapsedTime = 0
+	retryBackoff.Reset()
+fileLoop:
 	for ctx.Err() == nil {
 		var minFileTime time.Time
 		var minFileName string
 		fileNamePrefix := getFileNamePrefix(r.cfg.Format)
 		childCtx, cancel := context.WithTimeout(ctx, opTimeout)
 		startTime := time.Now()
-		err = r.walkFile(childCtx, curFileName,
+		err = walkFile(childCtx, curFileName,
 			func(name string, size int64) (bool, error) {
 				if !strings.HasPrefix(name, fileNamePrefix) {
 					return false, nil
@@ -296,11 +315,26 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 			})
 		cancel()
 		if err != nil {
-			break
+			if ctx.Err() != nil {
+				err = nil
+				break
+			}
+			if !r.cfg.WaitOnEOF {
+				break
+			}
+			if !r.waitForStorageRetry(ctx, retryBackoff, "list files", err) {
+				err = nil
+				break
+			}
+			continue
 		}
 		if minFileName == "" {
+			retryBackoff.Reset()
 			if r.cfg.WaitOnEOF {
-				time.Sleep(10 * time.Millisecond)
+				if !waitForContext(ctx, readerPollInterval) {
+					err = nil
+					break
+				}
 				continue
 			} else {
 				err = io.EOF
@@ -309,11 +343,25 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		}
 		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
 		var fr storage.ExternalFileReader
-		fr, err = r.storage.Open(ctx, minFileName, &storage.ReaderOption{})
-		if err != nil {
+		for {
+			fr, err = openFile(ctx, minFileName, &storage.ReaderOption{})
+			if err == nil {
+				break
+			}
 			err = errors.WithStack(err)
-			break
+			if ctx.Err() != nil {
+				err = nil
+				break fileLoop
+			}
+			if !r.cfg.WaitOnEOF {
+				break fileLoop
+			}
+			if !r.waitForStorageRetry(ctx, retryBackoff, "open file", err) {
+				err = nil
+				break fileLoop
+			}
 		}
+		retryBackoff.Reset()
 		curFileTime = minFileTime
 		curFileName = minFileName
 		r.lg.Info("opening next file", zap.String("file", path.Join(r.storage.URI(), minFileName)),
@@ -322,15 +370,44 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		select {
 		case r.fileCh <- fileReader{fileName: minFileName, reader: fr}:
 		case <-ctx.Done():
+			_ = fr.Close()
 		}
 	}
+	r.terminalErr = err
 	close(r.fileCh)
 	return err
+}
+
+func (r *rotateReader) waitForStorageRetry(ctx context.Context, retryBackoff backoff.BackOff, operation string, err error) bool {
+	retryAfter := retryBackoff.NextBackOff()
+	if retryAfter == backoff.Stop {
+		return false
+	}
+	r.lg.Warn("traffic storage operation failed, retrying",
+		zap.String("operation", operation),
+		zap.String("dir", r.cfg.Dir),
+		zap.Duration("retry_after", retryAfter),
+		zap.Error(err))
+	return waitForContext(ctx, retryAfter)
+}
+
+func waitForContext(ctx context.Context, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func (r *rotateReader) nextReader() error {
 	fileReader, ok := <-r.fileCh
 	if !ok {
+		if r.terminalErr != nil {
+			return r.terminalErr
+		}
 		return io.EOF
 	}
 	r.reader = fileReader.reader
