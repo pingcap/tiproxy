@@ -33,6 +33,11 @@ The implementation is split into:
 Neither crate depends on `control-proto`, the legacy bridge, the topology
 owner, or the SQL-serving dataplane. There is no replay payload over IPC or
 FFI. A replayer process has exactly one job owner and at most one active job.
+That invariant is process-local: during the migration window the standalone
+Rust process and the integrated Go traffic API are not mechanically fenced
+from each other. Deployments must not point both at the same replay input,
+checkpoint, and target at once. Cross-process coordination is an operational
+precondition, not an exactly-once lock supplied by this executable.
 
 ## Input contracts
 
@@ -105,11 +110,15 @@ configuration, permission failures, missing objects, corrupt data, and decode
 failures are terminal.
 
 Local checkpoint and metadata writes use create-in-the-same-directory,
-`sync_all`, atomic rename, and parent-directory sync. Remote publication uses a
-unique temporary object followed by a conditional final write when the
-provider supports it; providers without a compare/create primitive reject
-shared-writer mode. A replayer never treats a partially published object as a
-traffic file.
+`sync_all`, atomic rename, and parent-directory sync. The current Go checkpoint
+and SQL-output flags are filesystem paths, so `CP-REPLAYER` uses OpenDAL cloud
+services only for read/list/stat and rejects remote checkpoint or output URLs.
+It therefore has no shared remote writer and makes no cross-provider atomic
+publication claim. If a later owner adds remote publication, it must query
+OpenDAL's `Capability.write_with_if_not_exists` at runtime and use a provider's
+native atomic conditional-create primitive; read-then-write emulation is not
+acceptable. Providers without that capability must reject shared-writer mode.
+Capture-side remote publication remains owned by `CP-CAPTURE` (`#151`).
 
 Native streams apply AES-256-CTR and gzip in the same layer order as Go. The
 first 16 bytes are the random IV and the key is exactly the first 32 bytes of
@@ -157,7 +166,12 @@ input identity digest. Loading a checkpoint with different inputs, format,
 filters, partitioning, or encryption metadata fails closed. SIGINT/SIGTERM
 stops new scheduling, drains only when graceful cancellation was requested,
 publishes the final checkpoint/report atomically, joins all owned tasks, and
-then exits.
+then exits. The restart contract is explicitly bounded at-least-once, not
+exactly-once: a command whose request was sent but whose response/frontier was
+not committed at process death may execute once again after restart. Bare
+MySQL supplies no idempotency token or transaction with which the replayer
+could rule that out, so write traffic can have a duplicate effect at the
+frontier.
 
 ## Reports and service mode
 
@@ -192,8 +206,9 @@ The ownership move requires all of the following from the exact PR head:
    1x, and 2x. A statement-ID and deadline mutation must be killed.
 4. A process-death run kills the replayer during decode and during an in-flight
    response, restarts from the checkpoint, and proves no command before the
-   committed frontier is replayed twice. Dynamic-input owner partitioning is
-   stable across restart. A non-atomic-checkpoint mutation must be killed.
+   committed frontier is replayed twice while allowing only the one boundary
+   in-flight command to repeat. Dynamic-input owner partitioning is stable
+   across restart. A non-atomic-checkpoint mutation must be killed.
 5. Rust format, lint, unit, doc, release (amd64/arm64), supply-chain, stale-lock,
    negative, and `PARITY-EXCL-001` gates are green. The released artifact
    reports the repository version/commit/build time and the Go `cmd/replayer`
