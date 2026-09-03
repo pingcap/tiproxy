@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::decode::parse_go_quoted;
+use crate::decode::parse_go_quoted_utf8;
 use crate::{Command, CommandCode, ReplayError};
 
 /// Stateful decoder for `TiProxy` native capture records.
@@ -149,7 +149,7 @@ impl<'a> NativeDecoder<'a> {
                     })?);
                 }
                 "Prepared_stmt" => {
-                    prepared_statement = Some(parse_go_quoted(value).map_err(|message| {
+                    prepared_statement = Some(parse_go_quoted_utf8(value).map_err(|message| {
                         ReplayError::decode(&self.path, line_offset, message)
                     })?);
                 }

@@ -81,6 +81,18 @@
         "[2026/01/08 19:44:11.114 +08:00] [EVENT=\"[QUERY,EXECUTE,SELECT]\"] [USER=root] [CONNECTION_ID=7] [CURRENT_DB=test] [SQL_TEXT=\"SELECT ?\"] [EXECUTE_PARAMS=\"[1]\"]",
         "[2026/01/08 19:44:11.115 +08:00] [EVENT=\"[CONNECTION,DISCONNECT]\"] [USER=root] [CONNECTION_ID=7]"
       ]
+    },
+    {
+      "id": "plugin-binary-kind-bytes",
+      "format": "audit_log_plugin",
+      "prepared_close": "always",
+      "filter_retries": false,
+      "user_allowlist": [],
+      "source_ordinal": 4,
+      "records": [],
+      "lines": [
+        "[2025/09/06 17:03:53.724 +08:00] [TIMESTAMP=2025/09/06 17:03:53.724 +08:00] [EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=Execute] [SQL_TEXT=SELECT ?] [SQL_STATEMENTS=Select] [CONNECTION_ID=10] [EXECUTE_PARAMS=\"[\\\"KindBytes \\\\\\\\xff\\\"]\"] [RETRY=false]"
+      ]
     }
   ]
 }

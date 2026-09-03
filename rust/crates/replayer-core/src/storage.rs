@@ -14,7 +14,7 @@
 
 //! Credential-redacted `OpenDAL` input ownership.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -129,8 +129,18 @@ impl InputRoot {
         }
         let root = parsed.path().trim_matches('/');
         config.insert("root".to_owned(), format!("/{root}"));
+        let mut seen_options = HashSet::new();
         for (key, value) in parsed.query_pairs() {
-            if let Some((normalized, value)) = provider_query_option(scheme, &key, &value)? {
+            let option = provider_query_option(scheme, &key, &value)?;
+            let normalized = option
+                .as_ref()
+                .map_or_else(|| "provider".to_owned(), |(key, _)| key.clone());
+            if !seen_options.insert(normalized.clone()) {
+                return Err(ReplayError::Config(format!(
+                    "duplicate object-store query option {normalized}"
+                )));
+            }
+            if let Some((normalized, value)) = option {
                 config.insert(normalized, value);
             }
         }
@@ -417,8 +427,8 @@ fn provider_query_option(
     key: &str,
     value: &str,
 ) -> Result<Option<(String, String)>, ReplayError> {
-    let canonical = key.replace('-', "_");
-    if canonical == "provider" {
+    let canonical = key.to_ascii_lowercase().replace('-', "_");
+    if canonical == "provider" && matches!(scheme, Scheme::S3 | Scheme::Oss) {
         return Ok(None);
     }
     if scheme == Scheme::S3 && canonical == "force_path_style" {
@@ -431,13 +441,25 @@ fn provider_query_option(
         )));
     }
     let normalized = match (scheme, canonical.as_str()) {
+        (
+            Scheme::S3,
+            "endpoint" | "region" | "secret_access_key" | "session_token" | "role_arn"
+            | "external_id" | "profile",
+        )
+        | (Scheme::Azblob, "endpoint" | "account_name" | "account_key" | "sas_token") => {
+            canonical.as_str()
+        }
         (Scheme::S3 | Scheme::Oss, "access_key" | "access_key_id") => "access_key_id",
-        (Scheme::Cos, "access_key" | "access_key_id" | "secret_id") => "secret_id",
-        (Scheme::S3, "secret_access_key") => "secret_access_key",
+        (Scheme::Oss | Scheme::Cos | Scheme::Gcs, "endpoint") => "endpoint",
         (Scheme::Oss, "secret_access_key" | "access_key_secret") => "access_key_secret",
+        (Scheme::Cos, "access_key" | "access_key_id" | "secret_id") => "secret_id",
         (Scheme::Cos, "secret_access_key" | "secret_key") => "secret_key",
         (Scheme::Gcs, "credentials_file") => "credential_path",
-        _ => canonical.as_str(),
+        _ => {
+            return Err(ReplayError::Config(format!(
+                "unsupported object-store query option {canonical} for {scheme:?}"
+            )));
+        }
     };
     Ok(Some((normalized.to_owned(), value.to_owned())))
 }
@@ -560,6 +582,37 @@ mod tests {
             None
         );
         assert!(provider_query_option(Scheme::S3, "force-path-style", "maybe").is_err());
+        assert!(provider_query_option(Scheme::S3, "root", "/override").is_err());
+        assert!(provider_query_option(Scheme::S3, "bucket", "override").is_err());
+        assert!(provider_query_option(Scheme::S3, "unknown", "value").is_err());
+        assert!(provider_query_option(Scheme::Gcs, "provider", "ignored").is_err());
+    }
+
+    #[test]
+    fn object_store_query_rejects_alias_duplicates_and_root_override() {
+        let duplicate = InputRoot::open("s3://bucket/prefix?access-key=a&access_key_id=b")
+            .expect_err("aliases must not use last-wins semantics");
+        assert!(
+            duplicate
+                .to_string()
+                .contains("duplicate object-store query option")
+        );
+
+        let override_root = InputRoot::open("s3://bucket/prefix?root=/elsewhere")
+            .expect_err("root override must fail closed");
+        assert!(
+            override_root
+                .to_string()
+                .contains("unsupported object-store query option root")
+        );
+
+        let override_container = InputRoot::open("azblob://container/prefix?container=other")
+            .expect_err("container override must fail closed");
+        assert!(
+            override_container
+                .to_string()
+                .contains("unsupported object-store query option container")
+        );
     }
 
     #[test]

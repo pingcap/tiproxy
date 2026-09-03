@@ -227,6 +227,9 @@ pub struct Command {
     pub source_ordinal: u64,
     /// Stable record ordinal within one source.
     pub record_ordinal: u64,
+    /// Stable command ordinal within a record that expands to multiple commands.
+    #[serde(default)]
+    pub command_ordinal: u32,
 }
 
 impl Command {
@@ -256,6 +259,7 @@ impl Command {
             line,
             source_ordinal: 0,
             record_ordinal: 0,
+            command_ordinal: 0,
         })
     }
 }

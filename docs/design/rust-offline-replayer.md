@@ -39,6 +39,15 @@ from each other. Deployments must not point both at the same replay input,
 checkpoint, and target at once. Cross-process coordination is an operational
 precondition, not an exactly-once lock supplied by this executable.
 
+The first implementation PR is deliberately a **dry-run foundation**, not the
+ownership cutover described by this target contract. It enables bounded input,
+decode, filter, deterministic materialized ordering, and checkpoint evidence.
+Backend execution, replay scheduling, SQL/report output, dynamic input,
+service mode, and the Go-command cutover remain fail-closed until the relevant
+evidence below is present. Where this document says the replayer "supports" or
+"owns" those deferred paths, it describes the required cutover state rather
+than behavior exposed by the foundation binary.
+
 ## Input contracts
 
 ### Native capture format
@@ -76,14 +85,18 @@ larger than 64 MiB fails closed rather than scanning without a bound.
 The extension decoder accepts `_LOG_TIME` plus the quoted tuple `EVENT`
 contract for `QUERY`, `EXECUTE`, `CONNECTION`, and `DISCONNECT`. It preserves
 the current `always`/`never` prepared-close strategies, skips redacted
-parameters, and supports the existing end-time filter. `directed` close and
-retry filtering remain rejected for this format.
+parameters, and supports the existing end-time filter. For Go compatibility,
+the command-start filter maps onto that same frontier; an explicit command-end
+filter takes precedence. `directed` close and retry filtering remain rejected
+for this format.
 
 ### Ordering and filtering
 
 Multiple readers are merged by `(command_start_timestamp, connection_id,
-source_ordinal, record_ordinal)`. The first two keys preserve the observable Go
-contract; the final keys make previously unstable exact ties deterministic.
+source_ordinal, record_ordinal, command_ordinal)`. The first two keys preserve
+the observable Go contract; the final keys make previously unstable exact ties
+deterministic, including `PREPARE` / `EXECUTE` / `CLOSE` commands expanded from
+one audit record.
 Audit inputs use the configured bounded reorder buffer. Native input rejects
 multiple roots and a non-directed prepared-close strategy.
 
@@ -101,13 +114,17 @@ Apache OpenDAL. The dependency is exact-pinned, has default features disabled,
 and enables only `fs`, `s3`, `gcs`, `azblob`, `oss`, and `cos` plus the Tokio
 executor. Provider clients never escape this module.
 
-The URI adapter freezes the Go query parameters, provider root/path rules,
-ordered pagination, and directory listing behavior. Credentials are accepted
-only through the provider-specific configuration boundary and are redacted
-from errors, diagnostics, job JSON, and logs. Transient reads/lists use the
-bounded, cancellation-aware retry classifier from the CP-002 policy; invalid
+The URI adapter accepts a provider-specific allowlist of the Go-compatible
+read-side query parameters and rejects unknown, duplicate, bucket/container,
+and root overrides before constructing OpenDAL. It preserves provider
+root/path rules, ordered pagination, and directory listing behavior.
+Credentials are accepted only through that configuration boundary and are
+redacted from errors, diagnostics, job JSON, and logs. The foundation performs
+one bounded storage attempt and fails closed. Before service, backend, or
+dynamic-input mode is enabled, transient reads/lists must use the bounded,
+cancellation-aware retry classifier from the CP-002 policy; invalid
 configuration, permission failures, missing objects, corrupt data, and decode
-failures are terminal.
+failures remain terminal.
 
 Local checkpoint and metadata writes use create-in-the-same-directory,
 `sync_all`, atomic rename, and parent-directory sync. The current Go checkpoint
@@ -123,8 +140,9 @@ Capture-side remote publication remains owned by `CP-CAPTURE` (`#151`).
 Native streams apply AES-256-CTR and gzip in the same layer order as Go. The
 first 16 bytes are the random IV and the key is exactly the first 32 bytes of
 the key file. Short keys, short IVs, invalid gzip streams, wrong metadata, and
-trailing/truncated records fail closed. Plaintext keys and credentials are
-zeroized after construction.
+trailing/truncated records fail closed. Local AES key-file contents use a
+zeroizing buffer. URI credentials are redacted from diagnostics, but complete
+provider-config zeroization is a cutover gate before untrusted service mode.
 
 Dynamic input initially supports the Go-compatible local and S3 modes. A
 directory is assigned with FNV-1a modulo `replayer-count`; `replayer-index`
@@ -157,13 +175,19 @@ reconnects and restores the command's current database. `--ignore-errs`
 controls command failures, never configuration, corruption, authentication,
 or ownership failures.
 
-`--dry-run` performs the complete read/decrypt/decompress/decode/order/filter
-path without a backend. It produces the same command/filter counts and
-checkpoint frontier as execution mode.
+`--dry-run` performs the read/decrypt/decompress/decode/order/filter path
+without a backend. The foundation materializes and globally sorts decoded
+commands, so it does not yet exercise the configured reorder-buffer bound.
+Backend/execution modes stay fail-closed until a bounded merge/scheduler uses
+the same ordering and proves equal command/filter counts and checkpoint
+frontier.
 
-Checkpoints contain the current command start/end timestamp frontier and an
-input identity digest. Loading a checkpoint with different inputs, format,
-filters, partitioning, or encryption metadata fails closed. SIGINT/SIGTERM
+Checkpoints contain schema-v2's full durable frontier
+`(command_start_timestamp, connection_id, source_ordinal, record_ordinal,
+command_ordinal)`, the command end timestamp, and an input identity digest that
+also binds the frontier schema. Loading a checkpoint with an older schema or
+different inputs, format, filters, partitioning, or encryption metadata fails
+closed. SIGINT/SIGTERM
 stops new scheduling, drains only when graceful cancellation was requested,
 publishes the final checkpoint/report atomically, joins all owned tasks, and
 then exits. The restart contract is explicitly bounded at-least-once, not
@@ -190,7 +214,12 @@ supports immediate and graceful modes with one absolute timeout.
 
 ## Differential and fault evidence
 
-The ownership move requires all of the following from the exact PR head:
+The ownership move requires all of the following from the exact cutover PR
+head. The current foundation evidence covers well-formed native, audit-plugin,
+and audit-extension command observations (including allocation, duplicate and
+retry filtering, prepared expansion, and binary `KindBytes`), plus Rust-local
+malformed/boundary, gzip/AES, storage-mapping, and checkpoint tests. It does not
+claim the complete corpus or live/provider/restart coverage listed below.
 
 1. A Go oracle and the production Rust decoders consume the same native,
    plugin, and extension corpus. Semantic command observations, normalized

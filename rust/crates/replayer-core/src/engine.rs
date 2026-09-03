@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::checkpoint::{Checkpoint, InputIdentity};
+use crate::checkpoint::{CHECKPOINT_SCHEMA_VERSION, Checkpoint, InputIdentity};
 use crate::config::ReplayConfig;
 use crate::decode::{AuditDecoder, NativeDecoder};
 use crate::storage::InputRoot;
@@ -141,6 +141,7 @@ pub async fn dry_run(config: &ReplayConfig) -> Result<DryRunSummary, ReplayError
             .then_with(|| left.connection_id.cmp(&right.connection_id))
             .then_with(|| left.source_ordinal.cmp(&right.source_ordinal))
             .then_with(|| left.record_ordinal.cmp(&right.record_ordinal))
+            .then_with(|| left.command_ordinal.cmp(&right.command_ordinal))
     });
     if let Some(frontier) = checkpoint.as_ref() {
         commands.retain(|command| {
@@ -149,11 +150,13 @@ pub async fn dry_run(config: &ReplayConfig) -> Result<DryRunSummary, ReplayError
                 command.connection_id,
                 command.source_ordinal,
                 command.record_ordinal,
+                command.command_ordinal,
             ) > (
                 frontier.command_start_unix_nanos,
                 frontier.connection_id,
                 frontier.source_ordinal,
                 frontier.record_ordinal,
+                frontier.command_ordinal,
             )
         });
     }
@@ -182,6 +185,7 @@ pub async fn dry_run(config: &ReplayConfig) -> Result<DryRunSummary, ReplayError
             command.connection_id,
             command.source_ordinal,
             command.record_ordinal,
+            command.command_ordinal,
             checkpoint
                 .as_ref()
                 .map_or(0, |value| value.committed_commands)
@@ -210,6 +214,7 @@ pub async fn dry_run(config: &ReplayConfig) -> Result<DryRunSummary, ReplayError
 
 #[derive(Serialize)]
 struct IdentityConfig<'a> {
+    checkpoint_frontier_schema_version: u32,
     format: TrafficFormat,
     read_only: bool,
     prepared_close: crate::PreparedCloseStrategy,
@@ -225,6 +230,7 @@ struct IdentityConfig<'a> {
 impl<'a> From<&'a ReplayConfig> for IdentityConfig<'a> {
     fn from(config: &'a ReplayConfig) -> Self {
         Self {
+            checkpoint_frontier_schema_version: CHECKPOINT_SCHEMA_VERSION,
             format: config.format,
             read_only: config.read_only,
             prepared_close: config.prepared_close,

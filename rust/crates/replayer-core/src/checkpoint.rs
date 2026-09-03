@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ReplayError;
 
-const CHECKPOINT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const CHECKPOINT_SCHEMA_VERSION: u32 = 2;
 static TEMPORARY_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Digest binding a checkpoint to the exact replay input and filters.
@@ -66,6 +66,8 @@ pub struct Checkpoint {
     pub source_ordinal: u64,
     /// Stable source-local record ordinal.
     pub record_ordinal: u64,
+    /// Stable command ordinal within a source-local record.
+    pub command_ordinal: u32,
     /// Number of commands committed before and including this frontier.
     pub committed_commands: u64,
     /// Number of read-only-filtered commands before and including this frontier.
@@ -84,6 +86,7 @@ impl Checkpoint {
         connection_id: u64,
         source_ordinal: u64,
         record_ordinal: u64,
+        command_ordinal: u32,
         committed_commands: u64,
         filtered_commands: u64,
     ) -> Self {
@@ -96,6 +99,7 @@ impl Checkpoint {
             connection_id,
             source_ordinal,
             record_ordinal,
+            command_ordinal,
             committed_commands,
             filtered_commands,
         }
@@ -147,7 +151,7 @@ impl Checkpoint {
     /// Returns an error when the checkpoint cannot be encoded or durably
     /// written to the requested local path.
     pub fn save_atomic(&self, path: &Path) -> Result<(), ReplayError> {
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let parent = checkpoint_parent(path);
         let file_name = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -208,6 +212,12 @@ impl Checkpoint {
     }
 }
 
+fn checkpoint_parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -222,8 +232,18 @@ mod tests {
         std::fs::create_dir_all(&directory).expect("create temp directory");
         let path = directory.join("checkpoint.json");
         let identity = InputIdentity::from_canonical_bytes(b"input-a");
-        let checkpoint =
-            Checkpoint::new(identity.clone(), 10, 11, "input".to_owned(), 7, 1, 2, 3, 1);
+        let checkpoint = Checkpoint::new(
+            identity.clone(),
+            10,
+            11,
+            "input".to_owned(),
+            7,
+            1,
+            2,
+            0,
+            3,
+            1,
+        );
         checkpoint.save_atomic(&path).expect("save checkpoint");
         assert_eq!(
             Checkpoint::load(&path, &identity).expect("load"),
@@ -232,5 +252,17 @@ mod tests {
         let other = InputIdentity::from_canonical_bytes(b"input-b");
         assert!(Checkpoint::load(&path, &other).is_err());
         std::fs::remove_dir_all(directory).expect("remove temp directory");
+    }
+
+    #[test]
+    fn bare_filename_uses_current_directory_for_sync() {
+        assert_eq!(
+            checkpoint_parent(Path::new("checkpoint.json")),
+            Path::new(".")
+        );
+        assert_eq!(
+            checkpoint_parent(Path::new("state/checkpoint.json")),
+            Path::new("state")
+        );
     }
 }

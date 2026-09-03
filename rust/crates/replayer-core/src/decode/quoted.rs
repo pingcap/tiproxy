@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) fn parse_go_quoted(input: &str) -> Result<String, String> {
-    let bytes = input.as_bytes();
+pub(crate) fn parse_go_quoted(input: &[u8]) -> Result<Vec<u8>, String> {
+    let bytes = input;
     if bytes.len() < 2 || bytes.first() != Some(&b'"') || bytes.last() != Some(&b'"') {
         return Err("value must be a Go-quoted string".to_owned());
     }
@@ -80,7 +80,12 @@ pub(crate) fn parse_go_quoted(input: &str) -> Result<String, String> {
         }
         index += 1;
     }
-    String::from_utf8(output).map_err(|_| "quoted value is not valid UTF-8".to_owned())
+    Ok(output)
+}
+
+pub(crate) fn parse_go_quoted_utf8(input: &str) -> Result<String, String> {
+    String::from_utf8(parse_go_quoted(input.as_bytes())?)
+        .map_err(|_| "quoted value is not valid UTF-8".to_owned())
 }
 
 fn parse_hex(bytes: &[u8], start: usize, count: usize) -> Result<u32, String> {
@@ -115,14 +120,15 @@ mod tests {
     #[test]
     fn accepts_go_specific_escapes() {
         assert_eq!(
-            parse_go_quoted(r#""a\x00\u4e2d\U0001f60a\141""#).expect("valid"),
-            "a\0中😊a"
+            parse_go_quoted(br#""a\x00\u4e2d\U0001f60a\141""#).expect("valid"),
+            "a\0中😊a".as_bytes()
         );
     }
 
     #[test]
-    fn rejects_invalid_utf8_and_short_escapes() {
-        assert!(parse_go_quoted(r#""\xff""#).is_err());
-        assert!(parse_go_quoted(r#""\x0""#).is_err());
+    fn preserves_binary_and_rejects_short_escapes() {
+        assert_eq!(parse_go_quoted(br#""\xff""#).expect("binary"), [0xff]);
+        assert!(parse_go_quoted(br#""\x0""#).is_err());
+        assert!(parse_go_quoted_utf8(r#""\xff""#).is_err());
     }
 }

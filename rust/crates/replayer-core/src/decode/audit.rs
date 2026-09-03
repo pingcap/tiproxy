@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use time::OffsetDateTime;
 
-use crate::decode::parse_go_quoted;
+use crate::decode::{parse_go_quoted, parse_go_quoted_utf8};
 use crate::{Command, CommandCode, PreparedCloseStrategy, ReplayError, TrafficFormat};
 
 const AUDIT_TIME_FORMAT: &str = concat!(
@@ -150,7 +150,16 @@ impl AuditDecoder {
                 ReplayError::decode(&self.path, offset, "audit line is not valid UTF-8")
             })?;
             self.record_ordinal = self.record_ordinal.saturating_add(1);
-            let commands = self.decode_line(text, offset, line)?;
+            let mut commands = self.decode_line(text, offset, line)?;
+            for (command_ordinal, command) in commands.iter_mut().enumerate() {
+                command.command_ordinal = u32::try_from(command_ordinal).map_err(|_| {
+                    ReplayError::decode(
+                        &self.path,
+                        offset,
+                        "too many commands expanded from one audit record",
+                    )
+                })?;
+            }
             output.extend(commands);
             offset = if end < input.len() { end + 1 } else { end };
         }
@@ -248,7 +257,7 @@ impl AuditDecoder {
         }
         let encoded_command = fields.get("COMMAND").map_or("", String::as_str);
         let command_name = if encoded_command.starts_with('"') {
-            parse_go_quoted(encoded_command)
+            parse_go_quoted_utf8(encoded_command)
                 .map_err(|message| ReplayError::decode(&self.path, offset, message))?
         } else {
             encoded_command.to_owned()
@@ -302,10 +311,11 @@ impl AuditDecoder {
     ) -> Result<Vec<Command>, ReplayError> {
         let end_time = parse_audit_time(required(fields, "_LOG_TIME", &self.path, offset)?)
             .map_err(|message| ReplayError::decode(&self.path, offset, message))?;
-        if self
-            .command_end_time
-            .is_some_and(|frontier| end_time < frontier)
-        {
+        // The Go extension decoder maps command-start-time onto its sole
+        // end-time frontier. A non-zero command-end-time is then applied
+        // later and takes precedence.
+        let frontier = self.command_end_time.or(self.command_start_time);
+        if frontier.is_some_and(|frontier| end_time < frontier) {
             return Ok(Vec::new());
         }
         if !self.user_allowed(fields) {
@@ -313,7 +323,7 @@ impl AuditDecoder {
         }
         let replay_id = self.ensure_connection(upstream_connection_id)?;
         let encoded_event = required(fields, "EVENT", &self.path, offset)?;
-        let event = parse_go_quoted(encoded_event)
+        let event = parse_go_quoted_utf8(encoded_event)
             .map_err(|message| ReplayError::decode(&self.path, offset, message))?;
         let event = event
             .strip_prefix('[')
@@ -694,7 +704,7 @@ fn required<'a>(
 
 fn unquote_if_needed(value: &str) -> Result<String, String> {
     if value.starts_with('"') {
-        parse_go_quoted(value)
+        parse_go_quoted_utf8(value)
     } else if value.is_empty() {
         Err("empty SQL or command value".to_owned())
     } else {
@@ -769,11 +779,9 @@ fn prepared_command(
 }
 
 fn parse_plugin_parameters(input: &str) -> Result<Vec<Parameter>, String> {
-    let decoded = parse_go_quoted(input).map_err(|error| format!("invalid params: {error}"))?;
-    let body = decoded
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .ok_or_else(|| "params have no surrounding brackets".to_owned())?;
+    let decoded =
+        parse_go_quoted(input.as_bytes()).map_err(|error| format!("invalid params: {error}"))?;
+    let body = bracket_body(&decoded)?;
     if body.is_empty() {
         return Ok(Vec::new());
     }
@@ -782,33 +790,36 @@ fn parse_plugin_parameters(input: &str) -> Result<Vec<Parameter>, String> {
         .into_iter()
         .map(|value| {
             let decoded = parse_go_quoted(value)?;
-            let (kind, value) = decoded
-                .split_once(' ')
-                .ok_or_else(|| format!("no space in param {decoded}"))?;
+            let separator = decoded
+                .iter()
+                .position(|byte| *byte == b' ')
+                .ok_or_else(|| {
+                    format!("no space in param {}", String::from_utf8_lossy(&decoded))
+                })?;
+            let kind = std::str::from_utf8(&decoded[..separator])
+                .map_err(|_| "parameter kind is not valid UTF-8".to_owned())?;
+            let value = &decoded[separator + 1..];
             match kind {
                 "KindNull" => Ok(Parameter::Null),
-                "KindInt64" => value
+                "KindInt64" => parameter_text(value)?
                     .parse::<i64>()
                     .map(Parameter::Signed)
-                    .map_err(|_| format!("invalid signed param {value}")),
-                "KindUint64" => value
+                    .map_err(|_| "invalid signed param".to_owned()),
+                "KindUint64" => parameter_text(value)?
                     .parse::<u64>()
                     .map(Parameter::Unsigned)
-                    .map_err(|_| format!("invalid unsigned param {value}")),
-                "KindFloat32" => value
+                    .map_err(|_| "invalid unsigned param".to_owned()),
+                "KindFloat32" => parameter_text(value)?
                     .parse::<f32>()
                     .map(Parameter::Float)
-                    .map_err(|_| format!("invalid float param {value}")),
-                "KindFloat64" | "KindMysqlDecimal" => value
+                    .map_err(|_| "invalid float param".to_owned()),
+                "KindFloat64" | "KindMysqlDecimal" => parameter_text(value)?
                     .parse::<f64>()
                     .map(Parameter::Double)
-                    .map_err(|_| format!("invalid double param {value}")),
-                "KindString" => parse_go_quoted(&format!("\"{value}\""))
-                    .map(|value| Parameter::String(value.into_bytes())),
-                "KindBytes" => parse_go_quoted(&format!("\"{value}\""))
-                    .map(|value| Parameter::String(value.into_bytes())),
+                    .map_err(|_| "invalid double param".to_owned()),
+                "KindString" | "KindBytes" => parse_parameter_bytes(value).map(Parameter::String),
                 "KindBinaryLiteral" | "KindMysqlBit" | "KindMysqlSet" | "KindMysqlTime"
-                | "KindMysqlJSON" => Ok(Parameter::String(value.as_bytes().to_vec())),
+                | "KindMysqlJSON" => Ok(Parameter::String(value.to_vec())),
                 "KindMysqlDuration" | "KindMysqlEnum" | "KindInterface" | "KindMinNotNull"
                 | "KindMaxValue" | "KindRaw" => Err(format!("unsupported param type {kind}")),
                 _ => Err(format!("unknown param type {kind}")),
@@ -818,24 +829,36 @@ fn parse_plugin_parameters(input: &str) -> Result<Vec<Parameter>, String> {
 }
 
 fn parse_extension_parameters(input: &str) -> Result<Vec<Parameter>, String> {
-    let decoded = parse_go_quoted(input).map_err(|error| format!("invalid params: {error}"))?;
-    let body = decoded
-        .strip_prefix('[')
-        .and_then(|value| value.strip_suffix(']'))
-        .ok_or_else(|| "params have no surrounding brackets".to_owned())?;
+    let decoded =
+        parse_go_quoted(input.as_bytes()).map_err(|error| format!("invalid params: {error}"))?;
+    let body = bracket_body(&decoded)?;
     if body.is_empty() {
         return Ok(Vec::new());
     }
-    split_extension_list(body).map(|values| {
-        values
-            .into_iter()
-            .map(|value| Parameter::String(value.into_bytes()))
-            .collect()
-    })
+    split_extension_list(body).map(|values| values.into_iter().map(Parameter::String).collect())
 }
 
-fn split_quoted_list(input: &str) -> Result<Vec<&str>, String> {
-    let bytes = input.as_bytes();
+fn bracket_body(input: &[u8]) -> Result<&[u8], String> {
+    if input.first() != Some(&b'[') || input.last() != Some(&b']') {
+        return Err("params have no surrounding brackets".to_owned());
+    }
+    Ok(&input[1..input.len() - 1])
+}
+
+fn parameter_text(input: &[u8]) -> Result<&str, String> {
+    std::str::from_utf8(input).map_err(|_| "numeric parameter is not valid UTF-8".to_owned())
+}
+
+fn parse_parameter_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
+    let mut quoted = Vec::with_capacity(input.len().saturating_add(2));
+    quoted.push(b'"');
+    quoted.extend_from_slice(input);
+    quoted.push(b'"');
+    parse_go_quoted(&quoted)
+}
+
+fn split_quoted_list(input: &[u8]) -> Result<Vec<&[u8]>, String> {
+    let bytes = input;
     let mut values = Vec::new();
     let mut index = 0_usize;
     while index < bytes.len() {
@@ -858,11 +881,7 @@ fn split_quoted_list(input: &str) -> Result<Vec<&str>, String> {
                 b'\\' => index += 2,
                 b'"' => {
                     index += 1;
-                    values.push(
-                        input
-                            .get(start..index)
-                            .ok_or_else(|| "parameter is not on UTF-8 boundaries".to_owned())?,
-                    );
+                    values.push(&input[start..index]);
                     closed = true;
                     break;
                 }
@@ -876,8 +895,8 @@ fn split_quoted_list(input: &str) -> Result<Vec<&str>, String> {
     Ok(values)
 }
 
-fn split_extension_list(input: &str) -> Result<Vec<String>, String> {
-    let bytes = input.as_bytes();
+fn split_extension_list(input: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    let bytes = input;
     let mut values = Vec::new();
     let mut index = 0_usize;
     while index < bytes.len() {
@@ -898,9 +917,7 @@ fn split_extension_list(input: &str) -> Result<Vec<String>, String> {
                     b'\\' => index += 2,
                     b'"' => {
                         index += 1;
-                        let quoted = input
-                            .get(start..index)
-                            .ok_or_else(|| "parameter is not on UTF-8 boundaries".to_owned())?;
+                        let quoted = &input[start..index];
                         values.push(parse_go_quoted(quoted)?);
                         break;
                     }
@@ -915,11 +932,7 @@ fn split_extension_list(input: &str) -> Result<Vec<String>, String> {
             while index < bytes.len() && bytes[index] != b',' {
                 index += 1;
             }
-            let value = input
-                .get(start..index)
-                .ok_or_else(|| "parameter is not on UTF-8 boundaries".to_owned())?
-                .trim();
-            values.push(value.to_owned());
+            values.push(input[start..index].trim_ascii().to_vec());
         }
     }
     Ok(values)
@@ -1090,6 +1103,42 @@ mod tests {
             commands[1].payload,
             vec![0x17, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0xfe, 0, 1, b'1']
         );
+    }
+
+    #[test]
+    fn extension_maps_command_start_time_to_end_time_frontier() {
+        let lines = concat!(
+            "[2026/01/08 19:44:11.099 +08:00] ",
+            "[EVENT=\"[QUERY,QUERY_DDL]\"] [USER=root] [CONNECTION_ID=7] ",
+            "[CURRENT_DB=test] [SQL_TEXT=\"CREATE TABLE t (id INT)\"]\n",
+            "[2026/01/08 19:44:11.110 +08:00] ",
+            "[EVENT=\"[QUERY,QUERY_DML,INSERT]\"] [USER=root] [CONNECTION_ID=7] ",
+            "[CURRENT_DB=test] [SQL_TEXT=\"INSERT INTO t VALUES (1)\"]\n"
+        );
+        let frontier = parse_audit_time("2026/01/08 19:44:11.110 +08:00").expect("valid frontier");
+        let mut decoder = AuditDecoder::new(
+            TrafficFormat::AuditLogExtension,
+            "audit.log",
+            4096,
+            PreparedCloseStrategy::Never,
+            Some(frontier),
+            None,
+            false,
+            &[],
+            0,
+        )
+        .expect("decoder");
+        let commands = decoder.decode_all(lines.as_bytes()).expect("decode");
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].payload, b"\x03INSERT INTO t VALUES (1)");
+    }
+
+    #[test]
+    fn plugin_kind_bytes_preserves_non_utf8_payload() {
+        let parameters = parse_plugin_parameters(r#""[\"KindBytes \\\\xff\"]""#)
+            .expect("binary KindBytes parameter");
+        let payload = execute_payload(7, &parameters).expect("execute payload");
+        assert_eq!(payload.last(), Some(&0xff));
     }
 
     #[test]

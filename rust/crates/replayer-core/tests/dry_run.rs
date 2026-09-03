@@ -97,6 +97,7 @@ async fn checkpoint_uses_full_tie_frontier_and_content_identity() -> TestResult 
     assert_eq!(checkpoint.connection_id, 2);
     assert_eq!(checkpoint.source_ordinal, 0);
     assert_eq!(checkpoint.record_ordinal, 1);
+    assert_eq!(checkpoint.command_ordinal, 0);
 
     let resumed = dry_run(&config).await?;
     assert_eq!(resumed.decoded_commands, 0);
@@ -113,6 +114,40 @@ async fn checkpoint_uses_full_tie_frontier_and_content_identity() -> TestResult 
             .err()
             .is_some_and(|error| error.to_string().contains("input identity"))
     );
+
+    std::fs::remove_dir_all(directory)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn checkpoint_frontier_distinguishes_commands_expanded_from_one_record() -> TestResult {
+    let directory = temporary_directory("checkpoint-command-ordinal")?;
+    let traffic = directory.join("tidb-audit-2026-01-08T19-44-11.099.log");
+    let checkpoint_path = directory.join("checkpoint.json");
+    std::fs::write(
+        &traffic,
+        concat!(
+            "[2026/01/08 19:44:11.114 +08:00] ",
+            "[TIMESTAMP=2026/01/08 19:44:11.114 +08:00] ",
+            "[EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=Execute] ",
+            "[SQL_TEXT=SELECT ?] [SQL_STATEMENTS=Select] [CONNECTION_ID=7] ",
+            "[EXECUTE_PARAMS=\"[]\"] [CURRENT_DB=test]\n"
+        ),
+    )?;
+
+    let mut config = dry_run_config(&directory, Some(checkpoint_path.clone()));
+    config.format = TrafficFormat::AuditLogPlugin;
+    config.prepared_close = PreparedCloseStrategy::Always;
+    let first = dry_run(&config).await?;
+    assert_eq!(first.decoded_commands, 3);
+    let checkpoint = Checkpoint::load(&checkpoint_path, &first.input_identity)?
+        .ok_or("checkpoint was not persisted")?;
+    assert_eq!(checkpoint.record_ordinal, 1);
+    assert_eq!(checkpoint.command_ordinal, 2);
+
+    let resumed = dry_run(&config).await?;
+    assert_eq!(resumed.decoded_commands, 0);
+    assert_eq!(resumed.replayed_commands, 0);
 
     std::fs::remove_dir_all(directory)?;
     Ok(())

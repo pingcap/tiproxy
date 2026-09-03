@@ -15,7 +15,6 @@
 //! Replay configuration and compatibility validation.
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -107,7 +106,11 @@ impl ReplayConfig {
                 "speed should be between 0.1 and 10".to_owned(),
             ));
         }
-        if self.start_time + Duration::from_secs(60) < now {
+        let latest_allowed_now = self
+            .start_time
+            .checked_add(time::Duration::seconds(60))
+            .ok_or_else(|| ReplayError::Config("start time grace period overflows".to_owned()))?;
+        if latest_allowed_now < now {
             return Err(ReplayError::Config(
                 "start time should not be in the past".to_owned(),
             ));
@@ -235,5 +238,19 @@ mod tests {
         let mut extension = config(now);
         extension.format = TrafficFormat::AuditLogExtension;
         assert!(extension.validate(now).is_err());
+    }
+
+    #[test]
+    fn start_time_grace_period_overflow_fails_closed() {
+        let maximum = time::Date::MAX
+            .with_hms(23, 59, 59)
+            .expect("valid maximum time")
+            .assume_utc();
+        let mut overflow = config(maximum);
+        overflow.start_time = maximum;
+        let error = overflow
+            .validate(maximum)
+            .expect_err("overflow must fail closed");
+        assert!(error.to_string().contains("grace period overflows"));
     }
 }

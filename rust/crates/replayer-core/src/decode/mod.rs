@@ -20,4 +20,4 @@ mod quoted;
 
 pub use audit::{AuditDecoder, parse_bracket_fields};
 pub use native::NativeDecoder;
-pub(crate) use quoted::parse_go_quoted;
+pub(crate) use quoted::{parse_go_quoted, parse_go_quoted_utf8};
