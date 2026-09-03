@@ -78,6 +78,7 @@ When adding or modifying features, prefer extending existing packages before cre
 - `pkg/util/` - Utilities, including buffered IO, etcd wrapper, HTTP wrapper, simple MySQL lexer, and others.
 - `rust/crates/mysql-wire/` - MySQL wire-format types and codec boundaries; it does not own sockets or routing decisions.
 - `rust/crates/proxy-io/` - Client/backend transport ownership, including future TLS, compression, and PROXY protocol support.
+- `rust/crates/replayer-core/` - Bounded offline traffic replay primitives: input storage, native/audit decoding, deterministic ordering, filtering, and local checkpoints; it has no control-plane or SQL-serving dependency.
 - `rust/crates/session-core/` - Protocol-independent session lifecycle and migration state.
 - `rust/crates/control-router/` - Staged namespace-scoped routing selection, exact config/topology/health capture, and reservation accounting. Production dataplane/binary wiring remains prohibited until full routing parity is complete.
 - `rust/crates/control-routing/` - Protocol-independent route values, pure group matching/port-conflict primitives, and Go-compatible time arithmetic; it owns no reservation or production selector yet and carries no wire payloads.
@@ -94,6 +95,7 @@ When adding or modifying features, prefer extending existing packages before cre
 - `rust/crates/dataplane/` - Rust dataplane orchestration across wire, transport, session, and control components.
 - `rust/crates/differential-runner/` - Payload-free Rust consumer for the immutable Go protocol corpus; it drives merged wire/session parsers and emits sharded semantic observations.
 - `rust/crates/tiproxy-rs/` - Rust dataplane executable and build/version metadata.
+- `rust/crates/tiproxy-replayer/` - Standalone Rust offline traffic replayer composition root; replay payloads never enter the SQL-serving process or control bridge.
 - `tests/compatibility/` - Versioned client-driver and MySQL capability contract shared by the Go/Rust dataplane integration tests.
 - `tests/controlplane/cproute/api-differential/` - One test-only external router API input/output runner and its frozen acceptance/retirement inventories; synthetic adapter smoke does not qualify recorded-trace acceptance. Its `metrics/` package shares value-only query packets and decoding between recording and API replay; it owns no factor state. Its `clock/` package supplies the shared public event clock to test-build overlays only.
 - `tests/controlplane/` - Versioned Go control-plane contract and fault catalogs plus the payload-free observation comparator used by every Rust control-plane migration slice.

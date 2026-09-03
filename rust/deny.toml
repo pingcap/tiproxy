@@ -6,7 +6,16 @@ targets = [
 all-features = true
 
 [advisories]
-ignore = []
+# OpenDAL 0.53.3's S3/GCS signers retain these transitive advisories. This
+# foundation is an operator-run, dry-run-only binary with trusted storage
+# endpoints; service mode and backend execution fail closed. Revisit the pin
+# before either deferred mode is enabled. OpenDAL 0.58 fixes quick-xml but has
+# MSRV 1.91, above this workspace's 1.89 toolchain.
+ignore = [
+    "RUSTSEC-2023-0071",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
 
 [licenses]
 allow = [

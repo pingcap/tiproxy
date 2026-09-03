@@ -32,6 +32,7 @@ on:
       - "scripts/generate-control-proto.sh"
       - "tests/controlplane/**"
       - "tests/dataplane/capture-format/**"
+      - "tests/replayer/**"
   push:
     branches:
       - main
@@ -56,6 +57,7 @@ on:
       - "scripts/generate-control-proto.sh"
       - "tests/controlplane/**"
       - "tests/dataplane/capture-format/**"
+      - "tests/replayer/**"
   # The control-plane evidence jobs below do not run on pull requests. They
   # re-prove live etcd / Go-oracle behaviour that a pull request rarely
   # changes, and re-running them on every push to a branch was the bulk of
@@ -131,6 +133,8 @@ jobs:
         run: make rust-lint
       - name: Run unit tests
         run: make rust-test
+      - name: Compare Go and Rust replay decoders and kill a mutation
+        run: make replayer-differential-evidence
       - name: Run doc tests
         run: make rust-doc-test
       - name: Reject a stale lockfile
