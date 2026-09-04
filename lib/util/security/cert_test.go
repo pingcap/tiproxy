@@ -187,6 +187,7 @@ func TestCertServer(t *testing.T) {
 				require.Nil(t, c.RootCAs)
 				require.Nil(t, ci.cert.Load())
 				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
+				require.NotNil(t, c.GetClientCertificate, "skip-ca should set GetClientCertificate")
 			},
 		},
 		{
@@ -195,12 +196,7 @@ func TestCertServer(t *testing.T) {
 				Cert:       certPath,
 				RSAKeySize: 1024,
 			},
-			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
-				require.NotNil(t, c)
-				require.Nil(t, c.RootCAs)
-				require.Nil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS12, int(c.MinVersion))
-			},
+			checker: nil, // Expect error: both cert and key must be provided
 		},
 		{
 			TLSConfig: config.TLSConfig{
@@ -249,8 +245,10 @@ func TestCertServer(t *testing.T) {
 		ci := NewCert(tc.server)
 		ci.SetConfig(tc.TLSConfig)
 		tcfg, err := ci.Reload(logger)
-		require.NoError(t, err, "case %d", i)
-		if tc.checker != nil {
+		if tc.checker == nil {
+			require.Error(t, err, "case %d", i)
+		} else {
+			require.NoError(t, err, "case %d", i)
 			tc.checker(t, tcfg, ci)
 		}
 	}
@@ -336,6 +334,7 @@ func TestSetConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, tcfg)
 	require.True(t, tcfg.InsecureSkipVerify)
+	require.NotNil(t, tcfg.GetClientCertificate, "skip-ca should set GetClientCertificate")
 
 	cfg = config.TLSConfig{
 		SkipCA: false,
