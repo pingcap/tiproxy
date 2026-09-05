@@ -180,6 +180,9 @@ type rotateReader struct {
 	wg           waitgroup.WaitGroup
 	cancel       context.CancelFunc
 	eof          bool
+	// openFileErr is set by openFileLoop before closing fileCh so nextReader can
+	// return the real WalkDir/Open error instead of io.EOF.
+	openFileErr error
 
 	// fileMetaCache and fileMetaCacheIdx cache file metadata returned by WalkDir.
 	// Up to walkBatchSize entries are cached per batch so openFileLoop can pick the
@@ -198,7 +201,7 @@ func newRotateReader(lg *zap.Logger, store storeapi.Storage, cfg ReaderCfg) (*ro
 	childCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 	r.wg.Run(func() {
-		if err := r.openFileLoop(childCtx); err != nil && !errors.Is(err, io.EOF) {
+		if err := r.openFileLoop(childCtx); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 			r.lg.Error("open file loop failed", zap.Error(err))
 		}
 	}, lg)
@@ -222,6 +225,8 @@ func (r *rotateReader) Read(data []byte) (int, error) {
 			return m, nil
 		}
 		if !errors.Is(err, io.EOF) {
+			// Readers other than GCS and Local FS retry internally. Retrying here requires
+			// reopening the object and seeking to the last raw read offset.
 			return m, errors.WithStack(err)
 		}
 		_ = r.closeFile()
@@ -251,6 +256,7 @@ func (r *rotateReader) Close() error {
 }
 
 func (r *rotateReader) closeFile() error {
+	r.reader = nil
 	if r.externalFile.reader != nil && !reflect.ValueOf(r.externalFile.reader).IsNil() {
 		if err := r.externalFile.reader.Close(); err != nil {
 			r.lg.Warn("failed to close file", zap.String("filename", r.externalFile.fileName), zap.Error(err))
@@ -263,16 +269,16 @@ func (r *rotateReader) closeFile() error {
 }
 
 func (r *rotateReader) openFileLoop(ctx context.Context) error {
+	defer close(r.fileCh)
+
 	var curFileTime time.Time
 	var curFileName string
-	var err error
 	for ctx.Err() == nil {
 		var minFileTime time.Time
 		var minFileName string
 		fileNamePrefix := getFileNamePrefix(r.cfg.Format)
-		childCtx, cancel := context.WithTimeout(ctx, opTimeout)
 		startTime := time.Now()
-		err = r.walkFile(childCtx, curFileName,
+		err := r.walkFile(ctx, curFileName,
 			func(name string, size int64) (bool, error) {
 				if !strings.HasPrefix(name, fileNamePrefix) {
 					return false, nil
@@ -295,25 +301,25 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 				}
 				return false, nil
 			})
-		cancel()
 		if err != nil {
-			break
+			r.openFileErr = err
+			return err
 		}
 		if minFileName == "" {
 			if r.cfg.WaitOnEOF {
 				time.Sleep(10 * time.Millisecond)
 				continue
-			} else {
-				err = io.EOF
-				break
 			}
+			return io.EOF
 		}
-		// storage.Open(ctx) stores the context internally for subsequent reads, so don't set a short timeout.
-		var fr objectio.Reader
-		fr, err = r.storage.Open(ctx, minFileName, &storeapi.ReaderOption{})
+		// Storage implementations handle retries and timeouts inside Open.
+		fr, err := r.storage.Open(ctx, minFileName, &storeapi.ReaderOption{})
 		if err != nil {
-			err = errors.WithStack(err)
-			break
+			if fr != nil {
+				_ = fr.Close()
+			}
+			r.openFileErr = errors.WithStack(err)
+			return r.openFileErr
 		}
 		curFileTime = minFileTime
 		curFileName = minFileName
@@ -323,15 +329,19 @@ func (r *rotateReader) openFileLoop(ctx context.Context) error {
 		select {
 		case r.fileCh <- fileReader{fileName: minFileName, reader: fr}:
 		case <-ctx.Done():
+			_ = fr.Close()
+			return ctx.Err()
 		}
 	}
-	close(r.fileCh)
-	return err
+	return ctx.Err()
 }
 
 func (r *rotateReader) nextReader() error {
 	fileReader, ok := <-r.fileCh
 	if !ok {
+		if r.openFileErr != nil {
+			return r.openFileErr
+		}
 		return io.EOF
 	}
 	r.reader = fileReader.reader
@@ -342,10 +352,14 @@ func (r *rotateReader) nextReader() error {
 	var err error
 	if strings.HasSuffix(fileReader.fileName, fileCompressFormat) {
 		if r.reader, err = newCompressReader(r.reader); err != nil {
+			_ = r.closeFile()
 			return err
 		}
 	}
 	r.reader, err = newReaderWithEncryptOpts(r.reader, r.cfg.EncryptionMethod, r.cfg.EncryptionKey)
+	if err != nil {
+		_ = r.closeFile()
+	}
 	return err
 }
 
@@ -427,6 +441,7 @@ func (r *rotateReader) walkFile(ctx context.Context, curfileName string, fn func
 	walkOpt := r.buildWalkOption(curfileName)
 	batch := make([]fileMeta, 0, walkBatchSize)
 	selectedIdx := -1
+	// Storage implementations handle retries and timeouts inside WalkDir.
 	err := r.storage.WalkDir(ctx, walkOpt, func(name string, size int64) error {
 		if size <= 0 && strings.HasSuffix(name, "/") {
 			return nil
