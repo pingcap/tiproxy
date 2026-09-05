@@ -19,8 +19,10 @@ import (
 	s3v2 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
+	"github.com/pingcap/tidb/pkg/objstore/objectio"
 	"github.com/pingcap/tidb/pkg/objstore/s3store"
 	s3mock "github.com/pingcap/tidb/pkg/objstore/s3store/mock"
+	"github.com/pingcap/tidb/pkg/objstore/storeapi"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -571,4 +573,74 @@ func TestWalkS3(t *testing.T) {
 	// Batch caching should list S3 in pages instead of once per file.
 	require.LessOrEqual(t, selectedFileCount, 5)
 	require.Equal(t, "tidb-audit-2025-09-19T16-54-45.999.log", curFilename)
+}
+
+func TestBrokenFileReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "traffic-2025-09-10T17-01-56.073.log.gz"), []byte("not gzip"), 0666))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "traffic-2025-09-10T17-01-56.172.log"), []byte("hello"), 0666))
+
+	l, err := newRotateReader(zap.NewNop(), storage, ReaderCfg{Dir: dir})
+	require.NoError(t, err)
+	defer l.Close()
+
+	data := make([]byte, 5)
+	n, err := io.ReadFull(l, data)
+	require.Error(t, err)
+	require.Zero(t, n)
+}
+
+type hookStorage struct {
+	storeapi.Storage
+	walkErr error
+	openErr error
+}
+
+func (s *hookStorage) WalkDir(ctx context.Context, opt *storeapi.WalkOption, fn func(string, int64) error) error {
+	if s.walkErr != nil {
+		return s.walkErr
+	}
+	return s.Storage.WalkDir(ctx, opt, fn)
+}
+
+func (s *hookStorage) Open(ctx context.Context, path string, o *storeapi.ReaderOption) (objectio.Reader, error) {
+	if s.openErr != nil {
+		return nil, s.openErr
+	}
+	return s.Storage.Open(ctx, path, o)
+}
+
+func TestWalkDirErrorNotEOF(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "traffic-2025-09-10T17-01-56.073.log"), []byte("hello"), 0666))
+
+	listErr := fmt.Errorf("list objects failed")
+	l, err := newRotateReader(zap.NewNop(), &hookStorage{Storage: storage, walkErr: listErr}, ReaderCfg{Dir: dir})
+	require.NoError(t, err)
+	defer l.Close()
+
+	err = l.nextReader()
+	require.ErrorIs(t, err, listErr)
+}
+
+func TestOpenErrorNotEOF(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	require.NoError(t, err)
+	defer storage.Close()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "traffic-2025-09-10T17-01-56.073.log"), []byte("hello"), 0666))
+
+	openErr := fmt.Errorf("open object failed")
+	l, err := newRotateReader(zap.NewNop(), &hookStorage{Storage: storage, openErr: openErr}, ReaderCfg{Dir: dir})
+	require.NoError(t, err)
+	defer l.Close()
+
+	err = l.nextReader()
+	require.ErrorIs(t, err, openErr)
 }
