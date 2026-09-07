@@ -22,10 +22,14 @@ import (
 	"github.com/pingcap/tidb/pkg/objstore"
 	"github.com/pingcap/tidb/pkg/objstore/s3store"
 	s3mock "github.com/pingcap/tidb/pkg/objstore/s3store/mock"
+	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"go.uber.org/zap"
 )
+
+// The polling interval does not bound scheduling or storage latency.
+const dirWatcherTestTimeout = 5 * time.Second
 
 func TestLocalDirWatcher(t *testing.T) {
 	tempDir := t.TempDir()
@@ -35,7 +39,9 @@ func TestLocalDirWatcher(t *testing.T) {
 	s, err := objstore.New(context.Background(), backend, nil)
 	require.NoError(t, err)
 
+	oldPollInterval := dirWatcherPollInterval
 	dirWatcherPollInterval = time.Millisecond * 10
+	t.Cleanup(func() { dirWatcherPollInterval = oldPollInterval })
 
 	// Create two new directory
 	newDir := filepath.Join(tempDir, "dir_watcher_test_dir1")
@@ -79,25 +85,32 @@ func TestLocalDirWatcher(t *testing.T) {
 	})
 
 	t.Run("Watch function should have the correct result", func(t *testing.T) {
+		var mu sync.Mutex
 		files := make(map[string]struct{})
 		w := NewDirWatcher(logger, pathPrefix, func(filename string) error {
+			mu.Lock()
+			defer mu.Unlock()
 			files[strings.TrimRight(filename, "/")] = struct{}{}
 			return nil
 		}, s)
 		ctx, cancel := context.WithCancel(context.Background())
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			require.NoError(t, w.Watch(ctx))
-		}()
+		var wg waitgroup.WaitGroup
+		var watchErr error
+		wg.Run(func() { watchErr = w.Watch(ctx) })
+		t.Cleanup(func() {
+			cancel()
+			wg.Wait()
+			require.NoError(t, watchErr)
+		})
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok1 := files[newDir]
 			_, ok2 := files[newDir2]
 			return ok1 && ok2 && len(files) == 2
-		}, dirWatcherPollInterval*3, time.Millisecond)
+		}, dirWatcherTestTimeout, time.Millisecond)
 
 		// Add a new directory
 		newDir3 := filepath.Join(tempDir, "dir_watcher_test_dir3")
@@ -105,12 +118,11 @@ func TestLocalDirWatcher(t *testing.T) {
 		defer os.RemoveAll(newDir3)
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok := files[newDir3]
 			return ok && len(files) == 3
-		}, dirWatcherPollInterval*3, time.Millisecond)
-
-		cancel()
-		wg.Wait()
+		}, dirWatcherTestTimeout, time.Millisecond)
 	})
 }
 
@@ -119,9 +131,12 @@ func TestS3DirWatcher(t *testing.T) {
 	s3api := s3mock.NewMockS3API(controller)
 	currentFiles := atomic.Pointer[[]string]{}
 
+	oldPollInterval := dirWatcherPollInterval
 	dirWatcherPollInterval = time.Millisecond * 10
+	t.Cleanup(func() { dirWatcherPollInterval = oldPollInterval })
 
-	s3api.EXPECT().ListObjectsV2(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
+	// The number of polls depends on scheduling; assert the discovered directories below.
+	s3api.EXPECT().ListObjectsV2(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(
 		func(ctx context.Context, req *s3v2.ListObjectsV2Input, _ ...func(*s3v2.Options)) (*s3v2.ListObjectsV2Output, error) {
 			var retFiles []types.Object
 			files := currentFiles.Load()
@@ -176,25 +191,32 @@ func TestS3DirWatcher(t *testing.T) {
 	})
 
 	t.Run("Watch function should have the correct result", func(t *testing.T) {
+		var mu sync.Mutex
 		files := make(map[string]struct{})
 		w := NewDirWatcher(logger, "dir_watcher_test_", func(filename string) error {
+			mu.Lock()
+			defer mu.Unlock()
 			files[filename] = struct{}{}
 			return nil
 		}, s)
 		ctx, cancel := context.WithCancel(context.Background())
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			require.NoError(t, w.Watch(ctx))
-		}()
+		var wg waitgroup.WaitGroup
+		var watchErr error
+		wg.Run(func() { watchErr = w.Watch(ctx) })
+		t.Cleanup(func() {
+			cancel()
+			wg.Wait()
+			require.NoError(t, watchErr)
+		})
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok1 := files[newDir]
 			_, ok2 := files[newDir2]
 			return ok1 && ok2 && len(files) == 2
-		}, dirWatcherPollInterval*3, time.Millisecond)
+		}, dirWatcherTestTimeout, time.Millisecond)
 
 		oldFiles := currentFiles.Load()
 		newFiles := slices.Clone(*oldFiles)
@@ -203,12 +225,11 @@ func TestS3DirWatcher(t *testing.T) {
 		currentFiles.Store(&newFiles)
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok := files[newDir3]
 			return ok && len(files) == 3
-		}, dirWatcherPollInterval*3, time.Millisecond)
-
-		cancel()
-		wg.Wait()
+		}, dirWatcherTestTimeout, time.Millisecond)
 	})
 }
 
@@ -226,7 +247,9 @@ func TestS3DirWatcherWithRealS3(t *testing.T) {
 	s, err := objstore.New(context.Background(), backend, nil)
 	require.NoError(t, err)
 
+	oldPollInterval := dirWatcherPollInterval
 	dirWatcherPollInterval = time.Millisecond * 10
+	t.Cleanup(func() { dirWatcherPollInterval = oldPollInterval })
 
 	// Create two new directories
 	require.NoError(t, s.WriteFile(context.Background(), "dir_watcher_test_dir1/.keep", []byte{1}))
@@ -273,25 +296,32 @@ func TestS3DirWatcherWithRealS3(t *testing.T) {
 	})
 
 	t.Run("Watch function should have the correct result", func(t *testing.T) {
+		var mu sync.Mutex
 		files := make(map[string]struct{})
 		w := NewDirWatcher(logger, "dir_watcher_test_", func(filename string) error {
+			mu.Lock()
+			defer mu.Unlock()
 			files[filename] = struct{}{}
 			return nil
 		}, s)
 		ctx, cancel := context.WithCancel(context.Background())
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			require.NoError(t, w.Watch(ctx))
-		}()
+		var wg waitgroup.WaitGroup
+		var watchErr error
+		wg.Run(func() { watchErr = w.Watch(ctx) })
+		t.Cleanup(func() {
+			cancel()
+			wg.Wait()
+			require.NoError(t, watchErr)
+		})
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok1 := files["dir_watcher_test_dir1/"]
 			_, ok2 := files["dir_watcher_test_dir2/"]
 			return ok1 && ok2 && len(files) == 2
-		}, dirWatcherPollInterval*3, time.Millisecond)
+		}, dirWatcherTestTimeout, time.Millisecond)
 
 		// Add a new directory
 		require.NoError(t, s.WriteFile(context.Background(), "dir_watcher_test_dir3/.keep", []byte{1}))
@@ -300,35 +330,40 @@ func TestS3DirWatcherWithRealS3(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok := files["dir_watcher_test_dir3/"]
 			return ok && len(files) == 3
-		}, dirWatcherPollInterval*3, time.Millisecond)
-
-		cancel()
-		wg.Wait()
+		}, dirWatcherTestTimeout, time.Millisecond)
 	})
 
 	t.Run("Watch Function works well even if there are 2K new files in one folder", func(t *testing.T) {
+		var mu sync.Mutex
 		files := make(map[string]struct{})
 		w := NewDirWatcher(logger, "dir_watcher_test_", func(filename string) error {
+			mu.Lock()
+			defer mu.Unlock()
 			files[filename] = struct{}{}
 			return nil
 		}, s)
 		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			require.NoError(t, w.Watch(ctx))
-		}()
+		var wg waitgroup.WaitGroup
+		var watchErr error
+		wg.Run(func() { watchErr = w.Watch(ctx) })
+		t.Cleanup(func() {
+			cancel()
+			wg.Wait()
+			require.NoError(t, watchErr)
+		})
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok1 := files["dir_watcher_test_dir1/"]
 			_, ok2 := files["dir_watcher_test_dir2/"]
 			return ok1 && ok2 && len(files) == 2
-		}, dirWatcherPollInterval*3, time.Millisecond)
+		}, dirWatcherTestTimeout, time.Millisecond)
 
 		// Create 2K new files
 		for i := range 2000 {
@@ -342,11 +377,10 @@ func TestS3DirWatcherWithRealS3(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok := files["dir_watcher_test_dir3/"]
 			return ok && len(files) == 3
-		}, dirWatcherPollInterval*3, time.Millisecond)
-
-		cancel()
-		wg.Wait()
+		}, dirWatcherTestTimeout, time.Millisecond)
 	})
 }
