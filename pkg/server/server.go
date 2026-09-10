@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"runtime"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/manager/backendcluster"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
+	"github.com/pingcap/tiproxy/pkg/manager/health"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/memory"
@@ -46,6 +48,7 @@ type Server struct {
 	replay           mgrrp.JobManager
 	meter            *meter.Meter
 	memManager       *memory.MemManager
+	healthMgr        *health.Manager
 	// HTTP client
 	httpCli *http.Client
 	// HTTP server
@@ -96,6 +99,21 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	srv.memManager = memory.NewMemManager(lg, srv.configManager)
 	srv.memManager.Start(ctx)
+
+	// Aggregate the serving/accepting signals so DebugHealth and the proxy share
+	// one source of truth. The proxy starts listening before the namespace manager
+	// is ready, so RejectConns intentionally ignores the init phase.
+	srv.healthMgr = health.NewManager(
+		srv.namespaceManager.Ready,
+		func() (bool, string) {
+			reject, snapshot, threshold := srv.memManager.ShouldRejectNewConn()
+			if !reject {
+				return false, ""
+			}
+			return true, fmt.Sprintf("high memory usage (usage=%.4f, threshold=%.4f, used=%d, limit=%d, last_update=%s)",
+				snapshot.Usage, threshold, snapshot.Used, snapshot.Limit, snapshot.UpdateTime.String())
+		},
+	)
 
 	// setup certs
 	if err = srv.certManager.Init(cfg, lg.Named("cert"), srv.configManager.WatchConfig()); err != nil {
@@ -171,7 +189,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup proxy server
 	{
-		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), srv.meter, hsHandler, srv.memManager)
+		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), srv.meter, hsHandler, srv.memManager, srv.healthMgr)
 		if err != nil {
 			return
 		}
@@ -186,6 +204,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		CertMgr:       srv.certManager,
 		BackendReader: srv.clusterManager.MetricsQuerier(),
 		ReplayJobMgr:  srv.replay,
+		Health:        srv.healthMgr,
 	}
 	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), mgrs, handler, ready); err != nil {
 		return
@@ -231,9 +250,9 @@ func (s *Server) preClose() {
 	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
 		s.vipManager.PreClose()
 	}
-	// Make the API server return unhealth.
-	if s.apiServer != nil {
-		s.apiServer.PreClose()
+	// Mark the instance closing so DebugHealth and the proxy reject path react at once.
+	if s.healthMgr != nil {
+		s.healthMgr.PreClose()
 	}
 	if s.clusterManager != nil {
 		s.clusterManager.PreClose()

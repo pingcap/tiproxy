@@ -43,6 +43,13 @@ type HTTPHandler interface {
 	RegisterHTTP(c *gin.Engine) error
 }
 
+// healthChecker reports whether the instance is serving. It is satisfied by
+// *health.Manager; defined here so the api package does not depend on the health
+// package.
+type healthChecker interface {
+	Serving() (bool, string)
+}
+
 type ConfigManager interface {
 	GetConfig() *config.Config
 	SetTOMLConfig(data []byte) error
@@ -59,16 +66,16 @@ type Managers struct {
 	CertMgr       *mgrcrt.CertManager
 	BackendReader BackendReader
 	ReplayJobMgr  mgrrp.JobManager
+	Health        healthChecker
 }
 
 type Server struct {
-	listener  net.Listener
-	wg        waitgroup.WaitGroup
-	limit     ratelimit.Limiter
-	ready     *atomic.Bool
-	lg        *zap.Logger
-	grpc      *grpc.Server
-	isClosing atomic.Bool
+	listener net.Listener
+	wg       waitgroup.WaitGroup
+	limit    ratelimit.Limiter
+	ready    *atomic.Bool
+	lg       *zap.Logger
+	grpc     *grpc.Server
 	// manualHealthOverride is nil unless the debug API forces the health endpoint response.
 	manualHealthOverride atomic.Pointer[manualHealthOverride]
 	mgr                  Managers
@@ -239,10 +246,6 @@ func (h *Server) registerAPI(g *gin.RouterGroup) {
 	h.registerDebug(g.Group("debug"))
 	h.registerBackend(g.Group("backend"))
 	h.registerTraffic(g.Group("traffic"))
-}
-
-func (h *Server) PreClose() {
-	h.isClosing.Store(true)
 }
 
 func (h *Server) Close() error {
