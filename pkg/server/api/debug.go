@@ -27,7 +27,7 @@ func (h *Server) DebugHealth(c *gin.Context) {
 			status = http.StatusBadGateway
 			health.UnhealthyReason = healthOverride.Reason
 		}
-	} else if serving, reason := h.mgr.Health.Serving(); !serving {
+	} else if healthy, reason := h.mgr.Health.Healthy(); !healthy {
 		status = http.StatusBadGateway
 		health.UnhealthyReason = reason
 	}

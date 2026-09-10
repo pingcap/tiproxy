@@ -45,7 +45,7 @@ func TestDebug(t *testing.T) {
 		require.Equal(t, http.StatusBadGateway, r.StatusCode)
 		var health map[string]any
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
-		require.Equal(t, "server is closing", health["unhealthy_reason"])
+		require.Equal(t, "server is shutting down", health["unhealthy_reason"])
 	})
 }
 

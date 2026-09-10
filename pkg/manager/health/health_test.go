@@ -23,16 +23,16 @@ func TestManager(t *testing.T) {
 	)
 
 	// Fully serving.
-	ok, reason := mgr.Serving()
+	ok, reason := mgr.Healthy()
 	require.True(t, ok)
 	require.Empty(t, reason)
 	rejectConn, reason := mgr.RejectConns()
 	require.False(t, rejectConn)
 	require.Empty(t, reason)
 
-	// Init phase: Serving reports not ready, but the proxy still accepts.
+	// Init phase: Healthy reports not ready, but the proxy still accepts.
 	ready = false
-	ok, reason = mgr.Serving()
+	ok, reason = mgr.Healthy()
 	require.False(t, ok)
 	require.Equal(t, "server is not ready", reason)
 	rejectConn, reason = mgr.RejectConns()
@@ -42,27 +42,29 @@ func TestManager(t *testing.T) {
 	// Memory pressure: both consumers see the reject reason.
 	ready = true
 	reject = true
-	ok, reason = mgr.Serving()
+	ok, reason = mgr.Healthy()
 	require.False(t, ok)
 	require.Equal(t, "high memory usage", reason)
 	rejectConn, reason = mgr.RejectConns()
 	require.True(t, rejectConn)
 	require.Equal(t, "high memory usage", reason)
 
-	// Closing wins over every other signal.
+	// Graceful shutdown alone (no memory pressure): Healthy reports unhealthy,
+	// but the proxy keeps accepting until its listeners are closed.
+	reject = false
 	mgr.PreClose()
-	ok, reason = mgr.Serving()
+	ok, reason = mgr.Healthy()
 	require.False(t, ok)
-	require.Equal(t, "server is closing", reason)
+	require.Equal(t, "server is shutting down", reason)
 	rejectConn, reason = mgr.RejectConns()
-	require.True(t, rejectConn)
-	require.Equal(t, "server is closing", reason)
+	require.False(t, rejectConn)
+	require.Empty(t, reason)
 }
 
 func TestManagerNilChecks(t *testing.T) {
 	// Nil ready/rejectCheck must not panic and default to serving/accepting.
 	mgr := NewManager(nil, nil)
-	ok, reason := mgr.Serving()
+	ok, reason := mgr.Healthy()
 	require.True(t, ok)
 	require.Empty(t, reason)
 	rejectConn, reason := mgr.RejectConns()
@@ -70,8 +72,8 @@ func TestManagerNilChecks(t *testing.T) {
 	require.Empty(t, reason)
 
 	mgr.PreClose()
-	ok, _ = mgr.Serving()
+	ok, _ = mgr.Healthy()
 	require.False(t, ok)
 	rejectConn, _ = mgr.RejectConns()
-	require.True(t, rejectConn)
+	require.False(t, rejectConn)
 }

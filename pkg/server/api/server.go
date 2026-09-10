@@ -47,7 +47,7 @@ type HTTPHandler interface {
 // *health.Manager; defined here so the api package does not depend on the health
 // package.
 type healthChecker interface {
-	Serving() (bool, string)
+	Healthy() (bool, string)
 }
 
 type ConfigManager interface {

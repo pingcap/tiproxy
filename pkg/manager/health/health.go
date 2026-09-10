@@ -1,4 +1,4 @@
-// Copyright 2026 PingCAP, Inc.
+// Copyright 2025 PingCAP, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 package health
@@ -10,9 +10,13 @@ import "sync/atomic"
 // method below evaluates its own condition independently, so reordering one
 // signal never silently changes another consumer's behavior.
 type Manager struct {
-	closing     atomic.Bool
-	ready       func() bool
-	rejectCheck func() (bool, string)
+	// shuttingDown means the instance is in graceful shutdown. It only affects
+	// Healthy (so DebugHealth reports unhealthy and the LB drains); it does NOT
+	// reject new connections, since the proxy keeps serving until its listeners
+	// are closed.
+	shuttingDown atomic.Bool
+	ready        func() bool
+	rejectCheck  func() (bool, string)
 }
 
 // NewManager creates a Manager.
@@ -23,17 +27,18 @@ func NewManager(ready func() bool, rejectCheck func() (bool, string)) *Manager {
 	return &Manager{ready: ready, rejectCheck: rejectCheck}
 }
 
-// PreClose marks the server as shutting down. Idempotent; safe to call from
-// PreClose paths.
+// PreClose marks the instance as gracefully shutting down. Idempotent; safe to
+// call from PreClose paths.
 func (m *Manager) PreClose() {
-	m.closing.Store(true)
+	m.shuttingDown.Store(true)
 }
 
-// Serving reports whether the instance is fully serving. Used by DebugHealth.
-// It returns false (with a reason) during init, rejectConns, and closing.
-func (m *Manager) Serving() (bool, string) {
-	if m.closing.Load() {
-		return false, "server is closing"
+// Healthy reports whether the instance is fully serving. Used by DebugHealth.
+// It returns false (with a reason) during init, rejectConns, and graceful
+// shutdown.
+func (m *Manager) Healthy() (bool, string) {
+	if m.shuttingDown.Load() {
+		return false, "server is shutting down"
 	}
 	if m.rejectCheck != nil {
 		if reject, reason := m.rejectCheck(); reject {
@@ -47,13 +52,10 @@ func (m *Manager) Serving() (bool, string) {
 }
 
 // RejectConns reports whether new connections should be rejected and returns a
-// reason string. Used by the proxy server. It returns true during rejectConns
-// and closing; the init phase does NOT reject because the proxy already starts
-// listening before the namespace manager becomes ready.
+// reason string. Used by the proxy server. It returns true only on memory
+// pressure; graceful shutdown does NOT reject here, because the proxy keeps
+// accepting until its listeners are closed.
 func (m *Manager) RejectConns() (bool, string) {
-	if m.closing.Load() {
-		return true, "server is closing"
-	}
 	if m.rejectCheck != nil {
 		if reject, reason := m.rejectCheck(); reject {
 			return true, reason
