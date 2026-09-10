@@ -250,7 +250,7 @@ func (s *Server) preClose() {
 	if s.vipManager != nil && !reflect.ValueOf(s.vipManager).IsNil() {
 		s.vipManager.PreClose()
 	}
-	// Mark the instance closing so DebugHealth and the proxy reject path react at once.
+	// Make the API server return unhealth.
 	if s.healthMgr != nil {
 		s.healthMgr.PreClose()
 	}
