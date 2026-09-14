@@ -31,6 +31,25 @@ func TestConfig(t *testing.T) {
 		require.Contains(t, string(all), `"addr":"0.0.0.0:6000"`)
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader("balance.cpu.enabled = false")}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTP(t, http.MethodGet, "/api/admin/config", httpOpts{}, func(t *testing.T, r *http.Response) {
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		cfg := config.NewConfig()
+		require.NoError(t, toml.Unmarshal(all, cfg))
+		require.False(t, cfg.Balance.CPU.Enabled)
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTP(t, http.MethodGet, "/api/admin/config?format=json", httpOpts{}, func(t *testing.T, r *http.Response) {
+		all, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		cfg := config.NewConfig()
+		require.NoError(t, json.Unmarshal(all, cfg))
+		require.False(t, cfg.Balance.CPU.Enabled)
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
 
 	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader("security.require-backend-tls = true")}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusOK, r.StatusCode)

@@ -119,6 +119,17 @@ proxy.failover-timeout = 0
 				return c.Proxy.Addr == "gg"
 			},
 		},
+		{
+			name:   "factor enabled override",
+			precfg: `balance.cpu.enabled = false`,
+			precheck: func(c *config.Config) bool {
+				return !c.Balance.CPU.Enabled
+			},
+			postcfg: `balance.cpu.enabled = true`,
+			postcheck: func(c *config.Config) bool {
+				return c.Balance.CPU.Enabled
+			},
+		},
 	}
 
 	for i, tc := range cases {

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -109,6 +110,47 @@ func TestProxyConfig(t *testing.T) {
 	data2, err := cfg.ToBytes()
 	require.NoError(t, err)
 	require.Equal(t, data1, data2)
+}
+
+func TestConfigZeroValueOverridesRoundTrip(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Proxy.Addr = ""
+	cfg.Proxy.PDAddrs = ""
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0
+	cfg.Proxy.GracefulCloseConnTimeout = 0
+	cfg.Proxy.FailoverTimeout = 0
+	cfg.Proxy.FrontendKeepalive = KeepAlive{}
+	cfg.Proxy.BackendHealthyKeepalive = KeepAlive{}
+	cfg.Proxy.BackendUnhealthyKeepalive = KeepAlive{}
+	cfg.API.Addr = ""
+	cfg.Log.Level = ""
+	cfg.Log.Encoder = ""
+	cfg.Log.LogFile.MaxSize = 0
+	cfg.Log.LogFile.MaxDays = 0
+	cfg.Log.LogFile.MaxBackups = 0
+	cfg.Balance.Health.Enabled = false
+	cfg.Balance.Memory.Enabled = false
+	cfg.Balance.CPU.Enabled = false
+	cfg.Balance.Location.Enabled = false
+	cfg.HA.GARPRefreshCount = 0
+	cfg.EnableTrafficReplay = false
+	require.NoError(t, cfg.Check())
+
+	t.Run("toml", func(t *testing.T) {
+		data, err := cfg.ToBytes()
+		require.NoError(t, err)
+		decoded := NewConfig()
+		require.NoError(t, toml.Unmarshal(data, decoded))
+		require.Equal(t, cfg, decoded)
+	})
+
+	t.Run("json", func(t *testing.T) {
+		data, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		decoded := NewConfig()
+		require.NoError(t, json.Unmarshal(data, decoded))
+		require.Equal(t, cfg, decoded)
+	})
 }
 
 func TestProxyConfigCOS(t *testing.T) {
