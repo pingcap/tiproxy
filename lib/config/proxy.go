@@ -28,32 +28,32 @@ const DefaultBackendClusterName = "default"
 
 type Config struct {
 	Proxy               ProxyServer           `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
-	API                 API                   `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
+	API                 API                   `yaml:"api" toml:"api" json:"api"`
 	Workdir             string                `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty" reloadable:"false"`
 	Security            Security              `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
-	Log                 Log                   `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
+	Log                 Log                   `yaml:"log" toml:"log" json:"log"`
 	Balance             Balance               `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
 	Labels              map[string]string     `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty" reloadable:"true"`
 	HA                  HA                    `yaml:"ha,omitempty" toml:"ha,omitempty" json:"ha,omitempty"`
 	Metering            config.MeteringConfig `yaml:"metering,omitempty" toml:"metering,omitempty" json:"metering,omitempty" reloadable:"false"`
-	EnableTrafficReplay bool                  `yaml:"enable-traffic-replay,omitempty" toml:"enable-traffic-replay,omitempty" json:"enable-traffic-replay,omitempty" reloadable:"true"`
+	EnableTrafficReplay bool                  `yaml:"enable-traffic-replay" toml:"enable-traffic-replay" json:"enable-traffic-replay" reloadable:"true"`
 }
 
 type KeepAlive struct {
-	Enabled bool `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty" reloadable:"true"`
+	Enabled bool `yaml:"enabled" toml:"enabled" json:"enabled" reloadable:"true"`
 	// Idle, Cnt, and Intvl works only when the connection is idle. User packets will interrupt keep-alive.
 	// If the peer crashes and doesn't send any packets, the connection will be closed within Idle+Cnt*Intvl.
-	Idle  time.Duration `yaml:"idle,omitempty" toml:"idle,omitempty" json:"idle,omitempty" reloadable:"true"`
-	Cnt   int           `yaml:"cnt,omitempty" toml:"cnt,omitempty" json:"cnt,omitempty" reloadable:"true"`
-	Intvl time.Duration `yaml:"intvl,omitempty" toml:"intvl,omitempty" json:"intvl,omitempty" reloadable:"true"`
+	Idle  time.Duration `yaml:"idle" toml:"idle" json:"idle" reloadable:"true"`
+	Cnt   int           `yaml:"cnt" toml:"cnt" json:"cnt" reloadable:"true"`
+	Intvl time.Duration `yaml:"intvl" toml:"intvl" json:"intvl" reloadable:"true"`
 	// Timeout is the timeout of waiting ACK. It works for both user packets and keep-alive.
 	// It is suggested to be equal or close to Cnt*Intvl.
-	Timeout time.Duration `yaml:"timeout,omitempty" toml:"timeout,omitempty" json:"timeout,omitempty" reloadable:"true"`
+	Timeout time.Duration `yaml:"timeout" toml:"timeout" json:"timeout" reloadable:"true"`
 }
 
 type ProxyServerOnline struct {
 	MaxConnections                 uint64    `yaml:"max-connections,omitempty" toml:"max-connections,omitempty" json:"max-connections,omitempty" reloadable:"true"`
-	HighMemoryUsageRejectThreshold float64   `yaml:"high-memory-usage-reject-threshold,omitempty" toml:"high-memory-usage-reject-threshold,omitempty" json:"high-memory-usage-reject-threshold,omitempty" reloadable:"true"`
+	HighMemoryUsageRejectThreshold float64   `yaml:"high-memory-usage-reject-threshold" toml:"high-memory-usage-reject-threshold" json:"high-memory-usage-reject-threshold" reloadable:"true"`
 	ConnBufferSize                 int       `yaml:"conn-buffer-size,omitempty" toml:"conn-buffer-size,omitempty" json:"conn-buffer-size,omitempty" reloadable:"true"`
 	FrontendKeepalive              KeepAlive `yaml:"frontend-keepalive" toml:"frontend-keepalive" json:"frontend-keepalive"`
 	// BackendHealthyKeepalive applies when the observer treats the backend as healthy.
@@ -65,7 +65,7 @@ type ProxyServerOnline struct {
 	ProxyProtocol             string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty" reloadable:"true"`
 	// In k8s, the pod terminationGracePeriodSeconds can be set to very long so that these configs can be updated online.
 	GracefulWaitBeforeShutdown int `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty" reloadable:"true"`
-	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty" reloadable:"true"`
+	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout" toml:"graceful-close-conn-timeout" json:"graceful-close-conn-timeout" reloadable:"true"`
 	// Public and private traffic are metered separately.
 	PublicEndpoints []string `yaml:"public-endpoints,omitempty" toml:"public-endpoints,omitempty" json:"public-endpoints,omitempty" reloadable:"true"`
 	// BackendClusters represents multiple backend clusters that the proxy can route to. It can be reloaded
@@ -76,13 +76,13 @@ type ProxyServerOnline struct {
 	// TiProxy ignores the list for that group to keep routing available.
 	FailBackendList []string `yaml:"fail-backend-list,omitempty" toml:"fail-backend-list,omitempty" json:"fail-backend-list,omitempty" reloadable:"true"`
 	// FailoverTimeout is the grace period in seconds before force closing the remaining connections on failed backends.
-	FailoverTimeout int `yaml:"failover-timeout,omitempty" toml:"failover-timeout,omitempty" json:"failover-timeout,omitempty" reloadable:"true"`
+	FailoverTimeout int `yaml:"failover-timeout" toml:"failover-timeout" json:"failover-timeout" reloadable:"true"`
 }
 
 type ProxyServer struct {
-	Addr              string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty" reloadable:"false"`
+	Addr              string `yaml:"addr" toml:"addr" json:"addr" reloadable:"false"`
 	AdvertiseAddr     string `yaml:"advertise-addr,omitempty" toml:"advertise-addr,omitempty" json:"advertise-addr,omitempty" reloadable:"false"`
-	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty" reloadable:"false"`
+	PDAddrs           string `yaml:"pd-addrs" toml:"pd-addrs" json:"pd-addrs" reloadable:"false"`
 	PortRange         []int  `yaml:"port-range,omitempty" toml:"port-range,omitempty" json:"port-range,omitempty" reloadable:"false"`
 	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
@@ -94,26 +94,26 @@ type BackendCluster struct {
 }
 
 type API struct {
-	Addr          string `yaml:"addr,omitempty" toml:"addr,omitempty" json:"addr,omitempty" reloadable:"false"`
+	Addr          string `yaml:"addr" toml:"addr" json:"addr" reloadable:"false"`
 	ProxyProtocol string `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty" reloadable:"false"`
 }
 
 type LogOnline struct {
-	Level   string  `yaml:"level,omitempty" toml:"level,omitempty" json:"level,omitempty" reloadable:"true"`
-	LogFile LogFile `yaml:"log-file,omitempty" toml:"log-file,omitempty" json:"log-file,omitempty"`
+	Level   string  `yaml:"level" toml:"level" json:"level" reloadable:"true"`
+	LogFile LogFile `yaml:"log-file" toml:"log-file" json:"log-file"`
 }
 
 type Log struct {
-	Encoder   string `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty" reloadable:"false"`
+	Encoder   string `yaml:"encoder" toml:"encoder" json:"encoder" reloadable:"false"`
 	Simple    bool   `yaml:"simple,omitempty" toml:"simple,omitempty" json:"simple,omitempty" reloadable:"false"`
 	LogOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
 type LogFile struct {
 	Filename   string `yaml:"filename,omitempty" toml:"filename,omitempty" json:"filename,omitempty" reloadable:"true"`
-	MaxSize    int    `yaml:"max-size,omitempty" toml:"max-size,omitempty" json:"max-size,omitempty" reloadable:"true"`
-	MaxDays    int    `yaml:"max-days,omitempty" toml:"max-days,omitempty" json:"max-days,omitempty" reloadable:"true"`
-	MaxBackups int    `yaml:"max-backups,omitempty" toml:"max-backups,omitempty" json:"max-backups,omitempty" reloadable:"true"`
+	MaxSize    int    `yaml:"max-size" toml:"max-size" json:"max-size" reloadable:"true"`
+	MaxDays    int    `yaml:"max-days" toml:"max-days" json:"max-days" reloadable:"true"`
+	MaxBackups int    `yaml:"max-backups" toml:"max-backups" json:"max-backups" reloadable:"true"`
 }
 
 type HA struct {
@@ -130,7 +130,7 @@ type HA struct {
 	// GARPRefreshCount controls the number of follow-up bursts after
 	// takeover. It is used to refresh stale neighbor caches for a bounded window
 	// after failover instead of emitting high-rate GARP forever.
-	GARPRefreshCount int `yaml:"garp-refresh-count,omitempty" toml:"garp-refresh-count,omitempty" json:"garp-refresh-count,omitempty" reloadable:"false"`
+	GARPRefreshCount int `yaml:"garp-refresh-count" toml:"garp-refresh-count" json:"garp-refresh-count" reloadable:"false"`
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
