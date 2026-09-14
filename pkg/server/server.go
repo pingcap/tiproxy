@@ -221,20 +221,11 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			return
 		}
 		if srv.vipManager != nil && !reflect.ValueOf(srv.vipManager).IsNil() {
-<<<<<<< HEAD
-			if err = srv.vipManager.Start(ctx, srv.etcdCli); err != nil {
-				return
-=======
 			// Release the VIP while this instance is rejecting connections (e.g. under
 			// memory pressure) so a healthy node takes over, and re-campaign on recovery.
 			srv.vipManager.SetConnRejecter(srv.healthMgr)
-			if vipEtcdCli != nil {
-				if err = srv.vipManager.Start(ctx, vipEtcdCli); err != nil {
-					return
-				}
-			} else {
-				lg.Info("VIP is disabled because backend cluster count is not 1")
->>>>>>> 5f72f265 (vip: switch VIP when the owner rejects connections (#1213))
+			if err = srv.vipManager.Start(ctx, srv.etcdCli); err != nil {
+				return
 			}
 		}
 	}
