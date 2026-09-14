@@ -27,12 +27,9 @@ func (h *Server) DebugHealth(c *gin.Context) {
 			status = http.StatusBadGateway
 			health.UnhealthyReason = healthOverride.Reason
 		}
-	} else if h.isClosing.Load() {
+	} else if healthy, reason := h.mgr.Health.Healthy(); !healthy {
 		status = http.StatusBadGateway
-		health.UnhealthyReason = "server is closing"
-	} else if !h.mgr.NsMgr.Ready() {
-		status = http.StatusBadGateway
-		health.UnhealthyReason = "server is not ready"
+		health.UnhealthyReason = reason
 	}
 	c.JSON(status, health)
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/cmd"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/manager/health"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/memory"
@@ -84,6 +85,17 @@ func main() {
 		cfgMgr := &nopConfigManager{cfg: cfg}
 		memMgr := memory.NewMemManager(lg, cfgMgr)
 		memMgr.Start(context.Background())
+		healthMgr := health.NewManager(
+			func() bool { return true },
+			func() (bool, string) {
+				reject, snapshot, threshold := memMgr.ShouldRejectNewConn()
+				if !reject {
+					return false, ""
+				}
+				return true, fmt.Sprintf("high memory usage (usage=%.4f, threshold=%.4f, used=%d, limit=%d, last_update=%s)",
+					snapshot.Usage, threshold, snapshot.Used, snapshot.Limit, snapshot.UpdateTime.String())
+			},
+		)
 
 		// create replay job manager
 		hsHandler := backend.NewStaticHandshakeHandler(*addr)
@@ -97,6 +109,7 @@ func main() {
 			CertMgr:       cert.NewCertManager(),
 			BackendReader: nil,
 			ReplayJobMgr:  r,
+			Health:        healthMgr,
 		}
 		var ready atomic.Bool
 		ready.Store(true)
