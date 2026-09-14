@@ -89,6 +89,19 @@ func (me *mockElection) Close() {
 	me.wg.Wait()
 }
 
+var _ ConnRejecter = (*mockConnRejecter)(nil)
+
+type mockConnRejecter struct {
+	reject atomic.Bool
+}
+
+func (m *mockConnRejecter) RejectConns() (bool, string) {
+	if m.reject.Load() {
+		return true, "mock reject"
+	}
+	return false, ""
+}
+
 var _ NetworkOperation = (*mockNetworkOperation)(nil)
 
 type mockNetworkOperation struct {

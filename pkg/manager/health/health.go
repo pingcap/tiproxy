@@ -52,9 +52,10 @@ func (m *Manager) Healthy() (bool, string) {
 }
 
 // RejectConns reports whether new connections should be rejected and returns a
-// reason string. Used by the proxy server. It returns true only on memory
-// pressure; graceful shutdown does NOT reject here, because the proxy keeps
-// accepting until its listeners are closed.
+// reason string. Used by the proxy server and the VIP manager. It returns true
+// only on memory pressure; graceful shutdown does NOT reject here, because the
+// proxy keeps accepting until its listeners are closed. The VIP release on
+// graceful shutdown is handled by PreClose.
 func (m *Manager) RejectConns() (bool, string) {
 	if m.rejectCheck != nil {
 		if reject, reason := m.rejectCheck(); reject {
