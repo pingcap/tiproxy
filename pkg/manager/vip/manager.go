@@ -31,10 +31,26 @@ const (
 	garpRefreshInterval = 1 * time.Second
 )
 
+// servingCheckInterval is how often the VIP manager re-evaluates whether the
+// instance is rejecting connections. It is a variable so tests can
+// shorten it to speed up the resign/recompete transitions.
+var servingCheckInterval = 1 * time.Second
+
 type VIPManager interface {
 	Start(context.Context, *clientv3.Client) error
+	// SetConnRejecter configures the checker that decides whether the instance is
+	// rejecting new connections. When it reports a rejection, the manager resigns
+	// the VIP owner so a healthy node takes over, and re-campaigns once it stops
+	// rejecting.
+	SetConnRejecter(ConnRejecter)
 	PreClose()
 	Close()
+}
+
+// ConnRejecter reports whether the instance is currently rejecting new
+// connections.
+type ConnRejecter interface {
+	RejectConns() (bool, string)
 }
 
 var _ VIPManager = (*vipManager)(nil)
@@ -52,6 +68,17 @@ type vipManager struct {
 	cfgGetter config.ConfigGetter
 	election  elect.Election
 	lg        *zap.Logger
+	// rejecter, when set, drives the resign/recompete loop. nil keeps the
+	// historical behavior of always competing for the VIP.
+	rejecter ConnRejecter
+	// newElection creates and starts a fresh election. It is set in Start,
+	// closing over the etcd client, election parameters, and the start context
+	// so they don't need to live as separate fields. Tests override it to avoid
+	// a real etcd server.
+	newElection func() elect.Election
+	startCtx    context.Context
+	startCancel context.CancelFunc
+	watchWG     waitgroup.WaitGroup
 }
 
 func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, error) {
@@ -76,6 +103,14 @@ func NewVIPManager(lg *zap.Logger, cfgGetter config.ConfigGetter) (*vipManager, 
 	return vm, nil
 }
 
+// SetConnRejecter configures the checker that decides whether this instance is
+// rejecting new connections. It must be called before Start. When the checker
+// reports a rejection, the VIP manager resigns the owner so a healthy node
+// takes over, and re-campaigns once it stops rejecting.
+func (vm *vipManager) SetConnRejecter(r ConnRejecter) {
+	vm.rejecter = r
+}
+
 func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
@@ -93,9 +128,81 @@ func (vm *vipManager) Start(ctx context.Context, etcdCli *clientv3.Client) error
 	id := net.JoinHostPort(ip, port)
 	electionCfg := elect.DefaultElectionConfig(sessionTTL)
 	key := fmt.Sprintf(vipKey, vm.operation.Addr())
-	vm.election = elect.NewElection(vm.lg.Named("elect"), etcdCli, electionCfg, id, key, vm)
-	vm.election.Start(ctx)
+	vm.startCtx, vm.startCancel = context.WithCancel(ctx)
+	startCtx := vm.startCtx
+	vm.newElection = func() elect.Election {
+		e := elect.NewElection(vm.lg.Named("elect"), etcdCli, electionCfg, id, key, vm)
+		e.Start(startCtx)
+		return e
+	}
+	vm.election = vm.newElection()
+
+	// The watcher is a no-op when there is no rejecter, preserving the
+	// historical always-compete behavior.
+	if vm.rejecter != nil {
+		watchCtx := vm.startCtx
+		vm.watchWG.RunWithRecover(func() {
+			vm.watchRejecter(watchCtx)
+		}, nil, vm.lg)
+	}
 	return nil
+}
+
+// resign drops the current election so the etcd lease is revoked and another
+// node can take over. election.Close retires this member, which removes the
+// VIP locally via OnRetired.
+func (vm *vipManager) resign() {
+	vm.mu.Lock()
+	if vm.closing || vm.election == nil {
+		vm.mu.Unlock()
+		return
+	}
+	election := vm.election
+	vm.election = nil
+	vm.mu.Unlock()
+	// election.Close synchronously invokes OnRetired, which needs vm.mu, so it
+	// must run outside the lock to avoid a self-deadlock.
+	vm.lg.Info("resign VIP owner because the instance rejects new connections")
+	election.Close()
+}
+
+// recompete creates a new election and starts campaigning after recovery.
+func (vm *vipManager) recompete() {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	if vm.closing || vm.election != nil {
+		return
+	}
+	vm.lg.Info("recompete for VIP because the instance accepts new connections")
+	vm.election = vm.newElection()
+}
+
+// watchRejecter polls the rejecter and flips the VIP ownership on transitions.
+// Polling is intentional: the health signal is a simple boolean with no event
+// channel, and the interval is bounded by the election TTL so failover latency
+// stays comparable to an etcd session expiry. The instance never rejects at
+// startup, so the initial state is assumed to be not rejecting.
+func (vm *vipManager) watchRejecter(ctx context.Context) {
+	ticker := time.NewTicker(servingCheckInterval)
+	defer ticker.Stop()
+	wasRejecting := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			reject, _ := vm.rejecter.RejectConns()
+			if reject == wasRejecting {
+				continue
+			}
+			wasRejecting = reject
+			if reject {
+				vm.resign()
+			} else {
+				vm.recompete()
+			}
+		}
+	}
 }
 
 func (vm *vipManager) OnElected() {
@@ -208,6 +315,7 @@ func (vm *vipManager) stopARPRefresh() {
 // shutdowns do not expose the VIP on two nodes at the same time.
 func (vm *vipManager) PreClose() {
 	election := vm.prepareForClose()
+	vm.watchWG.Wait()
 	if election != nil {
 		election.Close()
 	}
@@ -216,6 +324,7 @@ func (vm *vipManager) PreClose() {
 // Close resigns the owner and makes sure the VIP is removed locally.
 func (vm *vipManager) Close() {
 	election := vm.prepareForClose()
+	vm.watchWG.Wait()
 	if election != nil {
 		election.Close()
 	}
@@ -231,5 +340,14 @@ func (vm *vipManager) prepareForClose() elect.Election {
 	vm.closing = true
 	vm.stopARPRefresh()
 	vm.delVIP(context.Background())
-	return vm.election
+	// Cancel the start context so the rejecter watcher and any in-flight election
+	// campaign loop stop. watchWG is waited outside the lock to avoid deadlocking
+	// with a watcher callback that may be waiting for vm.mu.
+	if vm.startCancel != nil {
+		vm.startCancel()
+		vm.startCancel = nil
+	}
+	election := vm.election
+	vm.election = nil
+	return election
 }

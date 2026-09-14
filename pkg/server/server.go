@@ -217,6 +217,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			return
 		}
 		if srv.vipManager != nil && !reflect.ValueOf(srv.vipManager).IsNil() {
+			// Release the VIP while this instance is rejecting connections (e.g. under
+			// memory pressure) so a healthy node takes over, and re-campaign on recovery.
+			srv.vipManager.SetConnRejecter(srv.healthMgr)
 			if vipEtcdCli != nil {
 				if err = srv.vipManager.Start(ctx, vipEtcdCli); err != nil {
 					return
