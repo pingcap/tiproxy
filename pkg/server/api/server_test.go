@@ -14,6 +14,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	mgrcrt "github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
+	"github.com/pingcap/tiproxy/pkg/manager/health"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
@@ -33,6 +34,7 @@ func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path
 	crtmgr := mgrcrt.NewCertManager()
 	require.NoError(t, crtmgr.Init(cfgmgr.GetConfig(), lg, cfgmgr.WatchConfig()))
 	nsMgr := newMockNamespaceManager()
+	healthMgr := health.NewManager(nsMgr.Ready, func() (bool, string) { return false, "" })
 	srv, err := NewServer(config.API{
 		Addr: "0.0.0.0:0",
 	}, lg, Managers{
@@ -41,6 +43,7 @@ func createServer(t *testing.T) (*Server, func(t *testing.T, method string, path
 		CertMgr:       crtmgr,
 		BackendReader: &mockBackendReader{},
 		ReplayJobMgr:  &mockReplayJobManager{},
+		Health:        healthMgr,
 	}, nil, ready)
 	require.NoError(t, err)
 	t.Cleanup(func() {

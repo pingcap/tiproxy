@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
-	mgrmem "github.com/pingcap/tiproxy/pkg/manager/memory"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
@@ -34,7 +33,7 @@ func TestCreateConn(t *testing.T) {
 	cfg := &config.Config{}
 	certManager := cert.NewCertManager()
 	require.NoError(t, certManager.Init(cfg, lg, nil))
-	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{}, nil)
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{}, nil, nil)
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 	defer func() {
@@ -75,17 +74,8 @@ func TestRejectConnByMemory(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	certManager := cert.NewCertManager()
 	require.NoError(t, certManager.Init(&config.Config{}, lg, nil))
-	server, err := NewSQLServer(lg, &config.Config{}, certManager, id.NewIDManager(), nil, &mockHsHandler{}, &mockMemUsageProvider{
-		reject: true,
-		snapshot: mgrmem.UsageSnapshot{
-			Used:       9 * (1 << 30),
-			Limit:      10 * (1 << 30),
-			Usage:      0.9,
-			UpdateTime: time.Now(),
-			Valid:      true,
-		},
-		threshold: 0.9,
-	})
+	memUsage := &mockMemUsageProvider{reject: true}
+	server, err := NewSQLServer(lg, &config.Config{}, certManager, id.NewIDManager(), nil, &mockHsHandler{}, memUsage, memUsage)
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 	defer func() {
@@ -135,7 +125,7 @@ func TestTrackConnBufferMemDelta(t *testing.T) {
 	}
 	require.NoError(t, certManager.Init(cfg, lg, nil))
 	memUsage := &mockMemUsageProvider{}
-	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{}, memUsage)
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{}, memUsage, memUsage)
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 	defer func() {
@@ -168,7 +158,7 @@ func TestGracefulCloseConn(t *testing.T) {
 			},
 		},
 	}
-	server, err := NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler, nil)
+	server, err := NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler, nil, nil)
 	require.NoError(t, err)
 	finish := make(chan struct{})
 	go func() {
@@ -198,7 +188,7 @@ func TestGracefulCloseConn(t *testing.T) {
 	}
 
 	// Graceful shutdown will be blocked if there are alive connections.
-	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler, nil)
+	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler, nil, nil)
 	require.NoError(t, err)
 	clientConn := createClientConn()
 	go func() {
@@ -224,7 +214,7 @@ func TestGracefulCloseConn(t *testing.T) {
 
 	// Graceful shutdown will shut down after GracefulCloseConnTimeout.
 	cfg.Proxy.GracefulCloseConnTimeout = 1
-	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler, nil)
+	server, err = NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, hsHandler, nil, nil)
 	require.NoError(t, err)
 	createClientConn()
 	go func() {
@@ -252,7 +242,7 @@ func TestGracefulShutDown(t *testing.T) {
 			},
 		},
 	}
-	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{}, nil)
+	server, err := NewSQLServer(lg, cfg, certManager, id.NewIDManager(), nil, &mockHsHandler{}, nil, nil)
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -290,7 +280,7 @@ func TestMultiAddr(t *testing.T) {
 		Proxy: config.ProxyServer{
 			Addr: "0.0.0.0:0,0.0.0.0:0",
 		},
-	}, certManager, id.NewIDManager(), nil, &mockHsHandler{}, nil)
+	}, certManager, id.NewIDManager(), nil, &mockHsHandler{}, nil, nil)
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -310,7 +300,7 @@ func TestWatchCfg(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	hsHandler := backend.NewDefaultHandshakeHandler(nil)
 	cfgch := make(chan *config.Config)
-	server, err := NewSQLServer(lg, &config.Config{}, nil, id.NewIDManager(), nil, hsHandler, nil)
+	server, err := NewSQLServer(lg, &config.Config{}, nil, id.NewIDManager(), nil, hsHandler, nil, nil)
 	require.NoError(t, err)
 	server.Run(context.Background(), cfgch)
 	cfg := &config.Config{
@@ -352,7 +342,7 @@ func TestRecoverPanic(t *testing.T) {
 			}
 			return nil
 		},
-	}, nil)
+	}, nil, nil)
 	require.NoError(t, err)
 	server.Run(context.Background(), nil)
 
@@ -380,13 +370,14 @@ type mockHsHandler struct {
 
 type mockMemUsageProvider struct {
 	reject             bool
-	snapshot           mgrmem.UsageSnapshot
-	threshold          float64
 	connBufferMemDelta atomic.Int64
 }
 
-func (m *mockMemUsageProvider) ShouldRejectNewConn() (bool, mgrmem.UsageSnapshot, float64) {
-	return m.reject, m.snapshot, m.threshold
+func (m *mockMemUsageProvider) RejectConns() (bool, string) {
+	if m.reject {
+		return true, "high memory usage"
+	}
+	return false, ""
 }
 
 func (m *mockMemUsageProvider) UpdateConnBufferMemory(delta int64) {

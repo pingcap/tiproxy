@@ -13,12 +13,14 @@ import (
 
 func (h *Server) DebugHealth(c *gin.Context) {
 	status := http.StatusOK
-	if h.isClosing.Load() || !h.mgr.NsMgr.Ready() {
-		status = http.StatusBadGateway
-	}
-	c.JSON(status, config.HealthInfo{
+	health := config.HealthInfo{
 		ConfigChecksum: h.mgr.CfgMgr.GetConfigChecksum(),
-	})
+	}
+	if healthy, reason := h.mgr.Health.Healthy(); !healthy {
+		status = http.StatusBadGateway
+		health.UnhealthyReason = reason
+	}
+	c.JSON(status, health)
 }
 
 func (h *Server) DebugRedirect(c *gin.Context) {
