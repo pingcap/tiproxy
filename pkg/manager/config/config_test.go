@@ -120,6 +120,31 @@ proxy.failover-timeout = 0
 				return c.Proxy.FailoverTimeout == 0 && len(c.Proxy.FailBackendList) == 0
 			},
 		},
+<<<<<<< HEAD
+=======
+		{
+			name:   "non empty fields should not be override by empty fields",
+			precfg: `proxy.addr = "gg"`,
+			precheck: func(c *config.Config) bool {
+				return c.Proxy.Addr == "gg"
+			},
+			postcfg: ``,
+			postcheck: func(c *config.Config) bool {
+				return c.Proxy.Addr == "gg"
+			},
+		},
+		{
+			name:   "factor enabled override",
+			precfg: `balance.cpu.enabled = false`,
+			precheck: func(c *config.Config) bool {
+				return !c.Balance.CPU.Enabled
+			},
+			postcfg: `balance.cpu.enabled = true`,
+			postcheck: func(c *config.Config) bool {
+				return c.Balance.CPU.Enabled
+			},
+		},
+>>>>>>> 31158a3d (config, balance: add switch configs to disable balance factors (#1218))
 	}
 
 	for i, tc := range cases {

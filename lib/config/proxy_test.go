@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -93,6 +94,92 @@ func TestProxyConfig(t *testing.T) {
 	require.Equal(t, data1, data2)
 }
 
+<<<<<<< HEAD
+=======
+func TestConfigZeroValueOverridesRoundTrip(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Proxy.Addr = ""
+	cfg.Proxy.PDAddrs = ""
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0
+	cfg.Proxy.GracefulCloseConnTimeout = 0
+	cfg.Proxy.FailoverTimeout = 0
+	cfg.Proxy.FrontendKeepalive = KeepAlive{}
+	cfg.Proxy.BackendHealthyKeepalive = KeepAlive{}
+	cfg.Proxy.BackendUnhealthyKeepalive = KeepAlive{}
+	cfg.API.Addr = ""
+	cfg.Log.Level = ""
+	cfg.Log.Encoder = ""
+	cfg.Log.LogFile.MaxSize = 0
+	cfg.Log.LogFile.MaxDays = 0
+	cfg.Log.LogFile.MaxBackups = 0
+	cfg.Balance.Health.Enabled = false
+	cfg.Balance.Memory.Enabled = false
+	cfg.Balance.CPU.Enabled = false
+	cfg.Balance.Location.Enabled = false
+	cfg.HA.GARPRefreshCount = 0
+	cfg.EnableTrafficReplay = false
+	require.NoError(t, cfg.Check())
+
+	t.Run("toml", func(t *testing.T) {
+		data, err := cfg.ToBytes()
+		require.NoError(t, err)
+		decoded := NewConfig()
+		require.NoError(t, toml.Unmarshal(data, decoded))
+		require.Equal(t, cfg, decoded)
+	})
+
+	t.Run("json", func(t *testing.T) {
+		data, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		decoded := NewConfig()
+		require.NoError(t, json.Unmarshal(data, decoded))
+		require.Equal(t, cfg, decoded)
+	})
+}
+
+func TestProxyConfigCOS(t *testing.T) {
+	data := []byte(`
+[metering]
+type = "cos"
+region = "ap-beijing"
+bucket = "metering-1234567890"
+prefix = "tiproxy/metering"
+
+[metering.cos]
+assume-role-arn = "qcs::cam::uin/1234567890:roleName/metering"
+access-key = "access-key"
+secret-access-key = "secret-access-key"
+session-token = "session-token"
+`)
+	var cfg Config
+	require.NoError(t, toml.Unmarshal(data, &cfg))
+	require.Equal(t, mconfig.MeteringConfig{
+		Type:   storage.ProviderTypeCOS,
+		Region: "ap-beijing",
+		Bucket: "metering-1234567890",
+		Prefix: "tiproxy/metering",
+		COS: &mconfig.MeteringCOSConfig{
+			AssumeRoleARN:   "qcs::cam::uin/1234567890:roleName/metering",
+			AccessKey:       "access-key",
+			SecretAccessKey: "secret-access-key",
+			SessionToken:    "session-token",
+		},
+	}, cfg.Metering)
+
+	providerCfg := cfg.Metering.ToProviderConfig()
+	require.Equal(t, storage.ProviderTypeCOS, providerCfg.Type)
+	require.Equal(t, "ap-beijing", providerCfg.Region)
+	require.Equal(t, "metering-1234567890", providerCfg.Bucket)
+	require.Equal(t, "tiproxy/metering", providerCfg.Prefix)
+	require.Equal(t, &storage.COSConfig{
+		AssumeRoleARN:   "qcs::cam::uin/1234567890:roleName/metering",
+		AccessKey:       "access-key",
+		SecretAccessKey: "secret-access-key",
+		SessionToken:    "session-token",
+	}, providerCfg.COS)
+}
+
+>>>>>>> 31158a3d (config, balance: add switch configs to disable balance factors (#1218))
 func TestProxyCheck(t *testing.T) {
 	testcases := []struct {
 		pre  func(*testing.T, *Config)

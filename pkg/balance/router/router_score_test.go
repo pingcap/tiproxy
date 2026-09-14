@@ -940,9 +940,79 @@ func TestFailoverTimeoutForceClose(t *testing.T) {
 	tester.addBackends(1)
 	backend := tester.getBackendByIndex(0)
 	tester.router.setConfig(&config.Config{
+<<<<<<< HEAD
 		Proxy: config.ProxyServer{
 			ProxyServerOnline: config.ProxyServerOnline{
 				FailBackendList: []string{backend.PodName()},
+=======
+		Labels: map[string]string{
+			"group": "a",
+		},
+		Balance: config.Balance{
+			LabelName: "group",
+			Policy:    config.BalancePolicyConnection,
+			Status: config.StatusFactor{
+				MigrationsPerSecond: 1000,
+			},
+		},
+	})
+
+	for range 10 {
+		selector := tester.router.GetBackendSelector(ClientInfo{})
+		backend, err := selector.Next()
+		require.NoError(t, err)
+		selector.Finish(nil, false)
+		require.NotNil(t, backend)
+		require.Contains(t, []string{"1", "2"}, backend.ID())
+	}
+
+	group := tester.router.groups[0]
+	toBackend := tester.router.backends["2"]
+	require.NotNil(t, toBackend)
+	for range 10 {
+		conn := tester.createConn()
+		conn.from = toBackend
+		tester.conns[conn.connID] = conn
+		group.onCreateConn(toBackend, conn, true)
+	}
+	require.Equal(t, 10, toBackend.ConnCount())
+
+	tester.router.setConfig(&config.Config{
+		Labels: map[string]string{
+			"group": "a",
+		},
+		Balance: config.Balance{
+			LabelName: "group",
+			Policy:    config.BalancePolicyConnection,
+			Status: config.StatusFactor{
+				MigrationsPerSecond: 1000,
+			},
+		},
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1"},
+				FailoverTimeout: 60,
+			},
+		},
+	})
+	require.False(t, tester.router.backends["1"].Healthy())
+	require.True(t, toBackend.Healthy())
+
+	tester.router.setConfig(&config.Config{
+		Labels: map[string]string{
+			"group": "a",
+		},
+		Balance: config.Balance{
+			LabelName: "group",
+			Policy:    config.BalancePolicyConnection,
+			Status: config.StatusFactor{
+				MigrationsPerSecond: 1000,
+			},
+		},
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				FailBackendList: []string{"1", "2"},
+>>>>>>> 31158a3d (config, balance: add switch configs to disable balance factors (#1218))
 				FailoverTimeout: 0,
 			},
 		},
