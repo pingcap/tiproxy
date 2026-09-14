@@ -60,7 +60,7 @@ func (b *Balance) Check() error {
 	}
 
 	switch b.RoutingPolicy {
-	case RoutingPolicyPreferIdle, RoutingPolicyRandom:
+	case RoutingPolicyPreferIdle, RoutingPolicyRandom, RoutingPolicyIdlest:
 	case "":
 		b.RoutingPolicy = RoutingPolicyPreferIdle
 	default:

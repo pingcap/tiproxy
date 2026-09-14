@@ -48,6 +48,8 @@ func TestCheckBalance(t *testing.T) {
 	require.NoError(t, (&balance).Check())
 	balance = DefaultBalance()
 	require.NoError(t, (&balance).Check())
+	balance.RoutingPolicy = RoutingPolicyIdlest
+	require.NoError(t, (&balance).Check())
 
 	balance = DefaultBalance()
 	balance.RoutingRule = MatchPortStr
