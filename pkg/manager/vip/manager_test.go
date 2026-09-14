@@ -7,12 +7,15 @@ import (
 	"context"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/manager/elect"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/stretchr/testify/require"
 )
@@ -295,6 +298,58 @@ func TestStartAndClose(t *testing.T) {
 	}
 }
 
+func TestRejecterWatcherResignsAndRecompetes(t *testing.T) {
+	// Shorten the polling interval so transitions happen within the test window.
+	origInterval := servingCheckInterval
+	servingCheckInterval = 10 * time.Millisecond
+	defer func() { servingCheckInterval = origInterval }()
+
+	lg, _ := logger.CreateLoggerForTest(t)
+	operation := newMockNetworkOperation()
+	operation.hasIP.Store(false)
+	rejecter := &mockConnRejecter{}
+	rejecter.reject.Store(false)
+
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(newMockConfig()),
+		operation: operation,
+		rejecter:  rejecter,
+	}
+	vm.newElection = func() elect.Election {
+		e := &autoElection{member: vm}
+		e.Start(vm.startCtx)
+		return e
+	}
+	vm.startCtx, vm.startCancel = context.WithCancel(context.Background())
+	// Start competing: the auto election wins immediately and binds the VIP.
+	vm.mu.Lock()
+	vm.election = vm.newElection()
+	vm.mu.Unlock()
+	require.Eventually(t, func() bool { return operation.hasIP.Load() }, time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 1, operation.addIPCnt.Load())
+
+	// Start the rejecter watcher, driven by vm.startCtx so that PreClose's
+	// cancellation of startCtx (and watchWG wait) is the shutdown path under test.
+	vm.watchWG.RunWithRecover(func() { vm.watchRejecter(vm.startCtx) }, nil, vm.lg)
+
+	// Flip to rejecting: the watcher resigns, which retires and drops the VIP.
+	rejecter.reject.Store(true)
+	require.Eventually(t, func() bool { return !operation.hasIP.Load() }, 3*time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 1, operation.delIPCnt.Load())
+
+	// Flip back to not rejecting: the watcher recompetes, wins, and rebinds the VIP.
+	rejecter.reject.Store(false)
+	require.Eventually(t, func() bool { return operation.hasIP.Load() }, 3*time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 2, operation.addIPCnt.Load())
+
+	// Shutdown: closing must release the VIP and stop the watcher without deadlock.
+	// PreClose cancels vm.startCtx (stopping the watcher) and waits for watchWG.
+	vm.PreClose()
+	vm.Close()
+	require.False(t, operation.hasIP.Load())
+}
+
 func TestMultiVIP(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		return
@@ -355,4 +410,44 @@ func (e *closeHookElection) Close() {
 	if e.closeFn != nil {
 		e.closeFn()
 	}
+}
+
+var _ elect.Election = (*autoElection)(nil)
+
+// autoElection calls OnElected on Start (simulating an immediate win) and
+// OnRetired on Close (simulating losing ownership). OnElected is delivered
+// asynchronously, like the real election, so callers that start the election
+// while holding the member's lock do not deadlock.
+type autoElection struct {
+	member  elect.Member
+	started atomic.Bool
+	closed  atomic.Bool
+	wg      sync.WaitGroup
+}
+
+func (e *autoElection) Start(context.Context) {
+	if e.started.Swap(true) {
+		return
+	}
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		e.member.OnElected()
+	}()
+}
+
+func (e *autoElection) ID() string {
+	return ""
+}
+
+func (e *autoElection) GetOwnerID(context.Context) (string, error) {
+	return "", nil
+}
+
+func (e *autoElection) Close() {
+	if !e.started.Load() || e.closed.Swap(true) {
+		return
+	}
+	e.wg.Wait()
+	e.member.OnRetired()
 }
