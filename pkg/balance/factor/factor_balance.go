@@ -77,44 +77,67 @@ func (fbb *FactorBasedBalance) setFactors(cfg *config.Config) {
 	}
 	fbb.factors = append(fbb.factors, fbb.factorStatus)
 
-	switch cfg.Balance.Policy {
-	case config.BalancePolicyResource, config.BalancePolicyLocation:
+	resourcePolicy := cfg.Balance.Policy == config.BalancePolicyResource || cfg.Balance.Policy == config.BalancePolicyLocation
+	if resourcePolicy && cfg.Balance.Location.Enabled {
 		if fbb.factorLocation == nil {
 			fbb.factorLocation = NewFactorLocation()
 		}
+	} else if fbb.factorLocation != nil {
+		fbb.factorLocation.Close()
+		fbb.factorLocation = nil
+	}
+	if resourcePolicy && cfg.Balance.Health.Enabled {
 		if fbb.factorHealth == nil {
 			fbb.factorHealth = NewFactorHealth(fbb.mr, fbb.lg.Named("health"))
 		}
+	} else if fbb.factorHealth != nil {
+		fbb.factorHealth.Close()
+		fbb.factorHealth = nil
+	}
+	if resourcePolicy && cfg.Balance.Memory.Enabled {
 		if fbb.factorMemory == nil {
 			fbb.factorMemory = NewFactorMemory(fbb.mr, fbb.lg.Named("memory"))
 		}
+	} else if fbb.factorMemory != nil {
+		fbb.factorMemory.Close()
+		fbb.factorMemory = nil
+	}
+	if resourcePolicy && cfg.Balance.CPU.Enabled {
 		if fbb.factorCPU == nil {
 			fbb.factorCPU = NewFactorCPU(fbb.mr, fbb.lg.Named("cpu"))
 		}
-	default:
-		if fbb.factorLocation != nil {
-			fbb.factorLocation.Close()
-			fbb.factorLocation = nil
-		}
-		if fbb.factorHealth != nil {
-			fbb.factorHealth.Close()
-			fbb.factorHealth = nil
-		}
-		if fbb.factorMemory != nil {
-			fbb.factorMemory.Close()
-			fbb.factorMemory = nil
-		}
-		if fbb.factorCPU != nil {
-			fbb.factorCPU.Close()
-			fbb.factorCPU = nil
-		}
+	} else if fbb.factorCPU != nil {
+		fbb.factorCPU.Close()
+		fbb.factorCPU = nil
 	}
 
 	switch cfg.Balance.Policy {
 	case config.BalancePolicyResource:
-		fbb.factors = append(fbb.factors, fbb.factorHealth, fbb.factorMemory, fbb.factorCPU, fbb.factorLocation)
+		if fbb.factorHealth != nil {
+			fbb.factors = append(fbb.factors, fbb.factorHealth)
+		}
+		if fbb.factorMemory != nil {
+			fbb.factors = append(fbb.factors, fbb.factorMemory)
+		}
+		if fbb.factorCPU != nil {
+			fbb.factors = append(fbb.factors, fbb.factorCPU)
+		}
+		if fbb.factorLocation != nil {
+			fbb.factors = append(fbb.factors, fbb.factorLocation)
+		}
 	case config.BalancePolicyLocation:
-		fbb.factors = append(fbb.factors, fbb.factorLocation, fbb.factorHealth, fbb.factorMemory, fbb.factorCPU)
+		if fbb.factorLocation != nil {
+			fbb.factors = append(fbb.factors, fbb.factorLocation)
+		}
+		if fbb.factorHealth != nil {
+			fbb.factors = append(fbb.factors, fbb.factorHealth)
+		}
+		if fbb.factorMemory != nil {
+			fbb.factors = append(fbb.factors, fbb.factorMemory)
+		}
+		if fbb.factorCPU != nil {
+			fbb.factors = append(fbb.factors, fbb.factorCPU)
+		}
 	}
 
 	if fbb.factorConnCount == nil {

@@ -27,7 +27,7 @@ type Balance struct {
 	RoutingRule   string          `yaml:"routing-rule,omitempty" toml:"routing-rule,omitempty" json:"routing-rule,omitempty" reloadable:"false"`
 	Policy        string          `yaml:"policy,omitempty" toml:"policy,omitempty" json:"policy,omitempty" reloadable:"true"`
 	RoutingPolicy string          `yaml:"routing-policy,omitempty" toml:"routing-policy,omitempty" json:"routing-policy,omitempty" reloadable:"true"`
-	Status        Factor          `yaml:"status,omitempty" toml:"status,omitempty" json:"status,omitempty" reloadable:"true"`
+	Status        StatusFactor    `yaml:"status,omitempty" toml:"status,omitempty" json:"status,omitempty" reloadable:"true"`
 	Health        Factor          `yaml:"health,omitempty" toml:"health,omitempty" json:"health,omitempty" reloadable:"true"`
 	Memory        Factor          `yaml:"memory,omitempty" toml:"memory,omitempty" json:"memory,omitempty" reloadable:"true"`
 	CPU           Factor          `yaml:"cpu,omitempty" toml:"cpu,omitempty" json:"cpu,omitempty" reloadable:"true"`
@@ -36,11 +36,16 @@ type Balance struct {
 }
 
 type ConnCountFactor struct {
-	Factor              `yaml:",inline" toml:",inline" json:",inline"`
+	MigrationsPerSecond float64 `yaml:"migrations-per-second,omitempty" toml:"migrations-per-second,omitempty" json:"migrations-per-second,omitempty" reloadable:"true"`
 	CountRatioThreshold float64 `yaml:"count-ratio-threshold,omitempty" toml:"count-ratio-threshold,omitempty" json:"count-ratio-threshold,omitempty" reloadable:"true"`
 }
 
+type StatusFactor struct {
+	MigrationsPerSecond float64 `yaml:"migrations-per-second,omitempty" toml:"migrations-per-second,omitempty" json:"migrations-per-second,omitempty" reloadable:"true"`
+}
+
 type Factor struct {
+	Enabled             bool    `yaml:"enabled,omitempty" toml:"enabled,omitempty" json:"enabled,omitempty" reloadable:"true"`
 	MigrationsPerSecond float64 `yaml:"migrations-per-second,omitempty" toml:"migrations-per-second,omitempty" json:"migrations-per-second,omitempty" reloadable:"true"`
 }
 
@@ -95,5 +100,13 @@ func DefaultBalance() Balance {
 	return Balance{
 		Policy:        BalancePolicyResource,
 		RoutingPolicy: RoutingPolicyPreferIdle,
+		Health:        defaultFactor(),
+		Memory:        defaultFactor(),
+		CPU:           defaultFactor(),
+		Location:      defaultFactor(),
 	}
+}
+
+func defaultFactor() Factor {
+	return Factor{Enabled: true}
 }

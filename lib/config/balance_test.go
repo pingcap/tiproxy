@@ -18,7 +18,7 @@ func TestCheckBalance(t *testing.T) {
 			RoutingPolicy: "test",
 		},
 		{
-			Status: Factor{MigrationsPerSecond: -1},
+			Status: StatusFactor{MigrationsPerSecond: -1},
 		},
 		{
 			Health: Factor{MigrationsPerSecond: -1},
@@ -33,7 +33,7 @@ func TestCheckBalance(t *testing.T) {
 			Location: Factor{MigrationsPerSecond: -1},
 		},
 		{
-			ConnCount: ConnCountFactor{Factor: Factor{MigrationsPerSecond: -1}},
+			ConnCount: ConnCountFactor{MigrationsPerSecond: -1},
 		},
 		{
 			ConnCount: ConnCountFactor{CountRatioThreshold: -1},
@@ -57,4 +57,12 @@ func TestCheckBalance(t *testing.T) {
 
 	balance.RoutingRule = "unknown"
 	require.ErrorIs(t, balance.Check(), ErrInvalidConfigValue)
+}
+
+func TestOptionalFactorEnabled(t *testing.T) {
+	balance := DefaultBalance()
+	require.True(t, balance.Health.Enabled)
+	require.True(t, balance.Memory.Enabled)
+	require.True(t, balance.CPU.Enabled)
+	require.True(t, balance.Location.Enabled)
 }
