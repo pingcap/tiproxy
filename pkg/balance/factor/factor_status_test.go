@@ -129,7 +129,7 @@ func TestFactorStatusConfig(t *testing.T) {
 		backends = append(backends, createBackend(0, 100, 100))
 		backends = append(backends, createBackend(1, 100, 100))
 		fs := NewFactorStatus(zap.NewNop())
-		fs.SetConfig(&config.Config{Balance: config.Balance{Status: config.Factor{MigrationsPerSecond: test.migrations}}})
+		fs.SetConfig(&config.Config{Balance: config.Balance{Status: config.StatusFactor{MigrationsPerSecond: test.migrations}}})
 		require.EqualValues(t, test.migrations, fs.migrationsPerSecond)
 		backends[0].BackendCtx.(*mockBackend).healthy = false
 		fs.UpdateScore(backends)
