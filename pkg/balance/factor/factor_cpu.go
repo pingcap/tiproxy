@@ -98,15 +98,18 @@ type FactorCPU struct {
 	mr                  metricsreader.MetricsQuerier
 	bitNum              int
 	migrationsPerSecond float64
+	minBalanceUsage     float64
+	maxUsageGap         float64
 	lg                  *zap.Logger
 }
 
 func NewFactorCPU(mr metricsreader.MetricsQuerier, lg *zap.Logger) *FactorCPU {
 	fc := &FactorCPU{
-		mr:       mr,
-		bitNum:   5,
-		snapshot: make(map[string]cpuBackendSnapshot),
-		lg:       lg,
+		mr:          mr,
+		bitNum:      5,
+		maxUsageGap: 1,
+		snapshot:    make(map[string]cpuBackendSnapshot),
+		lg:          lg,
 	}
 	mr.AddQueryExpr(fc.Name(), cpuQueryExpr, cpuQueryRule)
 	return fc
@@ -258,6 +261,8 @@ func (fc *FactorCPU) ScoreBitNum() int {
 func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float64, []zap.Field) {
 	fromAvgUsage, fromLatestUsage := fc.getUsage(from)
 	toAvgUsage, toLatestUsage := fc.getUsage(to)
+	avgUsageGap := fromAvgUsage - toAvgUsage
+	latestUsageGap := fromLatestUsage - toLatestUsage
 	fields := []zap.Field{
 		zap.Float64("from_avg_usage", fromAvgUsage),
 		zap.Float64("from_latest_usage", fromLatestUsage),
@@ -274,10 +279,18 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float6
 		(1.3-(toLatestUsage+fc.usagePerConn))*cpuUnbalancedRatio < 1.3-(fromLatestUsage-fc.usagePerConn) {
 		return AdviceNegtive, 0, fields
 	}
+	// CPU balance is unnecessary while the source backend is under the configured load threshold.
+	// Keep the rejection above so lower-priority factors cannot overload a target backend even at low CPU usage.
+	if fromAvgUsage < fc.minBalanceUsage || fromLatestUsage < fc.minBalanceUsage {
+		return AdviceNeutral, 0, fields
+	}
 	// The higher the CPU usage, the more sensitive the load balance should be.
 	// E.g. 10% vs 25% don't need rebalance, but 80% vs 95% need rebalance.
 	// Use the average usage to avoid thrash when CPU jitters too much and use the latest usage to avoid migrate too many connections.
-	if 1.3-toAvgUsage < (1.3-fromAvgUsage)*cpuBalancedRatio || 1.3-toLatestUsage < (1.3-fromLatestUsage)*cpuBalancedRatio {
+	adaptiveImbalanced := 1.3-toAvgUsage >= (1.3-fromAvgUsage)*cpuBalancedRatio &&
+		1.3-toLatestUsage >= (1.3-fromLatestUsage)*cpuBalancedRatio
+	gapImbalanced := avgUsageGap >= fc.maxUsageGap && latestUsageGap >= fc.maxUsageGap
+	if !adaptiveImbalanced && !gapImbalanced {
 		return AdviceNeutral, 0, fields
 	}
 	if fc.migrationsPerSecond > 0 {
@@ -288,6 +301,11 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float6
 
 func (fc *FactorCPU) SetConfig(cfg *config.Config) {
 	fc.migrationsPerSecond = cfg.Balance.CPU.MigrationsPerSecond
+	fc.minBalanceUsage = cfg.Balance.CPU.MinBalanceUsage
+	fc.maxUsageGap = cfg.Balance.CPU.MaxUsageGap
+	if fc.maxUsageGap == 0 {
+		fc.maxUsageGap = 1
+	}
 }
 
 func (fc *FactorCPU) CanBeRouted(_ uint64) bool {
