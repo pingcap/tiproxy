@@ -130,6 +130,19 @@ proxy.failover-timeout = 0
 				return c.Balance.CPU.Enabled
 			},
 		},
+		{
+			name: "cpu balance thresholds override",
+			precfg: `balance.cpu.min-balance-usage = 0.2
+balance.cpu.max-usage-gap = 0.1`,
+			precheck: func(c *config.Config) bool {
+				return c.Balance.CPU.MinBalanceUsage == 0.2 && c.Balance.CPU.MaxUsageGap == 0.1
+			},
+			postcfg: `balance.cpu.min-balance-usage = 0
+balance.cpu.max-usage-gap = 1`,
+			postcheck: func(c *config.Config) bool {
+				return c.Balance.CPU.MinBalanceUsage == 0 && c.Balance.CPU.MaxUsageGap == 1
+			},
+		},
 	}
 
 	for i, tc := range cases {
