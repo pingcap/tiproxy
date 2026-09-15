@@ -152,3 +152,5 @@ graceful-close-conn-timeout = 15
 	[balance.cpu]
 	# Skip CPU-triggered connection migration when the source backend CPU usage is below this value.
 	# min-balance-usage = 0
+	# Cap the adaptive CPU balance threshold. 0.1 means a maximum gap of 10 percentage points.
+	# max-usage-gap = 1

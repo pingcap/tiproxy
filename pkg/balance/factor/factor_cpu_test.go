@@ -558,6 +558,58 @@ func TestCPUMinBalanceUsage(t *testing.T) {
 	}
 }
 
+func TestCPUMaxUsageGap(t *testing.T) {
+	tests := []struct {
+		cpus        [][]float64
+		maxUsageGap float64
+		advice      BalanceAdvice
+	}{
+		{
+			cpus:        [][]float64{{0.1}, {0.25}},
+			maxUsageGap: 1,
+			advice:      AdviceNeutral,
+		},
+		{
+			cpus:        [][]float64{{0.1}, {0.25}},
+			maxUsageGap: 0.1,
+			advice:      AdvicePositive,
+		},
+		{
+			cpus:        [][]float64{{0.1}, {0.18}},
+			maxUsageGap: 0.1,
+			advice:      AdviceNeutral,
+		},
+		{
+			// The original adaptive threshold can still trigger balance before reaching the configured maximum gap.
+			cpus:        [][]float64{{0.6}, {0.8}},
+			maxUsageGap: 1,
+			advice:      AdvicePositive,
+		},
+	}
+
+	for i, test := range tests {
+		backends := make([]scoredBackend, 0, len(test.cpus))
+		values := make([]*model.SampleStream, 0, len(test.cpus))
+		for j := range test.cpus {
+			backends = append(backends, createBackend(j, 100, 100))
+			values = append(values, createSampleStream(test.cpus[j], j, model.Now()))
+		}
+		mmr := &mockMetricsReader{
+			qrs: map[string]metricsreader.QueryResult{
+				"cpu": {
+					UpdateTime: time.Now(),
+					Value:      model.Matrix(values),
+				},
+			},
+		}
+		fc := NewFactorCPU(mmr, zap.NewNop())
+		fc.SetConfig(&config.Config{Balance: config.Balance{CPU: config.CPUFactor{MaxUsageGap: test.maxUsageGap}}})
+		fc.UpdateScore(backends)
+		advice, _, _ := fc.BalanceCount(backends[1], backends[0])
+		require.Equal(t, test.advice, advice, "test index %d", i)
+	}
+}
+
 func TestFactorCPUConfig(t *testing.T) {
 	tests := []struct {
 		cpus  [][]float64
@@ -589,9 +641,10 @@ func TestFactorCPUConfig(t *testing.T) {
 			},
 		}
 		fc := NewFactorCPU(mmr, zap.NewNop())
-		fc.SetConfig(&config.Config{Balance: config.Balance{CPU: config.CPUFactor{MigrationsPerSecond: 10, MinBalanceUsage: 0.1}}})
+		fc.SetConfig(&config.Config{Balance: config.Balance{CPU: config.CPUFactor{MigrationsPerSecond: 10, MinBalanceUsage: 0.1, MaxUsageGap: 0.3}}})
 		require.EqualValues(t, 10, fc.migrationsPerSecond)
 		require.Equal(t, 0.1, fc.minBalanceUsage)
+		require.Equal(t, 0.3, fc.maxUsageGap)
 		updateScore(fc, backends)
 		_, count, _ := fc.BalanceCount(backends[1], backends[0])
 		require.Equal(t, test.speed, count, "test index %d", i)
