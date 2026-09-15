@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -785,6 +786,7 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 	ts.runTests(runners)
 }
 
+<<<<<<< HEAD
 type countingPacketIO struct {
 	pnet.PacketIO
 	gracefulCloseCnt atomic.Int32
@@ -799,6 +801,75 @@ func (cp *countingPacketIO) GracefulClose() error {
 func (cp *countingPacketIO) Close() error {
 	cp.closeCnt.Add(1)
 	return nil
+=======
+// TiDB reports an error for COM_PING during graceful shutdown, so TiProxy does the same.
+func TestPingDuringShutdown(t *testing.T) {
+	var shuttingDown atomic.Bool
+	ts := newBackendMgrTester(t, func(cfg *testConfig) {
+		cfg.proxyConfig.bcConfig.ShuttingDown = shuttingDown.Load
+		cfg.clientConfig.cmd = pnet.ComPing
+	})
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// the ping is forwarded to the backend when the proxy is serving
+		{
+			client:  ts.mc.request,
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		{
+			proxy: func(_, _ pnet.PacketIO) error {
+				shuttingDown.Store(true)
+				return nil
+			},
+		},
+		// the proxy answers the ping itself with an error and doesn't forward it to the backend
+		{
+			client: func(packetIO pnet.PacketIO) error {
+				packetIO.ResetSequence()
+				if err := packetIO.WritePacket([]byte{pnet.ComPing.Byte()}, true); err != nil {
+					return err
+				}
+				pkt, err := packetIO.ReadPacket()
+				if err != nil {
+					return err
+				}
+				require.Equal(t, pnet.ErrHeader.Byte(), pkt[0])
+				myErr := pnet.ParseErrorPacket(pkt)
+				require.Equal(t, uint16(mysql.ER_SERVER_SHUTDOWN), myErr.Code)
+				require.Equal(t, "08S01", myErr.State)
+				return nil
+			},
+			proxy: func(_, _ pnet.PacketIO) error {
+				backendIO := *ts.mp.backendIO.Load()
+				backendOutBytes := backendIO.OutBytes()
+				ts.mp.clientIO.ResetSequence()
+				cmd, err := ts.mp.ExecuteCmd(context.Background())
+				require.Equal(t, pnet.ComPing, cmd)
+				require.True(t, pnet.IsMySQLError(err))
+				// The connection is not quitting and nothing is sent to the backend.
+				require.Equal(t, SrcNone, ts.mp.QuitSource())
+				require.Equal(t, backendOutBytes, backendIO.OutBytes())
+				return nil
+			},
+		},
+		// other commands are still forwarded
+		{
+			client: func(packetIO pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComQuery
+				return ts.mc.request(packetIO)
+			},
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+	}
+	ts.runTests(runners)
+>>>>>>> 139ba4bf (proxy: return an error on COM_PING during graceful shutdown (#1226))
 }
 
 // Test that the redirection aborted by closing is reported as a failure instead of a success.

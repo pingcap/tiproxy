@@ -88,8 +88,17 @@ const (
 )
 
 type BCConfig struct {
+<<<<<<< HEAD
 	HealthyKeepAlive     config.KeepAlive
 	UnhealthyKeepAlive   config.KeepAlive
+=======
+	HealthyKeepAlive    config.KeepAlive
+	UnhealthyKeepAlive  config.KeepAlive
+	FromPublicEndpoints func(addr net.Addr) bool
+	DialContext         func(ctx context.Context, backend router.BackendInst, addr string) (net.Conn, error)
+	// ShuttingDown reports whether TiProxy is in graceful shutdown. It may be nil, e.g. for replaying traffic.
+	ShuttingDown         func() bool
+>>>>>>> 139ba4bf (proxy: return an error on COM_PING during graceful shutdown (#1226))
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
 	ConnectTimeout       time.Duration
@@ -382,6 +391,12 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	if mgr.closeStatus.Load() >= statusClosing {
 		return
 	}
+	// TiDB reports an error for COM_PING during graceful shutdown so that the clients and the load
+	// balancers know this instance is draining. TiProxy behaves the same for its own shutdown.
+	if cmd == pnet.ComPing && mgr.config.ShuttingDown != nil && mgr.config.ShuttingDown() {
+		err = mgr.writeShutdownErr()
+		return
+	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	backendIO := *mgr.backendIO.Load()
@@ -436,6 +451,16 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.updateTraffic(backendIO)
 	}
 	return
+}
+
+// writeShutdownErr replies to the client with the same error as TiDB does when it's shutting down.
+// The connection is kept alive, so it returns a MySQL error rather than a connection error.
+func (mgr *BackendConnManager) writeShutdownErr() error {
+	myErr := mysql.NewDefaultError(mysql.ER_SERVER_SHUTDOWN)
+	if err := mgr.clientIO.WritePacket(pnet.MakeErrPacket(myErr), true); err != nil {
+		return err
+	}
+	return myErr
 }
 
 func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO) {

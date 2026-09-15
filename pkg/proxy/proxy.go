@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -50,6 +51,9 @@ type SQLServer struct {
 	cpt               capture.Capture
 	wg                waitgroup.WaitGroup
 	cancelFunc        context.CancelFunc
+	// shuttingDown is set at the beginning of PreClose. The connections report it to the clients
+	// on COM_PING, just like TiDB does.
+	shuttingDown atomic.Bool
 
 	mu serverState
 }
@@ -191,12 +195,30 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 			zap.String("addr", addr))
 		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),
 			s.hsHandler, s.cpt, connID, addr, &backend.BCConfig{
+<<<<<<< HEAD
 				ProxyProtocol:      s.mu.proxyProtocol,
 				RequireBackendTLS:  s.mu.requireBackendTLS,
 				HealthyKeepAlive:   s.mu.healthyKeepAlive,
 				UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
 				ConnBufferSize:     s.mu.connBufferSize,
 			})
+=======
+				ProxyProtocol:       s.mu.proxyProtocol,
+				RequireBackendTLS:   s.mu.requireBackendTLS,
+				HealthyKeepAlive:    s.mu.healthyKeepAlive,
+				UnhealthyKeepAlive:  s.mu.unhealthyKeepAlive,
+				ConnBufferSize:      s.mu.connBufferSize,
+				FromPublicEndpoints: s.fromPublicEndpoint,
+				ShuttingDown:        s.shuttingDown.Load,
+				DialContext: func(ctx context.Context, backendInst router.BackendInst, addr string) (net.Conn, error) {
+					if s.dialer != nil {
+						return s.dialer.DialContext(ctx, "tcp", addr, backendInst.ClusterName())
+					}
+					var dialer net.Dialer
+					return dialer.DialContext(ctx, "tcp", addr)
+				},
+			}, s.meter)
+>>>>>>> 139ba4bf (proxy: return an error on COM_PING during graceful shutdown (#1226))
 		s.mu.clients[connID] = clientConn
 		connBufferMemDelta = estimateConnBufferMemDelta(s.mu.connBufferSize)
 		if connBufferUpdater != nil {
@@ -253,6 +275,8 @@ func (s *SQLServer) rejectConn(conn net.Conn) bool {
 
 func (s *SQLServer) PreClose() {
 	// Step 1: HTTP status returns unhealthy so that NLB takes this instance offline and then new connections won't come.
+	// COM_PING also reports an error from now on so that the clients know this instance is draining.
+	s.shuttingDown.Store(true)
 	s.mu.Lock()
 	gracefulWait := s.mu.gracefulWait
 	s.mu.Unlock()

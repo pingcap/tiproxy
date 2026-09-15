@@ -271,6 +271,32 @@ func TestGracefulShutDown(t *testing.T) {
 	wg.Wait()
 }
 
+// The connections report the shutdown to the clients on COM_PING, so the flag must be set
+// at the beginning of PreClose, not after graceful-wait-before-shutdown.
+func TestShuttingDownBeforeGracefulWait(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := &config.Config{
+		Proxy: config.ProxyServer{
+			ProxyServerOnline: config.ProxyServerOnline{
+				GracefulWaitBeforeShutdown: 1,
+			},
+		},
+	}
+	server, err := NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, nil, backend.NewDefaultHandshakeHandler(nil), nil, nil)
+	require.NoError(t, err)
+	require.False(t, server.shuttingDown.Load())
+
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		server.PreClose()
+	})
+	require.Eventually(t, func() bool {
+		return server.shuttingDown.Load()
+	}, 500*time.Millisecond, 10*time.Millisecond)
+	wg.Wait()
+	require.NoError(t, server.Close())
+}
+
 func TestMultiAddr(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	certManager := cert.NewCertManager()
