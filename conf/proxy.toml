@@ -148,3 +148,7 @@ graceful-close-conn-timeout = 15
 
 [balance]
 # policy = "resource"
+
+	[balance.cpu]
+	# Skip CPU-triggered connection migration when the source backend CPU usage is below this value.
+	# min-balance-usage = 0
