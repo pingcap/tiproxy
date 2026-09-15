@@ -121,6 +121,7 @@ func TestConfigZeroValueOverridesRoundTrip(t *testing.T) {
 	t.Run("toml", func(t *testing.T) {
 		data, err := cfg.ToBytes()
 		require.NoError(t, err)
+		require.Contains(t, string(data), "min-balance-usage = 0.0")
 		decoded := NewConfig()
 		require.NoError(t, toml.Unmarshal(data, decoded))
 		require.Equal(t, cfg, decoded)
@@ -129,6 +130,7 @@ func TestConfigZeroValueOverridesRoundTrip(t *testing.T) {
 	t.Run("json", func(t *testing.T) {
 		data, err := json.Marshal(cfg)
 		require.NoError(t, err)
+		require.Contains(t, string(data), `"min-balance-usage":0`)
 		decoded := NewConfig()
 		require.NoError(t, json.Unmarshal(data, decoded))
 		require.Equal(t, cfg, decoded)

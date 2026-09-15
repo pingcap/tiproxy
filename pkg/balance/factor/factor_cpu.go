@@ -98,6 +98,7 @@ type FactorCPU struct {
 	mr                  metricsreader.MetricsReader
 	bitNum              int
 	migrationsPerSecond float64
+	minBalanceUsage     float64
 	lg                  *zap.Logger
 }
 
@@ -267,11 +268,17 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float6
 		zap.Int("to_snapshot_conn", fc.snapshot[to.Addr()].connCount),
 		zap.Int("to_conn", to.ConnScore()),
 		zap.Float64("usage_per_conn", fc.usagePerConn),
+		zap.Float64("min_balance_usage", fc.minBalanceUsage),
 	}
 	// Reject migration if it will make the target backend even much busier than the source.
 	if (1.3-(toAvgUsage+fc.usagePerConn))*cpuUnbalancedRatio < 1.3-(fromAvgUsage-fc.usagePerConn) ||
 		(1.3-(toLatestUsage+fc.usagePerConn))*cpuUnbalancedRatio < 1.3-(fromLatestUsage-fc.usagePerConn) {
 		return AdviceNegtive, 0, fields
+	}
+	// CPU balance is unnecessary while the source backend is under the configured load threshold.
+	// Keep the rejection above so lower-priority factors cannot overload a target backend even at low CPU usage.
+	if fromAvgUsage < fc.minBalanceUsage || fromLatestUsage < fc.minBalanceUsage {
+		return AdviceNeutral, 0, fields
 	}
 	// The higher the CPU usage, the more sensitive the load balance should be.
 	// E.g. 10% vs 25% don't need rebalance, but 80% vs 95% need rebalance.
@@ -287,6 +294,7 @@ func (fc *FactorCPU) BalanceCount(from, to scoredBackend) (BalanceAdvice, float6
 
 func (fc *FactorCPU) SetConfig(cfg *config.Config) {
 	fc.migrationsPerSecond = cfg.Balance.CPU.MigrationsPerSecond
+	fc.minBalanceUsage = cfg.Balance.CPU.MinBalanceUsage
 }
 
 func (fc *FactorCPU) CanBeRouted(_ uint64) bool {
