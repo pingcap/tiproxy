@@ -195,30 +195,13 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 			zap.String("addr", addr))
 		clientConn := client.NewClientConnection(logger.Named("conn"), conn, s.certMgr.ServerSQLTLS(), s.certMgr.SQLTLS(),
 			s.hsHandler, s.cpt, connID, addr, &backend.BCConfig{
-<<<<<<< HEAD
 				ProxyProtocol:      s.mu.proxyProtocol,
 				RequireBackendTLS:  s.mu.requireBackendTLS,
 				HealthyKeepAlive:   s.mu.healthyKeepAlive,
 				UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
 				ConnBufferSize:     s.mu.connBufferSize,
+				ShuttingDown:       s.shuttingDown.Load,
 			})
-=======
-				ProxyProtocol:       s.mu.proxyProtocol,
-				RequireBackendTLS:   s.mu.requireBackendTLS,
-				HealthyKeepAlive:    s.mu.healthyKeepAlive,
-				UnhealthyKeepAlive:  s.mu.unhealthyKeepAlive,
-				ConnBufferSize:      s.mu.connBufferSize,
-				FromPublicEndpoints: s.fromPublicEndpoint,
-				ShuttingDown:        s.shuttingDown.Load,
-				DialContext: func(ctx context.Context, backendInst router.BackendInst, addr string) (net.Conn, error) {
-					if s.dialer != nil {
-						return s.dialer.DialContext(ctx, "tcp", addr, backendInst.ClusterName())
-					}
-					var dialer net.Dialer
-					return dialer.DialContext(ctx, "tcp", addr)
-				},
-			}, s.meter)
->>>>>>> 139ba4bf (proxy: return an error on COM_PING during graceful shutdown (#1226))
 		s.mu.clients[connID] = clientConn
 		connBufferMemDelta = estimateConnBufferMemDelta(s.mu.connBufferSize)
 		if connBufferUpdater != nil {

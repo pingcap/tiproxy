@@ -88,17 +88,10 @@ const (
 )
 
 type BCConfig struct {
-<<<<<<< HEAD
-	HealthyKeepAlive     config.KeepAlive
-	UnhealthyKeepAlive   config.KeepAlive
-=======
-	HealthyKeepAlive    config.KeepAlive
-	UnhealthyKeepAlive  config.KeepAlive
-	FromPublicEndpoints func(addr net.Addr) bool
-	DialContext         func(ctx context.Context, backend router.BackendInst, addr string) (net.Conn, error)
+	HealthyKeepAlive   config.KeepAlive
+	UnhealthyKeepAlive config.KeepAlive
 	// ShuttingDown reports whether TiProxy is in graceful shutdown. It may be nil, e.g. for replaying traffic.
 	ShuttingDown         func() bool
->>>>>>> 139ba4bf (proxy: return an error on COM_PING during graceful shutdown (#1226))
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
 	ConnectTimeout       time.Duration

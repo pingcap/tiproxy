@@ -786,7 +786,6 @@ func TestGracefulCloseWhenActive(t *testing.T) {
 	ts.runTests(runners)
 }
 
-<<<<<<< HEAD
 type countingPacketIO struct {
 	pnet.PacketIO
 	gracefulCloseCnt atomic.Int32
@@ -801,7 +800,8 @@ func (cp *countingPacketIO) GracefulClose() error {
 func (cp *countingPacketIO) Close() error {
 	cp.closeCnt.Add(1)
 	return nil
-=======
+}
+
 // TiDB reports an error for COM_PING during graceful shutdown, so TiProxy does the same.
 func TestPingDuringShutdown(t *testing.T) {
 	var shuttingDown atomic.Bool
@@ -849,8 +849,10 @@ func TestPingDuringShutdown(t *testing.T) {
 				backendIO := *ts.mp.backendIO.Load()
 				backendOutBytes := backendIO.OutBytes()
 				ts.mp.clientIO.ResetSequence()
-				cmd, err := ts.mp.ExecuteCmd(context.Background())
-				require.Equal(t, pnet.ComPing, cmd)
+				request, err := ts.mp.clientIO.ReadPacket()
+				require.NoError(t, err)
+				require.Equal(t, pnet.ComPing, pnet.Command(request[0]))
+				err = ts.mp.ExecuteCmd(context.Background(), request)
 				require.True(t, pnet.IsMySQLError(err))
 				// The connection is not quitting and nothing is sent to the backend.
 				require.Equal(t, SrcNone, ts.mp.QuitSource())
@@ -869,7 +871,6 @@ func TestPingDuringShutdown(t *testing.T) {
 		},
 	}
 	ts.runTests(runners)
->>>>>>> 139ba4bf (proxy: return an error on COM_PING during graceful shutdown (#1226))
 }
 
 // Test that the redirection aborted by closing is reported as a failure instead of a success.

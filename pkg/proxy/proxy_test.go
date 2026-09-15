@@ -282,7 +282,7 @@ func TestShuttingDownBeforeGracefulWait(t *testing.T) {
 			},
 		},
 	}
-	server, err := NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, nil, backend.NewDefaultHandshakeHandler(nil), nil, nil)
+	server, err := NewSQLServer(lg, cfg, nil, id.NewIDManager(), nil, backend.NewDefaultHandshakeHandler(nil), nil, nil)
 	require.NoError(t, err)
 	require.False(t, server.shuttingDown.Load())
 
