@@ -45,6 +45,7 @@ type CPUFactor struct {
 	Enabled             bool    `yaml:"enabled" toml:"enabled" json:"enabled" reloadable:"true"`
 	MigrationsPerSecond float64 `yaml:"migrations-per-second,omitempty" toml:"migrations-per-second,omitempty" json:"migrations-per-second,omitempty" reloadable:"true"`
 	MinBalanceUsage     float64 `yaml:"min-balance-usage" toml:"min-balance-usage" json:"min-balance-usage" reloadable:"true"`
+	MaxUsageGap         float64 `yaml:"max-usage-gap" toml:"max-usage-gap" json:"max-usage-gap" reloadable:"true"`
 }
 
 func (b *Balance) Check() error {
@@ -79,6 +80,11 @@ func (b *Balance) Check() error {
 	if b.CPU.MinBalanceUsage < 0 || b.CPU.MinBalanceUsage > 1 {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.cpu.min-balance-usage")
 	}
+	if b.CPU.MaxUsageGap == 0 {
+		b.CPU.MaxUsageGap = 1
+	} else if b.CPU.MaxUsageGap < 0.05 || b.CPU.MaxUsageGap > 1 {
+		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.cpu.max-usage-gap")
+	}
 	if b.Location.MigrationsPerSecond < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.location.migrations-per-second")
 	}
@@ -97,7 +103,7 @@ func DefaultBalance() Balance {
 		RoutingPolicy: RoutingPolicyPreferIdle,
 		Health:        defaultFactor(),
 		Memory:        defaultFactor(),
-		CPU:           CPUFactor{Enabled: true},
+		CPU:           CPUFactor{Enabled: true, MaxUsageGap: 1},
 		Location:      defaultFactor(),
 	}
 }

@@ -36,6 +36,12 @@ func TestCheckBalance(t *testing.T) {
 			CPU: CPUFactor{MinBalanceUsage: 1.1},
 		},
 		{
+			CPU: CPUFactor{MaxUsageGap: 0.04},
+		},
+		{
+			CPU: CPUFactor{MaxUsageGap: 1.1},
+		},
+		{
 			Location: Factor{MigrationsPerSecond: -1},
 		},
 		{
@@ -52,6 +58,7 @@ func TestCheckBalance(t *testing.T) {
 
 	balance := Balance{}
 	require.NoError(t, (&balance).Check())
+	require.Equal(t, 1.0, balance.CPU.MaxUsageGap)
 	balance = DefaultBalance()
 	require.NoError(t, (&balance).Check())
 	balance.RoutingPolicy = RoutingPolicyIdlest
@@ -64,5 +71,6 @@ func TestOptionalFactorEnabled(t *testing.T) {
 	require.True(t, balance.Memory.Enabled)
 	require.True(t, balance.CPU.Enabled)
 	require.Zero(t, balance.CPU.MinBalanceUsage)
+	require.Equal(t, 1.0, balance.CPU.MaxUsageGap)
 	require.True(t, balance.Location.Enabled)
 }
