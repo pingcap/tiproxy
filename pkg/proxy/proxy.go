@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -59,6 +60,9 @@ type SQLServer struct {
 	dialer            BackendDialer
 	wg                waitgroup.WaitGroup
 	cancelFunc        context.CancelFunc
+	// shuttingDown is set at the beginning of PreClose. The connections report it to the clients
+	// on COM_PING, just like TiDB does.
+	shuttingDown atomic.Bool
 
 	mu serverState
 }
@@ -220,6 +224,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				UnhealthyKeepAlive:  s.mu.unhealthyKeepAlive,
 				ConnBufferSize:      s.mu.connBufferSize,
 				FromPublicEndpoints: s.fromPublicEndpoint,
+				ShuttingDown:        s.shuttingDown.Load,
 				DialContext: func(ctx context.Context, backendInst router.BackendInst, addr string) (net.Conn, error) {
 					if s.dialer != nil {
 						return s.dialer.DialContext(ctx, "tcp", addr, backendInst.ClusterName())
@@ -309,6 +314,8 @@ func (s *SQLServer) fromPublicEndpoint(addr net.Addr) bool {
 
 func (s *SQLServer) PreClose() {
 	// Step 1: HTTP status returns unhealthy so that NLB takes this instance offline and then new connections won't come.
+	// COM_PING also reports an error from now on so that the clients know this instance is draining.
+	s.shuttingDown.Store(true)
 	s.mu.Lock()
 	gracefulWait := s.mu.gracefulWait
 	s.mu.Unlock()
