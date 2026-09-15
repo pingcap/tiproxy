@@ -132,7 +132,6 @@ func TestConfigZeroValueOverridesRoundTrip(t *testing.T) {
 	cfg.Balance.Memory.Enabled = false
 	cfg.Balance.CPU.Enabled = false
 	cfg.Balance.Location.Enabled = false
-	cfg.HA.GARPRefreshCount = 0
 	cfg.EnableTrafficReplay = false
 	require.NoError(t, cfg.Check())
 

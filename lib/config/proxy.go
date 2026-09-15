@@ -119,17 +119,6 @@ type LogFile struct {
 type HA struct {
 	VirtualIP string `yaml:"virtual-ip,omitempty" toml:"virtual-ip,omitempty" json:"virtual-ip,omitempty" reloadable:"false"`
 	Interface string `yaml:"interface,omitempty" toml:"interface,omitempty" json:"interface,omitempty" reloadable:"false"`
-<<<<<<< HEAD
-=======
-	// GARPBurstCount is the number of GARP packets sent immediately after the
-	// new owner binds the VIP. A small burst makes takeover visible quickly even
-	// if the first packet is dropped by the host, bond driver, or upstream device.
-	GARPBurstCount int `yaml:"garp-burst-count,omitempty" toml:"garp-burst-count,omitempty" json:"garp-burst-count,omitempty" reloadable:"false"`
-	// GARPRefreshCount controls the number of follow-up bursts after
-	// takeover. It is used to refresh stale neighbor caches for a bounded window
-	// after failover instead of emitting high-rate GARP forever.
-	GARPRefreshCount int `yaml:"garp-refresh-count" toml:"garp-refresh-count" json:"garp-refresh-count" reloadable:"false"`
->>>>>>> 31158a3d (config, balance: add switch configs to disable balance factors (#1218))
 }
 
 func DefaultKeepAlive() (frontend, backendHealthy, backendUnhealthy KeepAlive) {
