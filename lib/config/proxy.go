@@ -23,28 +23,15 @@ var (
 )
 
 type Config struct {
-<<<<<<< HEAD
 	Proxy               ProxyServer       `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
-	API                 API               `yaml:"api,omitempty" toml:"api,omitempty" json:"api,omitempty"`
+	API                 API               `yaml:"api" toml:"api" json:"api"`
 	Workdir             string            `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty" reloadable:"false"`
 	Security            Security          `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
-	Log                 Log               `yaml:"log,omitempty" toml:"log,omitempty" json:"log,omitempty"`
+	Log                 Log               `yaml:"log" toml:"log" json:"log"`
 	Balance             Balance           `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
 	Labels              map[string]string `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty" reloadable:"true"`
 	HA                  HA                `yaml:"ha,omitempty" toml:"ha,omitempty" json:"ha,omitempty"`
-	EnableTrafficReplay bool              `yaml:"enable-traffic-replay,omitempty" toml:"enable-traffic-replay,omitempty" json:"enable-traffic-replay,omitempty" reloadable:"true"`
-=======
-	Proxy               ProxyServer           `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
-	API                 API                   `yaml:"api" toml:"api" json:"api"`
-	Workdir             string                `yaml:"workdir,omitempty" toml:"workdir,omitempty" json:"workdir,omitempty" reloadable:"false"`
-	Security            Security              `yaml:"security,omitempty" toml:"security,omitempty" json:"security,omitempty"`
-	Log                 Log                   `yaml:"log" toml:"log" json:"log"`
-	Balance             Balance               `yaml:"balance,omitempty" toml:"balance,omitempty" json:"balance,omitempty"`
-	Labels              map[string]string     `yaml:"labels,omitempty" toml:"labels,omitempty" json:"labels,omitempty" reloadable:"true"`
-	HA                  HA                    `yaml:"ha,omitempty" toml:"ha,omitempty" json:"ha,omitempty"`
-	Metering            config.MeteringConfig `yaml:"metering,omitempty" toml:"metering,omitempty" json:"metering,omitempty" reloadable:"false"`
-	EnableTrafficReplay bool                  `yaml:"enable-traffic-replay" toml:"enable-traffic-replay" json:"enable-traffic-replay" reloadable:"true"`
->>>>>>> 31158a3d (config, balance: add switch configs to disable balance factors (#1218))
+	EnableTrafficReplay bool              `yaml:"enable-traffic-replay" toml:"enable-traffic-replay" json:"enable-traffic-replay" reloadable:"true"`
 }
 
 type KeepAlive struct {
@@ -73,16 +60,7 @@ type ProxyServerOnline struct {
 	ProxyProtocol             string    `yaml:"proxy-protocol,omitempty" toml:"proxy-protocol,omitempty" json:"proxy-protocol,omitempty" reloadable:"true"`
 	// In k8s, the pod terminationGracePeriodSeconds can be set to very long so that these configs can be updated online.
 	GracefulWaitBeforeShutdown int `yaml:"graceful-wait-before-shutdown,omitempty" toml:"graceful-wait-before-shutdown,omitempty" json:"graceful-wait-before-shutdown,omitempty" reloadable:"true"`
-<<<<<<< HEAD
-	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout,omitempty" toml:"graceful-close-conn-timeout,omitempty" json:"graceful-close-conn-timeout,omitempty" reloadable:"true"`
-=======
 	GracefulCloseConnTimeout   int `yaml:"graceful-close-conn-timeout" toml:"graceful-close-conn-timeout" json:"graceful-close-conn-timeout" reloadable:"true"`
-	// Public and private traffic are metered separately.
-	PublicEndpoints []string `yaml:"public-endpoints,omitempty" toml:"public-endpoints,omitempty" json:"public-endpoints,omitempty" reloadable:"true"`
-	// BackendClusters represents multiple backend clusters that the proxy can route to. It can be reloaded
-	// online.
-	BackendClusters []BackendCluster `yaml:"backend-clusters,omitempty" toml:"backend-clusters,omitempty" json:"backend-clusters,omitempty" reloadable:"true"`
->>>>>>> 31158a3d (config, balance: add switch configs to disable balance factors (#1218))
 	// FailBackendList contains backend pod names or backend addresses (IP:port) that should be drained immediately
 	// and excluded from new routing. If the configured list would leave no routeable backend,
 	// TiProxy ignores the list to keep routing available.
@@ -94,12 +72,7 @@ type ProxyServerOnline struct {
 type ProxyServer struct {
 	Addr              string `yaml:"addr" toml:"addr" json:"addr" reloadable:"false"`
 	AdvertiseAddr     string `yaml:"advertise-addr,omitempty" toml:"advertise-addr,omitempty" json:"advertise-addr,omitempty" reloadable:"false"`
-<<<<<<< HEAD
-	PDAddrs           string `yaml:"pd-addrs,omitempty" toml:"pd-addrs,omitempty" json:"pd-addrs,omitempty" reloadable:"false"`
-=======
 	PDAddrs           string `yaml:"pd-addrs" toml:"pd-addrs" json:"pd-addrs" reloadable:"false"`
-	PortRange         []int  `yaml:"port-range,omitempty" toml:"port-range,omitempty" json:"port-range,omitempty" reloadable:"false"`
->>>>>>> 31158a3d (config, balance: add switch configs to disable balance factors (#1218))
 	ProxyServerOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
@@ -114,12 +87,7 @@ type LogOnline struct {
 }
 
 type Log struct {
-<<<<<<< HEAD
-	Encoder   string `yaml:"encoder,omitempty" toml:"encoder,omitempty" json:"encoder,omitempty" reloadable:"false"`
-=======
 	Encoder   string `yaml:"encoder" toml:"encoder" json:"encoder" reloadable:"false"`
-	Simple    bool   `yaml:"simple,omitempty" toml:"simple,omitempty" json:"simple,omitempty" reloadable:"false"`
->>>>>>> 31158a3d (config, balance: add switch configs to disable balance factors (#1218))
 	LogOnline `yaml:",inline" toml:",inline" json:",inline"`
 }
 
