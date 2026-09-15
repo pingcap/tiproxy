@@ -567,16 +567,28 @@ func TestSetFactors(t *testing.T) {
 			},
 			expectedNames: []string{"label", "status", "conn"},
 		},
+		{
+			setFunc: func(balance *config.Balance) {
+				balance.Health.Enabled = false
+				balance.CPU.Enabled = false
+			},
+			expectedNames: []string{"status", "memory", "location", "conn"},
+		},
+		{
+			setFunc: func(balance *config.Balance) {
+				balance.Health.Enabled = false
+				balance.Memory.Enabled = false
+				balance.CPU.Enabled = false
+				balance.Location.Enabled = false
+			},
+			expectedNames: []string{"status", "conn"},
+		},
 	}
 
 	lg, _ := logger.CreateLoggerForTest(t)
 	fm := NewFactorBasedBalance(lg, newMockMetricsReader())
 	for i, test := range tests {
-		cfg := &config.Config{
-			Balance: config.Balance{
-				Policy: config.BalancePolicyResource,
-			},
-		}
+		cfg := config.NewConfig()
 		fm.Init(cfg)
 		test.setFunc(&cfg.Balance)
 		fm.SetConfig(cfg)

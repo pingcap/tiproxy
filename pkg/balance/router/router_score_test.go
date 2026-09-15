@@ -1051,7 +1051,7 @@ func TestIgnoreFailoverListWhenItMatchesAllLabelRoutableBackends(t *testing.T) {
 		Balance: config.Balance{
 			LabelName: "group",
 			Policy:    config.BalancePolicyConnection,
-			Status: config.Factor{
+			Status: config.StatusFactor{
 				MigrationsPerSecond: 1000,
 			},
 		},
@@ -1084,7 +1084,7 @@ func TestIgnoreFailoverListWhenItMatchesAllLabelRoutableBackends(t *testing.T) {
 		Balance: config.Balance{
 			LabelName: "group",
 			Policy:    config.BalancePolicyConnection,
-			Status: config.Factor{
+			Status: config.StatusFactor{
 				MigrationsPerSecond: 1000,
 			},
 		},
@@ -1105,7 +1105,7 @@ func TestIgnoreFailoverListWhenItMatchesAllLabelRoutableBackends(t *testing.T) {
 		Balance: config.Balance{
 			LabelName: "group",
 			Policy:    config.BalancePolicyConnection,
-			Status: config.Factor{
+			Status: config.StatusFactor{
 				MigrationsPerSecond: 1000,
 			},
 		},
