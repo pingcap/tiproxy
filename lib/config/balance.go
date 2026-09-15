@@ -30,7 +30,7 @@ type Balance struct {
 	Status        StatusFactor    `yaml:"status,omitempty" toml:"status,omitempty" json:"status,omitempty" reloadable:"true"`
 	Health        Factor          `yaml:"health" toml:"health" json:"health" reloadable:"true"`
 	Memory        Factor          `yaml:"memory" toml:"memory" json:"memory" reloadable:"true"`
-	CPU           Factor          `yaml:"cpu" toml:"cpu" json:"cpu" reloadable:"true"`
+	CPU           CPUFactor       `yaml:"cpu" toml:"cpu" json:"cpu" reloadable:"true"`
 	Location      Factor          `yaml:"location" toml:"location" json:"location" reloadable:"true"`
 	ConnCount     ConnCountFactor `yaml:"conn-count,omitempty" toml:"conn-count,omitempty" json:"conn-count,omitempty" reloadable:"true"`
 }
@@ -47,6 +47,12 @@ type StatusFactor struct {
 type Factor struct {
 	Enabled             bool    `yaml:"enabled" toml:"enabled" json:"enabled" reloadable:"true"`
 	MigrationsPerSecond float64 `yaml:"migrations-per-second,omitempty" toml:"migrations-per-second,omitempty" json:"migrations-per-second,omitempty" reloadable:"true"`
+}
+
+type CPUFactor struct {
+	Enabled             bool    `yaml:"enabled" toml:"enabled" json:"enabled" reloadable:"true"`
+	MigrationsPerSecond float64 `yaml:"migrations-per-second,omitempty" toml:"migrations-per-second,omitempty" json:"migrations-per-second,omitempty" reloadable:"true"`
+	MinBalanceUsage     float64 `yaml:"min-balance-usage" toml:"min-balance-usage" json:"min-balance-usage" reloadable:"true"`
 }
 
 func (b *Balance) Check() error {
@@ -84,6 +90,9 @@ func (b *Balance) Check() error {
 	if b.CPU.MigrationsPerSecond < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.cpu.migrations-per-second")
 	}
+	if b.CPU.MinBalanceUsage < 0 || b.CPU.MinBalanceUsage > 1 {
+		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.cpu.min-balance-usage")
+	}
 	if b.Location.MigrationsPerSecond < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.location.migrations-per-second")
 	}
@@ -102,7 +111,7 @@ func DefaultBalance() Balance {
 		RoutingPolicy: RoutingPolicyPreferIdle,
 		Health:        defaultFactor(),
 		Memory:        defaultFactor(),
-		CPU:           defaultFactor(),
+		CPU:           CPUFactor{Enabled: true},
 		Location:      defaultFactor(),
 	}
 }

@@ -27,7 +27,13 @@ func TestCheckBalance(t *testing.T) {
 			Memory: Factor{MigrationsPerSecond: -1},
 		},
 		{
-			CPU: Factor{MigrationsPerSecond: -1},
+			CPU: CPUFactor{MigrationsPerSecond: -1},
+		},
+		{
+			CPU: CPUFactor{MinBalanceUsage: -0.1},
+		},
+		{
+			CPU: CPUFactor{MinBalanceUsage: 1.1},
 		},
 		{
 			Location: Factor{MigrationsPerSecond: -1},
@@ -64,5 +70,6 @@ func TestOptionalFactorEnabled(t *testing.T) {
 	require.True(t, balance.Health.Enabled)
 	require.True(t, balance.Memory.Enabled)
 	require.True(t, balance.CPU.Enabled)
+	require.Zero(t, balance.CPU.MinBalanceUsage)
 	require.True(t, balance.Location.Enabled)
 }

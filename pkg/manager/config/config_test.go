@@ -130,6 +130,17 @@ proxy.failover-timeout = 0
 				return c.Balance.CPU.Enabled
 			},
 		},
+		{
+			name:   "cpu min balance usage override",
+			precfg: `balance.cpu.min-balance-usage = 0.2`,
+			precheck: func(c *config.Config) bool {
+				return c.Balance.CPU.MinBalanceUsage == 0.2
+			},
+			postcfg: `balance.cpu.min-balance-usage = 0`,
+			postcheck: func(c *config.Config) bool {
+				return c.Balance.CPU.MinBalanceUsage == 0
+			},
+		},
 	}
 
 	for i, tc := range cases {
