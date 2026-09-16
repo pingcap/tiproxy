@@ -18,10 +18,11 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if bytes.Equal(content, e.fileContent) {
+	if e.fileLoaded && bytes.Equal(content, e.fileContent) {
 		return nil
 	}
 	e.fileContent = content
+	e.fileLoaded = true
 
 	return e.SetTOMLConfig(content)
 }

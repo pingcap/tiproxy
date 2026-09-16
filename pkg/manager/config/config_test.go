@@ -171,6 +171,17 @@ balance.cpu.max-usage-gap = 1`,
 	}
 }
 
+func TestEmptyConfigFile(t *testing.T) {
+	tmpcfg := filepath.Join(t.TempDir(), "cfg")
+	require.NoError(t, os.WriteFile(tmpcfg, nil, 0o644))
+
+	cfgmgr, _, _ := testConfigManager(t, tmpcfg, "addr")
+	cfg := cfgmgr.GetConfig()
+	require.NotNil(t, cfg)
+	require.Equal(t, "127.0.0.1:2379", cfg.Proxy.PDAddrs)
+	require.Equal(t, "addr", cfg.Proxy.AdvertiseAddr)
+}
+
 func TestConfigRemove(t *testing.T) {
 	tmpdir := t.TempDir()
 	tmpcfg := filepath.Join(tmpdir, "cfg")
