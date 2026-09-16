@@ -134,6 +134,27 @@ local disconnP = graphPanel.new(
   )
 );
 
+local connLifetimeP = graphPanel.new(
+  title='Connection Lifetime',
+  datasource=myDS,
+  legend_rightSide=true,
+  description='TiProxy connection lifetime by histogram percentiles and average.',
+  format='s',
+  logBase1Y=2,
+)
+.addTarget(
+  prometheus.target(
+    'histogram_quantile(0.99, sum(rate(tiproxy_session_conn_lifetime_seconds_bucket{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) by (le))',
+    legendFormat='99',
+  )
+)
+.addTarget(
+  prometheus.target(
+    'sum(rate(tiproxy_session_conn_lifetime_seconds_sum{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m])) / sum(rate(tiproxy_session_conn_lifetime_seconds_count{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance"}[1m]))',
+    legendFormat='avg',
+  )
+);
+
 local goroutineP = graphPanel.new(
   title='Goroutine Count',
   datasource=myDS,
@@ -178,7 +199,7 @@ local memP = graphPanel.new(
   title='Memory Usage',
   datasource=myDS,
   legend_rightSide=true,
-  description='TiProxy process rss memory usage.TiProxy heap memory size in use.',
+  description='TiProxy process RSS, Go heap in-use, and memory quota.',
   format='bytes',
 )
 .addTarget(
@@ -191,6 +212,12 @@ local memP = graphPanel.new(
   prometheus.target(
     'go_memory_classes_heap_objects_bytes{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"} + go_memory_classes_heap_unused_bytes{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}',
     legendFormat='HeapInuse-{{instance}}',
+  )
+)
+.addTarget(
+  prometheus.target(
+    'tiproxy_server_memory_quota_bytes{k8s_cluster="$k8s_cluster", tidb_cluster="$tidb_cluster", instance=~"$instance", job="tiproxy"}',
+    legendFormat='quota-{{instance}}',
   )
 );
 
@@ -608,8 +635,9 @@ newDash
   .addPanel(connectionP, gridPos=rightPanelPos)
   .addPanel(createConnP, gridPos=leftPanelPos)
   .addPanel(disconnP, gridPos=rightPanelPos)
-  .addPanel(goroutineP, gridPos=leftPanelPos)
-  .addPanel(ownerP, gridPos=rightPanelPos)
+  .addPanel(connLifetimeP, gridPos=leftPanelPos)
+  .addPanel(goroutineP, gridPos=rightPanelPos)
+  .addPanel(ownerP, gridPos=leftPanelPos)
   ,
   gridPos=rowPos
 )
