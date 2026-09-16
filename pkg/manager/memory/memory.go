@@ -14,6 +14,7 @@ import (
 
 	"github.com/pingcap/tidb/pkg/util/memory"
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
@@ -80,6 +81,7 @@ func (m *MemManager) Start(ctx context.Context) {
 		return
 	}
 	m.memoryLimit = limit
+	metrics.MemoryQuotaGauge.Set(float64(limit))
 	if _, err = m.refreshUsage(); err != nil {
 		return
 	}

@@ -101,6 +101,7 @@ func init() {
 		RejectConnCounter,
 		DisConnCounter,
 		MaxProcsGauge,
+		MemoryQuotaGauge,
 		OwnerGauge,
 		ServerEventCounter,
 		ServerErrCounter,
