@@ -14,6 +14,7 @@ import (
 
 	"github.com/pingcap/tidb/pkg/util/memory"
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
@@ -104,6 +105,9 @@ func TestShouldRejectNewConn(t *testing.T) {
 	m.snapshotExpire = 200 * time.Millisecond
 	m.Start(context.Background())
 	defer m.Close()
+	memoryQuota, err := metrics.ReadGauge(metrics.MemoryQuotaGauge)
+	require.NoError(t, err)
+	require.Equal(t, float64(10*(1<<30)), memoryQuota)
 
 	require.Eventually(t, func() bool {
 		reject, snapshot, threshold := m.ShouldRejectNewConn()
