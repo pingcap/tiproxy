@@ -204,28 +204,24 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 
 func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config, error) {
 	logger = logger.With(zap.String("tls", "client"))
-	if !cfg.HasCA() {
-		if cfg.SkipCA {
-			// still enable TLS without verify server certs
-			return &tls.Config{
-				InsecureSkipVerify: true,
-				MinVersion:         tls.VersionTLS11,
-			}, nil
-		}
+	if !cfg.HasCA() && !cfg.SkipCA {
 		logger.Info("no CA to verify server connections, disable TLS")
 		return nil, nil
 	}
 
 	tcfg := &tls.Config{
 		MinVersion: tls.VersionTLS11,
+		InsecureSkipVerify: cfg.SkipCA,
 	}
-	tcfg.RootCAs = x509.NewCertPool()
-	certBytes, err := os.ReadFile(cfg.CA)
-	if err != nil {
-		return nil, errors.Errorf("failed to read CA: %w", err)
-	}
-	if !tcfg.RootCAs.AppendCertsFromPEM(certBytes) {
-		return nil, errors.Errorf("failed to append CA")
+	if cfg.HasCA() {
+		tcfg.RootCAs = x509.NewCertPool()
+		certBytes, err := os.ReadFile(cfg.CA)
+		if err != nil {
+			return nil, errors.Errorf("failed to read CA: %w", err)
+		}
+		if !tcfg.RootCAs.AppendCertsFromPEM(certBytes) {
+			return nil, errors.Errorf("failed to append CA")
+		}
 	}
 
 	if !cfg.HasCert() {
