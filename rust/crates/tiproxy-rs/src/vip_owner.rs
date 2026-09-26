@@ -134,43 +134,27 @@ impl VipModule {
                 }
             };
             let _owned = OwnedElection::new(Arc::clone(&self.history), self.election_name.clone());
-            // If pre-close races a Linux command, dropping its future kills the
-            // child; deletion below covers a command that already completed.
-            let add = tokio::select! {
-                biased;
-                _ = self.stop.changed() => None,
-                _ = lifecycle.changed() => None,
-                result = self.network.add_ip() => Some(result),
-            };
-            if let Some(Err(error)) = add {
-                self.network.delete_ip().await.map_err(network_failure)?;
+            // Linux commands can outlast the 3s lease. Keep it alive while
+            // binding; dropping an in-flight command kills its child, and the
+            // retirement delete below covers a command that already finished.
+            let add = self.bind_while_owned(&mut session, &mut lifecycle).await;
+            if let Err(error) = add {
+                self.delete_while_owned(&mut session)
+                    .await
+                    .map_err(network_failure)?;
                 let _ = session.shutdown().await;
                 return Err(network_failure(error));
             }
-            if add.is_some() {
-                let first_arp = tokio::select! {
-                    biased;
-                    _ = self.stop.changed() => None,
-                    _ = lifecycle.changed() => None,
-                    result = self.network.send_arp() => Some(result),
-                };
-                if let Some(Err(error)) = first_arp {
-                    logging::emit(
-                        Level::Warn,
-                        &format!(
-                            "VIP first GARP burst failed: {} / {}",
-                            error.operation, error.class
-                        ),
-                    );
-                }
+            if matches!(add, Ok(true)) {
                 logging::emit(Level::Info, "VIP election won and address bound");
-                if first_arp.is_some() {
-                    Box::pin(self.maintain(&mut session, &mut lifecycle)).await;
-                }
+                Box::pin(self.maintain(&mut session, &mut lifecycle)).await;
             }
             // This awaited delete is the retirement boundary. Never resign the
-            // lease while our local interface still has the VIP.
-            self.network.delete_ip().await.map_err(network_failure)?;
+            // lease while our local interface still has the VIP. Keepalive
+            // continues because a slow `ip`/`sudo` command can outlast TTL.
+            self.delete_while_owned(&mut session)
+                .await
+                .map_err(network_failure)?;
             let _ = session.shutdown().await;
             logging::emit(Level::Info, "VIP retired and address removed");
             if *self.stop.borrow() || shutting_down(&lifecycle) {
@@ -184,6 +168,60 @@ impl VipModule {
         }
     }
 
+    async fn bind_while_owned(
+        &mut self,
+        session: &mut ElectionSession,
+        lifecycle: &mut watch::Receiver<control_plane::LifecycleSnapshot>,
+    ) -> Result<bool, NetworkError> {
+        let network = Arc::clone(&self.network);
+        let mut add = Box::pin(network.add_ip());
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                biased;
+                _ = self.stop.changed() => return Ok(false),
+                changed = lifecycle.changed() => {
+                    if changed.is_err() || shutting_down(lifecycle) {
+                        return Ok(false);
+                    }
+                },
+                _ = heartbeat.tick() => {
+                    if session.keep_alive().await.is_err()
+                        || session.snapshot().state != ElectionState::Leader
+                    {
+                        return Ok(false);
+                    }
+                },
+                result = &mut add => return result.map(|()| true),
+            }
+        }
+    }
+
+    async fn delete_while_owned(&self, session: &mut ElectionSession) -> Result<(), NetworkError> {
+        let network = Arc::clone(&self.network);
+        let mut delete = Box::pin(network.delete_ip());
+        let mut heartbeat = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut lease_alive = session.snapshot().state == ElectionState::Leader;
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut delete => return result,
+                _ = heartbeat.tick(), if lease_alive => {
+                    lease_alive = session.keep_alive().await.is_ok()
+                        && session.snapshot().state == ElectionState::Leader;
+                    if !lease_alive {
+                        logging::emit(Level::Warn, "VIP lease uncertain during address removal");
+                    }
+                },
+            }
+        }
+    }
+
     async fn maintain(
         &mut self,
         session: &mut ElectionSession,
@@ -191,9 +229,10 @@ impl VipModule {
     ) {
         let mut heartbeat = tokio::time::interval(Duration::from_secs(1));
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut refresh = tokio::time::interval(Duration::from_secs(1));
-        refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        refresh.tick().await; // the first burst was sent synchronously above
+        let network = Arc::clone(&self.network);
+        let mut arp = Some(network.send_arp());
+        let mut first_arp = true;
+        let mut refresh: Option<tokio::time::Interval> = None;
         let mut remaining = self.refresh_count;
         while !*self.stop.borrow() && !shutting_down(lifecycle) {
             enum Event {
@@ -201,16 +240,30 @@ impl VipModule {
                 Heartbeat,
                 Watch,
                 Refresh,
+                Arp(Result<(), NetworkError>),
             }
             let event = tokio::select! {
                 biased;
                 _ = self.stop.changed() => Event::Stop,
                 _ = lifecycle.changed() => Event::Stop,
                 _ = heartbeat.tick() => Event::Heartbeat,
+                result = async {
+                    if let Some(arp) = arp.as_mut() {
+                        arp.await
+                    } else {
+                        std::future::pending().await
+                    }
+                }, if arp.is_some() => Event::Arp(result),
                 result = session.watch_once() => {
                     if result.is_err() { Event::Stop } else { Event::Watch }
                 },
-                _ = refresh.tick(), if remaining > 0 => Event::Refresh,
+                () = async {
+                    if let Some(refresh) = refresh.as_mut() {
+                        refresh.tick().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                }, if refresh.is_some() && arp.is_none() && remaining > 0 => Event::Refresh,
             };
             match event {
                 Event::Stop => break,
@@ -224,21 +277,28 @@ impl VipModule {
                 Event::Watch => {}
                 Event::Refresh => {
                     remaining -= 1;
-                    let send = tokio::select! {
-                        biased;
-                        _ = self.stop.changed() => break,
-                        _ = lifecycle.changed() => break,
-                        result = self.network.send_arp() => result,
-                    };
-                    if let Err(error) = send {
+                    arp = Some(network.send_arp());
+                }
+                Event::Arp(result) => {
+                    arp = None;
+                    if let Err(error) = result {
                         logging::emit(
                             Level::Warn,
                             &format!(
-                                "VIP GARP refresh stopped: {} / {}",
+                                "VIP GARP burst failed: {} / {}",
                                 error.operation, error.class
                             ),
                         );
-                        remaining = 0;
+                        if !first_arp {
+                            remaining = 0;
+                        }
+                    }
+                    if first_arp {
+                        first_arp = false;
+                        refresh = Some(tokio::time::interval_at(
+                            tokio::time::Instant::now() + Duration::from_secs(1),
+                            Duration::from_secs(1),
+                        ));
                     }
                 }
             }
