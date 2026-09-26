@@ -88,12 +88,17 @@ sudo ip addr add "$host_ip/24" dev "$bridge"
 sudo ip link set "$bridge" up
 
 attach_node() {
-	local namespace=$1 host_link=$2 address=$3 peer=peer0
+	local namespace=$1 host_link=$2 address=$3 mac_suffix=$4 peer=peer0
 	sudo ip link add "$host_link" type veth peer name "$peer"
 	sudo ip link set "$peer" netns "$namespace"
+	# GitHub's runner assigned the same generated MAC to both peers in the
+	# first acceptance runs. A shared MAC lets the bridge learn the wrong port
+	# for the VIP even though exactly one namespace owns its IP address.
+	sudo ip link set "$host_link" address "02:00:00:99:10:$mac_suffix"
 	sudo ip link set "$host_link" master "$bridge"
 	sudo ip link set "$host_link" up
 	sudo ip -n "$namespace" link set "$peer" name eth0
+	sudo ip -n "$namespace" link set eth0 address "02:00:00:99:20:$mac_suffix"
 	sudo ip -n "$namespace" link set eth0 up
 	sudo ip -n "$namespace" addr add "$address/24" dev eth0
 	sudo ip -n "$namespace" route add default via "$host_ip"
@@ -103,8 +108,8 @@ sudo ip netns add "$ns_a"
 sudo ip netns add "$ns_b"
 sudo ip -n "$ns_a" link set lo up
 sudo ip -n "$ns_b" link set lo up
-attach_node "$ns_a" "$host_a" "$node_a_ip"
-attach_node "$ns_b" "$host_b" "$node_b_ip"
+attach_node "$ns_a" "$host_a" "$node_a_ip" 11
+attach_node "$ns_b" "$host_b" "$node_b_ip" 12
 
 # The backend playground is deliberately on the host's bridge address so a
 # namespace's 127.0.0.1 can never accidentally bypass the veth network.
