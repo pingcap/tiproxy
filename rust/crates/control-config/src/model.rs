@@ -100,6 +100,45 @@ pub struct ConfigPersistence {
     pub cluster_tls: ClientTlsConfig,
 }
 
+/// Inputs for the dedicated VIP election and network owner.
+///
+/// The decision to start is pinned at process startup, matching Go's VIP
+/// manager. A missing address/interface pair or a non-singleton backend set
+/// disables VIP; neither case grants ownership of a partially configured IP.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VipConfig {
+    /// Address as configured, including its optional CIDR prefix.
+    pub address: Arc<str>,
+    /// Parsed host IP used for the dedicated election key and GARP.
+    pub ip: IpAddr,
+    /// Prefix length to compare and bind on the Linux interface.
+    pub prefix_len: u8,
+    /// Linux interface that holds the address.
+    pub interface: Arc<str>,
+    /// The sole backend cluster's PD endpoints, which own the VIP election.
+    pub pd_addrs: Arc<[Arc<str>]>,
+    /// TLS material for that cluster's PD connection.
+    pub cluster_tls: ClientTlsConfig,
+    /// Immediate GARP packets in each burst.
+    pub garp_burst_count: u64,
+    /// One-second follow-up GARP bursts after takeover.
+    pub garp_refresh_count: u64,
+}
+
+impl VipConfig {
+    /// Returns the Go-compatible election prefix for this exact VIP host IP.
+    #[must_use]
+    pub fn election_name(&self) -> String {
+        format!("/tiproxy/vip/{}/owner", self.ip)
+    }
+
+    /// Returns the canonical address and prefix for Linux address operations.
+    #[must_use]
+    pub fn cidr(&self) -> String {
+        format!("{}/{}", self.ip, self.prefix_len)
+    }
+}
+
 /// Health observer policy consumed by CP-TOPO.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HealthCheckConfig {
@@ -594,6 +633,46 @@ impl EffectiveConfig {
             pd_addrs: Arc::from(pd_addrs),
             cluster_tls: client_tls(&self.security.cluster_tls),
         })
+    }
+
+    /// Projects an enabled VIP only for a single backend cluster. The
+    /// configured address and interface must both be present. Go elects via
+    /// that cluster's PD endpoints, which may differ from `proxy.pd-addrs`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an invalid VIP address, backend normalization error or an
+    /// unrepresentable GARP count. Config validation already rejects negative
+    /// counts and gives a zero burst count the Go-compatible value of one.
+    pub fn vip(&self) -> Result<Option<VipConfig>, ConfigError> {
+        if self.ha.virtual_ip.is_empty() || self.ha.interface.is_empty() {
+            return Ok(None);
+        }
+        let clusters = self.normalized_backend_clusters()?;
+        let [cluster] = clusters.as_slice() else {
+            return Ok(None);
+        };
+        let (ip, prefix_len) = parse_vip_address(&self.ha.virtual_ip)?;
+        let garp_burst_count =
+            u64::try_from(self.ha.garp_burst_count).map_err(|_| ConfigError::InvalidField {
+                field: "ha.garp-burst-count",
+                class: "out_of_range",
+            })?;
+        let garp_refresh_count =
+            u64::try_from(self.ha.garp_refresh_count).map_err(|_| ConfigError::InvalidField {
+                field: "ha.garp-refresh-count",
+                class: "out_of_range",
+            })?;
+        Ok(Some(VipConfig {
+            address: Arc::from(self.ha.virtual_ip.as_str()),
+            ip,
+            prefix_len,
+            interface: Arc::from(self.ha.interface.as_str()),
+            pd_addrs: Arc::clone(&cluster.pd_addrs),
+            cluster_tls: client_tls(&self.security.cluster_tls),
+            garp_burst_count,
+            garp_refresh_count,
+        }))
     }
 
     /// Returns the complete SQL-serving projection formerly built by Go.
@@ -2422,6 +2501,27 @@ fn normalize_ip_prefix(value: &str) -> Result<String, ConfigError> {
         }
         IpAddr::V4(_) | IpAddr::V6(_) => invalid("proxy.public-endpoints", "invalid_ip_or_cidr"),
     }
+}
+
+fn parse_vip_address(value: &str) -> Result<(IpAddr, u8), ConfigError> {
+    let failure = || ConfigError::InvalidField {
+        field: "ha.virtual-ip",
+        class: "invalid_ip_or_cidr",
+    };
+    let (ip, prefix_len) = if let Some((ip, prefix)) = value.split_once('/') {
+        (
+            ip.parse::<IpAddr>().map_err(|_| failure())?,
+            prefix.parse::<u8>().map_err(|_| failure())?,
+        )
+    } else {
+        let ip = value.parse::<IpAddr>().map_err(|_| failure())?;
+        let prefix_len = if ip.is_ipv4() { 32 } else { 128 };
+        (ip, prefix_len)
+    };
+    if prefix_len > if ip.is_ipv4() { 32 } else { 128 } {
+        return Err(failure());
+    }
+    Ok((ip, prefix_len))
 }
 
 fn path_arc(value: &str) -> Option<Arc<Path>> {

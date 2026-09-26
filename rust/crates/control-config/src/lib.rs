@@ -27,7 +27,7 @@ pub use model::{
     RoutingBalancePolicy, RoutingConfig, RoutingConnectionFactorConfig, RoutingFactorConfig,
     RoutingNamespace, RoutingRule, RoutingSelectionPolicy, ServingConfig, ServingKeepalive,
     ServingListener, ServingNamespace, ServingTlsConfig, SourceRevision, TopologyConfig,
-    TopologyRuntimeIdentity,
+    TopologyRuntimeIdentity, VipConfig,
 };
 pub use module::{
     ConfigModule, ConfigModuleHandle, ConfigModuleOptions, ConfigMutationError,
