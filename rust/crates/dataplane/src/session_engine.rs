@@ -2138,6 +2138,27 @@ impl Engine {
                 acquired
             }
             Err(error) => {
+                #[cfg(debug_assertions)]
+                if std::env::var_os("TIPROXY_ROUTE_DIAGNOSTIC").is_some() {
+                    let class = match &error {
+                        AcquireError::NoBackend { .. } => "no_backend",
+                        AcquireError::Routing { .. } => "routing",
+                        AcquireError::BudgetExhausted { last_failure: None } => {
+                            "budget_without_dial_failure"
+                        }
+                        AcquireError::BudgetExhausted {
+                            last_failure: Some(_),
+                        } => "budget_after_dial_failure",
+                        AcquireError::MalformedAssignment { .. } => "malformed_assignment",
+                        AcquireError::ClusterUnsupported { .. } => "cluster_unsupported",
+                        AcquireError::Channel(RouteChannelError::Rejected) => "channel_rejected",
+                        AcquireError::Channel(RouteChannelError::ControlLost) => "control_lost",
+                    };
+                    eprintln!(
+                        "local route acquisition failed class={class} stats={:?}",
+                        route_engine.stats()
+                    );
+                }
                 self.metrics.try_record(Observation::GetBackend {
                     duration: acquisition_started.elapsed(),
                     succeeded: false,
