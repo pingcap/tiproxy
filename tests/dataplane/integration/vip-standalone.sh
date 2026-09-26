@@ -113,9 +113,14 @@ attach_node "$ns_b" "$host_b" "$node_b_ip" 12
 
 # The backend playground is deliberately on the host's bridge address so a
 # namespace's 127.0.0.1 can never accidentally bypass the veth network.
+cat >"$run_dir/tidb.toml" <<'CONFIG'
+[labels]
+keyspace = "vip-ks"
+CONFIG
 tiup "playground:v${TIUP_VERSION}" "$TIDB_VERSION" --tag "$tag" \
 	--without-monitor --host "$host_ip" --port-offset "$offset" \
-	--pd 1 --kv 1 --db 1 --tiflash 0 --tiproxy 0 \
+	--pd 1 --kv 1 --db 1 --db.config "$run_dir/tidb.toml" \
+	--tiflash 0 --tiproxy 0 \
 	>"$run_dir/diagnostics/tiup.log" 2>&1 &
 tiup_pid=$!
 
@@ -153,6 +158,36 @@ for namespace in "$ns_a" "$ns_b"; do
 	fi
 done
 
+# Standalone metering requires a nonempty backend keyspace before forwarding
+# SQL. TiDB publishes this label in its classic /topology/tidb info record.
+ctl=${TIUP_HOME:-$HOME/.tiup}/components/ctl/$TIDB_VERSION/etcdctl
+[[ -x $ctl ]] || { echo "missing $ctl" >&2; exit 2; }
+topology="$run_dir/diagnostics/backend-topology.json"
+registered=0
+for _ in {1..30}; do
+	ETCDCTL_API=3 "$ctl" --endpoints "http://$host_ip:$pd_port" \
+		get '/topology/tidb/' --prefix -w json >"$topology"
+	if python3 - "$topology" <<'PY'
+import base64, json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    entries = json.load(source).get("kvs", [])
+for entry in entries:
+    key = base64.b64decode(entry["key"])
+    if not key.endswith(b"/info"):
+        continue
+    info = json.loads(base64.b64decode(entry["value"]))
+    if info.get("labels", {}).get("keyspace") == "vip-ks":
+        sys.exit(0)
+sys.exit(1)
+PY
+	then
+		registered=1
+		break
+	fi
+	sleep 1
+done
+[[ $registered == 1 ]] || { echo 'TiDB keyspace label missing from PD topology' >&2; exit 1; }
+
 write_config() {
 	local node=$1 address=$2
 	mkdir -p "$run_dir/$node-work"
@@ -188,7 +223,7 @@ start_node() {
 	# would not be a reliable signal target for the Rust shutdown path.
 	sudo ip netns exec "$namespace" sh -c \
 		'echo "$$" >"$1"; shift; exec "$@"' \
-		sh "$run_dir/$node.pid" env TIPROXY_ROUTE_DIAGNOSTIC=1 \
+		sh "$run_dir/$node.pid" \
 		"$rust_binary" --standalone \
 		--config "$run_dir/$node.toml" --health-port 8080 \
 		>"$run_dir/diagnostics/$node.log" 2>&1 &

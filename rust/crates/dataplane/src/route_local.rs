@@ -166,10 +166,6 @@ impl LocalRouteChannel {
 
     fn terminal(&self, error: RouteError) -> RouteAssignment {
         let category = error.category();
-        #[cfg(debug_assertions)]
-        if std::env::var_os("TIPROXY_ROUTE_DIAGNOSTIC").is_some() {
-            eprintln!("local route terminal category={category}");
-        }
         let (code, detail) = match error {
             RouteError::NoBackend | RouteError::WrappedNoBackend => (
                 RouteCode::NoBackend,
