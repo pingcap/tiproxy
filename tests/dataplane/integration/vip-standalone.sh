@@ -188,7 +188,8 @@ start_node() {
 	# would not be a reliable signal target for the Rust shutdown path.
 	sudo ip netns exec "$namespace" sh -c \
 		'echo "$$" >"$1"; shift; exec "$@"' \
-		sh "$run_dir/$node.pid" "$rust_binary" --standalone \
+		sh "$run_dir/$node.pid" env TIPROXY_ROUTE_DIAGNOSTIC=1 \
+		"$rust_binary" --standalone \
 		--config "$run_dir/$node.toml" --health-port 8080 \
 		>"$run_dir/diagnostics/$node.log" 2>&1 &
 }
