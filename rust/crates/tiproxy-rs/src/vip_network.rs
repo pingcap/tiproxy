@@ -160,18 +160,16 @@ impl NetworkOperation for LinuxNetwork {
             let ip = self.ip.to_string();
             for _ in 0..self.burst_count {
                 let mut sent = false;
-                // iputils uses -I for interface; Thomas Habets' arping uses
-                // -i. Both implement -U as an unsolicited ARP announcement.
-                // Try the normal and noninteractive sudo paths for each.
+                // iputils uses -I for interface and chooses the VIP as the
+                // source of -U announcements. Thomas Habets' arping uses -i
+                // and needs -S VIP as well; otherwise it announces the node
+                // address rather than the VIP. Try direct and sudo for each.
                 for interface_flag in ["-I", "-i"] {
-                    let args = [
-                        "-c",
-                        "1",
-                        "-U",
-                        interface_flag,
-                        self.interface.as_ref(),
-                        ip.as_str(),
-                    ];
+                    let mut args = vec!["-c", "1", "-U", interface_flag, self.interface.as_ref()];
+                    if interface_flag == "-i" {
+                        args.extend(["-S", ip.as_str()]);
+                    }
+                    args.push(ip.as_str());
                     if run_command("arping", &args, "garp")
                         .await
                         .is_ok_and(|output| output.success)
@@ -179,16 +177,8 @@ impl NetworkOperation for LinuxNetwork {
                         sent = true;
                         break;
                     }
-                    let sudo_args = [
-                        "-n",
-                        "arping",
-                        "-c",
-                        "1",
-                        "-U",
-                        interface_flag,
-                        self.interface.as_ref(),
-                        ip.as_str(),
-                    ];
+                    let mut sudo_args = vec!["-n", "arping"];
+                    sudo_args.extend(args);
                     if run_command("sudo", &sudo_args, "garp")
                         .await
                         .is_ok_and(|output| output.success)

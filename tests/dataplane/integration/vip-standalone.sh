@@ -399,4 +399,9 @@ kill "$capture_pid" 2>/dev/null || true
 wait "$capture_pid" 2>/dev/null || true
 capture_pid=
 assert_no_overlap
+if ! grep -F "tell $vip_ip" "$run_dir/diagnostics/arp-packets.txt" |
+	grep -Fq "who-has $vip_ip"; then
+	echo 'no gratuitous ARP announcement for the VIP observed on the bridge' >&2
+	exit 1
+fi
 echo 'PASS: one VIP holder and SQL continuity through controlled close, restart and node/link loss'
