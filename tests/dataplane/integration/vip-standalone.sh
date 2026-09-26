@@ -194,7 +194,7 @@ done
 # particular, some arping versions report failure for a sent unsolicited
 # packet because no reply is expected; an exit code alone cannot prove GARP.
 arping -V >"$run_dir/diagnostics/arping-version.txt" 2>&1 || true
-sudo timeout 40s tcpdump -l -nn -tt -i "$bridge" arp \
+sudo timeout 40s tcpdump -e -l -nn -tt -i "$bridge" arp \
 	>"$run_dir/diagnostics/arp-packets.txt" \
 	2>"$run_dir/diagnostics/tcpdump-stderr.txt" &
 capture_pid=$!
@@ -267,6 +267,34 @@ assert_no_overlap() {
 		echo 'two VIP holders observed by background sampler' >&2
 		return 1
 	fi
+}
+
+garp_count() {
+	local node=$1 mac
+	if [[ $node == a ]]; then
+		mac=02:00:00:99:20:11
+	else
+		mac=02:00:00:99:20:12
+	fi
+	awk -v vip="$vip_ip" -v mac="$mac" '
+		index($0, mac) && index($0, "who-has " vip) && index($0, "tell " vip) { count++ }
+		END { print count + 0 }
+	' "$run_dir/diagnostics/arp-packets.txt"
+}
+
+wait_garp() {
+	local label=$1 node=$2 previous=$3 count
+	for _ in {1..30}; do
+		count=$(garp_count "$node")
+		if ((count > previous)); then
+			echo "$(date +%s.%N) $label $node GARP observed" \
+				>>"$run_dir/diagnostics/events.log"
+			return 0
+		fi
+		sleep 0.2
+	done
+	echo "$label: no VIP-source GARP from $node observed on the bridge" >&2
+	return 1
 }
 
 monitor_overlap &
@@ -346,6 +374,7 @@ wait_single_owner() {
 
 owner=$(wait_single_owner initial)
 assert_no_overlap
+wait_garp initial "$owner" 0
 wait_mysql "$vip_ip" 6000 initial-vip
 if [[ $owner == a ]]; then
 	former=a
@@ -355,9 +384,11 @@ else
 	new=a
 fi
 former_pid=$(cat "$run_dir/$former.pid")
+before_garp=$(garp_count "$new")
 sudo kill -INT "$former_pid"
 wait_single_owner after-controlled-close "$new" >/dev/null
 assert_no_overlap
+wait_garp after-controlled-close "$new" "$before_garp"
 wait_mysql "$vip_ip" 6000 controlled-failover
 for _ in {1..30}; do
 	sudo kill -0 "$former_pid" 2>/dev/null || break
@@ -383,6 +414,7 @@ wait_mysql "$vip_ip" 6000 restart
 # Model a whole-node crash: terminate its process and remove its network link.
 # Process-only SIGKILL leaves an IP on a live Linux interface and is separately
 # documented as a remaining Go/Rust operational fencing gap.
+before_garp=$(garp_count "$former")
 sudo kill -KILL "$(cat "$run_dir/$new.pid")"
 if [[ $new == a ]]; then
 	sudo ip link del "$host_a"
@@ -391,6 +423,7 @@ else
 fi
 wait_single_owner after-node-link-loss "$former" >/dev/null
 assert_no_overlap
+wait_garp after-node-link-loss "$former" "$before_garp"
 wait_mysql "$vip_ip" 6000 node-failover
 kill "$monitor_pid" 2>/dev/null || true
 wait "$monitor_pid" 2>/dev/null || true
@@ -399,9 +432,4 @@ kill "$capture_pid" 2>/dev/null || true
 wait "$capture_pid" 2>/dev/null || true
 capture_pid=
 assert_no_overlap
-if ! grep -F "tell $vip_ip" "$run_dir/diagnostics/arp-packets.txt" |
-	grep -Fq "who-has $vip_ip"; then
-	echo 'no gratuitous ARP announcement for the VIP observed on the bridge' >&2
-	exit 1
-fi
 echo 'PASS: one VIP holder and SQL continuity through controlled close, restart and node/link loss'
