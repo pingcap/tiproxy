@@ -116,13 +116,15 @@ tiup_pid=$!
 
 wait_mysql() {
 	local host=$1 port=$2 label=$3
+	local result
 	for _ in {1..120}; do
-		if mysql --protocol=TCP --connect-timeout=1 -h "$host" -P "$port" \
-			-u root --batch --skip-column-names -e 'SELECT 1' 2>/dev/null |
-			grep -qx 1; then
+		if result=$(mysql --protocol=TCP --connect-timeout=1 --ssl-mode=DISABLED \
+			-h "$host" -P "$port" -u root --batch --skip-column-names \
+			-e 'SELECT 1' 2>&1) && [[ $result == 1 ]]; then
 			echo "$(date +%s.%N) $label SELECT 1 PASS" >>"$run_dir/diagnostics/events.log"
 			return 0
 		fi
+		printf '%s\n' "$result" >"$run_dir/diagnostics/$label-mysql-last-error.txt"
 		kill -0 "$tiup_pid" 2>/dev/null || break
 		sleep 1
 	done
@@ -130,6 +132,18 @@ wait_mysql() {
 	return 1
 }
 wait_mysql "$host_ip" "$tidb_port" backend
+
+# The runner must prove each network namespace can reach the same backend
+# before a failed VIP query is attributed to routing in the Rust processes.
+for namespace in "$ns_a" "$ns_b"; do
+	if ! sudo ip netns exec "$namespace" mysql --protocol=TCP \
+		--connect-timeout=2 --ssl-mode=DISABLED -h "$host_ip" -P "$tidb_port" \
+		-u root --batch --skip-column-names -e 'SELECT 1' \
+		>"$run_dir/diagnostics/$namespace-backend-preflight.txt" 2>&1; then
+		echo "$namespace cannot query TiDB from its network namespace" >&2
+		exit 1
+	fi
+done
 
 write_config() {
 	local node=$1 address=$2
