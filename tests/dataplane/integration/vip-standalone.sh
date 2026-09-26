@@ -12,7 +12,7 @@ if [[ $(uname -s) != Linux ]]; then
 	echo 'VIP acceptance requires Linux network namespaces' >&2
 	exit 2
 fi
-for command in ip arping tiup mysql curl; do
+for command in ip arping tcpdump tiup mysql curl; do
 	command -v "$command" >/dev/null || { echo "missing $command" >&2; exit 2; }
 done
 
@@ -42,6 +42,7 @@ pd_port=$((2379 + offset))
 tidb_port=$((4000 + offset))
 tiup_pid=
 monitor_pid=
+capture_pid=
 
 owned_rust_pid() {
 	local node=$1 pid=$2
@@ -55,6 +56,7 @@ cleanup() {
 	trap - EXIT
 	set +e
 	[[ -n $monitor_pid ]] && kill "$monitor_pid" 2>/dev/null
+	[[ -n $capture_pid ]] && kill "$capture_pid" 2>/dev/null
 	[[ -s $run_dir/diagnostics/overlap.log ]] && status=1
 	for node in a b; do
 		pidfile=$run_dir/$node.pid
@@ -187,6 +189,17 @@ PY
 	sleep 1
 done
 [[ $registered == 1 ]] || { echo 'TiDB keyspace label missing from PD topology' >&2; exit 1; }
+
+# Keep passive on-wire ARP evidence separate from SQL continuity. In
+# particular, some arping versions report failure for a sent unsolicited
+# packet because no reply is expected; an exit code alone cannot prove GARP.
+arping -V >"$run_dir/diagnostics/arping-version.txt" 2>&1 || true
+sudo timeout 40s tcpdump -l -nn -tt -i "$bridge" arp \
+	>"$run_dir/diagnostics/arp-packets.txt" \
+	2>"$run_dir/diagnostics/tcpdump-stderr.txt" &
+capture_pid=$!
+sleep 1
+kill -0 "$capture_pid"
 
 write_config() {
 	local node=$1 address=$2
@@ -382,5 +395,8 @@ wait_mysql "$vip_ip" 6000 node-failover
 kill "$monitor_pid" 2>/dev/null || true
 wait "$monitor_pid" 2>/dev/null || true
 monitor_pid=
+kill "$capture_pid" 2>/dev/null || true
+wait "$capture_pid" 2>/dev/null || true
+capture_pid=
 assert_no_overlap
 echo 'PASS: one VIP holder and SQL continuity through controlled close, restart and node/link loss'

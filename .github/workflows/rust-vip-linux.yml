@@ -52,7 +52,7 @@ jobs:
       - name: Install Linux network and Rust build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install --yes iproute2 arping protobuf-compiler
+          sudo apt-get install --yes iproute2 arping tcpdump protobuf-compiler
           command -v mysql
       - name: Build standalone Rust executable
         run: make rust-build
