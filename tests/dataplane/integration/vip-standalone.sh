@@ -133,6 +133,9 @@ wait_mysql() {
 		kill -0 "$tiup_pid" 2>/dev/null || break
 		sleep 1
 	done
+	if declare -F snapshot >/dev/null; then
+		snapshot "$label-failed"
+	fi
 	echo "$label SQL query failed" >&2
 	return 1
 }
@@ -226,7 +229,8 @@ wait_ready() {
 	local node=$1 namespace=$2
 	for _ in {1..60}; do
 		if sudo ip netns exec "$namespace" curl --fail --silent --max-time 1 \
-			'http://127.0.0.1:8080/health' >/dev/null; then
+			'http://127.0.0.1:8080/health' \
+			>"$run_dir/diagnostics/$node-health-ready.json"; then
 			echo "$(date +%s.%N) $node ready" >>"$run_dir/diagnostics/events.log"
 			return 0
 		fi
@@ -245,11 +249,20 @@ snapshot() {
 	local label=$1
 	sudo ip -j -n "$ns_a" addr show >"$run_dir/diagnostics/$label-a-addr.json"
 	sudo ip -j -n "$ns_b" addr show >"$run_dir/diagnostics/$label-b-addr.json"
+	sudo ip netns exec "$ns_a" curl --silent --max-time 2 \
+		'http://127.0.0.1:8080/health' \
+		>"$run_dir/diagnostics/$label-a-health.json" || true
+	sudo ip netns exec "$ns_b" curl --silent --max-time 2 \
+		'http://127.0.0.1:8080/health' \
+		>"$run_dir/diagnostics/$label-b-health.json" || true
 	local ctl=${TIUP_HOME:-$HOME/.tiup}/components/ctl/$TIDB_VERSION/etcdctl
 	if [[ -x $ctl ]]; then
 		ETCDCTL_API=3 "$ctl" --endpoints "http://$host_ip:$pd_port" \
 			get "/tiproxy/vip/$vip_ip/owner" --prefix -w json \
 			>"$run_dir/diagnostics/$label-election.json" 2>&1 || true
+		ETCDCTL_API=3 "$ctl" --endpoints "http://$host_ip:$pd_port" \
+			get '/topology/tidb/' --prefix -w json \
+			>"$run_dir/diagnostics/$label-tidb-topology.json" 2>&1 || true
 	fi
 }
 
