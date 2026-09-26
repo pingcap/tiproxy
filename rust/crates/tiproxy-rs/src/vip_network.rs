@@ -158,27 +158,46 @@ impl NetworkOperation for LinuxNetwork {
                 });
             }
             let ip = self.ip.to_string();
-            let args = ["-c", "1", "-U", "-I", self.interface.as_ref(), ip.as_str()];
             for _ in 0..self.burst_count {
-                let direct = run_command("arping", &args, "garp").await;
-                if matches!(direct, Ok(Output { success: true, .. })) {
-                    continue;
+                let mut sent = false;
+                // iputils uses -I for interface; Thomas Habets' arping uses
+                // -i. Both implement -U as an unsolicited ARP announcement.
+                // Try the normal and noninteractive sudo paths for each.
+                for interface_flag in ["-I", "-i"] {
+                    let args = [
+                        "-c",
+                        "1",
+                        "-U",
+                        interface_flag,
+                        self.interface.as_ref(),
+                        ip.as_str(),
+                    ];
+                    if run_command("arping", &args, "garp")
+                        .await
+                        .is_ok_and(|output| output.success)
+                    {
+                        sent = true;
+                        break;
+                    }
+                    let sudo_args = [
+                        "-n",
+                        "arping",
+                        "-c",
+                        "1",
+                        "-U",
+                        interface_flag,
+                        self.interface.as_ref(),
+                        ip.as_str(),
+                    ];
+                    if run_command("sudo", &sudo_args, "garp")
+                        .await
+                        .is_ok_and(|output| output.success)
+                    {
+                        sent = true;
+                        break;
+                    }
                 }
-                // Go tries both a library GARP and sudo arping for each packet.
-                // The CLI path is retained here; a direct arping success or
-                // noninteractive sudo success counts as one logical packet.
-                let sudo_args = [
-                    "-n",
-                    "arping",
-                    "-c",
-                    "1",
-                    "-U",
-                    "-I",
-                    self.interface.as_ref(),
-                    ip.as_str(),
-                ];
-                let sudo = run_command("sudo", &sudo_args, "garp").await?;
-                if !sudo.success {
+                if !sent {
                     return Err(NetworkError {
                         operation: "garp",
                         class: "arping_failed",
