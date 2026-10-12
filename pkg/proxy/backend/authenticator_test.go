@@ -4,6 +4,7 @@
 package backend
 
 import (
+	"encoding/binary"
 	"strings"
 	"testing"
 
@@ -596,33 +597,6 @@ func TestUpgradeBackendCap(t *testing.T) {
 		clean()
 	}
 }
-<<<<<<< HEAD
-=======
-
-func TestMalformedHandshakePacket(t *testing.T) {
-	tc := newTCPConnSuite(t)
-	ts, clean := newTestSuite(t, tc)
-
-	customClientRunner := func(packetIO pnet.PacketIO) error {
-		_, err := packetIO.ReadPacket()
-		if err != nil {
-			return err
-		}
-
-		malformedPacket := make([]byte, 31)
-		binary.LittleEndian.PutUint32(malformedPacket[0:4], ts.mc.capability.Uint32())
-
-		return packetIO.WritePacket(malformedPacket, true)
-	}
-
-	ts.runAndCheck(t, func(t *testing.T, ts *testSuite) {
-		require.Error(t, ts.mp.err)
-		require.Contains(t, ts.mp.err.Error(), "Malform packet error: Fails to handshake with the client")
-		require.Equal(t, SrcProxyMalformed, Error2Source(ts.mp.err))
-	}, customClientRunner, ts.mb.authenticate, ts.mp.authenticateFirstTime)
-
-	clean()
-}
 
 func TestHandshakePacketSizeLimit(t *testing.T) {
 	tc := newTCPConnSuite(t)
@@ -647,4 +621,3 @@ func TestHandshakePacketSizeLimit(t *testing.T) {
 
 	clean()
 }
->>>>>>> 4ef84352 (packetio: limit the packet size of packets before handshake (#1090))
