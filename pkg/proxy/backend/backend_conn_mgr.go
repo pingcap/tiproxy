@@ -348,16 +348,11 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 // If it finds that the session is ready for redirection, it migrates the session.
 func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command, err error) {
 	startTime := time.Now()
-<<<<<<< HEAD
-	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
-		mgr.cpt.Capture(request, startTime, mgr.connectionID, mgr.initForCapture)
-	}
-=======
 	var firstByte byte
 	var firstPktLen int
 	firstByte, firstPktLen, err = mgr.clientIO.PeekPacketFirstByte()
 	if err != nil {
-		mgr.SetQuitSourceByErr(err)
+		mgr.setQuitSourceByErr(err)
 		return
 	}
 	cmd = pnet.Command(firstByte)
@@ -368,25 +363,16 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	if firstPktLen < streamingForwardThreshold || cmd == pnet.ComChangeUser {
 		request, err = mgr.clientIO.ReadPacket()
 		if err != nil {
-			mgr.SetQuitSourceByErr(err)
+			mgr.setQuitSourceByErr(err)
 			return
 		}
 		streamingForward = false
-		// For most cases, capture the command at the beginning.
-		if cmd != pnet.ComStmtPrepare && mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
-			mgr.cpt.Capture(capture.StmtInfo{
-				Request:     request,
-				StartTime:   startTime,
-				ConnID:      mgr.connectionID,
-				InitSession: mgr.initForCapture,
-			})
+		if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
+			mgr.cpt.Capture(request, startTime, mgr.connectionID, mgr.initForCapture)
 		}
 	} else {
 		mgr.logger.Info("streaming forward too large packet", zap.Int("first_pkt_len", firstPktLen), zap.Stringer("cmd", cmd))
 	}
-
-	var stmtID uint32
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 	mgr.processLock.Lock()
 	defer func() {
 		if err != nil && !pnet.IsMySQLError(err) {
@@ -409,20 +395,6 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 		}
 		mgr.lastActiveTime = now
 		mgr.processLock.Unlock()
-<<<<<<< HEAD
-=======
-		// For ComStmtPrepare, capture the command after the statement ID is obtained.
-		// Capture ComStmtPrepare after releasing processLock to avoid deadlock with initForCapture().
-		if !streamingForward && cmd == pnet.ComStmtPrepare && stmtID > 0 && mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
-			mgr.cpt.Capture(capture.StmtInfo{
-				Request:     request,
-				StmtID:      stmtID,
-				StartTime:   startTime,
-				ConnID:      mgr.connectionID,
-				InitSession: mgr.initForCapture,
-			})
-		}
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 		metrics.QueryTimeSinceConnCreationHistogram.Observe(startTime.Sub(mgr.createTime).Seconds())
 	}()
 	if firstPktLen < 1 {
@@ -443,16 +415,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	backendIO := *mgr.backendIO.Load()
-<<<<<<< HEAD
-	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect)
-=======
-	if cmd == pnet.ComStmtPrepare {
-		mgr.cmdProcessor.prepareEndHook = func(id uint32) {
-			stmtID = id
-		}
-	}
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect, streamingForward)
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 	if !holdRequest {
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
 		mgr.updateTraffic(backendIO)

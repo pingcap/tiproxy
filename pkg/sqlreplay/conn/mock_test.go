@@ -8,11 +8,7 @@ import (
 	"crypto/tls"
 	"sync/atomic"
 
-<<<<<<< HEAD
-	"github.com/pingcap/tiproxy/pkg/proxy/net"
-=======
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 )
 
 var _ BackendConnManager = (*mockBackendConnMgr)(nil)
@@ -22,11 +18,7 @@ type mockBackendConnMgr struct {
 	closed   bool
 }
 
-<<<<<<< HEAD
-func (m *mockBackendConnMgr) Connect(ctx context.Context, clientIO net.PacketIO, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, username string, password string) error {
-=======
-func (m *mockBackendConnMgr) Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, username, password, dbName string) error {
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
+func (m *mockBackendConnMgr) Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig *tls.Config, backendTLSConfig *tls.Config, username string, password string) error {
 	m.clientIO = clientIO
 	return nil
 }

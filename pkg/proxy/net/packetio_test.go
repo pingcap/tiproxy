@@ -558,8 +558,6 @@ func TestForwardUntilLongData(t *testing.T) {
 	wg.Wait()
 }
 
-<<<<<<< HEAD
-=======
 func TestPeekPacketFirstByte(t *testing.T) {
 	testPipeConn(t,
 		func(t *testing.T, cli *packetIO) {
@@ -636,54 +634,6 @@ func TestReadPacketEmptyPayload(t *testing.T) {
 	)
 }
 
-func TestForwardUntilError(t *testing.T) {
-	srvCh := make(chan *packetIO)
-	exitCh := make(chan struct{})
-	var wg waitgroup.WaitGroup
-	selfErr, peerErr := errors.New("self"), errors.New("peer")
-	// client1 writes to server1
-	// server1 forwards to server2
-	// server2 writes to client2 while client2 closes
-	wg.Run(func() {
-		testTCPConn(t,
-			func(t *testing.T, cli *packetIO) {
-				data := make([]byte, DefaultConnBufferSize*2)
-				data[0] = byte(0)
-				require.NoError(t, cli.WritePacket(data, true))
-			},
-			func(t *testing.T, srv1 *packetIO) {
-				srv1.ApplyOpts(WithWrapError(selfErr))
-				srv2 := <-srvCh
-				err := srv1.ForwardUntil(srv2, func(firstByte byte, firstPktLen int) (bool, bool) {
-					return true, true
-				}, func(response []byte) error {
-					return srv2.Flush()
-				})
-				require.ErrorIs(t, err, peerErr)
-				exitCh <- struct{}{}
-			},
-			1,
-		)
-	})
-	wg.Run(func() {
-		testTCPConn(t,
-			func(t *testing.T, cli *packetIO) {
-				tcpConn, ok := cli.rawConn.(*net.TCPConn)
-				require.True(t, ok)
-				require.NoError(t, tcpConn.SetLinger(0))
-			},
-			func(t *testing.T, srv2 *packetIO) {
-				srv2.ApplyOpts(WithWrapError(peerErr))
-				srvCh <- srv2
-				<-exitCh
-			},
-			1,
-		)
-	})
-	wg.Wait()
-}
-
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 func BenchmarkWritePacket(b *testing.B) {
 	b.ReportAllocs()
 	cli, srv := net.Pipe()

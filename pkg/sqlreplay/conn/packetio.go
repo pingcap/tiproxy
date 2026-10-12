@@ -17,13 +17,8 @@ import (
 var _ pnet.PacketIO = (*packetIO)(nil)
 
 type packetIO struct {
-<<<<<<< HEAD
-	resp bytes.Buffer
-=======
-	request  []byte
-	resp     bytes.Buffer
-	saveResp bool // Discard responses by default because the result may be huge and causes OOM.
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
+	request []byte
+	resp    bytes.Buffer
 }
 
 func newPacketIO() *packetIO {
@@ -53,11 +48,7 @@ func (p *packetIO) Flush() error {
 
 func (p *packetIO) Reset() {
 	p.resp.Reset()
-<<<<<<< HEAD
-=======
-	p.saveResp = false
 	p.request = nil
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 }
 
 func (p *packetIO) GetResp() []byte {

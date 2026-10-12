@@ -592,7 +592,6 @@ func TestReturnMySQLError(t *testing.T) {
 		},
 		// mysql error
 		{
-<<<<<<< HEAD
 			client: func(packetIO pnet.PacketIO) error {
 				ts.mc.cmd = pnet.ComQuery
 				ts.mc.sql = "select $$"
@@ -600,49 +599,10 @@ func TestReturnMySQLError(t *testing.T) {
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				clientIO.ResetSequence()
-				request, err := clientIO.ReadPacket()
-				require.NoError(ts.t, err)
-				rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+				_, rsErr := ts.mp.ExecuteCmd(context.Background())
 				require.True(ts.t, pnet.IsMySQLError(rsErr))
 				require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
 				return nil
-=======
-			// mysql error
-			runner: runner{
-				client: func(packetIO pnet.PacketIO) error {
-					ts.mc.cmd = pnet.ComQuery
-					ts.mc.sql = "select $$"
-					return ts.mc.request(packetIO)
-				},
-				proxy: func(clientIO, backendIO pnet.PacketIO) error {
-					clientIO.ResetSequence()
-					_, rsErr := ts.mp.ExecuteCmd(context.Background())
-					require.True(ts.t, pnet.IsMySQLError(rsErr))
-					require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
-					return nil
-				},
-				backend: func(packetIO pnet.PacketIO) error {
-					ts.mb.respondType = responseTypeErr
-					return ts.mb.respond(packetIO)
-				},
-			},
-		},
-		{
-			// ErrClosing
-			runner: runner{
-				client: func(packetIO pnet.PacketIO) error {
-					ts.mc.cmd = pnet.ComQuery
-					ts.mc.sql = "select $$"
-					return ts.mc.request(packetIO)
-				},
-				proxy: func(clientIO, backendIO pnet.PacketIO) error {
-					ts.mp.closeStatus.Store(statusClosing)
-					clientIO.ResetSequence()
-					_, rsErr := ts.mp.ExecuteCmd(context.Background())
-					require.Error(ts.t, rsErr)
-					return rsErr
-				},
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
 			},
 			backend: func(packetIO pnet.PacketIO) error {
 				ts.mb.respondType = responseTypeErr
@@ -887,10 +847,10 @@ func TestPingDuringShutdown(t *testing.T) {
 				backendIO := *ts.mp.backendIO.Load()
 				backendOutBytes := backendIO.OutBytes()
 				ts.mp.clientIO.ResetSequence()
-				request, err := ts.mp.clientIO.ReadPacket()
+				firstByte, _, err := ts.mp.clientIO.PeekPacketFirstByte()
 				require.NoError(t, err)
-				require.Equal(t, pnet.ComPing, pnet.Command(request[0]))
-				err = ts.mp.ExecuteCmd(context.Background(), request)
+				require.Equal(t, pnet.ComPing, pnet.Command(firstByte))
+				_, err = ts.mp.ExecuteCmd(context.Background())
 				require.True(t, pnet.IsMySQLError(err))
 				// The connection is not quitting and nothing is sent to the backend.
 				require.Equal(t, SrcNone, ts.mp.QuitSource())
@@ -1456,19 +1416,6 @@ func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
 			backend: ts.handshake4Backend,
 		},
 		{
-<<<<<<< HEAD
-			client: ts.mc.request,
-			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				clientIO.ResetSequence()
-				request, err := clientIO.ReadPacket()
-				if err != nil {
-					return err
-				}
-				go func() {
-					require.NoError(ts.t, ts.mp.Close())
-				}()
-				return ts.mp.ExecuteCmd(context.Background(), request)
-=======
 			client:  clientRunner(pnet.MaxPayloadLen),
 			proxy:   ts.forwardCmd4Proxy,
 			backend: ts.respondWithNoTxn4Backend,
@@ -1489,47 +1436,48 @@ func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
 
 func TestCloseWhileExecute(t *testing.T) {
 	ts := newBackendMgrTester(t)
-	tests := []struct {
-		runner  runner
-		checker checker
-	}{
+	requestForwarded := make(chan struct{})
+	allowBackendResponse := make(chan struct{})
+	runners := []runner{
 		{
 			// 1st handshake
-			runner: runner{
-				client:  ts.mc.authenticate,
-				proxy:   ts.firstHandshake4Proxy,
-				backend: ts.handshake4Backend,
-			},
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
 		},
 		{
 			// execute cmd while force close
-			runner: runner{
-				client: ts.mc.request,
-				proxy: func(clientIO, backendIO pnet.PacketIO) error {
-					clientIO.ResetSequence()
-					go func() {
-						require.NoError(ts.t, ts.mp.BackendConnManager.Close())
-					}()
+			client: ts.mc.request,
+			proxy: func(clientIO, backendIO pnet.PacketIO) error {
+				clientIO.ResetSequence()
+				execDone := make(chan error, 1)
+				go func() {
 					_, err := ts.mp.ExecuteCmd(context.Background())
-					return err
-				},
-				backend: ts.startTxn4Backend,
+					execDone <- err
+				}()
+				<-requestForwarded
+				closeDone := make(chan error, 1)
+				go func() {
+					closeDone <- ts.mp.Close()
+				}()
+				close(allowBackendResponse)
+				err := <-execDone
+				require.NoError(ts.t, <-closeDone)
+				return err
 			},
-			checker: func(t *testing.T, ts *testSuite) {
-				if ts.mp.err != nil {
-					require.ErrorIs(t, ts.mp.err, ErrClosing)
+			backend: func(packetIO pnet.PacketIO) error {
+				packetIO.ResetSequence()
+				if _, err := packetIO.ReadPacket(); err != nil {
+					return err
 				}
-				if ts.mb.err != nil {
-					require.True(t, pnet.IsDisconnectError(ts.mb.err))
-				}
->>>>>>> 989ac0e9 (proxy, sqlreplay: streaming forward large client packets to avoid OOM (#1151))
+				close(requestForwarded)
+				<-allowBackendResponse
+				return packetIO.WritePacket(pnet.MakeOKPacket(pnet.ServerStatusInTrans, pnet.OKHeader), true)
 			},
 		},
 	}
 
-	for _, test := range tests {
-		ts.runAndCheck(ts.t, test.checker, test.runner.client, test.runner.backend, test.runner.proxy)
-	}
+	ts.runTests(runners)
 }
 
 func TestCloseWhileGracefulClose(t *testing.T) {
