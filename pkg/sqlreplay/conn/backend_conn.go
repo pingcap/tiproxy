@@ -19,7 +19,7 @@ import (
 
 type BackendConnManager interface {
 	Connect(ctx context.Context, clientIO pnet.PacketIO, frontendTLSConfig, backendTLSConfig *tls.Config, username, password string) error
-	ExecuteCmd(ctx context.Context, request []byte) error
+	ExecuteCmd(ctx context.Context) (pnet.Command, error)
 	ConnectionID() uint64
 	Close() error
 }
@@ -74,7 +74,8 @@ func (bc *backendConn) ConnID() uint64 {
 }
 
 func (bc *backendConn) ExecuteCmd(ctx context.Context, request []byte) error {
-	err := bc.backendConnMgr.ExecuteCmd(ctx, request)
+	bc.clientIO.request = request
+	_, err := bc.backendConnMgr.ExecuteCmd(ctx)
 	if err == nil {
 		bc.updatePreparedStmts(request, bc.clientIO.GetResp())
 	}
@@ -137,14 +138,16 @@ func (bc *backendConn) ExecuteStmt(ctx context.Context, stmtID uint32, args []an
 	if err != nil {
 		return err
 	}
-	err = bc.backendConnMgr.ExecuteCmd(ctx, request)
+	bc.clientIO.request = request
+	_, err = bc.backendConnMgr.ExecuteCmd(ctx)
 	bc.clientIO.Reset()
 	return err
 }
 
 func (bc *backendConn) PrepareStmt(ctx context.Context, stmt string) (stmtID uint32, err error) {
 	request := pnet.MakePrepareStmtRequest(stmt)
-	err = bc.backendConnMgr.ExecuteCmd(ctx, request)
+	bc.clientIO.request = request
+	_, err = bc.backendConnMgr.ExecuteCmd(ctx)
 	if err == nil {
 		resp := bc.clientIO.GetResp()
 		stmtID = binary.LittleEndian.Uint32(resp[1:5])
@@ -155,7 +158,8 @@ func (bc *backendConn) PrepareStmt(ctx context.Context, stmt string) (stmtID uin
 
 func (bc *backendConn) Query(ctx context.Context, stmt string) error {
 	request := pnet.MakeQueryPacket(stmt)
-	err := bc.backendConnMgr.ExecuteCmd(ctx, request)
+	bc.clientIO.request = request
+	_, err := bc.backendConnMgr.ExecuteCmd(ctx)
 	bc.clientIO.Reset()
 	return err
 }

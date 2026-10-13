@@ -196,15 +196,15 @@ func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ pnet.PacketIO) error {
 
 func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO pnet.PacketIO) error {
 	clientIO.ResetSequence()
-	request, err := clientIO.ReadPacket()
+	firstByte, _, err := clientIO.PeekPacketFirstByte()
 	require.NoError(ts.t, err)
-	prevCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
+	prevCounter, err := readCmdCounter(pnet.Command(firstByte), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
-	rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+	_, rsErr := ts.mp.ExecuteCmd(context.Background())
 	if pnet.IsMySQLError(rsErr) {
 		rsErr = nil
 	}
-	curCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
+	curCounter, err := readCmdCounter(pnet.Command(firstByte), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	require.Equal(ts.t, prevCounter+1, curCounter)
 	return rsErr
@@ -599,9 +599,7 @@ func TestReturnMySQLError(t *testing.T) {
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				clientIO.ResetSequence()
-				request, err := clientIO.ReadPacket()
-				require.NoError(ts.t, err)
-				rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+				_, rsErr := ts.mp.ExecuteCmd(context.Background())
 				require.True(ts.t, pnet.IsMySQLError(rsErr))
 				require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
 				return nil
@@ -849,10 +847,10 @@ func TestPingDuringShutdown(t *testing.T) {
 				backendIO := *ts.mp.backendIO.Load()
 				backendOutBytes := backendIO.OutBytes()
 				ts.mp.clientIO.ResetSequence()
-				request, err := ts.mp.clientIO.ReadPacket()
+				firstByte, _, err := ts.mp.clientIO.PeekPacketFirstByte()
 				require.NoError(t, err)
-				require.Equal(t, pnet.ComPing, pnet.Command(request[0]))
-				err = ts.mp.ExecuteCmd(context.Background(), request)
+				require.Equal(t, pnet.ComPing, pnet.Command(firstByte))
+				_, err = ts.mp.ExecuteCmd(context.Background())
 				require.True(t, pnet.IsMySQLError(err))
 				// The connection is not quitting and nothing is sent to the backend.
 				require.Equal(t, SrcNone, ts.mp.QuitSource())
@@ -1391,30 +1389,91 @@ func TestCloseWhileConnect(t *testing.T) {
 	ts.runTests(runners)
 }
 
-func TestCloseWhileExecute(t *testing.T) {
+// TestExecuteCmdStreamingForwardLargeQuery exercises the path where the first physical
+// fragment length is MaxPayloadLen so the proxy forwards COM_QUERY via ForwardPacketTo
+// instead of buffering the whole logical packet.
+func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("allocates a ~32MiB COM_QUERY payload")
+	}
 	ts := newBackendMgrTester(t)
+	clientRunner := func(size int) func(packetIO pnet.PacketIO) error {
+		return func(packetIO pnet.PacketIO) error {
+			packetIO.ResetSequence()
+			data := make([]byte, size)
+			data[0] = pnet.ComQuery.Byte()
+			if err := packetIO.WritePacket(data, true); err != nil {
+				return err
+			}
+			_, err := packetIO.ReadPacket()
+			return err
+		}
+	}
 	runners := []runner{
-		// 1st handshake
 		{
 			client:  ts.mc.authenticate,
 			proxy:   ts.firstHandshake4Proxy,
 			backend: ts.handshake4Backend,
 		},
-		// execute cmd while force close
 		{
+			client:  clientRunner(pnet.MaxPayloadLen),
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		{
+			client:  clientRunner(pnet.MaxPayloadLen + 10),
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		{
+			client:  clientRunner(2 * pnet.MaxPayloadLen),
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestCloseWhileExecute(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	requestForwarded := make(chan struct{})
+	allowBackendResponse := make(chan struct{})
+	runners := []runner{
+		{
+			// 1st handshake
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		{
+			// execute cmd while force close
 			client: ts.mc.request,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				clientIO.ResetSequence()
-				request, err := clientIO.ReadPacket()
-				if err != nil {
+				execDone := make(chan error, 1)
+				go func() {
+					_, err := ts.mp.ExecuteCmd(context.Background())
+					execDone <- err
+				}()
+				<-requestForwarded
+				closeDone := make(chan error, 1)
+				go func() {
+					closeDone <- ts.mp.Close()
+				}()
+				close(allowBackendResponse)
+				err := <-execDone
+				require.NoError(ts.t, <-closeDone)
+				return err
+			},
+			backend: func(packetIO pnet.PacketIO) error {
+				packetIO.ResetSequence()
+				if _, err := packetIO.ReadPacket(); err != nil {
 					return err
 				}
-				go func() {
-					require.NoError(ts.t, ts.mp.Close())
-				}()
-				return ts.mp.ExecuteCmd(context.Background(), request)
+				close(requestForwarded)
+				<-allowBackendResponse
+				return packetIO.WritePacket(pnet.MakeOKPacket(pnet.ServerStatusInTrans, pnet.OKHeader), true)
 			},
-			backend: ts.startTxn4Backend,
 		},
 	}
 

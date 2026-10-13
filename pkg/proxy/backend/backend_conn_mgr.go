@@ -47,6 +47,8 @@ const (
 	CheckBackendInterval = time.Minute
 	// TickerInterval is the interval for checking backend status.
 	TickerInterval = 5 * time.Second
+	// streamingForwardThreshold is the threshold for streaming forward.
+	streamingForwardThreshold = pnet.MaxPayloadLen
 )
 
 const (
@@ -344,10 +346,32 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 
 // ExecuteCmd forwards messages between the client and the backend.
 // If it finds that the session is ready for redirection, it migrates the session.
-func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
+func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command, err error) {
 	startTime := time.Now()
-	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
-		mgr.cpt.Capture(request, startTime, mgr.connectionID, mgr.initForCapture)
+	var firstByte byte
+	var firstPktLen int
+	firstByte, firstPktLen, err = mgr.clientIO.PeekPacketFirstByte()
+	if err != nil {
+		mgr.setQuitSourceByErr(err)
+		return
+	}
+	cmd = pnet.Command(firstByte)
+	var request []byte
+	// If the packet is too large, forward it in the streaming mode to avoid OOM.
+	// In this case, the request won't be captured.
+	streamingForward := true
+	if firstPktLen < streamingForwardThreshold || cmd == pnet.ComChangeUser {
+		request, err = mgr.clientIO.ReadPacket()
+		if err != nil {
+			mgr.setQuitSourceByErr(err)
+			return
+		}
+		streamingForward = false
+		if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
+			mgr.cpt.Capture(request, startTime, mgr.connectionID, mgr.initForCapture)
+		}
+	} else {
+		mgr.logger.Info("streaming forward too large packet", zap.Int("first_pkt_len", firstPktLen), zap.Stringer("cmd", cmd))
 	}
 	mgr.processLock.Lock()
 	defer func() {
@@ -357,10 +381,9 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.handshakeHandler.OnTraffic(mgr)
 		now := time.Now()
 		if err != nil && errors.Is(err, ErrBackendConn) {
-			cmd, data := pnet.Command(request[0]), request[1:]
 			var query string
-			if cmd == pnet.ComQuery {
-				query = parser.Normalize(pnet.ParseQueryPacket(data), "ON")
+			if cmd == pnet.ComQuery && !streamingForward {
+				query = parser.Normalize(pnet.ParseQueryPacket(request[1:]), "ON")
 				if len(query) > 256 {
 					query = query[:256]
 				}
@@ -374,11 +397,10 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.processLock.Unlock()
 		metrics.QueryTimeSinceConnCreationHistogram.Observe(startTime.Sub(mgr.createTime).Seconds())
 	}()
-	if len(request) < 1 {
+	if firstPktLen < 1 {
 		err = mysql.ErrMalformPacket
 		return
 	}
-	cmd := pnet.Command(request[0])
 
 	// Once the request is accepted, it's treated in the transaction, so we don't check graceful shutdown here.
 	if mgr.closeStatus.Load() >= statusClosing {
@@ -393,7 +415,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	backendIO := *mgr.backendIO.Load()
-	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect)
+	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect, streamingForward)
 	if !holdRequest {
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
 		mgr.updateTraffic(backendIO)
@@ -439,7 +461,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	// Execute the held request no matter redirection succeeds or not.
 	if holdRequest && mgr.closeStatus.Load() < statusNotifyClose {
 		backendIO = *mgr.backendIO.Load()
-		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false)
+		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false, streamingForward)
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
 		mgr.updateTraffic(backendIO)
 	}
