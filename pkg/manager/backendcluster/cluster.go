@@ -127,13 +127,18 @@ func NewCluster(
 	for key, query := range metricsQuerier.snapshot() {
 		cluster.metrics.AddQueryExpr(key, query.expr, query.rule)
 	}
-	if err := cluster.metrics.Start(ctx); err != nil {
-		_ = infoSyncer.Close()
-		if closeErr := etcdCli.Close(); closeErr != nil {
-			logger.Warn("close cluster etcd client failed after metrics init error",
-				zap.String("cluster", clusterCfg.Name), zap.Error(closeErr))
+	// The Rust dataplane owns backend metric collection and its election endpoint.
+	// Keep the Go reader allocated so the manager/API surfaces remain safe, but do
+	// not let it campaign with api.addr, which is served by Rust in this mode.
+	if !cfg.RustDataplane.Enabled {
+		if err := cluster.metrics.Start(ctx); err != nil {
+			_ = infoSyncer.Close()
+			if closeErr := etcdCli.Close(); closeErr != nil {
+				logger.Warn("close cluster etcd client failed after metrics init error",
+					zap.String("cluster", clusterCfg.Name), zap.Error(closeErr))
+			}
+			return nil, err
 		}
-		return nil, err
 	}
 
 	return cluster, nil

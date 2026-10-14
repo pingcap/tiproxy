@@ -15,6 +15,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
@@ -66,6 +67,63 @@ func TestManagerFetchesAllClusters(t *testing.T) {
 		return topology[backendID("cluster-a", "10.0.0.1:4000")].ClusterName == "cluster-a" &&
 			topology[backendID("cluster-b", "10.0.0.2:4000")].ClusterName == "cluster-b"
 	}, 5*time.Second, 100*time.Millisecond)
+}
+
+func TestManagerCampaignsForMetricsInGoDataplaneMode(t *testing.T) {
+	cluster := newManagerTestEtcdCluster(t)
+	t.Cleanup(func() { cluster.close(t) })
+
+	cfg := newManagerTestConfig()
+	cfg.Proxy.BackendClusters = []config.BackendCluster{
+		{Name: "cluster-a", PDAddrs: cluster.addr},
+	}
+	cfgGetter := newManagerTestConfigGetter(cfg)
+	cfgCh := make(chan *config.Config, 1)
+
+	mgr := NewManager(zapLoggerForTest(t), nilClusterTLS)
+	require.NoError(t, mgr.Start(context.Background(), cfgGetter, cfgCh))
+	t.Cleanup(func() {
+		close(cfgCh)
+		require.NoError(t, mgr.Close())
+	})
+
+	const ownerPrefix = "/tiproxy/metric_reader/cluster-a/owner"
+	require.Eventually(t, func() bool {
+		response, err := cluster.kv.Get(context.Background(), ownerPrefix, clientv3.WithPrefix())
+		return err == nil && response.Count > 0
+	}, 5*time.Second, 25*time.Millisecond)
+}
+
+func TestManagerDoesNotCampaignForMetricsInRustDataplaneMode(t *testing.T) {
+	cluster := newManagerTestEtcdCluster(t)
+	t.Cleanup(func() { cluster.close(t) })
+
+	cfg := newManagerTestConfig()
+	cfg.RustDataplane.Enabled = true
+	cfg.Proxy.BackendClusters = []config.BackendCluster{
+		{Name: "cluster-a", PDAddrs: cluster.addr},
+	}
+	cfgGetter := newManagerTestConfigGetter(cfg)
+	cfgCh := make(chan *config.Config, 1)
+
+	mgr := NewManager(zapLoggerForTest(t), nilClusterTLS)
+	require.NoError(t, mgr.Start(context.Background(), cfgGetter, cfgCh))
+	t.Cleanup(func() {
+		close(cfgCh)
+		require.NoError(t, mgr.Close())
+	})
+
+	// Query registration and reads stay safe even though Go owns no collection
+	// lifecycle while the Rust dataplane is selected.
+	mgr.MetricsQuerier().AddQueryExpr("up", metricsreader.QueryExpr{PromQL: "up"}, metricsreader.QueryRule{})
+	require.True(t, clusterHasBackendQueryRule(mgr.Snapshot()["cluster-a"], "up"))
+	require.Empty(t, mgr.MetricsQuerier().GetBackendMetricsByCluster("cluster-a"))
+
+	const ownerPrefix = "/tiproxy/metric_reader/cluster-a/owner"
+	require.Never(t, func() bool {
+		response, err := cluster.kv.Get(context.Background(), ownerPrefix, clientv3.WithPrefix())
+		return err != nil || response.Count != 0
+	}, 500*time.Millisecond, 25*time.Millisecond)
 }
 
 func TestManagerDynamicClusterUpdate(t *testing.T) {
