@@ -28,7 +28,7 @@ if-addrs.workspace = true
 libc.workspace = true
 rustix.workspace = true
 rustls.workspace = true
-tokio = { workspace = true, features = ["signal"] }
+tokio = { workspace = true, features = ["process", "signal"] }
 tokio-rustls.workspace = true
 
 [dev-dependencies]
