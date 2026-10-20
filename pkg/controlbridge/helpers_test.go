@@ -3,7 +3,7 @@
 
 // Shared test doubles. These outlived the legacy RouterAdapter deleted at
 // #223 Phase 2: the residual route-owner handler, the snapshot publisher and
-// the metering tests all still need a control peer and a handshake handler.
+// the metering tests all still need a control peer.
 
 package controlbridge
 
@@ -13,12 +13,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/go-mysql-org/go-mysql/mysql"
-	"github.com/pingcap/tiproxy/pkg/balance/router"
 	controlpb "github.com/pingcap/tiproxy/pkg/controlbridge/pb"
 	"github.com/pingcap/tiproxy/pkg/controlbridge/transport"
-	"github.com/pingcap/tiproxy/pkg/proxy/backend"
-	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
@@ -66,82 +62,6 @@ func (peer *fakeSender) AllocateRequestID() (uint64, error) {
 	}
 	peer.nextID++
 	return peer.nextID, nil
-}
-
-type recordingHandler struct {
-	mu                   sync.Mutex
-	rt                   router.Router
-	response             *pnet.HandshakeResp
-	retryHandshakeErrors int
-	handshakeCalls       int
-	handshakeErr         error
-	trafficCalls         int
-	closeCalls           int
-	lastClientIn         uint64
-	lastClientOut        uint64
-}
-
-func (handler *recordingHandler) HandleHandshakeResp(_ backend.ConnContext, response *pnet.HandshakeResp) error {
-	handler.mu.Lock()
-	defer handler.mu.Unlock()
-	handler.response = response
-	return nil
-}
-
-func (handler *recordingHandler) HandleHandshakeErr(_ backend.ConnContext, _ *mysql.MyError) bool {
-	handler.mu.Lock()
-	defer handler.mu.Unlock()
-	if handler.retryHandshakeErrors > 0 {
-		handler.retryHandshakeErrors--
-		return true
-	}
-	return false
-}
-
-func (handler *recordingHandler) GetRouter(_ backend.ConnContext, _ *pnet.HandshakeResp) (router.Router, error) {
-	if handler.rt == nil {
-		return nil, errors.New("no router")
-	}
-	return handler.rt, nil
-}
-
-func (handler *recordingHandler) OnHandshake(_ backend.ConnContext, _ string, err error, _ backend.ErrorSource) {
-	handler.mu.Lock()
-	defer handler.mu.Unlock()
-	handler.handshakeCalls++
-	handler.handshakeErr = err
-}
-
-func (handler *recordingHandler) OnConnClose(_ backend.ConnContext, _ backend.ErrorSource) error {
-	handler.mu.Lock()
-	defer handler.mu.Unlock()
-	handler.closeCalls++
-	return nil
-}
-
-func (handler *recordingHandler) OnTraffic(ctx backend.ConnContext) {
-	handler.mu.Lock()
-	defer handler.mu.Unlock()
-	handler.trafficCalls++
-	handler.lastClientIn = ctx.ClientInBytes()
-	handler.lastClientOut = ctx.ClientOutBytes()
-}
-
-func (handler *recordingHandler) GetCapability() pnet.Capability {
-	return backend.SupportedServerCapabilities
-}
-func (handler *recordingHandler) GetServerVersion() string { return pnet.ServerVersion }
-
-func (handler *recordingHandler) handshakeCount() int {
-	handler.mu.Lock()
-	defer handler.mu.Unlock()
-	return handler.handshakeCalls
-}
-
-func (handler *recordingHandler) closeCount() int {
-	handler.mu.Lock()
-	defer handler.mu.Unlock()
-	return handler.closeCalls
 }
 
 func lastEnvelope(t *testing.T, peer *fakeSender) *controlpb.ControlEnvelope {
