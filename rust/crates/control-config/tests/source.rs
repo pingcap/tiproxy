@@ -671,6 +671,68 @@ pd-addrs = "routing-pd:2379"
 }
 
 #[test]
+fn vip_requires_complete_ha_pair_and_one_backend_cluster() {
+    let load = |source: &str| {
+        ConfigNamespaceStore::from_toml(source.as_bytes(), None, current_dir())
+            .unwrap_or_else(|error| unreachable!("VIP config: {error}"))
+    };
+    let basic = r#"
+[proxy]
+pd-addrs = "pd:2379"
+[ha]
+virtual-ip = "192.0.2.5/24"
+interface = "eth0"
+garp-burst-count = 0
+garp-refresh-count = 2
+"#;
+    let store = load(basic);
+    let vip = store
+        .current()
+        .effective()
+        .vip()
+        .unwrap_or_else(|error| unreachable!("VIP projection: {error}"))
+        .unwrap_or_else(|| unreachable!("complete single-cluster VIP is enabled"));
+    assert_eq!(vip.address.as_ref(), "192.0.2.5/24");
+    assert_eq!(vip.interface.as_ref(), "eth0");
+    assert_eq!(vip.election_name(), "/tiproxy/vip/192.0.2.5/owner");
+    assert_eq!(vip.cidr(), "192.0.2.5/24");
+    assert_eq!(vip.garp_burst_count, 1);
+    assert_eq!(vip.garp_refresh_count, 2);
+
+    let incomplete = load(&basic.replace("interface = \"eth0\"", "interface = \"\""));
+    assert!(matches!(incomplete.current().effective().vip(), Ok(None)));
+    let no_pd = load(&basic.replace("pd-addrs = \"pd:2379\"", "pd-addrs = \"\""));
+    assert!(matches!(no_pd.current().effective().vip(), Ok(None)));
+    let explicit_cluster = load(&basic.replace(
+        "[ha]",
+        "[[proxy.backend-clusters]]\nname = \"only\"\npd-addrs = \"cluster-pd:2379\"\n[ha]",
+    ));
+    let cluster_vip = explicit_cluster
+        .current()
+        .effective()
+        .vip()
+        .unwrap_or_else(|error| unreachable!("VIP projection: {error}"))
+        .unwrap_or_else(|| unreachable!("single explicit backend cluster enables VIP"));
+    assert_eq!(cluster_vip.pd_addrs[0].as_ref(), "cluster-pd:2379");
+    let two_clusters = load(
+        &basic.replace(
+            "[ha]",
+            "[[proxy.backend-clusters]]\nname = \"a\"\npd-addrs = \"pd-a:2379\"\n[[proxy.backend-clusters]]\nname = \"b\"\npd-addrs = \"pd-b:2379\"\n[ha]",
+        ),
+    );
+    assert!(matches!(two_clusters.current().effective().vip(), Ok(None)));
+
+    let invalid_address = load(&basic.replace("192.0.2.5/24", "192.0.2.5/33"));
+    assert!(matches!(
+        invalid_address.current().effective().vip(),
+        Err(ConfigError::InvalidField {
+            field: "ha.virtual-ip",
+            class: "invalid_ip_or_cidr"
+        })
+    ));
+}
+
+#[test]
 fn config_module_rejects_a_factory_that_disagrees_with_initial_transport() {
     let initial = EtcdClientConfig::new(["initial-pd:2379".to_owned()], None)
         .unwrap_or_else(|error| unreachable!("initial transport: {error}"));

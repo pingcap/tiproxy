@@ -23,6 +23,8 @@ mod native_meter;
 mod startup;
 mod tls_material;
 mod topology_composition;
+mod vip_network;
+mod vip_owner;
 
 use std::env;
 use std::fmt::Display;
@@ -78,6 +80,8 @@ use topology_composition::{
     ArtifactClusterFactory, CompositeCandidateValidator, MetricServerConnectionAcceptor,
     TopologyCandidateValidator, interface_advertise_candidates, metric_owner_bind_address,
 };
+use vip_network::{LinuxNetwork, NetworkOperation};
+use vip_owner::{VipHandle, VipModule};
 
 const VERSION: &str = env!("TIPROXY_BUILD_VERSION");
 const COMMIT: &str = env!("TIPROXY_BUILD_COMMIT");
@@ -698,6 +702,50 @@ async fn run(options: Options) -> Result<(), String> {
                 .await);
         }
     };
+    // Go still owns VIP in the two-process configuration. Only the pure-Rust
+    // standalone process may start the new election, so the two owners cannot
+    // silently compete for the same address during the migration period.
+    let vip_plan = if options.standalone {
+        let vip = match config_owner.handle.source().current().effective().vip() {
+            Ok(vip) => vip,
+            Err(error) => return Err(guard.rollback(format!("project VIP config: {error}")).await),
+        };
+        if let Some(vip) = vip {
+            let roots = tls_material::open_tls_roots(&config_owner.tls_roots);
+            let tls = match etcd_tls(&vip.cluster_tls, &roots) {
+                Ok(tls) => tls,
+                Err(error) => {
+                    return Err(guard.rollback(format!("prepare VIP TLS: {error}")).await);
+                }
+            };
+            let endpoints = vip
+                .pd_addrs
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            let client = EtcdClientConfig::new(endpoints, tls).and_then(|client| {
+                client.with_timeouts(
+                    Duration::from_secs(2),
+                    Duration::from_secs(1),
+                    Duration::from_secs(1),
+                    Duration::from_secs(1),
+                    Duration::from_secs(30),
+                )
+            });
+            match client {
+                Ok(client) => Some((vip, client)),
+                Err(error) => {
+                    return Err(guard
+                        .rollback(format!("prepare VIP etcd client: {error}"))
+                        .await);
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let metric_bind_address = metric_owner_bind_address(&initial_topology, &metric_advertise_host);
     let (topology_module, mut topology_handle) = match TopologyModule::new(
         Arc::new(config_owner.handle.source().clone()),
@@ -897,7 +945,7 @@ async fn run(options: Options) -> Result<(), String> {
         serving.clone(),
         route_plane_handle,
         route_config_source,
-        topology_handle,
+        topology_handle.clone(),
         Arc::clone(&runtime_stats),
         HealthGates {
             lb_readiness: lb_readiness.clone(),
@@ -1065,11 +1113,63 @@ async fn run(options: Options) -> Result<(), String> {
             .await);
     }
 
+    let mut vip_handle = None;
+    if let Some((vip, etcd)) = vip_plan {
+        let network = match LinuxNetwork::new(&vip) {
+            Ok(network) => Arc::new(network),
+            Err(error) => {
+                return Err(guard
+                    .rollback(format!(
+                        "initialize VIP network: {} / {}",
+                        error.operation, error.class
+                    ))
+                    .await);
+            }
+        };
+        // Match Go Start: clear a stale address before the process becomes
+        // ready or the dedicated election can be won.
+        if let Err(error) = network.delete_ip().await {
+            return Err(guard
+                .rollback(format!(
+                    "clear stale VIP: {} / {}",
+                    error.operation, error.class
+                ))
+                .await);
+        }
+        let host = metric_advertise_host.as_ref();
+        let member_id = if host.contains(':') {
+            format!("[{host}]:{}", initial_topology.sql_port)
+        } else {
+            format!("{host}:{}", initial_topology.sql_port)
+        };
+        let process_id = runtime_handle.lifecycle().owner_id;
+        let (module, handle) = match VipModule::new(
+            &vip,
+            member_id,
+            process_id.as_ref(),
+            etcd,
+            network,
+            topology_handle.owner_history(),
+        ) {
+            Ok(parts) => parts,
+            Err(error) => return Err(guard.rollback(error).await),
+        };
+        if let Err(error) = guard.spawn_module(module) {
+            return Err(guard.rollback(format!("start VIP module: {error}")).await);
+        }
+        vip_handle = Some(handle);
+    }
+
     if let Err(error) = in_process.mark_ready() {
         meter_ready.send_replace(Some(false));
-        return Err(guard
-            .rollback(format!("mark in-process control runtime ready: {error}"))
-            .await);
+        let vip_close = close_vip(&mut vip_handle).await.err();
+        let failure = match vip_close {
+            Some(vip_close) => {
+                format!("mark in-process control runtime ready: {error}; {vip_close}")
+            }
+            None => format!("mark in-process control runtime ready: {error}"),
+        };
+        return Err(guard.rollback(failure).await);
     }
     meter_ready.send_replace(Some(true));
     if let Some(app) = &admin_app {
@@ -1117,12 +1217,13 @@ async fn run(options: Options) -> Result<(), String> {
             None => std::future::pending().await,
         }
     });
-    let (control_result, sampler_result, serving_result, module_result) = tokio::select! {
+    let (control_result, sampler_result, serving_result, module_result, vip_close_result) = tokio::select! {
         control = &mut control_runtime => {
             let control = match control {
                 Ok(result) => result.map_err(|error| error.to_string()),
                 Err(_) => Err("control runtime supervisor panicked".to_owned()),
             };
+            let vip_close_result = close_vip(&mut vip_handle).await;
             if control.is_err() {
                 in_process.fail("legacy_bridge", "runtime_failure");
             } else {
@@ -1141,13 +1242,14 @@ async fn run(options: Options) -> Result<(), String> {
                 Ok(result) => result.map_err(|error| error.to_string()),
                 Err(_) => Err("metering sampler panicked".to_owned()),
             };
-            (control, sampler, serving_result, Ok(()))
+            (control, sampler, serving_result, Ok(()), vip_close_result)
         }
         sampler = &mut metering_sampler => {
             let sampler = match sampler {
                 Ok(result) => result.map_err(|error| error.to_string()),
                 Err(_) => Err("metering sampler panicked".to_owned()),
             };
+            let vip_close_result = close_vip(&mut vip_handle).await;
             if sampler.is_err() {
                 in_process.fail("metering_sampler", "runtime_failure");
             } else {
@@ -1170,12 +1272,13 @@ async fn run(options: Options) -> Result<(), String> {
                 Ok(result) => result.map_err(|error| error.to_string()),
                 Err(_) => Err("control runtime supervisor panicked".to_owned()),
             };
-            (control, sampler, serving_result, Ok(()))
+            (control, sampler, serving_result, Ok(()), vip_close_result)
         }
         () = &mut termination => {
             // Close readiness as soon as SIGTERM wins the select, even if an
             // in-flight config apply briefly delays the applied-snapshot read.
             lb_readiness.mark_unhealthy();
+            let vip_close_result = close_vip(&mut vip_handle).await;
             let lb_wait = serving.graceful_wait_before_shutdown().await;
             let event = async {
                 tokio::select! {
@@ -1242,13 +1345,14 @@ async fn run(options: Options) -> Result<(), String> {
                     Err(_) => Err("control runtime supervisor panicked".to_owned()),
                 },
             };
-            (control, sampler, serving_result, module_result)
+            (control, sampler, serving_result, module_result, vip_close_result)
         }
         admin = &mut admin_exit => {
             let failure = match admin {
                 Ok(()) => "control admin server exited unexpectedly".to_owned(),
                 Err(_) => "control admin server panicked".to_owned(),
             };
+            let vip_close_result = close_vip(&mut vip_handle).await;
             in_process.fail("control_admin", "runtime_failure");
             let serving_result = stop_drain_and_join_sessions(
                 &in_process,
@@ -1266,7 +1370,7 @@ async fn run(options: Options) -> Result<(), String> {
                 Ok(result) => result.map_err(|error| error.to_string()),
                 Err(_) => Err("control runtime supervisor panicked".to_owned()),
             };
-            (control, sampler, serving_result, Err(failure))
+            (control, sampler, serving_result, Err(failure), vip_close_result)
         }
         module = modules.join_next() => {
             let failure = match module {
@@ -1276,6 +1380,7 @@ async fn run(options: Options) -> Result<(), String> {
                 },
                 None => "control module executor became empty unexpectedly".to_owned(),
             };
+            let vip_close_result = close_vip(&mut vip_handle).await;
             in_process.fail("control_module", "runtime_failure");
             let serving_result = stop_drain_and_join_sessions(
                 &in_process,
@@ -1293,7 +1398,7 @@ async fn run(options: Options) -> Result<(), String> {
                 Ok(result) => result.map_err(|error| error.to_string()),
                 Err(_) => Err("control runtime supervisor panicked".to_owned()),
             };
-            (control, sampler, serving_result, Err(failure))
+            (control, sampler, serving_result, Err(failure), vip_close_result)
         }
     };
     if let Some(observer) = routing_shadow {
@@ -1334,6 +1439,7 @@ async fn run(options: Options) -> Result<(), String> {
     prefer_control_failure(control_result, sampler_result)?;
     serving_result?;
     module_result?;
+    vip_close_result?;
     module_executor_result?;
     finish_result?;
     Ok(())
@@ -1345,6 +1451,18 @@ fn prefer_control_failure(
 ) -> Result<(), String> {
     control?;
     sampler
+}
+
+async fn close_vip(handle: &mut Option<VipHandle>) -> Result<(), String> {
+    let Some(handle) = handle.as_mut() else {
+        return Ok(());
+    };
+    handle.pre_close().await.map_err(|error| {
+        format!(
+            "remove VIP before SQL drain: {} / {}",
+            error.operation, error.class
+        )
+    })
 }
 
 enum OrderedWaitExit {
