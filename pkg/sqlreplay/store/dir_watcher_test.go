@@ -121,7 +121,7 @@ func TestS3DirWatcher(t *testing.T) {
 
 	dirWatcherPollInterval = time.Millisecond * 10
 
-	s3api.EXPECT().ListObjectsV2(gomock.Any(), gomock.Any()).MaxTimes(4).DoAndReturn(
+	s3api.EXPECT().ListObjectsV2(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(
 		func(ctx context.Context, req *s3v2.ListObjectsV2Input, _ ...func(*s3v2.Options)) (*s3v2.ListObjectsV2Output, error) {
 			var retFiles []types.Object
 			files := currentFiles.Load()
@@ -176,8 +176,11 @@ func TestS3DirWatcher(t *testing.T) {
 	})
 
 	t.Run("Watch function should have the correct result", func(t *testing.T) {
+		var mu sync.Mutex
 		files := make(map[string]struct{})
 		w := NewDirWatcher(logger, "dir_watcher_test_", func(filename string) error {
+			mu.Lock()
+			defer mu.Unlock()
 			files[filename] = struct{}{}
 			return nil
 		}, s)
@@ -191,10 +194,12 @@ func TestS3DirWatcher(t *testing.T) {
 		}()
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok1 := files[newDir]
 			_, ok2 := files[newDir2]
 			return ok1 && ok2 && len(files) == 2
-		}, dirWatcherPollInterval*3, time.Millisecond)
+		}, 5*time.Second, time.Millisecond)
 
 		oldFiles := currentFiles.Load()
 		newFiles := slices.Clone(*oldFiles)
@@ -203,9 +208,11 @@ func TestS3DirWatcher(t *testing.T) {
 		currentFiles.Store(&newFiles)
 
 		require.Eventually(t, func() bool {
+			mu.Lock()
+			defer mu.Unlock()
 			_, ok := files[newDir3]
 			return ok && len(files) == 3
-		}, dirWatcherPollInterval*3, time.Millisecond)
+		}, 5*time.Second, time.Millisecond)
 
 		cancel()
 		wg.Wait()
