@@ -15,7 +15,9 @@ members = [
     "crates/legacy-router-shadow",
     "crates/mysql-wire",
     "crates/proxy-io",
+    "crates/replayer-core",
     "crates/session-core",
+    "crates/tiproxy-replayer",
     "crates/tiproxy-rs",
 ]
 exclude = ["ci/fixtures"]
@@ -29,6 +31,7 @@ license = "Apache-2.0"
 repository = "https://github.com/pingcap/tiproxy"
 
 [workspace.dependencies]
+aes = { version = "=0.8.4", default-features = false }
 axum = { version = "=0.8.9", default-features = false }
 hyper = { version = "=1.11.1", default-features = false, features = ["server", "http1", "http2"] }
 hyper-util = { version = "=0.1.20", default-features = false, features = ["server", "server-auto", "server-graceful", "service", "tokio"] }
@@ -49,7 +52,9 @@ reqsign-aws-core = { version = "=3.1.1", default-features = false }
 reqsign-aws-v4 = { version = "=3.3.0", default-features = false }
 reqsign-aliyun-oss = { version = "=3.1.5", default-features = false }
 reqsign-tencent-cos = { version = "=3.0.6", default-features = false }
+clap = { version = "=4.5.51", default-features = false, features = ["derive", "error-context", "help", "std", "suggestions", "usage"] }
 crc32fast = { version = "=1.5.1", default-features = false }
+ctr = { version = "=0.9.2", default-features = false }
 getrandom = "=0.2.17"
 control-admin = { path = "crates/control-admin", version = "0.1.0" }
 control-config = { path = "crates/control-config", version = "0.1.0" }
@@ -72,7 +77,10 @@ if-addrs = { version = "=0.13.4", default-features = false }
 libc = { version = "=0.2.189", default-features = false }
 legacy-router-shadow = { path = "crates/legacy-router-shadow", version = "0.1.0" }
 mysql-wire = { path = "crates/mysql-wire", version = "0.1.0" }
+opendal = { version = "=0.53.3", default-features = false, features = ["executors-tokio", "services-azblob", "services-cos", "services-fs", "services-gcs", "services-oss", "services-s3"] }
 proxy-io = { path = "crates/proxy-io", version = "0.1.0" }
+replayer-core = { path = "crates/replayer-core", version = "0.1.0" }
+ring = { version = "=0.17.14", default-features = false, features = ["std"] }
 serde = { version = "=1.0.228", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "=1.0.151", default-features = false, features = ["std"] }
 session-core = { path = "crates/session-core", version = "0.1.0" }
@@ -87,11 +95,13 @@ socket2 = { version = "=0.6.1", default-features = false, features = ["all"] }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
 tokio = { version = "=1.47.1", default-features = false, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 thiserror = { version = "=2.0.17", default-features = false }
+time = { version = "=0.3.55", default-features = false, features = ["formatting", "parsing", "serde", "std"] }
 toml = { version = "=0.8.23", default-features = false, features = ["display", "parse"] }
 tonic = { version = "=0.14.6", default-features = false, features = ["codegen", "server", "transport"] }
 tonic-prost = { version = "=0.14.6", default-features = false }
 x509-parser = { version = "=0.18.1", default-features = false }
 zeroize = { version = "=1.9.0", default-features = false, features = ["alloc"] }
+url = { version = "=2.5.7", default-features = false }
 zstd-pure-rs = { version = "=0.1.2", default-features = false, features = ["std"] }
 zstd-zero = { version = "=0.1.0", default-features = false }
 

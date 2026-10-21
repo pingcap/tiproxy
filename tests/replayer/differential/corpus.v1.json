@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "id": "native-binary",
+      "format": "native",
+      "prepared_close": "directed",
+      "filter_retries": false,
+      "user_allowlist": [],
+      "source_ordinal": 0,
+      "records": [
+        {
+          "headers": [
+            ["Future", "one"],
+            ["Future", "two"],
+            ["Time", "2026-01-08T19:44:11.099+08:00"],
+            ["Conn_ID", "42"]
+          ],
+          "payload_hex": "53454c4543542031"
+        },
+        {
+          "headers": [
+            ["Time", "2026-01-08T19:44:11.100+08:00"],
+            ["Conn_ID", "42"],
+            ["Cmd_type", "StmtPrepare"],
+            ["Captured_ps_id", "7"]
+          ],
+          "payload_hex": "53454c454354203f"
+        },
+        {
+          "headers": [
+            ["Time", "2026-01-08T19:44:11.101+08:00"],
+            ["Conn_ID", "42"],
+            ["Cmd_type", "StmtExecute"],
+            ["Captured_ps_id", "7"],
+            ["Prepared_stmt", "\"SELECT ?\""]
+          ],
+          "payload_hex": "070000000001000000"
+        }
+      ],
+      "lines": []
+    },
+    {
+      "id": "plugin-allocation-and-dedup",
+      "format": "audit_log_plugin",
+      "prepared_close": "directed",
+      "filter_retries": false,
+      "user_allowlist": ["ROOT"],
+      "source_ordinal": 1,
+      "records": [],
+      "lines": [
+        "[2025/09/06 17:03:53.719 +08:00] [TIMESTAMP=2025/09/06 17:03:53.719 +08:00] [EVENT_CLASS=GENERAL] [EVENT=STARTING] [COMMAND=Query] [SQL_TEXT=SELECT 0] [SQL_STATEMENTS=Select] [CONNECTION_ID=40] [USER=root]",
+        "[2025/09/06 17:03:53.720 +08:00] [TIMESTAMP=2025/09/06 17:03:53.720 +08:00] [EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=Query] [SQL_TEXT=INSERT INTO t VALUES (1)] [SQL_STATEMENTS=Insert] [CONNECTION_ID=9] [USER=root] [CURRENT_DB=test]",
+        "[2025/09/06 17:03:53.720 +08:00] [TIMESTAMP=2025/09/06 17:03:53.720 +08:00] [EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=Query] [SQL_TEXT=INSERT INTO t VALUES (1)] [SQL_STATEMENTS=Insert] [CONNECTION_ID=9] [USER=root] [CURRENT_DB=test]",
+        "[2025/09/06 17:03:53.720 +08:00] [TIMESTAMP=2025/09/06 17:03:53.720 +08:00] [EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=Query] [SQL_TEXT=SELECT 1] [SQL_STATEMENTS=Select] [CONNECTION_ID=9] [USER=root] [CURRENT_DB=test]",
+        "[2025/09/06 17:03:53.720 +08:00] [TIMESTAMP=2025/09/06 17:03:53.720 +08:00] [EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=Query] [SQL_TEXT=INSERT INTO t VALUES (1)] [SQL_STATEMENTS=Insert] [CONNECTION_ID=9] [USER=root] [CURRENT_DB=test]"
+      ]
+    },
+    {
+      "id": "plugin-retry-and-close",
+      "format": "audit_log_plugin",
+      "prepared_close": "directed",
+      "filter_retries": true,
+      "user_allowlist": [],
+      "source_ordinal": 2,
+      "records": [],
+      "lines": [
+        "[2025/09/06 17:03:53.721 +08:00] [TIMESTAMP=2025/09/06 17:03:53.721 +08:00] [EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=Execute] [SQL_TEXT=SELECT ?] [SQL_STATEMENTS=Select] [CONNECTION_ID=9] [PREPARED_STMT_ID=7] [EXECUTE_PARAMS=\"[]\"] [RETRY=false]",
+        "[2025/09/06 17:03:53.722 +08:00] [TIMESTAMP=2025/09/06 17:03:53.722 +08:00] [EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=\"Close stmt\"] [CONNECTION_ID=9] [PREPARED_STMT_ID=7] [RETRY=true]",
+        "[2025/09/06 17:03:53.723 +08:00] [TIMESTAMP=2025/09/06 17:03:53.723 +08:00] [EVENT_CLASS=CONNECTION] [EVENT_SUBCLASS=Disconnect] [CONNECTION_ID=9]"
+      ]
+    },
+    {
+      "id": "extension-prepare-execute-close",
+      "format": "audit_log_extension",
+      "prepared_close": "always",
+      "filter_retries": false,
+      "user_allowlist": [],
+      "source_ordinal": 3,
+      "records": [],
+      "lines": [
+        "[2026/01/08 19:44:11.114 +08:00] [EVENT=\"[QUERY,EXECUTE,SELECT]\"] [USER=root] [CONNECTION_ID=7] [CURRENT_DB=test] [SQL_TEXT=\"SELECT ?\"] [EXECUTE_PARAMS=\"[1]\"]",
+        "[2026/01/08 19:44:11.115 +08:00] [EVENT=\"[CONNECTION,DISCONNECT]\"] [USER=root] [CONNECTION_ID=7]"
+      ]
+    },
+    {
+      "id": "plugin-binary-kind-bytes",
+      "format": "audit_log_plugin",
+      "prepared_close": "always",
+      "filter_retries": false,
+      "user_allowlist": [],
+      "source_ordinal": 4,
+      "records": [],
+      "lines": [
+        "[2025/09/06 17:03:53.724 +08:00] [TIMESTAMP=2025/09/06 17:03:53.724 +08:00] [EVENT_CLASS=GENERAL] [EVENT=COMPLETED] [COMMAND=Execute] [SQL_TEXT=SELECT ?] [SQL_STATEMENTS=Select] [CONNECTION_ID=10] [EXECUTE_PARAMS=\"[\\\"KindBytes \\\\\\\\xff\\\"]\"] [RETRY=false]"
+      ]
+    }
+  ]
+}

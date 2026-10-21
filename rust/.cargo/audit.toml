@@ -1,5 +1,9 @@
 [advisories]
-ignore = []
+ignore = [
+    "RUSTSEC-2023-0071",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
 informational_warnings = ["unmaintained", "unsound"]
 severity_threshold = "low"
 

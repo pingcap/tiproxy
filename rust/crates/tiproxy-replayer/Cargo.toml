@@ -1,0 +1,22 @@
+[package]
+name = "tiproxy-replayer"
+description = "TiProxy standalone offline traffic replayer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+clap.workspace = true
+replayer-core.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+zeroize.workspace = true
+
+[lints]
+workspace = true
