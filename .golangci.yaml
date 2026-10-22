@@ -1,65 +1,43 @@
-version: "2"
 run:
+  timeout: 10m
   issues-exit-code: 1
-linters:
-  enable:
-    - gosec
-    - misspell
-  settings:
-    errcheck:
-      exclude-functions:
+
+linters-settings:
+  errcheck:
+    exclude-functions:
         - io.WriteString
         - (*go.uber.org/zap/buffer.Buffer).WriteString
         - (*go.uber.org/zap/buffer.Buffer).WriteByte
-  exclusions:
-    generated: lax
-    presets:
-      - comments
-      - common-false-positives
-      - legacy
-      - std-error-handling
-    rules:
-      - linters:
-          - gosec
-        path: _test\.go
-      - linters:
-          - gosec
-        path: util/security/tls.go
-        text: 'G402:'
-      - linters:
-          - gosec
-        path: util/security/cert.go
-        text: 'G123:|G402:'
-      - linters:
-          - gosec
-        path: pkg/proxy/net/auth.go
-        text: 'G101:|G401:|G505:'
-      - linters:
-          - gosec
-        path: pkg/util/cmd/cmd.go
-        text: 'G204:'
-      - linters:
-          - gosec
-        path: .*.go
-        text: 'G115:'
-      - linters:
-          - staticcheck
-        text: '^QF(1001|1003|1008|1012):'
-      - linters:
-          - govet
-        path: lib/config/output.go
-        text: 'inline: Constant reflect\.Ptr should be inlined'
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
-formatters:
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+    - path: util/security/tls.go
+      linters:
+        - gosec
+      text: "G402:"
+    - path: util/security/cert.go
+      linters:
+        - gosec
+      text: "G402:"
+    - path: pkg/proxy/net/auth.go
+      linters:
+        - gosec
+      text: "G101:|G401:|G505:"
+    - path: pkg/util/cmd/cmd.go
+      linters:
+        - gosec
+      text: "G204:"
+    - path: ".*.go"
+      linters:
+        - gosec
+      text: "G115:"
+
+linters:
   enable:
+    - gosec
     - gofmt
     - goimports
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+    - misspell
