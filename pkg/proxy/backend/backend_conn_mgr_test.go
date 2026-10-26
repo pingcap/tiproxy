@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -62,10 +63,9 @@ func (mer *mockEventReceiver) OnRedirectFail(from, to string, conn router.Redire
 	return nil
 }
 
-func (mer *mockEventReceiver) OnConnClosed(from, to string, conn router.RedirectableConn) error {
+func (mer *mockEventReceiver) OnConnClosed(backendAddr string, conn router.RedirectableConn) error {
 	mer.eventCh <- event{
-		from:      from,
-		to:        to,
+		from:      backendAddr,
 		eventName: eventClose,
 	}
 	return nil
@@ -196,15 +196,15 @@ func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ pnet.PacketIO) error {
 
 func (ts *backendMgrTester) forwardCmd4Proxy(clientIO, backendIO pnet.PacketIO) error {
 	clientIO.ResetSequence()
-	request, err := clientIO.ReadPacket()
+	firstByte, _, err := clientIO.PeekPacketFirstByte()
 	require.NoError(ts.t, err)
-	prevCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
+	prevCounter, err := readCmdCounter(pnet.Command(firstByte), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
-	rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+	_, rsErr := ts.mp.ExecuteCmd(context.Background())
 	if pnet.IsMySQLError(rsErr) {
 		rsErr = nil
 	}
-	curCounter, err := readCmdCounter(pnet.Command(request[0]), ts.tc.backendListener.Addr().String())
+	curCounter, err := readCmdCounter(pnet.Command(firstByte), ts.tc.backendListener.Addr().String())
 	require.NoError(ts.t, err)
 	require.Equal(ts.t, prevCounter+1, curCounter)
 	return rsErr
@@ -599,9 +599,7 @@ func TestReturnMySQLError(t *testing.T) {
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				clientIO.ResetSequence()
-				request, err := clientIO.ReadPacket()
-				require.NoError(ts.t, err)
-				rsErr := ts.mp.ExecuteCmd(context.Background(), request)
+				_, rsErr := ts.mp.ExecuteCmd(context.Background())
 				require.True(ts.t, pnet.IsMySQLError(rsErr))
 				require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
 				return nil
@@ -800,6 +798,109 @@ func (cp *countingPacketIO) GracefulClose() error {
 func (cp *countingPacketIO) Close() error {
 	cp.closeCnt.Add(1)
 	return nil
+}
+
+// TiDB reports an error for COM_PING during graceful shutdown, so TiProxy does the same.
+func TestPingDuringShutdown(t *testing.T) {
+	var shuttingDown atomic.Bool
+	ts := newBackendMgrTester(t, func(cfg *testConfig) {
+		cfg.proxyConfig.bcConfig.ShuttingDown = shuttingDown.Load
+		cfg.clientConfig.cmd = pnet.ComPing
+	})
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		// the ping is forwarded to the backend when the proxy is serving
+		{
+			client:  ts.mc.request,
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		{
+			proxy: func(_, _ pnet.PacketIO) error {
+				shuttingDown.Store(true)
+				return nil
+			},
+		},
+		// the proxy answers the ping itself with an error and doesn't forward it to the backend
+		{
+			client: func(packetIO pnet.PacketIO) error {
+				packetIO.ResetSequence()
+				if err := packetIO.WritePacket([]byte{pnet.ComPing.Byte()}, true); err != nil {
+					return err
+				}
+				pkt, err := packetIO.ReadPacket()
+				if err != nil {
+					return err
+				}
+				require.Equal(t, pnet.ErrHeader.Byte(), pkt[0])
+				myErr := pnet.ParseErrorPacket(pkt)
+				require.Equal(t, uint16(mysql.ER_SERVER_SHUTDOWN), myErr.Code)
+				require.Equal(t, "08S01", myErr.State)
+				return nil
+			},
+			proxy: func(_, _ pnet.PacketIO) error {
+				backendIO := *ts.mp.backendIO.Load()
+				backendOutBytes := backendIO.OutBytes()
+				ts.mp.clientIO.ResetSequence()
+				firstByte, _, err := ts.mp.clientIO.PeekPacketFirstByte()
+				require.NoError(t, err)
+				require.Equal(t, pnet.ComPing, pnet.Command(firstByte))
+				_, err = ts.mp.ExecuteCmd(context.Background())
+				require.True(t, pnet.IsMySQLError(err))
+				// The connection is not quitting and nothing is sent to the backend.
+				require.Equal(t, SrcNone, ts.mp.QuitSource())
+				require.Equal(t, backendOutBytes, backendIO.OutBytes())
+				return nil
+			},
+		},
+		// other commands are still forwarded
+		{
+			client: func(packetIO pnet.PacketIO) error {
+				ts.mc.cmd = pnet.ComQuery
+				return ts.mc.request(packetIO)
+			},
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
+// Test that the redirection aborted by closing is reported as a failure instead of a success.
+// Otherwise, the router moves the connection to the target backend in the connList, which
+// leaks the connection in the list.
+func TestRedirectAbortedByCloseReportsFail(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	runners := []runner{
+		// 1st handshake
+		{
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		{
+			proxy: func(_, _ pnet.PacketIO) error {
+				// Simulate the race that the redirect signal is received but the connection
+				// starts closing before tryRedirect processes the signal.
+				backendInst := router.BackendInst(newMockBackendInst(ts))
+				ts.mp.redirectInfo.Store(&backendInst)
+				ts.mp.closeStatus.Store(statusNotifyClose)
+				ts.mp.processLock.Lock()
+				ts.mp.tryRedirect(context.Background())
+				ts.mp.processLock.Unlock()
+				// The aborted redirection must be reported as a failure, not a success.
+				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
+				ts.mp.closeStatus.Store(statusActive)
+				return nil
+			},
+		},
+	}
+	ts.runTests(runners)
 }
 
 func TestForceClose(t *testing.T) {
@@ -1272,7 +1373,7 @@ func TestCloseWhileConnect(t *testing.T) {
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				go func() {
-					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+					require.NoError(ts.t, ts.mp.Close())
 				}()
 				err := ts.mp.Connect(context.Background(), clientIO, ts.mp.frontendTLSConfig, ts.mp.backendTLSConfig, "", "")
 				if err == nil {
@@ -1288,30 +1389,91 @@ func TestCloseWhileConnect(t *testing.T) {
 	ts.runTests(runners)
 }
 
-func TestCloseWhileExecute(t *testing.T) {
+// TestExecuteCmdStreamingForwardLargeQuery exercises the path where the first physical
+// fragment length is MaxPayloadLen so the proxy forwards COM_QUERY via ForwardPacketTo
+// instead of buffering the whole logical packet.
+func TestExecuteCmdStreamingForwardLargeQuery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("allocates a ~32MiB COM_QUERY payload")
+	}
 	ts := newBackendMgrTester(t)
+	clientRunner := func(size int) func(packetIO pnet.PacketIO) error {
+		return func(packetIO pnet.PacketIO) error {
+			packetIO.ResetSequence()
+			data := make([]byte, size)
+			data[0] = pnet.ComQuery.Byte()
+			if err := packetIO.WritePacket(data, true); err != nil {
+				return err
+			}
+			_, err := packetIO.ReadPacket()
+			return err
+		}
+	}
 	runners := []runner{
-		// 1st handshake
 		{
 			client:  ts.mc.authenticate,
 			proxy:   ts.firstHandshake4Proxy,
 			backend: ts.handshake4Backend,
 		},
-		// execute cmd while force close
 		{
+			client:  clientRunner(pnet.MaxPayloadLen),
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		{
+			client:  clientRunner(pnet.MaxPayloadLen + 10),
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+		{
+			client:  clientRunner(2 * pnet.MaxPayloadLen),
+			proxy:   ts.forwardCmd4Proxy,
+			backend: ts.respondWithNoTxn4Backend,
+		},
+	}
+	ts.runTests(runners)
+}
+
+func TestCloseWhileExecute(t *testing.T) {
+	ts := newBackendMgrTester(t)
+	requestForwarded := make(chan struct{})
+	allowBackendResponse := make(chan struct{})
+	runners := []runner{
+		{
+			// 1st handshake
+			client:  ts.mc.authenticate,
+			proxy:   ts.firstHandshake4Proxy,
+			backend: ts.handshake4Backend,
+		},
+		{
+			// execute cmd while force close
 			client: ts.mc.request,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				clientIO.ResetSequence()
-				request, err := clientIO.ReadPacket()
-				if err != nil {
+				execDone := make(chan error, 1)
+				go func() {
+					_, err := ts.mp.ExecuteCmd(context.Background())
+					execDone <- err
+				}()
+				<-requestForwarded
+				closeDone := make(chan error, 1)
+				go func() {
+					closeDone <- ts.mp.Close()
+				}()
+				close(allowBackendResponse)
+				err := <-execDone
+				require.NoError(ts.t, <-closeDone)
+				return err
+			},
+			backend: func(packetIO pnet.PacketIO) error {
+				packetIO.ResetSequence()
+				if _, err := packetIO.ReadPacket(); err != nil {
 					return err
 				}
-				go func() {
-					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
-				}()
-				return ts.mp.ExecuteCmd(context.Background(), request)
+				close(requestForwarded)
+				<-allowBackendResponse
+				return packetIO.WritePacket(pnet.MakeOKPacket(pnet.ServerStatusInTrans, pnet.OKHeader), true)
 			},
-			backend: ts.startTxn4Backend,
 		},
 	}
 
@@ -1331,7 +1493,7 @@ func TestCloseWhileGracefulClose(t *testing.T) {
 		{
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				go func() {
-					require.NoError(ts.t, ts.mp.BackendConnManager.Close())
+					require.NoError(ts.t, ts.mp.Close())
 				}()
 				ts.mp.GracefulClose()
 				return nil

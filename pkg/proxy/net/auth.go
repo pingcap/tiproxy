@@ -52,7 +52,7 @@ func GenerateAuthResp(password, authPlugin string, salt []byte) ([]byte, error) 
 	case AuthMySQLClearPassword:
 		return append(hack.Slice(password), 0), nil
 	case AuthSocket:
-		return hack.Slice(password), nil
+		return []byte(password), nil
 	default:
 		return nil, errors.Errorf("unsupported auth plugin %s", authPlugin)
 	}

@@ -36,15 +36,17 @@ func (l *Lexer) NextToken() string {
 				}
 			}
 		case inSingleQuote:
-			if char == '\\' {
+			switch char {
+			case '\\':
 				l.curIdx++
-			} else if char == '\'' {
+			case '\'':
 				inSingleQuote = false
 			}
 		case inDoubleQuote:
-			if char == '\\' {
+			switch char {
+			case '\\':
 				l.curIdx++
-			} else if char == '"' {
+			case '"':
 				inDoubleQuote = false
 			}
 		case char == '-' && l.curIdx+1 < len(l.sql) && l.sql[l.curIdx+1] == '-':

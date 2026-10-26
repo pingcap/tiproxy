@@ -17,12 +17,12 @@ import (
 	"github.com/pingcap/sysutil"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	mgrcrt "github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
 	mgrns "github.com/pingcap/tiproxy/pkg/manager/namespace"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	mgrrp "github.com/pingcap/tiproxy/pkg/sqlreplay/manager"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/atomic"
 	"go.uber.org/ratelimit"
 	"go.uber.org/zap"
@@ -42,23 +42,30 @@ type HTTPHandler interface {
 	RegisterHTTP(c *gin.Engine) error
 }
 
+// healthChecker reports whether the instance is serving. It is satisfied by
+// *health.Manager; defined here so the api package does not depend on the health
+// package.
+type healthChecker interface {
+	Healthy() (bool, string)
+}
+
 type Managers struct {
 	CfgMgr        *mgrcfg.ConfigManager
 	NsMgr         mgrns.NamespaceManager
 	CertMgr       *mgrcrt.CertManager
 	BackendReader BackendReader
 	ReplayJobMgr  mgrrp.JobManager
+	Health        healthChecker
 }
 
 type Server struct {
-	listener  net.Listener
-	wg        waitgroup.WaitGroup
-	limit     ratelimit.Limiter
-	ready     *atomic.Bool
-	lg        *zap.Logger
-	grpc      *grpc.Server
-	isClosing atomic.Bool
-	mgr       Managers
+	listener net.Listener
+	wg       waitgroup.WaitGroup
+	limit    ratelimit.Limiter
+	ready    *atomic.Bool
+	lg       *zap.Logger
+	grpc     *grpc.Server
+	mgr      Managers
 }
 
 func NewServer(cfg config.API, lg *zap.Logger, mgr Managers, handler HTTPHandler, ready *atomic.Bool) (*Server, error) {
@@ -199,10 +206,6 @@ func (h *Server) registerAPI(g *gin.RouterGroup) {
 	h.registerDebug(g.Group("debug"))
 	h.registerBackend(g.Group("backend"))
 	h.registerTraffic(g.Group("traffic"))
-}
-
-func (h *Server) PreClose() {
-	h.isClosing.Store(true)
 }
 
 func (h *Server) Close() error {

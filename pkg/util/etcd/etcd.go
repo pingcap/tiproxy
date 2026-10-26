@@ -6,6 +6,7 @@ package etcd
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -75,7 +76,15 @@ func GetKVs(ctx context.Context, etcdCli *clientv3.Client, key string, opts []cl
 
 // CreateEtcdServer creates an etcd server and is only used for testing.
 func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
-	serverURL, err := url.Parse(fmt.Sprintf("http://%s", addr))
+	listenAddr, advertiseAddr, err := allocEtcdServerAddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	serverURL, err := url.Parse(fmt.Sprintf("http://%s", listenAddr))
+	if err != nil {
+		return nil, err
+	}
+	advertiseURL, err := url.Parse(fmt.Sprintf("http://%s", advertiseAddr))
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +92,9 @@ func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
 	cfg.Dir = dir
 	cfg.ListenClientUrls = []url.URL{*serverURL}
 	cfg.ListenPeerUrls = []url.URL{*serverURL}
+	cfg.AdvertiseClientUrls = []url.URL{*advertiseURL}
+	cfg.AdvertisePeerUrls = []url.URL{*advertiseURL}
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, advertiseURL.String())
 	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(lg)
 	cfg.LogLevel = "fatal"
 	// Reuse port so that it can reboot with the same port immediately.
@@ -96,6 +108,30 @@ func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
 	}
 	<-etcd.Server.ReadyNotify()
 	return etcd, err
+}
+
+func allocEtcdServerAddr(addr string) (listenAddr, advertiseAddr string, err error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", "", err
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	if port != "0" {
+		return net.JoinHostPort(host, port), net.JoinHostPort(host, port), nil
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		return "", "", err
+	}
+	defer func() {
+		closeErr := ln.Close()
+		if err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	return ln.Addr().String(), ln.Addr().String(), nil
 }
 
 func ConfigForEtcdTest(endpoint string) *config.Config {

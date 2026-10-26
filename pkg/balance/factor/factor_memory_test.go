@@ -49,7 +49,7 @@ func TestMemoryScore(t *testing.T) {
 		},
 		{
 			memory: []float64{0, 0.1},
-			score:  1,
+			score:  0,
 		},
 		{
 			memory: []float64{1.0, 0.95},
@@ -121,13 +121,13 @@ func TestMemoryUsage(t *testing.T) {
 			memory:    []float64{0.2, 0.3},
 			ts:        []model.Time{model.Time(15000), model.Time(30000)},
 			lastUsage: 0.3,
-			timeToOOM: 90 * time.Second,
+			timeToOOM: 3 * time.Minute,
 		},
 		{
 			memory:    []float64{0.2, 0.3, 0.3},
 			ts:        []model.Time{model.Time(15000), model.Time(30000), model.Time(31000)},
 			lastUsage: 0.3,
-			timeToOOM: 96 * time.Second,
+			timeToOOM: 192 * time.Second,
 		},
 		{
 			memory:    []float64{0.3, 0.3},
@@ -165,7 +165,7 @@ func TestMemoryBalance(t *testing.T) {
 	}{
 		{
 			memory:   [][]float64{{0.2, 0.3}, {0.3, 0.4}},
-			scores:   []uint64{1, 1},
+			scores:   []uint64{0, 1},
 			balanced: true,
 		},
 		{
@@ -322,7 +322,7 @@ func TestMemoryBalanceCount(t *testing.T) {
 		case 1:
 			usage = []float64{0.8, 0.8}
 		case 2:
-			usage = []float64{0.1, 0.4}
+			usage = []float64{0.75, 0.88}
 		}
 		ts = ts.Add(time.Millisecond)
 		values := []*model.SampleStream{

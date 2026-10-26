@@ -165,7 +165,7 @@ func (tester *routerTester) closeConnections(num int, redirecting bool) {
 		}
 	}
 	for _, conn := range conns {
-		err := tester.router.OnConnClosed(conn.from.Addr(), conn.GetRedirectingAddr(), conn)
+		err := tester.router.OnConnClosed(conn.from.Addr(), conn)
 		require.NoError(tester.t, err)
 		delete(tester.conns, conn.connID)
 	}
@@ -247,6 +247,34 @@ func (tester *routerTester) checkBackendConnMetrics() {
 	}
 }
 
+// checkNoConnLeak checks that no connection wrapper leaks in any connList and all connScores are 0
+// after all the connections are closed.
+func (tester *routerTester) checkNoConnLeak() {
+	for _, backend := range tester.router.backends {
+		require.Equal(tester.t, 0, backend.connList.Len(), "backend %s leaks connections in connList", backend.addr)
+		require.Equal(tester.t, 0, backend.connScore, "backend %s has a wrong connScore", backend.addr)
+	}
+}
+
+// prepareRedirectingConn creates one connection on backend "1" and makes it redirect to backend "2".
+func (tester *routerTester) prepareRedirectingConn() *mockRedirectableConn {
+	tester.addBackends(1)
+	tester.addConnections(1)
+	tester.addBackends(1)
+	// Make backend "1" unhealthy so that the connection is redirected to backend "2".
+	tester.updateBackendStatusByAddr("1", false)
+	tester.rebalance(1)
+	conn := tester.conns[1]
+	require.Equal(tester.t, "2", conn.GetRedirectingAddr())
+	return conn
+}
+
+func (tester *routerTester) readPendingGauge(from, to, reason string) float64 {
+	val, err := metrics.ReadGauge(metrics.PendingMigrateGuage.WithLabelValues(from, to, reason))
+	require.NoError(tester.t, err)
+	return val
+}
+
 func (tester *routerTester) clear() {
 	tester.backendID = 0
 	tester.connID = 0
@@ -281,6 +309,114 @@ func TestRebalance(t *testing.T) {
 	// 50 not redirecting, 20 redirecting
 	tester.closeConnections(10, false)
 	tester.checkRedirectingNum(20)
+}
+
+// Test the race that the connection is closed after the redirection succeeds on the connection side
+// but before the router processes the redirect result. The connection must be removed from the
+// original backend's connList, otherwise it leaks in the connList forever, which inflates b_conn
+// metrics and distorts the balance.
+func TestCloseRaceWithRedirectSucceed(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	conn := tester.prepareRedirectingConn()
+	reason := tester.router.getConnWrapper(conn).Value.redirectReason
+	pendingDuringRedirect := tester.readPendingGauge("1", "2", reason)
+
+	// The redirection succeeds on the connection side, and then the connection is closed
+	// before the router receives OnRedirectSucceed.
+	conn.redirectSucceed()
+	require.NoError(t, tester.router.OnConnClosed(conn.from.Addr(), conn))
+	delete(tester.conns, conn.connID)
+	// Now the router processes the redirect result.
+	require.NoError(t, tester.router.OnRedirectSucceed("1", "2", conn))
+
+	tester.checkNoConnLeak()
+	tester.checkBackendConnMetrics()
+	require.Equal(t, pendingDuringRedirect-1, tester.readPendingGauge("1", "2", reason))
+}
+
+// Test the race that the connection is closed after the redirection fails on the connection side
+// but before the router processes the redirect result. The connScores moved by the redirection
+// must be moved back, otherwise they drift away permanently.
+func TestCloseRaceWithRedirectFail(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	conn := tester.prepareRedirectingConn()
+	reason := tester.router.getConnWrapper(conn).Value.redirectReason
+	pendingDuringRedirect := tester.readPendingGauge("1", "2", reason)
+
+	// The redirection fails on the connection side, and then the connection is closed
+	// before the router receives OnRedirectFail.
+	conn.redirectFail()
+	require.NoError(t, tester.router.OnConnClosed(conn.from.Addr(), conn))
+	delete(tester.conns, conn.connID)
+	// Now the router processes the redirect result.
+	require.NoError(t, tester.router.OnRedirectFail("1", "2", conn))
+
+	tester.checkNoConnLeak()
+	tester.checkBackendConnMetrics()
+	require.Equal(t, pendingDuringRedirect-1, tester.readPendingGauge("1", "2", reason))
+}
+
+// Test the race that the connection is closed before the connection side processes the redirect
+// signal. OnConnClosed reverts the redirection, and the aborted redirect result that arrives later
+// must not revert it again, otherwise the connScores and the pending gauge are decreased twice.
+func TestCloseRaceWithRedirectAborted(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	conn := tester.prepareRedirectingConn()
+	reason := tester.router.getConnWrapper(conn).Value.redirectReason
+	pendingDuringRedirect := tester.readPendingGauge("1", "2", reason)
+
+	// The connection is closed before the redirect signal is processed on the connection side.
+	require.NoError(t, tester.router.OnConnClosed(conn.from.Addr(), conn))
+	delete(tester.conns, conn.connID)
+	// The aborted redirect result arrives later and must be a no-op.
+	require.NoError(t, tester.router.OnRedirectFail("1", "2", conn))
+
+	tester.checkNoConnLeak()
+	tester.checkBackendConnMetrics()
+	require.Equal(t, pendingDuringRedirect-1, tester.readPendingGauge("1", "2", reason))
+}
+
+// Test that when the authenticator reconnects to another backend during the handshake,
+// the registration of the previous attempt is cleaned up.
+func TestReconnectDuringHandshake(t *testing.T) {
+	tester := newRouterTester(t, nil)
+	tester.addBackends(2)
+	conn := tester.createConn()
+	selector1 := tester.router.GetBackendSelector()
+	backend1, err := selector1.Next()
+	require.NoError(t, err)
+	require.False(t, backend1 == nil || reflect.ValueOf(backend1).IsNil())
+	selector1.Finish(conn, true)
+	// Simulate getBackendIO cleaning up before reconnecting to another backend.
+	require.NoError(t, tester.router.OnConnClosed(backend1.Addr(), conn))
+	selector2 := tester.router.GetBackendSelector()
+	var backend2 BackendInst
+	for {
+		backend2, err = selector2.Next()
+		require.NoError(t, err)
+		require.False(t, backend2 == nil || reflect.ValueOf(backend2).IsNil())
+		if backend2.Addr() != backend1.Addr() {
+			break
+		}
+		selector2.Finish(conn, false)
+	}
+	selector2.Finish(conn, true)
+	conn.from = backend2
+	tester.conns[conn.connID] = conn
+
+	// Only the registration of the second attempt remains.
+	totalConns, totalScore := 0, 0
+	for _, backend := range tester.router.backends {
+		totalConns += backend.connList.Len()
+		totalScore += backend.connScore
+	}
+	require.Equal(t, 1, totalConns)
+	require.Equal(t, 1, totalScore)
+	tester.checkBackendConnMetrics()
+
+	require.NoError(t, tester.router.OnConnClosed(backend2.Addr(), conn))
+	delete(tester.conns, conn.connID)
+	tester.checkNoConnLeak()
 }
 
 // Test that the connections are always balanced after rebalance and routing.
@@ -618,7 +754,7 @@ func TestConcurrency(t *testing.T) {
 						from, to := conn.getAddr()
 						var err error
 						if i < 1 {
-							err = router.OnConnClosed(from, conn.GetRedirectingAddr(), conn)
+							err = router.OnConnClosed(from, conn)
 							conn = nil
 						} else if i < 3 {
 							conn.redirectFail()
@@ -634,7 +770,7 @@ func TestConcurrency(t *testing.T) {
 						if i < 2 {
 							// The balancer may happen to redirect it concurrently - that's exactly what may happen.
 							from, _ := conn.getAddr()
-							err := router.OnConnClosed(from, conn.GetRedirectingAddr(), conn)
+							err := router.OnConnClosed(from, conn)
 							require.NoError(t, err)
 							conn = nil
 						}

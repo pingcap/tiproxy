@@ -120,6 +120,30 @@ proxy.failover-timeout = 0
 				return c.Proxy.FailoverTimeout == 0 && len(c.Proxy.FailBackendList) == 0
 			},
 		},
+		{
+			name:   "factor enabled override",
+			precfg: `balance.cpu.enabled = false`,
+			precheck: func(c *config.Config) bool {
+				return !c.Balance.CPU.Enabled
+			},
+			postcfg: `balance.cpu.enabled = true`,
+			postcheck: func(c *config.Config) bool {
+				return c.Balance.CPU.Enabled
+			},
+		},
+		{
+			name: "cpu balance thresholds override",
+			precfg: `balance.cpu.min-balance-usage = 0.2
+balance.cpu.max-usage-gap = 0.1`,
+			precheck: func(c *config.Config) bool {
+				return c.Balance.CPU.MinBalanceUsage == 0.2 && c.Balance.CPU.MaxUsageGap == 0.1
+			},
+			postcfg: `balance.cpu.min-balance-usage = 0
+balance.cpu.max-usage-gap = 1`,
+			postcheck: func(c *config.Config) bool {
+				return c.Balance.CPU.MinBalanceUsage == 0 && c.Balance.CPU.MaxUsageGap == 1
+			},
+		},
 	}
 
 	for i, tc := range cases {
@@ -146,6 +170,17 @@ proxy.failover-timeout = 0
 			require.Eventually(t, func() bool { return tc.postcheck(cfgmgr1.GetConfig()) }, 3*time.Second, 100*time.Millisecond, msg)
 		}
 	}
+}
+
+func TestEmptyConfigFile(t *testing.T) {
+	tmpcfg := filepath.Join(t.TempDir(), "cfg")
+	require.NoError(t, os.WriteFile(tmpcfg, nil, 0o644))
+
+	cfgmgr, _, _ := testConfigManager(t, tmpcfg, "addr")
+	cfg := cfgmgr.GetConfig()
+	require.NotNil(t, cfg)
+	require.Equal(t, "127.0.0.1:2379", cfg.Proxy.PDAddrs)
+	require.Equal(t, "addr", cfg.Proxy.AdvertiseAddr)
 }
 
 func TestConfigRemove(t *testing.T) {
@@ -212,7 +247,7 @@ func TestFilePath(t *testing.T) {
 					// For linux, it creates another file. For macOS, it doesn't touch the file.
 					f, err = os.Create(filepath.Join(tmpdir, "cfg"))
 					require.NoError(t, err)
-					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+					_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr1)
 					require.NoError(t, err)
 					require.NoError(t, f.Close())
 				},
@@ -239,7 +274,7 @@ func TestFilePath(t *testing.T) {
 					}
 					f, err := os.Create("_tmp/cfg")
 					require.NoError(t, err)
-					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+					_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr1)
 					require.NoError(t, err)
 					require.NoError(t, f.Close())
 				},
@@ -253,7 +288,7 @@ func TestFilePath(t *testing.T) {
 					require.NoError(t, os.Mkdir("_tmp", 0755))
 					f, err := os.Create("_tmp/cfg")
 					require.NoError(t, err)
-					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr3))
+					_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr3)
 					require.NoError(t, err)
 					require.NoError(t, f.Close())
 					t.Log("write _tmp")
@@ -270,7 +305,7 @@ func TestFilePath(t *testing.T) {
 
 					f, err := os.Create(filename)
 					require.NoError(t, err)
-					_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr3))
+					_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr3)
 					require.NoError(t, err)
 					require.NoError(t, f.Close())
 					require.Eventually(t, func() bool {
@@ -287,7 +322,7 @@ func TestFilePath(t *testing.T) {
 			} else {
 				f, err := os.Create(test.filename)
 				require.NoError(t, err)
-				_, err = f.WriteString(fmt.Sprintf("proxy.pd-addrs = \"%s\"", pdAddr1))
+				_, err = fmt.Fprintf(f, "proxy.pd-addrs = \"%s\"", pdAddr1)
 				require.NoError(t, err)
 				require.NoError(t, f.Close())
 			}

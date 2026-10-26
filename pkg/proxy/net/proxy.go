@@ -109,7 +109,7 @@ func (prw *proxyReadWriter) writeProxy() error {
 		return errors.Wrap(err, ErrWriteConn)
 	}
 	// according to the spec, we better flush to avoid server hanging
-	if err := prw.packetReadWriter.Flush(); err != nil {
+	if err := prw.Flush(); err != nil {
 		return err
 	}
 	prw.proxyInited.Store(true)
@@ -133,7 +133,7 @@ func (prw *proxyReadWriter) parseProxyV2() (*proxyprotocol.Proxy, error) {
 	}
 
 	// yes, it is proxyV2
-	_, err = prw.packetReadWriter.Discard(len(proxyprotocol.MagicV2))
+	_, err = prw.Discard(len(proxyprotocol.MagicV2))
 	if err != nil {
 		return nil, errors.WithStack(errors.Wrap(err, ErrReadConn))
 	}

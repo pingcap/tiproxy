@@ -47,9 +47,10 @@ func doRequest(ctx context.Context, bctx *Context, method string, url string, rd
 	res, err := bctx.Client.Do(req)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			if req.URL.Scheme == "https" {
+			switch req.URL.Scheme {
+			case "https":
 				req.URL.Scheme = "http"
-			} else if req.URL.Scheme == "http" {
+			case "http":
 				req.URL.Scheme = "https"
 			}
 			// probably server did not enable TLS, try again with plain http

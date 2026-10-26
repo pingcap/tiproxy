@@ -18,7 +18,7 @@ func TestCheckBalance(t *testing.T) {
 			RoutingPolicy: "test",
 		},
 		{
-			Status: Factor{MigrationsPerSecond: -1},
+			Status: StatusFactor{MigrationsPerSecond: -1},
 		},
 		{
 			Health: Factor{MigrationsPerSecond: -1},
@@ -27,13 +27,25 @@ func TestCheckBalance(t *testing.T) {
 			Memory: Factor{MigrationsPerSecond: -1},
 		},
 		{
-			CPU: Factor{MigrationsPerSecond: -1},
+			CPU: CPUFactor{MigrationsPerSecond: -1},
+		},
+		{
+			CPU: CPUFactor{MinBalanceUsage: -0.1},
+		},
+		{
+			CPU: CPUFactor{MinBalanceUsage: 1.1},
+		},
+		{
+			CPU: CPUFactor{MaxUsageGap: 0.04},
+		},
+		{
+			CPU: CPUFactor{MaxUsageGap: 1.1},
 		},
 		{
 			Location: Factor{MigrationsPerSecond: -1},
 		},
 		{
-			ConnCount: ConnCountFactor{Factor: Factor{MigrationsPerSecond: -1}},
+			ConnCount: ConnCountFactor{MigrationsPerSecond: -1},
 		},
 		{
 			ConnCount: ConnCountFactor{CountRatioThreshold: -1},
@@ -46,6 +58,19 @@ func TestCheckBalance(t *testing.T) {
 
 	balance := Balance{}
 	require.NoError(t, (&balance).Check())
+	require.Equal(t, 1.0, balance.CPU.MaxUsageGap)
 	balance = DefaultBalance()
 	require.NoError(t, (&balance).Check())
+	balance.RoutingPolicy = RoutingPolicyIdlest
+	require.NoError(t, (&balance).Check())
+}
+
+func TestOptionalFactorEnabled(t *testing.T) {
+	balance := DefaultBalance()
+	require.True(t, balance.Health.Enabled)
+	require.True(t, balance.Memory.Enabled)
+	require.True(t, balance.CPU.Enabled)
+	require.Zero(t, balance.CPU.MinBalanceUsage)
+	require.Equal(t, 1.0, balance.CPU.MaxUsageGap)
+	require.True(t, balance.Location.Enabled)
 }

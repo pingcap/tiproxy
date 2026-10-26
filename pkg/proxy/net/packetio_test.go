@@ -558,6 +558,82 @@ func TestForwardUntilLongData(t *testing.T) {
 	wg.Wait()
 }
 
+func TestPeekPacketFirstByte(t *testing.T) {
+	testPipeConn(t,
+		func(t *testing.T, cli *packetIO) {
+			require.NoError(t, cli.WritePacket([]byte{ComQuery.Byte(), 1, 2, 3}, true))
+		},
+		func(t *testing.T, srv *packetIO) {
+			b, n, err := srv.PeekPacketFirstByte()
+			require.NoError(t, err)
+			require.Equal(t, ComQuery.Byte(), b)
+			require.Equal(t, 4, n)
+			pkt, err := srv.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, []byte{ComQuery.Byte(), 1, 2, 3}, pkt)
+		},
+		1,
+	)
+}
+
+func TestForwardPacketToLongData(t *testing.T) {
+	srvCh := make(chan *packetIO)
+	exitCh := make(chan struct{})
+	var wg waitgroup.WaitGroup
+	size := MaxPayloadLen + 16
+	expect := make([]byte, size)
+	expect[0] = ComQuery.Byte()
+	expect[size-1] = 1
+	wg.Run(func() {
+		testTCPConn(t,
+			func(t *testing.T, cli *packetIO) {
+				require.NoError(t, cli.WritePacket(expect, true))
+			},
+			func(t *testing.T, srv1 *packetIO) {
+				firstByte, firstPktLen, err := srv1.PeekPacketFirstByte()
+				require.NoError(t, err)
+				require.Equal(t, ComQuery.Byte(), firstByte)
+				require.Equal(t, MaxPayloadLen, firstPktLen)
+				srv2 := <-srvCh
+				_, err = srv1.ForwardPacketTo(srv2, 0)
+				require.NoError(t, err)
+				require.Equal(t, srv1.InBytes(), srv2.OutBytes())
+				exitCh <- struct{}{}
+			},
+			1,
+		)
+	})
+	wg.Run(func() {
+		testTCPConn(t,
+			func(t *testing.T, cli *packetIO) {
+				data, err := cli.ReadPacket()
+				require.NoError(t, err)
+				require.Equal(t, expect, data)
+			},
+			func(t *testing.T, srv2 *packetIO) {
+				srvCh <- srv2
+				<-exitCh
+			},
+			1,
+		)
+	})
+	wg.Wait()
+}
+
+func TestReadPacketEmptyPayload(t *testing.T) {
+	testPipeConn(t,
+		func(t *testing.T, cli *packetIO) {
+			require.NoError(t, cli.WritePacket([]byte{}, true))
+		},
+		func(t *testing.T, srv *packetIO) {
+			readBack, err := srv.ReadPacket()
+			require.NoError(t, err)
+			require.Empty(t, readBack)
+		},
+		1,
+	)
+}
+
 func BenchmarkWritePacket(b *testing.B) {
 	b.ReportAllocs()
 	cli, srv := net.Pipe()

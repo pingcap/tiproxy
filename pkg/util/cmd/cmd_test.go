@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,7 +34,7 @@ func TestExecCmd(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		output, err := ExecCmd(test.cmds[0], test.cmds[1:]...)
+		output, err := ExecCmd(context.Background(), test.cmds[0], test.cmds[1:]...)
 		require.Equal(t, test.hasErr, err != nil, "case %d", i)
 		require.Equal(t, test.output, output)
 	}

@@ -5,15 +5,16 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"runtime"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/metricsreader"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	mgrcfg "github.com/pingcap/tiproxy/pkg/manager/config"
+	"github.com/pingcap/tiproxy/pkg/manager/health"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/manager/infosync"
 	"github.com/pingcap/tiproxy/pkg/manager/logger"
@@ -29,6 +30,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/pingcap/tiproxy/pkg/util/http"
 	"github.com/pingcap/tiproxy/pkg/util/versioninfo"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -47,6 +49,7 @@ type Server struct {
 	metricsReader    metricsreader.MetricsReader
 	replay           mgrrp.JobManager
 	memManager       *memory.MemManager
+	healthMgr        *health.Manager
 	// etcd client
 	etcdCli *clientv3.Client
 	// HTTP client
@@ -99,6 +102,21 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	srv.memManager = memory.NewMemManager(lg, srv.configManager)
 	srv.memManager.Start(ctx)
+
+	// Aggregate the serving/accepting signals so DebugHealth and the proxy share
+	// one source of truth. The proxy starts listening before the namespace manager
+	// is ready, so RejectConns intentionally ignores the init phase.
+	srv.healthMgr = health.NewManager(
+		srv.namespaceManager.Ready,
+		func() (bool, string) {
+			reject, snapshot, threshold := srv.memManager.ShouldRejectNewConn()
+			if !reject {
+				return false, ""
+			}
+			return true, fmt.Sprintf("high memory usage (usage=%.4f, threshold=%.4f, used=%d, limit=%d, last_update=%s)",
+				snapshot.Usage, threshold, snapshot.Used, snapshot.Limit, snapshot.UpdateTime.String())
+		},
+	)
 
 	// setup certs
 	if err = srv.certManager.Init(cfg, lg.Named("cert"), srv.configManager.WatchConfig()); err != nil {
@@ -176,7 +194,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup proxy server
 	{
-		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), hsHandler, srv.memManager)
+		srv.proxy, err = proxy.NewSQLServer(lg.Named("proxy"), cfg, srv.certManager, idMgr, srv.replay.GetCapture(), hsHandler, srv.memManager, srv.healthMgr)
 		if err != nil {
 			return
 		}
@@ -190,6 +208,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 		CertMgr:       srv.certManager,
 		BackendReader: srv.metricsReader,
 		ReplayJobMgr:  srv.replay,
+		Health:        srv.healthMgr,
 	}
 	if srv.apiServer, err = api.NewServer(cfg.API, lg.Named("api"), mgrs, handler, ready); err != nil {
 		return
@@ -202,6 +221,9 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 			return
 		}
 		if srv.vipManager != nil && !reflect.ValueOf(srv.vipManager).IsNil() {
+			// Release the VIP while this instance is rejecting connections (e.g. under
+			// memory pressure) so a healthy node takes over, and re-campaign on recovery.
+			srv.vipManager.SetConnRejecter(srv.healthMgr)
 			if err = srv.vipManager.Start(ctx, srv.etcdCli); err != nil {
 				return
 			}
@@ -231,8 +253,8 @@ func (s *Server) preClose() {
 		s.vipManager.PreClose()
 	}
 	// Make the API server return unhealth.
-	if s.apiServer != nil {
-		s.apiServer.PreClose()
+	if s.healthMgr != nil {
+		s.healthMgr.PreClose()
 	}
 	// Resign the metric reader owner to make other members campaign ASAP.
 	if s.metricsReader != nil && !reflect.ValueOf(s.metricsReader).IsNil() {

@@ -66,6 +66,14 @@ var (
 			Help:      "The value of GOMAXPROCS.",
 		})
 
+	MemoryQuotaGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: ModuleProxy,
+			Subsystem: LabelServer,
+			Name:      "memory_quota_bytes",
+			Help:      "The memory quota available to the TiProxy process in bytes.",
+		})
+
 	ServerEventCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: ModuleProxy,

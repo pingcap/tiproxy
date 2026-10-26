@@ -22,11 +22,11 @@ import (
 	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/balance/router"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
@@ -47,6 +47,8 @@ const (
 	CheckBackendInterval = time.Minute
 	// TickerInterval is the interval for checking backend status.
 	TickerInterval = 5 * time.Second
+	// streamingForwardThreshold is the threshold for streaming forward.
+	streamingForwardThreshold = pnet.MaxPayloadLen
 )
 
 const (
@@ -88,8 +90,10 @@ const (
 )
 
 type BCConfig struct {
-	HealthyKeepAlive     config.KeepAlive
-	UnhealthyKeepAlive   config.KeepAlive
+	HealthyKeepAlive   config.KeepAlive
+	UnhealthyKeepAlive config.KeepAlive
+	// ShuttingDown reports whether TiProxy is in graceful shutdown. It may be nil, e.g. for replaying traffic.
+	ShuttingDown         func() bool
 	TickerInterval       time.Duration
 	CheckBackendInterval time.Duration
 	ConnectTimeout       time.Duration
@@ -227,7 +231,9 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
-	mgr.cancelFunc = cancelFunc
+	mgr.cancelFunc = func() {
+		cancelFunc()
+	}
 	mgr.lastActiveTime = endTime
 	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
 		mgr.cpt.InitConn(endTime, mgr.connectionID, mgr.authenticator.dbname)
@@ -256,7 +262,23 @@ func (mgr *BackendConnManager) newExponentialBackOff() *backoff.ExponentialBackO
 	return b
 }
 
+// abandonRoutedBackend removes the registration left by a previous successful dial during handshake.
+// It is called at the beginning of getBackendIO before routing to another backend.
+func (mgr *BackendConnManager) abandonRoutedBackend() {
+	receiver := mgr.getEventReceiver()
+	if receiver == nil || mgr.curBackend == nil {
+		return
+	}
+	if err := receiver.OnConnClosed(mgr.curBackend.Addr(), mgr); err != nil {
+		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
+	}
+	// Clear the receiver so that Close() won't clean up again.
+	mgr.eventReceiver.Store(nil)
+	mgr.redirectInfo.Store(nil)
+}
+
 func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContext, resp *pnet.HandshakeResp) (pnet.PacketIO, error) {
+	mgr.abandonRoutedBackend()
 	r, err := mgr.handshakeHandler.GetRouter(cctx, resp)
 	if err != nil {
 		return nil, errors.Wrap(err, ErrProxyErr)
@@ -324,10 +346,32 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 
 // ExecuteCmd forwards messages between the client and the backend.
 // If it finds that the session is ready for redirection, it migrates the session.
-func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (err error) {
+func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command, err error) {
 	startTime := time.Now()
-	if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
-		mgr.cpt.Capture(request, startTime, mgr.connectionID, mgr.initForCapture)
+	var firstByte byte
+	var firstPktLen int
+	firstByte, firstPktLen, err = mgr.clientIO.PeekPacketFirstByte()
+	if err != nil {
+		mgr.setQuitSourceByErr(err)
+		return
+	}
+	cmd = pnet.Command(firstByte)
+	var request []byte
+	// If the packet is too large, forward it in the streaming mode to avoid OOM.
+	// In this case, the request won't be captured.
+	streamingForward := true
+	if firstPktLen < streamingForwardThreshold || cmd == pnet.ComChangeUser {
+		request, err = mgr.clientIO.ReadPacket()
+		if err != nil {
+			mgr.setQuitSourceByErr(err)
+			return
+		}
+		streamingForward = false
+		if mgr.cpt != nil && !reflect.ValueOf(mgr.cpt).IsNil() {
+			mgr.cpt.Capture(request, startTime, mgr.connectionID, mgr.initForCapture)
+		}
+	} else {
+		mgr.logger.Info("streaming forward too large packet", zap.Int("first_pkt_len", firstPktLen), zap.Stringer("cmd", cmd))
 	}
 	mgr.processLock.Lock()
 	defer func() {
@@ -337,10 +381,9 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.handshakeHandler.OnTraffic(mgr)
 		now := time.Now()
 		if err != nil && errors.Is(err, ErrBackendConn) {
-			cmd, data := pnet.Command(request[0]), request[1:]
 			var query string
-			if cmd == pnet.ComQuery {
-				query = parser.Normalize(pnet.ParseQueryPacket(data), "ON")
+			if cmd == pnet.ComQuery && !streamingForward {
+				query = parser.Normalize(pnet.ParseQueryPacket(request[1:]), "ON")
 				if len(query) > 256 {
 					query = query[:256]
 				}
@@ -354,20 +397,25 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 		mgr.processLock.Unlock()
 		metrics.QueryTimeSinceConnCreationHistogram.Observe(startTime.Sub(mgr.createTime).Seconds())
 	}()
-	if len(request) < 1 {
+	if firstPktLen < 1 {
 		err = mysql.ErrMalformPacket
 		return
 	}
-	cmd := pnet.Command(request[0])
 
 	// Once the request is accepted, it's treated in the transaction, so we don't check graceful shutdown here.
 	if mgr.closeStatus.Load() >= statusClosing {
 		return
 	}
+	// TiDB reports an error for COM_PING during graceful shutdown so that the clients and the load
+	// balancers know this instance is draining. TiProxy behaves the same for its own shutdown.
+	if cmd == pnet.ComPing && mgr.config.ShuttingDown != nil && mgr.config.ShuttingDown() {
+		err = mgr.writeShutdownErr()
+		return
+	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
 	backendIO := *mgr.backendIO.Load()
-	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect)
+	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect, streamingForward)
 	if !holdRequest {
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
 		mgr.updateTraffic(backendIO)
@@ -413,11 +461,21 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context, request []byte) (
 	// Execute the held request no matter redirection succeeds or not.
 	if holdRequest && mgr.closeStatus.Load() < statusNotifyClose {
 		backendIO = *mgr.backendIO.Load()
-		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false)
+		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false, streamingForward)
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
 		mgr.updateTraffic(backendIO)
 	}
 	return
+}
+
+// writeShutdownErr replies to the client with the same error as TiDB does when it's shutting down.
+// The connection is kept alive, so it returns a MySQL error rather than a connection error.
+func (mgr *BackendConnManager) writeShutdownErr() error {
+	myErr := mysql.NewDefaultError(mysql.ER_SERVER_SHUTDOWN)
+	if err := mgr.clientIO.WritePacket(pnet.MakeErrPacket(myErr), true); err != nil {
+		return err
+	}
+	return myErr
 }
 
 func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO) {
@@ -543,6 +601,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 	}()
 	// Even if the connection is closing, the redirection result must still be sent to recover the connection scores.
 	if mgr.closeStatus.Load() >= statusNotifyClose || ctx.Err() != nil {
+		rs.err = ErrClosing
 		return
 	}
 	// It may have been too long since the redirection signal was sent, and the target backend may be unhealthy now.
@@ -787,26 +846,22 @@ func (mgr *BackendConnManager) Close() error {
 	handErr := mgr.handshakeHandler.OnConnClose(mgr, mgr.quitSource)
 
 	var connErr error
-	var addr string
 	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
-		addr = (*backendIO).RemoteAddr().String()
 		connErr = (*backendIO).Close()
 	}
 
 	eventReceiver := mgr.getEventReceiver()
 	if eventReceiver != nil {
 		// Notify the receiver if there's any event.
-		if len(mgr.redirectResCh) > 0 {
-			mgr.notifyRedirectResult(context.Background(), <-mgr.redirectResCh)
+		select {
+		case rs := <-mgr.redirectResCh:
+			mgr.notifyRedirectResult(context.Background(), rs)
+		default:
 		}
 		// The connection may have just received the redirecting signal.
-		if len(addr) > 0 {
-			var redirectingAddr string
-			if redirectingBackend := mgr.redirectInfo.Load(); redirectingBackend != nil {
-				redirectingAddr = (*redirectingBackend).Addr()
-			}
-			if err := eventReceiver.OnConnClosed(addr, redirectingAddr, mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_addr", addr), zap.NamedError("notify_err", err))
+		if mgr.curBackend != nil {
+			if err := eventReceiver.OnConnClosed(mgr.curBackend.Addr(), mgr); err != nil {
+				mgr.logger.Error("close connection error", zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
 			}
 		}
 	}

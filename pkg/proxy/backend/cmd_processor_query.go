@@ -9,7 +9,6 @@ import (
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/siddontang/go/hack"
 )
 
 // query is called when the proxy sends requests to the backend by itself,
@@ -88,7 +87,7 @@ func (cp *CmdProcessor) readResultColumns(packetIO pnet.PacketIO, result *mysql.
 		if err = result.Fields[fieldIndex].Parse(data); err != nil {
 			return errors.WithStack(err)
 		}
-		fieldName := hack.String(result.Fields[fieldIndex].Name)
+		fieldName := string(result.Fields[fieldIndex].Name)
 		result.FieldNames[fieldName] = fieldIndex
 		fieldIndex++
 	}

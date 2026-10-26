@@ -7,12 +7,15 @@ import (
 	"context"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
+	"github.com/pingcap/tiproxy/pkg/manager/elect"
 	"github.com/pingcap/tiproxy/pkg/util/etcd"
 	"github.com/stretchr/testify/require"
 )
@@ -126,7 +129,6 @@ func TestNetworkOperation(t *testing.T) {
 		cfgGetter: newMockConfigGetter(newMockConfig()),
 		operation: operation,
 	}
-	vm.delOnRetire.Store(true)
 	vm.election = newMockElection(ch, vm)
 	childCtx, cancel := context.WithCancel(context.Background())
 	vm.election.Start(childCtx)
@@ -145,6 +147,127 @@ func TestNetworkOperation(t *testing.T) {
 	}
 	cancel()
 	vm.Close()
+}
+
+func TestPreCloseDeletesVIPBeforeCloseElection(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	operation := newMockNetworkOperation()
+	operation.hasIP.Store(true)
+
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(newMockConfig()),
+		operation: operation,
+	}
+	vm.election = &closeHookElection{
+		closeFn: func() {
+			require.False(t, operation.hasIP.Load())
+			require.EqualValues(t, 1, operation.delIPCnt.Load())
+		},
+	}
+
+	vm.PreClose()
+}
+
+func TestPreClosePreventsReacquireDuringElectionClose(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	operation := newMockNetworkOperation()
+	operation.hasIP.Store(true)
+
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(newMockConfig()),
+		operation: operation,
+	}
+	vm.election = &closeHookElection{
+		closeFn: func() {
+			vm.OnElected()
+		},
+	}
+
+	vm.PreClose()
+	require.False(t, operation.hasIP.Load())
+	require.EqualValues(t, 0, operation.addIPCnt.Load())
+}
+
+func TestGARPRefresh(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newMockConfig()
+	cfg.HA.GARPBurstCount = 1
+	cfg.HA.GARPRefreshCount = 1
+	operation := newMockNetworkOperation()
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(cfg),
+		operation: operation,
+	}
+
+	vm.OnElected()
+	require.Eventually(t, func() bool {
+		return operation.sendArpCnt.Load() > 0
+	}, 2*garpRefreshInterval, 10*time.Millisecond)
+
+	vm.OnRetired()
+	sendArpCnt := operation.sendArpCnt.Load()
+	time.Sleep(50 * time.Millisecond)
+	require.Equal(t, sendArpCnt, operation.sendArpCnt.Load())
+	require.False(t, operation.hasIP.Load())
+}
+
+func TestGARPRefreshNotStartedWhenVIPNotBound(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newMockConfig()
+	cfg.HA.GARPBurstCount = 1
+	cfg.HA.GARPRefreshCount = 1
+	operation := newMockNetworkOperation()
+	operation.addIPErr.Store(true)
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(cfg),
+		operation: operation,
+	}
+
+	vm.OnElected()
+	time.Sleep(50 * time.Millisecond)
+	require.EqualValues(t, 0, operation.sendArpCnt.Load())
+	require.False(t, operation.hasIP.Load())
+}
+
+func TestPreCloseCancelsInFlightARP(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	cfg := newMockConfig()
+	cfg.HA.GARPBurstCount = 2
+	cfg.HA.GARPRefreshCount = 1
+	operation := newMockNetworkOperation()
+	operation.sendArpDelay.Store(int64(200 * time.Millisecond))
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(cfg),
+		operation: operation,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		vm.OnElected()
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		return operation.addIPCnt.Load() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	start := time.Now()
+	vm.PreClose()
+	require.Less(t, time.Since(start), 500*time.Millisecond)
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	require.False(t, operation.hasIP.Load())
 }
 
 func TestStartAndClose(t *testing.T) {
@@ -173,6 +296,58 @@ func TestStartAndClose(t *testing.T) {
 		vm.PreClose()
 		vm.Close()
 	}
+}
+
+func TestRejecterWatcherResignsAndRecompetes(t *testing.T) {
+	// Shorten the polling interval so transitions happen within the test window.
+	origInterval := servingCheckInterval
+	servingCheckInterval = 10 * time.Millisecond
+	defer func() { servingCheckInterval = origInterval }()
+
+	lg, _ := logger.CreateLoggerForTest(t)
+	operation := newMockNetworkOperation()
+	operation.hasIP.Store(false)
+	rejecter := &mockConnRejecter{}
+	rejecter.reject.Store(false)
+
+	vm := &vipManager{
+		lg:        lg,
+		cfgGetter: newMockConfigGetter(newMockConfig()),
+		operation: operation,
+		rejecter:  rejecter,
+	}
+	vm.newElection = func() elect.Election {
+		e := &autoElection{member: vm}
+		e.Start(vm.startCtx)
+		return e
+	}
+	vm.startCtx, vm.startCancel = context.WithCancel(context.Background())
+	// Start competing: the auto election wins immediately and binds the VIP.
+	vm.mu.Lock()
+	vm.election = vm.newElection()
+	vm.mu.Unlock()
+	require.Eventually(t, func() bool { return operation.hasIP.Load() }, time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 1, operation.addIPCnt.Load())
+
+	// Start the rejecter watcher, driven by vm.startCtx so that PreClose's
+	// cancellation of startCtx (and watchWG wait) is the shutdown path under test.
+	vm.watchWG.RunWithRecover(func() { vm.watchRejecter(vm.startCtx) }, nil, vm.lg)
+
+	// Flip to rejecting: the watcher resigns, which retires and drops the VIP.
+	rejecter.reject.Store(true)
+	require.Eventually(t, func() bool { return !operation.hasIP.Load() }, 3*time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 1, operation.delIPCnt.Load())
+
+	// Flip back to not rejecting: the watcher recompetes, wins, and rebinds the VIP.
+	rejecter.reject.Store(false)
+	require.Eventually(t, func() bool { return operation.hasIP.Load() }, 3*time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 2, operation.addIPCnt.Load())
+
+	// Shutdown: closing must release the VIP and stop the watcher without deadlock.
+	// PreClose cancels vm.startCtx (stopping the watcher) and waits for watchWG.
+	vm.PreClose()
+	vm.Close()
+	require.False(t, operation.hasIP.Load())
 }
 
 func TestMultiVIP(t *testing.T) {
@@ -215,4 +390,64 @@ func TestMultiVIP(t *testing.T) {
 	vm2.PreClose()
 	vm1.Close()
 	vm2.Close()
+}
+
+type closeHookElection struct {
+	closeFn func()
+}
+
+func (e *closeHookElection) Start(context.Context) {}
+
+func (e *closeHookElection) ID() string {
+	return ""
+}
+
+func (e *closeHookElection) GetOwnerID(context.Context) (string, error) {
+	return "", nil
+}
+
+func (e *closeHookElection) Close() {
+	if e.closeFn != nil {
+		e.closeFn()
+	}
+}
+
+var _ elect.Election = (*autoElection)(nil)
+
+// autoElection calls OnElected on Start (simulating an immediate win) and
+// OnRetired on Close (simulating losing ownership). OnElected is delivered
+// asynchronously, like the real election, so callers that start the election
+// while holding the member's lock do not deadlock.
+type autoElection struct {
+	member  elect.Member
+	started atomic.Bool
+	closed  atomic.Bool
+	wg      sync.WaitGroup
+}
+
+func (e *autoElection) Start(context.Context) {
+	if e.started.Swap(true) {
+		return
+	}
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		e.member.OnElected()
+	}()
+}
+
+func (e *autoElection) ID() string {
+	return ""
+}
+
+func (e *autoElection) GetOwnerID(context.Context) (string, error) {
+	return "", nil
+}
+
+func (e *autoElection) Close() {
+	if !e.started.Load() || e.closed.Swap(true) {
+		return
+	}
+	e.wg.Wait()
+	e.member.OnRetired()
 }

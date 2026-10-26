@@ -4,9 +4,11 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
+	"github.com/pingcap/tiproxy/pkg/manager/health"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,8 +36,11 @@ func TestDebug(t *testing.T) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 
-	server.PreClose()
+	server.mgr.Health.(*health.Manager).PreClose()
 	doHTTP(t, http.MethodGet, "/api/debug/health", httpOpts{}, func(t *testing.T, r *http.Response) {
 		require.Equal(t, http.StatusBadGateway, r.StatusCode)
+		var health map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&health))
+		require.Equal(t, "server is shutting down", health["unhealthy_reason"])
 	})
 }

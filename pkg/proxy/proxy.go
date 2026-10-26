@@ -8,20 +8,20 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/manager/cert"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
-	mgrmem "github.com/pingcap/tiproxy/pkg/manager/memory"
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/proxy/client"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 )
 
@@ -40,22 +40,29 @@ type serverState struct {
 }
 
 type SQLServer struct {
-	listeners  []net.Listener
-	addrs      []string
-	logger     *zap.Logger
-	certMgr    *cert.CertManager
-	idMgr      *id.IDManager
-	memUsage   memoryStateProvider
-	hsHandler  backend.HandshakeHandler
-	cpt        capture.Capture
-	wg         waitgroup.WaitGroup
-	cancelFunc context.CancelFunc
+	listeners         []net.Listener
+	addrs             []string
+	logger            *zap.Logger
+	certMgr           *cert.CertManager
+	idMgr             *id.IDManager
+	connBufferUpdater connBufferMemoryUpdater
+	health            connAcceptor
+	hsHandler         backend.HandshakeHandler
+	cpt               capture.Capture
+	wg                waitgroup.WaitGroup
+	cancelFunc        context.CancelFunc
+	// shuttingDown is set at the beginning of PreClose. The connections report it to the clients
+	// on COM_PING, just like TiDB does.
+	shuttingDown atomic.Bool
 
 	mu serverState
 }
 
-type memoryStateProvider interface {
-	ShouldRejectNewConn() (bool, mgrmem.UsageSnapshot, float64)
+// connAcceptor reports whether the proxy should reject new connections and
+// provides a reason for the reject log. Satisfied by *health.Manager; defined
+// here so the proxy package does not depend on the health package.
+type connAcceptor interface {
+	RejectConns() (bool, string)
 }
 
 type connBufferMemoryUpdater interface {
@@ -72,15 +79,16 @@ func estimateConnBufferMemDelta(bufferSize int) int64 {
 
 // NewSQLServer creates a new SQLServer.
 func NewSQLServer(logger *zap.Logger, cfg *config.Config, certMgr *cert.CertManager, idMgr *id.IDManager, cpt capture.Capture,
-	hsHandler backend.HandshakeHandler, memUsage memoryStateProvider) (*SQLServer, error) {
+	hsHandler backend.HandshakeHandler, connBufferUpdater connBufferMemoryUpdater, health connAcceptor) (*SQLServer, error) {
 	var err error
 	s := &SQLServer{
-		logger:    logger,
-		certMgr:   certMgr,
-		idMgr:     idMgr,
-		memUsage:  memUsage,
-		hsHandler: hsHandler,
-		cpt:       cpt,
+		logger:            logger,
+		certMgr:           certMgr,
+		idMgr:             idMgr,
+		connBufferUpdater: connBufferUpdater,
+		health:            health,
+		hsHandler:         hsHandler,
+		cpt:               cpt,
 		mu: serverState{
 			clients: make(map[uint64]*client.ClientConnection),
 		},
@@ -154,12 +162,12 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 					s.wg.RunWithRecover(func() { s.onConn(ctx, conn, s.addrs[j]) }, nil, s.logger)
 				}
 			}
-		})
+		}, s.logger)
 	}
 }
 
 func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
-	if s.rejectConnByMemory(conn) {
+	if s.rejectConn(conn) {
 		return
 	}
 
@@ -167,9 +175,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 		connBufferUpdater  connBufferMemoryUpdater
 		connBufferMemDelta int64
 	)
-	if s.memUsage != nil {
-		connBufferUpdater, _ = s.memUsage.(connBufferMemoryUpdater)
-	}
+	connBufferUpdater = s.connBufferUpdater
 
 	tcpKeepAlive, logger, connID, clientConn := func() (bool, *zap.Logger, uint64, *client.ClientConnection) {
 		s.mu.Lock()
@@ -194,6 +200,7 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 				HealthyKeepAlive:   s.mu.healthyKeepAlive,
 				UnhealthyKeepAlive: s.mu.unhealthyKeepAlive,
 				ConnBufferSize:     s.mu.connBufferSize,
+				ShuttingDown:       s.shuttingDown.Load,
 			})
 		s.mu.clients[connID] = clientConn
 		connBufferMemDelta = estimateConnBufferMemDelta(s.mu.connBufferSize)
@@ -234,28 +241,25 @@ func (s *SQLServer) onConn(ctx context.Context, conn net.Conn, addr string) {
 	clientConn.Run(ctx)
 }
 
-func (s *SQLServer) rejectConnByMemory(conn net.Conn) bool {
-	if s.memUsage == nil {
+func (s *SQLServer) rejectConn(conn net.Conn) bool {
+	if s.health == nil {
 		return false
 	}
-	reject, snapshot, threshold := s.memUsage.ShouldRejectNewConn()
-	if !reject {
-		return false
+	if reject, reason := s.health.RejectConns(); reject {
+		metrics.RejectConnCounter.WithLabelValues("memory").Inc()
+		s.logger.Warn("reject connection",
+			zap.String("reason", reason),
+			zap.Stringer("client_addr", conn.RemoteAddr()),
+			zap.Error(conn.Close()))
+		return true
 	}
-	metrics.RejectConnCounter.WithLabelValues("memory").Inc()
-	s.logger.Warn("reject connection due to high memory usage",
-		zap.Stringer("client_addr", conn.RemoteAddr()),
-		zap.Float64("threshold", threshold),
-		zap.Float64("usage", snapshot.Usage),
-		zap.Uint64("used", snapshot.Used),
-		zap.Uint64("limit", snapshot.Limit),
-		zap.Time("last_update", snapshot.UpdateTime),
-		zap.Error(conn.Close()))
-	return true
+	return false
 }
 
 func (s *SQLServer) PreClose() {
 	// Step 1: HTTP status returns unhealthy so that NLB takes this instance offline and then new connections won't come.
+	// COM_PING also reports an error from now on so that the clients know this instance is draining.
+	s.shuttingDown.Store(true)
 	s.mu.Lock()
 	gracefulWait := s.mu.gracefulWait
 	s.mu.Unlock()

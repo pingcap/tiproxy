@@ -169,14 +169,14 @@ func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
 // This function normally costs 1ms, so don't call it too frequently.
 // This function may incorrectly return true if the system is extremely slow.
 func (brw *basicReadWriter) IsPeerActive() bool {
-	if err := brw.Conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+	if err := brw.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
 		return false
 	}
 	active := true
-	if _, err := brw.ReadWriter.Peek(1); err != nil {
+	if _, err := brw.Peek(1); err != nil {
 		active = !errors.Is(err, io.EOF)
 	}
-	if err := brw.Conn.SetReadDeadline(time.Time{}); err != nil {
+	if err := brw.SetReadDeadline(time.Time{}); err != nil {
 		return false
 	}
 	return active
@@ -204,6 +204,19 @@ type PacketIO interface {
 	GetSequence() uint8
 	ReadPacket() (data []byte, err error)
 	WritePacket(data []byte, flush bool) (err error)
+	// PeekPacketFirstByte reads only the first physical packet header plus the
+	// command byte. Callers use it to choose a forwarding path without materializing
+	// the whole logical MySQL packet.
+	PeekPacketFirstByte() (firstByte byte, firstPktLen int, err error)
+	// ForwardPacketTo forwards one logical MySQL packet as physical packets.
+	// It preserves packet boundaries and avoids allocating a single []byte for
+	// a large multi-packet command. When captureLimit is 0, the returned []byte
+	// is always nil. When captureLimit is greater than 0, the returned slice holds
+	// the full logical payload if its size does not exceed captureLimit; otherwise
+	// it holds the first captureLimit bytes only. Callers that pass max+1 as
+	// captureLimit treat len(result)==captureLimit as overflow when valid payloads
+	// are at most max bytes.
+	ForwardPacketTo(destIO PacketIO, captureLimit int) (data []byte, err error)
 	ForwardUntil(dest PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
 		process func(response []byte) error) error
 	InBytes() uint64
@@ -291,17 +304,41 @@ func (p *packetIO) GetSequence() uint8 {
 	return p.readWriter.Sequence()
 }
 
-func (p *packetIO) readOnePacket() ([]byte, bool, error) {
-	if err := ReadFull(p.readWriter, p.header[:]); err != nil {
-		return nil, false, errors.Wrap(err, ErrReadConn)
-	}
-	sequence, pktSequence := p.header[3], p.readWriter.Sequence()
+// mysqlPayloadLen3 decodes the 24-bit little-endian payload length from the first 3 bytes of a MySQL packet header.
+func mysqlPayloadLen3(hdr []byte) int {
+	return int(hdr[0]) | int(hdr[1])<<8 | int(hdr[2])<<16
+}
+
+// consumeIncomingPhyHeader checks the wire sequence against the local reader, advances it, and returns payload length.
+func (p *packetIO) consumeIncomingPhyHeader(hdr []byte) int {
+	sequence, pktSequence := hdr[3], p.readWriter.Sequence()
 	if sequence != pktSequence {
 		p.logger.Warn("sequence mismatch", zap.Uint8("expected", pktSequence), zap.Uint8("actual", sequence))
 	}
 	p.readWriter.SetSequence(sequence + 1)
+	return mysqlPayloadLen3(hdr)
+}
 
-	length := int(p.header[0]) | int(p.header[1])<<8 | int(p.header[2])<<16
+// writeOutgoingPhyHeader writes a 4-byte MySQL physical header for payloadLen using dst's current sequence.
+func writeOutgoingPhyHeader(dst packetReadWriter, hdr *[4]byte, payloadLen int) error {
+	seq := dst.Sequence()
+	hdr[0] = byte(payloadLen)
+	hdr[1] = byte(payloadLen >> 8)
+	hdr[2] = byte(payloadLen >> 16)
+	hdr[3] = seq
+	dst.SetSequence(seq + 1)
+	_, err := dst.Write(hdr[:])
+	return err
+}
+
+// readOnePacket reads one packet and returns the data without header, whether there are more packets and error if any.
+// If limit >= 0, it returns an error if the packet size exceeds the limit.
+// The caller may read a trailing zero-length packet when the previous packet length equals MaxPayloadLen.
+func (p *packetIO) readOnePacket() ([]byte, bool, error) {
+	if err := ReadFull(p.readWriter, p.header[:]); err != nil {
+		return nil, false, errors.Wrap(err, ErrReadConn)
+	}
+	length := p.consumeIncomingPhyHeader(p.header[:])
 	data := make([]byte, length)
 	if err := ReadFull(p.readWriter, data); err != nil {
 		return nil, false, errors.Wrap(err, ErrReadConn)
@@ -329,6 +366,19 @@ func (p *packetIO) ReadPacket() (data []byte, err error) {
 	return data, nil
 }
 
+func (p *packetIO) PeekPacketFirstByte() (firstByte byte, firstPktLen int, err error) {
+	p.readWriter.BeginRW(rwRead)
+	// Peek the header first so we never ask bufio to read past the end of this
+	// physical packet when n is larger than the payload (TCP is a byte stream).
+	firstBytes, err := p.readWriter.Peek(5)
+	if err != nil {
+		return 0, 0, p.wrapErr(errors.Wrap(errors.WithStack(err), ErrReadConn))
+	}
+	firstPktLen = mysqlPayloadLen3(firstBytes)
+	firstByte = firstBytes[4]
+	return firstByte, firstPktLen, nil
+}
+
 func (p *packetIO) writeOnePacket(data []byte) (int, bool, error) {
 	more := false
 	length := len(data)
@@ -339,14 +389,7 @@ func (p *packetIO) writeOnePacket(data []byte) (int, bool, error) {
 		more = true
 	}
 
-	sequence := p.readWriter.Sequence()
-	p.header[0] = byte(length)
-	p.header[1] = byte(length >> 8)
-	p.header[2] = byte(length >> 16)
-	p.header[3] = sequence
-	p.readWriter.SetSequence(sequence + 1)
-
-	if _, err := p.readWriter.Write(p.header[:]); err != nil {
+	if err := writeOutgoingPhyHeader(p.readWriter, &p.header, length); err != nil {
 		return 0, more, errors.Wrap(err, ErrWriteConn)
 	}
 
@@ -376,6 +419,41 @@ func (p *packetIO) WritePacket(data []byte, flush bool) (err error) {
 	return nil
 }
 
+func (p *packetIO) ForwardPacketTo(destIO PacketIO, captureLimit int) ([]byte, error) {
+	p.readWriter.BeginRW(rwRead)
+	dest, _ := destIO.(*packetIO)
+	if dest != nil {
+		dest.readWriter.BeginRW(rwWrite)
+	}
+	var captureData []byte
+	limit := captureLimit
+	if limit > 0 {
+		captureData = make([]byte, 0, limit)
+	}
+	for more := true; more; {
+		var buf []byte
+		var err error
+		if buf, more, err = p.readOnePacket(); err != nil {
+			err = p.wrapErr(err)
+			return captureData, err
+		}
+		if limit > 0 {
+			take := min(len(buf), limit)
+			captureData = append(captureData, buf[:take]...)
+			limit -= take
+		}
+		if dest != nil {
+			if _, _, err := dest.writeOnePacket(buf); err != nil {
+				return captureData, dest.wrapErr(errors.Wrap(err, ErrWriteConn))
+			}
+		}
+	}
+	if err := destIO.Flush(); err != nil {
+		return nil, err
+	}
+	return captureData, nil
+}
+
 func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firstPktLen int) (end, needData bool),
 	process func(response []byte) error) error {
 	p.readWriter.BeginRW(rwRead)
@@ -390,7 +468,7 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 		if err != nil {
 			return p.wrapErr(errors.Wrap(errors.WithStack(err), ErrReadConn))
 		}
-		length := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
+		length := mysqlPayloadLen3(header)
 		end, needData := isEnd(header[4], length)
 		var data []byte
 		// Just call ReadFrom if the caller doesn't need the data, even if it's the last packet.
@@ -405,11 +483,7 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 			}
 		} else {
 			for {
-				sequence, pktSequence := header[3], p.readWriter.Sequence()
-				if sequence != pktSequence {
-					p.logger.Warn("sequence mismatch", zap.Uint8("expected", pktSequence), zap.Uint8("actual", sequence))
-				}
-				p.readWriter.SetSequence(sequence + 1)
+				length = p.consumeIncomingPhyHeader(header)
 				// Sequence may be different (e.g. with compression) so we can't just copy the data to the destination.
 				dest.readWriter.SetSequence(dest.readWriter.Sequence() + 1)
 				p.limitReader.N = int64(length + 4)
@@ -425,7 +499,6 @@ func (p *packetIO) ForwardUntil(destIO PacketIO, isEnd func(firstByte byte, firs
 				if header, err = p.readWriter.Peek(4); err != nil {
 					return p.wrapErr(errors.Wrap(errors.WithStack(err), ErrReadConn))
 				}
-				length = int(header[0]) | int(header[1])<<8 | int(header[2])<<16
 			}
 		}
 

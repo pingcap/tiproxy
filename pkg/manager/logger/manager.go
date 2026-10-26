@@ -9,7 +9,7 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	lg "github.com/pingcap/tiproxy/lib/util/logger"
-	"github.com/pingcap/tiproxy/lib/util/waitgroup"
+	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
@@ -74,6 +75,12 @@ var testProxyConfig = Config{
 		},
 		RequireBackendTLS: true,
 	},
+	HA: HA{
+		VirtualIP:        "10.10.10.10/32",
+		Interface:        "eth0",
+		GARPBurstCount:   5,
+		GARPRefreshCount: 30,
+	},
 }
 
 func TestProxyConfig(t *testing.T) {
@@ -87,6 +94,50 @@ func TestProxyConfig(t *testing.T) {
 	require.Equal(t, data1, data2)
 }
 
+func TestConfigZeroValueOverridesRoundTrip(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Proxy.Addr = ""
+	cfg.Proxy.PDAddrs = ""
+	cfg.Proxy.HighMemoryUsageRejectThreshold = 0
+	cfg.Proxy.GracefulCloseConnTimeout = 0
+	cfg.Proxy.FailoverTimeout = 0
+	cfg.Proxy.FrontendKeepalive = KeepAlive{}
+	cfg.Proxy.BackendHealthyKeepalive = KeepAlive{}
+	cfg.Proxy.BackendUnhealthyKeepalive = KeepAlive{}
+	cfg.API.Addr = ""
+	cfg.Log.Level = ""
+	cfg.Log.Encoder = ""
+	cfg.Log.LogFile.MaxSize = 0
+	cfg.Log.LogFile.MaxDays = 0
+	cfg.Log.LogFile.MaxBackups = 0
+	cfg.Balance.Health.Enabled = false
+	cfg.Balance.Memory.Enabled = false
+	cfg.Balance.CPU.Enabled = false
+	cfg.Balance.Location.Enabled = false
+	cfg.HA.GARPRefreshCount = 0
+	cfg.EnableTrafficReplay = false
+	require.NoError(t, cfg.Check())
+
+	t.Run("toml", func(t *testing.T) {
+		data, err := cfg.ToBytes()
+		require.NoError(t, err)
+		require.Contains(t, string(data), "min-balance-usage = 0.0")
+		require.Contains(t, string(data), "max-usage-gap = 1.0")
+		decoded := NewConfig()
+		require.NoError(t, toml.Unmarshal(data, decoded))
+		require.Equal(t, cfg, decoded)
+	})
+
+	t.Run("json", func(t *testing.T) {
+		data, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		require.Contains(t, string(data), `"min-balance-usage":0`)
+		require.Contains(t, string(data), `"max-usage-gap":1`)
+		decoded := NewConfig()
+		require.NoError(t, json.Unmarshal(data, decoded))
+		require.Equal(t, cfg, decoded)
+	})
+}
 func TestProxyCheck(t *testing.T) {
 	testcases := []struct {
 		pre  func(*testing.T, *Config)
@@ -144,6 +195,18 @@ func TestProxyCheck(t *testing.T) {
 		{
 			pre: func(t *testing.T, c *Config) {
 				c.Proxy.FailoverTimeout = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.HA.GARPBurstCount = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.HA.GARPRefreshCount = -1
 			},
 			err: ErrInvalidConfigValue,
 		},

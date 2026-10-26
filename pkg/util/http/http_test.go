@@ -6,6 +6,7 @@ package http
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -16,6 +17,57 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
+
+func TestNewHTTPClientDisableKeepAlives(t *testing.T) {
+	for name, newClient := range map[string]func() *Client{
+		"NewHTTPClient": func() *Client {
+			return NewHTTPClient(func() *tls.Config { return nil })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := newClient()
+			transport, ok := client.cli.Transport.(*http.Transport)
+			require.True(t, ok)
+			require.True(t, transport.DisableKeepAlives)
+		})
+	}
+}
+
+func TestNewHTTPClientDisableKeepAlivesNoConnectionReuse(t *testing.T) {
+	dialCount := atomic.Int32{}
+	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialCount.Add(1)
+		var d net.Dialer
+		return d.DialContext(ctx, network, addr)
+	}
+
+	httpHandler := &mockHttpHandler{t: t}
+	httpHandler.setHTTPResp(true)
+	httpHandler.setHTTPRespBody("ok")
+	listener, addr := testkit.StartListener(t, "")
+	server := &http.Server{Addr: addr, Handler: httpHandler}
+	var wg waitgroup.WaitGroup
+	wg.Run(func() {
+		_ = server.Serve(listener)
+	})
+	defer func() {
+		require.NoError(t, server.Close())
+		wg.Wait()
+	}()
+
+	client := NewHTTPClient(func() *tls.Config { return nil })
+	client.cli.Transport.(*http.Transport).DialContext = dialContext
+	b := backoff.WithContext(backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Millisecond), 1), context.Background())
+
+	_, err := client.Get(addr, "", b, time.Second)
+	require.NoError(t, err)
+	first := dialCount.Load()
+
+	_, err = client.Get(addr, "", b, time.Second)
+	require.NoError(t, err)
+
+	require.Equal(t, int32(1), dialCount.Load()-first)
+}
 
 func TestHTTPGet(t *testing.T) {
 	httpHandler := &mockHttpHandler{

@@ -4,6 +4,7 @@
 package cmd
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 )
 
 // ExecCmd executes commands with checking potential tainted input.
-func ExecCmd(cmd string, args ...string) (string, error) {
+func ExecCmd(ctx context.Context, cmd string, args ...string) (string, error) {
 	if !isValidArg(cmd) {
 		return "", errors.Errorf("invalid cmd: %s", cmd)
 	}
@@ -21,7 +22,7 @@ func ExecCmd(cmd string, args ...string) (string, error) {
 			return "", errors.Errorf("invalid argument: %s", arg)
 		}
 	}
-	output, err := exec.Command(cmd, args...).CombinedOutput()
+	output, err := exec.CommandContext(ctx, cmd, args...).CombinedOutput()
 	if err != nil {
 		return hack.String(output), errors.Wrapf(errors.WithStack(err), "output: %s", string(output))
 	}
