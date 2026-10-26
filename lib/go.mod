@@ -1,15 +1,18 @@
 module github.com/pingcap/tiproxy/lib
 
-go 1.25.14
+go 1.27.3
 
 require (
+	github.com/BurntSushi/toml v1.5.0
 	github.com/cenkalti/backoff/v4 v4.2.1
+	github.com/pingcap/metering_sdk v0.0.0-20260814062708-9e3b68cd9adf
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tiancaiamao/gp v0.0.0-20230126082955-4f9e4f1ed9b5
 	go.uber.org/atomic v1.9.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/term v0.34.0
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
 require (
@@ -66,6 +69,7 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.127 // indirect
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.74 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
@@ -73,11 +77,4 @@ require (
 	golang.org/x/time v0.4.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
-
-require (
-	github.com/BurntSushi/toml v1.5.0
-	github.com/pingcap/metering_sdk v0.0.0-20260814062708-9e3b68cd9adf
-	go.uber.org/multierr v1.11.0 // indirect
-	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
