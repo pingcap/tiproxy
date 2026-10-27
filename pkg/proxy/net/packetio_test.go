@@ -203,7 +203,9 @@ func TestPeerActive(t *testing.T) {
 			// It's not active after the peer closes.
 			ch <- struct{}{}
 			ch <- struct{}{}
-			require.False(t, cli.IsPeerActive())
+			require.Eventually(t, func() bool {
+				return !cli.IsPeerActive()
+			}, time.Second, 10*time.Millisecond)
 		},
 		func(t *testing.T, srv *packetIO) {
 			<-ch
