@@ -6,6 +6,7 @@ package etcd
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -75,14 +76,47 @@ func GetKVs(ctx context.Context, etcdCli *clientv3.Client, key string, opts []cl
 
 // CreateEtcdServer creates an etcd server and is only used for testing.
 func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
-	serverURL, err := url.Parse(fmt.Sprintf("http://%s", addr))
+	clientListenAddr, clientAdvertiseAddr, err := allocEtcdServerAddr(addr)
+	if err != nil {
+		return nil, err
+	}
+	clientURL, err := url.Parse(fmt.Sprintf("http://%s", clientListenAddr))
+	if err != nil {
+		return nil, err
+	}
+	clientAdvertiseURL, err := url.Parse(fmt.Sprintf("http://%s", clientAdvertiseAddr))
+	if err != nil {
+		return nil, err
+	}
+	host, _, err := net.SplitHostPort(clientAdvertiseAddr)
+	if err != nil {
+		return nil, err
+	}
+	var peerListenAddr, peerAdvertiseAddr string
+	for peerListenAddr == "" || peerListenAddr == clientListenAddr {
+		peerListenAddr, peerAdvertiseAddr, err = allocEtcdServerAddr(net.JoinHostPort(host, "0"))
+		if err != nil {
+			return nil, err
+		}
+	}
+	peerURL, err := url.Parse(fmt.Sprintf("http://%s", peerListenAddr))
+	if err != nil {
+		return nil, err
+	}
+	peerAdvertiseURL, err := url.Parse(fmt.Sprintf("http://%s", peerAdvertiseAddr))
 	if err != nil {
 		return nil, err
 	}
 	cfg := embed.NewConfig()
 	cfg.Dir = dir
-	cfg.ListenClientUrls = []url.URL{*serverURL}
-	cfg.ListenPeerUrls = []url.URL{*serverURL}
+	// Keep peer and client traffic on separate ports. Sharing the port with
+	// SO_REUSEPORT can send a client connection to the peer listener, where the
+	// gRPC client receives an HTTP/1.1 response.
+	cfg.ListenClientUrls = []url.URL{*clientURL}
+	cfg.ListenPeerUrls = []url.URL{*peerURL}
+	cfg.AdvertiseClientUrls = []url.URL{*clientAdvertiseURL}
+	cfg.AdvertisePeerUrls = []url.URL{*peerAdvertiseURL}
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, peerAdvertiseURL.String())
 	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(lg)
 	cfg.LogLevel = "fatal"
 	// Reuse port so that it can reboot with the same port immediately.
@@ -96,6 +130,30 @@ func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
 	}
 	<-etcd.Server.ReadyNotify()
 	return etcd, err
+}
+
+func allocEtcdServerAddr(addr string) (listenAddr, advertiseAddr string, err error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", "", err
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	if port != "0" {
+		return net.JoinHostPort(host, port), net.JoinHostPort(host, port), nil
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		return "", "", err
+	}
+	defer func() {
+		closeErr := ln.Close()
+		if err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	return ln.Addr().String(), ln.Addr().String(), nil
 }
 
 func ConfigForEtcdTest(endpoint string) *config.Config {
