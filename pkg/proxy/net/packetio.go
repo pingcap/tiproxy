@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
+	"github.com/pingcap/tiproxy/pkg/proxy/peeractive"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tiproxy/pkg/util/bufio"
 	"go.uber.org/zap"
@@ -83,7 +84,6 @@ type packetReadWriter interface {
 	TLSConnectionState() tls.ConnectionState
 	InBytes() uint64
 	OutBytes() uint64
-	IsPeerActive() bool
 	SetSequence(uint8)
 	Sequence() uint8
 	// ResetSequence is called before executing a command.
@@ -206,27 +206,6 @@ func (brw *basicReadWriter) Close() error {
 
 func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
 	return tls.ConnectionState{}
-}
-
-// IsPeerActive checks if the peer connection is still active.
-// If the backend disconnects, the client should also be disconnected (required by serverless).
-// We have no other way than reading from the connection.
-//
-// This function cannot be called concurrently with other functions of packetReadWriter.
-// This function normally costs 1ms, so don't call it too frequently.
-// This function may incorrectly return true if the system is extremely slow.
-func (brw *basicReadWriter) IsPeerActive() bool {
-	if err := brw.Conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
-		return false
-	}
-	active := true
-	if _, err := brw.ReadWriter.Peek(1); err != nil {
-		active = !errors.Is(err, io.EOF)
-	}
-	if err := brw.Conn.SetReadDeadline(time.Time{}); err != nil {
-		return false
-	}
-	return active
 }
 
 // ReadFull is used to replace io.ReadFull to erase boundary check, function calls and interface conversion.
@@ -595,7 +574,7 @@ func (p *packetIO) Flush() error {
 }
 
 func (p *packetIO) IsPeerActive() bool {
-	return p.readWriter.IsPeerActive()
+	return peeractive.IsPeerActive(p.rawConn, p.readWriter)
 }
 
 func (p *packetIO) SetKeepalive(cfg config.KeepAlive) error {
