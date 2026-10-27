@@ -99,25 +99,47 @@ func GetKVs(ctx context.Context, etcdCli *clientv3.Client, key string, opts []cl
 
 // CreateEtcdServer creates an etcd server and is only used for testing.
 func CreateEtcdServer(addr, dir string, lg *zap.Logger) (*embed.Etcd, error) {
-	listenAddr, advertiseAddr, err := allocEtcdServerAddr(addr)
+	clientListenAddr, clientAdvertiseAddr, err := allocEtcdServerAddr(addr)
 	if err != nil {
 		return nil, err
 	}
-	serverURL, err := url.Parse(fmt.Sprintf("http://%s", listenAddr))
+	clientURL, err := url.Parse(fmt.Sprintf("http://%s", clientListenAddr))
 	if err != nil {
 		return nil, err
 	}
-	advertiseURL, err := url.Parse(fmt.Sprintf("http://%s", advertiseAddr))
+	clientAdvertiseURL, err := url.Parse(fmt.Sprintf("http://%s", clientAdvertiseAddr))
+	if err != nil {
+		return nil, err
+	}
+	host, _, err := net.SplitHostPort(clientAdvertiseAddr)
+	if err != nil {
+		return nil, err
+	}
+	var peerListenAddr, peerAdvertiseAddr string
+	for peerListenAddr == "" || peerListenAddr == clientListenAddr {
+		peerListenAddr, peerAdvertiseAddr, err = allocEtcdServerAddr(net.JoinHostPort(host, "0"))
+		if err != nil {
+			return nil, err
+		}
+	}
+	peerURL, err := url.Parse(fmt.Sprintf("http://%s", peerListenAddr))
+	if err != nil {
+		return nil, err
+	}
+	peerAdvertiseURL, err := url.Parse(fmt.Sprintf("http://%s", peerAdvertiseAddr))
 	if err != nil {
 		return nil, err
 	}
 	cfg := embed.NewConfig()
 	cfg.Dir = dir
-	cfg.ListenClientUrls = []url.URL{*serverURL}
-	cfg.ListenPeerUrls = []url.URL{*serverURL}
-	cfg.AdvertiseClientUrls = []url.URL{*advertiseURL}
-	cfg.AdvertisePeerUrls = []url.URL{*advertiseURL}
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, advertiseURL.String())
+	// Keep peer and client traffic on separate ports. Sharing the port with
+	// SO_REUSEPORT can send a client connection to the peer listener, where the
+	// gRPC client receives an HTTP/1.1 response.
+	cfg.ListenClientUrls = []url.URL{*clientURL}
+	cfg.ListenPeerUrls = []url.URL{*peerURL}
+	cfg.AdvertiseClientUrls = []url.URL{*clientAdvertiseURL}
+	cfg.AdvertisePeerUrls = []url.URL{*peerAdvertiseURL}
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, peerAdvertiseURL.String())
 	cfg.ZapLoggerBuilder = embed.NewZapLoggerBuilder(lg)
 	cfg.LogLevel = "fatal"
 	// Reuse port so that it can reboot with the same port immediately.
