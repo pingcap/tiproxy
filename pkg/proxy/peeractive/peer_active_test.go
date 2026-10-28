@@ -61,7 +61,7 @@ func TestIsPeerActiveFallback(t *testing.T) {
 }
 
 func TestPeerActiveFromError(t *testing.T) {
-	for _, err := range []error{nil, os.ErrDeadlineExceeded} {
+	for _, err := range []error{nil, os.ErrDeadlineExceeded, &net.OpError{Err: os.ErrDeadlineExceeded}} {
 		active, returnedErr := peerActiveFromError(err)
 		require.NoError(t, returnedErr)
 		require.True(t, active)
