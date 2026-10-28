@@ -764,10 +764,17 @@ func (mgr *BackendConnManager) checkBackendActive() {
 		return
 	}
 	backendIO := *mgr.backendIO.Load()
-	if !backendIO.IsPeerActive() {
+	active, err := backendIO.IsPeerActive()
+	if !active {
 		mgr.logger.Info("backend connection is closed, close client connection",
+<<<<<<< HEAD
 			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Stringer("backend_addr", backendIO.RemoteAddr()),
 			zap.Bool("backend_healthy", mgr.curBackend.Healthy()))
+=======
+			zap.Stringer("backend_addr", backendIO.RemoteAddr()),
+			zap.Bool("backend_healthy", mgr.curBackend.Healthy()),
+			zap.Error(err))
+>>>>>>> ab18dcba (net: probe backend connection liveness more accurately (#1399))
 		mgr.quitSource = SrcBackendNetwork
 		if err := mgr.clientIO.GracefulClose(); err != nil {
 			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))

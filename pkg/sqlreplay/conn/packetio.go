@@ -123,8 +123,8 @@ func (p *packetIO) InPackets() uint64 {
 }
 
 // IsPeerActive implements net.PacketIO.
-func (p *packetIO) IsPeerActive() bool {
-	return true
+func (p *packetIO) IsPeerActive() (bool, error) {
+	return true, nil
 }
 
 // LastKeepAlive implements net.PacketIO.

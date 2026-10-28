@@ -59,6 +59,7 @@ When adding or modifying features, prefer extending existing packages before cre
 - `pkg/proxy/client/` - Wrapper of the client connection.
 - `pkg/proxy/keepalive/` - Configures TCP keep-alive settings.
 - `pkg/proxy/net/` - Parses and packages MySQL-wire packets.
+- `pkg/proxy/peeractive/` - Detects definitive peer socket closure with platform-specific raw socket probes and a portable buffered fallback.
 - `pkg/proxy/proxyprotocol/` - Parses and fills the Proxy Protocol header.
 - `pkg/sctx/` - Defines the global context.
 - `pkg/server/` - Starts and stops the TiProxy server, including proxy service, API service, and other managers.
