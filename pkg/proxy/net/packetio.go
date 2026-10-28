@@ -255,7 +255,7 @@ type PacketIO interface {
 	InPackets() uint64
 	OutPackets() uint64
 	Flush() error
-	IsPeerActive() bool
+	IsPeerActive() (bool, error)
 	SetKeepalive(cfg config.KeepAlive) error
 	LastKeepAlive() config.KeepAlive
 	GracefulClose() error
@@ -578,12 +578,16 @@ func (p *packetIO) Flush() error {
 	return nil
 }
 
-func (p *packetIO) IsPeerActive() bool {
+func (p *packetIO) IsPeerActive() (bool, error) {
 	active, err := p.readWriter.IsPeerActive()
 	if err != nil && p.logger != nil {
-		p.logger.Warn("failed to determine whether the peer is active", zap.Error(err))
+		msg := "failed to determine whether the peer is active"
+		if !active {
+			msg = "peer connection is inactive"
+		}
+		p.logger.Info(msg, zap.Error(err))
 	}
-	return active
+	return active, err
 }
 
 func (p *packetIO) SetKeepalive(cfg config.KeepAlive) error {

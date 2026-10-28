@@ -29,9 +29,9 @@ func TestIsPeerActiveAfterReset(t *testing.T) {
 			<-reset
 			require.Eventually(t, func() bool {
 				active, err = IsPeerActive(cli, reader)
-				require.NoError(t, err)
 				return !active
 			}, time.Second, 10*time.Millisecond)
+			require.Error(t, err)
 		},
 		func(t *testing.T, srv net.Conn) {
 			tcpConn, ok := srv.(*net.TCPConn)
@@ -54,9 +54,9 @@ func TestIsPeerActiveFallback(t *testing.T) {
 	require.NoError(t, srv.Close())
 	require.Eventually(t, func() bool {
 		active, err = IsPeerActive(cli, reader)
-		require.NoError(t, err)
 		return !active
 	}, time.Second, 10*time.Millisecond)
+	require.Error(t, err)
 	require.NoError(t, cli.Close())
 }
 
@@ -68,7 +68,7 @@ func TestPeerActiveFromError(t *testing.T) {
 	}
 	for _, err := range []error{io.EOF, io.ErrClosedPipe, net.ErrClosed} {
 		active, returnedErr := peerActiveFromError(err)
-		require.NoError(t, returnedErr)
+		require.ErrorIs(t, returnedErr, err)
 		require.False(t, active)
 	}
 	unknownErr := errors.New("unknown error")
