@@ -5,7 +5,10 @@ package peeractive
 
 import (
 	"bufio"
+	"errors"
+	"io"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -47,4 +50,13 @@ func TestIsPeerActiveFallback(t *testing.T) {
 		return !IsPeerActive(cli, reader)
 	}, time.Second, 10*time.Millisecond)
 	require.NoError(t, cli.Close())
+}
+
+func TestPeerActiveFromError(t *testing.T) {
+	require.True(t, peerActiveFromError(nil))
+	require.True(t, peerActiveFromError(os.ErrDeadlineExceeded))
+	require.True(t, peerActiveFromError(errors.New("unknown error")))
+	require.False(t, peerActiveFromError(io.EOF))
+	require.False(t, peerActiveFromError(io.ErrClosedPipe))
+	require.False(t, peerActiveFromError(net.ErrClosed))
 }

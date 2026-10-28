@@ -7,6 +7,6 @@ package peeractive
 
 import "net"
 
-func isPeerActiveWithRawConn(net.Conn) (active bool, supported bool) {
+func isPeerActiveWithRawConn(net.Conn) (active bool, determined bool) {
 	return false, false
 }
