@@ -19,6 +19,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type readDeadlineErrorConn struct {
+	net.Conn
+	err error
+}
+
+func (c *readDeadlineErrorConn) SetReadDeadline(time.Time) error {
+	return c.err
+}
+
 func testPipeConn(t *testing.T, a func(*testing.T, *packetIO), b func(*testing.T, *packetIO), loop int) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	testkit.TestPipeConn(t,
@@ -229,6 +238,42 @@ func TestPeerActive(t *testing.T) {
 		},
 		10,
 	)
+}
+
+func TestPeerActiveFallbackDoesNotBreakTLS(t *testing.T) {
+	stls, ctls, err := security.CreateTLSConfigForTest()
+	require.NoError(t, err)
+	probed := make(chan struct{})
+	testPipeConn(t,
+		func(t *testing.T, cli *packetIO) {
+			require.NoError(t, cli.ClientTLSHandshake(ctls))
+			require.True(t, cli.IsPeerActive())
+			close(probed)
+			data, err := cli.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, "123", string(data))
+		},
+		func(t *testing.T, srv *packetIO) {
+			_, err := srv.ServerTLSHandshake(stls)
+			require.NoError(t, err)
+			<-probed
+			require.NoError(t, srv.WritePacket([]byte("123"), true))
+		},
+		1,
+	)
+}
+
+func TestPeerActiveLogsUnknownError(t *testing.T) {
+	cli, srv := net.Pipe()
+	unknownErr := errors.New("unknown peer state")
+	lg, text := logger.CreateLoggerForTest(t)
+	p := NewPacketIO(&readDeadlineErrorConn{Conn: cli, err: unknownErr}, lg, DefaultConnBufferSize)
+
+	require.True(t, p.IsPeerActive())
+	require.Contains(t, text.String(), "failed to determine whether the peer is active")
+	require.Contains(t, text.String(), unknownErr.Error())
+	require.NoError(t, p.Close())
+	require.NoError(t, srv.Close())
 }
 
 func TestKeepAlive(t *testing.T) {
