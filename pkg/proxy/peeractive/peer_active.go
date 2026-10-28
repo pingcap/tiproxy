@@ -5,8 +5,8 @@ package peeractive
 
 import (
 	"errors"
+	"io"
 	"net"
-	"os"
 	"time"
 )
 
@@ -21,21 +21,32 @@ type Peeker interface {
 //
 // It must not be called concurrently with reads or deadline changes on conn.
 func IsPeerActive(conn net.Conn, peeker Peeker) bool {
-	if active, supported := isPeerActiveWithRawConn(conn); supported {
+	if active, determined := isPeerActiveWithRawConn(conn); determined {
 		return active
 	}
 	if peeker == nil {
 		return true
 	}
-	// Use fallback for other platforms.
+	// Fallback when we can't determine the peer state from the raw socket.
 	// It normally costs 1ms, so don't call it too frequently.
 	// It may incorrectly return true if the system is extremely slow.
 	if err := conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
-		return false
+		return peerActiveFromError(err)
 	}
 	_, peekErr := peeker.Peek(1)
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		return peerActiveFromError(err)
+	}
+	return peerActiveFromError(peekErr)
+}
+
+func peerActiveFromError(err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
 		return false
 	}
-	return peekErr == nil || errors.Is(peekErr, os.ErrDeadlineExceeded)
+	// A deadline or an unknown error does not prove that the peer is gone.
+	return true
 }
