@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"time"
 )
 
@@ -49,8 +50,7 @@ func peerActiveFromError(err error) (bool, error) {
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
 		return false, err
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return true, nil
 	}
 	// An unknown error does not prove that the peer is gone.

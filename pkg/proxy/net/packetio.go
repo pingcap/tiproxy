@@ -209,6 +209,9 @@ func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
 	return tls.ConnectionState{}
 }
 
+// IsPeerActive checks if the peer connection is still active.
+// If the backend disconnects, the client should also be disconnected (required by serverless).
+// We have no other way than reading from the connection.
 func (brw *basicReadWriter) IsPeerActive() (bool, error) {
 	return peeractive.IsPeerActive(brw.Conn, brw)
 }

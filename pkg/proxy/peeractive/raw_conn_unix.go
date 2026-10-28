@@ -37,11 +37,11 @@ func isPeerActiveWithRawConn(conn net.Conn) (active bool, determined bool, probe
 			active = true
 		} else {
 			switch recvErr {
-			// n == 0 && recvErr == nil indicates EOF
 			case nil, syscall.ECONNRESET, syscall.ECONNABORTED, syscall.ENOTCONN,
 				syscall.ETIMEDOUT, syscall.EPIPE, syscall.ESHUTDOWN, syscall.ENETRESET,
 				syscall.EBADF:
 				active = false
+				// n == 0 && recvErr == nil indicates EOF
 				if recvErr == nil {
 					probeErr = io.EOF
 				} else {
