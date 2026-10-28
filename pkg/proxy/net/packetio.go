@@ -165,27 +165,8 @@ func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
 // IsPeerActive checks if the peer connection is still active.
 // If the backend disconnects, the client should also be disconnected (required by serverless).
 // We have no other way than reading from the connection.
-<<<<<<< HEAD
-//
-// This function cannot be called concurrently with other functions of packetReadWriter.
-// This function normally costs 1ms, so don't call it too frequently.
-// This function may incorrectly return true if the system is extremely slow.
-func (brw *basicReadWriter) IsPeerActive() bool {
-	if err := brw.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
-		return false
-	}
-	active := true
-	if _, err := brw.Peek(1); err != nil {
-		active = !errors.Is(err, io.EOF)
-	}
-	if err := brw.SetReadDeadline(time.Time{}); err != nil {
-		return false
-	}
-	return active
-=======
 func (brw *basicReadWriter) IsPeerActive() (bool, error) {
 	return peeractive.IsPeerActive(brw.Conn, brw)
->>>>>>> ab18dcba (net: probe backend connection liveness more accurately (#1399))
 }
 
 // ReadFull is used to replace io.ReadFull to erase boundary check, function calls and interface conversion.
