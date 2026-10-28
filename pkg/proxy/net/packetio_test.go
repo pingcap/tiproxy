@@ -5,18 +5,36 @@ package net
 
 import (
 	"encoding/binary"
+	"io"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/security"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
 	"github.com/pingcap/tiproxy/pkg/testkit"
 	"github.com/stretchr/testify/require"
 )
+
+type readDeadlineErrorConn struct {
+	net.Conn
+	err error
+}
+
+func (c *readDeadlineErrorConn) SetReadDeadline(time.Time) error {
+	return c.err
+}
+
+func requirePeerActive(t *testing.T, p *packetIO) {
+	t.Helper()
+	active, err := p.IsPeerActive()
+	require.NoError(t, err)
+	require.True(t, active)
+}
 
 func testPipeConn(t *testing.T, a func(*testing.T, *packetIO), b func(*testing.T, *packetIO), loop int) {
 	lg, _ := logger.CreateLoggerForTest(t)
@@ -177,32 +195,35 @@ func TestPeerActive(t *testing.T) {
 	testTCPConn(t,
 		func(t *testing.T, cli *packetIO) {
 			// It's active at the beginning.
-			require.True(t, cli.IsPeerActive())
+			requirePeerActive(t, cli)
 			ch <- struct{}{} // let srv write packet
 			// ReadPacket still reads the whole data after checking.
 			ch <- struct{}{}
-			require.True(t, cli.IsPeerActive())
+			requirePeerActive(t, cli)
 			data, err := cli.ReadPacket()
 			require.NoError(t, err)
 			require.Equal(t, "123", string(data))
 			// IsPeerActive works after reading data.
-			require.True(t, cli.IsPeerActive())
+			requirePeerActive(t, cli)
 			// IsPeerActive works after writing data.
 			require.NoError(t, cli.WritePacket([]byte("456"), true))
-			require.True(t, cli.IsPeerActive())
+			requirePeerActive(t, cli)
 			// upgrade to TLS and try again
 			require.NoError(t, cli.ClientTLSHandshake(ctls))
-			require.True(t, cli.IsPeerActive())
+			requirePeerActive(t, cli)
 			data, err = cli.ReadPacket()
 			require.NoError(t, err)
 			require.Equal(t, "123", string(data))
-			require.True(t, cli.IsPeerActive())
+			requirePeerActive(t, cli)
 			require.NoError(t, cli.WritePacket([]byte("456"), true))
-			require.True(t, cli.IsPeerActive())
+			requirePeerActive(t, cli)
 			// It's not active after the peer closes.
 			ch <- struct{}{}
 			ch <- struct{}{}
-			require.False(t, cli.IsPeerActive())
+			require.Eventually(t, func() bool {
+				active, err := cli.IsPeerActive()
+				return !active && err != nil
+			}, time.Second, 10*time.Millisecond)
 		},
 		func(t *testing.T, srv *packetIO) {
 			<-ch
@@ -226,6 +247,58 @@ func TestPeerActive(t *testing.T) {
 		},
 		10,
 	)
+}
+
+func TestPeerActiveFallbackDoesNotBreakTLS(t *testing.T) {
+	stls, ctls, err := security.CreateTLSConfigForTest()
+	require.NoError(t, err)
+	probed := make(chan struct{})
+	testPipeConn(t,
+		func(t *testing.T, cli *packetIO) {
+			require.NoError(t, cli.ClientTLSHandshake(ctls))
+			requirePeerActive(t, cli)
+			close(probed)
+			data, err := cli.ReadPacket()
+			require.NoError(t, err)
+			require.Equal(t, "123", string(data))
+		},
+		func(t *testing.T, srv *packetIO) {
+			_, err := srv.ServerTLSHandshake(stls)
+			require.NoError(t, err)
+			<-probed
+			require.NoError(t, srv.WritePacket([]byte("123"), true))
+		},
+		1,
+	)
+}
+
+func TestPeerActiveLogsUnknownError(t *testing.T) {
+	cli, srv := net.Pipe()
+	unknownErr := errors.New("unknown peer state")
+	lg, text := logger.CreateLoggerForTest(t)
+	p := NewPacketIO(&readDeadlineErrorConn{Conn: cli, err: unknownErr}, lg, DefaultConnBufferSize)
+
+	active, err := p.IsPeerActive()
+	require.True(t, active)
+	require.Error(t, err)
+	require.Contains(t, text.String(), "failed to determine whether the peer is active")
+	require.Contains(t, text.String(), unknownErr.Error())
+	require.NoError(t, p.Close())
+	require.NoError(t, srv.Close())
+}
+
+func TestPeerActiveLogsInactiveError(t *testing.T) {
+	cli, srv := net.Pipe()
+	lg, text := logger.CreateLoggerForTest(t)
+	p := NewPacketIO(cli, lg, DefaultConnBufferSize)
+	require.NoError(t, srv.Close())
+	require.Eventually(t, func() bool {
+		active, err := p.IsPeerActive()
+		return !active && err != nil
+	}, time.Second, 10*time.Millisecond)
+	require.Contains(t, text.String(), "peer connection is inactive")
+	require.Contains(t, text.String(), io.ErrClosedPipe.Error())
+	require.NoError(t, p.Close())
 }
 
 func TestKeepAlive(t *testing.T) {
@@ -299,7 +372,7 @@ func TestProxyTLSCompress(t *testing.T) {
 		require.NoError(t, p.WritePacket(data, true))
 		ch <- data
 		require.Greater(t, p.OutBytes(), outBytes)
-		require.True(t, p.IsPeerActive())
+		requirePeerActive(t, p)
 		require.NotEmpty(t, p.RemoteAddr().String())
 	}
 	read := func(p *packetIO) {
@@ -309,7 +382,7 @@ func TestProxyTLSCompress(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, data, pkt)
 		require.Greater(t, p.InBytes(), inBytes)
-		require.True(t, p.IsPeerActive())
+		requirePeerActive(t, p)
 		require.NotEmpty(t, p.RemoteAddr().String())
 	}
 	for _, enableCompress := range []bool{true, false} {

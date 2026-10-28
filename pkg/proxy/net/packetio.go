@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/proxy/keepalive"
+	"github.com/pingcap/tiproxy/pkg/proxy/peeractive"
 	"github.com/pingcap/tiproxy/pkg/proxy/proxyprotocol"
 	"github.com/pingcap/tiproxy/pkg/util/bufio"
 	"go.uber.org/zap"
@@ -78,7 +79,7 @@ type packetReadWriter interface {
 	TLSConnectionState() tls.ConnectionState
 	InBytes() uint64
 	OutBytes() uint64
-	IsPeerActive() bool
+	IsPeerActive() (bool, error)
 	SetSequence(uint8)
 	Sequence() uint8
 	// ResetSequence is called before executing a command.
@@ -164,22 +165,8 @@ func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
 // IsPeerActive checks if the peer connection is still active.
 // If the backend disconnects, the client should also be disconnected (required by serverless).
 // We have no other way than reading from the connection.
-//
-// This function cannot be called concurrently with other functions of packetReadWriter.
-// This function normally costs 1ms, so don't call it too frequently.
-// This function may incorrectly return true if the system is extremely slow.
-func (brw *basicReadWriter) IsPeerActive() bool {
-	if err := brw.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
-		return false
-	}
-	active := true
-	if _, err := brw.Peek(1); err != nil {
-		active = !errors.Is(err, io.EOF)
-	}
-	if err := brw.SetReadDeadline(time.Time{}); err != nil {
-		return false
-	}
-	return active
+func (brw *basicReadWriter) IsPeerActive() (bool, error) {
+	return peeractive.IsPeerActive(brw.Conn, brw)
 }
 
 // ReadFull is used to replace io.ReadFull to erase boundary check, function calls and interface conversion.
@@ -224,7 +211,7 @@ type PacketIO interface {
 	InPackets() uint64
 	OutPackets() uint64
 	Flush() error
-	IsPeerActive() bool
+	IsPeerActive() (bool, error)
 	SetKeepalive(cfg config.KeepAlive) error
 	LastKeepAlive() config.KeepAlive
 	GracefulClose() error
@@ -535,8 +522,16 @@ func (p *packetIO) Flush() error {
 	return nil
 }
 
-func (p *packetIO) IsPeerActive() bool {
-	return p.readWriter.IsPeerActive()
+func (p *packetIO) IsPeerActive() (bool, error) {
+	active, err := p.readWriter.IsPeerActive()
+	if err != nil && p.logger != nil {
+		msg := "failed to determine whether the peer is active"
+		if !active {
+			msg = "peer connection is inactive"
+		}
+		p.logger.Info(msg, zap.Error(err))
+	}
+	return active, err
 }
 
 func (p *packetIO) SetKeepalive(cfg config.KeepAlive) error {
