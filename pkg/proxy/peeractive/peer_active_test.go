@@ -22,11 +22,15 @@ func TestIsPeerActiveAfterReset(t *testing.T) {
 	testkit.TestTCPConn(t,
 		func(t *testing.T, cli net.Conn) {
 			reader := bufio.NewReader(cli)
-			require.True(t, IsPeerActive(cli, reader))
+			active, err := IsPeerActive(cli, reader)
+			require.NoError(t, err)
+			require.True(t, active)
 			close(probed)
 			<-reset
 			require.Eventually(t, func() bool {
-				return !IsPeerActive(cli, reader)
+				active, err = IsPeerActive(cli, reader)
+				require.NoError(t, err)
+				return !active
 			}, time.Second, 10*time.Millisecond)
 		},
 		func(t *testing.T, srv net.Conn) {
@@ -44,19 +48,31 @@ func TestIsPeerActiveAfterReset(t *testing.T) {
 func TestIsPeerActiveFallback(t *testing.T) {
 	cli, srv := net.Pipe()
 	reader := bufio.NewReader(cli)
-	require.True(t, IsPeerActive(cli, reader))
+	active, err := IsPeerActive(cli, reader)
+	require.NoError(t, err)
+	require.True(t, active)
 	require.NoError(t, srv.Close())
 	require.Eventually(t, func() bool {
-		return !IsPeerActive(cli, reader)
+		active, err = IsPeerActive(cli, reader)
+		require.NoError(t, err)
+		return !active
 	}, time.Second, 10*time.Millisecond)
 	require.NoError(t, cli.Close())
 }
 
 func TestPeerActiveFromError(t *testing.T) {
-	require.True(t, peerActiveFromError(nil))
-	require.True(t, peerActiveFromError(os.ErrDeadlineExceeded))
-	require.True(t, peerActiveFromError(errors.New("unknown error")))
-	require.False(t, peerActiveFromError(io.EOF))
-	require.False(t, peerActiveFromError(io.ErrClosedPipe))
-	require.False(t, peerActiveFromError(net.ErrClosed))
+	for _, err := range []error{nil, os.ErrDeadlineExceeded} {
+		active, returnedErr := peerActiveFromError(err)
+		require.NoError(t, returnedErr)
+		require.True(t, active)
+	}
+	for _, err := range []error{io.EOF, io.ErrClosedPipe, net.ErrClosed} {
+		active, returnedErr := peerActiveFromError(err)
+		require.NoError(t, returnedErr)
+		require.False(t, active)
+	}
+	unknownErr := errors.New("unknown error")
+	active, returnedErr := peerActiveFromError(unknownErr)
+	require.True(t, active)
+	require.ErrorIs(t, returnedErr, unknownErr)
 }

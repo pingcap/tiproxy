@@ -14,14 +14,14 @@ import (
 // isPeerActiveWithRawConn checks the socket state without consuming data or
 // changing the connection deadline. MSG_DONTWAIT makes this probe return
 // immediately when the socket has no pending data or error.
-func isPeerActiveWithRawConn(conn net.Conn) (active bool, determined bool) {
+func isPeerActiveWithRawConn(conn net.Conn) (active bool, determined bool, probeErr error) {
 	syscallConn, ok := conn.(syscall.Conn)
 	if !ok {
-		return false, false
+		return false, false, nil
 	}
 	rawConn, err := syscallConn.SyscallConn()
 	if err != nil {
-		return false, false
+		return false, false, nil
 	}
 
 	active = true
@@ -38,15 +38,19 @@ func isPeerActiveWithRawConn(conn net.Conn) (active bool, determined bool) {
 			switch recvErr {
 			// n == 0 && recvErr == nil indicates EOF
 			case nil, syscall.ECONNRESET, syscall.ECONNABORTED, syscall.ENOTCONN,
-				syscall.ETIMEDOUT, syscall.EPIPE, syscall.ESHUTDOWN:
+				syscall.ETIMEDOUT, syscall.EPIPE, syscall.ESHUTDOWN, syscall.ENETRESET,
+				syscall.EBADF:
 				active = false
 			default:
 				active = true
+				if !errors.Is(recvErr, syscall.EAGAIN) && !errors.Is(recvErr, syscall.EWOULDBLOCK) {
+					probeErr = recvErr
+				}
 			}
 		}
 	})
 	if err != nil {
-		return false, errors.Is(err, net.ErrClosed)
+		return false, errors.Is(err, net.ErrClosed), nil
 	}
-	return active, true
+	return active, true, probeErr
 }

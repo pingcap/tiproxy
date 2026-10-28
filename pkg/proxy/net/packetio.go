@@ -84,6 +84,7 @@ type packetReadWriter interface {
 	TLSConnectionState() tls.ConnectionState
 	InBytes() uint64
 	OutBytes() uint64
+	IsPeerActive() (bool, error)
 	SetSequence(uint8)
 	Sequence() uint8
 	// ResetSequence is called before executing a command.
@@ -206,6 +207,10 @@ func (brw *basicReadWriter) Close() error {
 
 func (brw *basicReadWriter) TLSConnectionState() tls.ConnectionState {
 	return tls.ConnectionState{}
+}
+
+func (brw *basicReadWriter) IsPeerActive() (bool, error) {
+	return peeractive.IsPeerActive(brw.Conn, brw)
 }
 
 // ReadFull is used to replace io.ReadFull to erase boundary check, function calls and interface conversion.
@@ -574,7 +579,11 @@ func (p *packetIO) Flush() error {
 }
 
 func (p *packetIO) IsPeerActive() bool {
-	return peeractive.IsPeerActive(p.rawConn, p.readWriter)
+	active, err := p.readWriter.IsPeerActive()
+	if err != nil && p.logger != nil {
+		p.logger.Warn("failed to determine whether the peer is active", zap.Error(err))
+	}
+	return active
 }
 
 func (p *packetIO) SetKeepalive(cfg config.KeepAlive) error {
