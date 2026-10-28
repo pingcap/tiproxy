@@ -16,9 +16,10 @@ type Peeker interface {
 }
 
 // IsPeerActive reports whether the connection has no definitive peer-close
-// event. An error means that the probe could not determine the state, in which
-// case active remains true. The raw socket probe is used when the platform
-// supports it; otherwise the function falls back to a bounded buffered peek.
+// event. When active is false, err is the peer-close error. When the probe
+// cannot determine the state, active remains true and err is set. The raw
+// socket probe is used when the platform supports it; otherwise the function
+// falls back to a bounded buffered peek.
 //
 // It must not be called concurrently with reads or deadline changes on conn.
 func IsPeerActive(conn net.Conn, peeker Peeker) (bool, error) {
@@ -46,7 +47,7 @@ func peerActiveFromError(err error) (bool, error) {
 		return true, nil
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) {
-		return false, nil
+		return false, err
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {

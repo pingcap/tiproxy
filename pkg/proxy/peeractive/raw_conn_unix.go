@@ -7,6 +7,7 @@ package peeractive
 
 import (
 	"errors"
+	"io"
 	"net"
 	"syscall"
 )
@@ -41,6 +42,11 @@ func isPeerActiveWithRawConn(conn net.Conn) (active bool, determined bool, probe
 				syscall.ETIMEDOUT, syscall.EPIPE, syscall.ESHUTDOWN, syscall.ENETRESET,
 				syscall.EBADF:
 				active = false
+				if recvErr == nil {
+					probeErr = io.EOF
+				} else {
+					probeErr = recvErr
+				}
 			default:
 				active = true
 				if !errors.Is(recvErr, syscall.EAGAIN) && !errors.Is(recvErr, syscall.EWOULDBLOCK) {
@@ -50,7 +56,10 @@ func isPeerActiveWithRawConn(conn net.Conn) (active bool, determined bool, probe
 		}
 	})
 	if err != nil {
-		return false, errors.Is(err, net.ErrClosed), nil
+		if errors.Is(err, net.ErrClosed) {
+			return false, true, err
+		}
+		return false, false, nil
 	}
 	return active, true, probeErr
 }
