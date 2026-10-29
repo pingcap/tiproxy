@@ -220,10 +220,10 @@ func (ts *backendMgrTester) redirectSucceed4Backend(packetIO pnet.PacketIO) erro
 }
 
 func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ pnet.PacketIO) error {
-	backend1 := ts.mp.backendIO.Load()
+	backend1 := ts.mp.loadBackendIO()
 	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
-	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
+	require.NotEqual(ts.t, backend1, ts.mp.loadBackendIO())
 	require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
 	return nil
 }
@@ -259,31 +259,31 @@ func (ts *backendMgrTester) startTxn4Backend(packetIO pnet.PacketIO) error {
 func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO pnet.PacketIO) error {
 	redirInfo := ts.mp.redirectInfo.Load()
 	require.Nil(ts.t, redirInfo)
-	backend1 := ts.mp.backendIO.Load()
+	backend1 := ts.mp.loadBackendIO()
 	// There is no other way to verify it's not redirected.
 	// The buffer size of channel signalReceived is 0, so after the second redirect signal is sent,
 	// we can ensure that the first signal is already processed.
 	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.signalReceived <- signalTypeRedirect
 	// The backend connection is still the same.
-	require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
+	require.Equal(ts.t, backend1, ts.mp.loadBackendIO())
 	return nil
 }
 
 func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO pnet.PacketIO) error {
-	backend1 := ts.mp.backendIO.Load()
+	backend1 := ts.mp.loadBackendIO()
 	err := ts.forwardCmd4Proxy(clientIO, backendIO)
 	require.NoError(ts.t, err)
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
-	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
+	require.NotEqual(ts.t, backend1, ts.mp.loadBackendIO())
 	return nil
 }
 
 func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO pnet.PacketIO) error {
-	backend1 := ts.mp.backendIO.Load()
+	backend1 := ts.mp.loadBackendIO()
 	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
-	require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
+	require.Equal(ts.t, backend1, ts.mp.loadBackendIO())
 	return nil
 }
 
@@ -314,24 +314,27 @@ func TestBCCheck(t *testing.T) {
 		{
 			original: &BCConfig{},
 			final: &BCConfig{
-				TickerInterval:       TickerInterval,
-				CheckBackendInterval: CheckBackendInterval,
-				DialTimeout:          DialTimeout,
-				ConnectTimeout:       ConnectTimeout,
+				TickerInterval:                TickerInterval,
+				CheckBackendInterval:          CheckBackendInterval,
+				UnhealthyCheckBackendInterval: UnhealthyCheckBackendInterval,
+				DialTimeout:                   DialTimeout,
+				ConnectTimeout:                ConnectTimeout,
 			},
 		},
 		{
 			original: &BCConfig{
-				TickerInterval:       10 * time.Second,
-				CheckBackendInterval: 10 * time.Second,
-				DialTimeout:          10 * time.Second,
-				ConnectTimeout:       10 * time.Second,
+				TickerInterval:                10 * time.Second,
+				CheckBackendInterval:          10 * time.Second,
+				UnhealthyCheckBackendInterval: 10 * time.Second,
+				DialTimeout:                   10 * time.Second,
+				ConnectTimeout:                10 * time.Second,
 			},
 			final: &BCConfig{
-				TickerInterval:       10 * time.Second,
-				CheckBackendInterval: 10 * time.Second,
-				DialTimeout:          10 * time.Second,
-				ConnectTimeout:       10 * time.Second,
+				TickerInterval:                10 * time.Second,
+				CheckBackendInterval:          10 * time.Second,
+				UnhealthyCheckBackendInterval: 10 * time.Second,
+				DialTimeout:                   10 * time.Second,
+				ConnectTimeout:                10 * time.Second,
 			},
 		},
 	}
@@ -480,11 +483,11 @@ func TestRedirectInTxn(t *testing.T) {
 				return ts.mc.request(packetIO)
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				backend1 := ts.mp.backendIO.Load()
+				backend1 := ts.mp.loadBackendIO()
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(t, err)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventFail)
-				require.Equal(t, backend1, ts.mp.backendIO.Load())
+				require.Equal(t, backend1, ts.mp.loadBackendIO())
 				require.Equal(t, SrcNone, ts.mp.QuitSource())
 				return nil
 			},
@@ -937,7 +940,7 @@ func TestPingDuringShutdown(t *testing.T) {
 				return nil
 			},
 			proxy: func(_, _ pnet.PacketIO) error {
-				backendIO := *ts.mp.backendIO.Load()
+				backendIO := ts.mp.loadBackendIO()
 				backendOutBytes := backendIO.OutBytes()
 				ts.mp.clientIO.ResetSequence()
 				cmd, err := ts.mp.ExecuteCmd(context.Background())
@@ -1351,21 +1354,21 @@ func TestKeepAlive(t *testing.T) {
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.NoError(t, ts.firstHandshake4Proxy(clientIO, backendIO))
-				require.Equal(t, time.Minute, (*ts.mp.backendIO.Load()).LastKeepAlive().Idle)
+				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
 				return nil
 			},
 			backend: ts.handshake4Backend,
 		},
 		{
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				require.Equal(t, time.Minute, (*ts.mp.backendIO.Load()).LastKeepAlive().Idle)
+				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
 				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(false)
 				require.Eventually(t, func() bool {
-					return (*ts.mp.backendIO.Load()).LastKeepAlive().Idle == time.Second
+					return ts.mp.loadBackendIO().LastKeepAlive().Idle == time.Second
 				}, 3*time.Second, 10*time.Millisecond)
 				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(true)
 				require.Eventually(t, func() bool {
-					return (*ts.mp.backendIO.Load()).LastKeepAlive().Idle == time.Minute
+					return ts.mp.loadBackendIO().LastKeepAlive().Idle == time.Minute
 				}, 3*time.Second, 10*time.Millisecond)
 				return nil
 			},
@@ -1482,11 +1485,11 @@ func TestBackendStatusChange(t *testing.T) {
 		{
 			client: ts.mc.request,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				backend1 := ts.mp.backendIO.Load()
+				backend1 := ts.mp.loadBackendIO()
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(ts.t, err)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
-				require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
+				require.Equal(ts.t, backend1, ts.mp.loadBackendIO())
 				require.Eventually(ts.t, func() bool {
 					return strings.Contains(ts.mp.text.String(), ErrTargetUnhealthy.Error())
 				}, time.Second, 10*time.Millisecond)
