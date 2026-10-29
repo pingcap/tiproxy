@@ -1358,10 +1358,10 @@ func TestKeepAlive(t *testing.T) {
 		{
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
-				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(false)
+				ts.mp.backendSnap.Load().backend.(*router.StaticBackend).SetHealthy(false)
 				ts.mp.CheckBackend()
 				require.Equal(t, time.Second, ts.mp.loadBackendIO().LastKeepAlive().Idle)
-				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(true)
+				ts.mp.backendSnap.Load().backend.(*router.StaticBackend).SetHealthy(true)
 				ts.mp.CheckBackend()
 				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
 				return nil
@@ -1656,7 +1656,7 @@ func TestTrafficMetrics(t *testing.T) {
 				return ts.mc.request(packetIO)
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				ts.mp.curBackend.(*router.StaticBackend).SetKeyspace("key1")
+				ts.mp.backendSnap.Load().backend.(*router.StaticBackend).SetKeyspace("key1")
 				addr := ts.tc.backendListener.Addr().String()
 				var err error
 				inBytes, inPackets, outBytes, outPackets, err = readTraffic(addr)

@@ -153,7 +153,6 @@ type BackendConnManager struct {
 	eventReceiver  atomic.Pointer[router.ConnEventReceiver]
 	config         *BCConfig
 	logger         *zap.Logger
-	curBackend     router.BackendInst
 	// Redirect() sets it without lock. It will be set to nil after migration.
 	redirectInfo atomic.Pointer[router.BackendInst]
 	// redirectResCh is used to notify the event receiver asynchronously.
@@ -254,7 +253,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 	if mgr.config.FromPublicEndpoints != nil {
 		mgr.fromPublicEndpoint = mgr.config.FromPublicEndpoints(clientIO.ProxyAddr())
 	}
-	mgr.updateTraffic(mgr.loadBackendIO())
+	snap := mgr.backendSnap.Load()
+	mgr.updateTraffic(snap.io, snap.backend)
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
@@ -291,12 +291,13 @@ func (mgr *BackendConnManager) newExponentialBackOff() *backoff.ExponentialBackO
 // It is called at the beginning of getBackendIO before routing to another backend.
 func (mgr *BackendConnManager) abandonRoutedBackend() {
 	receiver := mgr.getEventReceiver()
-	if receiver == nil || mgr.curBackend == nil {
+	snap := mgr.backendSnap.Load()
+	if receiver == nil || snap == nil || snap.backend == nil {
 		return
 	}
-	if err := receiver.OnConnClosed(mgr.curBackend.ID(), mgr); err != nil {
-		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_id", mgr.curBackend.ID()),
-			zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
+	if err := receiver.OnConnClosed(snap.backend.ID(), mgr); err != nil {
+		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_id", snap.backend.ID()),
+			zap.String("backend_addr", snap.backend.Addr()), zap.NamedError("notify_err", err))
 	}
 	// Clear the receiver so that Close() won't clean up again.
 	mgr.eventReceiver.Store(nil)
@@ -477,7 +478,8 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
-	backendIO := mgr.loadBackendIO()
+	snap := mgr.backendSnap.Load()
+	backendIO := snap.io
 	if cmd == pnet.ComStmtPrepare {
 		mgr.cmdProcessor.prepareEndHook = func(id uint32) {
 			stmtID = id
@@ -486,7 +488,7 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect, streamingForward)
 	if !holdRequest {
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
-		mgr.updateTraffic(backendIO)
+		mgr.updateTraffic(backendIO, snap.backend)
 	}
 	if err != nil {
 		if !pnet.IsMySQLError(err) {
@@ -528,10 +530,11 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	}
 	// Execute the held request no matter redirection succeeds or not.
 	if holdRequest && mgr.closeStatus.Load() < statusNotifyClose {
-		backendIO = mgr.loadBackendIO()
+		snap = mgr.backendSnap.Load()
+		backendIO = snap.io
 		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false, streamingForward)
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
-		mgr.updateTraffic(backendIO)
+		mgr.updateTraffic(backendIO, snap.backend)
 	}
 	return
 }
@@ -546,16 +549,16 @@ func (mgr *BackendConnManager) writeShutdownErr() error {
 	return myErr
 }
 
-func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO) {
+func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO, backend router.BackendInst) {
 	inBytes, inPackets, outBytes, outPackets := backendIO.InBytes(), backendIO.InPackets(), backendIO.OutBytes(), backendIO.OutPackets()
-	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets, mgr.curBackend.Local())
+	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets, backend.Local())
 	// Update metering.
-	if mgr.meter != nil && !reflect.ValueOf(mgr.meter).IsNil() && mgr.curBackend != nil {
+	if mgr.meter != nil && !reflect.ValueOf(mgr.meter).IsNil() {
 		// The keyspace of one connection should not change.
-		keyspace := mgr.curBackend.Keyspace()
+		keyspace := backend.Keyspace()
 		if len(keyspace) > 0 {
 			crossAZBytes := int64(0)
-			if !mgr.curBackend.Local() {
+			if !backend.Local() {
 				crossAZBytes = int64(outBytes - mgr.outBytes + inBytes - mgr.inBytes)
 			}
 			mgr.meter.IncTraffic(keyspace, int64(inBytes-mgr.inBytes), crossAZBytes, mgr.fromPublicEndpoint)
@@ -656,8 +659,9 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		return
 	}
 
+	snap := mgr.backendSnap.Load()
 	rs := &redirectResult{
-		from: mgr.curBackend.ID(),
+		from: snap.backend.ID(),
 		to:   (*backendInst).ID(),
 	}
 	defer func() {
@@ -678,7 +682,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		rs.err = ErrTargetUnhealthy
 		return
 	}
-	backendIO := mgr.loadBackendIO()
+	backendIO := snap.io
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
 		// If the backend connection is closed, also close the client connection.
@@ -726,9 +730,9 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		}
 		return
 	}
-	mgr.updateTraffic(backendIO)
+	mgr.updateTraffic(backendIO, snap.backend)
 	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = 0, 0, 0, 0
-	mgr.updateTraffic(newBackendIO)
+	mgr.updateTraffic(newBackendIO, *backendInst)
 	if ignoredErr := backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
@@ -841,23 +845,24 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	if mgr.closeStatus.Load() >= statusNotifyClose {
 		return
 	}
+	snap := mgr.backendSnap.Load()
+	if snap == nil || snap.backend == nil || snap.io == nil {
+		return
+	}
 	now := time.Now()
 	interval := mgr.config.CheckBackendInterval
-	if mgr.curBackend != nil && !mgr.curBackend.Healthy() {
+	if !snap.backend.Healthy() {
 		interval = mgr.config.UnhealthyCheckBackendInterval
 	}
 	if mgr.lastActiveTime.Add(interval).After(now) {
 		return
 	}
-	backendIO := mgr.loadBackendIO()
-	if backendIO == nil {
-		return
-	}
+	backendIO := snap.io
 	active, err := backendIO.IsPeerActive()
 	if !active {
 		mgr.logger.Info("backend connection is closed, close client connection",
 			zap.Stringer("backend_addr", backendIO.RemoteAddr()),
-			zap.Bool("backend_healthy", mgr.curBackend.Healthy()),
+			zap.Bool("backend_healthy", snap.backend.Healthy()),
 			zap.Error(err))
 		mgr.quitSource = SrcBackendNetwork
 		if err := mgr.clientIO.GracefulClose(); err != nil {
@@ -966,10 +971,10 @@ func (mgr *BackendConnManager) Close() error {
 		default:
 		}
 		// The connection may have just received the redirecting signal.
-		if mgr.curBackend != nil {
-			if err := eventReceiver.OnConnClosed(mgr.curBackend.ID(), mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_id", mgr.curBackend.ID()),
-					zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
+		if snap != nil && snap.backend != nil {
+			if err := eventReceiver.OnConnClosed(snap.backend.ID(), mgr); err != nil {
+				mgr.logger.Error("close connection error", zap.String("backend_id", snap.backend.ID()),
+					zap.String("backend_addr", snap.backend.Addr()), zap.NamedError("notify_err", err))
 			}
 		}
 	}
@@ -990,7 +995,6 @@ func (mgr *BackendConnManager) Close() error {
 // publishBackend replaces the current connection and backend together.
 // NOTE: processLock should be held before calling this function.
 func (mgr *BackendConnManager) publishBackend(io pnet.PacketIO, backend router.BackendInst) {
-	mgr.curBackend = backend
 	mgr.backendSnap.Store(&backendSnap{io: io, backend: backend})
 }
 
