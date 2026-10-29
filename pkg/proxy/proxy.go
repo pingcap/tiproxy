@@ -150,6 +150,10 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 	ctx, s.cancelFunc = context.WithCancel(context.Background())
 
 	s.wg.RunWithRecover(func() {
+		s.monitorBackendConnections(ctx)
+	}, nil, s.logger)
+
+	s.wg.RunWithRecover(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -186,6 +190,30 @@ func (s *SQLServer) Run(ctx context.Context, cfgch <-chan *config.Config) {
 				}
 			}
 		}, s.logger)
+	}
+}
+
+func (s *SQLServer) monitorBackendConnections(ctx context.Context) {
+	ticker := time.NewTicker(backend.TickerInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.mu.RLock()
+			clients := make([]*client.ClientConnection, 0, len(s.mu.clients))
+			for _, conn := range s.mu.clients {
+				clients = append(clients, conn)
+			}
+			s.mu.RUnlock()
+
+			// Do not hold the server lock while touching sockets. Closing a connection
+			// may concurrently remove it from s.mu.clients.
+			for _, conn := range clients {
+				conn.CheckBackend()
+			}
+		}
 	}
 }
 

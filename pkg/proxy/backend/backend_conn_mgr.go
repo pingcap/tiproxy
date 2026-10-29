@@ -47,7 +47,7 @@ const (
 	CheckBackendInterval = time.Minute
 	// UnhealthyCheckBackendInterval is the peer-check interval while the backend is unhealthy.
 	UnhealthyCheckBackendInterval = 10 * time.Second
-	// TickerInterval is the interval for checking backend status.
+	// TickerInterval is the interval for applying backend health policy and checking backend connections.
 	TickerInterval = 5 * time.Second
 	// streamingForwardThreshold is the threshold for streaming forward.
 	streamingForwardThreshold = pnet.MaxPayloadLen
@@ -98,7 +98,6 @@ type BCConfig struct {
 	DialContext         func(ctx context.Context, backend router.BackendInst, addr string) (net.Conn, error)
 	// ShuttingDown reports whether TiProxy is in graceful shutdown. It may be nil, e.g. for replaying traffic.
 	ShuttingDown                  func() bool
-	TickerInterval                time.Duration
 	CheckBackendInterval          time.Duration
 	UnhealthyCheckBackendInterval time.Duration
 	DialTimeout                   time.Duration
@@ -109,9 +108,6 @@ type BCConfig struct {
 }
 
 func (cfg *BCConfig) check() {
-	if cfg.TickerInterval == time.Duration(0) {
-		cfg.TickerInterval = TickerInterval
-	}
 	if cfg.CheckBackendInterval == time.Duration(0) {
 		cfg.CheckBackendInterval = CheckBackendInterval
 	}
@@ -131,7 +127,7 @@ type Meter interface {
 }
 
 // backendSnap is the current backend connection and the backend it belongs to.
-// Writers replace the whole value while holding processLock. The signal goroutine loads it without the lock.
+// Writers replace the whole value while holding processLock. The shared backend monitor may load it without the lock.
 type backendSnap struct {
 	io      pnet.PacketIO
 	backend router.BackendInst
@@ -363,7 +359,7 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			// And `RemoteAddr()` will return IP addr
 			backendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize, pnet.WithRemoteAddr(addr, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn)))
 			mgr.publishBackend(backendIO, backend)
-			mgr.setKeepAlive()
+			mgr.applyHealthPolicy()
 			return backendIO, nil
 		},
 		backoff.WithContext(mgr.newExponentialBackOff(), bctx),
@@ -625,52 +621,25 @@ func (mgr *BackendConnManager) initForCapture() (string, error) {
 // processSignals runs in a goroutine to:
 // - Receive redirection signals and then try to migrate the session.
 // - Send redirection results to the event receiver.
-// - Apply backend health policy and check whether the backend is still alive.
 func (mgr *BackendConnManager) processSignals(ctx context.Context) {
-	checkBackendTicker := time.NewTicker(mgr.config.TickerInterval)
-	defer checkBackendTicker.Stop()
-	// Signals stay pending while ExecuteCmd holds processLock, so this loop can keep
-	// applying keepalive instead of waiting out a stuck command.
-	var pendingRedirect, pendingGraceful bool
 	for {
 		select {
 		case s := <-mgr.signalReceived:
-			switch s {
-			case signalTypeGracefulClose:
-				pendingGraceful = true
-			case signalTypeRedirect:
-				pendingRedirect = true
-			}
-			mgr.handlePendingSignals(ctx, &pendingRedirect, &pendingGraceful)
+			func() {
+				mgr.processLock.Lock()
+				defer mgr.processLock.Unlock()
+				switch s {
+				case signalTypeGracefulClose:
+					mgr.tryGracefulClose(ctx)
+				case signalTypeRedirect:
+					mgr.tryRedirect(ctx)
+				}
+			}()
 		case rs := <-mgr.redirectResCh:
 			mgr.notifyRedirectResult(ctx, rs)
-		case <-checkBackendTicker.C:
-			mgr.applyHealthPolicy()
-			mgr.checkBackendActive()
-			mgr.handlePendingSignals(ctx, &pendingRedirect, &pendingGraceful)
 		case <-ctx.Done():
 			return
 		}
-	}
-}
-
-// handlePendingSignals runs a deferred redirect or graceful close when processLock is free.
-// A failed try leaves the flag set for a later ticker.
-func (mgr *BackendConnManager) handlePendingSignals(ctx context.Context, pendingRedirect, pendingGraceful *bool) {
-	if !*pendingRedirect && !*pendingGraceful {
-		return
-	}
-	if !mgr.processLock.TryLock() {
-		return
-	}
-	defer mgr.processLock.Unlock()
-	if *pendingGraceful {
-		*pendingGraceful = false
-		mgr.tryGracefulClose(ctx)
-	}
-	if *pendingRedirect {
-		*pendingRedirect = false
-		mgr.tryRedirect(ctx)
 	}
 }
 
@@ -764,7 +733,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
 	mgr.publishBackend(newBackendIO, *backendInst)
-	mgr.setKeepAlive()
+	mgr.applyHealthPolicy()
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 }
 
@@ -900,6 +869,13 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	}
 }
 
+// CheckBackend applies the current health policy and probes an idle backend connection when due.
+// It never waits for SQL execution or migration to release processLock.
+func (mgr *BackendConnManager) CheckBackend() {
+	mgr.applyHealthPolicy()
+	mgr.checkBackendActive()
+}
+
 func (mgr *BackendConnManager) ClientAddr() string {
 	if mgr.clientIO == nil {
 		return ""
@@ -1024,30 +1000,6 @@ func (mgr *BackendConnManager) loadBackendIO() pnet.PacketIO {
 		return nil
 	}
 	return snap.io
-}
-
-// setKeepAlive sets keepalive on the backend connection based on the health status.
-// NOTE: processLock should be held before calling this function.
-func (mgr *BackendConnManager) setKeepAlive() {
-	if mgr.closeStatus.Load() >= statusClosing {
-		return
-	}
-	snap := mgr.backendSnap.Load()
-	if snap == nil || snap.io == nil || snap.backend == nil {
-		return
-	}
-
-	// The request to the unhealthy backend may block, instead of fail immediately.
-	// So we set a shorter keep alive timeout for the unhealthy backends.
-	cfg := mgr.config.HealthyKeepAlive
-	curHealthy := snap.backend.Healthy()
-	if !curHealthy {
-		cfg = mgr.config.UnhealthyKeepAlive
-	}
-	if err := snap.io.SetKeepalive(cfg); err != nil {
-		mgr.logger.Warn("failed to set keepalive", zap.Stringer("backend_addr", snap.io.RemoteAddr()),
-			zap.Bool("backend_healthy", curHealthy), zap.Error(err))
-	}
 }
 
 // applyHealthPolicy applies keepalive from the published snapshot.

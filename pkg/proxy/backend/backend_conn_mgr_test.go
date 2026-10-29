@@ -289,6 +289,7 @@ func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO pnet.PacketIO
 
 func (ts *backendMgrTester) checkConnClosed4Proxy(_, _ pnet.PacketIO) error {
 	require.Eventually(ts.t, func() bool {
+		ts.mp.CheckBackend()
 		switch ts.mp.closeStatus.Load() {
 		case statusClosing, statusClosed:
 			return true
@@ -314,7 +315,6 @@ func TestBCCheck(t *testing.T) {
 		{
 			original: &BCConfig{},
 			final: &BCConfig{
-				TickerInterval:                TickerInterval,
 				CheckBackendInterval:          CheckBackendInterval,
 				UnhealthyCheckBackendInterval: UnhealthyCheckBackendInterval,
 				DialTimeout:                   DialTimeout,
@@ -323,14 +323,12 @@ func TestBCCheck(t *testing.T) {
 		},
 		{
 			original: &BCConfig{
-				TickerInterval:                10 * time.Second,
 				CheckBackendInterval:          10 * time.Second,
 				UnhealthyCheckBackendInterval: 10 * time.Second,
 				DialTimeout:                   10 * time.Second,
 				ConnectTimeout:                10 * time.Second,
 			},
 			final: &BCConfig{
-				TickerInterval:                10 * time.Second,
 				CheckBackendInterval:          10 * time.Second,
 				UnhealthyCheckBackendInterval: 10 * time.Second,
 				DialTimeout:                   10 * time.Second,
@@ -1260,7 +1258,6 @@ func TestGetBackendIOUsesBackendDialContext(t *testing.T) {
 
 func TestBackendInactive(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.bcConfig.TickerInterval = time.Millisecond
 		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
 	})
 	runners := []runner{
@@ -1345,7 +1342,6 @@ func TestBackendInactive(t *testing.T) {
 
 func TestKeepAlive(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.bcConfig.TickerInterval = time.Millisecond
 		config.proxyConfig.bcConfig.HealthyKeepAlive.Idle = time.Minute
 		config.proxyConfig.bcConfig.UnhealthyKeepAlive.Idle = time.Second
 	})
@@ -1363,13 +1359,11 @@ func TestKeepAlive(t *testing.T) {
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
 				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(false)
-				require.Eventually(t, func() bool {
-					return ts.mp.loadBackendIO().LastKeepAlive().Idle == time.Second
-				}, 3*time.Second, 10*time.Millisecond)
+				ts.mp.CheckBackend()
+				require.Equal(t, time.Second, ts.mp.loadBackendIO().LastKeepAlive().Idle)
 				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(true)
-				require.Eventually(t, func() bool {
-					return ts.mp.loadBackendIO().LastKeepAlive().Idle == time.Minute
-				}, 3*time.Second, 10*time.Millisecond)
+				ts.mp.CheckBackend()
+				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
 				return nil
 			},
 		},
