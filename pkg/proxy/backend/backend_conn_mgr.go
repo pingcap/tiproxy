@@ -45,7 +45,9 @@ const (
 	ConnectTimeout = 15 * time.Second
 	// CheckBackendInterval is the interval for checking if the backend is still connected.
 	CheckBackendInterval = time.Minute
-	// TickerInterval is the interval for checking backend status.
+	// UnhealthyCheckBackendInterval is the peer-check interval while the backend is unhealthy.
+	UnhealthyCheckBackendInterval = 10 * time.Second
+	// TickerInterval is the interval for applying backend health policy and checking backend connections.
 	TickerInterval = 5 * time.Second
 	// streamingForwardThreshold is the threshold for streaming forward.
 	streamingForwardThreshold = pnet.MaxPayloadLen
@@ -93,25 +95,32 @@ type BCConfig struct {
 	HealthyKeepAlive   config.KeepAlive
 	UnhealthyKeepAlive config.KeepAlive
 	// ShuttingDown reports whether TiProxy is in graceful shutdown. It may be nil, e.g. for replaying traffic.
-	ShuttingDown         func() bool
-	TickerInterval       time.Duration
-	CheckBackendInterval time.Duration
-	ConnectTimeout       time.Duration
-	ConnBufferSize       int
-	ProxyProtocol        bool
-	RequireBackendTLS    bool
+	ShuttingDown                  func() bool
+	CheckBackendInterval          time.Duration
+	UnhealthyCheckBackendInterval time.Duration
+	ConnectTimeout                time.Duration
+	ConnBufferSize                int
+	ProxyProtocol                 bool
+	RequireBackendTLS             bool
 }
 
 func (cfg *BCConfig) check() {
-	if cfg.TickerInterval == time.Duration(0) {
-		cfg.TickerInterval = TickerInterval
-	}
 	if cfg.CheckBackendInterval == time.Duration(0) {
 		cfg.CheckBackendInterval = CheckBackendInterval
+	}
+	if cfg.UnhealthyCheckBackendInterval == time.Duration(0) {
+		cfg.UnhealthyCheckBackendInterval = UnhealthyCheckBackendInterval
 	}
 	if cfg.ConnectTimeout == time.Duration(0) {
 		cfg.ConnectTimeout = ConnectTimeout
 	}
+}
+
+// backendSnap is the current backend connection and the backend it belongs to.
+// Writers replace the whole value while holding processLock. The shared backend monitor may load it without the lock.
+type backendSnap struct {
+	io      pnet.PacketIO
+	backend router.BackendInst
 }
 
 // BackendConnManager migrates a session from one BackendConnection to another.
@@ -134,7 +143,6 @@ type BackendConnManager struct {
 	eventReceiver  atomic.Pointer[router.ConnEventReceiver]
 	config         *BCConfig
 	logger         *zap.Logger
-	curBackend     router.BackendInst
 	// Redirect() sets it without lock. It will be set to nil after migration.
 	redirectInfo atomic.Pointer[router.BackendInst]
 	// redirectResCh is used to notify the event receiver asynchronously.
@@ -150,8 +158,8 @@ type BackendConnManager struct {
 	// cancelFunc is used to cancel the signal processing goroutine.
 	cancelFunc context.CancelFunc
 	clientIO   pnet.PacketIO
-	// backendIO may be written during redirection and be read in ExecuteCmd/Redirect/setKeepalive.
-	backendIO        atomic.Pointer[pnet.PacketIO]
+	// backendSnap is the current backend connection paired with its backend.
+	backendSnap      atomic.Pointer[backendSnap]
 	backendTLS       *tls.Config
 	handshakeHandler HandshakeHandler
 	ctxmap           struct {
@@ -159,7 +167,7 @@ type BackendConnManager struct {
 		m map[any]any
 	}
 	connectionID uint64
-	quitSource   ErrorSource
+	quitSource   atomic.Int32 // ForceClose writes this without processLock.
 	cpt          capture.Capture
 }
 
@@ -176,7 +184,6 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		// There are 2 types of signals, which may be sent concurrently.
 		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),
-		quitSource:     SrcNone,
 		cpt:            cpt,
 	}
 	mgr.ctxmap.m = make(map[any]any)
@@ -199,7 +206,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 	mgr.clientIO = clientIO
 
 	if mgr.closeStatus.Load() >= statusNotifyClose {
-		mgr.quitSource = SrcProxyQuit
+		mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcProxyQuit))
 		return errors.New("graceful shutdown before connecting")
 	}
 	startTime := time.Now()
@@ -221,13 +228,14 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 				mgr.logger.Warn("writing error to client failed", zap.NamedError("mysql_err", clientErr), zap.NamedError("write_err", writeErr))
 			}
 		}
-		mgr.quitSource = src
+		mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(src))
 		return err
 	}
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 	endTime := time.Now()
 	addHandshakeMetrics(mgr.ServerAddr(), endTime.Sub(startTime))
-	mgr.updateTraffic(*mgr.backendIO.Load())
+	snap := mgr.backendSnap.Load()
+	mgr.updateTraffic(snap.io, snap.backend)
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
@@ -266,11 +274,12 @@ func (mgr *BackendConnManager) newExponentialBackOff() *backoff.ExponentialBackO
 // It is called at the beginning of getBackendIO before routing to another backend.
 func (mgr *BackendConnManager) abandonRoutedBackend() {
 	receiver := mgr.getEventReceiver()
-	if receiver == nil || mgr.curBackend == nil {
+	snap := mgr.backendSnap.Load()
+	if receiver == nil || snap == nil || snap.backend == nil {
 		return
 	}
-	if err := receiver.OnConnClosed(mgr.curBackend.Addr(), mgr); err != nil {
-		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
+	if err := receiver.OnConnClosed(snap.backend.Addr(), mgr); err != nil {
+		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_addr", snap.backend.Addr()), zap.NamedError("notify_err", err))
 	}
 	// Clear the receiver so that Close() won't clean up again.
 	mgr.eventReceiver.Store(nil)
@@ -315,9 +324,8 @@ func (mgr *BackendConnManager) getBackendIO(ctx context.Context, cctx ConnContex
 			// Usually certs are signed with domain instead of IP addrs
 			// And `RemoteAddr()` will return IP addr
 			backendIO := pnet.PacketIO(pnet.NewPacketIO(cn, mgr.logger, mgr.config.ConnBufferSize, pnet.WithRemoteAddr(addr, cn.RemoteAddr()), pnet.WithWrapError(ErrBackendConn)))
-			mgr.backendIO.Store(&backendIO)
-			mgr.curBackend = backend
-			mgr.setKeepAlive()
+			mgr.publishBackend(backendIO, backend)
+			mgr.applyHealthPolicy()
 			return backendIO, nil
 		},
 		backoff.WithContext(mgr.newExponentialBackOff(), bctx),
@@ -414,11 +422,12 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
-	backendIO := *mgr.backendIO.Load()
+	snap := mgr.backendSnap.Load()
+	backendIO := snap.io
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect, streamingForward)
 	if !holdRequest {
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
-		mgr.updateTraffic(backendIO)
+		mgr.updateTraffic(backendIO, snap.backend)
 	}
 	if err != nil {
 		if !pnet.IsMySQLError(err) {
@@ -460,10 +469,11 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	}
 	// Execute the held request no matter redirection succeeds or not.
 	if holdRequest && mgr.closeStatus.Load() < statusNotifyClose {
-		backendIO = *mgr.backendIO.Load()
+		snap = mgr.backendSnap.Load()
+		backendIO = snap.io
 		_, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, false, streamingForward)
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
-		mgr.updateTraffic(backendIO)
+		mgr.updateTraffic(backendIO, snap.backend)
 	}
 	return
 }
@@ -478,9 +488,9 @@ func (mgr *BackendConnManager) writeShutdownErr() error {
 	return myErr
 }
 
-func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO) {
+func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO, backend router.BackendInst) {
 	inBytes, inPackets, outBytes, outPackets := backendIO.InBytes(), backendIO.InPackets(), backendIO.OutBytes(), backendIO.OutPackets()
-	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets, mgr.curBackend.Local())
+	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets, backend.Local())
 	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = inBytes, inPackets, outBytes, outPackets
 }
 
@@ -529,7 +539,7 @@ func (mgr *BackendConnManager) initForCapture() (string, error) {
 	if !mgr.cmdProcessor.finishedTxn() {
 		return "", ErrInTxn
 	}
-	sessionStates, _, err := mgr.querySessionStates(*mgr.backendIO.Load())
+	sessionStates, _, err := mgr.querySessionStates(mgr.loadBackendIO())
 	if err != nil {
 		return "", err
 	}
@@ -541,14 +551,11 @@ func (mgr *BackendConnManager) initForCapture() (string, error) {
 // processSignals runs in a goroutine to:
 // - Receive redirection signals and then try to migrate the session.
 // - Send redirection results to the event receiver.
-// - Check if the backend is still alive.
 func (mgr *BackendConnManager) processSignals(ctx context.Context) {
-	checkBackendTicker := time.NewTicker(mgr.config.TickerInterval)
 	for {
 		select {
 		case s := <-mgr.signalReceived:
 			func() {
-				// Redirect the session immediately just in case the session is finishedTxn.
 				mgr.processLock.Lock()
 				defer mgr.processLock.Unlock()
 				switch s {
@@ -560,15 +567,7 @@ func (mgr *BackendConnManager) processSignals(ctx context.Context) {
 			}()
 		case rs := <-mgr.redirectResCh:
 			mgr.notifyRedirectResult(ctx, rs)
-		case <-checkBackendTicker.C:
-			func() {
-				mgr.checkBackendActive()
-				mgr.processLock.Lock()
-				defer mgr.processLock.Unlock()
-				mgr.setKeepAlive()
-			}()
 		case <-ctx.Done():
-			checkBackendTicker.Stop()
 			return
 		}
 	}
@@ -587,6 +586,7 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		return
 	}
 
+	snap := mgr.backendSnap.Load()
 	rs := &redirectResult{
 		from: mgr.ServerAddr(),
 		to:   (*backendInst).Addr(),
@@ -609,13 +609,14 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		rs.err = ErrTargetUnhealthy
 		return
 	}
-	backendIO := *mgr.backendIO.Load()
+	backendIO := snap.io
 	var sessionStates, sessionToken string
 	if sessionStates, sessionToken, rs.err = mgr.querySessionStates(backendIO); rs.err != nil {
 		// If the backend connection is closed, also close the client connection.
 		// Otherwise, if the client is idle, the mgr will keep retrying.
 		if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
-			mgr.quitSource = SrcBackendNetwork
+			// ForceClose stores SrcProxyQuit before it wakes this read. Do not replace that source.
+			mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcBackendNetwork))
 			if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
 				mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(ignoredErr))
 			}
@@ -649,15 +650,14 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		}
 		return
 	}
-	mgr.updateTraffic(backendIO)
+	mgr.updateTraffic(backendIO, snap.backend)
 	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = 0, 0, 0, 0
-	mgr.updateTraffic(newBackendIO)
+	mgr.updateTraffic(newBackendIO, *backendInst)
 	if ignoredErr := backendIO.Close(); ignoredErr != nil && !pnet.IsDisconnectError(ignoredErr) {
 		mgr.logger.Error("close previous backend connection failed", zap.Error(ignoredErr))
 	}
-	mgr.backendIO.Store(&newBackendIO)
-	mgr.curBackend = *backendInst
-	mgr.setKeepAlive()
+	mgr.publishBackend(newBackendIO, *backendInst)
+	mgr.applyHealthPolicy()
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 }
 
@@ -700,12 +700,19 @@ func (mgr *BackendConnManager) ForceClose() bool {
 			break
 		}
 	}
-	mgr.quitSource = SrcProxyQuit
+	mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcProxyQuit))
 	if mgr.clientIO != nil {
 		// Interrupt in-flight I/O and let the normal connection teardown release buffers.
 		// Closing the PacketIO here may race with ExecuteCmd() flushing to the client.
 		if err := mgr.clientIO.GracefulClose(); err != nil && !pnet.IsDisconnectError(err) {
 			mgr.logger.Warn("force close client IO error", zap.Error(err))
+		}
+	}
+	if snap := mgr.backendSnap.Load(); snap != nil && snap.io != nil {
+		// ExecuteCmd may be blocked reading a backend that keeps its TCP connection open.
+		// Interrupt that read so the normal connection teardown can finish.
+		if err := snap.io.GracefulClose(); err != nil && !pnet.IsDisconnectError(err) {
+			mgr.logger.Warn("force close backend IO error", zap.Error(err))
 		}
 	}
 	return true
@@ -744,7 +751,7 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 	if !mgr.cmdProcessor.finishedTxn() {
 		return
 	}
-	mgr.quitSource = SrcProxyQuit
+	mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcProxyQuit))
 	// Closing clientIO will cause the whole connection to be closed.
 	if err := mgr.clientIO.GracefulClose(); err != nil {
 		mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
@@ -753,25 +760,39 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 }
 
 func (mgr *BackendConnManager) checkBackendActive() {
-	mgr.processLock.Lock()
+	// Skip this round when a command or migration holds the lock. The probe reads the
+	// backend connection, so it must not overlap ExecuteCmd. applyHealthPolicy already
+	// ran and does not take this lock.
+	if !mgr.processLock.TryLock() {
+		return
+	}
 	defer mgr.processLock.Unlock()
 
 	if mgr.closeStatus.Load() >= statusNotifyClose {
 		return
 	}
-	now := time.Now()
-	if mgr.lastActiveTime.Add(mgr.config.CheckBackendInterval).After(now) {
+	snap := mgr.backendSnap.Load()
+	if snap == nil || snap.backend == nil || snap.io == nil {
 		return
 	}
-	backendIO := *mgr.backendIO.Load()
+	now := time.Now()
+	interval := mgr.config.CheckBackendInterval
+	if !snap.backend.Healthy() {
+		interval = mgr.config.UnhealthyCheckBackendInterval
+	}
+	if mgr.lastActiveTime.Add(interval).After(now) {
+		return
+	}
+	backendIO := snap.io
 	active, err := backendIO.IsPeerActive()
 	if !active {
 		mgr.logger.Info("backend connection is closed, close client connection",
 			zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()),
 			zap.Stringer("backend_addr", backendIO.RemoteAddr()),
-			zap.Bool("backend_healthy", mgr.curBackend.Healthy()),
+			zap.Bool("backend_healthy", snap.backend.Healthy()),
 			zap.Error(err))
-		mgr.quitSource = SrcBackendNetwork
+		// A deadline from ForceClose must not replace SrcProxyQuit.
+		mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcBackendNetwork))
 		if err := mgr.clientIO.GracefulClose(); err != nil {
 			mgr.logger.Warn("graceful close client IO error", zap.Stringer("client_addr", mgr.clientIO.RemoteAddr()), zap.Error(err))
 		}
@@ -779,6 +800,13 @@ func (mgr *BackendConnManager) checkBackendActive() {
 	} else {
 		mgr.lastActiveTime = now
 	}
+}
+
+// CheckBackend applies the current health policy and probes an idle backend connection when due.
+// It never waits for SQL execution or migration to release processLock.
+func (mgr *BackendConnManager) CheckBackend() {
+	mgr.applyHealthPolicy()
+	mgr.checkBackendActive()
 }
 
 func (mgr *BackendConnManager) ClientAddr() string {
@@ -789,8 +817,8 @@ func (mgr *BackendConnManager) ClientAddr() string {
 }
 
 func (mgr *BackendConnManager) ServerAddr() string {
-	if backendIO := mgr.backendIO.Load(); backendIO != nil {
-		return (*backendIO).RemoteAddr().String()
+	if backendIO := mgr.loadBackendIO(); backendIO != nil {
+		return backendIO.RemoteAddr().String()
 	}
 	return ""
 }
@@ -810,7 +838,7 @@ func (mgr *BackendConnManager) ClientOutBytes() uint64 {
 }
 
 func (mgr *BackendConnManager) QuitSource() ErrorSource {
-	return mgr.quitSource
+	return ErrorSource(mgr.quitSource.Load())
 }
 
 func (mgr *BackendConnManager) SetValue(key, val any) {
@@ -845,12 +873,13 @@ func (mgr *BackendConnManager) Close() error {
 		mgr.cancelFunc = nil
 	}
 
-	// OnConnClose may read ServerAddr(), so call it before closing backendIO.
-	handErr := mgr.handshakeHandler.OnConnClose(mgr, mgr.quitSource)
+	// OnConnClose may read ServerAddr(), so call it before closing the backend connection.
+	handErr := mgr.handshakeHandler.OnConnClose(mgr, mgr.QuitSource())
 
 	var connErr error
-	if backendIO := mgr.backendIO.Swap(nil); backendIO != nil {
-		connErr = (*backendIO).Close()
+	snap := mgr.backendSnap.Swap(nil)
+	if snap != nil && snap.io != nil {
+		connErr = snap.io.Close()
 	}
 
 	eventReceiver := mgr.getEventReceiver()
@@ -862,9 +891,9 @@ func (mgr *BackendConnManager) Close() error {
 		default:
 		}
 		// The connection may have just received the redirecting signal.
-		if mgr.curBackend != nil {
-			if err := eventReceiver.OnConnClosed(mgr.curBackend.Addr(), mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
+		if snap != nil && snap.backend != nil {
+			if err := eventReceiver.OnConnClosed(snap.backend.Addr(), mgr); err != nil {
+				mgr.logger.Error("close connection error", zap.String("backend_addr", snap.backend.Addr()), zap.NamedError("notify_err", err))
 			}
 		}
 	}
@@ -877,27 +906,39 @@ func (mgr *BackendConnManager) Close() error {
 	return errors.Collect(ErrCloseConnMgr, connErr, handErr)
 }
 
-// setKeepAlive sets keepalive on the backend connection based on the health status.
+// publishBackend replaces the current connection and backend together.
 // NOTE: processLock should be held before calling this function.
-func (mgr *BackendConnManager) setKeepAlive() {
+func (mgr *BackendConnManager) publishBackend(io pnet.PacketIO, backend router.BackendInst) {
+	mgr.backendSnap.Store(&backendSnap{io: io, backend: backend})
+}
+
+func (mgr *BackendConnManager) loadBackendIO() pnet.PacketIO {
+	snap := mgr.backendSnap.Load()
+	if snap == nil {
+		return nil
+	}
+	return snap.io
+}
+
+// applyHealthPolicy applies keepalive from the published snapshot.
+// It does not take processLock.
+func (mgr *BackendConnManager) applyHealthPolicy() {
 	if mgr.closeStatus.Load() >= statusClosing {
 		return
 	}
-	backendIO := mgr.backendIO.Load()
-	if backendIO == nil {
+	snap := mgr.backendSnap.Load()
+	if snap == nil || snap.backend == nil || snap.io == nil {
 		return
 	}
 
-	// The request to the unhealthy backend may block, instead of fail immediately.
-	// So we set a shorter keep alive timeout for the unhealthy backends.
 	cfg := mgr.config.HealthyKeepAlive
-	curHealthy := mgr.curBackend.Healthy()
-	if !curHealthy {
+	healthy := snap.backend.Healthy()
+	if !healthy {
 		cfg = mgr.config.UnhealthyKeepAlive
 	}
-	if err := (*backendIO).SetKeepalive(cfg); err != nil {
-		mgr.logger.Warn("failed to set keepalive", zap.Stringer("backend_addr", (*backendIO).RemoteAddr()),
-			zap.Bool("backend_healthy", curHealthy), zap.Error(err))
+	if err := snap.io.SetKeepalive(cfg); err != nil {
+		mgr.logger.Warn("failed to set keepalive", zap.Stringer("backend_addr", snap.io.RemoteAddr()),
+			zap.Bool("backend_healthy", healthy), zap.Error(err))
 	}
 }
 
@@ -905,12 +946,9 @@ func (mgr *BackendConnManager) setQuitSourceByErr(err error) {
 	if err == nil {
 		return
 	}
-	// The source may be already be set.
+	// The source may already be set.
 	// E.g. quitSource is set before TiProxy shuts down and client connection error is caused by shutdown instead of network.
-	if mgr.quitSource != SrcNone {
-		return
-	}
-	mgr.quitSource = Error2Source(err)
+	mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(Error2Source(err)))
 }
 
 // UpdateLogger add fields to the logger.

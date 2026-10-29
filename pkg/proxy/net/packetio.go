@@ -28,6 +28,7 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/pingcap/tidb/pkg/errno"
@@ -233,6 +234,9 @@ type PacketIO interface {
 
 // PacketIO is a helper to read and write sql and proxy protocol.
 type packetIO struct {
+	// keepAliveMu covers lastKeepAlive and the setsockopt below it.
+	// The shared backend monitor may set keepalive without processLock.
+	keepAliveMu   sync.Mutex
 	lastKeepAlive config.KeepAlive
 	// TLS allocates another buffered layer after the handshake. Keep the
 	// normalized base connection buffer size here so the TLS layer can scale
@@ -535,6 +539,8 @@ func (p *packetIO) IsPeerActive() (bool, error) {
 }
 
 func (p *packetIO) SetKeepalive(cfg config.KeepAlive) error {
+	p.keepAliveMu.Lock()
+	defer p.keepAliveMu.Unlock()
 	if cfg == p.lastKeepAlive {
 		return nil
 	}
@@ -544,6 +550,8 @@ func (p *packetIO) SetKeepalive(cfg config.KeepAlive) error {
 
 // LastKeepAlive is used for test.
 func (p *packetIO) LastKeepAlive() config.KeepAlive {
+	p.keepAliveMu.Lock()
+	defer p.keepAliveMu.Unlock()
 	return p.lastKeepAlive
 }
 

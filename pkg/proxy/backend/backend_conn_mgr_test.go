@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -81,6 +82,22 @@ type mockBackendInst struct {
 	addr    string
 	healthy atomic.Bool
 	local   atomic.Bool
+}
+
+type backendCheckPacketIO struct {
+	pnet.PacketIO
+	keepaliveCnt atomic.Int32
+	peerCheckCnt atomic.Int32
+}
+
+func (io *backendCheckPacketIO) SetKeepalive(config.KeepAlive) error {
+	io.keepaliveCnt.Add(1)
+	return nil
+}
+
+func (io *backendCheckPacketIO) IsPeerActive() (bool, error) {
+	io.peerCheckCnt.Add(1)
+	return true, nil
 }
 
 func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
@@ -186,10 +203,10 @@ func (ts *backendMgrTester) redirectSucceed4Backend(packetIO pnet.PacketIO) erro
 }
 
 func (ts *backendMgrTester) redirectSucceed4Proxy(_, _ pnet.PacketIO) error {
-	backend1 := ts.mp.backendIO.Load()
+	backend1 := ts.mp.loadBackendIO()
 	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
-	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
+	require.NotEqual(ts.t, backend1, ts.mp.loadBackendIO())
 	require.Equal(ts.t, SrcNone, ts.mp.QuitSource())
 	return nil
 }
@@ -225,36 +242,37 @@ func (ts *backendMgrTester) startTxn4Backend(packetIO pnet.PacketIO) error {
 func (ts *backendMgrTester) checkNotRedirected4Proxy(clientIO, backendIO pnet.PacketIO) error {
 	redirInfo := ts.mp.redirectInfo.Load()
 	require.Nil(ts.t, redirInfo)
-	backend1 := ts.mp.backendIO.Load()
+	backend1 := ts.mp.loadBackendIO()
 	// There is no other way to verify it's not redirected.
 	// The buffer size of channel signalReceived is 0, so after the second redirect signal is sent,
 	// we can ensure that the first signal is already processed.
 	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.signalReceived <- signalTypeRedirect
 	// The backend connection is still the same.
-	require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
+	require.Equal(ts.t, backend1, ts.mp.loadBackendIO())
 	return nil
 }
 
 func (ts *backendMgrTester) redirectAfterCmd4Proxy(clientIO, backendIO pnet.PacketIO) error {
-	backend1 := ts.mp.backendIO.Load()
+	backend1 := ts.mp.loadBackendIO()
 	err := ts.forwardCmd4Proxy(clientIO, backendIO)
 	require.NoError(ts.t, err)
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventSucceed)
-	require.NotEqual(ts.t, backend1, ts.mp.backendIO.Load())
+	require.NotEqual(ts.t, backend1, ts.mp.loadBackendIO())
 	return nil
 }
 
 func (ts *backendMgrTester) redirectFail4Proxy(clientIO, backendIO pnet.PacketIO) error {
-	backend1 := ts.mp.backendIO.Load()
+	backend1 := ts.mp.loadBackendIO()
 	ts.mp.Redirect(newMockBackendInst(ts))
 	ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
-	require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
+	require.Equal(ts.t, backend1, ts.mp.loadBackendIO())
 	return nil
 }
 
 func (ts *backendMgrTester) checkConnClosed4Proxy(_, _ pnet.PacketIO) error {
 	require.Eventually(ts.t, func() bool {
+		ts.mp.CheckBackend()
 		switch ts.mp.closeStatus.Load() {
 		case statusClosing, statusClosed:
 			return true
@@ -270,6 +288,72 @@ func (ts *backendMgrTester) runTests(runners []runner) {
 		require.Equal(ts.t, ts.tc.clientIO.InBytes(), ts.mp.ClientOutBytes())
 		require.Equal(ts.t, ts.tc.clientIO.OutBytes(), ts.mp.ClientInBytes())
 	}
+}
+
+func TestBCCheck(t *testing.T) {
+	tests := []struct {
+		original *BCConfig
+		final    *BCConfig
+	}{
+		{
+			original: &BCConfig{},
+			final: &BCConfig{
+				CheckBackendInterval:          CheckBackendInterval,
+				UnhealthyCheckBackendInterval: UnhealthyCheckBackendInterval,
+				ConnectTimeout:                ConnectTimeout,
+			},
+		},
+		{
+			original: &BCConfig{
+				CheckBackendInterval:          10 * time.Second,
+				UnhealthyCheckBackendInterval: 10 * time.Second,
+				ConnectTimeout:                10 * time.Second,
+			},
+			final: &BCConfig{
+				CheckBackendInterval:          10 * time.Second,
+				UnhealthyCheckBackendInterval: 10 * time.Second,
+				ConnectTimeout:                10 * time.Second,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		test.original.check()
+		require.Equal(t, *test.final, *test.original)
+	}
+}
+
+func TestCheckBackend(t *testing.T) {
+	backendIO := &backendCheckPacketIO{}
+	backendInst := &mockBackendInst{}
+	backendInst.setHealthy(true)
+	mgr := &BackendConnManager{
+		config: &BCConfig{
+			CheckBackendInterval:          time.Hour,
+			UnhealthyCheckBackendInterval: time.Second,
+		},
+	}
+	mgr.publishBackend(backendIO, backendInst)
+	mgr.lastActiveTime = time.Now().Add(-2 * time.Second)
+
+	// A healthy backend is not due for a peer check yet.
+	mgr.CheckBackend()
+	require.Equal(t, int32(1), backendIO.keepaliveCnt.Load())
+	require.Zero(t, backendIO.peerCheckCnt.Load())
+
+	// An unhealthy backend uses the shorter interval and is checked immediately.
+	backendInst.setHealthy(false)
+	mgr.CheckBackend()
+	require.Equal(t, int32(2), backendIO.keepaliveCnt.Load())
+	require.Equal(t, int32(1), backendIO.peerCheckCnt.Load())
+
+	// A busy connection still receives the health policy, but the peer check does not wait for the lock.
+	mgr.processLock.Lock()
+	mgr.lastActiveTime = time.Now().Add(-2 * time.Hour)
+	mgr.CheckBackend()
+	mgr.processLock.Unlock()
+	require.Equal(t, int32(3), backendIO.keepaliveCnt.Load())
+	require.Equal(t, int32(1), backendIO.peerCheckCnt.Load())
 }
 
 // Test that redirection succeeds immediately if the session is redirect-able.
@@ -410,11 +494,11 @@ func TestRedirectInTxn(t *testing.T) {
 				return ts.mc.request(packetIO)
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				backend1 := ts.mp.backendIO.Load()
+				backend1 := ts.mp.loadBackendIO()
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(t, err)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(t, eventFail)
-				require.Equal(t, backend1, ts.mp.backendIO.Load())
+				require.Equal(t, backend1, ts.mp.loadBackendIO())
 				require.Equal(t, SrcNone, ts.mp.QuitSource())
 				return nil
 			},
@@ -844,7 +928,7 @@ func TestPingDuringShutdown(t *testing.T) {
 				return nil
 			},
 			proxy: func(_, _ pnet.PacketIO) error {
-				backendIO := *ts.mp.backendIO.Load()
+				backendIO := ts.mp.loadBackendIO()
 				backendOutBytes := backendIO.OutBytes()
 				ts.mp.clientIO.ResetSequence()
 				firstByte, _, err := ts.mp.clientIO.PeekPacketFirstByte()
@@ -905,6 +989,7 @@ func TestRedirectAbortedByCloseReportsFail(t *testing.T) {
 
 func TestForceClose(t *testing.T) {
 	ts := newBackendMgrTester(t)
+	requestForwarded := make(chan struct{})
 	runners := []runner{
 		// 1st handshake
 		{
@@ -912,10 +997,35 @@ func TestForceClose(t *testing.T) {
 			proxy:   ts.firstHandshake4Proxy,
 			backend: ts.handshake4Backend,
 		},
-		// force close
+		// Force close while ExecuteCmd is waiting for a backend response.
 		{
+			client: func(packetIO pnet.PacketIO) error {
+				packetIO.ResetSequence()
+				return packetIO.WritePacket(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), true)
+			},
+			backend: func(packetIO pnet.PacketIO) error {
+				_, err := packetIO.ReadPacket()
+				close(requestForwarded)
+				return err
+			},
 			proxy: func(_, _ pnet.PacketIO) error {
+				executeDone := make(chan error, 1)
+				var wg waitgroup.WaitGroup
+				wg.Run(func() {
+					_, err := ts.mp.ExecuteCmd(context.Background())
+					executeDone <- err
+				})
+				<-requestForwarded
 				require.True(t, ts.mp.ForceClose())
+				select {
+				case err := <-executeDone:
+					require.Error(t, err)
+				case <-time.After(time.Second):
+					t.Fatal("ExecuteCmd was not interrupted")
+				}
+				wg.Wait()
+				require.True(t, ts.mp.processLock.TryLock())
+				ts.mp.processLock.Unlock()
 				return nil
 			},
 		},
@@ -937,17 +1047,23 @@ func TestForceClose(t *testing.T) {
 func TestForceCloseUsesGracefulClose(t *testing.T) {
 	mgr := NewBackendConnManager(zap.NewNop(), &DefaultHandshakeHandler{}, nil, 1, &BCConfig{})
 	clientIO := &countingPacketIO{}
+	backendIO := &countingPacketIO{}
 	mgr.clientIO = clientIO
+	mgr.backendSnap.Store(&backendSnap{io: backendIO})
 
 	require.True(t, mgr.ForceClose())
 	require.Equal(t, SrcProxyQuit, mgr.QuitSource())
 	require.Equal(t, int32(statusClosing), mgr.closeStatus.Load())
 	require.EqualValues(t, 1, clientIO.gracefulCloseCnt.Load())
 	require.Zero(t, clientIO.closeCnt.Load())
+	require.EqualValues(t, 1, backendIO.gracefulCloseCnt.Load())
+	require.Zero(t, backendIO.closeCnt.Load())
 
 	require.False(t, mgr.ForceClose())
 	require.EqualValues(t, 1, clientIO.gracefulCloseCnt.Load())
 	require.Zero(t, clientIO.closeCnt.Load())
+	require.EqualValues(t, 1, backendIO.gracefulCloseCnt.Load())
+	require.Zero(t, backendIO.closeCnt.Load())
 }
 
 func TestGracefulCloseBeforeHandshake(t *testing.T) {
@@ -1123,7 +1239,6 @@ func TestGetBackendIO(t *testing.T) {
 
 func TestBackendInactive(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.bcConfig.TickerInterval = time.Millisecond
 		config.proxyConfig.bcConfig.CheckBackendInterval = 10 * time.Millisecond
 	})
 	runners := []runner{
@@ -1208,7 +1323,6 @@ func TestBackendInactive(t *testing.T) {
 
 func TestKeepAlive(t *testing.T) {
 	ts := newBackendMgrTester(t, func(config *testConfig) {
-		config.proxyConfig.bcConfig.TickerInterval = time.Millisecond
 		config.proxyConfig.bcConfig.HealthyKeepAlive.Idle = time.Minute
 		config.proxyConfig.bcConfig.UnhealthyKeepAlive.Idle = time.Second
 	})
@@ -1217,22 +1331,20 @@ func TestKeepAlive(t *testing.T) {
 			client: ts.mc.authenticate,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
 				require.NoError(t, ts.firstHandshake4Proxy(clientIO, backendIO))
-				require.Equal(t, time.Minute, (*ts.mp.backendIO.Load()).LastKeepAlive().Idle)
+				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
 				return nil
 			},
 			backend: ts.handshake4Backend,
 		},
 		{
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				require.Equal(t, time.Minute, (*ts.mp.backendIO.Load()).LastKeepAlive().Idle)
-				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(false)
-				require.Eventually(t, func() bool {
-					return (*ts.mp.backendIO.Load()).LastKeepAlive().Idle == time.Second
-				}, 3*time.Second, 10*time.Millisecond)
-				ts.mp.curBackend.(*router.StaticBackend).SetHealthy(true)
-				require.Eventually(t, func() bool {
-					return (*ts.mp.backendIO.Load()).LastKeepAlive().Idle == time.Minute
-				}, 3*time.Second, 10*time.Millisecond)
+				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
+				ts.mp.backendSnap.Load().backend.(*router.StaticBackend).SetHealthy(false)
+				ts.mp.CheckBackend()
+				require.Equal(t, time.Second, ts.mp.loadBackendIO().LastKeepAlive().Idle)
+				ts.mp.backendSnap.Load().backend.(*router.StaticBackend).SetHealthy(true)
+				ts.mp.CheckBackend()
+				require.Equal(t, time.Minute, ts.mp.loadBackendIO().LastKeepAlive().Idle)
 				return nil
 			},
 		},
@@ -1348,11 +1460,11 @@ func TestBackendStatusChange(t *testing.T) {
 		{
 			client: ts.mc.request,
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-				backend1 := ts.mp.backendIO.Load()
+				backend1 := ts.mp.loadBackendIO()
 				err := ts.forwardCmd4Proxy(clientIO, backendIO)
 				require.NoError(ts.t, err)
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
-				require.Equal(ts.t, backend1, ts.mp.backendIO.Load())
+				require.Equal(ts.t, backend1, ts.mp.loadBackendIO())
 				require.Eventually(ts.t, func() bool {
 					return strings.Contains(ts.mp.text.String(), ErrTargetUnhealthy.Error())
 				}, time.Second, 10*time.Millisecond)
