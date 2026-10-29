@@ -95,48 +95,25 @@ type BCConfig struct {
 	HealthyKeepAlive   config.KeepAlive
 	UnhealthyKeepAlive config.KeepAlive
 	// ShuttingDown reports whether TiProxy is in graceful shutdown. It may be nil, e.g. for replaying traffic.
-<<<<<<< HEAD
-	ShuttingDown         func() bool
-	TickerInterval       time.Duration
-	CheckBackendInterval time.Duration
-	ConnectTimeout       time.Duration
-	ConnBufferSize       int
-	ProxyProtocol        bool
-	RequireBackendTLS    bool
-=======
 	ShuttingDown                  func() bool
 	CheckBackendInterval          time.Duration
 	UnhealthyCheckBackendInterval time.Duration
-	DialTimeout                   time.Duration
 	ConnectTimeout                time.Duration
 	ConnBufferSize                int
 	ProxyProtocol                 bool
 	RequireBackendTLS             bool
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 }
 
 func (cfg *BCConfig) check() {
 	if cfg.CheckBackendInterval == time.Duration(0) {
 		cfg.CheckBackendInterval = CheckBackendInterval
 	}
-<<<<<<< HEAD
-=======
 	if cfg.UnhealthyCheckBackendInterval == time.Duration(0) {
 		cfg.UnhealthyCheckBackendInterval = UnhealthyCheckBackendInterval
 	}
-	if cfg.DialTimeout == time.Duration(0) {
-		cfg.DialTimeout = DialTimeout
-	}
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 	if cfg.ConnectTimeout == time.Duration(0) {
 		cfg.ConnectTimeout = ConnectTimeout
 	}
-}
-
-<<<<<<< HEAD
-=======
-type Meter interface {
-	IncTraffic(clusterID string, respBytes, crossAZBytes int64, fromPublicEndpoint bool)
 }
 
 // backendSnap is the current backend connection and the backend it belongs to.
@@ -146,7 +123,6 @@ type backendSnap struct {
 	backend router.BackendInst
 }
 
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 // BackendConnManager migrates a session from one BackendConnection to another.
 //
 // The signal processing goroutine tries to migrate the session once it receives a signal.
@@ -190,17 +166,9 @@ type BackendConnManager struct {
 		sync.Mutex
 		m map[any]any
 	}
-<<<<<<< HEAD
 	connectionID uint64
-	quitSource   ErrorSource
+	quitSource   atomic.Int32 // ForceClose writes this without processLock.
 	cpt          capture.Capture
-=======
-	connectionID       uint64
-	quitSource         atomic.Int32 // ForceClose writes this without processLock.
-	cpt                capture.Capture
-	meter              Meter
-	fromPublicEndpoint bool
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 }
 
 // NewBackendConnManager creates a BackendConnManager.
@@ -238,13 +206,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 	mgr.clientIO = clientIO
 
 	if mgr.closeStatus.Load() >= statusNotifyClose {
-<<<<<<< HEAD
-		mgr.quitSource = SrcProxyQuit
-		return errors.New("graceful shutdown before connecting")
-=======
 		mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcProxyQuit))
-		return ErrClosing
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
+		return errors.New("graceful shutdown before connecting")
 	}
 	startTime := time.Now()
 	mgr.createTime = startTime
@@ -271,15 +234,8 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
 	endTime := time.Now()
 	addHandshakeMetrics(mgr.ServerAddr(), endTime.Sub(startTime))
-<<<<<<< HEAD
-	mgr.updateTraffic(*mgr.backendIO.Load())
-=======
-	if mgr.config.FromPublicEndpoints != nil {
-		mgr.fromPublicEndpoint = mgr.config.FromPublicEndpoints(clientIO.ProxyAddr())
-	}
 	snap := mgr.backendSnap.Load()
 	mgr.updateTraffic(snap.io, snap.backend)
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 
 	mgr.cmdProcessor.capability = mgr.authenticator.capability
 	childCtx, cancelFunc := context.WithCancel(ctx)
@@ -322,14 +278,8 @@ func (mgr *BackendConnManager) abandonRoutedBackend() {
 	if receiver == nil || snap == nil || snap.backend == nil {
 		return
 	}
-<<<<<<< HEAD
-	if err := receiver.OnConnClosed(mgr.curBackend.Addr(), mgr); err != nil {
-		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
-=======
-	if err := receiver.OnConnClosed(snap.backend.ID(), mgr); err != nil {
-		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_id", snap.backend.ID()),
-			zap.String("backend_addr", snap.backend.Addr()), zap.NamedError("notify_err", err))
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
+	if err := receiver.OnConnClosed(snap.backend.Addr(), mgr); err != nil {
+		mgr.logger.Warn("abandon routed backend failed", zap.String("backend_addr", snap.backend.Addr()), zap.NamedError("notify_err", err))
 	}
 	// Clear the receiver so that Close() won't clean up again.
 	mgr.eventReceiver.Store(nil)
@@ -472,17 +422,8 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 	}
 	waitingRedirect := mgr.redirectInfo.Load() != nil
 	var holdRequest bool
-<<<<<<< HEAD
-	backendIO := *mgr.backendIO.Load()
-=======
 	snap := mgr.backendSnap.Load()
 	backendIO := snap.io
-	if cmd == pnet.ComStmtPrepare {
-		mgr.cmdProcessor.prepareEndHook = func(id uint32) {
-			stmtID = id
-		}
-	}
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 	holdRequest, err = mgr.cmdProcessor.executeCmd(request, mgr.clientIO, backendIO, waitingRedirect, streamingForward)
 	if !holdRequest {
 		addCmdMetrics(cmd, backendIO.RemoteAddr().String(), startTime)
@@ -549,23 +490,7 @@ func (mgr *BackendConnManager) writeShutdownErr() error {
 
 func (mgr *BackendConnManager) updateTraffic(backendIO pnet.PacketIO, backend router.BackendInst) {
 	inBytes, inPackets, outBytes, outPackets := backendIO.InBytes(), backendIO.InPackets(), backendIO.OutBytes(), backendIO.OutPackets()
-<<<<<<< HEAD
-	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets, mgr.curBackend.Local())
-=======
 	addTraffic(backendIO.RemoteAddr().String(), inBytes-mgr.inBytes, inPackets-mgr.inPackets, outBytes-mgr.outBytes, outPackets-mgr.outPackets, backend.Local())
-	// Update metering.
-	if mgr.meter != nil && !reflect.ValueOf(mgr.meter).IsNil() {
-		// The keyspace of one connection should not change.
-		keyspace := backend.Keyspace()
-		if len(keyspace) > 0 {
-			crossAZBytes := int64(0)
-			if !backend.Local() {
-				crossAZBytes = int64(outBytes - mgr.outBytes + inBytes - mgr.inBytes)
-			}
-			mgr.meter.IncTraffic(keyspace, int64(inBytes-mgr.inBytes), crossAZBytes, mgr.fromPublicEndpoint)
-		}
-	}
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 	mgr.inBytes, mgr.inPackets, mgr.outBytes, mgr.outPackets = inBytes, inPackets, outBytes, outPackets
 }
 
@@ -663,13 +588,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 
 	snap := mgr.backendSnap.Load()
 	rs := &redirectResult{
-<<<<<<< HEAD
 		from: mgr.ServerAddr(),
 		to:   (*backendInst).Addr(),
-=======
-		from: snap.backend.ID(),
-		to:   (*backendInst).ID(),
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 	}
 	defer func() {
 		// The `mgr` won't be notified again before it calls `OnRedirectSucceed`, so simply `StorePointer` is also fine.
@@ -971,16 +891,9 @@ func (mgr *BackendConnManager) Close() error {
 		default:
 		}
 		// The connection may have just received the redirecting signal.
-<<<<<<< HEAD
-		if mgr.curBackend != nil {
-			if err := eventReceiver.OnConnClosed(mgr.curBackend.Addr(), mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_addr", mgr.curBackend.Addr()), zap.NamedError("notify_err", err))
-=======
 		if snap != nil && snap.backend != nil {
-			if err := eventReceiver.OnConnClosed(snap.backend.ID(), mgr); err != nil {
-				mgr.logger.Error("close connection error", zap.String("backend_id", snap.backend.ID()),
-					zap.String("backend_addr", snap.backend.Addr()), zap.NamedError("notify_err", err))
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
+			if err := eventReceiver.OnConnClosed(snap.backend.Addr(), mgr); err != nil {
+				mgr.logger.Error("close connection error", zap.String("backend_addr", snap.backend.Addr()), zap.NamedError("notify_err", err))
 			}
 		}
 	}

@@ -79,22 +79,9 @@ func (mer *mockEventReceiver) checkEvent(t *testing.T, eventName int) event {
 }
 
 type mockBackendInst struct {
-<<<<<<< HEAD
 	addr    string
 	healthy atomic.Bool
 	local   atomic.Bool
-=======
-	addr     string
-	keyspace string
-	cluster  string
-	healthy  atomic.Bool
-	local    atomic.Bool
-}
-
-type countingPacketIO struct {
-	pnet.PacketIO
-	gracefulCloseCnt atomic.Int32
-	closeCnt         atomic.Int32
 }
 
 type backendCheckPacketIO struct {
@@ -111,17 +98,6 @@ func (io *backendCheckPacketIO) SetKeepalive(config.KeepAlive) error {
 func (io *backendCheckPacketIO) IsPeerActive() (bool, error) {
 	io.peerCheckCnt.Add(1)
 	return true, nil
-}
-
-func (cp *countingPacketIO) GracefulClose() error {
-	cp.gracefulCloseCnt.Add(1)
-	return nil
-}
-
-func (cp *countingPacketIO) Close() error {
-	cp.closeCnt.Add(1)
-	return nil
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 }
 
 func newMockBackendInst(ts *backendMgrTester) *mockBackendInst {
@@ -314,8 +290,6 @@ func (ts *backendMgrTester) runTests(runners []runner) {
 	}
 }
 
-<<<<<<< HEAD
-=======
 func TestBCCheck(t *testing.T) {
 	tests := []struct {
 		original *BCConfig
@@ -326,7 +300,6 @@ func TestBCCheck(t *testing.T) {
 			final: &BCConfig{
 				CheckBackendInterval:          CheckBackendInterval,
 				UnhealthyCheckBackendInterval: UnhealthyCheckBackendInterval,
-				DialTimeout:                   DialTimeout,
 				ConnectTimeout:                ConnectTimeout,
 			},
 		},
@@ -334,13 +307,11 @@ func TestBCCheck(t *testing.T) {
 			original: &BCConfig{
 				CheckBackendInterval:          10 * time.Second,
 				UnhealthyCheckBackendInterval: 10 * time.Second,
-				DialTimeout:                   10 * time.Second,
 				ConnectTimeout:                10 * time.Second,
 			},
 			final: &BCConfig{
 				CheckBackendInterval:          10 * time.Second,
 				UnhealthyCheckBackendInterval: 10 * time.Second,
-				DialTimeout:                   10 * time.Second,
 				ConnectTimeout:                10 * time.Second,
 			},
 		},
@@ -385,7 +356,6 @@ func TestCheckBackend(t *testing.T) {
 	require.Equal(t, int32(1), backendIO.peerCheckCnt.Load())
 }
 
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 // Test that redirection succeeds immediately if the session is redirect-able.
 func TestNormalRedirect(t *testing.T) {
 	ts := newBackendMgrTester(t)
@@ -1663,10 +1633,6 @@ func TestTrafficMetrics(t *testing.T) {
 				return ts.mc.request(packetIO)
 			},
 			proxy: func(clientIO, backendIO pnet.PacketIO) error {
-<<<<<<< HEAD
-=======
-				ts.mp.backendSnap.Load().backend.(*router.StaticBackend).SetKeyspace("key1")
->>>>>>> 08886a9f (backend: close client connections sooner when a backend fails without closing sockets (#1401))
 				addr := ts.tc.backendListener.Addr().String()
 				var err error
 				inBytes, inPackets, outBytes, outPackets, err = readTraffic(addr)

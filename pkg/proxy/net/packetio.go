@@ -28,6 +28,7 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/pingcap/tidb/pkg/errno"
