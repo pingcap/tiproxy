@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-mysql-org/go-mysql/mysql"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/lib/util/waitgroup"
@@ -89,6 +90,22 @@ type countingPacketIO struct {
 	pnet.PacketIO
 	gracefulCloseCnt atomic.Int32
 	closeCnt         atomic.Int32
+}
+
+type backendCheckPacketIO struct {
+	pnet.PacketIO
+	keepaliveCnt atomic.Int32
+	peerCheckCnt atomic.Int32
+}
+
+func (io *backendCheckPacketIO) SetKeepalive(config.KeepAlive) error {
+	io.keepaliveCnt.Add(1)
+	return nil
+}
+
+func (io *backendCheckPacketIO) IsPeerActive() (bool, error) {
+	io.peerCheckCnt.Add(1)
+	return true, nil
 }
 
 func (cp *countingPacketIO) GracefulClose() error {
@@ -341,6 +358,39 @@ func TestBCCheck(t *testing.T) {
 		test.original.check()
 		require.Equal(t, *test.final, *test.original)
 	}
+}
+
+func TestCheckBackend(t *testing.T) {
+	backendIO := &backendCheckPacketIO{}
+	backendInst := &mockBackendInst{}
+	backendInst.setHealthy(true)
+	mgr := &BackendConnManager{
+		config: &BCConfig{
+			CheckBackendInterval:          time.Hour,
+			UnhealthyCheckBackendInterval: time.Second,
+		},
+	}
+	mgr.publishBackend(backendIO, backendInst)
+	mgr.lastActiveTime = time.Now().Add(-2 * time.Second)
+
+	// A healthy backend is not due for a peer check yet.
+	mgr.CheckBackend()
+	require.Equal(t, int32(1), backendIO.keepaliveCnt.Load())
+	require.Zero(t, backendIO.peerCheckCnt.Load())
+
+	// An unhealthy backend uses the shorter interval and is checked immediately.
+	backendInst.setHealthy(false)
+	mgr.CheckBackend()
+	require.Equal(t, int32(2), backendIO.keepaliveCnt.Load())
+	require.Equal(t, int32(1), backendIO.peerCheckCnt.Load())
+
+	// A busy connection still receives the health policy, but the peer check does not wait for the lock.
+	mgr.processLock.Lock()
+	mgr.lastActiveTime = time.Now().Add(-2 * time.Hour)
+	mgr.CheckBackend()
+	mgr.processLock.Unlock()
+	require.Equal(t, int32(3), backendIO.keepaliveCnt.Load())
+	require.Equal(t, int32(1), backendIO.peerCheckCnt.Load())
 }
 
 // Test that redirection succeeds immediately if the session is redirect-able.
