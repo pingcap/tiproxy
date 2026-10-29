@@ -177,7 +177,7 @@ type BackendConnManager struct {
 		m map[any]any
 	}
 	connectionID       uint64
-	quitSource         ErrorSource
+	quitSource         atomic.Int32 // ForceClose writes this without processLock.
 	cpt                capture.Capture
 	meter              Meter
 	fromPublicEndpoint bool
@@ -197,7 +197,6 @@ func NewBackendConnManager(logger *zap.Logger, handshakeHandler HandshakeHandler
 		// There are 2 types of signals, which may be sent concurrently.
 		signalReceived: make(chan signalType, signalTypeNums),
 		redirectResCh:  make(chan *redirectResult, 1),
-		quitSource:     SrcNone,
 		cpt:            cpt,
 		meter:          meter,
 	}
@@ -221,7 +220,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 	mgr.clientIO = clientIO
 
 	if mgr.closeStatus.Load() >= statusNotifyClose {
-		mgr.quitSource = SrcProxyQuit
+		mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcProxyQuit))
 		return ErrClosing
 	}
 	startTime := time.Now()
@@ -244,7 +243,7 @@ func (mgr *BackendConnManager) Connect(ctx context.Context, clientIO pnet.Packet
 				mgr.logger.Warn("writing error to client failed", zap.NamedError("mysql_err", clientErr), zap.NamedError("write_err", writeErr))
 			}
 		}
-		mgr.quitSource = src
+		mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(src))
 		return err
 	}
 	mgr.handshakeHandler.OnHandshake(mgr, mgr.ServerAddr(), nil, SrcNone)
@@ -688,7 +687,8 @@ func (mgr *BackendConnManager) tryRedirect(ctx context.Context) {
 		// If the backend connection is closed, also close the client connection.
 		// Otherwise, if the client is idle, the mgr will keep retrying.
 		if errors.Is(rs.err, net.ErrClosed) || pnet.IsDisconnectError(rs.err) || errors.Is(rs.err, os.ErrDeadlineExceeded) {
-			mgr.quitSource = SrcBackendNetwork
+			// ForceClose stores SrcProxyQuit before it wakes this read. Do not replace that source.
+			mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcBackendNetwork))
 			if ignoredErr := mgr.clientIO.GracefulClose(); ignoredErr != nil {
 				mgr.logger.Warn("graceful close client IO error", zap.Error(ignoredErr))
 			}
@@ -780,12 +780,19 @@ func (mgr *BackendConnManager) ForceClose() bool {
 			break
 		}
 	}
-	mgr.quitSource = SrcProxyQuit
+	mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcProxyQuit))
 	if mgr.clientIO != nil {
 		// Interrupt in-flight I/O and let the normal connection teardown release buffers.
 		// Closing the PacketIO here may race with ExecuteCmd() flushing to the client.
 		if err := mgr.clientIO.GracefulClose(); err != nil && !pnet.IsDisconnectError(err) {
 			mgr.logger.Warn("force close client IO error", zap.Error(err))
+		}
+	}
+	if snap := mgr.backendSnap.Load(); snap != nil && snap.io != nil {
+		// ExecuteCmd may be blocked reading a backend that keeps its TCP connection open.
+		// Interrupt that read so the normal connection teardown can finish.
+		if err := snap.io.GracefulClose(); err != nil && !pnet.IsDisconnectError(err) {
+			mgr.logger.Warn("force close backend IO error", zap.Error(err))
 		}
 	}
 	return true
@@ -825,7 +832,7 @@ func (mgr *BackendConnManager) tryGracefulClose(ctx context.Context) {
 	if !mgr.cmdProcessor.finishedTxn() {
 		return
 	}
-	mgr.quitSource = SrcProxyQuit
+	mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcProxyQuit))
 	// Closing clientIO will cause the whole connection to be closed.
 	if err := mgr.clientIO.GracefulClose(); err != nil {
 		mgr.logger.Warn("graceful close client IO error", zap.Error(err))
@@ -864,7 +871,8 @@ func (mgr *BackendConnManager) checkBackendActive() {
 			zap.Stringer("backend_addr", backendIO.RemoteAddr()),
 			zap.Bool("backend_healthy", snap.backend.Healthy()),
 			zap.Error(err))
-		mgr.quitSource = SrcBackendNetwork
+		// A deadline from ForceClose must not replace SrcProxyQuit.
+		mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(SrcBackendNetwork))
 		if err := mgr.clientIO.GracefulClose(); err != nil {
 			mgr.logger.Warn("graceful close client IO error", zap.Error(err))
 		}
@@ -910,7 +918,7 @@ func (mgr *BackendConnManager) ClientOutBytes() uint64 {
 }
 
 func (mgr *BackendConnManager) QuitSource() ErrorSource {
-	return mgr.quitSource
+	return ErrorSource(mgr.quitSource.Load())
 }
 
 func (mgr *BackendConnManager) SetValue(key, val any) {
@@ -954,7 +962,7 @@ func (mgr *BackendConnManager) Close() error {
 	}
 
 	// OnConnClose may read ServerAddr(), so call it before closing the backend connection.
-	handErr := mgr.handshakeHandler.OnConnClose(mgr, mgr.quitSource)
+	handErr := mgr.handshakeHandler.OnConnClose(mgr, mgr.QuitSource())
 
 	var connErr error
 	snap := mgr.backendSnap.Swap(nil)
@@ -1032,12 +1040,9 @@ func (mgr *BackendConnManager) SetQuitSourceByErr(err error) {
 	if err == nil {
 		return
 	}
-	// The source may be already be set.
+	// The source may already be set.
 	// E.g. quitSource is set before TiProxy shuts down and client connection error is caused by shutdown instead of network.
-	if mgr.quitSource != SrcNone {
-		return
-	}
-	mgr.quitSource = Error2Source(err)
+	mgr.quitSource.CompareAndSwap(int32(SrcNone), int32(Error2Source(err)))
 }
 
 // UpdateLogger add fields to the logger.

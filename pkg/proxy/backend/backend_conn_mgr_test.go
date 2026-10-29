@@ -1070,6 +1070,7 @@ func TestGracefulCloseBeforeHandshake(t *testing.T) {
 
 func TestForceClose(t *testing.T) {
 	ts := newBackendMgrTester(t)
+	requestForwarded := make(chan struct{})
 	runners := []runner{
 		// 1st handshake
 		{
@@ -1077,10 +1078,35 @@ func TestForceClose(t *testing.T) {
 			proxy:   ts.firstHandshake4Proxy,
 			backend: ts.handshake4Backend,
 		},
-		// force close
+		// Force close while ExecuteCmd is waiting for a backend response.
 		{
+			client: func(packetIO pnet.PacketIO) error {
+				packetIO.ResetSequence()
+				return packetIO.WritePacket(append([]byte{pnet.ComQuery.Byte()}, []byte("select 1")...), true)
+			},
+			backend: func(packetIO pnet.PacketIO) error {
+				_, err := packetIO.ReadPacket()
+				close(requestForwarded)
+				return err
+			},
 			proxy: func(_, _ pnet.PacketIO) error {
+				executeDone := make(chan error, 1)
+				var wg waitgroup.WaitGroup
+				wg.Run(func() {
+					_, err := ts.mp.ExecuteCmd(context.Background())
+					executeDone <- err
+				})
+				<-requestForwarded
 				require.True(t, ts.mp.ForceClose())
+				select {
+				case err := <-executeDone:
+					require.Error(t, err)
+				case <-time.After(time.Second):
+					t.Fatal("ExecuteCmd was not interrupted")
+				}
+				wg.Wait()
+				require.True(t, ts.mp.processLock.TryLock())
+				ts.mp.processLock.Unlock()
 				return nil
 			},
 		},
@@ -1102,17 +1128,23 @@ func TestForceClose(t *testing.T) {
 func TestForceCloseUsesGracefulClose(t *testing.T) {
 	mgr := NewBackendConnManager(zap.NewNop(), &DefaultHandshakeHandler{}, nil, 1, &BCConfig{}, nil)
 	clientIO := &countingPacketIO{}
+	backendIO := &countingPacketIO{}
 	mgr.clientIO = clientIO
+	mgr.backendSnap.Store(&backendSnap{io: backendIO})
 
 	require.True(t, mgr.ForceClose())
 	require.Equal(t, SrcProxyQuit, mgr.QuitSource())
 	require.Equal(t, int32(statusClosing), mgr.closeStatus.Load())
 	require.EqualValues(t, 1, clientIO.gracefulCloseCnt.Load())
 	require.Zero(t, clientIO.closeCnt.Load())
+	require.EqualValues(t, 1, backendIO.gracefulCloseCnt.Load())
+	require.Zero(t, backendIO.closeCnt.Load())
 
 	require.False(t, mgr.ForceClose())
 	require.EqualValues(t, 1, clientIO.gracefulCloseCnt.Load())
 	require.Zero(t, clientIO.closeCnt.Load())
+	require.EqualValues(t, 1, backendIO.gracefulCloseCnt.Load())
+	require.Zero(t, backendIO.closeCnt.Load())
 }
 
 func TestHandlerReturnError(t *testing.T) {
