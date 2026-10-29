@@ -84,6 +84,11 @@ func (cc *ClientConnection) GracefulClose() {
 	cc.connMgr.GracefulClose()
 }
 
+// CheckBackend applies backend health policy and probes an idle backend connection when due.
+func (cc *ClientConnection) CheckBackend() {
+	cc.connMgr.CheckBackend()
+}
+
 func (cc *ClientConnection) Close() error {
 	return errors.Collect(ErrCloseConn, cc.pkt.Close(), cc.connMgr.Close())
 }
