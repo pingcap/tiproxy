@@ -5273,7 +5273,7 @@ async fn backend_to_client_destination_write_break_is_client_network_on_both_obs
     let Ok(stream) = reader.into_inner().reunite(writer.into_inner()) else {
         unreachable!("the client's split halves reunite")
     };
-    let _ = stream.set_linger(Some(Duration::from_secs(0)));
+    let _ = stream.set_zero_linger();
     drop(stream);
 
     // Log observable: the destination(client)-write break attributes to the

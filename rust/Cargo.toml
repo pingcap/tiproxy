@@ -81,11 +81,11 @@ rcgen = { version = "=0.14.9", default-features = false, features = ["pem", "rin
 reqwest = { version = "=0.12.24", default-features = false, features = ["rustls-tls-manual-roots", "stream"] }
 regex = { version = "=1.13.1", default-features = false, features = ["std", "unicode", "perf"] }
 rustix = { version = "=0.38.44", default-features = false, features = ["fs", "std"] }
-rustls = { version = "=0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-pki-types = { version = "=1.14.1", default-features = false, features = ["alloc", "std"] }
-socket2 = { version = "=0.6.1", default-features = false, features = ["all"] }
+socket2 = { version = "=0.6.3", default-features = false, features = ["all"] }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
-tokio = { version = "=1.47.1", default-features = false, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "=1.51.6", default-features = false, features = ["io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }
 thiserror = { version = "=2.0.17", default-features = false }
 toml = { version = "=0.8.23", default-features = false, features = ["display", "parse"] }
 tonic = { version = "=0.14.6", default-features = false, features = ["codegen", "server", "transport"] }
