@@ -200,6 +200,37 @@ func TestFetchTiDBTopology(t *testing.T) {
 	}
 }
 
+func TestFetchInvalidTiDBTopology(t *testing.T) {
+	ts := newEtcdTestSuite(t)
+	t.Cleanup(ts.close)
+
+	ts.updateTTL("1.1.1.1:4000", "", []byte("123456789"))
+	ts.updateInfo("1.1.1.1:4000", "", &TiDBTopologyInfo{
+		IP:         "1.1.1.1",
+		StatusPort: 10080,
+	})
+
+	keyspacePrefix := path.Join(tidbKeyspaceTopologyInformationPath, "test", tidbTopologyInformationPath)
+	invalidEntries := map[string]string{
+		path.Join(tidbTopologyInformationPath, ttlSuffix):                           "123456789",
+		path.Join(tidbTopologyInformationPath, infoSuffix):                          `{}`,
+		path.Join(tidbTopologyInformationPath, "2.2.2.2:4000", infoSuffix):          `null`,
+		path.Join(tidbTopologyInformationPath, "2.2.2.2:4000", "extra", infoSuffix): `{}`,
+		path.Join(keyspacePrefix, ttlSuffix):                                        "123456789",
+		path.Join(keyspacePrefix, infoSuffix):                                       `{}`,
+		path.Join(keyspacePrefix, "3.3.3.3:4000", infoSuffix):                       `null`,
+	}
+	for key, value := range invalidEntries {
+		_, err := ts.kv.Put(context.Background(), key, value)
+		require.NoError(t, err)
+	}
+
+	info, err := ts.is.GetTiDBTopology(context.Background())
+	require.NoError(t, err)
+	require.Len(t, info, 1)
+	require.Contains(t, info, "1.1.1.1:4000")
+}
+
 func TestGetTopology(t *testing.T) {
 	ts := newEtcdTestSuite(t)
 	t.Cleanup(ts.close)
