@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/tiproxy/lib/config"
@@ -37,6 +37,20 @@ func listAllFiles(dir, ext string) ([]string, error) {
 	}
 
 	return ret, nil
+}
+
+// namespaceCommitPath builds the commit request. Names are repeated namespace
+// query values so the server can apply each one, including a deletion of a
+// namespace that is no longer stored. No names commits the full stored set.
+func namespaceCommitPath(names []string) string {
+	if len(names) == 0 {
+		return namespacePrefix + "/commit"
+	}
+	query := url.Values{}
+	for _, name := range names {
+		query.Add("namespace", name)
+	}
+	return namespacePrefix + "/commit?" + query.Encode()
 }
 
 func GetNamespaceCmd(ctx *Context) *cobra.Command {
@@ -74,7 +88,7 @@ func GetNamespaceCmd(ctx *Context) *cobra.Command {
 			Use: "commit nsName...",
 		}
 		commitNamespaces.RunE = func(cmd *cobra.Command, args []string) error {
-			resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, fmt.Sprintf("%s/commit?namespaces=%s", namespacePrefix, strings.Join(args, ",")), nil)
+			resp, err := doRequest(cmd.Context(), ctx, http.MethodPost, namespaceCommitPath(args), nil)
 			if err != nil {
 				return err
 			}

@@ -56,3 +56,48 @@ func TestNamespace(t *testing.T) {
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 }
+
+func TestNamespaceCommitPropagatesDeletion(t *testing.T) {
+	srv, doHTTP := createServer(t)
+	nsMgr := srv.mgr.NsMgr.(*mockNamespaceManager)
+
+	doHTTP(t, http.MethodPut, "/api/admin/namespace/keep", httpOpts{reader: strings.NewReader(`{"namespace":"keep","frontend":{"user":"keep-user"}}`)}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTP(t, http.MethodPut, "/api/admin/namespace/drop", httpOpts{reader: strings.NewReader(`{"namespace":"drop","frontend":{"user":"drop-user"}}`)}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	doHTTP(t, http.MethodDelete, "/api/admin/namespace/drop", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+
+	nsMgr.mu.Lock()
+	nsMgr.live = map[string]bool{"keep": true, "drop": true}
+	nsMgr.mu.Unlock()
+
+	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit?namespace=drop", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	call := nsMgr.lastCommit()
+	require.Equal(t, []string{"drop"}, call.names)
+	require.Equal(t, []bool{true}, call.delete)
+	require.False(t, call.deleteNil)
+
+	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit?namespace=keep", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	call = nsMgr.lastCommit()
+	require.Equal(t, []string{"keep"}, call.names)
+	require.Equal(t, []bool{false}, call.delete)
+
+	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	call = nsMgr.lastCommit()
+	require.Equal(t, []string{"keep"}, call.names)
+	require.True(t, call.deleteNil)
+
+	doHTTP(t, http.MethodPost, "/api/admin/namespace/commit?namespace=missing", httpOpts{}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
+	})
+}
