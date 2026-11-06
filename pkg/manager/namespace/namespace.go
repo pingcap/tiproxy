@@ -31,6 +31,10 @@ func (n *Namespace) GetRouter() router.Router {
 }
 
 func (n *Namespace) Close() {
-	n.router.Close()
-	n.bo.Close()
+	if n.router != nil {
+		n.router.Close()
+	}
+	if n.bo != nil {
+		n.bo.Close()
+	}
 }
