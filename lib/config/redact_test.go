@@ -95,3 +95,33 @@ func TestRedactedKeepsSecretsOutOfAPIAndLogs(t *testing.T) {
 	require.NotContains(t, string(logged), "account-key-secret")
 	require.Contains(t, string(logged), "metering-container")
 }
+
+func TestRedactedDropsPresignedEndpoint(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Metering.Endpoint = "https://bucket.s3.amazonaws.com/obj?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLE%2F20261109%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Signature=sigsecret&X-Amz-Security-Token=tokensecret"
+	redacted := cfg.Redacted()
+	require.Empty(t, redacted.Metering.Endpoint)
+
+	jsonBody, err := json.Marshal(redacted)
+	require.NoError(t, err)
+	tomlBody, err := redacted.ToBytes()
+	require.NoError(t, err)
+	for _, body := range []string{string(jsonBody), string(tomlBody)} {
+		require.NotContains(t, body, "sigsecret")
+		require.NotContains(t, body, "tokensecret")
+		require.NotContains(t, body, "AKIAEXAMPLE")
+	}
+
+	// Writing the public document back must keep the stored endpoint.
+	base := cfg.Clone()
+	require.NoError(t, toml.Unmarshal(tomlBody, base))
+	require.Equal(t, cfg.Metering.Endpoint, base.Metering.Endpoint)
+
+	sigCfg := NewConfig()
+	sigCfg.Metering.Endpoint = "https://account.blob.core.windows.net/container?sig=sassecret"
+	require.Empty(t, sigCfg.Redacted().Metering.Endpoint)
+
+	plain := NewConfig()
+	plain.Metering.Endpoint = "https://s3.example.com"
+	require.Equal(t, plain.Metering.Endpoint, plain.Redacted().Metering.Endpoint)
+}

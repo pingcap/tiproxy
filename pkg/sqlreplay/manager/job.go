@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
@@ -108,7 +107,7 @@ func (job *captureJob) MarshalJSON() ([]byte, error) {
 	job4Marshal.Type = "capture"
 	c := captureJob4Marshal{
 		job4Marshal:      *job4Marshal,
-		Output:           ast.RedactURL(job.cfg.Output),
+		Output:           replay.RedactStorageList(job.cfg.Output),
 		Duration:         job.cfg.Duration.String(),
 		Compress:         job.cfg.Compress,
 		EncryptionMethod: job.cfg.EncryptionMethod,
@@ -154,7 +153,7 @@ func (job *replayJob) MarshalJSON() ([]byte, error) {
 	r := replayJob4Marshal{
 		job4Marshal: *job4Marshal,
 		LastCmdTs:   job.lastCmdTs.Format(time.RFC3339Nano),
-		Input:       ast.RedactURL(job.cfg.Input),
+		Input:       replay.RedactStorageList(job.cfg.Input),
 		Username:    job.cfg.Username,
 		Speed:       job.cfg.Speed,
 		ReadOnly:    job.cfg.ReadOnly,

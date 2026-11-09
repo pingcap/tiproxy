@@ -5,19 +5,17 @@ package replay
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/pingcap/tidb/pkg/objstore/storeapi"
-	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
-	"go.uber.org/zap/zapcore"
 )
 
 type ReplayConfig struct {
@@ -89,19 +87,21 @@ func (cfg *ReplayConfig) Validate() ([]storeapi.Storage, error) {
 	var storages []storeapi.Storage
 	var err error
 	for _, input := range inputs {
+		// The caller closes storages returned with a later validation error.
+		// Opening failures return none, so storages opened earlier must be closed here.
+		rawInput := input
 		var inputStorage storeapi.Storage
 		if cfg.DynamicInput {
 			input, err = getDirForInput(input)
 			if err != nil {
-				return nil, errors.Wrapf(err, "invalid input url %s", redactStorageList(input))
+				closeStorages(storages)
+				return nil, errors.Wrapf(publicStorageErr(err), "invalid input url %s", RedactStorageList(rawInput))
 			}
 		}
 		inputStorage, err = store.NewStorage(input)
 		if err != nil {
-			for _, s := range storages {
-				s.Close()
-			}
-			return nil, errors.Wrapf(err, "invalid input %s", redactStorageList(input))
+			closeStorages(storages)
+			return nil, errors.Wrapf(publicStorageErr(err), "invalid input %s", RedactStorageList(rawInput))
 		}
 		storages = append(storages, inputStorage)
 	}
@@ -211,46 +211,76 @@ func (cfg *ReplayConfig) LoadFromCheckpoint() error {
 	return nil
 }
 
-// MarshalLogObject writes the replay config without the TiDB password or
-// credentials embedded in storage URLs. zap.Any uses this instead of reflection.
-func (cfg ReplayConfig) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+// String returns the replay config as JSON without the TiDB password or
+// credentials embedded in storage URLs.
+// zap.Any prefers fmt.Stringer, and the TiDB text encoder then writes that JSON
+// as one escaped field. An ObjectMarshaler would nest brackets inside the field.
+func (cfg ReplayConfig) String() string {
 	view := cfg
 	view.Password = ""
 	view.encryptionKey = nil
-	view.Input = redactStorageList(cfg.Input)
-	view.OutputPath = ast.RedactURL(cfg.OutputPath)
-	return writeLogObject(enc, view)
+	view.Input = RedactStorageList(cfg.Input)
+	view.OutputPath = redactStorageURL(cfg.OutputPath)
+	raw, err := json.Marshal(view)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
-func redactStorageList(raw string) string {
+// RedactStorageList keeps the scheme, host, and path of one storage URL or each
+// entry in a comma-separated list. Query parameters and userinfo are removed.
+// Each entry is handled on its own so a leading local path does not hide a later URL.
+func RedactStorageList(raw string) string {
 	if raw == "" {
 		return ""
 	}
 	parts := strings.Split(raw, ",")
 	for i, part := range parts {
-		parts[i] = ast.RedactURL(strings.TrimSpace(part))
+		parts[i] = redactStorageURL(strings.TrimSpace(part))
 	}
 	return strings.Join(parts, ",")
 }
 
-func writeLogObject(enc zapcore.ObjectEncoder, v any) error {
-	raw, err := json.Marshal(v)
+func redactStorageURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if i := strings.IndexAny(raw, "?#"); i >= 0 {
+		raw = raw[:i]
+	}
+	if !strings.Contains(raw, "://") && !strings.Contains(raw, "@") {
+		return raw
+	}
+	u, err := url.Parse(raw)
 	if err != nil {
+		return "(invalid URL)"
+	}
+	u.User = nil
+	return u.String()
+}
+
+// publicStorageErr drops raw URLs from parser errors. url.Parse puts the original
+// URL, including userinfo, in the error text.
+func publicStorageErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var uerr *url.Error
+	if !errors.As(err, &uerr) {
 		return err
 	}
-	var fields map[string]any
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
+	if uerr.Err == nil {
+		return errors.New("invalid URL")
 	}
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		if err := enc.AddReflected(key, fields[key]); err != nil {
-			return err
+	return errors.New(uerr.Err.Error())
+}
+
+func closeStorages(storages []storeapi.Storage) {
+	for _, storage := range storages {
+		if storage != nil {
+			storage.Close()
 		}
 	}
-	return nil
 }
