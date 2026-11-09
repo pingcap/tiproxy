@@ -166,6 +166,51 @@ backend-clusters = []
 	})
 }
 
+func TestConfigGetOmitsCloudSecrets(t *testing.T) {
+	srv, doHTTP := createServer(t)
+	const secret = "secret-access-key-value"
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader(`
+[metering]
+type = "cos"
+bucket = "metering-bucket"
+[metering.cos]
+assume-role-arn = "qcs::cam::uin/1:roleName/metering"
+access-key = "access-key-value"
+secret-access-key = "` + secret + `"
+session-token = "session-token-value"
+`)}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+
+	require.Equal(t, secret, srv.mgr.CfgMgr.GetConfig().Metering.COS.SecretAccessKey)
+
+	var publicBody string
+	doHTTP(t, http.MethodGet, "/api/admin/config", httpOpts{}, func(t *testing.T, r *http.Response) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		publicBody = string(body)
+		require.Equal(t, http.StatusOK, r.StatusCode)
+		require.Contains(t, publicBody, "metering-bucket")
+		require.Contains(t, publicBody, "qcs::cam::uin/1:roleName/metering")
+		require.NotContains(t, publicBody, secret)
+		require.NotContains(t, publicBody, "access-key-value")
+		require.NotContains(t, publicBody, "session-token-value")
+	})
+	doHTTP(t, http.MethodGet, "/api/admin/config?format=json", httpOpts{}, func(t *testing.T, r *http.Response) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, r.StatusCode)
+		require.NotContains(t, string(body), secret)
+		require.Contains(t, string(body), "metering-bucket")
+	})
+
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader(publicBody)}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	require.Equal(t, secret, srv.mgr.CfgMgr.GetConfig().Metering.COS.SecretAccessKey)
+	require.Equal(t, "metering-bucket", srv.mgr.CfgMgr.GetConfig().Metering.Bucket)
+}
+
 func TestAcceptType(t *testing.T) {
 	_, doHTTP := createServer(t)
 	checkRespContentType := func(expectedType string, r *http.Response) {
