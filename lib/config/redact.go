@@ -6,25 +6,10 @@ package config
 import (
 	"encoding/json"
 	"net/url"
-	"slices"
 	"strings"
 
 	mconfig "github.com/pingcap/metering_sdk/config"
-	"go.uber.org/zap/zapcore"
 )
-
-// secretQueryKeys are credential query parameters that may be embedded in a
-// storage endpoint. Names are compared after lower-casing and replacing '_'.
-var secretQueryKeys = map[string]struct{}{
-	"access-key":        {},
-	"secret-access-key": {},
-	"session-token":     {},
-	"account-key":       {},
-	"sas-token":         {},
-	"password":          {},
-	"encryption-key":    {},
-	"sig":               {},
-}
 
 // Redacted returns a copy that is safe to return from the admin API and to write
 // to logs. Cloud credentials are cleared so omitempty drops them. Non-secret
@@ -42,13 +27,19 @@ func (cfg *Config) Redacted() *Config {
 	return out
 }
 
-// MarshalLogObject implements zapcore.ObjectMarshaler.
-// zap.Any uses it instead of reflecting every exported field into the log.
-func (cfg *Config) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+// String returns the redacted config as JSON.
+// zap.Any prefers fmt.Stringer, and the TiDB text encoder then writes that JSON
+// as one escaped field. An ObjectMarshaler would be rendered as nested brackets
+// inside the field, which the text format cannot parse.
+func (cfg *Config) String() string {
 	if cfg == nil {
-		return nil
+		return ""
 	}
-	return writeLogObject(enc, cfg.Redacted())
+	raw, err := json.Marshal(cfg.Redacted())
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func redactMetering(mc mconfig.MeteringConfig) mconfig.MeteringConfig {
@@ -83,55 +74,17 @@ func redactMetering(mc mconfig.MeteringConfig) mconfig.MeteringConfig {
 	return mc
 }
 
-// redactEndpoint drops an endpoint that embeds credentials.
-// Clearing it lets omitempty remove the field, so writing the public config
-// back does not replace the stored endpoint. An endpoint without credentials
-// is returned unchanged.
+// redactEndpoint omits an endpoint that has userinfo or a query.
+// An empty value is dropped by omitempty, so writing the public config back does
+// not replace the stored endpoint. Returning only the prefix would overwrite it.
+// A plain endpoint is returned unchanged.
 func redactEndpoint(raw string) string {
 	if raw == "" || (!strings.Contains(raw, "://") && !strings.Contains(raw, "?") && !strings.Contains(raw, "@")) {
 		return raw
 	}
 	u, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return ""
-	}
-	if u.User != nil {
-		return ""
-	}
-	if u.RawQuery == "" {
-		return raw
-	}
-	values, err := url.ParseQuery(u.RawQuery)
-	if err != nil {
-		return ""
-	}
-	for key := range values {
-		normalized := strings.ToLower(strings.ReplaceAll(key, "_", "-"))
-		if _, ok := secretQueryKeys[normalized]; ok {
-			return ""
-		}
 	}
 	return raw
-}
-
-func writeLogObject(enc zapcore.ObjectEncoder, v any) error {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	var fields map[string]any
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
-	}
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
-		if err := enc.AddReflected(key, fields[key]); err != nil {
-			return err
-		}
-	}
-	return nil
 }
