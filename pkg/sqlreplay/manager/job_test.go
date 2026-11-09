@@ -220,12 +220,13 @@ func TestJobStatusRedactsNestedStorageSecrets(t *testing.T) {
 
 	captured := &captureJob{
 		cfg: capture.CaptureConfig{
-			Output: "s3://bucket/prefix?endpoint=http://user:ENDPOINTPASS@minio:9000&secret-access-key=TOPSECRET",
+			Output: "s3://bucket/prefix?endpoint=http://user:ENDPOINTPASS@minio:9000&secret-access-key=TOPSECRET,LEAKED",
 		},
 	}
 	text = captured.String()
 	require.NotContains(t, text, "ENDPOINTPASS")
 	require.NotContains(t, text, "TOPSECRET")
+	require.NotContains(t, text, "LEAKED")
 	require.Contains(t, text, "s3://bucket/prefix")
 	require.NotContains(t, text, "?")
 }

@@ -220,7 +220,7 @@ func (cfg ReplayConfig) String() string {
 	view.Password = ""
 	view.encryptionKey = nil
 	view.Input = RedactStorageList(cfg.Input)
-	view.OutputPath = redactStorageURL(cfg.OutputPath)
+	view.OutputPath = RedactStorageURL(cfg.OutputPath)
 	raw, err := json.Marshal(view)
 	if err != nil {
 		return ""
@@ -237,12 +237,13 @@ func RedactStorageList(raw string) string {
 	}
 	parts := strings.Split(raw, ",")
 	for i, part := range parts {
-		parts[i] = redactStorageURL(strings.TrimSpace(part))
+		parts[i] = RedactStorageURL(strings.TrimSpace(part))
 	}
 	return strings.Join(parts, ",")
 }
 
-func redactStorageURL(raw string) string {
+// RedactStorageURL removes query parameters and userinfo from one storage URL.
+func RedactStorageURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""

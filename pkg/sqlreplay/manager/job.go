@@ -107,7 +107,7 @@ func (job *captureJob) MarshalJSON() ([]byte, error) {
 	job4Marshal.Type = "capture"
 	c := captureJob4Marshal{
 		job4Marshal:      *job4Marshal,
-		Output:           replay.RedactStorageList(job.cfg.Output),
+		Output:           replay.RedactStorageURL(job.cfg.Output),
 		Duration:         job.cfg.Duration.String(),
 		Compress:         job.cfg.Compress,
 		EncryptionMethod: job.cfg.EncryptionMethod,
