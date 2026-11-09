@@ -109,9 +109,9 @@ func TestReplayConfigLogRedactsSecrets(t *testing.T) {
 	plain := publicStorageErr(errors.New("storage http not support yet"))
 	require.EqualError(t, plain, "storage http not support yet")
 
-	require.Equal(t, "s3://bucket/in", redactStorageURL("s3://bucket/in?access-key=AKIAINPUT&secret-access-key=SECRETINPUT&endpoint=http://user:ENDPOINTPASS@minio:9000"))
-	require.Equal(t, "s3://bucket/in", redactStorageURL("s3://user:SECRET@bucket/in"))
-	require.Equal(t, "/tmp/traffic", redactStorageURL("/tmp/traffic"))
-	azure := redactStorageURL("azure://container/out?account-name=acct&account-key=ACCOUNTKEY&sas-token=SASTOKEN")
+	require.Equal(t, "s3://bucket/in", RedactStorageURL("s3://bucket/in?access-key=AKIAINPUT&secret-access-key=SECRETINPUT&endpoint=http://user:ENDPOINTPASS@minio:9000"))
+	require.Equal(t, "s3://bucket/in", RedactStorageURL("s3://user:SECRET@bucket/in"))
+	require.Equal(t, "/tmp/traffic", RedactStorageURL("/tmp/traffic"))
+	azure := RedactStorageURL("azure://container/out?account-name=acct&account-key=ACCOUNTKEY&sas-token=SASTOKEN")
 	require.Equal(t, "azure://container/out", azure)
 }
