@@ -2182,16 +2182,22 @@ impl Engine {
         let backend_cluster = acquired.backend.cluster_name.clone();
         let backend_keyspace = acquired.backend.keyspace.clone();
         let backend_local = acquired.backend.local;
-        // A metered session must know its immutable source attribution before
-        // consuming or forwarding any backend protocol bytes. RouteEngine has
-        // only completed the TCP dial here: the greeting is still unread and
-        // the socket has not entered the counted/billable transport. Reject an
-        // incomplete assignment locally without poisoning the process-wide
-        // registry; this is the session-scoped fail-closed policy.
-        if self.metering.is_some() && (backend_id.is_empty() || backend_keyspace.is_empty()) {
+        // A metered session must know its backend id before consuming or
+        // forwarding any backend protocol bytes. RouteEngine has only
+        // completed the TCP dial here. Reject a missing backend id locally
+        // without poisoning the process-wide registry.
+        //
+        // An empty keyspace is the classic topology (`/topology/tidb/`). Go
+        // `BackendConnManager.updateTraffic` skips metering when `Keyspace()`
+        // is empty and still serves the session. Detach metering for that
+        // session so a later register does not fail the handshake.
+        if self.metering.is_some() && backend_id.is_empty() {
             self.quit_source = QuitSource::ProxyError;
             let _ = self.events.send(SessionEvent::BackendIoError).await;
             return Some(WireErrorSource::Proxy);
+        }
+        if backend_keyspace.is_empty() {
+            self.metering = None;
         }
         // Health-appropriate keepalive at dial time (KA-003 family):
         // the snapshot's healthy/unhealthy backend policy follows the
