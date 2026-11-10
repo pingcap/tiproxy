@@ -72,7 +72,7 @@ pub(crate) fn build_client_config(
         .dangerous()
         .with_custom_certificate_verifier(verifier);
 
-    let config = match identity {
+    let mut config = match identity {
         Some((certificate_pem, key_pem)) => {
             let chain = parse_certificate_chain(certificate_pem)?;
             let key = parse_private_key(key_pem)?;
@@ -82,6 +82,10 @@ pub(crate) fn build_client_config(
         }
         None => builder.with_no_client_auth(),
     };
+    // PD/etcd serves gRPC and HTTP/1.1 on the same port. Without ALPN h2 the
+    // server answers HTTP/1.1, and the HTTP/2 framer reads "HTTP" as a frame
+    // longer than the default max frame size (FRAME_SIZE_ERROR).
+    config.alpn_protocols = vec![b"h2".to_vec()];
     Ok(Arc::new(config))
 }
 
@@ -676,11 +680,11 @@ mod tests {
             }
             None => builder.with_no_client_auth(),
         };
-        Arc::new(
-            builder
-                .with_single_cert(parse_chain(cert_pem), parse_key(key_pem))
-                .unwrap_or_else(|error| unreachable!("server cert: {error}")),
-        )
+        let mut config = builder
+            .with_single_cert(parse_chain(cert_pem), parse_key(key_pem))
+            .unwrap_or_else(|error| unreachable!("server cert: {error}"));
+        config.alpn_protocols = vec![b"h2".to_vec()];
+        Arc::new(config)
     }
 
     /// Drives a full in-memory handshake, returning `Err` if either side
