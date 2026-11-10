@@ -987,14 +987,16 @@ async fn run_bound_session_observed(
                             continue;
                         }
                         let assignment = redirect.to();
-                        let deadline = u64::try_from(
-                            SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .saturating_add(budget)
-                            .as_millis(),
-                        )
-                        .unwrap_or(u64::MAX);
+                        // `budget` was the queue TTL, already enforced above.
+                        // Do not stamp it as an absolute handshake deadline.
+                        // Go `tryRedirect` keeps `redirectInfo` with no timeout
+                        // while `!finishedTxn()` and dials only after the next
+                        // command leaves the transaction. An absolute
+                        // acceptance-time deadline expires that wait (a
+                        // transaction held for 30s) and the handshake then
+                        // fails without migrating. Zero means
+                        // `candidate_budget` applies the dial schedule when
+                        // the handshake actually starts.
                         let target = RedirectTarget {
                             backend_id: assignment.backend_id.clone(),
                             backend_address: assignment.backend_address.clone(),
@@ -1002,7 +1004,7 @@ async fn run_bound_session_observed(
                             keyspace: assignment.keyspace.clone(),
                             backend_healthy: assignment.healthy,
                             backend_local: assignment.local,
-                            deadline_unix_millis: deadline,
+                            deadline_unix_millis: 0,
                         };
                         local_redirect = Some(envelope);
                         // Atomic redirect pair: one operation permit spans both
