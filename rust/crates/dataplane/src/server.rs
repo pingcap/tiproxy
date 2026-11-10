@@ -555,12 +555,12 @@ impl DataplaneServer {
 ///
 /// # Errors
 ///
-/// Returns an explicit unsupported error for traffic capture/replay and a
-/// configuration error when the complete config is absent.
+/// Returns a configuration error when the complete config is absent.
+/// `traffic_replay_enabled` does not fail preflight: the Go default is true,
+/// and the native process serves SQL without implementing capture or replay.
 pub fn preflight_snapshot(snapshot: &StateSnapshot) -> Result<(), ServerError> {
-    let config = snapshot.config.as_ref().ok_or(ServerError::MissingConfig)?;
-    if config.traffic_replay_enabled {
-        return Err(ServerError::TrafficReplayUnsupported);
+    if snapshot.config.is_none() {
+        return Err(ServerError::MissingConfig);
     }
     Ok(())
 }
@@ -1722,9 +1722,13 @@ mod tests {
             }),
             ..Default::default()
         };
+        assert!(
+            preflight_snapshot(&raw).is_ok(),
+            "the Go default enable-traffic-replay=true must still serve"
+        );
         assert!(matches!(
-            preflight_snapshot(&raw),
-            Err(ServerError::TrafficReplayUnsupported)
+            preflight_snapshot(&StateSnapshot::default()),
+            Err(ServerError::MissingConfig)
         ));
         let mut backoff = AcceptBackoff::new();
         assert_eq!(backoff.fail(), ACCEPT_BACKOFF_INITIAL);

@@ -5,8 +5,8 @@ observations exactly:
 
 - **Go**: `pkg/server/api.TestCPAdminCapture` builds the production gin engine
   through the package's own `createServerWithConfig` helper (real listener,
-  the unit-test mocks, `enable-traffic-replay = false` as the Rust dataplane
-  composition requires) and replays `script.json`. Actions in the script toggle
+  the unit-test mocks, `enable-traffic-replay = false` so both sides answer
+  the traffic routes with `disabled`) and replays `script.json`. Actions in the script toggle
   the readiness gate, the namespace manager readiness, the dataplane status
   reader and `PreClose`, exactly as the Go unit tests do.
 - **Rust**: `control-admin`'s `cpadmin_replay` example drives the same script

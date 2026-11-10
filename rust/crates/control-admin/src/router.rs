@@ -861,11 +861,16 @@ async fn config_put(State(app): State<Arc<AdminApp>>, request: Request) -> Respo
 
 fn traffic_disabled(
     verb: &'static str,
-) -> impl Fn() -> std::future::Ready<Response> + Clone + Send + 'static {
-    move || {
+) -> impl Fn(State<Arc<AdminApp>>) -> std::future::Ready<Response> + Clone + Send + 'static {
+    move |State(app): State<Arc<AdminApp>>| {
+        let status = if app.hooks.config.traffic_replay_enabled() {
+            "unsupported"
+        } else {
+            "disabled"
+        };
         std::future::ready(text(
             StatusCode::BAD_REQUEST,
-            &format!("traffic {verb} is disabled"),
+            &format!("traffic {verb} is {status}"),
         ))
     }
 }
@@ -1104,7 +1109,11 @@ mod tests {
                 oneshot(router.clone(), request(method, path, "")).await;
             assert_eq!(status, StatusCode::BAD_REQUEST);
             assert_eq!(content_type, TEXT_CONTENT_TYPE);
-            assert_eq!(body, format!("traffic {verb} is disabled"));
+            assert_eq!(
+                body,
+                format!("traffic {verb} is unsupported"),
+                "the default configuration leaves enable-traffic-replay true"
+            );
         }
         let (status, _, body) =
             oneshot(router.clone(), request("GET", "/api/debug/pprof/heap", "")).await;

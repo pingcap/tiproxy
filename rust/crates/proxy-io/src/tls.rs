@@ -304,6 +304,8 @@ where
 pub fn build_backend_config(
     policy: &ValidatedTlsPolicy,
 ) -> Result<Arc<ClientConfig>, TlsSetupError> {
+    // `1.3` is TLS 1.3 only. Go also accepts 1.0 and 1.1; rustls cannot offer
+    // them, so every other value uses the TLS 1.2 floor.
     let builder = if policy.minimum_version == "1.3" {
         ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
     } else {

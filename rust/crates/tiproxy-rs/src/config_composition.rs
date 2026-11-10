@@ -337,6 +337,15 @@ impl CandidateValidator for ServingCandidateValidator {
         {
             return Err("server_auto_certs_unsupported");
         }
+        if effective.api_proxy_protocol() == "v2" {
+            return Err("api_proxy_protocol_unsupported");
+        }
+        if !effective.encryption_key_path().is_empty() {
+            return Err("encryption_key_path_unsupported");
+        }
+        if !effective.ha_virtual_ip().is_empty() && !effective.ha_interface().is_empty() {
+            return Err("ha_vip_unsupported");
+        }
         let mut serving = effective.serving().map_err(|_| "serving_projection")?;
         apply_drain_override(&mut serving, self.drain_grace_override);
         let candidate = StateSnapshot {
@@ -794,16 +803,23 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let snapshots = SnapshotStore::new([])?;
         let validator = Arc::new(ServingCandidateValidator::new(snapshots, None));
-        let result = ConfigNamespaceStore::new_with_validator(
+        let store = ConfigNamespaceStore::new_with_validator(
             EffectiveConfig::default(),
             Vec::new(),
             SourceRevision::default(),
             Path::new("/tmp"),
             validator,
+        )?;
+        assert!(
+            store.current().effective().traffic_replay_enabled(),
+            "the Go default enable-traffic-replay=true must be accepted"
         );
         assert!(
-            result.is_err(),
-            "traffic replay defaults true and Rust rejects it"
+            store
+                .current()
+                .effective()
+                .serving()?
+                .traffic_replay_enabled
         );
         let server_auto = ConfigNamespaceStore::from_toml_with_validator(
             b"enable-traffic-replay = false\n[security.server-tls]\nauto-certs = true\n",
@@ -820,6 +836,47 @@ mod tests {
                 class: "serving_auto_certs_unsupported"
             })
         ));
+        for (toml, class) in [
+            (
+                &b"api.proxy-protocol = \"v2\"\n"[..],
+                "api_proxy_protocol_unsupported",
+            ),
+            (
+                &b"security.encryption-key-path = \"/tmp/key\"\n"[..],
+                "encryption_key_path_unsupported",
+            ),
+            (
+                &b"ha.virtual-ip = \"192.0.2.10\"\nha.interface = \"eth0\"\n"[..],
+                "ha_vip_unsupported",
+            ),
+        ] {
+            let rejected = ConfigNamespaceStore::from_toml_with_validator(
+                toml,
+                None,
+                Path::new("/tmp"),
+                Arc::new(ServingCandidateValidator::new(
+                    SnapshotStore::new([])?,
+                    None,
+                )),
+            );
+            assert!(
+                matches!(
+                    rejected,
+                    Err(StoreError::CandidateRejected { class: got }) if got == class
+                ),
+                "{class} was not rejected"
+            );
+        }
+        let vip_only = ConfigNamespaceStore::from_toml_with_validator(
+            b"ha.virtual-ip = \"192.0.2.10\"\n",
+            None,
+            Path::new("/tmp"),
+            Arc::new(ServingCandidateValidator::new(
+                SnapshotStore::new([])?,
+                None,
+            )),
+        )?;
+        assert_eq!(vip_only.current().effective().ha_virtual_ip(), "192.0.2.10");
         Ok(())
     }
 

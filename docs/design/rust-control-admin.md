@@ -52,7 +52,7 @@ drains instead of continuing without an operator surface (Go only logs the
 | `DELETE /api/debug/health` | clears the override, `200 ""`. |
 | `GET /metrics`, `/metrics/`, `/api/metrics`, `/api/metrics/` | the B0 native exposition, `text/plain; version=0.0.4; charset=utf-8; escaping=underscores`. |
 | `GET /api/dataplane/status` | the Go key set in gin's sorted-map order; `desired_generation` and `sent_generation` are the latest composed generation (there is no transport hop in-process), `applied_generation`/`rejected_generation` come from SQL serving, `last_result_code` is `ERROR_CODE_INVALID_SNAPSHOT` when the latest rejection is newer than the latest apply, `ERROR_CODE_OK` after the first apply, `ERROR_CODE_UNSPECIFIED` before it. |
-| `POST /api/traffic/{capture,replay,cancel}`, `GET /api/traffic/show` | `400 text/plain "traffic <verb> is disabled"`, the Go answer when `enable-traffic-replay = false`, which the Rust dataplane composition requires. |
+| `POST /api/traffic/{capture,replay,cancel}`, `GET /api/traffic/show` | `400 text/plain`. The body is `traffic <verb> is unsupported` when `enable-traffic-replay` is true, and Go's `traffic <verb> is disabled` when it is false. The default is true and SQL serving still starts. |
 
 Health inputs: `closing` is the runtime lifecycle leaving `Ready`; the
 namespace-owner readiness is the config module's initial persistent view;
@@ -288,7 +288,7 @@ certificate.
   every command's exit code and stdout: `health`, `config get`/`config set
   --input`, `namespace list`/`put`/`get`/`import`/`commit`/`del` including
   missing namespaces, and `traffic show`/`capture`/`replay`/`cancel`, which
-  both sides refuse with the disabled message while traffic replay is off.
+  both sides refuse. The evidence overlay sets `enable-traffic-replay = false`, so both answers are the disabled message. A default configuration answers `unsupported` on the native process.
   `config get` and `health` are compared semantically (the TOML renderers
   differ in layout and omitted zero fields); every other observation,
   including the CLI's `namespace list` failure on an empty set (the Go server

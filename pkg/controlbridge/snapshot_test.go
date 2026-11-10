@@ -57,7 +57,7 @@ func TestSnapshotBuilderBuildsCompleteDeterministicSnapshot(t *testing.T) {
 	require.Equal(t, controlpb.ProxyProtocolMode_PROXY_PROTOCOL_MODE_V2, actual.GetProxyProtocol())
 	require.Equal(t, uint64(7000), actual.GetGracefulWaitMillis())
 	require.Equal(t, uint64(11000), actual.GetGracefulCloseMillis())
-	require.Equal(t, []string{"10.0.0.0/24", "10.0.0.9/32", "2001:db8::1/128"}, actual.GetPublicCidrs())
+	require.Equal(t, []string{"2001:db8::/32", "10.0.0.9/32", "10.0.0.0/24", "10.0.0.0/24"}, actual.GetPublicCidrs())
 	require.Equal(t, uint32(0xaabb), actual.GetAdvertisedCapability())
 	require.Equal(t, "TiProxy-test", actual.GetServerVersion())
 	require.Equal(t, []string{"client-a", "client-b"}, actual.GetFrontendTls().GetAllowedCommonNames())
@@ -90,13 +90,16 @@ func TestSnapshotBuilderRejectsUnsafeOrRestartRequiredValues(t *testing.T) {
 
 	invalidKeepalive := cfg.Clone()
 	invalidKeepalive.Proxy.FrontendKeepalive.Idle = -time.Second
-	_, err = builder.Build(1, invalidKeepalive, 0, "test", nil, nil)
-	require.ErrorContains(t, err, "nonnegative")
+	invalidKeepalive.Security.ServerSQLTLS.MinTLSVersion = "1.0"
+	envelope, err := builder.Build(1, invalidKeepalive, 0, "test", nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), envelope.GetStateSnapshot().GetConfig().GetFrontendKeepalive().GetIdleMillis())
+	require.Equal(t, "1.0", envelope.GetStateSnapshot().GetConfig().GetFrontendTls().GetMinimumVersion())
 
 	partialTLS := cfg.Clone()
 	partialTLS.Security.ServerSQLTLS.Cert = outside
 	_, err = builder.Build(1, partialTLS, 0, "test", nil, nil)
-	require.ErrorContains(t, err, "configured together")
+	require.ErrorContains(t, err, "outside configured TLS roots")
 
 	unsafeTLS := cfg.Clone()
 	unsafeTLS.Security.ServerSQLTLS.Cert = outside
@@ -119,8 +122,11 @@ func TestSnapshotBuilderRejectsInvalidAllowlistAndSubMillisecondKeepalive(t *tes
 	builder, err := NewSnapshotBuilder(cfg, []string{t.TempDir()})
 	require.NoError(t, err)
 	cfg.Proxy.FrontendKeepalive.Idle = time.Microsecond
-	_, err = builder.Build(1, cfg, 0, "test", nil, nil)
-	require.ErrorContains(t, err, "at least one millisecond")
+	cfg.Security.ServerSQLTLS.MinTLSVersion = "nope"
+	envelope, err := builder.Build(1, cfg, 0, "test", nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), envelope.GetStateSnapshot().GetConfig().GetFrontendKeepalive().GetIdleMillis())
+	require.Equal(t, "1.2", envelope.GetStateSnapshot().GetConfig().GetFrontendTls().GetMinimumVersion())
 }
 
 func writeSnapshotTestFile(t *testing.T, directory, name string) string {

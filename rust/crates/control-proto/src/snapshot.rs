@@ -15,6 +15,7 @@
 //! Atomic validation and last-good storage for complete dataplane snapshots.
 
 use std::collections::BTreeSet;
+use std::env;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Read;
@@ -959,7 +960,9 @@ impl SnapshotStore {
         }
         let private_key = private_key
             .ok_or_else(|| SnapshotError::invalid(format!("{field} private key is required")))?;
-        let builder = if policy.minimum_version == "1.3" {
+        // Go `GetMinTLSVer` selects 1.3 only for a `1.3` suffix. 1.0 and 1.1
+        // are accepted; rustls cannot offer them, so the handshake floor is 1.2.
+        let builder = if go_min_tls_version(&policy.minimum_version) == "1.3" {
             ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         } else {
             ServerConfig::builder()
@@ -980,17 +983,24 @@ impl SnapshotStore {
 
     fn read_tls_file(&self, path: &str, field: &str) -> Result<Vec<u8>, SnapshotError> {
         let path = Path::new(path);
-        if !path.is_absolute() {
-            return Err(SnapshotError::invalid(format!(
-                "{field} file path must be absolute"
-            )));
-        }
-        let canonical = fs::canonicalize(path)
+        // Go opens certificate paths with `os.ReadFile`, which resolves a
+        // relative path against the process working directory.
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            env::current_dir()
+                .map_err(|_| SnapshotError::invalid(format!("{field} file is unavailable")))?
+                .join(path)
+        };
+        let canonical = fs::canonicalize(&absolute)
             .map_err(|_| SnapshotError::invalid(format!("{field} file is unavailable")))?;
-        if !self
-            .allowed_tls_roots
-            .iter()
-            .any(|root| canonical.starts_with(root))
+        // An empty allowlist matches Go: there is no extra root jail. A
+        // configured `--tls-root` or `tls-allowed-roots` still confines reads.
+        if !self.allowed_tls_roots.is_empty()
+            && !self
+                .allowed_tls_roots
+                .iter()
+                .any(|root| canonical.starts_with(root))
         {
             return Err(SnapshotError::invalid(format!(
                 "{field} file is outside configured TLS roots"
@@ -1045,19 +1055,26 @@ fn build_client_verifier(
     }))
 }
 
+/// Go `GetMinTLSVer` suffix match. Empty and unrecognized values are TLS 1.2.
+fn go_min_tls_version(value: &str) -> &'static str {
+    if value.ends_with("1.0") {
+        "1.0"
+    } else if value.ends_with("1.1") {
+        "1.1"
+    } else if value.ends_with("1.2") {
+        "1.2"
+    } else if value.ends_with("1.3") {
+        "1.3"
+    } else {
+        "1.2"
+    }
+}
+
 fn validate_tls_policy(
     field: &str,
     policy: &TlsPolicy,
     frontend: bool,
 ) -> Result<(), SnapshotError> {
-    if !policy.minimum_version.is_empty()
-        && policy.minimum_version != "1.2"
-        && policy.minimum_version != "1.3"
-    {
-        return Err(SnapshotError::invalid(format!(
-            "{field}.minimum_version must be 1.2 or 1.3"
-        )));
-    }
     if policy.certificate_path.is_empty() != policy.private_key_path.is_empty() {
         return Err(SnapshotError::invalid(format!(
             "{field} certificate and private key must be configured together"
@@ -1092,11 +1109,9 @@ fn validate_tls_policy(
 }
 
 fn validate_config(config: &ConfigSnapshot) -> Result<(), SnapshotError> {
-    if config.traffic_replay_enabled {
-        return Err(SnapshotError::unsupported(
-            "traffic replay is unsupported by the Rust dataplane",
-        ));
-    }
+    // `traffic_replay_enabled` stays in the snapshot so the checksum matches
+    // Go. The native process does not capture or replay; that is reported by
+    // the traffic API, and it does not reject the serving generation.
     if !config.high_memory_reject_threshold.is_finite()
         || config.high_memory_reject_threshold < 0.0
         || config.high_memory_reject_threshold > 1.0
@@ -1141,7 +1156,9 @@ fn validate_config(config: &ConfigSnapshot) -> Result<(), SnapshotError> {
         if listener.name.is_empty() || listener.name.len() > 128 {
             return Err(SnapshotError::invalid("listener name is invalid"));
         }
-        if listener.port == 0 || listener.port > u32::from(u16::MAX) {
+        // Port 0 is Go's empty `proxy.addr`: `net.Listen("tcp", "")` binds an
+        // ephemeral port instead of failing configuration validation.
+        if listener.port > u32::from(u16::MAX) {
             return Err(SnapshotError::invalid("listener port is invalid"));
         }
         validate_host(&listener.address, "listener address")?;

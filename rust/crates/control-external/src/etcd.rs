@@ -47,19 +47,31 @@ pub enum EtcdTlsVersion {
 }
 
 impl EtcdTlsVersion {
-    /// Parses the CP-CFG `minimum-version` value: `""` (no floor), `"1.2"`, or
-    /// `"1.3"`.
+    /// Parses a minimum version with Go `GetMinTLSVer` suffix rules.
+    ///
+    /// `""` keeps the default floor. A `1.3` suffix selects TLS 1.3 only.
+    /// `1.0` and `1.1` are accepted and floored at TLS 1.2, because rustls
+    /// cannot offer the older protocols. Any other non-empty value falls
+    /// back to TLS 1.2, matching Go's warning-and-default path.
     ///
     /// # Errors
     ///
-    /// Returns [`EtcdConfigError::UnsupportedTlsVersion`] for any other value.
+    /// This function does not reject a version string. The `Result` is kept
+    /// so existing callers can still propagate a configuration error.
+    #[allow(clippy::unnecessary_wraps)]
     pub fn parse(value: &str) -> Result<Option<Self>, EtcdConfigError> {
-        match value {
-            "" => Ok(None),
-            "1.2" => Ok(Some(Self::V1_2)),
-            "1.3" => Ok(Some(Self::V1_3)),
-            _ => Err(EtcdConfigError::UnsupportedTlsVersion),
+        if value.is_empty() {
+            return Ok(None);
         }
+        // Same suffix order as Go `GetMinTLSVer`. 1.0 and 1.1 cannot be
+        // offered by rustls, so they use the 1.2 floor.
+        if value.ends_with("1.0") || value.ends_with("1.1") || value.ends_with("1.2") {
+            return Ok(Some(Self::V1_2));
+        }
+        if value.ends_with("1.3") {
+            return Ok(Some(Self::V1_3));
+        }
+        Ok(Some(Self::V1_2))
     }
 }
 
@@ -987,17 +999,29 @@ mod tests {
     }
 
     #[test]
-    fn minimum_tls_version_parses_only_the_frozen_values() {
+    fn minimum_tls_version_follows_go_suffix_rules() {
         assert_eq!(EtcdTlsVersion::parse(""), Ok(None));
         assert_eq!(EtcdTlsVersion::parse("1.2"), Ok(Some(EtcdTlsVersion::V1_2)));
         assert_eq!(EtcdTlsVersion::parse("1.3"), Ok(Some(EtcdTlsVersion::V1_3)));
         assert_eq!(
+            EtcdTlsVersion::parse("1.0"),
+            Ok(Some(EtcdTlsVersion::V1_2)),
+            "TLS 1.0 is accepted and floored at 1.2"
+        );
+        assert_eq!(
             EtcdTlsVersion::parse("1.1"),
-            Err(EtcdConfigError::UnsupportedTlsVersion)
+            Ok(Some(EtcdTlsVersion::V1_2)),
+            "TLS 1.1 is accepted and floored at 1.2"
         );
         assert_eq!(
             EtcdTlsVersion::parse("tls1.3"),
-            Err(EtcdConfigError::UnsupportedTlsVersion)
+            Ok(Some(EtcdTlsVersion::V1_3)),
+            "Go matches the 1.3 suffix"
+        );
+        assert_eq!(
+            EtcdTlsVersion::parse("nope"),
+            Ok(Some(EtcdTlsVersion::V1_2)),
+            "an unrecognized value falls back to TLS 1.2"
         );
     }
 
