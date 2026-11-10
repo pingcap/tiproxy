@@ -77,6 +77,10 @@ func (lm *LoggerManager) watchCfg(ctx context.Context, cfgch <-chan *config.Conf
 					zap.NamedError("cfg marshal error", merr),
 				)
 			}
+<<<<<<< HEAD
+=======
+			lm.logger.Info("current config", zap.Any("cfg", acfg.Redacted()))
+>>>>>>> 89402815 (config, api, sqlreplay: redact object storage URL in gRPC and logs (#1412))
 		}
 	}
 }

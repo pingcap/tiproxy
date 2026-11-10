@@ -49,6 +49,7 @@ type Replay interface {
 	Close()
 }
 
+<<<<<<< HEAD
 type ReplayConfig struct {
 	Input    string
 	Username string
@@ -95,6 +96,8 @@ func (cfg *ReplayConfig) Validate() error {
 	return nil
 }
 
+=======
+>>>>>>> 89402815 (config, api, sqlreplay: redact object storage URL in gRPC and logs (#1412))
 type replay struct {
 	sync.Mutex
 	cfg              ReplayConfig

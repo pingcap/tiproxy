@@ -245,6 +245,10 @@ func printInfo(lg *zap.Logger) {
 		zap.String("Arch", runtime.GOARCH),
 	}
 	lg.Info("Welcome to TiProxy.", fields...)
+<<<<<<< HEAD
+=======
+	lg.Info("current config", zap.Any("cfg", cfg.Redacted()))
+>>>>>>> 89402815 (config, api, sqlreplay: redact object storage URL in gRPC and logs (#1412))
 }
 
 func (s *Server) preClose() {
