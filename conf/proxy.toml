@@ -88,6 +88,7 @@ graceful-close-conn-timeout = 15
 # [metering.azure]
 # account-name = "my-account"
 # Use either account-key or sas-token, or rely on Azure DefaultAzureCredential.
+# These secrets stay in the process config, but the admin API and logs omit them.
 # account-key = ""
 # sas-token = ""
 #
@@ -95,6 +96,7 @@ graceful-close-conn-timeout = 15
 # includes the app ID (for example, "my-bucket-1250000000").
 # [metering.cos]
 # Use an access key pair, assume-role-arn, or the Tencent Cloud default credential chain.
+# access-key, secret-access-key, and session-token are omitted from the admin API and logs.
 # assume-role-arn = ""
 # access-key = ""
 # secret-access-key = ""

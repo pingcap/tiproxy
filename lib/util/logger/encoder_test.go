@@ -6,8 +6,11 @@ package logger
 import (
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -38,4 +41,20 @@ func TestEncoder(t *testing.T) {
 	enc = enc.clone(false)
 	require.NoError(t, enc.AddReflected("ff", struct{ A string }{"\""}))
 	require.Equal(t, "[ff=\"{\\\"A\\\":\\\"\\\\\"\\\"}\"]", enc.line.String())
+}
+
+func TestRedactedConfigIsOneField(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.Metering.Endpoint = "https://bucket.s3.amazonaws.com/obj?X-Amz-Signature=sigsecret&X-Amz-Security-Token=tokensecret"
+	enc := NewTiDBEncoder(zap.NewProductionEncoderConfig())
+	buf, err := enc.EncodeEntry(zapcore.Entry{Level: zapcore.InfoLevel, Message: "current config", Time: time.Now()}, []zapcore.Field{
+		zap.Any("cfg", cfg),
+	})
+	require.NoError(t, err)
+	defer buf.Free()
+	line := buf.String()
+	require.Contains(t, line, `[cfg="`)
+	require.NotContains(t, line, "[cfg={")
+	require.NotContains(t, line, "sigsecret")
+	require.NotContains(t, line, "tokensecret")
 }
