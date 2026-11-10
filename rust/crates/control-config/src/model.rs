@@ -240,7 +240,7 @@ const FIELD_CONTRACT: &[FieldContract] = &[
     FieldContract {
         field: "security.encryption-key-path",
         reload: ReloadClass::Dynamic,
-        effect: FieldEffect::Unsupported,
+        effect: FieldEffect::Inert,
     },
     FieldContract {
         field: "security.cluster-tls.skip-ca",

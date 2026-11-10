@@ -340,9 +340,6 @@ impl CandidateValidator for ServingCandidateValidator {
         if effective.api_proxy_protocol() == "v2" {
             return Err("api_proxy_protocol_unsupported");
         }
-        if !effective.encryption_key_path().is_empty() {
-            return Err("encryption_key_path_unsupported");
-        }
         if !effective.ha_virtual_ip().is_empty() && !effective.ha_interface().is_empty() {
             return Err("ha_vip_unsupported");
         }
@@ -842,10 +839,6 @@ mod tests {
                 "api_proxy_protocol_unsupported",
             ),
             (
-                &b"security.encryption-key-path = \"/tmp/key\"\n"[..],
-                "encryption_key_path_unsupported",
-            ),
-            (
                 &b"ha.virtual-ip = \"192.0.2.10\"\nha.interface = \"eth0\"\n"[..],
                 "ha_vip_unsupported",
             ),
@@ -877,6 +870,20 @@ mod tests {
             )),
         )?;
         assert_eq!(vip_only.current().effective().ha_virtual_ip(), "192.0.2.10");
+        let encryption = ConfigNamespaceStore::from_toml_with_validator(
+            b"security.encryption-key-path = \"/tmp/key\"\n",
+            None,
+            Path::new("/tmp"),
+            Arc::new(ServingCandidateValidator::new(
+                SnapshotStore::new([])?,
+                None,
+            )),
+        )?;
+        assert_eq!(
+            encryption.current().effective().encryption_key_path(),
+            "/tmp/key",
+            "Go keeps security.encryption-key-path and still starts"
+        );
         Ok(())
     }
 
