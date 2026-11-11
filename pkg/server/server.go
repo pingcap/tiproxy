@@ -245,7 +245,7 @@ func printInfo(lg *zap.Logger, cfg *config.Config) {
 		zap.String("Arch", runtime.GOARCH),
 	}
 	lg.Info("Welcome to TiProxy.", fields...)
-	lg.Info("current config", zap.Any("cfg", cfg))
+	lg.Info("current config", zap.Any("cfg", cfg.Redacted()))
 }
 
 func (s *Server) preClose() {
