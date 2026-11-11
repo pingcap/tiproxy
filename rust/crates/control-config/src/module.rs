@@ -808,14 +808,20 @@ async fn read_until_disconnect(
 ) -> Result<(), ReaderError> {
     let mut connection = connector.connect().await.map_err(|error| match error {
         control_external::EtcdConnectError::StaleOwner => ReaderError::StaleOwner,
-        control_external::EtcdConnectError::Dependency(_) => ReaderError::Dependency,
+        control_external::EtcdConnectError::Dependency(_) => {
+            eprintln!("tiproxy-rs etcd connect failed: {error:?}");
+            ReaderError::Dependency
+        }
     })?;
     let response = connection
         .execute(|client| {
             Box::pin(client.get(CONFIG_PREFIX, Some(GetOptions::new().with_prefix())))
         })
         .await
-        .map_err(|error| map_reader_operation(&error))?;
+        .map_err(|error| {
+            eprintln!("tiproxy-rs etcd get /config failed: {error:?}");
+            map_reader_operation(&error)
+        })?;
     let revision = response
         .header()
         .map_or(0, etcd_client::ResponseHeader::revision);
