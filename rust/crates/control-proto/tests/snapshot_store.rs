@@ -242,12 +242,17 @@ fn expiry_ca_tls_policy_and_unsupported_configuration_are_rejected_atomically()
         .as_mut()
         .ok_or("missing config")?
         .traffic_replay_enabled = true;
-    let replay_error = store
-        .apply(4, replay, validation_time(), lineage_a())
-        .err()
-        .ok_or("traffic replay unexpectedly applied")?;
-    assert_eq!(replay_error.kind(), SnapshotErrorKind::Unsupported);
-    assert_eq!(store.current()?.ok_or("missing last-good")?.generation(), 3);
+    let applied = store.apply(4, replay, validation_time(), lineage_a())?;
+    assert!(
+        applied
+            .snapshot
+            .raw()
+            .config
+            .as_ref()
+            .is_some_and(|config| config.traffic_replay_enabled),
+        "the Go default traffic-replay flag is retained and does not reject serving"
+    );
+    assert_eq!(store.current()?.ok_or("missing last-good")?.generation(), 4);
     Ok(())
 }
 
@@ -589,11 +594,6 @@ fn listener_config_bound_cases() -> Vec<ConfigBoundCase> {
             "listeners must contain",
         ),
         (
-            "a listener port of zero",
-            Box::new(|config: &mut ConfigSnapshot| config.listeners[0].port = 0),
-            "listener port",
-        ),
-        (
             "a listener port beyond u16",
             Box::new(|config: &mut ConfigSnapshot| config.listeners[0].port = 70_000),
             "listener port",
@@ -701,7 +701,17 @@ fn config_bounds_are_rejected_without_disturbing_last_good() -> Result<(), Box<d
 
     // The same store still accepts a good generation afterwards: none of the
     // rejections left it wedged.
-    store.apply(2, valid_snapshot(valid), validation_time(), lineage_a())?;
+    store.apply(
+        2,
+        valid_snapshot(valid.clone()),
+        validation_time(),
+        lineage_a(),
+    )?;
     assert_eq!(store.current()?.ok_or("missing last-good")?.generation(), 2);
+    // Port 0 is Go's empty SQL address: the listener binds an ephemeral port.
+    let mut ephemeral = valid_snapshot(valid);
+    ephemeral.config.as_mut().ok_or("missing config")?.listeners[0].port = 0;
+    store.apply(3, ephemeral, validation_time(), lineage_a())?;
+    assert_eq!(store.current()?.ok_or("missing last-good")?.generation(), 3);
     Ok(())
 }

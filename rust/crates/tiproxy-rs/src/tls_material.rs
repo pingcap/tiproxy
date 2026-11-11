@@ -105,11 +105,38 @@ fn open_dir_capability(canonical_dir: &Path) -> Result<OwnedFd, &'static str> {
 /// # Errors
 ///
 /// Returns a bounded, payload-free reason (never the path or the material) when
-/// the path is not absolute, resolves outside the roots, has a symlink
-/// component, is not a regular file, or exceeds 16 MiB.
+/// the path cannot be resolved, escapes a configured root, has a symlink
+/// component inside a root, is not a regular file, or exceeds 16 MiB. A
+/// relative path is resolved against the process working directory. An empty
+/// root list does not add a jail.
 pub fn read_tls_material(path: &Path, roots: &TlsRoots) -> Result<Vec<u8>, &'static str> {
-    let selection = select_root(path, roots)?;
+    let path = absolute_tls_path(path)?;
+    if roots.roots.is_empty() {
+        // Go has no TLS-root jail. An empty allowlist reads the path the
+        // process working directory resolved, with the same size bound.
+        return read_unconfined(&path);
+    }
+    let selection = select_root(&path, roots)?;
     traverse_and_read(&selection)
+}
+
+fn absolute_tls_path(path: &Path) -> Result<PathBuf, &'static str> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        Ok(std::env::current_dir()
+            .map_err(|_| "tls material path is unavailable")?
+            .join(path))
+    }
+}
+
+fn read_unconfined(path: &Path) -> Result<Vec<u8>, &'static str> {
+    let mut file = File::open(path).map_err(|_| "tls material is unavailable")?;
+    let metadata = file.metadata().map_err(|_| "tls material is unavailable")?;
+    if !metadata.is_file() {
+        return Err("tls material must be a regular file");
+    }
+    read_bounded_prefix(&mut file)
 }
 
 /// The frozen root plus the root-relative parent components and the
@@ -241,9 +268,24 @@ mod tests {
     }
 
     #[test]
-    fn a_relative_path_is_rejected() {
+    fn a_missing_relative_path_is_unavailable() {
         let roots = open_tls_roots(&[]);
         assert!(read_tls_material(std::path::Path::new("ca.pem"), &roots).is_err());
+    }
+
+    #[test]
+    fn a_relative_path_with_no_roots_reads_from_the_working_directory() {
+        let name = format!("cptopo-rel-{}.pem", std::process::id());
+        let absolute = std::env::current_dir()
+            .unwrap_or_else(|error| unreachable!("cwd: {error}"))
+            .join(&name);
+        let _ = std::fs::remove_file(&absolute);
+        write(&absolute, b"rel-ca");
+        let roots = open_tls_roots(&[]);
+        let bytes = read_tls_material(std::path::Path::new(&name), &roots)
+            .unwrap_or_else(|error| unreachable!("relative read: {error}"));
+        assert_eq!(bytes, b"rel-ca");
+        let _ = std::fs::remove_file(&absolute);
     }
 
     #[test]

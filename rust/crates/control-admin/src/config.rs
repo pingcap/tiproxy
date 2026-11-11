@@ -64,6 +64,11 @@ pub trait ConfigAdmin: Send + Sync {
     /// Go `SetTOMLConfig`: partial document merged onto the current
     /// configuration, validated as a whole.
     fn put_config_toml(&self, data: Vec<u8>) -> AdminFuture<'_, Result<(), ConfigMutationError>>;
+    /// Whether the accepted configuration asks for traffic capture/replay.
+    ///
+    /// The native process does not capture. A true value makes the traffic
+    /// routes answer `unsupported`; false keeps Go's `disabled` answer.
+    fn traffic_replay_enabled(&self) -> bool;
 }
 
 /// In-memory [`ConfigAdmin`] with Go's per-process semantics, for tests and
@@ -199,6 +204,13 @@ impl ConfigAdmin for MemoryConfigAdmin {
             state.config = candidate;
             Ok(())
         })
+    }
+
+    fn traffic_replay_enabled(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.config.traffic_replay_enabled())
+            .unwrap_or(false)
     }
 }
 

@@ -993,7 +993,7 @@ timeout = "4.5s"
 }
 
 #[test]
-fn malformed_or_sub_millisecond_go_duration_rejects_atomically() {
+fn malformed_go_duration_rejects_and_sub_millisecond_projects_as_zero() {
     assert!(matches!(
         ConfigNamespaceStore::from_toml(
             br#"
@@ -1005,20 +1005,23 @@ idle = "1fortnight"
         ),
         Err(StoreError::TomlDecode(_))
     ));
-    assert!(matches!(
-        ConfigNamespaceStore::from_toml(
-            br#"
+    let store = ConfigNamespaceStore::from_toml(
+        br#"
 [proxy.frontend-keepalive]
 idle = "999us"
+cnt = -1
 "#,
-            None,
-            current_dir(),
-        ),
-        Err(StoreError::Config(ConfigError::InvalidField {
-            field: "proxy.frontend-keepalive",
-            class: "sub_millisecond"
-        }))
-    ));
+        None,
+        current_dir(),
+    )
+    .unwrap_or_else(|error| unreachable!("sub-millisecond keepalive is accepted: {error}"));
+    let serving = store
+        .current()
+        .effective()
+        .serving()
+        .unwrap_or_else(|error| unreachable!("serving projection: {error}"));
+    assert_eq!(serving.frontend_keepalive.idle_millis, 0);
+    assert_eq!(serving.frontend_keepalive.probe_count, 0);
 }
 
 #[test]

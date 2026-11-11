@@ -112,6 +112,8 @@ struct Options {
     metrics_addr: Option<SocketAddr>,
     admin_addr: Option<SocketAddr>,
     log_file: Option<PathBuf>,
+    /// Go `--advertise-addr`. Overrides `proxy.advertise-addr` when non-empty.
+    advertise_addr: Option<String>,
 }
 
 enum Command {
@@ -119,6 +121,8 @@ enum Command {
     Version,
     Help,
     IntegrationCapabilities,
+    /// Prints the machine-readable field contract and exits, like Go `--config-info json`.
+    ConfigInfo,
 }
 
 /// The integration harness's capability contract (DPL-07): only what
@@ -150,6 +154,10 @@ async fn main() -> ExitCode {
         }
         Command::IntegrationCapabilities => {
             println!("{INTEGRATION_CAPABILITIES}");
+            ExitCode::SUCCESS
+        }
+        Command::ConfigInfo => {
+            println!("{}", control_config::field_contract_json());
             ExitCode::SUCCESS
         }
         Command::Run(options) => match run(*options).await {
@@ -1584,7 +1592,7 @@ fn load_config_owner(options: &Options, process_id: &str) -> Result<ConfigOwner,
     let current_dir = env::current_dir().map_err(|_| "resolve current directory".to_owned())?;
     let base = ConfigModuleOptions {
         config_file: Some(options.config_file.clone()),
-        advertise_addr: None,
+        advertise_addr: options.advertise_addr.clone(),
         current_dir: current_dir.clone(),
         etcd: None,
         election: None,
@@ -1692,32 +1700,36 @@ fn etcd_tls(
     config: &control_config::ClientTlsConfig,
     allowed_tls_roots: &tls_material::TlsRoots,
 ) -> Result<Option<EtcdTlsConfig>, String> {
-    if config.skip_ca_verification {
-        return Err("config persistence does not support skip-ca-verification".to_owned());
-    }
-    let configured = config.ca_path.is_some()
+    // Same rule as topology cluster clients: skip-ca still performs the TLS
+    // handshake and does not require a CA. It must not fall back to plaintext.
+    let configured = config.skip_ca_verification
+        || config.ca_path.is_some()
         || config.certificate_path.is_some()
         || config.private_key_path.is_some();
     if !configured {
         return Ok(None);
     }
-    let ca_path = config
+    let policy = control_external::EtcdTlsPolicy {
+        minimum_version: control_external::EtcdTlsVersion::parse(&config.minimum_version)
+            .map_err(|_| "config persistence TLS minimum version".to_owned())?,
+        allowed_common_names: config
+            .allowed_common_names
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        skip_ca_verification: config.skip_ca_verification,
+    };
+    let ca = config
         .ca_path
         .as_deref()
-        .ok_or_else(|| "config persistence TLS requires a CA".to_owned())?;
-    let ca = tls_material::read_tls_material(ca_path, allowed_tls_roots)
+        .map(|path| tls_material::read_tls_material(path, allowed_tls_roots))
+        .transpose()
         .map_err(|_| "read config persistence TLS CA".to_owned())?;
     let certificate = read_optional_tls(config.certificate_path.as_deref(), allowed_tls_roots)?;
     let key = read_optional_tls(config.private_key_path.as_deref(), allowed_tls_roots)?;
-    EtcdTlsConfig::new(
-        Some(ca),
-        certificate,
-        key,
-        None,
-        control_external::EtcdTlsPolicy::default(),
-    )
-    .map(Some)
-    .map_err(|error| format!("validate config persistence TLS: {error}"))
+    EtcdTlsConfig::new(ca, certificate, key, None, policy)
+        .map(Some)
+        .map_err(|error| format!("validate config persistence TLS: {error}"))
 }
 
 fn read_optional_tls(
@@ -1983,6 +1995,14 @@ impl control_admin::ConfigAdmin for OwnerConfigAdmin {
     ) -> control_admin::AdminFuture<'_, Result<(), control_config::ConfigMutationError>> {
         Box::pin(self.handle.apply_local_toml(data))
     }
+
+    fn traffic_replay_enabled(&self) -> bool {
+        self.handle
+            .source()
+            .current()
+            .effective()
+            .traffic_replay_enabled()
+    }
 }
 
 /// `control_admin::DrainAdmin` over the dispatch owner: the operator label
@@ -2178,6 +2198,7 @@ fn parse_options(arguments: impl IntoIterator<Item = String>) -> Result<Command,
     let mut metrics_addr: Option<SocketAddr> = None;
     let mut admin_addr: Option<SocketAddr> = None;
     let mut log_file: Option<PathBuf> = None;
+    let mut advertise_addr: Option<String> = None;
     let mut routing_shadow_socket = None;
     let mut standalone = false;
     let mut socket_argument = false;
@@ -2186,6 +2207,28 @@ fn parse_options(arguments: impl IntoIterator<Item = String>) -> Result<Command,
             "--version" | "-V" => return Ok(Command::Version),
             "--help" | "-h" => return Ok(Command::Help),
             "--integration-capabilities" => return Ok(Command::IntegrationCapabilities),
+            "--config-info" => {
+                let format = arguments
+                    .next()
+                    .ok_or_else(|| "--config-info requires a format".to_owned())?;
+                if format != "json" {
+                    return Err("only support json format".to_owned());
+                }
+                return Ok(Command::ConfigInfo);
+            }
+            "--advertise-addr" => {
+                advertise_addr = Some(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--advertise-addr requires an address".to_owned())?,
+                );
+            }
+            // Go still accepts these flags and ignores their values.
+            "--log_encoder" | "--log_level" | "--log-encoder" | "--log-level" => {
+                arguments
+                    .next()
+                    .ok_or_else(|| format!("{argument} requires a value"))?;
+            }
             "--standalone" => standalone = true,
             "--config" => {
                 config_file = Some(PathBuf::from(
@@ -2313,6 +2356,7 @@ fn parse_options(arguments: impl IntoIterator<Item = String>) -> Result<Command,
         metrics_addr,
         admin_addr,
         log_file,
+        advertise_addr,
     })))
 }
 
@@ -2332,7 +2376,12 @@ impl startup::Teardown for legacy_router_shadow::consumer::Task {
 
 fn usage() -> &'static str {
     "Usage: tiproxy-rs --config <path> (--standalone | --control-socket <absolute-path> --control-uid <uid>) \
-     [--tls-root <absolute-path>]... [--drain-grace-seconds <n>] [--health-port <n>] [--metrics-addr <host:port>] [--admin-addr <host:port>] [--log-file <absolute-path>] [--routing-shadow-socket <absolute-path>]\n\
+     [--advertise-addr <addr>] [--tls-root <absolute-path>]... [--drain-grace-seconds <n>] [--health-port <n>] [--metrics-addr <host:port>] [--admin-addr <host:port>] [--log-file <absolute-path>] [--routing-shadow-socket <absolute-path>]\n\
+     tiproxy-rs --config-info json\n\
+     --advertise-addr overrides proxy.advertise-addr when non-empty. --admin-addr overrides the bind of api.addr. \
+     --tls-root is added to rust-dataplane.tls-allowed-roots. --log-file is the Rust log path. \
+     --drain-grace-seconds overrides proxy.graceful-close-conn-timeout. --health-port and --metrics-addr are CLI-only. \
+     Deprecated --log_encoder and --log_level are accepted and ignored.\n\
      Environment: TIPROXY_CONFIG, TIPROXY_CONTROL_SOCKET, TIPROXY_CONTROL_UID, TIPROXY_TLS_ROOTS"
 }
 
@@ -3323,6 +3372,7 @@ mod tests {
                 metrics_addr: None,
                 admin_addr: None,
                 log_file: None,
+                advertise_addr: None,
             }
         );
     }
@@ -3407,6 +3457,7 @@ mod tests {
             metrics_addr: None,
             admin_addr: None,
             log_file: None,
+            advertise_addr: None,
         };
         let source = ConfigNamespaceStore::from_toml(
             b"enable-traffic-replay = false\n",
@@ -3508,20 +3559,53 @@ pd-addrs = "routing-pd:2379"
     }
 
     #[test]
-    fn persistence_rejects_skip_ca_instead_of_silently_downgrading_to_plaintext() {
+    fn persistence_skip_ca_uses_tls_without_a_ca() {
         let source = ConfigNamespaceStore::from_toml(
             b"[security.cluster-tls]\nskip-ca = true\n",
             None,
             std::path::Path::new("/tmp"),
         )
         .unwrap_or_else(|error| unreachable!("valid source model: {error}"));
+        let client = config_persistence_client(
+            source.current().effective(),
+            &crate::tls_material::open_tls_roots(&[]),
+        )
+        .unwrap_or_else(|error| unreachable!("skip-ca is a TLS client: {error}"))
+        .unwrap_or_else(|| unreachable!("default PD address configures persistence"));
+        assert_eq!(
+            client.endpoints(),
+            ["https://127.0.0.1:2379"],
+            "skip-ca still performs the TLS handshake"
+        );
+    }
+
+    #[test]
+    fn advertise_addr_and_config_info_follow_the_go_cli() {
+        let command = parse_options([
+            "--config".to_owned(),
+            "/etc/tiproxy/tiproxy.toml".to_owned(),
+            "--standalone".to_owned(),
+            "--advertise-addr".to_owned(),
+            "192.0.2.10".to_owned(),
+            "--log_encoder".to_owned(),
+            "tidb".to_owned(),
+            "--log-level".to_owned(),
+            "info".to_owned(),
+        ]);
+        let Ok(Command::Run(options)) = command else {
+            unreachable!("deprecated log flags are ignored")
+        };
+        assert_eq!(options.advertise_addr.as_deref(), Some("192.0.2.10"));
+        assert!(matches!(
+            parse_options(["--config-info".to_owned(), "json".to_owned()]),
+            Ok(Command::ConfigInfo)
+        ));
+        let Err(error) = parse_options(["--config-info".to_owned(), "yaml".to_owned()]) else {
+            unreachable!("only json is supported");
+        };
         assert!(
-            config_persistence_client(
-                source.current().effective(),
-                &crate::tls_material::open_tls_roots(&[])
-            )
-            .is_err(),
-            "skip-ca without a CA must not silently construct a plaintext etcd client"
+            error.contains("only support json format"),
+            "unexpected error: {error}"
         );
     }
 

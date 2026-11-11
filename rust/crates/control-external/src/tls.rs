@@ -22,8 +22,8 @@
 //!
 //! | `skip_ca` | common names | server certificate verification |
 //! |-----------|--------------|---------------------------------|
-//! | false     | empty        | `WebPKI` chain + hostname |
-//! | false     | non-empty    | `WebPKI` chain + hostname, then exact leaf Subject-CN pin |
+//! | false     | empty        | CA chain only; hostname is not checked, matching Go |
+//! | false     | non-empty    | CA chain only, then exact leaf Subject-CN pin |
 //! | true      | empty        | chain/hostname skipped, TLS `CertificateVerify` signature still checked |
 //! | true      | non-empty    | as above, then exact leaf Subject-CN pin |
 //!
@@ -35,7 +35,6 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
@@ -73,7 +72,7 @@ pub(crate) fn build_client_config(
         .dangerous()
         .with_custom_certificate_verifier(verifier);
 
-    let config = match identity {
+    let mut config = match identity {
         Some((certificate_pem, key_pem)) => {
             let chain = parse_certificate_chain(certificate_pem)?;
             let key = parse_private_key(key_pem)?;
@@ -83,6 +82,10 @@ pub(crate) fn build_client_config(
         }
         None => builder.with_no_client_auth(),
     };
+    // PD/etcd serves gRPC and HTTP/1.1 on the same port. Without ALPN h2 the
+    // server answers HTTP/1.1, and the HTTP/2 framer reads "HTTP" as a frame
+    // longer than the default max frame size (FRAME_SIZE_ERROR).
+    config.alpn_protocols = vec![b"h2".to_vec()];
     Ok(Arc::new(config))
 }
 
@@ -106,9 +109,7 @@ fn build_server_verifier(
         if roots.is_empty() {
             return Err(EtcdConfigError::EmptyCaCertificate);
         }
-        WebPkiServerVerifier::builder_with_provider(Arc::new(roots), Arc::clone(provider))
-            .build()
-            .map_err(|_| EtcdConfigError::TlsSetup)?
+        Arc::new(CaOnlyServerVerification::new(roots, Arc::clone(provider)))
     };
     if policy.allowed_common_names.is_empty() {
         return Ok(inner);
@@ -142,6 +143,82 @@ fn parse_private_key(pem: &[u8]) -> Result<PrivateKeyDer<'static>, EtcdConfigErr
         .ok_or(EtcdConfigError::TlsSetup)?
         .map_err(|_| EtcdConfigError::TlsSetup)?;
     Ok(key.clone_key())
+}
+
+/// Verifies the server certificate chains to the configured CA and is a TLS
+/// server cert, and does not check the dialed hostname.
+///
+/// Go `CertInfo.verifyCA` leaves `VerifyOptions.DNSName` empty. Operator
+/// configs dial PD as `tc-pd:2379` while the serving certificate is issued
+/// for the peer DNS name, so a hostname check refuses the connection.
+#[derive(Debug)]
+struct CaOnlyServerVerification {
+    roots: Arc<RootCertStore>,
+    provider: Arc<CryptoProvider>,
+}
+
+impl CaOnlyServerVerification {
+    fn new(roots: RootCertStore, provider: Arc<CryptoProvider>) -> Self {
+        Self {
+            roots: Arc::new(roots),
+            provider,
+        }
+    }
+}
+
+impl ServerCertVerifier for CaOnlyServerVerification {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        let certificate = rustls::server::ParsedCertificate::try_from(end_entity)?;
+        rustls::client::verify_server_cert_signed_by_trust_anchor(
+            &certificate,
+            &self.roots,
+            intermediates,
+            now,
+            self.provider.signature_verification_algorithms.all,
+        )?;
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.provider.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.provider
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
 }
 
 /// Skips certificate-chain and hostname trust while still validating the
@@ -603,11 +680,11 @@ mod tests {
             }
             None => builder.with_no_client_auth(),
         };
-        Arc::new(
-            builder
-                .with_single_cert(parse_chain(cert_pem), parse_key(key_pem))
-                .unwrap_or_else(|error| unreachable!("server cert: {error}")),
-        )
+        let mut config = builder
+            .with_single_cert(parse_chain(cert_pem), parse_key(key_pem))
+            .unwrap_or_else(|error| unreachable!("server cert: {error}"));
+        config.alpn_protocols = vec![b"h2".to_vec()];
+        Arc::new(config)
     }
 
     /// Drives a full in-memory handshake, returning `Err` if either side
@@ -694,15 +771,16 @@ mod tests {
             .is_ok(),
             "trusted CA and correct hostname must succeed"
         );
-        // Correct CA but wrong hostname is rejected.
+        // Correct CA but a different dial name still succeeds. Go does not
+        // set VerifyOptions.DNSName for cluster-tls.
         assert!(
             do_handshake(
                 client_config(Some(&trusted_ca), None, &policy),
                 server_config(&server_cert, &server_key, None, rustls::ALL_VERSIONS),
                 "wrong-host.example",
             )
-            .is_err(),
-            "a hostname absent from the SAN must fail"
+            .is_ok(),
+            "a hostname absent from the SAN must still succeed when the CA matches"
         );
         // Client trusts a different CA than signed the leaf.
         assert!(

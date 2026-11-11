@@ -1,9 +1,13 @@
 # workdir = "./work"
 
-# Experimental out-of-process Rust SQL dataplane. When enabled, set
-# enable-traffic-replay = false and start tiproxy-rs with the same absolute
-# control socket, allowed UID, and TLS allowlist roots.
-# enable-traffic-replay = false
+# Experimental out-of-process Rust SQL dataplane. The Go default
+# enable-traffic-replay = true is accepted by tiproxy-rs and SQL serving
+# starts. Capture and replay are not implemented: the traffic API answers
+# "unsupported" while the flag is true and "disabled" while it is false.
+# The Go process still rejects rust-dataplane.enabled together with
+# enable-traffic-replay. Start tiproxy-rs with the same absolute control
+# socket, allowed UID, and TLS allowlist roots.
+# enable-traffic-replay = true
 # [rust-dataplane]
 # enabled = true
 # control-socket = "/var/run/tiproxy/tiproxy-rust-control.sock"

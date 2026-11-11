@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +18,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	controlpb "github.com/pingcap/tiproxy/pkg/controlbridge/pb"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/util/netutil"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -96,18 +96,9 @@ func (builder *SnapshotBuilder) Build(
 		return nil, ErrListenerRestartRequired
 	}
 
-	frontendKeepalive, err := buildKeepalive("proxy.frontend-keepalive", normalized.Proxy.FrontendKeepalive)
-	if err != nil {
-		return nil, err
-	}
-	healthyKeepalive, err := buildKeepalive("proxy.backend-healthy-keepalive", normalized.Proxy.BackendHealthyKeepalive)
-	if err != nil {
-		return nil, err
-	}
-	unhealthyKeepalive, err := buildKeepalive("proxy.backend-unhealthy-keepalive", normalized.Proxy.BackendUnhealthyKeepalive)
-	if err != nil {
-		return nil, err
-	}
+	frontendKeepalive := buildKeepalive(normalized.Proxy.FrontendKeepalive)
+	healthyKeepalive := buildKeepalive(normalized.Proxy.BackendHealthyKeepalive)
+	unhealthyKeepalive := buildKeepalive(normalized.Proxy.BackendUnhealthyKeepalive)
 	frontendTLS, err := builder.buildTLSPolicy("security.server-tls", normalized.Security.ServerSQLTLS)
 	if err != nil {
 		return nil, err
@@ -116,10 +107,7 @@ func (builder *SnapshotBuilder) Build(
 	if err != nil {
 		return nil, err
 	}
-	publicCIDRs, err := normalizeCIDRs(normalized.Proxy.PublicEndpoints)
-	if err != nil {
-		return nil, fmt.Errorf("validate proxy.public-endpoints: %w", err)
-	}
+	publicCIDRs := normalizeCIDRs(normalized.Proxy.PublicEndpoints)
 	gracefulWait, err := secondsToMillis("proxy.graceful-wait-before-shutdown", normalized.Proxy.GracefulWaitBeforeShutdown)
 	if err != nil {
 		return nil, err
@@ -200,39 +188,34 @@ func buildListeners(cfg *config.Config) ([]*controlpb.Listener, error) {
 	return listeners, nil
 }
 
-func buildKeepalive(field string, keepalive config.KeepAlive) (*controlpb.KeepalivePolicy, error) {
-	if keepalive.Idle < 0 || keepalive.Intvl < 0 || keepalive.Timeout < 0 || keepalive.Cnt < 0 {
-		return nil, fmt.Errorf("%s values must be nonnegative", field)
-	}
-	if keepalive.Cnt > math.MaxUint32 {
-		return nil, fmt.Errorf("%s probe count exceeds uint32", field)
-	}
-	idle, err := durationMillis(field+".idle", keepalive.Idle)
-	if err != nil {
-		return nil, err
-	}
-	interval, err := durationMillis(field+".intvl", keepalive.Intvl)
-	if err != nil {
-		return nil, err
-	}
-	timeout, err := durationMillis(field+".timeout", keepalive.Timeout)
-	if err != nil {
-		return nil, err
-	}
+func buildKeepalive(keepalive config.KeepAlive) *controlpb.KeepalivePolicy {
+	// Go Config.Check does not reject keepalive numbers. The socket layer
+	// applies only a positive duration and a positive probe count, and a
+	// duration is truncated to whole milliseconds.
 	return &controlpb.KeepalivePolicy{
 		Enabled:           keepalive.Enabled,
-		IdleMillis:        idle,
-		ProbeCount:        uint32(keepalive.Cnt),
-		IntervalMillis:    interval,
-		UserTimeoutMillis: timeout,
-	}, nil
+		IdleMillis:        durationMillis(keepalive.Idle),
+		ProbeCount:        probeCount(keepalive.Cnt),
+		IntervalMillis:    durationMillis(keepalive.Intvl),
+		UserTimeoutMillis: durationMillis(keepalive.Timeout),
+	}
 }
 
-func durationMillis(field string, value time.Duration) (uint64, error) {
-	if value > 0 && value < time.Millisecond {
-		return 0, fmt.Errorf("%s must be zero or at least one millisecond", field)
+func durationMillis(value time.Duration) uint64 {
+	if value < time.Millisecond {
+		return 0
 	}
-	return uint64(value / time.Millisecond), nil
+	return uint64(value / time.Millisecond)
+}
+
+func probeCount(count int) uint32 {
+	if count <= 0 {
+		return 0
+	}
+	if uint64(count) > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(count)
 }
 
 func secondsToMillis(field string, value int) (uint64, error) {
@@ -249,12 +232,6 @@ func secondsToMillis(field string, value int) (uint64, error) {
 func (builder *SnapshotBuilder) buildTLSPolicy(field string, cfg config.TLSConfig) (*controlpb.TlsPolicy, error) {
 	if cfg.AutoCerts {
 		return nil, fmt.Errorf("%s.auto-certs is unsupported by the Rust dataplane; use shared certificate files", field)
-	}
-	if (cfg.Cert == "") != (cfg.Key == "") {
-		return nil, fmt.Errorf("%s cert and key must be configured together", field)
-	}
-	if cfg.MinTLSVersion != "" && cfg.MinTLSVersion != "1.2" && cfg.MinTLSVersion != "1.3" {
-		return nil, fmt.Errorf("%s minimum TLS version must be 1.2 or 1.3", field)
 	}
 	paths := []struct {
 		name  string
@@ -289,19 +266,41 @@ func (builder *SnapshotBuilder) buildTLSPolicy(field string, cfg config.TLSConfi
 		CertificatePath:    resolved["cert"],
 		PrivateKeyPath:     resolved["key"],
 		CaPath:             resolved["ca"],
-		MinimumVersion:     cfg.MinTLSVersion,
+		MinimumVersion:     effectiveMinTLSVersion(cfg.MinTLSVersion),
 		AllowedCommonNames: allowedCN,
 		SkipCaVerification: cfg.SkipCA,
 	}, nil
 }
 
+func effectiveMinTLSVersion(value string) string {
+	switch {
+	case strings.HasSuffix(value, "1.0"):
+		return "1.0"
+	case strings.HasSuffix(value, "1.1"):
+		return "1.1"
+	case strings.HasSuffix(value, "1.2"):
+		return "1.2"
+	case strings.HasSuffix(value, "1.3"):
+		return "1.3"
+	default:
+		return "1.2"
+	}
+}
+
 func (builder *SnapshotBuilder) validateTLSPath(path string) (string, error) {
 	if !filepath.IsAbs(path) {
-		return "", fmt.Errorf("path must be absolute")
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve path: %w", err)
+		}
+		path = absolute
 	}
 	canonical, err := filepath.EvalSymlinks(filepath.Clean(path))
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	if len(builder.allowedTLSRoots) == 0 {
+		return canonical, nil
 	}
 	for _, root := range builder.allowedTLSRoots {
 		relative, err := filepath.Rel(root, canonical)
@@ -312,22 +311,15 @@ func (builder *SnapshotBuilder) validateTLSPath(path string) (string, error) {
 	return "", fmt.Errorf("path is outside configured TLS roots")
 }
 
-func normalizeCIDRs(values []string) ([]string, error) {
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		prefix, err := netip.ParsePrefix(value)
-		if err != nil {
-			address, addrErr := netip.ParseAddr(value)
-			if addrErr != nil {
-				return nil, fmt.Errorf("invalid IP or CIDR %q", value)
-			}
-			prefix = netip.PrefixFrom(address, address.BitLen())
-		}
-		result = append(result, prefix.Masked().String())
+func normalizeCIDRs(values []string) []string {
+	// Same parser the SQL server uses: bare addresses become /32, invalid
+	// entries are skipped, and the survivors keep their order and duplicates.
+	cidrs, _ := netutil.ParseCIDRList(values)
+	result := make([]string, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		result = append(result, cidr.String())
 	}
-	slices.Sort(result)
-	return slices.Compact(result), nil
+	return result
 }
 
 func cloneListeners(listeners []*controlpb.Listener) []*controlpb.Listener {

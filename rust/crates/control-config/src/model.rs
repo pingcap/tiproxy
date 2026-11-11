@@ -16,7 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -51,6 +51,231 @@ pub enum ConfigError {
     },
 }
 
+/// Whether a published field can change without restarting the process.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReloadClass {
+    /// Accepted and published for the next consumer.
+    Dynamic,
+    /// A post-startup change rejects the whole candidate.
+    Restart,
+}
+
+/// What the native process does with a modeled Go field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldEffect {
+    /// The native process applies the same value Go applies.
+    Applied,
+    /// The value round-trips for checksum and storage, and has no runtime effect.
+    Inert,
+    /// Activating the value rejects the serving candidate before publication.
+    Unsupported,
+}
+
+/// One machine-readable compatibility entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FieldContract {
+    /// Stable field name. `a+b` is a pair that is unsupported together.
+    pub field: &'static str,
+    /// Reload class enforced by [`EffectiveConfig::check_reload_from`].
+    pub reload: ReloadClass,
+    /// Native-process effect. This is the runtime policy, not the Go struct tag.
+    pub effect: FieldEffect,
+}
+
+/// Compatibility contract for the fields whose Go and native-process behavior
+/// is not obvious from the schema. Restart-required names match
+/// [`EffectiveConfig::check_reload_from`]. `balance.routing-rule` stays
+/// dynamic: existing routers keep the rule they were built with, and later
+/// routers read the new value, which is also what the Go process does.
+#[must_use]
+pub fn field_contract() -> &'static [FieldContract] {
+    FIELD_CONTRACT
+}
+
+/// JSON document printed by `tiproxy-rs --config-info json`.
+#[must_use]
+pub fn field_contract_json() -> String {
+    let mut out = String::from("{\"component\":\"TiProxy Server\",\"parameters\":[");
+    for (index, field) in FIELD_CONTRACT.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        let reload = match field.reload {
+            ReloadClass::Dynamic => "dynamic",
+            ReloadClass::Restart => "restart",
+        };
+        let effect = match field.effect {
+            FieldEffect::Applied => "applied",
+            FieldEffect::Inert => "inert",
+            FieldEffect::Unsupported => "unsupported",
+        };
+        out.push_str("{\"key\":\"");
+        out.push_str(field.field);
+        out.push_str("\",\"reload\":\"");
+        out.push_str(reload);
+        out.push_str("\",\"effect\":\"");
+        out.push_str(effect);
+        out.push_str("\"}");
+    }
+    out.push_str("]}");
+    out
+}
+
+const FIELD_CONTRACT: &[FieldContract] = &[
+    FieldContract {
+        field: "workdir",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "proxy.addr",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "proxy.advertise-addr",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "proxy.pd-addrs",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "proxy.port-range",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "api",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "api.proxy-protocol",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Unsupported,
+    },
+    FieldContract {
+        field: "log.encoder",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "log.simple",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "ha",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "ha.virtual-ip",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "ha.interface",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Inert,
+    },
+    FieldContract {
+        field: "ha.garp-burst-count",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Inert,
+    },
+    FieldContract {
+        field: "ha.garp-refresh-count",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Inert,
+    },
+    FieldContract {
+        field: "ha.virtual-ip+ha.interface",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Unsupported,
+    },
+    FieldContract {
+        field: "metering",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "rust-dataplane",
+        reload: ReloadClass::Restart,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "balance.routing-rule",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "enable-traffic-replay",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Inert,
+    },
+    FieldContract {
+        field: "security.server-tls.auto-certs",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Unsupported,
+    },
+    FieldContract {
+        field: "security.server-http-tls.auto-certs",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Unsupported,
+    },
+    FieldContract {
+        field: "security.cluster-tls.auto-certs",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Inert,
+    },
+    FieldContract {
+        field: "security.sql-tls.auto-certs",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Inert,
+    },
+    FieldContract {
+        field: "security.encryption-key-path",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Inert,
+    },
+    FieldContract {
+        field: "security.cluster-tls.skip-ca",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "proxy.public-endpoints",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Applied,
+    },
+    FieldContract {
+        field: "proxy.frontend-keepalive",
+        reload: ReloadClass::Dynamic,
+        effect: FieldEffect::Applied,
+    },
+];
+
+/// Go `GetMinTLSVer`: a suffix of `1.0`, `1.1`, `1.2`, or `1.3` selects that
+/// version, and an empty or unrecognized value falls back to `1.2`.
+#[must_use]
+pub fn go_min_tls_version(value: &str) -> &'static str {
+    if value.ends_with("1.0") {
+        "1.0"
+    } else if value.ends_with("1.1") {
+        "1.1"
+    } else if value.ends_with("1.2") {
+        "1.2"
+    } else if value.ends_with("1.3") {
+        "1.3"
+    } else {
+        "1.2"
+    }
+}
+
 /// Source lineages observed while constructing one immutable snapshot.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SourceRevision {
@@ -69,7 +294,10 @@ pub struct ClientTlsConfig {
     pub certificate_path: Option<Arc<Path>>,
     /// Optional client private-key path.
     pub private_key_path: Option<Arc<Path>>,
-    /// Minimum accepted TLS version (`1.2` or `1.3`).
+    /// Effective minimum TLS version (`1.0`, `1.1`, `1.2`, or `1.3`).
+    ///
+    /// This is Go's `GetMinTLSVer` result. The native TLS stack's floor is
+    /// 1.2, so `1.0` and `1.1` are accepted and then negotiated as 1.2.
     pub minimum_version: Arc<str>,
     /// Whether server CA verification is disabled.
     pub skip_ca_verification: bool,
@@ -298,7 +526,7 @@ pub struct ServingConfig {
     pub graceful_close_millis: u64,
     /// Restart-required SQL listeners.
     pub listeners: Arc<[ServingListener]>,
-    /// Canonical, sorted public endpoint CIDRs.
+    /// Public endpoint networks from Go `ParseCIDRList`, in input order.
     pub public_cidrs: Arc<[Arc<str>]>,
     /// Frontend server TLS policy.
     pub frontend_tls: ServingTlsConfig,
@@ -330,7 +558,7 @@ pub struct ServingListener {
     pub name: Arc<str>,
     /// Host/IP without brackets.
     pub address: Arc<str>,
-    /// Nonzero TCP port.
+    /// TCP port. Zero is the empty `proxy.addr` sentinel.
     pub port: u16,
 }
 
@@ -604,7 +832,7 @@ impl EffectiveConfig {
     /// represented by the serving contract.
     pub fn serving(&self) -> Result<ServingConfig, ConfigError> {
         let listeners = serving_listeners(&self.proxy)?;
-        let public_cidrs = normalize_public_endpoints(&self.proxy.online.public_endpoints)?;
+        let public_cidrs = go_public_cidrs(&self.proxy.online.public_endpoints);
         Ok(ServingConfig {
             max_connections: self.proxy.online.max_connections,
             high_memory_reject_threshold: self.proxy.online.high_memory_usage_reject_threshold,
@@ -618,18 +846,13 @@ impl EffectiveConfig {
                     }
                 })?
             },
-            frontend_keepalive: serving_keepalive(
-                "proxy.frontend-keepalive",
-                &self.proxy.online.frontend_keepalive,
-            )?,
+            frontend_keepalive: serving_keepalive(&self.proxy.online.frontend_keepalive),
             healthy_backend_keepalive: serving_keepalive(
-                "proxy.backend-healthy-keepalive",
                 &self.proxy.online.backend_healthy_keepalive,
-            )?,
+            ),
             unhealthy_backend_keepalive: serving_keepalive(
-                "proxy.backend-unhealthy-keepalive",
                 &self.proxy.online.backend_unhealthy_keepalive,
-            )?,
+            ),
             proxy_protocol_v2: self.proxy.online.proxy_protocol == "v2",
             require_backend_tls: self.security.require_backend_tls,
             graceful_wait_millis: seconds_to_millis(
@@ -777,6 +1000,33 @@ impl EffectiveConfig {
     #[must_use]
     pub fn api_addr(&self) -> &str {
         &self.api.addr
+    }
+
+    /// Returns `api.proxy-protocol`. Only `v2` has a Go runtime effect, and
+    /// the native admin listener rejects that activation.
+    #[must_use]
+    pub fn api_proxy_protocol(&self) -> &str {
+        &self.api.proxy_protocol
+    }
+
+    /// Returns `security.encryption-key-path`. Go uses it for traffic capture.
+    #[must_use]
+    pub fn encryption_key_path(&self) -> &str {
+        &self.security.encryption_key_path
+    }
+
+    /// Returns `ha.virtual-ip`. A non-empty value is excluded from advertise
+    /// address selection. Pairing it with [`Self::ha_interface`] asks Go to
+    /// own the VIP, which the native process rejects.
+    #[must_use]
+    pub fn ha_virtual_ip(&self) -> &str {
+        &self.ha.virtual_ip
+    }
+
+    /// Returns `ha.interface`.
+    #[must_use]
+    pub fn ha_interface(&self) -> &str {
+        &self.ha.interface
     }
 
     /// Returns whether traffic replay is enabled.
@@ -2216,17 +2466,9 @@ fn validate_balance(balance: &mut BalanceConfig) -> Result<(), ConfigError> {
 }
 
 fn validate_tls(field: &'static str, tls: &TlsConfig) -> Result<(), ConfigError> {
-    if tls.cert.is_empty() != tls.key.is_empty() {
-        return invalid(field, "partial_cert_key");
-    }
-    if !tls.min_tls_version.is_empty() && !matches!(tls.min_tls_version.as_str(), "1.2" | "1.3") {
-        return invalid(field, "unsupported_minimum_version");
-    }
-    for path in [&tls.cert, &tls.key, &tls.ca] {
-        if !path.is_empty() && !Path::new(path).is_absolute() {
-            return invalid(field, "relative_path");
-        }
-    }
+    // Go `Config.Check` does not reject a partial certificate pair, a relative
+    // path, or a TLS version. Incomplete material fails later, when TLS state
+    // is built. Versions follow `GetMinTLSVer` in the serving projection.
     if tls
         .cert_allowed_cn
         .iter()
@@ -2242,7 +2484,7 @@ fn client_tls(tls: &TlsConfig) -> ClientTlsConfig {
         ca_path: path_arc(&tls.ca),
         certificate_path: path_arc(&tls.cert),
         private_key_path: path_arc(&tls.key),
-        minimum_version: Arc::from(tls.min_tls_version.as_str()),
+        minimum_version: Arc::from(go_min_tls_version(&tls.min_tls_version)),
         skip_ca_verification: tls.skip_ca,
         allowed_common_names: normalized_common_names(&tls.cert_allowed_cn),
     }
@@ -2253,7 +2495,7 @@ fn serving_tls(tls: &TlsConfig) -> ServingTlsConfig {
         certificate_path: path_arc(&tls.cert),
         private_key_path: path_arc(&tls.key),
         ca_path: path_arc(&tls.ca),
-        minimum_version: Arc::from(tls.min_tls_version.as_str()),
+        minimum_version: Arc::from(go_min_tls_version(&tls.min_tls_version)),
         allowed_common_names: normalized_common_names(&tls.cert_allowed_cn),
         skip_ca_verification: tls.skip_ca,
     }
@@ -2269,50 +2511,49 @@ fn normalized_common_names(names: &[String]) -> Arc<[Arc<str>]> {
     Arc::from(normalized)
 }
 
-fn serving_keepalive(
-    field: &'static str,
-    keepalive: &KeepAliveConfig,
-) -> Result<ServingKeepalive, ConfigError> {
-    if keepalive.idle < 0 || keepalive.count < 0 || keepalive.interval < 0 || keepalive.timeout < 0
-    {
-        return invalid(field, "negative");
-    }
-    for value in [keepalive.idle, keepalive.interval, keepalive.timeout] {
-        if value > 0 && value < NANOS_PER_MILLISECOND {
-            return invalid(field, "sub_millisecond");
-        }
-    }
-    Ok(ServingKeepalive {
+fn serving_keepalive(keepalive: &KeepAliveConfig) -> ServingKeepalive {
+    // Go `Config.Check` accepts every keepalive number. A negative value is
+    // not applied by the socket layer. A positive duration is truncated to
+    // whole milliseconds, so a sub-millisecond value projects as zero instead
+    // of rejecting the candidate.
+    ServingKeepalive {
         enabled: keepalive.enabled,
-        idle_millis: u64::try_from(keepalive.idle / NANOS_PER_MILLISECOND).map_err(|_| {
-            ConfigError::InvalidField {
-                field,
-                class: "out_of_range",
-            }
-        })?,
-        probe_count: u32::try_from(keepalive.count).map_err(|_| ConfigError::InvalidField {
-            field,
-            class: "out_of_range",
-        })?,
-        interval_millis: u64::try_from(keepalive.interval / NANOS_PER_MILLISECOND).map_err(
-            |_| ConfigError::InvalidField {
-                field,
-                class: "out_of_range",
-            },
-        )?,
-        user_timeout_millis: u64::try_from(keepalive.timeout / NANOS_PER_MILLISECOND).map_err(
-            |_| ConfigError::InvalidField {
-                field,
-                class: "out_of_range",
-            },
-        )?,
-    })
+        idle_millis: duration_millis(keepalive.idle),
+        probe_count: probe_count(keepalive.count),
+        interval_millis: duration_millis(keepalive.interval),
+        user_timeout_millis: duration_millis(keepalive.timeout),
+    }
+}
+
+fn duration_millis(value: i64) -> u64 {
+    if value <= 0 {
+        0
+    } else {
+        u64::try_from(value / NANOS_PER_MILLISECOND).unwrap_or(u64::MAX)
+    }
+}
+
+fn probe_count(count: i64) -> u32 {
+    if count <= 0 {
+        0
+    } else {
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
 }
 
 fn serving_listeners(proxy: &ProxyConfig) -> Result<Vec<ServingListener>, ConfigError> {
     let addrs = split_addr_list(&proxy.addr);
     if addrs.is_empty() {
-        return invalid("proxy.addr", "empty_listener");
+        if !proxy.port_range.is_empty() {
+            return invalid("proxy.addr", "empty_with_port_range");
+        }
+        // Go `GetSQLAddrs` returns `[""]` and `net.Listen("tcp", "")` binds an
+        // ephemeral port. Port 0 is that sentinel for the listener layer.
+        return Ok(vec![ServingListener {
+            name: Arc::from("sql-0"),
+            address: Arc::from(""),
+            port: 0,
+        }]);
     }
     let addresses = if proxy.port_range.is_empty() {
         addrs
@@ -2357,42 +2598,28 @@ fn seconds_to_millis(field: &'static str, seconds: i64) -> Result<u64, ConfigErr
         })
 }
 
-fn normalize_public_endpoints(values: &[String]) -> Result<Vec<Arc<str>>, ConfigError> {
-    let mut result = values
+/// Go `netutil.ParseCIDRList`: a value without `/` is parsed as `/32` (including
+/// IPv6), invalid entries are skipped, and the surviving network addresses keep
+/// their input order and duplicates. `Config.Check` accepts the raw list; the
+/// SQL server logs a warning and keeps using the entries that parsed.
+fn go_public_cidrs(values: &[String]) -> Vec<Arc<str>> {
+    values
         .iter()
-        .map(|value| normalize_ip_prefix(value))
-        .collect::<Result<Vec<_>, _>>()?;
-    result.sort();
-    result.dedup();
-    Ok(result.into_iter().map(Arc::<str>::from).collect())
+        .filter_map(|value| {
+            let spec = if value.contains('/') {
+                value.clone()
+            } else {
+                format!("{value}/32")
+            };
+            mask_cidr(&spec).map(Arc::<str>::from)
+        })
+        .collect()
 }
 
-fn normalize_ip_prefix(value: &str) -> Result<String, ConfigError> {
-    let value = value.trim();
-    let (address, prefix) = if let Some((address, prefix)) = value.split_once('/') {
-        let address = address
-            .parse::<IpAddr>()
-            .map_err(|_| ConfigError::InvalidField {
-                field: "proxy.public-endpoints",
-                class: "invalid_ip_or_cidr",
-            })?;
-        let prefix = prefix
-            .parse::<u8>()
-            .map_err(|_| ConfigError::InvalidField {
-                field: "proxy.public-endpoints",
-                class: "invalid_ip_or_cidr",
-            })?;
-        (address, prefix)
-    } else {
-        let address = value
-            .parse::<IpAddr>()
-            .map_err(|_| ConfigError::InvalidField {
-                field: "proxy.public-endpoints",
-                class: "invalid_ip_or_cidr",
-            })?;
-        let prefix = if address.is_ipv4() { 32 } else { 128 };
-        (address, prefix)
-    };
+fn mask_cidr(spec: &str) -> Option<String> {
+    let (address, prefix) = spec.rsplit_once('/')?;
+    let address = address.parse::<IpAddr>().ok()?;
+    let prefix = prefix.parse::<u8>().ok()?;
     match address {
         IpAddr::V4(address) if prefix <= 32 => {
             let bits = u32::from(address);
@@ -2401,11 +2628,7 @@ fn normalize_ip_prefix(value: &str) -> Result<String, ConfigError> {
             } else {
                 u32::MAX << (32 - prefix)
             };
-            Ok(format!(
-                "{}/{}",
-                std::net::Ipv4Addr::from(bits & mask),
-                prefix
-            ))
+            Some(format!("{}/{}", Ipv4Addr::from(bits & mask), prefix))
         }
         IpAddr::V6(address) if prefix <= 128 => {
             let bits = u128::from(address);
@@ -2414,13 +2637,9 @@ fn normalize_ip_prefix(value: &str) -> Result<String, ConfigError> {
             } else {
                 u128::MAX << (128 - prefix)
             };
-            Ok(format!(
-                "{}/{}",
-                std::net::Ipv6Addr::from(bits & mask),
-                prefix
-            ))
+            Some(format!("{}/{}", Ipv6Addr::from(bits & mask), prefix))
         }
-        IpAddr::V4(_) | IpAddr::V6(_) => invalid("proxy.public-endpoints", "invalid_ip_or_cidr"),
+        IpAddr::V4(_) | IpAddr::V6(_) => None,
     }
 }
 
@@ -2493,7 +2712,7 @@ fn normalize_ns_server(value: &str) -> Result<String, ConfigError> {
     }
     // A bare IPv6 literal has no port (Go `SplitHostPort` fails), so Go falls back
     // to `net.JoinHostPort(server, "53")` → `[<ip>]:53`.
-    if value.parse::<std::net::Ipv6Addr>().is_ok() {
+    if value.parse::<Ipv6Addr>().is_ok() {
         return Ok(format!("[{value}]:53"));
     }
     // Plain `host:port` (hostname or IPv4).

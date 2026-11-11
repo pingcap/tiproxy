@@ -121,7 +121,7 @@
       "anchors": [
         {"path": "pkg/manager/cert/manager_test.go", "contains": "func TestRotate"},
         {"path": "pkg/manager/cert/manager_test.go", "contains": "func TestWatchConfig"},
-        {"path": "pkg/controlbridge/snapshot.go", "contains": "minimum TLS version must be 1.2 or 1.3"},
+        {"path": "pkg/controlbridge/snapshot.go", "contains": "func effectiveMinTLSVersion"},
         {"path": "rust/crates/control-config/src/source.rs", "contains": "pub fn refresh_external_material"},
         {"path": "rust/crates/tiproxy-rs/src/config_composition.rs", "contains": "pub struct ServingCandidateValidator"},
         {"path": "rust/crates/control-config/tests/source.rs", "contains": "fn external_material_refresh_advances_generation_and_retains_last_good_on_rejection"}

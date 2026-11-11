@@ -41,6 +41,7 @@ type ConfigManager struct {
 
 	checkFileInterval time.Duration
 	fileContent       []byte // used to compare whether the config file has changed
+	fileLoaded        bool   // distinguishes the initial nil buffer from an empty file
 	sts               struct {
 		sync.Mutex
 		listeners []chan<- *config.Config

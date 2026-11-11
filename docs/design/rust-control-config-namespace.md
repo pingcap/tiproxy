@@ -123,9 +123,9 @@ old reader/election, and campaign with the new transport; owner-fenced writes
 remain unavailable throughout the handoff. Transport construction participates
 in prospective candidate validation, so an unsupported replacement retains the
 last-good source generation instead of publishing and then failing. In
-particular, `cluster-tls.skip-ca = true` is rejected explicitly by the current
-safe Rust etcd transport; it can never silently downgrade the owner connection
-to plaintext.
+particular, `cluster-tls.skip-ca = true` still opens a TLS connection and
+does not require a CA. It does not downgrade the owner connection to
+plaintext.
 
 Binary/build/process facts are not configuration: the composition root passes
 `TopologyRuntimeIdentity` directly to the CP-TOPO constructor. CP-TOPO combines
@@ -208,10 +208,13 @@ would activate the value is rejected by the serving validator.
 | --- | --- | --- |
 | `workdir` | Restart | Modeled and checksummed; process/filesystem ownership is fixed at startup. |
 | `proxy.addr`, `proxy.advertise-addr`, `proxy.pd-addrs`, `proxy.port-range` | Restart | Modeled; SQL bind and topology identity are fixed at startup. |
-| `api.addr`, `api.proxy-protocol` | Restart | Modeled; CP-ADMIN will own the HTTP listener. |
+| `api.addr` | Restart | The native process binds it. `--admin-addr` overrides only that bind. |
 | `log.encoder`, `log.simple` | Restart | Modeled; encoder construction is fixed at startup. |
-| `balance.routing-rule` | Restart | Modeled; listener-group construction is fixed at startup. |
-| `ha.virtual-ip`, `ha.interface`, `ha.garp-burst-count`, `ha.garp-refresh-count` | Restart | Modeled; CP-HA consumes them at startup. |
+| `api.proxy-protocol` | Restart, `v2` unsupported | Retained for the checksum. `v2` is rejected because the native admin listener does not apply PROXY protocol. Any other value is inert. |
+| `balance.routing-rule` | Dynamic | Accepted for routers created after the reload. An existing router keeps the rule it was built with, matching the Go process. |
+| `ha.virtual-ip` | Restart, applied | Excluded when the process selects an advertise address. |
+| `ha.interface`, `ha.garp-burst-count`, `ha.garp-refresh-count` | Restart, inert | Retained. VIP ownership and GARP are not implemented. |
+| `ha.virtual-ip` with `ha.interface` | Restart, unsupported | Go binds the VIP only when both are set. That activation is rejected. |
 | `metering.type`, `region`, `bucket`, `prefix`, `endpoint`, `shared-pool-id`; every field below `metering.aws`, `.oss`, `.cos`, `.azure`, `.localfs` | Restart | Modeled with secret-safe debug output; CP-METER consumes them at startup. |
 | `rust-dataplane.enabled`, `.control-socket`, `.routing-shadow-socket`, `.allowed-uid`, `.tls-allowed-roots`, `.metrics-owner-port` | Restart | Modeled; process/transport, TLS trust roots, observer socket, and metrics-owner bind cannot change online. A nonzero metrics-owner port must differ from every SQL/API listener port. |
 | `proxy.max-connections`, `proxy.high-memory-usage-reject-threshold`, `proxy.conn-buffer-size` | Dynamic | Applied by the Rust SQL serving snapshot. |
@@ -219,16 +222,16 @@ would activate the value is rejected by the serving validator.
 | `proxy.proxy-protocol`, `.graceful-wait-before-shutdown`, `.graceful-close-conn-timeout`, `.public-endpoints` | Dynamic | Applied by the Rust SQL serving snapshot, including the latest graceful-close value at process drain. |
 | every `name`, `pd-addrs`, `ns-servers` below `proxy.backend-clusters` | Dynamic | Projected in stable order for CP-TOPO. |
 | `proxy.fail-backend-list`, `proxy.failover-timeout` | Dynamic | Retained for CP-ROUTE; no effect is claimed before #147. |
-| `security.encryption-key-path` | Dynamic | Modeled and checksummed; CP-ADMIN consumes it. |
+| `security.encryption-key-path` | Dynamic, inert | Retained, including a non-empty path, so a Go config still starts. Traffic capture is not implemented and does not read the key. |
 | `security.require-backend-tls` | Dynamic | Applied by the Rust SQL serving snapshot. |
-| `cert`, `key`, `ca`, `min-tls-version`, `cert-allowed-cn`, `skip-ca` below each of `security.server-tls`, `.server-http-tls`, `.cluster-tls`, `.sql-tls` | Dynamic | All material is validated and content-watched atomically. SQL front/back is applied now; HTTP and cluster projections are ready for CP-ADMIN/CP-TOPO. `cluster-tls.skip-ca = true` is an explicit unsupported candidate while the Rust config owner uses the safe etcd transport. |
+| `cert`, `key`, `ca`, `min-tls-version`, `cert-allowed-cn`, `skip-ca` below each of `security.server-tls`, `.server-http-tls`, `.cluster-tls`, `.sql-tls` | Dynamic | `Config.Check` accepts every minimum version, a relative path, and a certificate without its key. The effective minimum version follows Go `GetMinTLSVer`; the native handshake floor is TLS 1.2, and only a `1.3` suffix selects TLS 1.3 alone. A relative path is resolved against the process working directory. A configured `--tls-root` or `tls-allowed-roots` still confines the read; an empty allowlist does not add a jail. A certificate and key are still required together when a server identity is built. `cluster-tls.skip-ca = true` keeps the etcd connection on TLS and does not require a CA. |
 | `auto-certs` below global `server-tls` / `server-http-tls` and namespace `frontend.security` | Unsupported | Canonically round-tripped, then rejected explicitly because #146 does not generate server certificates. |
 | `auto-certs` below global `cluster-tls` / `sql-tls` and namespace `backend.security` | Dynamic, inert | Canonically round-tripped; the legacy client-side shape has no serving meaning. |
 | `rsa-key-size`, `autocert-expire-duration` below every global TLS block | Dynamic, inert unless auto-certs | Canonically round-tripped; because auto-certs is unsupported, these fields do not generate material in #146. |
 | `log.level`, every `filename`, `max-size`, `max-days`, `max-backups` below `log.log-file` | Dynamic | Level is applied by CP-001; file sink changes are retained for CP-ADMIN/log ownership. |
 | `balance.label-name`, `.policy`, `.routing-policy`; `migrations-per-second` below `.status`, `.health`, `.memory`, `.cpu`, `.location`, `.conn-count`; `.conn-count.count-ratio-threshold` | Dynamic | Validated and retained for CP-ROUTE. |
 | every `labels.<key>` | Dynamic | Stable map projection for CP-TOPO/CP-ROUTE. |
-| `enable-traffic-replay` | Dynamic, only `false` supported | Canonically modeled and reloadable, but enabling it is rejected by the serving validator because traffic capture remains M2 CP-CAPTURE #151. |
+| `enable-traffic-replay` | Dynamic, inert | The Go default `true` is accepted and SQL serving starts. Capture and replay are not implemented: the traffic API answers `unsupported` when the flag is true and `disabled` when it is false. `rust-dataplane.enabled` together with this flag still fails `Config.Check`. |
 
 Namespace values have a separate, equally exact classification:
 
@@ -320,12 +323,17 @@ where an unrelated first proxy update empties all namespaces.
 
 ## TLS rotation
 
-TLS paths must be absolute and under configured allowed roots. Certificate and
-key must be supplied together; minimum TLS is 1.2 or 1.3; allowed common names
-are bounded and canonicalized. Candidate validation loads and parses every
+A relative TLS path is resolved against the process working directory, the
+same way Go `os.ReadFile` resolves it. When `--tls-root` or
+`tls-allowed-roots` is non-empty, the canonical path must stay under one of
+those roots. An empty allowlist has no extra jail. Minimum versions follow
+Go `GetMinTLSVer`, with a native floor of TLS 1.2. A certificate without its
+key is accepted by `Config.Check` and rejected when a server identity is
+built, so it cannot become a plaintext listener. Allowed common names are
+bounded and canonicalized. Candidate validation loads and parses every
 complete cert/key/CA set before publishing a source generation; the serving
 adapter then constructs and atomically swaps one complete immutable connection
-factory. Partial, unreadable, invalid, or expired material is rejected without
+factory. Unreadable, invalid, or expired material is rejected without
 publishing a partial set. A generation advances for an accepted
 config/namespace value change **or for a byte-level change to any referenced
 TLS material file**, even when every source revision and canonical config

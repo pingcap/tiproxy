@@ -18,10 +18,13 @@ func (e *ConfigManager) reloadConfigFile(file string) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if bytes.Equal(content, e.fileContent) {
+	// An empty file is not equal to the initial nil buffer. The first read
+	// installs defaults, matching a process started without a config file.
+	if e.fileLoaded && bytes.Equal(content, e.fileContent) {
 		return nil
 	}
 	e.fileContent = content
+	e.fileLoaded = true
 
 	return e.SetTOMLConfig(content)
 }

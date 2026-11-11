@@ -987,14 +987,16 @@ async fn run_bound_session_observed(
                             continue;
                         }
                         let assignment = redirect.to();
-                        let deadline = u64::try_from(
-                            SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .saturating_add(budget)
-                            .as_millis(),
-                        )
-                        .unwrap_or(u64::MAX);
+                        // `budget` was the queue TTL, already enforced above.
+                        // Do not stamp it as an absolute handshake deadline.
+                        // Go `tryRedirect` keeps `redirectInfo` with no timeout
+                        // while `!finishedTxn()` and dials only after the next
+                        // command leaves the transaction. An absolute
+                        // acceptance-time deadline expires that wait (a
+                        // transaction held for 30s) and the handshake then
+                        // fails without migrating. Zero means
+                        // `candidate_budget` applies the dial schedule when
+                        // the handshake actually starts.
                         let target = RedirectTarget {
                             backend_id: assignment.backend_id.clone(),
                             backend_address: assignment.backend_address.clone(),
@@ -1002,7 +1004,7 @@ async fn run_bound_session_observed(
                             keyspace: assignment.keyspace.clone(),
                             backend_healthy: assignment.healthy,
                             backend_local: assignment.local,
-                            deadline_unix_millis: deadline,
+                            deadline_unix_millis: 0,
                         };
                         local_redirect = Some(envelope);
                         // Atomic redirect pair: one operation permit spans both
@@ -2182,16 +2184,22 @@ impl Engine {
         let backend_cluster = acquired.backend.cluster_name.clone();
         let backend_keyspace = acquired.backend.keyspace.clone();
         let backend_local = acquired.backend.local;
-        // A metered session must know its immutable source attribution before
-        // consuming or forwarding any backend protocol bytes. RouteEngine has
-        // only completed the TCP dial here: the greeting is still unread and
-        // the socket has not entered the counted/billable transport. Reject an
-        // incomplete assignment locally without poisoning the process-wide
-        // registry; this is the session-scoped fail-closed policy.
-        if self.metering.is_some() && (backend_id.is_empty() || backend_keyspace.is_empty()) {
+        // A metered session must know its backend id before consuming or
+        // forwarding any backend protocol bytes. RouteEngine has only
+        // completed the TCP dial here. Reject a missing backend id locally
+        // without poisoning the process-wide registry.
+        //
+        // An empty keyspace is the classic topology (`/topology/tidb/`). Go
+        // `BackendConnManager.updateTraffic` skips metering when `Keyspace()`
+        // is empty and still serves the session. Detach metering for that
+        // session so a later register does not fail the handshake.
+        if self.metering.is_some() && backend_id.is_empty() {
             self.quit_source = QuitSource::ProxyError;
             let _ = self.events.send(SessionEvent::BackendIoError).await;
             return Some(WireErrorSource::Proxy);
+        }
+        if backend_keyspace.is_empty() {
+            self.metering = None;
         }
         // Health-appropriate keepalive at dial time (KA-003 family):
         // the snapshot's healthy/unhealthy backend policy follows the

@@ -151,8 +151,12 @@ impl RouteCommandEnvelope {
         self.public_connection_id
     }
 
-    /// Remaining queue-plus-execution budget for a redirect. Force-close has no
-    /// expiry and returns `None`.
+    /// Remaining time a redirect may sit in the command queue before the
+    /// session accepts it. Force-close has no expiry and returns `None`.
+    ///
+    /// Time after acceptance, including a transaction that has not reached
+    /// a safe boundary, is not part of this budget. Go `tryRedirect` keeps
+    /// the signal until the next finished command and only then dials.
     #[must_use]
     pub fn redirect_budget(&self) -> Option<Duration> {
         self.redirect_deadline

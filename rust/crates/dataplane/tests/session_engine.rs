@@ -3351,23 +3351,30 @@ async fn existing_session_reapplies_keepalive_on_backend_health_flip() {
     stack.server_task.abort();
 }
 
+/// An empty keyspace is classic `/topology/tidb/` topology. Go still proxies
+/// the session and skips `IncTraffic` while `Keyspace()` is empty, so metering
+/// is detached and no billable source is registered.
 #[tokio::test]
-async fn metering_unknown_initial_keyspace_rejects_before_billable_forwarding() {
+async fn metering_classic_empty_keyspace_serves_without_a_billable_source() {
     let Ok(registry) = MeteringSourceRegistry::new(7) else {
         unreachable!("metering registry")
     };
     let stack = spawn_metered_stack(registry.clone()).await;
     spawn_route_answer(&stack, 1, 2);
-    let client = timeout(Duration::from_secs(5), MysqlClient::connect(stack.sql_port))
+    let Some(mut client) = timeout(Duration::from_secs(5), MysqlClient::connect(stack.sql_port))
         .await
         .ok()
-        .flatten();
-    assert!(client.is_none(), "unknown keyspace must reject the session");
+        .flatten()
+    else {
+        unreachable!("classic empty keyspace still serves the session")
+    };
+    assert!(client.query_ok("SELECT classic").await);
     assert_eq!(
         metering_source_count(&registry),
         0,
-        "an un-attributed backend never becomes a billable source"
+        "an empty keyspace is not a billable source"
     );
+    client.quit().await;
     stack.dispatch_task.abort();
 }
 
@@ -5273,6 +5280,9 @@ async fn backend_to_client_destination_write_break_is_client_network_on_both_obs
     let Ok(stream) = reader.into_inner().reunite(writer.into_inner()) else {
         unreachable!("the client's split halves reunite")
     };
+    // Tokio 1.51.6+ deprecates this because SO_LINGER can block the drop. The
+    // test still wants RST rather than a buffered FIN.
+    #[allow(deprecated)]
     let _ = stream.set_linger(Some(Duration::from_secs(0)));
     drop(stream);
 

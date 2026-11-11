@@ -317,6 +317,16 @@ func TestFilePath(t *testing.T) {
 	}
 }
 
+func TestEmptyConfigFileInstallsDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cfg")
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	cfgmgr, _, _ := testConfigManager(t, path, "")
+	cfg := cfgmgr.GetConfig()
+	require.NotNil(t, cfg)
+	require.Equal(t, "0.0.0.0:6000", cfg.Proxy.Addr)
+	require.True(t, cfg.EnableTrafficReplay)
+}
+
 func TestChecksum(t *testing.T) {
 	cfgmgr, _, _ := testConfigManager(t, "", "")
 

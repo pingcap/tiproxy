@@ -22,12 +22,13 @@ pub mod source;
 
 pub use model::{
     AwsMeteringConfig, AzureMeteringConfig, BackendClusterConfig, ClientTlsConfig,
-    CloudMeteringConfig, ConfigError, ConfigPersistence, EffectiveConfig, HealthCheckConfig,
-    LocalFsMeteringConfig, LogOnlineConfig, MeteringConfig, NamespaceConfig, ProxyOnlineConfig,
-    RoutingBalancePolicy, RoutingConfig, RoutingConnectionFactorConfig, RoutingFactorConfig,
-    RoutingNamespace, RoutingRule, RoutingSelectionPolicy, ServingConfig, ServingKeepalive,
-    ServingListener, ServingNamespace, ServingTlsConfig, SourceRevision, TopologyConfig,
-    TopologyRuntimeIdentity,
+    CloudMeteringConfig, ConfigError, ConfigPersistence, EffectiveConfig, FieldContract,
+    FieldEffect, HealthCheckConfig, LocalFsMeteringConfig, LogOnlineConfig, MeteringConfig,
+    NamespaceConfig, ProxyOnlineConfig, ReloadClass, RoutingBalancePolicy, RoutingConfig,
+    RoutingConnectionFactorConfig, RoutingFactorConfig, RoutingNamespace, RoutingRule,
+    RoutingSelectionPolicy, ServingConfig, ServingKeepalive, ServingListener, ServingNamespace,
+    ServingTlsConfig, SourceRevision, TopologyConfig, TopologyRuntimeIdentity, field_contract,
+    field_contract_json, go_min_tls_version,
 };
 pub use module::{
     ConfigModule, ConfigModuleHandle, ConfigModuleOptions, ConfigMutationError,
