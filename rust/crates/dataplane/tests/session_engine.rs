@@ -5280,6 +5280,9 @@ async fn backend_to_client_destination_write_break_is_client_network_on_both_obs
     let Ok(stream) = reader.into_inner().reunite(writer.into_inner()) else {
         unreachable!("the client's split halves reunite")
     };
+    // Tokio 1.51.6+ deprecates this because SO_LINGER can block the drop. The
+    // test still wants RST rather than a buffered FIN.
+    #[allow(deprecated)]
     let _ = stream.set_linger(Some(Duration::from_secs(0)));
     drop(stream);
 
