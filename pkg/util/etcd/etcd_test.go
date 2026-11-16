@@ -19,6 +19,7 @@ func TestEtcdClient(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
 	server, err := CreateEtcdServer("0.0.0.0:0", t.TempDir(), lg)
 	require.NoError(t, err)
+	require.NotEqual(t, server.Clients[0].Addr().String(), server.Peers[0].Addr().String())
 	endpoint := server.Clients[0].Addr().String()
 
 	cfg := ConfigForEtcdTest(endpoint)
