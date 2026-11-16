@@ -1,10 +1,6 @@
 module github.com/pingcap/tiproxy
 
-<<<<<<< HEAD
-go 1.25.12
-=======
 go 1.27.3
->>>>>>> 09810fb4 (*: upgrade go to v1.27.3 (#1393))
 
 require (
 	github.com/BurntSushi/toml v1.6.0
