@@ -209,8 +209,19 @@ func (h *Server) attachLogger(c *gin.Context) {
 		}
 		fields = append(fields, zap.Errors("errs", errs))
 		h.lg.Warn(path, fields...)
+	case isSensitiveOperation(c.Request.Method):
+		// Keep mutating API calls visible at the default log level without
+		// recording request bodies, which may contain credentials or secrets.
+		h.lg.Info(path, fields...)
+	}
+}
+
+func isSensitiveOperation(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
 	default:
-		h.lg.Debug(path, fields...)
+		return true
 	}
 }
 

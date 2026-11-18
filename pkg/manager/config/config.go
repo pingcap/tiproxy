@@ -43,7 +43,8 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 		base = base.Clone()
 	}
 
-	if err = toml.Unmarshal(data, base); err != nil {
+	metadata, err := toml.NewDecoder(bytes.NewReader(data)).Decode(base)
+	if err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -55,6 +56,15 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	if err = base.Check(); err != nil {
 		return
 	}
+
+	undecoded := metadata.Undecoded()
+	unknownKeys := make([]string, 0, len(undecoded))
+	for _, key := range undecoded {
+		unknownKeys = append(unknownKeys, key.String())
+	}
+	e.warnUnknownConfigKeys(unknownConfigKeysWarning{
+		keys: unknownKeys,
+	})
 
 	e.sts.current = base
 	originalData := e.sts.data

@@ -14,6 +14,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/tidwall/btree"
+	"go.uber.org/zap"
 )
 
 const (
@@ -32,6 +33,10 @@ type KVValue struct {
 	Value []byte
 }
 
+type unknownConfigKeysWarning struct {
+	keys []string
+}
+
 type ConfigManager struct {
 	wg            waitgroup.WaitGroup
 	cancel        context.CancelFunc
@@ -42,7 +47,12 @@ type ConfigManager struct {
 	checkFileInterval time.Duration
 	fileContent       []byte // used to compare whether the config file has changed
 	fileLoaded        bool   // distinguishes an unread file from an empty file
-	sts               struct {
+	log               struct {
+		sync.Mutex
+		logger  *zap.Logger
+		pending []unknownConfigKeysWarning
+	}
+	sts struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
 		current   *config.Config
@@ -55,6 +65,48 @@ func NewConfigManager() *ConfigManager {
 	return &ConfigManager{
 		checkFileInterval: checkFileInterval,
 	}
+}
+
+// SetLogger configures the logger and flushes warnings collected while loading
+// the initial configuration, before the main logger was available.
+func (e *ConfigManager) SetLogger(logger *zap.Logger) {
+	if logger == nil {
+		return
+	}
+
+	e.log.Lock()
+	e.log.logger = logger
+	pending := e.log.pending
+	e.log.pending = nil
+	e.log.Unlock()
+
+	for _, warning := range pending {
+		logUnknownConfigKeys(logger, warning)
+	}
+}
+
+func (e *ConfigManager) warnUnknownConfigKeys(warning unknownConfigKeysWarning) {
+	if len(warning.keys) == 0 {
+		return
+	}
+
+	e.log.Lock()
+	logger := e.log.logger
+	if logger == nil {
+		e.log.pending = append(e.log.pending, warning)
+		e.log.Unlock()
+		return
+	}
+	e.log.Unlock()
+
+	logUnknownConfigKeys(logger, warning)
+}
+
+func logUnknownConfigKeys(logger *zap.Logger, warning unknownConfigKeysWarning) {
+	logger.Warn("configuration contains unknown keys",
+		zap.Strings("unknown_keys", warning.keys),
+		zap.Int("unknown_key_count", len(warning.keys)),
+	)
 }
 
 func (e *ConfigManager) Init(ctx context.Context, configFile string, advertiseAddr string) error {

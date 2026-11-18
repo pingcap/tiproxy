@@ -51,12 +51,6 @@ graceful-close-conn-timeout = 15
 [api]
 # addr = "0.0.0.0:3080"
 
-# enable HTTP basic auth or not.
-#
-# enable-basic-auth = false
-# user = ""
-# password = ""
-
 # same as [proxy.proxy-protocol], but for HTTP port
 # proxy-protocol = ""
 
