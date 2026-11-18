@@ -59,6 +59,16 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
+func (e *ConfigManager) warnUnknownConfigKeys(keys []string) {
+	if len(keys) == 0 || e.logger == nil {
+		return
+	}
+	e.logger.Warn("configuration contains unknown keys",
+		zap.Strings("unknown_keys", keys),
+		zap.Int("unknown_key_count", len(keys)),
+	)
+}
+
 func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, advertiseAddr string) error {
 	var nctx context.Context
 	nctx, e.cancel = context.WithCancel(ctx)
