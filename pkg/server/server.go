@@ -79,6 +79,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 	if srv.loggerManager, lg, err = logger.NewLoggerManager(&cfg.Log); err != nil {
 		return
 	}
+	srv.configManager.SetLogger(lg.Named("config"))
 	srv.loggerManager.Init(srv.configManager.WatchConfig())
 
 	// welcome messages must be printed after initialization of configmager, because
