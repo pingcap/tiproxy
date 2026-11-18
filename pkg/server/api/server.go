@@ -189,20 +189,22 @@ func (h *Server) attachLogger(c *gin.Context) {
 	start := time.Now()
 	c.Next()
 	latency := time.Since(start)
+	status := c.Writer.Status()
 
 	fields := make([]zapcore.Field, 0, 7)
 	fields = append(fields,
-		zap.Int("status", c.Writer.Status()),
+		zap.Int("status", status),
 		zap.String("method", c.Request.Method),
-		zap.String("query", c.Request.URL.RawQuery),
-		zap.String("ip", c.ClientIP()),
+		// RemoteAddr comes from the accepted connection (or the configured Proxy
+		// Protocol listener), so HTTP forwarding headers cannot spoof this field.
+		zap.String("remote-addr", c.Request.RemoteAddr),
 		zap.String("user-agent", c.Request.UserAgent()),
 		zap.Duration("latency", latency),
 	)
 
 	path := c.Request.URL.Path
 	switch {
-	case len(c.Errors) > 0:
+	case len(c.Errors) > 0 || (status >= http.StatusBadRequest && status < 600):
 		errs := make([]error, 0, len(c.Errors))
 		for _, e := range c.Errors {
 			errs = append(errs, e)
