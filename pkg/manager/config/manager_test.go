@@ -72,4 +72,22 @@ security.unknown-option = "another-secret-value"
 		require.Contains(t, text.String(), "security.unknown-option")
 		require.NotContains(t, text.String(), "another-secret-value")
 	})
+
+	t.Run("keep only latest pending warning", func(t *testing.T) {
+		lg, text := logger.CreateLoggerForTest(t)
+		cfgmgr := NewConfigManager()
+		require.NoError(t, cfgmgr.Init(t.Context(), "", ""))
+		t.Cleanup(func() {
+			require.NoError(t, cfgmgr.Close())
+		})
+
+		require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.first-unknown = "first-secret-value"`)))
+		require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.latest-unknown = "latest-secret-value"`)))
+		cfgmgr.SetLogger(lg)
+
+		require.NotContains(t, text.String(), "proxy.first-unknown")
+		require.Contains(t, text.String(), "proxy.latest-unknown")
+		require.NotContains(t, text.String(), "first-secret-value")
+		require.NotContains(t, text.String(), "latest-secret-value")
+	})
 }

@@ -33,10 +33,6 @@ type KVValue struct {
 	Value []byte
 }
 
-type unknownConfigKeysWarning struct {
-	keys []string
-}
-
 type ConfigManager struct {
 	wg            waitgroup.WaitGroup
 	cancel        context.CancelFunc
@@ -50,7 +46,7 @@ type ConfigManager struct {
 	log               struct {
 		sync.Mutex
 		logger  *zap.Logger
-		pending []unknownConfigKeysWarning
+		pending []string
 	}
 	sts struct {
 		sync.Mutex
@@ -80,32 +76,33 @@ func (e *ConfigManager) SetLogger(logger *zap.Logger) {
 	e.log.pending = nil
 	e.log.Unlock()
 
-	for _, warning := range pending {
-		logUnknownConfigKeys(logger, warning)
-	}
+	logUnknownConfigKeys(logger, pending)
 }
 
-func (e *ConfigManager) warnUnknownConfigKeys(warning unknownConfigKeysWarning) {
-	if len(warning.keys) == 0 {
+func (e *ConfigManager) warnUnknownConfigKeys(keys []string) {
+	if len(keys) == 0 {
 		return
 	}
 
 	e.log.Lock()
 	logger := e.log.logger
 	if logger == nil {
-		e.log.pending = append(e.log.pending, warning)
+		e.log.pending = keys
 		e.log.Unlock()
 		return
 	}
 	e.log.Unlock()
 
-	logUnknownConfigKeys(logger, warning)
+	logUnknownConfigKeys(logger, keys)
 }
 
-func logUnknownConfigKeys(logger *zap.Logger, warning unknownConfigKeysWarning) {
+func logUnknownConfigKeys(logger *zap.Logger, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
 	logger.Warn("configuration contains unknown keys",
-		zap.Strings("unknown_keys", warning.keys),
-		zap.Int("unknown_key_count", len(warning.keys)),
+		zap.Strings("unknown_keys", keys),
+		zap.Int("unknown_key_count", len(keys)),
 	)
 }
 

@@ -62,9 +62,7 @@ func (e *ConfigManager) SetTOMLConfig(data []byte) (err error) {
 	for _, key := range undecoded {
 		unknownKeys = append(unknownKeys, key.String())
 	}
-	e.warnUnknownConfigKeys(unknownConfigKeysWarning{
-		keys: unknownKeys,
-	})
+	e.warnUnknownConfigKeys(unknownKeys)
 
 	e.sts.current = base
 	originalData := e.sts.data
