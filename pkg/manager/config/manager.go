@@ -44,12 +44,7 @@ type ConfigManager struct {
 	checkFileInterval time.Duration
 	fileContent       []byte // used to compare whether the config file has changed
 	fileLoaded        bool   // distinguishes an unread file from an empty file
-	log               struct {
-		sync.Mutex
-		logger  *zap.Logger
-		pending []string
-	}
-	sts struct {
+	sts               struct {
 		sync.Mutex
 		listeners []chan<- *config.Config
 		current   *config.Config
@@ -64,53 +59,17 @@ func NewConfigManager() *ConfigManager {
 	}
 }
 
-<<<<<<< HEAD
-func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, advertiseAddr string) error {
-=======
-// SetLogger configures the logger and flushes warnings collected while loading
-// the initial configuration, before the main logger was available.
-func (e *ConfigManager) SetLogger(logger *zap.Logger) {
-	if logger == nil {
-		return
-	}
-
-	e.log.Lock()
-	e.log.logger = logger
-	pending := e.log.pending
-	e.log.pending = nil
-	e.log.Unlock()
-
-	logUnknownConfigKeys(logger, pending)
-}
-
 func (e *ConfigManager) warnUnknownConfigKeys(keys []string) {
-	e.log.Lock()
-	logger := e.log.logger
-	if logger == nil {
-		// Keep the pending warning in sync with the latest configuration. An
-		// empty list clears warnings from an older revision before the logger
-		// becomes available.
-		e.log.pending = keys
-		e.log.Unlock()
+	if len(keys) == 0 || e.logger == nil {
 		return
 	}
-	e.log.Unlock()
-
-	logUnknownConfigKeys(logger, keys)
-}
-
-func logUnknownConfigKeys(logger *zap.Logger, keys []string) {
-	if len(keys) == 0 {
-		return
-	}
-	logger.Warn("configuration contains unknown keys",
+	e.logger.Warn("configuration contains unknown keys",
 		zap.Strings("unknown_keys", keys),
 		zap.Int("unknown_key_count", len(keys)),
 	)
 }
 
-func (e *ConfigManager) Init(ctx context.Context, configFile string, advertiseAddr string) error {
->>>>>>> a2944978 (config, api: Add audit logs for API (#1422))
+func (e *ConfigManager) Init(ctx context.Context, logger *zap.Logger, configFile string, advertiseAddr string) error {
 	var nctx context.Context
 	nctx, e.cancel = context.WithCancel(ctx)
 

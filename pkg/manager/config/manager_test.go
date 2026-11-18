@@ -16,11 +16,7 @@ import (
 )
 
 func testConfigManager(t *testing.T, configFile string, advertiseAddr string) (*ConfigManager, fmt.Stringer, context.Context) {
-<<<<<<< HEAD
-	logger, text := logger.CreateLoggerForTest(t)
-=======
 	lg, text := logger.CreateLoggerForTest(t)
->>>>>>> a2944978 (config, api: Add audit logs for API (#1422))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	if ddl, ok := t.Deadline(); ok {
@@ -29,12 +25,7 @@ func testConfigManager(t *testing.T, configFile string, advertiseAddr string) (*
 
 	cfgmgr := NewConfigManager()
 	cfgmgr.checkFileInterval = 20 * time.Millisecond
-<<<<<<< HEAD
-	require.NoError(t, cfgmgr.Init(ctx, logger, configFile, advertiseAddr))
-=======
-	require.NoError(t, cfgmgr.Init(ctx, configFile, advertiseAddr))
-	cfgmgr.SetLogger(lg)
->>>>>>> a2944978 (config, api: Add audit logs for API (#1422))
+	require.NoError(t, cfgmgr.Init(ctx, lg, configFile, advertiseAddr))
 
 	t.Cleanup(func() {
 		require.NoError(t, cfgmgr.Close())
@@ -69,50 +60,13 @@ security.unknown-option = "another-secret-value"
 
 		lg, text := logger.CreateLoggerForTest(t)
 		cfgmgr := NewConfigManager()
-		require.NoError(t, cfgmgr.Init(t.Context(), configFile, ""))
+		require.NoError(t, cfgmgr.Init(t.Context(), lg, configFile, ""))
 		t.Cleanup(func() {
 			require.NoError(t, cfgmgr.Close())
 		})
 
-		require.NotContains(t, text.String(), "security.unknown-option")
-		cfgmgr.SetLogger(lg)
 		require.Equal(t, uint64(456), cfgmgr.GetConfig().Proxy.MaxConnections)
 		require.Contains(t, text.String(), "security.unknown-option")
 		require.NotContains(t, text.String(), "another-secret-value")
-	})
-
-	t.Run("keep only latest pending warning", func(t *testing.T) {
-		lg, text := logger.CreateLoggerForTest(t)
-		cfgmgr := NewConfigManager()
-		require.NoError(t, cfgmgr.Init(t.Context(), "", ""))
-		t.Cleanup(func() {
-			require.NoError(t, cfgmgr.Close())
-		})
-
-		require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.first-unknown = "first-secret-value"`)))
-		require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.latest-unknown = "latest-secret-value"`)))
-		cfgmgr.SetLogger(lg)
-
-		require.NotContains(t, text.String(), "proxy.first-unknown")
-		require.Contains(t, text.String(), "proxy.latest-unknown")
-		require.NotContains(t, text.String(), "first-secret-value")
-		require.NotContains(t, text.String(), "latest-secret-value")
-	})
-
-	t.Run("clear pending warning after clean update", func(t *testing.T) {
-		lg, text := logger.CreateLoggerForTest(t)
-		cfgmgr := NewConfigManager()
-		require.NoError(t, cfgmgr.Init(t.Context(), "", ""))
-		t.Cleanup(func() {
-			require.NoError(t, cfgmgr.Close())
-		})
-
-		require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.old-unknown = "old-secret-value"`)))
-		require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.max-connections = 123`)))
-		cfgmgr.SetLogger(lg)
-
-		require.NotContains(t, text.String(), "configuration contains unknown keys")
-		require.NotContains(t, text.String(), "proxy.old-unknown")
-		require.NotContains(t, text.String(), "old-secret-value")
 	})
 }

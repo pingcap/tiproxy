@@ -5,11 +5,7 @@ package api
 
 import (
 	"context"
-<<<<<<< HEAD
-=======
-	"crypto/tls"
 	"errors"
->>>>>>> a2944978 (config, api: Add audit logs for API (#1422))
 	"fmt"
 	"io"
 	"net/http"
