@@ -80,13 +80,12 @@ func (e *ConfigManager) SetLogger(logger *zap.Logger) {
 }
 
 func (e *ConfigManager) warnUnknownConfigKeys(keys []string) {
-	if len(keys) == 0 {
-		return
-	}
-
 	e.log.Lock()
 	logger := e.log.logger
 	if logger == nil {
+		// Keep the pending warning in sync with the latest configuration. An
+		// empty list clears warnings from an older revision before the logger
+		// becomes available.
 		e.log.pending = keys
 		e.log.Unlock()
 		return

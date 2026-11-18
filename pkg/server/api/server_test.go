@@ -108,6 +108,7 @@ func TestAttachLogger(t *testing.T) {
 		method        string
 		path          string
 		handlerError  bool
+		status        int
 		expectedLevel *zapcore.Level
 	}{
 		{
@@ -156,6 +157,27 @@ func TestAttachLogger(t *testing.T) {
 			handlerError:  true,
 			expectedLevel: levelPtr(zap.WarnLevel),
 		},
+		{
+			name:          "write error",
+			method:        http.MethodPost,
+			path:          "/api/test",
+			handlerError:  true,
+			expectedLevel: levelPtr(zap.WarnLevel),
+		},
+		{
+			name:          "read error status",
+			method:        http.MethodGet,
+			path:          "/api/debug/health",
+			status:        http.StatusBadGateway,
+			expectedLevel: levelPtr(zap.WarnLevel),
+		},
+		{
+			name:          "write error status",
+			method:        http.MethodPost,
+			path:          "/api/traffic/replay",
+			status:        http.StatusBadRequest,
+			expectedLevel: levelPtr(zap.WarnLevel),
+		},
 	}
 
 	for _, tt := range tests {
@@ -168,11 +190,17 @@ func TestAttachLogger(t *testing.T) {
 				if tt.handlerError {
 					_ = c.Error(errors.New("test error"))
 				}
-				c.Status(http.StatusOK)
+				status := tt.status
+				if status == 0 {
+					status = http.StatusOK
+				}
+				c.Status(status)
 			})
 
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(tt.method, tt.path, nil)
+			request.RemoteAddr = "192.0.2.1:1234"
+			request.Header.Set("X-Forwarded-For", "203.0.113.1")
 			engine.ServeHTTP(recorder, request)
 
 			entries := logs.All()
@@ -184,6 +212,7 @@ func TestAttachLogger(t *testing.T) {
 			require.Equal(t, *tt.expectedLevel, entries[0].Level)
 			require.Equal(t, tt.path, entries[0].Message)
 			require.Equal(t, tt.method, entries[0].ContextMap()["method"])
+			require.Equal(t, "192.0.2.1:1234", entries[0].ContextMap()["remote-addr"])
 		})
 	}
 }

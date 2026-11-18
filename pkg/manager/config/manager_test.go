@@ -90,4 +90,21 @@ security.unknown-option = "another-secret-value"
 		require.NotContains(t, text.String(), "first-secret-value")
 		require.NotContains(t, text.String(), "latest-secret-value")
 	})
+
+	t.Run("clear pending warning after clean update", func(t *testing.T) {
+		lg, text := logger.CreateLoggerForTest(t)
+		cfgmgr := NewConfigManager()
+		require.NoError(t, cfgmgr.Init(t.Context(), "", ""))
+		t.Cleanup(func() {
+			require.NoError(t, cfgmgr.Close())
+		})
+
+		require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.old-unknown = "old-secret-value"`)))
+		require.NoError(t, cfgmgr.SetTOMLConfig([]byte(`proxy.max-connections = 123`)))
+		cfgmgr.SetLogger(lg)
+
+		require.NotContains(t, text.String(), "configuration contains unknown keys")
+		require.NotContains(t, text.String(), "proxy.old-unknown")
+		require.NotContains(t, text.String(), "old-secret-value")
+	})
 }
