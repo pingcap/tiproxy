@@ -205,6 +205,48 @@ session-token = "session-token"
 	}, providerCfg.COS)
 }
 
+func TestProxyConfigTOS(t *testing.T) {
+	data := []byte(`
+[metering]
+type = "tos"
+region = "cn-beijing"
+bucket = "metering-bucket"
+prefix = "tiproxy/metering"
+
+[metering.tos]
+assume-role-arn = "trn:iam::1234567890:role/metering"
+access-key = "access-key"
+secret-access-key = "secret-access-key"
+session-token = "session-token"
+`)
+	var cfg Config
+	require.NoError(t, toml.Unmarshal(data, &cfg))
+	require.Equal(t, mconfig.MeteringConfig{
+		Type:   storage.ProviderTypeTOS,
+		Region: "cn-beijing",
+		Bucket: "metering-bucket",
+		Prefix: "tiproxy/metering",
+		TOS: &mconfig.MeteringTOSConfig{
+			AssumeRoleARN:   "trn:iam::1234567890:role/metering",
+			AccessKey:       "access-key",
+			SecretAccessKey: "secret-access-key",
+			SessionToken:    "session-token",
+		},
+	}, cfg.Metering)
+
+	providerCfg := cfg.Metering.ToProviderConfig()
+	require.Equal(t, storage.ProviderTypeTOS, providerCfg.Type)
+	require.Equal(t, "cn-beijing", providerCfg.Region)
+	require.Equal(t, "metering-bucket", providerCfg.Bucket)
+	require.Equal(t, "tiproxy/metering", providerCfg.Prefix)
+	require.Equal(t, &storage.TOSConfig{
+		AssumeRoleARN:   "trn:iam::1234567890:role/metering",
+		AccessKey:       "access-key",
+		SecretAccessKey: "secret-access-key",
+		SessionToken:    "session-token",
+	}, providerCfg.TOS)
+}
+
 func TestProxyCheck(t *testing.T) {
 	testcases := []struct {
 		pre  func(*testing.T, *Config)
