@@ -73,7 +73,7 @@ graceful-close-conn-timeout = 15
 # max-backups = 3
 
 # [metering]
-# provider type: "s3", "oss", "cos", "azure", or "localfs"
+# provider type: "s3", "oss", "cos", "tos", "azure", or "localfs"
 # type = "azure"
 # bucket = "my-container"
 # prefix = "tiproxy/metering"
@@ -90,6 +90,19 @@ graceful-close-conn-timeout = 15
 # includes the app ID (for example, "my-bucket-1250000000").
 # [metering.cos]
 # Use an access key pair, assume-role-arn, or the Tencent Cloud default credential chain.
+# access-key, secret-access-key, and session-token are omitted from the admin API and logs.
+# assume-role-arn = ""
+# access-key = ""
+# secret-access-key = ""
+# session-token = ""
+#
+# For Volcengine TOS, set type = "tos", region (required even when endpoint is set), and bucket.
+# [metering.tos]
+# TOS uses the first available source of base credentials.
+#   1. access-key and secret-access-key below, with an optional session-token.
+#   2. VOLCSTACK_ACCESS_KEY_ID and VOLCSTACK_SECRET_ACCESS_KEY, with an optional VOLCSTACK_SESSION_TOKEN.
+#   3. VKE OIDC via VOLCENGINE_OIDC_TOKEN_FILE and VOLCENGINE_OIDC_ROLE_TRN.
+# To assume a role with those credentials, set assume-role-arn to the target role's TRN.
 # access-key, secret-access-key, and session-token are omitted from the admin API and logs.
 # assume-role-arn = ""
 # access-key = ""

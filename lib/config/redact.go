@@ -64,6 +64,13 @@ func redactMetering(mc mconfig.MeteringConfig) mconfig.MeteringConfig {
 		cos.SessionToken = ""
 		mc.COS = &cos
 	}
+	if mc.TOS != nil {
+		tos := *mc.TOS
+		tos.AccessKey = ""
+		tos.SecretAccessKey = ""
+		tos.SessionToken = ""
+		mc.TOS = &tos
+	}
 	if mc.Azure != nil {
 		azure := *mc.Azure
 		azure.AccountKey = ""

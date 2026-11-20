@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/BurntSushi/toml v1.5.0
 	github.com/cenkalti/backoff/v4 v4.2.1
-	github.com/pingcap/metering_sdk v0.0.0-20260814062708-9e3b68cd9adf
+	github.com/pingcap/metering_sdk v0.0.0-20261118092607-18aaee053664
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.11.1
 	github.com/tiancaiamao/gp v0.0.0-20230126082955-4f9e4f1ed9b5
@@ -57,6 +57,7 @@ require (
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.4.3 // indirect
@@ -69,12 +70,17 @@ require (
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.127 // indirect
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.74 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
+	github.com/volcengine/ve-tos-golang-sdk/v2 v2.9.2 // indirect
+	github.com/volcengine/volc-sdk-golang v1.0.23 // indirect
+	github.com/volcengine/volcengine-go-sdk v1.2.24 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/time v0.4.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
