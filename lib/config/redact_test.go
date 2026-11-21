@@ -44,6 +44,12 @@ func TestRedactedKeepsSecretsOutOfAPIAndLogs(t *testing.T) {
 			SecretAccessKey: "cos-secret",
 			SessionToken:    "cos-token",
 		},
+		TOS: &mconfig.MeteringTOSConfig{
+			AssumeRoleARN:   "trn:iam::1:role/metering",
+			AccessKey:       "tos-access",
+			SecretAccessKey: "tos-secret",
+			SessionToken:    "tos-token",
+		},
 	}
 	cfg.Security.EncryptionKeyPath = "/var/lib/tiproxy/traffic.key"
 
@@ -60,6 +66,8 @@ func TestRedactedKeepsSecretsOutOfAPIAndLogs(t *testing.T) {
 	require.Empty(t, redacted.Metering.OSS.SecretAccessKey)
 	require.Equal(t, "qcs::cam::uin/1:roleName/metering", redacted.Metering.COS.AssumeRoleARN)
 	require.Empty(t, redacted.Metering.COS.SecretAccessKey)
+	require.Equal(t, "trn:iam::1:role/metering", redacted.Metering.TOS.AssumeRoleARN)
+	require.Empty(t, redacted.Metering.TOS.SecretAccessKey)
 	require.Empty(t, redacted.Metering.Endpoint)
 	require.Equal(t, "/var/lib/tiproxy/traffic.key", redacted.Security.EncryptionKeyPath)
 	require.Equal(t, "metering-container", redacted.Metering.Bucket)
@@ -74,6 +82,7 @@ func TestRedactedKeepsSecretsOutOfAPIAndLogs(t *testing.T) {
 		require.NotContains(t, body, "aws-secret")
 		require.NotContains(t, body, "oss-secret")
 		require.NotContains(t, body, "cos-secret")
+		require.NotContains(t, body, "tos-secret")
 		require.Contains(t, body, "metering-container")
 	}
 
@@ -82,6 +91,7 @@ func TestRedactedKeepsSecretsOutOfAPIAndLogs(t *testing.T) {
 	require.NoError(t, toml.Unmarshal(tomlBody, base))
 	require.Equal(t, "sas-secret", base.Metering.Azure.SASToken)
 	require.Equal(t, "cos-secret", base.Metering.COS.SecretAccessKey)
+	require.Equal(t, "tos-secret", base.Metering.TOS.SecretAccessKey)
 	require.Equal(t, cfg.Metering.Endpoint, base.Metering.Endpoint)
 
 	enc := zapcore.NewMapObjectEncoder()
@@ -92,6 +102,7 @@ func TestRedactedKeepsSecretsOutOfAPIAndLogs(t *testing.T) {
 	require.NotContains(t, string(logged), "aws-secret")
 	require.NotContains(t, string(logged), "oss-secret")
 	require.NotContains(t, string(logged), "cos-secret")
+	require.NotContains(t, string(logged), "tos-secret")
 	require.NotContains(t, string(logged), "account-key-secret")
 	require.Contains(t, string(logged), "metering-container")
 }
