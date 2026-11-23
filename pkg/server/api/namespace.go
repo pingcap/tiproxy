@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
+	mconfig "github.com/pingcap/tiproxy/pkg/manager/config"
 )
 
 func (h *Server) NamespaceGet(c *gin.Context) {
@@ -74,12 +75,12 @@ func (h *Server) NamespaceRemove(c *gin.Context) {
 }
 
 func (h *Server) NamespaceCommit(c *gin.Context) {
-	ns_names := c.QueryArray("namespace")
+	nsNames := c.QueryArray("namespace")
 
 	var nss []*config.Namespace
-	var nss_delete []bool
-	var err error
-	if len(ns_names) == 0 {
+	var nssDelete []bool
+	if len(nsNames) == 0 {
+		var err error
 		nss, err = h.mgr.CfgMgr.ListAllNamespace(c)
 		if err != nil {
 			c.Errors = append(c.Errors, &gin.Error{
@@ -89,25 +90,36 @@ func (h *Server) NamespaceCommit(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, "failed to list all namespaces")
 			return
 		}
+		// Leave nssDelete nil. CommitNamespaces treats that as a full snapshot and
+		// drops live namespaces whose stored record has already been removed.
 	} else {
-		nss = make([]*config.Namespace, len(ns_names))
-		nss_delete = make([]bool, len(ns_names))
-		for i, ns_name := range ns_names {
-			ns, err := h.mgr.CfgMgr.GetNamespace(c, ns_name)
+		nss = make([]*config.Namespace, len(nsNames))
+		nssDelete = make([]bool, len(nsNames))
+		for i, nsName := range nsNames {
+			ns, err := h.mgr.CfgMgr.GetNamespace(c, nsName)
 			if err != nil {
+				// DELETE only removes the stored record. If that namespace is still
+				// routing, this commit has to carry an explicit delete so the live
+				// table drops it.
+				if errors.Is(err, mconfig.ErrNoResults) {
+					if _, live := h.mgr.NsMgr.GetNamespace(nsName); live {
+						nss[i] = &config.Namespace{Namespace: nsName}
+						nssDelete[i] = true
+						continue
+					}
+				}
 				c.Errors = append(c.Errors, &gin.Error{
 					Type: gin.ErrorTypePrivate,
-					Err:  errors.Errorf("failed to get namespace[%s]: %+v", ns_name, err),
+					Err:  errors.Errorf("failed to get namespace[%s]: %+v", nsName, err),
 				})
 				c.JSON(http.StatusInternalServerError, "failed to get namespace")
 				return
 			}
 			nss[i] = ns
-			nss_delete[i] = false
 		}
 	}
 
-	if err := h.mgr.NsMgr.CommitNamespaces(nss, nss_delete); err != nil {
+	if err := h.mgr.NsMgr.CommitNamespaces(nss, nssDelete); err != nil {
 		c.Errors = append(c.Errors, &gin.Error{
 			Type: gin.ErrorTypePrivate,
 			Err:  errors.Errorf("failed to reload namespaces: %v, %+v", nss, err),

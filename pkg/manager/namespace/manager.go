@@ -9,7 +9,6 @@ package namespace
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sync"
 
 	"github.com/pingcap/tiproxy/lib/config"
@@ -28,6 +27,12 @@ type NamespaceManager interface {
 	Init(logger *zap.Logger, nscs []*config.Namespace, tpFetcher observer.TopologyFetcher,
 		promFetcher metricsreader.PromInfoFetcher, httpCli *http.Client, cfgMgr *mconfig.ConfigManager,
 		metricsReader metricsreader.MetricsQuerier) error
+	// CommitNamespaces applies namespace configs to the live routing table.
+	// A nil nssDelete means nss is the complete desired set: every live namespace
+	// absent from nss is removed and stops accepting new traffic.
+	// A non-nil nssDelete must have the same length as nss. A true entry removes
+	// that namespace; a false entry creates or replaces it. Namespaces that are
+	// not listed stay in place.
 	CommitNamespaces(nss []*config.Namespace, nssDelete []bool) error
 	GetNamespace(nm string) (*Namespace, bool)
 	GetNamespaceByUser(user string) (*Namespace, bool)
@@ -46,6 +51,8 @@ type namespaceManager struct {
 	backendNetwork observer.BackendNetwork
 	logger         *zap.Logger
 	cfgMgr         *mconfig.ConfigManager
+	// newNamespace, when set, replaces the real namespace constructor.
+	newNamespace func(cfg *config.Namespace) (*Namespace, error)
 }
 
 func NewNamespaceManager() *namespaceManager {
@@ -53,6 +60,9 @@ func NewNamespaceManager() *namespaceManager {
 }
 
 func (mgr *namespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, error) {
+	if mgr.newNamespace != nil {
+		return mgr.newNamespace(cfg)
+	}
 	logger := mgr.logger.With(zap.String("namespace", cfg.Namespace))
 
 	healthCheckCfg := config.NewDefaultHealthCheckConfig()
@@ -81,27 +91,85 @@ func (mgr *namespaceManager) buildNamespace(cfg *config.Namespace) (*Namespace, 
 }
 
 func (mgr *namespaceManager) CommitNamespaces(nss []*config.Namespace, nssDelete []bool) error {
-	nsm := make(map[string]*Namespace)
-	mgr.RLock()
-	maps.Copy(nsm, mgr.nsm)
-	mgr.RUnlock()
+	if nssDelete != nil && len(nssDelete) != len(nss) {
+		return fmt.Errorf("namespace delete flags length %d does not match namespaces length %d", len(nssDelete), len(nss))
+	}
+	// A nil delete slice is a full snapshot of what should be routing. Anything
+	// still live but missing from that snapshot must be dropped, otherwise a
+	// namespace removed from storage keeps serving until process restart.
+	fullSnapshot := nssDelete == nil
 
+	built := make(map[string]*Namespace, len(nss))
+	deleted := make(map[string]struct{})
+	closeBuilt := func() {
+		for _, ns := range built {
+			ns.Close()
+		}
+		clear(built)
+	}
 	for i, nsc := range nss {
-		if nssDelete != nil && nssDelete[i] {
-			delete(nsm, nsc.Namespace)
+		if nsc == nil || nsc.Namespace == "" {
+			closeBuilt()
+			return fmt.Errorf("invalid namespace at index %d", i)
+		}
+		if !fullSnapshot && nssDelete[i] {
+			deleted[nsc.Namespace] = struct{}{}
+			if prev := built[nsc.Namespace]; prev != nil {
+				prev.Close()
+				delete(built, nsc.Namespace)
+			}
 			continue
 		}
-
+		delete(deleted, nsc.Namespace)
 		ns, err := mgr.buildNamespace(nsc)
 		if err != nil {
+			closeBuilt()
 			return fmt.Errorf("%w: create namespace error, namespace: %s", err, nsc.Namespace)
 		}
-		nsm[ns.Name()] = ns
+		if prev := built[nsc.Namespace]; prev != nil {
+			prev.Close()
+		}
+		built[nsc.Namespace] = ns
 	}
 
 	mgr.Lock()
-	mgr.nsm = nsm
+	next := make(map[string]*Namespace, len(built)+len(mgr.nsm))
+	if !fullSnapshot {
+		for name, ns := range mgr.nsm {
+			if _, drop := deleted[name]; drop {
+				continue
+			}
+			next[name] = ns
+		}
+	}
+	for name, ns := range built {
+		next[name] = ns
+	}
+	var stale []*Namespace
+	var removed []string
+	for name, old := range mgr.nsm {
+		cur, ok := next[name]
+		if !ok {
+			removed = append(removed, name)
+			stale = append(stale, old)
+			continue
+		}
+		if cur != old {
+			stale = append(stale, old)
+		}
+	}
+	mgr.nsm = next
+	logger := mgr.logger
 	mgr.Unlock()
+
+	if logger != nil {
+		for _, name := range removed {
+			logger.Info("removed namespace from routing table", zap.String("namespace", name))
+		}
+	}
+	for _, ns := range stale {
+		ns.Close()
+	}
 	return nil
 }
 
