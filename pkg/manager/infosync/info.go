@@ -258,25 +258,11 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBTopo
 	ttls := make(map[string]struct{}, len(res.Kvs)/2)
 	for _, kv := range res.Kvs {
 		key := hack.String(kv.Key)
-<<<<<<< HEAD
-		switch {
-		case strings.HasSuffix(key, ttlSuffix):
-			addr := key[len(tidbTopologyInformationPath)+1 : len(key)-len(ttlSuffix)-1]
-=======
-		var keyspace string
-		if strings.HasPrefix(key, tidbKeyspaceTopologyInformationPath) {
-			key = key[len(tidbKeyspaceTopologyInformationPath):]
-			slashIdx := strings.Index(key, "/")
-			if slashIdx <= 0 {
-				continue
-			}
-			keyspace = key[:slashIdx]
-			key = key[slashIdx:]
-			if !strings.HasPrefix(key, tidbTopologyInformationPath) {
-				continue
-			}
-		}
 		key = key[len(tidbTopologyInformationPath):]
+		key, found := strings.CutPrefix(key, "/")
+		if !found {
+			continue
+		}
 		// Topology keys are external data, so validate the expected {address}/{type} shape first.
 		addr, suffix, found := strings.Cut(key, "/")
 		if !found || len(addr) == 0 {
@@ -285,14 +271,9 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBTopo
 
 		switch suffix {
 		case ttlSuffix:
->>>>>>> 6018a128 (infosync: verify invalid topologies from PD (#1405))
 			ttls[addr] = struct{}{}
 		case infoSuffix:
 			var topology *TiDBTopologyInfo
-<<<<<<< HEAD
-			addr := key[len(tidbTopologyInformationPath)+1 : len(key)-len(infoSuffix)-1]
-=======
->>>>>>> 6018a128 (infosync: verify invalid topologies from PD (#1405))
 			if err = json.Unmarshal(kv.Value, &topology); err != nil {
 				is.lg.Error("unmarshal topology info failed", zap.String("key", key),
 					zap.String("value", hack.String(kv.Value)), zap.Error(err))
