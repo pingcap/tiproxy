@@ -258,16 +258,27 @@ func (is *InfoSyncer) GetTiDBTopology(ctx context.Context) (map[string]*TiDBTopo
 	ttls := make(map[string]struct{}, len(res.Kvs)/2)
 	for _, kv := range res.Kvs {
 		key := hack.String(kv.Key)
-		switch {
-		case strings.HasSuffix(key, ttlSuffix):
-			addr := key[len(tidbTopologyInformationPath)+1 : len(key)-len(ttlSuffix)-1]
+		key = key[len(tidbTopologyInformationPath):]
+		key, found := strings.CutPrefix(key, "/")
+		if !found {
+			continue
+		}
+		// Topology keys are external data, so validate the expected {address}/{type} shape first.
+		addr, suffix, found := strings.Cut(key, "/")
+		if !found || len(addr) == 0 {
+			continue
+		}
+
+		switch suffix {
+		case ttlSuffix:
 			ttls[addr] = struct{}{}
-		case strings.HasSuffix(key, infoSuffix):
+		case infoSuffix:
 			var topology *TiDBTopologyInfo
-			addr := key[len(tidbTopologyInformationPath)+1 : len(key)-len(infoSuffix)-1]
 			if err = json.Unmarshal(kv.Value, &topology); err != nil {
 				is.lg.Error("unmarshal topology info failed", zap.String("key", key),
 					zap.String("value", hack.String(kv.Value)), zap.Error(err))
+			} else if topology == nil {
+				is.lg.Error("topology info is null", zap.String("key", key))
 			} else {
 				infos[addr] = topology
 			}
