@@ -51,6 +51,10 @@ func formatValue(v reflect.Value, name string, reloadable bool) ([]field, error)
 	if !v.IsValid() {
 		return nil, errors.New("invalid value")
 	}
+	if v.Type() == reflect.TypeFor[RedactInfoLogType]() {
+		redactInfoLog := v.Interface().(RedactInfoLogType)
+		return []field{{Name: name, Type: "string", DefaultValue: redactInfoLog.configInfoValue(), HotReloadable: reloadable}}, nil
+	}
 
 	if v.Kind() == reflect.Interface {
 		return formatValue(v.Elem(), name, reloadable)
