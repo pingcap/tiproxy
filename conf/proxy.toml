@@ -110,9 +110,11 @@ graceful-close-conn-timeout = 15
 # session-token = ""
 
 [security]
-# Controls whether sensitive information is redacted in logs. It accepts the
-# booleans true and false, or the case-insensitive strings "true", "false", and
-# "marker".
+# Controls whether sensitive information is redacted in logs and traffic replay
+# report tables. SQL literals and quoted text in error samples are kept as
+# captured when this is false, replaced with "?" when this is true, and wrapped
+# in ‹› markers when this is "marker". It accepts the booleans true and false,
+# or the case-insensitive strings "true", "false", and "marker".
 redact-info-log = true
 
 # tls object is either of type server, client, or peer

@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/pkg/parser"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/redact"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
@@ -156,4 +158,24 @@ func (c *Command) QueryText() string {
 		return c.PreparedStmt
 	}
 	return ""
+}
+
+// RedactedQueryText returns the statement text stored in traffic replay report tables.
+func (c *Command) RedactedQueryText(mode config.RedactInfoLogType) string {
+	if c == nil {
+		return ""
+	}
+	switch c.Type {
+	case pnet.ComQuery, pnet.ComStmtPrepare:
+		if len(c.Payload) == 0 {
+			return ""
+		}
+		return redact.NormalizeSQL(string(c.Payload[1:]), mode)
+	case pnet.ComStmtExecute:
+		return fmt.Sprintf("%s params=%s", redact.NormalizeSQL(c.PreparedStmt, mode), redact.ParamsText(c.Params, mode))
+	case pnet.ComStmtClose, pnet.ComStmtSendLongData, pnet.ComStmtReset, pnet.ComStmtFetch:
+		return redact.NormalizeSQL(c.PreparedStmt, mode)
+	default:
+		return ""
+	}
 }

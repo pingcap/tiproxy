@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/pkg/objstore/storeapi"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
@@ -66,6 +67,8 @@ type ReplayConfig struct {
 	UserAllowlist []string
 	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
 	WaitOnEOF bool
+	// ConfigGetter reads the current config while report rows are written.
+	ConfigGetter config.ConfigGetter `json:"-"`
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report

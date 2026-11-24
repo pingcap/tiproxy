@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/retry"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/redact"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
@@ -20,7 +22,7 @@ type BackendConnCreator func() conn.BackendConn
 
 type ReportDB interface {
 	Init(ctx context.Context) error
-	InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection) error
+	InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection, mode config.RedactInfoLogType) error
 	Close()
 }
 
@@ -94,18 +96,18 @@ func (rdb *reportDB) initStmts(ctx context.Context) (err error) {
 	return
 }
 
-func (rdb *reportDB) InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection) error {
+func (rdb *reportDB) InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection, mode config.RedactInfoLogType) error {
 	for _, value := range m {
 		var args []any
 		switch tp {
 		case conn.Fail:
 			sample := value.sample.(*conn.FailException)
 			command := sample.Command()
-			args = []any{startTime.String(), command.Type.String(), command.Digest(), command.QueryText(), sample.Error(), sample.ConnID(),
+			args = []any{startTime.String(), command.Type.String(), command.Digest(), command.RedactedQueryText(mode), redact.ErrorMessage(sample.Error(), mode), sample.ConnID(),
 				command.FileName, command.Line, command.StartTs.String(), sample.Time().String(), value.count, value.count}
 		case conn.Other:
 			sample := value.sample.(*conn.OtherException)
-			args = []any{startTime.String(), sample.Key(), sample.Error(), sample.Time().String(), value.count, value.count}
+			args = []any{startTime.String(), redact.ErrorMessage(sample.Key(), mode), redact.ErrorMessage(sample.Error(), mode), sample.Time().String(), value.count, value.count}
 		default:
 			return errors.WithStack(errors.New("unknown exception type"))
 		}

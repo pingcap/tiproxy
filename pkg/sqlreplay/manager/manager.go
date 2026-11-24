@@ -56,18 +56,18 @@ type jobManager struct {
 	replay             replay.Replay
 	hsHandler          backend.HandshakeHandler
 	certManager        CertManager
-	cfg                *config.Config
+	cfgGetter          config.ConfigGetter
 	lg                 *zap.Logger
 	isStandalonePlayer bool
 }
 
-func NewJobManager(lg *zap.Logger, cfg *config.Config, certMgr CertManager, idMgr *id.IDManager, hsHandler backend.HandshakeHandler, isStandalonePlayer bool) *jobManager {
+func NewJobManager(lg *zap.Logger, cfgGetter config.ConfigGetter, certMgr CertManager, idMgr *id.IDManager, hsHandler backend.HandshakeHandler, isStandalonePlayer bool) *jobManager {
 	return &jobManager{
 		lg:                 lg,
 		capture:            capture.NewCapture(lg.Named("capture")),
 		replay:             replay.NewReplay(lg.Named("replay"), idMgr),
 		hsHandler:          hsHandler,
-		cfg:                cfg,
+		cfgGetter:          cfgGetter,
 		certManager:        certMgr,
 		isStandalonePlayer: isStandalonePlayer,
 	}
@@ -145,6 +145,7 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 		jm.hsHandler = backend.NewStaticHandshakeHandler(cfg.Addr)
 	}
 
+	cfg.ConfigGetter = jm.cfgGetter
 	newJob := &replayJob{
 		job: job{
 			// cfg.StartTime may act as the job ID in a TiProxy cluster.
@@ -152,13 +153,14 @@ func (jm *jobManager) StartReplay(cfg replay.ReplayConfig) error {
 		},
 		cfg: cfg,
 	}
+	current := jm.cfgGetter.GetConfig()
 	// TODO: support update configs online
 	err := jm.replay.Start(cfg, jm.certManager.SQLTLS(), jm.hsHandler, &backend.BCConfig{
-		ProxyProtocol:      jm.cfg.Proxy.ProxyProtocol != "",
-		RequireBackendTLS:  jm.cfg.Security.RequireBackendTLS,
-		HealthyKeepAlive:   jm.cfg.Proxy.BackendHealthyKeepalive,
-		UnhealthyKeepAlive: jm.cfg.Proxy.BackendUnhealthyKeepalive,
-		ConnBufferSize:     jm.cfg.Proxy.ConnBufferSize,
+		ProxyProtocol:      current.Proxy.ProxyProtocol != "",
+		RequireBackendTLS:  current.Security.RequireBackendTLS,
+		HealthyKeepAlive:   current.Proxy.BackendHealthyKeepalive,
+		UnhealthyKeepAlive: current.Proxy.BackendUnhealthyKeepalive,
+		ConnBufferSize:     current.Proxy.ConnBufferSize,
 		DialTimeout:        dialTimeout,
 		ConnectTimeout:     connectTimeout,
 	})

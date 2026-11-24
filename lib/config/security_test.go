@@ -15,6 +15,13 @@ func TestRedactInfoLogDefault(t *testing.T) {
 	require.Equal(t, RedactInfoLogOn, NewConfig().Security.RedactInfoLog)
 }
 
+func TestSQLRedactMode(t *testing.T) {
+	require.Equal(t, "OFF", RedactInfoLogOff.SQLRedactMode())
+	require.Equal(t, "ON", RedactInfoLogOn.SQLRedactMode())
+	require.Equal(t, "MARKER", RedactInfoLogMarker.SQLRedactMode())
+	require.Equal(t, "ON", RedactInfoLogType(99).SQLRedactMode())
+}
+
 func TestRedactInfoLogTOML(t *testing.T) {
 	testcases := []struct {
 		name      string

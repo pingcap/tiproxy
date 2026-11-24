@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
@@ -118,7 +119,7 @@ func TestInsertExceptions(t *testing.T) {
 		err := db.Init(context.Background())
 		require.NoErrorf(t, err, "case %d", i)
 		cn.clear()
-		err = db.InsertExceptions(now, test.tp, test.colls)
+		err = db.InsertExceptions(now, test.tp, test.colls, config.RedactInfoLogOff)
 		require.NoErrorf(t, err, "case %d", i)
 		require.Equal(t, test.stmtID, cn.stmtID, "case %d", i)
 		if len(test.args) > 1 {
@@ -126,6 +127,71 @@ func TestInsertExceptions(t *testing.T) {
 			sort.Slice(cn.args, func(i, j int) bool { return cn.args[i][1].(string) < cn.args[j][1].(string) })
 		}
 		require.Equal(t, test.args, cn.args, "case %d", i)
+		db.Close()
+	}
+}
+
+func TestInsertExceptionsRedactsSamples(t *testing.T) {
+	now := time.Now()
+	const (
+		sql = "select * from t where name = 'alice' and id = 10"
+		err = "ERROR 1062 (23000): Duplicate entry 'alice@example.com' for key 'users.email'"
+	)
+	query := cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte(sql)...), now, 1)
+	query.FileName = "my/file"
+	query.Line = 100
+	query.UpstreamConnID = 1
+	fail := conn.NewFailException(errors.New(err), query)
+	other := conn.NewOtherException(errors.New("Table 'test.users' doesn't exist"), 1)
+
+	tests := []struct {
+		redact   config.RedactInfoLogType
+		stmt     string
+		failErr  string
+		otherKey string
+		otherErr string
+	}{
+		{
+			redact:   config.RedactInfoLogOff,
+			stmt:     sql,
+			failErr:  err,
+			otherKey: "Table 'test.users' doesn't exist",
+			otherErr: "Table 'test.users' doesn't exist",
+		},
+		{
+			redact:   config.RedactInfoLogOn,
+			stmt:     "select * from `t` where `name` = ? and `id` = ?",
+			failErr:  "ERROR 1062 (23000): Duplicate entry '?' for key '?'",
+			otherKey: "Table '?' doesn't exist",
+			otherErr: "Table '?' doesn't exist",
+		},
+		{
+			redact:   config.RedactInfoLogMarker,
+			stmt:     "select * from `t` where `name` = ‹alice› and `id` = ‹10›",
+			failErr:  "ERROR 1062 (23000): Duplicate entry '‹alice@example.com›' for key '‹users.email›'",
+			otherKey: "Table '‹test.users›' doesn't exist",
+			otherErr: "Table '‹test.users›' doesn't exist",
+		},
+	}
+
+	lg, _ := logger.CreateLoggerForTest(t)
+	for i, test := range tests {
+		cn := &mockBackendConn{}
+		db := NewReportDB(lg, func() conn.BackendConn { return cn })
+		require.NoError(t, db.Init(context.Background()))
+		cn.clear()
+
+		require.NoError(t, db.InsertExceptions(now, conn.Fail, map[string]*expCollection{
+			fail.Key(): {count: 1, sample: fail},
+		}, test.redact))
+		require.Equal(t, [][]any{{now.String(), "Query", query.Digest(), test.stmt, test.failErr,
+			uint64(1), "my/file", 100, now.String(), fail.Time().String(), uint64(1), uint64(1)}}, cn.args, "case %d", i)
+
+		cn.clear()
+		require.NoError(t, db.InsertExceptions(now, conn.Other, map[string]*expCollection{
+			other.Key(): {count: 2, sample: other},
+		}, test.redact))
+		require.Equal(t, [][]any{{now.String(), test.otherKey, test.otherErr, other.Time().String(), uint64(2), uint64(2)}}, cn.args, "case %d", i)
 		db.Close()
 	}
 }

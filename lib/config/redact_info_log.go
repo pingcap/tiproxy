@@ -10,7 +10,8 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
-// RedactInfoLogType controls how sensitive information is written to logs.
+// RedactInfoLogType controls how sensitive information is written to logs and
+// traffic replay report tables.
 type RedactInfoLogType int
 
 const (
@@ -74,6 +75,19 @@ func (t RedactInfoLogType) configInfoValue() string {
 		return "marker"
 	default:
 		return "false"
+	}
+}
+
+// SQLRedactMode returns the mode accepted by the SQL normalizer: "OFF", "ON", or "MARKER".
+// An unrecognized value redacts, so a bad setting does not leave literals in the report.
+func (t RedactInfoLogType) SQLRedactMode() string {
+	switch t {
+	case RedactInfoLogOff:
+		return "OFF"
+	case RedactInfoLogMarker:
+		return "MARKER"
+	default:
+		return "ON"
 	}
 }
 

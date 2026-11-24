@@ -203,8 +203,9 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	// Cancel decoding on graceful stop without shutting down execution.
 	r.decodeCtx, r.decodeCancel = context.WithCancel(childCtx)
 	if err := r.report.Start(childCtx, report.ReportConfig{
-		StartTime: r.startTime,
-		TlsConfig: r.backendTLSConfig,
+		StartTime:    r.startTime,
+		TlsConfig:    r.backendTLSConfig,
+		ConfigGetter: r.cfg.ConfigGetter,
 	}); err != nil {
 		return err
 	}

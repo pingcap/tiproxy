@@ -7,10 +7,23 @@ import (
 	"crypto/tls"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 )
+
+type fixedConfigGetter struct {
+	cfg *config.Config
+}
+
+func (g *fixedConfigGetter) GetConfig() *config.Config {
+	return g.cfg
+}
+
+func fixedConfig(cfg *config.Config) config.ConfigGetter {
+	return &fixedConfigGetter{cfg: cfg}
+}
 
 var _ CertManager = (*mockCertMgr)(nil)
 
@@ -63,6 +76,7 @@ type mockReplay struct {
 	progress float64
 	err      error
 	done     bool
+	cfg      replay.ReplayConfig
 }
 
 func (m *mockReplay) Close() {
@@ -76,6 +90,7 @@ func (m *mockReplay) Wait() {
 }
 
 func (m *mockReplay) Start(cfg replay.ReplayConfig, backendTLSConfig *tls.Config, hsHandler backend.HandshakeHandler, bcConfig *backend.BCConfig) error {
+	m.cfg = cfg
 	m.progress = 0
 	m.err = nil
 	m.done = false

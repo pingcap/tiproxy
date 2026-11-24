@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 )
 
@@ -36,7 +37,7 @@ func (db *mockReportDB) clear() {
 	db.exceptions = exceptions
 }
 
-func (db *mockReportDB) InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection) error {
+func (db *mockReportDB) InsertExceptions(startTime time.Time, tp conn.ExceptionType, m map[string]*expCollection, _ config.RedactInfoLogType) error {
 	db.Lock()
 	defer db.Unlock()
 	exps := db.exceptions[tp]
