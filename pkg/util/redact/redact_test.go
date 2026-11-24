@@ -49,6 +49,9 @@ func TestErrorMessage(t *testing.T) {
 	require.Equal(t, "syntax error near '?' at line 1", ErrorMessage(nestedEscapedQuote, config.RedactInfoLogOn))
 	require.NotContains(t, ErrorMessage(nestedEscapedQuote, config.RedactInfoLogOn), "customer-secret")
 	require.Equal(t, "syntax error near '‹SELEC 'a'' customer-secret'›' at line 1", ErrorMessage(nestedEscapedQuote, config.RedactInfoLogMarker))
+	independentQuotes := "value 'a''; value ' customer-secret'"
+	require.Equal(t, "value '?'; value '?'", ErrorMessage(independentQuotes, config.RedactInfoLogOn))
+	require.Equal(t, "value '‹a'›'; value '‹ customer-secret›'", ErrorMessage(independentQuotes, config.RedactInfoLogMarker))
 	require.Equal(t, "Can't DROP '?'; check that column/key exists", ErrorMessage("Can't DROP 'private_column'; check that column/key exists", config.RedactInfoLogOn))
 	require.Equal(t, "Can't DROP '‹private_column›'; check that column/key exists", ErrorMessage("Can't DROP 'private_column'; check that column/key exists", config.RedactInfoLogMarker))
 	require.Equal(t, "it is alice's", ErrorMessage("it is alice's", config.RedactInfoLogOn))
