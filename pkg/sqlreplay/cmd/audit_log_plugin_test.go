@@ -6,6 +6,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"testing"
 	"time"
 
@@ -434,7 +435,7 @@ func TestParseParams(t *testing.T) {
 		},
 		{
 			s:      `"[\"KindInt64 \"]"`,
-			errMsg: "invalid syntax",
+			errMsg: "invalid param value",
 		},
 		{
 			s:      `"[\"1\"]"`,
@@ -523,6 +524,24 @@ func TestParseParams(t *testing.T) {
 		}
 		require.Equal(t, test.expect, params, "case %d", i)
 	}
+}
+
+func TestAuditPluginDecodeErrorsDoNotExposeSensitiveInput(t *testing.T) {
+	const secret = "audit-plugin-sensitive-value"
+
+	_, _, _, err := parseInBracket(`SQL_TEXT="select '` + secret)
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), secret)
+
+	_, err = parseExecuteParams(strconv.Quote(`["KindInt64 ` + secret + `"]`))
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), secret)
+
+	line := `[2025/09/06 17:03:53.720 +08:00] [SQL_TEXT="select '` + secret + `'"]`
+	decoder := NewAuditLogPluginDecoder(NewDeDup(), zap.NewNop())
+	_, err = decoder.Decode(&mockReader{data: append([]byte(line), '\n'), filename: "audit.log"})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), secret)
 }
 
 func TestDecodeSingleLine(t *testing.T) {

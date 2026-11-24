@@ -6,6 +6,7 @@ package cmd
 import (
 	"io"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -572,6 +573,20 @@ func TestParseExecuteParamsForExtension(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAuditExtensionDecodeErrorsDoNotExposeSensitiveInput(t *testing.T) {
+	const secret = "audit-extension-sensitive-value"
+
+	_, err := parseExecuteParamsForExtension(strconv.Quote(`["` + secret))
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), secret)
+
+	line := auditExtensionLine("root", "", "QUERY", `"select '`+secret+`'"`, "")
+	decoder := NewAuditLogExtensionDecoder(zap.NewNop())
+	_, err = decoder.Decode(&mockReader{data: append([]byte(line), '\n'), filename: "audit.log"})
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), secret)
 }
 
 func auditExtensionLine(user, connID, event, sql, params string) string {

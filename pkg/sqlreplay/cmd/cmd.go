@@ -62,6 +62,8 @@ func NewCmdDecoder(format TrafficFormat, dedup *DeDup, lg *zap.Logger) CmdDecode
 }
 
 type CmdDecoder interface {
+	// Decode errors can be exposed in replay logs and task status. Implementations must not include
+	// raw source lines, SQL text, or parameter values in the returned error.
 	Decode(reader LineReader) (c *Command, err error)
 
 	SetCommandStartTime(t time.Time)

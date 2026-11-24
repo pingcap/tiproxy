@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/pkg/objstore/storeapi"
-	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
@@ -32,6 +31,7 @@ import (
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/redact"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
@@ -758,12 +758,12 @@ func (r *replay) recordExecInfoLoop() {
 			continue
 		}
 		var sql string
+		redactMode := r.cfg.redactInfoLog()
 		switch info.Command.Type {
 		case pnet.ComStmtExecute:
-			sql = info.Command.PreparedStmt
+			sql = redact.NormalizeSQL(info.Command.PreparedStmt, redactMode)
 		case pnet.ComQuery:
-			sql = hack.String(info.Command.Payload[1:])
-			sql = parser.Normalize(sql, "ON")
+			sql = redact.NormalizeSQL(hack.String(info.Command.Payload[1:]), redactMode)
 		}
 		if len(sql) == 0 {
 			continue

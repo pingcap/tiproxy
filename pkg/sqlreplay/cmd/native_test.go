@@ -135,6 +135,22 @@ select 1
 	}
 }
 
+func TestNativeDecodeErrorsDoNotExposeSensitiveInput(t *testing.T) {
+	const secret = "native-sensitive-value"
+	tests := []string{
+		secret + "\n",
+		"# Time: " + secret + "\n",
+		`# Prepared_stmt: "select '` + secret + "\n",
+	}
+
+	for _, input := range tests {
+		decoder := NewNativeDecoder()
+		_, err := decoder.Decode(&mockReader{data: []byte(input), filename: "native.log"})
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), secret)
+	}
+}
+
 func TestDecodeNativeWithCommandStartTime(t *testing.T) {
 	tests := []struct {
 		lines string

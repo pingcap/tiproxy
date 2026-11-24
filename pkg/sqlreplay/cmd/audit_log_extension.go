@@ -106,7 +106,7 @@ func (decoder *AuditLogExtensionDecoder) Decode(reader LineReader) (retCmd *Comm
 		}
 		connStr := kvs[auditPluginKeyConnID]
 		if len(connStr) == 0 {
-			return nil, errors.Errorf("%s, line %d: no connection id in line: %s", filename, lineIdx, line)
+			return nil, errors.Errorf("%s, line %d: no connection id", filename, lineIdx)
 		}
 		upstreamConnID, err := strconv.ParseUint(connStr, 10, 64)
 		if err != nil {
@@ -204,7 +204,7 @@ func (decoder *AuditLogExtensionDecoder) parseQueryEvent(kvs map[string]string, 
 		var err error
 		sql, err = parseSQL(sqlStr)
 		if err != nil {
-			return nil, errors.Wrapf(err, "unquote sql failed: %s", sqlStr)
+			return nil, errors.New("unquote sql failed")
 		}
 	}
 	cmds := make([]*Command, 0, 3)
@@ -301,13 +301,13 @@ func (decoder *AuditLogExtensionDecoder) parseQueryEvent(kvs map[string]string, 
 func parseExecuteParamsForExtension(value string) ([]any, error) {
 	v, err := strconv.Unquote(value)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unquote execute params failed: %s", value)
+		return nil, errors.New("unquote execute params failed")
 	}
 	if len(v) == 0 {
-		return nil, errors.Errorf("no brackets in params: %s", value)
+		return nil, errors.New("no brackets in params")
 	}
 	if v[0] != '[' || v[len(v)-1] != ']' {
-		return nil, errors.Errorf("no brackets in params: %s", value)
+		return nil, errors.New("no brackets in params")
 	}
 	v = v[1 : len(v)-1]
 	if len(v) == 0 {
@@ -320,12 +320,12 @@ func parseExecuteParamsForExtension(value string) ([]any, error) {
 		case '"':
 			endIdx := skipQuotes(v[idx+1:], false)
 			if endIdx == -1 {
-				return nil, errors.Errorf("unterminated quote in params: %s", v[idx+1:])
+				return nil, errors.New("unterminated quote in params")
 			}
 
 			unquoted, err := strconv.Unquote(v[idx : idx+endIdx+2])
 			if err != nil {
-				return nil, errors.Wrapf(err, "unquote param failed: %s", v[idx:idx+endIdx+2])
+				return nil, errors.New("unquote param failed")
 			}
 			params = append(params, unquoted)
 			idx += endIdx + 1
