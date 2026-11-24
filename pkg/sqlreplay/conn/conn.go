@@ -19,9 +19,9 @@ import (
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
-	"github.com/pingcap/tiproxy/pkg/sqlreplay/redact"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/sessionstates"
 	"github.com/pingcap/tiproxy/pkg/util/lex"
+	"github.com/pingcap/tiproxy/pkg/util/redact"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )

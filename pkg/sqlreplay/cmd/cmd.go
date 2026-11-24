@@ -12,7 +12,7 @@ import (
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
-	"github.com/pingcap/tiproxy/pkg/sqlreplay/redact"
+	"github.com/pingcap/tiproxy/pkg/util/redact"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
 )
