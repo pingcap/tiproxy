@@ -141,7 +141,7 @@ func TestMarshalJob(t *testing.T) {
 					Duration: 2 * time.Hour,
 				},
 			},
-			marshal: `{"type":"capture","status":"done","start_time":"2020-01-01T00:00:00Z","end_time":"2020-01-01T02:01:01Z","duration":"2h0m0s","output":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","progress":"50%"}`,
+			marshal: `{"type":"capture","status":"done","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","duration":"2h0m0s","output":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","progress":"50%"}`,
 		},
 		{
 			job: &replayJob{
@@ -183,7 +183,7 @@ func TestMarshalJob(t *testing.T) {
 					Username: "root",
 				},
 			},
-			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01T00:00:00Z","input":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","username":"root","speed":1,"progress":"0%"}`,
+			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01 00:00:00 +0000 UTC","input":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","username":"root","speed":1,"progress":"0%"}`,
 		},
 	}
 
