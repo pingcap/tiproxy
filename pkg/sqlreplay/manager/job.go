@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pingcap/tidb/pkg/parser/ast"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/replay"
 	"github.com/siddontang/go/hack"
@@ -97,7 +96,7 @@ func (job *captureJob) Type() jobType {
 func (job *captureJob) MarshalJSON() ([]byte, error) {
 	job4Marshal := job.getJob4Marshal()
 	job4Marshal.Type = "capture"
-	job4Marshal.Output = ast.RedactURL(job.cfg.Output)
+	job4Marshal.Output = replay.RedactStorageURL(job.cfg.Output)
 	job4Marshal.Duration = job.cfg.Duration.String()
 	return json.Marshal(job4Marshal)
 }
@@ -124,7 +123,7 @@ func (job *replayJob) Type() jobType {
 func (job *replayJob) MarshalJSON() ([]byte, error) {
 	job4Marshal := job.getJob4Marshal()
 	job4Marshal.Type = "replay"
-	job4Marshal.Input = ast.RedactURL(job.cfg.Input)
+	job4Marshal.Input = replay.RedactStorageList(job.cfg.Input)
 	job4Marshal.Username = job.cfg.Username
 	job4Marshal.Speed = job.cfg.Speed
 	if job4Marshal.Speed == 0 {

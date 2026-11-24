@@ -141,7 +141,7 @@ func TestMarshalJob(t *testing.T) {
 					Duration: 2 * time.Hour,
 				},
 			},
-			marshal: `{"type":"capture","status":"done","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","duration":"2h0m0s","output":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","progress":"50%"}`,
+			marshal: `{"type":"capture","status":"done","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","duration":"2h0m0s","output":"s3://bucket/prefix","progress":"50%"}`,
 		},
 		{
 			job: &replayJob{
@@ -183,11 +183,42 @@ func TestMarshalJob(t *testing.T) {
 					Username: "root",
 				},
 			},
-			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01 00:00:00 +0000 UTC","input":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","username":"root","speed":1,"progress":"0%"}`,
+			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01 00:00:00 +0000 UTC","input":"s3://bucket/prefix","username":"root","speed":1,"progress":"0%"}`,
 		},
 	}
 
 	for i, test := range tests {
 		require.Equal(t, test.marshal, test.job.String(), "case %d", i)
 	}
+}
+
+func TestJobStatusRedactsNestedStorageSecrets(t *testing.T) {
+	replayed := &replayJob{
+		job: job{startTime: time.Now()},
+		cfg: replay.ReplayConfig{
+			Input:    "/tmp/traffic,s3://bucket/prefix?secret-access-key=TOPSECRET&endpoint=http://user:ENDPOINTPASS@minio:9000",
+			Username: "root",
+			Password: "db-password",
+		},
+	}
+	text := replayed.String()
+	require.NotContains(t, text, "TOPSECRET")
+	require.NotContains(t, text, "ENDPOINTPASS")
+	require.NotContains(t, text, "db-password")
+	require.Contains(t, text, "/tmp/traffic")
+	require.Contains(t, text, "s3://bucket/prefix")
+	require.NotContains(t, text, "?")
+	require.Contains(t, text, "root")
+
+	captured := &captureJob{
+		cfg: capture.CaptureConfig{
+			Output: "s3://bucket/prefix?endpoint=http://user:ENDPOINTPASS@minio:9000&secret-access-key=TOPSECRET,LEAKED",
+		},
+	}
+	text = captured.String()
+	require.NotContains(t, text, "ENDPOINTPASS")
+	require.NotContains(t, text, "TOPSECRET")
+	require.NotContains(t, text, "LEAKED")
+	require.Contains(t, text, "s3://bucket/prefix")
+	require.NotContains(t, text, "?")
 }
