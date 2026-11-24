@@ -129,6 +129,21 @@ func TestMarshalJob(t *testing.T) {
 			marshal: `{"type":"capture","status":"canceled","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","duration":"2h0m0s","output":"/tmp/traffic","progress":"50%","error":"mock error"}`,
 		},
 		{
+			job: &captureJob{
+				job: job{
+					startTime: startTime,
+					endTime:   endTime,
+					progress:  0.5,
+					done:      true,
+				},
+				cfg: capture.CaptureConfig{
+					Output:   "s3://bucket/prefix?access-key=abcdefghi&secret-access-key=123&force-path-style=true",
+					Duration: 2 * time.Hour,
+				},
+			},
+			marshal: `{"type":"capture","status":"done","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","duration":"2h0m0s","output":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","progress":"50%"}`,
+		},
+		{
 			job: &replayJob{
 				job: job{
 					startTime: startTime,
@@ -156,6 +171,19 @@ func TestMarshalJob(t *testing.T) {
 				},
 			},
 			marshal: `{"type":"replay","status":"done","start_time":"2020-01-01 00:00:00 +0000 UTC","end_time":"2020-01-01 02:01:01 +0000 UTC","input":"/tmp/traffic","username":"root","speed":0.5,"progress":"100%"}`,
+		},
+		{
+			job: &replayJob{
+				job: job{
+					startTime: startTime,
+					progress:  0,
+				},
+				cfg: replay.ReplayConfig{
+					Input:    "s3://bucket/prefix?access-key=abcdefghi&secret-access-key=123&force-path-style=true",
+					Username: "root",
+				},
+			},
+			marshal: `{"type":"replay","status":"running","start_time":"2020-01-01 00:00:00 +0000 UTC","input":"s3://bucket/prefix?access-key=xxxxxx\u0026force-path-style=true\u0026secret-access-key=xxxxxx","username":"root","speed":1,"progress":"0%"}`,
 		},
 	}
 
