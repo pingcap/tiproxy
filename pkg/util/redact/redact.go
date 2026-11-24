@@ -126,14 +126,15 @@ func quotedSpan(s string, open int) (inner string, next int, ok bool) {
 		}
 		if s[i] == quote {
 			// MySQL escapes quotes by doubling them. When a doubled pair is
-			// followed by a word character, it is inside the quoted value.
-			// Otherwise, the pair can close nested and outer quoted fragments.
+			// followed by a word character or another quote remains to close the
+			// surrounding span, it is inside the quoted value. Otherwise, the
+			// pair can close nested and outer quoted fragments.
 			if i+1 < len(s) && s[i+1] == quote {
-				if i+2 >= len(s) || !isASCIIWordByte(s[i+2]) {
-					return s[open+1 : i+1], i + 2, true
+				if i+2 < len(s) && (isASCIIWordByte(s[i+2]) || hasLaterUnescapedQuote(s, i+2, quote)) {
+					i += 2
+					continue
 				}
-				i += 2
-				continue
+				return s[open+1 : i+1], i + 2, true
 			}
 			if i+1 < len(s) && isASCIIWordByte(s[i+1]) {
 				if ambiguousCloser < 0 {
@@ -150,6 +151,19 @@ func quotedSpan(s string, open int) (inner string, next int, ok bool) {
 		return s[open+1 : ambiguousCloser], ambiguousCloser + 1, true
 	}
 	return "", 0, false
+}
+
+func hasLaterUnescapedQuote(s string, start int, quote byte) bool {
+	for i := start; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+			continue
+		}
+		if s[i] == quote {
+			return true
+		}
+	}
+	return false
 }
 
 func isASCIIWordByte(ch byte) bool {
