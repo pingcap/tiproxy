@@ -38,13 +38,10 @@ func (h *Server) ConfigSet(c *gin.Context) {
 func (h *Server) ConfigGet(c *gin.Context) {
 	// TiDB cluster_config uses format=json, while tiproxyctl expects toml (both PUT and GET) by default.
 	// Users can choose the format on TiDB-Dashboard.
-	// Secrets are omitted. A client that writes this document back does not clear them,
-	// because the update only overwrites keys present in the request.
-	cfg := h.mgr.CfgMgr.GetConfig().Redacted()
 	if strings.EqualFold(c.Query("format"), "json") || c.GetHeader("Accept") == "application/json" {
-		c.JSON(http.StatusOK, cfg)
+		c.JSON(http.StatusOK, h.mgr.CfgMgr.GetConfig())
 	} else {
-		c.TOML(http.StatusOK, cfg)
+		c.TOML(http.StatusOK, h.mgr.CfgMgr.GetConfig())
 	}
 }
 

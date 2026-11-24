@@ -96,20 +96,9 @@ func (job *captureJob) Type() jobType {
 func (job *captureJob) MarshalJSON() ([]byte, error) {
 	job4Marshal := job.getJob4Marshal()
 	job4Marshal.Type = "capture"
-<<<<<<< HEAD
-	job4Marshal.Output = ast.RedactURL(job.cfg.Output)
+	job4Marshal.Output = replay.RedactStorageURL(job.cfg.Output)
 	job4Marshal.Duration = job.cfg.Duration.String()
 	return json.Marshal(job4Marshal)
-=======
-	c := captureJob4Marshal{
-		job4Marshal:      *job4Marshal,
-		Output:           replay.RedactStorageURL(job.cfg.Output),
-		Duration:         job.cfg.Duration.String(),
-		Compress:         job.cfg.Compress,
-		EncryptionMethod: job.cfg.EncryptionMethod,
-	}
-	return json.Marshal(c)
->>>>>>> 89402815 (config, api, sqlreplay: redact object storage URL in gRPC and logs (#1412))
 }
 
 func (job *captureJob) String() string {
@@ -134,23 +123,11 @@ func (job *replayJob) Type() jobType {
 func (job *replayJob) MarshalJSON() ([]byte, error) {
 	job4Marshal := job.getJob4Marshal()
 	job4Marshal.Type = "replay"
-<<<<<<< HEAD
-	job4Marshal.Input = ast.RedactURL(job.cfg.Input)
+	job4Marshal.Input = replay.RedactStorageList(job.cfg.Input)
 	job4Marshal.Username = job.cfg.Username
 	job4Marshal.Speed = job.cfg.Speed
 	if job4Marshal.Speed == 0 {
 		job4Marshal.Speed = 1
-=======
-	r := replayJob4Marshal{
-		job4Marshal: *job4Marshal,
-		LastCmdTs:   job.lastCmdTs.Format(time.RFC3339Nano),
-		Input:       replay.RedactStorageList(job.cfg.Input),
-		Username:    job.cfg.Username,
-		Speed:       job.cfg.Speed,
-		ReadOnly:    job.cfg.ReadOnly,
-		Format:      job.cfg.Format,
-		Addr:        job.cfg.Addr,
->>>>>>> 89402815 (config, api, sqlreplay: redact object storage URL in gRPC and logs (#1412))
 	}
 	return json.Marshal(job4Marshal)
 }
