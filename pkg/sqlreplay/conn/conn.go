@@ -13,11 +13,13 @@ import (
 	"time"
 
 	glist "github.com/bahlo/generic-list-go"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
 	"github.com/pingcap/tiproxy/pkg/proxy/backend"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
+	"github.com/pingcap/tiproxy/pkg/sqlreplay/redact"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/sessionstates"
 	"github.com/pingcap/tiproxy/pkg/util/lex"
 	"github.com/siddontang/go/hack"
@@ -333,7 +335,8 @@ func (c *conn) updateExecuteStmt(ctx context.Context, command *cmd.Command) erro
 		_, args, _, err := pnet.ParseExecuteStmtRequest(command.Payload, ps.paramNum, ps.paramTypes)
 		if err != nil {
 			// Failing to parse the request is not critical, so don't return false.
-			c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("replay_stmt_id", replayPsID), zap.String("sql", ps.text),
+			c.lg.Error("parsing ComExecuteStmt request failed", zap.Uint32("replay_stmt_id", replayPsID),
+				zap.String("sql", redact.NormalizeSQL(ps.text, config.RedactInfoLogOn)),
 				zap.Int("param_num", ps.paramNum), zap.ByteString("param_types", ps.paramTypes), zap.Error(err))
 		}
 		command.Params = args
