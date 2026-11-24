@@ -10,12 +10,13 @@ import (
 	"github.com/pingcap/tiproxy/lib/util/errors"
 )
 
-// RedactInfoLogType controls how sensitive information is written to logs and
-// traffic replay report tables.
+// RedactInfoLogType controls how sensitive information is written to traffic
+// replay exec-info logs and report tables. Other logs always redact sensitive
+// information.
 type RedactInfoLogType int
 
 const (
-	// RedactInfoLogOff disables log redaction.
+	// RedactInfoLogOff disables redaction in configurable traffic replay outputs.
 	RedactInfoLogOff RedactInfoLogType = iota
 	// RedactInfoLogOn replaces sensitive information with question marks.
 	RedactInfoLogOn

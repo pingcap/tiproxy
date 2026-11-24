@@ -108,6 +108,16 @@ func quotedSpan(s string, open int) (inner string, next int, ok bool) {
 	if quote != '\'' && quote != '"' {
 		return "", 0, false
 	}
+	// An apostrophe surrounded by word characters is part of a contraction or
+	// possessive, not the start of quoted sensitive text.
+	if quote == '\'' && open > 0 && open+1 < len(s) && isASCIIWordByte(s[open-1]) && isASCIIWordByte(s[open+1]) {
+		return "", 0, false
+	}
+
+	// A quote followed immediately by a word character can be an unescaped
+	// nested opening quote. Prefer a later unambiguous closer, but retain the
+	// first such quote as a fallback for malformed messages.
+	ambiguousCloser := -1
 	i := open + 1
 	for i < len(s) {
 		if s[i] == '\\' && i+1 < len(s) {
@@ -115,14 +125,33 @@ func quotedSpan(s string, open int) (inner string, next int, ok bool) {
 			continue
 		}
 		if s[i] == quote {
-			// MySQL escapes a single quote by doubling it.
-			if quote == '\'' && i+1 < len(s) && s[i+1] == '\'' {
+			// MySQL escapes quotes by doubling them. When a doubled pair is
+			// followed by a word character, it is inside the quoted value.
+			// Otherwise, the pair can close nested and outer quoted fragments.
+			if i+1 < len(s) && s[i+1] == quote {
+				if i+2 >= len(s) || !isASCIIWordByte(s[i+2]) {
+					return s[open+1 : i+1], i + 2, true
+				}
 				i += 2
+				continue
+			}
+			if i+1 < len(s) && isASCIIWordByte(s[i+1]) {
+				if ambiguousCloser < 0 {
+					ambiguousCloser = i
+				}
+				i++
 				continue
 			}
 			return s[open+1 : i], i + 1, true
 		}
 		i++
 	}
+	if ambiguousCloser >= 0 {
+		return s[open+1 : ambiguousCloser], ambiguousCloser + 1, true
+	}
 	return "", 0, false
+}
+
+func isASCIIWordByte(ch byte) bool {
+	return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_'
 }
