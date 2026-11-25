@@ -113,6 +113,9 @@ func (cfg *ReplayConfig) Validate() ([]storeapi.Storage, error) {
 	} else if cfg.Speed < minSpeed || cfg.Speed > maxSpeed {
 		return storages, errors.Errorf("speed should be between %f and %f", minSpeed, maxSpeed)
 	}
+	if cfg.BufSize < 0 || cfg.BufSize > maxBufSize {
+		return storages, errors.Errorf("bufsize should be between 0 and %d", maxBufSize)
+	}
 	switch cfg.Format {
 	case cmd.FormatAuditLogPlugin, cmd.FormatAuditLogExtension, cmd.FormatNative, "":
 	default:

@@ -3,6 +3,12 @@
 
 package config
 
+import "github.com/pingcap/tiproxy/lib/util/errors"
+
+// MaxRSAKeySize is the largest RSA modulus auto-certs will generate.
+// Bigger sizes make key generation block for minutes while config reload runs.
+const MaxRSAKeySize = 8192
+
 type TLSConfig struct {
 	Cert               string   `yaml:"cert,omitempty" toml:"cert,omitempty" json:"cert,omitempty" reloadable:"true"`
 	Key                string   `yaml:"key,omitempty" toml:"key,omitempty" json:"key,omitempty" reloadable:"true"`
@@ -21,6 +27,25 @@ func (c TLSConfig) HasCert() bool {
 
 func (c TLSConfig) HasCA() bool {
 	return c.CA != ""
+}
+
+func (s *Security) Check() error {
+	fields := []struct {
+		name string
+		size int
+	}{
+		{"security.server-tls.rsa-key-size", s.ServerSQLTLS.RSAKeySize},
+		{"security.server-http-tls.rsa-key-size", s.ServerHTTPTLS.RSAKeySize},
+		{"security.cluster-tls.rsa-key-size", s.ClusterTLS.RSAKeySize},
+		{"security.sql-tls.rsa-key-size", s.SQLTLS.RSAKeySize},
+	}
+	for _, field := range fields {
+		// 0 selects the default size. Values below 1024 are raised to 1024 when the key is generated.
+		if field.size < 0 || field.size > MaxRSAKeySize {
+			return errors.Wrapf(ErrInvalidConfigValue, "invalid %s, must be between 0 and %d", field.name, MaxRSAKeySize)
+		}
+	}
+	return nil
 }
 
 type Security struct {
