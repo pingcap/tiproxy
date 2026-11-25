@@ -3,7 +3,11 @@
 
 package config
 
-import "github.com/pingcap/tiproxy/lib/util/errors"
+import (
+	"math"
+
+	"github.com/pingcap/tiproxy/lib/util/errors"
+)
 
 const (
 	BalancePolicyResource   = "resource"
@@ -13,6 +17,21 @@ const (
 	RoutingPolicyPreferIdle = "prefer-idle"
 	RoutingPolicyRandom     = "random"
 	RoutingPolicyIdlest     = "idlest"
+<<<<<<< HEAD
+=======
+
+	// MatchClientCIDRStr is used for MatchClientCIDR.
+	MatchClientCIDRStr = "client_cidr"
+	// MatchProxyCIDRStr is used for MatchProxyCIDR.
+	MatchProxyCIDRStr = "proxy_cidr"
+	// MatchPortStr is used for port-based routing.
+	MatchPortStr = "port"
+
+	// maxMigrationsPerSecond is one migration per nanosecond. time.Duration cannot
+	// represent a shorter interval, and a larger rate truncates to 0 and then
+	// panics on integer division in the rebalance loop.
+	maxMigrationsPerSecond = 1e9
+>>>>>>> e8e8ea2b (*: check config value bounds (#1440))
 )
 
 type Balance struct {
@@ -48,6 +67,13 @@ type CPUFactor struct {
 	MaxUsageGap         float64 `yaml:"max-usage-gap" toml:"max-usage-gap" json:"max-usage-gap" reloadable:"true"`
 }
 
+func checkMigrationsPerSecond(name string, v float64) error {
+	if math.IsNaN(v) || v < 0 || v > maxMigrationsPerSecond {
+		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.%s.migrations-per-second, must be between 0 and %g", name, maxMigrationsPerSecond)
+	}
+	return nil
+}
+
 func (b *Balance) Check() error {
 	switch b.Policy {
 	case BalancePolicyResource, BalancePolicyLocation, BalancePolicyConnection:
@@ -65,17 +91,17 @@ func (b *Balance) Check() error {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.route-policy")
 	}
 
-	if b.Status.MigrationsPerSecond < 0 {
-		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.status.migrations-per-second")
+	if err := checkMigrationsPerSecond("status", b.Status.MigrationsPerSecond); err != nil {
+		return err
 	}
-	if b.Health.MigrationsPerSecond < 0 {
-		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.health.migrations-per-second")
+	if err := checkMigrationsPerSecond("health", b.Health.MigrationsPerSecond); err != nil {
+		return err
 	}
-	if b.Memory.MigrationsPerSecond < 0 {
-		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.memory.migrations-per-second")
+	if err := checkMigrationsPerSecond("memory", b.Memory.MigrationsPerSecond); err != nil {
+		return err
 	}
-	if b.CPU.MigrationsPerSecond < 0 {
-		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.cpu.migrations-per-second")
+	if err := checkMigrationsPerSecond("cpu", b.CPU.MigrationsPerSecond); err != nil {
+		return err
 	}
 	if b.CPU.MinBalanceUsage < 0 || b.CPU.MinBalanceUsage > 1 {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.cpu.min-balance-usage")
@@ -85,11 +111,11 @@ func (b *Balance) Check() error {
 	} else if b.CPU.MaxUsageGap < 0.05 || b.CPU.MaxUsageGap > 1 {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.cpu.max-usage-gap")
 	}
-	if b.Location.MigrationsPerSecond < 0 {
-		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.location.migrations-per-second")
+	if err := checkMigrationsPerSecond("location", b.Location.MigrationsPerSecond); err != nil {
+		return err
 	}
-	if b.ConnCount.MigrationsPerSecond < 0 {
-		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.conn-count.migrations-per-second")
+	if err := checkMigrationsPerSecond("conn-count", b.ConnCount.MigrationsPerSecond); err != nil {
+		return err
 	}
 	if b.ConnCount.CountRatioThreshold != 0 && b.ConnCount.CountRatioThreshold <= 1 {
 		return errors.Wrapf(ErrInvalidConfigValue, "invalid balance.conn-count.count-ratio-threshold")
