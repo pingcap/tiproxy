@@ -50,7 +50,34 @@ func IsSensitiveSQL(sql string) bool {
 	return startsWithKeyword(sql, sensitiveKeywords)
 }
 
-func isReadOnlySelect(lexer *Lexer) bool {
+type selectIntoFileVisitor struct {
+	found bool
+}
+
+func (v *selectIntoFileVisitor) Enter(node ast.Node) bool {
+	selectStmt, ok := node.(*ast.SelectStmt)
+	if !ok || selectStmt.SelectIntoOpt == nil {
+		return false
+	}
+	v.found = selectStmt.SelectIntoOpt.Tp == ast.SelectIntoOutfile || selectStmt.SelectIntoOpt.Tp == ast.SelectIntoDumpfile
+	return v.found
+}
+
+func (v *selectIntoFileVisitor) Leave(ast.Node) bool {
+	return !v.found
+}
+
+func isReadOnlyParsedSQL(sql string) bool {
+	stmt, err := parser.New().ParseOneStmt(sql, "", "")
+	if err != nil || !ast.IsReadOnly(stmt, true) {
+		return false
+	}
+	visitor := &selectIntoFileVisitor{}
+	ast.Walk(stmt, visitor)
+	return !visitor.found
+}
+
+func isReadOnlySelect(sql string, lexer *Lexer) bool {
 	previousToken := ""
 	for {
 		token := lexer.NextToken()
@@ -61,7 +88,7 @@ func isReadOnlySelect(lexer *Lexer) bool {
 			return false
 		}
 		if previousToken == "INTO" && (token == "OUTFILE" || token == "DUMPFILE") {
-			return false
+			return isReadOnlyParsedSQL(sql)
 		}
 		previousToken = token
 	}
@@ -75,14 +102,13 @@ func isReadOnlyWith(sql string, lexer *Lexer) bool {
 			return true
 		}
 		if previousToken == "INTO" && (token == "OUTFILE" || token == "DUMPFILE") {
-			return false
+			return isReadOnlyParsedSQL(sql)
 		}
 		switch token {
 		case "UPDATE", "DELETE", "INSERT", "REPLACE":
 			// The lexer does not distinguish keywords from identifiers. Parse only
 			// ambiguous WITH statements so identifiers such as `update` stay allowed.
-			stmt, err := parser.New().ParseOneStmt(sql, "", "")
-			return err == nil && ast.IsReadOnly(stmt, true)
+			return isReadOnlyParsedSQL(sql)
 		}
 		previousToken = token
 	}
@@ -97,7 +123,7 @@ func IsReadOnly(sql string) bool {
 	lexer := NewLexer(sql)
 	switch lexer.NextToken() {
 	case "SELECT":
-		return isReadOnlySelect(lexer)
+		return isReadOnlySelect(sql, lexer)
 	case "WITH":
 		return isReadOnlyWith(sql, lexer)
 	case "SHOW", "USE", "DESC", "DESCRIBE", "TABLE", "DO", "BEGIN", "COMMIT", "ROLLBACK":
