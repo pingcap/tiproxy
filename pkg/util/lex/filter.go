@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/pingcap/tidb/pkg/parser"
+	"github.com/pingcap/tidb/pkg/parser/ast"
+	_ "github.com/pingcap/tidb/pkg/types/parser_driver" // for parser driver
 )
 
 func startsWithKeyword(sql string, keywords [][]string) bool {
@@ -48,6 +50,44 @@ func IsSensitiveSQL(sql string) bool {
 	return startsWithKeyword(sql, sensitiveKeywords)
 }
 
+func isReadOnlySelect(lexer *Lexer) bool {
+	previousToken := ""
+	for {
+		token := lexer.NextToken()
+		if token == "" {
+			return true
+		}
+		if previousToken == "FOR" && token == "UPDATE" {
+			return false
+		}
+		if previousToken == "INTO" && (token == "OUTFILE" || token == "DUMPFILE") {
+			return false
+		}
+		previousToken = token
+	}
+}
+
+func isReadOnlyWith(sql string, lexer *Lexer) bool {
+	previousToken := ""
+	for {
+		token := lexer.NextToken()
+		if token == "" {
+			return true
+		}
+		if previousToken == "INTO" && (token == "OUTFILE" || token == "DUMPFILE") {
+			return false
+		}
+		switch token {
+		case "UPDATE", "DELETE", "INSERT", "REPLACE":
+			// The lexer does not distinguish keywords from identifiers. Parse only
+			// ambiguous WITH statements so identifiers such as `update` stay allowed.
+			stmt, err := parser.New().ParseOneStmt(sql, "", "")
+			return err == nil && ast.IsReadOnly(stmt, true)
+		}
+		previousToken = token
+	}
+}
+
 // ignore prepared statements in text-protocol
 // ignore EXPLAIN, EXPLAIN ANALYZE, and TRACE
 // include SELECT FOR UPDATE because it doesn't require write privilege
@@ -57,17 +97,10 @@ func IsReadOnly(sql string) bool {
 	lexer := NewLexer(sql)
 	switch lexer.NextToken() {
 	case "SELECT":
-		for {
-			token := lexer.NextToken()
-			if token == "" {
-				break
-			}
-			if token == "FOR" && lexer.NextToken() == "UPDATE" {
-				return false
-			}
-		}
-		return true
-	case "SHOW", "WITH", "USE", "DESC", "DESCRIBE", "TABLE", "DO", "BEGIN", "COMMIT", "ROLLBACK":
+		return isReadOnlySelect(lexer)
+	case "WITH":
+		return isReadOnlyWith(sql, lexer)
+	case "SHOW", "USE", "DESC", "DESCRIBE", "TABLE", "DO", "BEGIN", "COMMIT", "ROLLBACK":
 		return true
 	case "START":
 		return lexer.NextToken() == "TRANSACTION"

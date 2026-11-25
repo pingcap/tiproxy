@@ -315,6 +315,16 @@ func TestReadOnly(t *testing.T) {
 			readOnly: false,
 		},
 		{
+			cmd:      pnet.ComQuery,
+			stmt:     "with cte as (select 1) update t set a = 1",
+			readOnly: false,
+		},
+		{
+			cmd:      pnet.ComQuery,
+			stmt:     "select 1 into outfile '/tmp/select.txt'",
+			readOnly: false,
+		},
+		{
 			cmd:      pnet.ComStmtPrepare,
 			stmt:     "select ?",
 			readOnly: true,
@@ -322,6 +332,11 @@ func TestReadOnly(t *testing.T) {
 		{
 			cmd:      pnet.ComStmtPrepare,
 			stmt:     "insert into t value(?)",
+			readOnly: false,
+		},
+		{
+			cmd:      pnet.ComStmtPrepare,
+			stmt:     "with cte as (select 1) update t set a = ?",
 			readOnly: false,
 		},
 		{
