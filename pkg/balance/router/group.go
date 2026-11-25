@@ -351,7 +351,12 @@ func (g *Group) Balance(ctx context.Context) {
 
 	// Control the speed of migration.
 	curTime := time.Now()
+	// time.Duration is a whole number of nanoseconds. A rate above 1e9 truncates
+	// this to 0, and the integer division below would panic.
 	migrationInterval := time.Duration(float64(time.Second) / balanceCount)
+	if migrationInterval <= 0 {
+		return
+	}
 	count := 0
 	if migrationInterval < rebalanceInterval*2 {
 		// If we need to migrate multiple connections in each round, calculate the connection count for each round.
