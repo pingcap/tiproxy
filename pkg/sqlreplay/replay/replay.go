@@ -52,9 +52,12 @@ const (
 	// slowDownFactor is the factor to slow down when there are too many pending commands.
 	slowDownFactor = 100 * time.Nanosecond
 	// abortThreshold is the threshold of pending commands to abort.
-	abortThreshold    = 1 << 21
-	minSpeed          = 0.1
-	maxSpeed          = 10.0
+	abortThreshold = 1 << 21
+	minSpeed       = 0.1
+	maxSpeed       = 10.0
+	// maxBufSize caps the reorder channel. Each slot is a pointer, so this stays
+	// within tens of megabytes. 0 disables buffering.
+	maxBufSize        = 10_000_000
 	reportLogInterval = 10 * time.Second
 
 	checkpointSaveInterval = 100 * time.Millisecond
