@@ -223,6 +223,9 @@ func (cfg *Config) Check() error {
 	if err := cfg.Balance.Check(); err != nil {
 		return err
 	}
+	if err := cfg.Security.Check(); err != nil {
+		return err
+	}
 	if cfg.HA.GARPBurstCount < 0 {
 		return errors.Wrapf(ErrInvalidConfigValue, "ha.garp-burst-count must be greater than or equal to 0")
 	}

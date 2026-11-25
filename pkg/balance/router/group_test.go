@@ -4,6 +4,8 @@
 package router
 
 import (
+	"context"
+	"math"
 	"net"
 	"strings"
 	"testing"
@@ -11,13 +13,34 @@ import (
 
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
+	"github.com/pingcap/tiproxy/pkg/balance/observer"
 	"github.com/pingcap/tiproxy/pkg/balance/policy"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var nopBpCreator = func(*zap.Logger) policy.BalancePolicy {
 	return nil
+}
+
+func TestBalanceHugeMigrationsPerSecond(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	from := newBackendWrapper("a", observer.BackendHealth{Addr: "127.0.0.1:4000"})
+	to := newBackendWrapper("b", observer.BackendHealth{Addr: "127.0.0.1:4001"})
+	for _, rate := range []float64{1e10, math.Inf(1), math.NaN()} {
+		group, err := NewGroup(nil, func(*zap.Logger) policy.BalancePolicy {
+			return &mockBalancePolicy{
+				backendsToBalance: func([]policy.BackendCtx) (policy.BackendCtx, policy.BackendCtx, float64, string, []zapcore.Field) {
+					return from, to, rate, "conn", nil
+				},
+			}
+		}, MatchAll, lg)
+		require.NoError(t, err)
+		require.NotPanics(t, func() {
+			group.Balance(context.Background())
+		})
+	}
 }
 
 func TestParseCIDR(t *testing.T) {
