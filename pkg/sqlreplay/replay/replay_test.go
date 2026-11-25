@@ -96,35 +96,6 @@ func TestValidateCfg(t *testing.T) {
 	}
 }
 
-func TestValidateBufSize(t *testing.T) {
-	dir := t.TempDir()
-	base := func(bufSize int) ReplayConfig {
-		return ReplayConfig{
-			Input:           dir,
-			Username:        "u1",
-			StartTime:       time.Now().Add(time.Minute),
-			PSCloseStrategy: cmd.PSCloseStrategyDirected,
-			BufSize:         bufSize,
-		}
-	}
-	for _, bufSize := range []int{0, 100000, maxBufSize} {
-		cfg := base(bufSize)
-		storages, err := cfg.Validate()
-		require.NoError(t, err, "bufsize %d", bufSize)
-		for _, storage := range storages {
-			storage.Close()
-		}
-	}
-	for _, bufSize := range []int{-1, maxBufSize + 1} {
-		cfg := base(bufSize)
-		storages, err := cfg.Validate()
-		require.Error(t, err, "bufsize %d", bufSize)
-		for _, storage := range storages {
-			storage.Close()
-		}
-	}
-}
-
 func TestReplaySpeed(t *testing.T) {
 	speeds := []float64{10, 1, 0.1}
 	var lastTotalTime time.Duration

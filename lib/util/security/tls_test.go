@@ -64,16 +64,13 @@ func TestGetMinTLSVer(t *testing.T) {
 		}
 	}
 }
-<<<<<<< HEAD
-=======
 
 func TestRsaSize(t *testing.T) {
 	sizes := []int{0, 512, 1024, 2048, 4096}
 	for _, size := range sizes {
-		_, _, _, err := createTempTLS(size, DefaultCertExpiration, "")
+		_, _, _, err := createTempTLS(size, DefaultCertExpiration)
 		require.NoError(t, err)
 	}
-	_, _, _, err := createTempTLS(config.MaxRSAKeySize+1, DefaultCertExpiration, "")
+	_, _, _, err := createTempTLS(config.MaxRSAKeySize+1, DefaultCertExpiration)
 	require.Error(t, err)
 }
->>>>>>> e8e8ea2b (*: check config value bounds (#1440))

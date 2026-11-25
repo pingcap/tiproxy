@@ -1227,6 +1227,21 @@ func TestControlSpeed(t *testing.T) {
 	}
 }
 
+func TestRebalanceHugeMigrationsPerSecond(t *testing.T) {
+	bp := &mockBalancePolicy{}
+	tester := newRouterTester(t, bp)
+	tester.addBackends(2)
+
+	for _, balanceCount := range []float64{1e10, math.Inf(1), math.NaN()} {
+		bp.backendsToBalance = func([]policy.BackendCtx) (policy.BackendCtx, policy.BackendCtx, float64, string, []zapcore.Field) {
+			return tester.getBackendByIndex(0), tester.getBackendByIndex(1), balanceCount, "conn", nil
+		}
+		require.NotPanics(t, func() {
+			tester.router.rebalance(context.Background())
+		}, "balance count %v", balanceCount)
+	}
+}
+
 func TestRedirectFail(t *testing.T) {
 	tester := newRouterTester(t, nil)
 	tester.addBackends(1)

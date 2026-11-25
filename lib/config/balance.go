@@ -17,21 +17,11 @@ const (
 	RoutingPolicyPreferIdle = "prefer-idle"
 	RoutingPolicyRandom     = "random"
 	RoutingPolicyIdlest     = "idlest"
-<<<<<<< HEAD
-=======
-
-	// MatchClientCIDRStr is used for MatchClientCIDR.
-	MatchClientCIDRStr = "client_cidr"
-	// MatchProxyCIDRStr is used for MatchProxyCIDR.
-	MatchProxyCIDRStr = "proxy_cidr"
-	// MatchPortStr is used for port-based routing.
-	MatchPortStr = "port"
 
 	// maxMigrationsPerSecond is one migration per nanosecond. time.Duration cannot
 	// represent a shorter interval, and a larger rate truncates to 0 and then
 	// panics on integer division in the rebalance loop.
 	maxMigrationsPerSecond = 1e9
->>>>>>> e8e8ea2b (*: check config value bounds (#1440))
 )
 
 type Balance struct {

@@ -36,24 +36,6 @@ const (
 	abortThreshold = 1 << 21
 	minSpeed       = 0.1
 	maxSpeed       = 10.0
-<<<<<<< HEAD
-=======
-	// maxBufSize caps the reorder channel. Each slot is a pointer, so this stays
-	// within tens of megabytes. 0 disables buffering.
-	maxBufSize        = 10_000_000
-	reportLogInterval = 10 * time.Second
-
-	checkpointSaveInterval = 100 * time.Millisecond
-	stateSaveRetryInterval = 10 * time.Second
-
-	outputTimeFormat = "20060102 15:04:05.999"
-)
-
-var (
-	// chanBufForEachDecoder is the buffer size for each reader's channel. If it's set to -1,
-	// it'll use synchronized implementation for each reader.
-	chanBufForEachDecoder = 64
->>>>>>> e8e8ea2b (*: check config value bounds (#1440))
 )
 
 type Replay interface {

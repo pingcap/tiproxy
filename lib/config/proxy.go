@@ -22,6 +22,10 @@ var (
 	ErrInvalidConfigValue              = errors.New("invalid config value")
 )
 
+// MaxRSAKeySize is the largest RSA modulus auto-certs will generate.
+// Bigger sizes make key generation block for minutes while config reload runs.
+const MaxRSAKeySize = 8192
+
 type Config struct {
 	Proxy               ProxyServer       `yaml:"proxy,omitempty" toml:"proxy,omitempty" json:"proxy,omitempty"`
 	API                 API               `yaml:"api" toml:"api" json:"api"`
@@ -123,6 +127,25 @@ type Security struct {
 	ClusterTLS        TLSConfig `yaml:"cluster-tls,omitempty" toml:"cluster-tls,omitempty" json:"cluster-tls,omitempty"`
 	SQLTLS            TLSConfig `yaml:"sql-tls,omitempty" toml:"sql-tls,omitempty" json:"sql-tls,omitempty"`
 	RequireBackendTLS bool      `yaml:"require-backend-tls,omitempty" toml:"require-backend-tls,omitempty" json:"require-backend-tls,omitempty" reloadable:"true"`
+}
+
+func (s *Security) Check() error {
+	fields := []struct {
+		name string
+		size int
+	}{
+		{"security.server-tls.rsa-key-size", s.ServerSQLTLS.RSAKeySize},
+		{"security.server-http-tls.rsa-key-size", s.ServerHTTPTLS.RSAKeySize},
+		{"security.cluster-tls.rsa-key-size", s.ClusterTLS.RSAKeySize},
+		{"security.sql-tls.rsa-key-size", s.SQLTLS.RSAKeySize},
+	}
+	for _, field := range fields {
+		// 0 selects the default size. Values below 1024 are raised to 1024 when the key is generated.
+		if field.size < 0 || field.size > MaxRSAKeySize {
+			return errors.Wrapf(ErrInvalidConfigValue, "invalid %s, must be between 0 and %d", field.name, MaxRSAKeySize)
+		}
+	}
+	return nil
 }
 
 type HA struct {

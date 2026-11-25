@@ -76,18 +76,11 @@ func CreateTLSCertificates(logger *zap.Logger, certpath, keypath, capath string,
 	return nil
 }
 
-<<<<<<< HEAD
 func createTempTLS(rsaKeySize int, expiration time.Duration) ([]byte, []byte, []byte, error) {
-	if rsaKeySize < 1024 {
-=======
-func createTempTLS(rsaKeySize int, expiration time.Duration, commonName string) ([]byte, []byte, []byte, error) {
 	if rsaKeySize > config.MaxRSAKeySize {
 		return nil, nil, nil, errors.Errorf("rsa key size %d exceeds maximum %d", rsaKeySize, config.MaxRSAKeySize)
 	}
-	if rsaKeySize <= 0 {
-		rsaKeySize = 4096
-	} else if rsaKeySize < 1024 {
->>>>>>> e8e8ea2b (*: check config value bounds (#1440))
+	if rsaKeySize < 1024 {
 		rsaKeySize = 1024
 	}
 
