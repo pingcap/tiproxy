@@ -50,20 +50,25 @@ func IsSensitiveSQL(sql string) bool {
 	return startsWithKeyword(sql, sensitiveKeywords)
 }
 
-type selectIntoFileVisitor struct {
+type unsafeSelectVisitor struct {
 	found bool
 }
 
-func (v *selectIntoFileVisitor) Enter(node ast.Node) bool {
+func (v *unsafeSelectVisitor) Enter(node ast.Node) bool {
 	selectStmt, ok := node.(*ast.SelectStmt)
-	if !ok || selectStmt.SelectIntoOpt == nil {
+	if !ok {
 		return false
 	}
-	v.found = selectStmt.SelectIntoOpt.Tp == ast.SelectIntoOutfile || selectStmt.SelectIntoOpt.Tp == ast.SelectIntoDumpfile
+	if selectStmt.SelectIntoOpt != nil {
+		v.found = selectStmt.SelectIntoOpt.Tp == ast.SelectIntoOutfile || selectStmt.SelectIntoOpt.Tp == ast.SelectIntoDumpfile
+	}
+	if selectStmt.LockInfo != nil && selectStmt.LockInfo.LockType != ast.SelectLockNone {
+		v.found = true
+	}
 	return v.found
 }
 
-func (v *selectIntoFileVisitor) Leave(ast.Node) bool {
+func (v *unsafeSelectVisitor) Leave(ast.Node) bool {
 	return !v.found
 }
 
@@ -72,7 +77,7 @@ func isReadOnlyParsedSQL(sql string) bool {
 	if err != nil || !ast.IsReadOnly(stmt, true) {
 		return false
 	}
-	visitor := &selectIntoFileVisitor{}
+	visitor := &unsafeSelectVisitor{}
 	ast.Walk(stmt, visitor)
 	return !visitor.found
 }
