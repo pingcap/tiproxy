@@ -50,6 +50,10 @@ func TestNextToken(t *testing.T) {
 			sql:    `select "for update"`,
 			tokens: []string{"SELECT"},
 		},
+		{
+			sql:    `INTO/**/OUTFILE UPDATE/* comment */t`,
+			tokens: []string{"INTO", "OUTFILE", "UPDATE", "T"},
+		},
 	}
 
 	for i, test := range tests {

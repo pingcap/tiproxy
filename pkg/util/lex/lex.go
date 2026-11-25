@@ -48,9 +48,15 @@ func (l *Lexer) NextToken() string {
 				inDoubleQuote = false
 			}
 		case char == '-' && l.curIdx+1 < len(l.sql) && l.sql[l.curIdx+1] == '-':
+			if len(l.curToken) > 0 {
+				return string(l.curToken)
+			}
 			l.curIdx++
 			inSingleLineComment = true
 		case char == '/' && l.curIdx+1 < len(l.sql) && l.sql[l.curIdx+1] == '*':
+			if len(l.curToken) > 0 {
+				return string(l.curToken)
+			}
 			l.curIdx++
 			inMultiLineComment = true
 		case char == '\'':
