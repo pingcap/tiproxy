@@ -210,6 +210,36 @@ func TestProxyCheck(t *testing.T) {
 			},
 			err: ErrInvalidConfigValue,
 		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Security.ServerSQLTLS.RSAKeySize = MaxRSAKeySize + 1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Security.ServerHTTPTLS.RSAKeySize = MaxRSAKeySize + 1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Security.ClusterTLS.RSAKeySize = MaxRSAKeySize + 1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Security.SQLTLS.RSAKeySize = -1
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
+				c.Security.ServerSQLTLS.RSAKeySize = MaxRSAKeySize
+			},
+			post: func(*testing.T, *Config) {},
+		},
 	}
 	for _, tc := range testcases {
 		cfg := testProxyConfig

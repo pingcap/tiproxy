@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"testing"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 )
@@ -62,4 +63,14 @@ func TestGetMinTLSVer(t *testing.T) {
 			require.Empty(t, text.String())
 		}
 	}
+}
+
+func TestRsaSize(t *testing.T) {
+	sizes := []int{0, 512, 1024, 2048, 4096}
+	for _, size := range sizes {
+		_, _, _, err := createTempTLS(size, DefaultCertExpiration)
+		require.NoError(t, err)
+	}
+	_, _, _, err := createTempTLS(config.MaxRSAKeySize+1, DefaultCertExpiration)
+	require.Error(t, err)
 }
