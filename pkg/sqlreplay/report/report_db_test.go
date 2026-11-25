@@ -135,7 +135,7 @@ func TestInsertExceptionsRedactsSamples(t *testing.T) {
 	now := time.Now()
 	const (
 		sql = "select * from t where name = 'alice' and id = 10"
-		err = "ERROR 1062 (23000): Duplicate entry 'alice@example.com' for key 'users.email'"
+		err = "ERROR 1526 (HY000): Table has no partition for value customer-secret"
 	)
 	query := cmd.NewCommand(append([]byte{pnet.ComQuery.Byte()}, []byte(sql)...), now, 1)
 	query.FileName = "my/file"
@@ -161,16 +161,16 @@ func TestInsertExceptionsRedactsSamples(t *testing.T) {
 		{
 			redact:   config.RedactInfoLogOn,
 			stmt:     "select * from `t` where `name` = ? and `id` = ?",
-			failErr:  "ERROR 1062 (23000): Duplicate entry '?' for key '?'",
-			otherKey: "Table '?' doesn't exist",
-			otherErr: "Table '?' doesn't exist",
+			failErr:  "ERROR 1526 (HY000): ?",
+			otherKey: "?",
+			otherErr: "?",
 		},
 		{
 			redact:   config.RedactInfoLogMarker,
 			stmt:     "select * from `t` where `name` = ‹alice› and `id` = ‹10›",
-			failErr:  "ERROR 1062 (23000): Duplicate entry '‹alice@example.com›' for key '‹users.email›'",
-			otherKey: "Table '‹test.users›' doesn't exist",
-			otherErr: "Table '‹test.users›' doesn't exist",
+			failErr:  "ERROR 1526 (HY000): ‹Table has no partition for value customer-secret›",
+			otherKey: "‹Table 'test.users' doesn't exist›",
+			otherErr: "‹Table 'test.users' doesn't exist›",
 		},
 	}
 

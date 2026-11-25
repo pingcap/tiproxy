@@ -37,33 +37,20 @@ func ParamsText(params []any, mode config.RedactInfoLogType) string {
 	return "[" + strings.Join(parts, " ") + "]"
 }
 
-// ErrorMessage redacts quoted text in an error sample. The error code and the
-// words outside quotes stay, so rows can still be grouped by error shape.
+// ErrorMessage redacts an error sample. For canonical MySQL errors, the numeric
+// error code and SQLSTATE stay so rows can still be grouped without exposing
+// the unstructured message body.
 func ErrorMessage(msg string, mode config.RedactInfoLogType) string {
 	mode = normalize(mode)
-	if mode == config.RedactInfoLogOff || msg == "" || (!strings.Contains(msg, "'") && !strings.Contains(msg, `"`)) {
+	if mode == config.RedactInfoLogOff || msg == "" {
 		return msg
 	}
 
-	var b strings.Builder
-	b.Grow(len(msg))
-	for i := 0; i < len(msg); {
-		inner, next, ok := quotedSpan(msg, i)
-		if !ok {
-			b.WriteByte(msg[i])
-			i++
-			continue
-		}
-		b.WriteByte(msg[i])
-		if mode == config.RedactInfoLogMarker {
-			b.WriteString(wrapMarker(inner))
-		} else {
-			b.WriteByte('?')
-		}
-		b.WriteByte(msg[next-1])
-		i = next
+	prefix, body := splitMySQLError(msg)
+	if mode == config.RedactInfoLogMarker {
+		return prefix + wrapMarker(body)
 	}
-	return b.String()
+	return prefix + "?"
 }
 
 func normalize(mode config.RedactInfoLogType) config.RedactInfoLogType {
@@ -98,78 +85,35 @@ func wrapMarker(s string) string {
 	return b.String()
 }
 
-// quotedSpan returns the raw text inside a quote that starts at open.
-// A quote without a closer, such as the apostrophe in "doesn't", is left unchanged.
-func quotedSpan(s string, open int) (inner string, next int, ok bool) {
-	if open >= len(s) {
-		return "", 0, false
-	}
-	quote := s[open]
-	if quote != '\'' && quote != '"' {
-		return "", 0, false
-	}
-	// An apostrophe surrounded by word characters is part of a contraction or
-	// possessive, not the start of quoted sensitive text.
-	if quote == '\'' && open > 0 && open+1 < len(s) && isASCIIWordByte(s[open-1]) && isASCIIWordByte(s[open+1]) {
-		return "", 0, false
+// splitMySQLError keeps only the fixed metadata prefix emitted by
+// go-mysql's MyError.Error. Everything after the prefix is unstructured and
+// may contain values supplied by a client or returned by a backend.
+func splitMySQLError(msg string) (prefix, body string) {
+	const errorPrefix = "ERROR "
+	if !strings.HasPrefix(msg, errorPrefix) {
+		return "", msg
 	}
 
-	// A quote followed immediately by a word character can be an unescaped
-	// nested opening quote. Prefer a later unambiguous closer, but retain the
-	// first such quote as a fallback for malformed messages.
-	ambiguousCloser := -1
-	i := open + 1
-	for i < len(s) {
-		if s[i] == '\\' && i+1 < len(s) {
-			i += 2
-			continue
-		}
-		if s[i] == quote {
-			// MySQL escapes quotes by doubling them. A doubled pair followed by a
-			// word character is inside the quoted value. It can also close an
-			// unescaped nested quote while leaving the surrounding span open.
-			if i+1 < len(s) && s[i+1] == quote {
-				if i+2 < len(s) && isASCIIWordByte(s[i+2]) {
-					i += 2
-					continue
-				}
-				if ambiguousCloser >= 0 && hasLaterUnescapedQuote(s, i+2, quote) {
-					ambiguousCloser = -1
-					i += 2
-					continue
-				}
-				return s[open+1 : i+1], i + 2, true
-			}
-			if i+1 < len(s) && isASCIIWordByte(s[i+1]) {
-				if ambiguousCloser < 0 {
-					ambiguousCloser = i
-				}
-				i++
-				continue
-			}
-			return s[open+1 : i], i + 1, true
-		}
-		i++
+	codeStart := len(errorPrefix)
+	codeEnd := codeStart
+	for codeEnd < len(msg) && msg[codeEnd] >= '0' && msg[codeEnd] <= '9' {
+		codeEnd++
 	}
-	if ambiguousCloser >= 0 {
-		return s[open+1 : ambiguousCloser], ambiguousCloser + 1, true
+	if codeEnd == codeStart || codeEnd-codeStart > 5 || codeEnd+2 > len(msg) || msg[codeEnd:codeEnd+2] != " (" {
+		return "", msg
 	}
-	return "", 0, false
-}
 
-func hasLaterUnescapedQuote(s string, start int, quote byte) bool {
-	for i := start; i < len(s); i++ {
-		if s[i] == '\\' && i+1 < len(s) {
-			i++
-			continue
-		}
-		if s[i] == quote {
-			return true
+	stateStart := codeEnd + 2
+	stateEnd := stateStart + 5
+	if stateEnd+3 > len(msg) || msg[stateEnd:stateEnd+3] != "): " {
+		return "", msg
+	}
+	for i := stateStart; i < stateEnd; i++ {
+		if (msg[i] < 'A' || msg[i] > 'Z') && (msg[i] < '0' || msg[i] > '9') {
+			return "", msg
 		}
 	}
-	return false
-}
 
-func isASCIIWordByte(ch byte) bool {
-	return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_'
+	bodyStart := stateEnd + 3
+	return msg[:bodyStart], msg[bodyStart:]
 }

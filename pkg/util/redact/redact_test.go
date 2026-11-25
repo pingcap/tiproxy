@@ -28,33 +28,94 @@ func TestParamsText(t *testing.T) {
 }
 
 func TestErrorMessage(t *testing.T) {
-	msg := "ERROR 1062 (23000): Duplicate entry 'alice@example.com' for key 'users.email'"
-	require.Equal(t, msg, ErrorMessage(msg, config.RedactInfoLogOff))
-	require.Equal(t, "ERROR 1062 (23000): Duplicate entry '?' for key '?'", ErrorMessage(msg, config.RedactInfoLogOn))
-	require.Equal(t, "ERROR 1062 (23000): Duplicate entry '?' for key '?'", ErrorMessage(msg, config.RedactInfoLogType(99)))
-	require.Equal(t, "ERROR 1062 (23000): Duplicate entry '‹alice@example.com›' for key '‹users.email›'", ErrorMessage(msg, config.RedactInfoLogMarker))
+	tests := []struct {
+		name   string
+		msg    string
+		mode   config.RedactInfoLogType
+		output string
+	}{
+		{
+			name:   "off",
+			msg:    "ERROR 1062 (23000): Duplicate entry 'alice@example.com' for key 'users.email'",
+			mode:   config.RedactInfoLogOff,
+			output: "ERROR 1062 (23000): Duplicate entry 'alice@example.com' for key 'users.email'",
+		},
+		{
+			name:   "mysql error on",
+			msg:    "ERROR 1062 (23000): Duplicate entry 'alice@example.com' for key 'users.email'",
+			mode:   config.RedactInfoLogOn,
+			output: "ERROR 1062 (23000): ?",
+		},
+		{
+			name:   "mysql error marker",
+			msg:    "ERROR 1062 (23000): Duplicate entry 'alice@example.com' for key 'users.email'",
+			mode:   config.RedactInfoLogMarker,
+			output: "ERROR 1062 (23000): ‹Duplicate entry 'alice@example.com' for key 'users.email'›",
+		},
+		{
+			name:   "unquoted sensitive value",
+			msg:    "Table has no partition for value customer-secret",
+			mode:   config.RedactInfoLogOn,
+			output: "?",
+		},
+		{
+			name:   "unquoted sensitive value marker",
+			msg:    "Table has no partition for value customer-secret",
+			mode:   config.RedactInfoLogMarker,
+			output: "‹Table has no partition for value customer-secret›",
+		},
+		{
+			name:   "unclosed quote",
+			msg:    "syntax error near 'customer-secret\\' at line 1",
+			mode:   config.RedactInfoLogOn,
+			output: "?",
+		},
+		{
+			name:   "apostrophe between word characters",
+			msg:    "value x'customer-secret'",
+			mode:   config.RedactInfoLogOn,
+			output: "?",
+		},
+		{
+			name:   "network address",
+			msg:    "dial tcp 10.0.0.1:4000: connect: connection refused",
+			mode:   config.RedactInfoLogOn,
+			output: "?",
+		},
+		{
+			name:   "invalid mysql state",
+			msg:    "ERROR 1062 (secret): customer-secret",
+			mode:   config.RedactInfoLogOn,
+			output: "?",
+		},
+		{
+			name:   "invalid mysql code",
+			msg:    "ERROR customer-secret (23000): detail",
+			mode:   config.RedactInfoLogOn,
+			output: "?",
+		},
+		{
+			name:   "marker escaping",
+			msg:    "value ‹customer-secret›",
+			mode:   config.RedactInfoLogMarker,
+			output: "‹value ‹‹customer-secret›››",
+		},
+		{
+			name:   "invalid mode is on",
+			msg:    "customer-secret",
+			mode:   config.RedactInfoLogType(99),
+			output: "?",
+		},
+		{
+			name:   "empty",
+			mode:   config.RedactInfoLogOn,
+			output: "",
+		},
+	}
 
-	plain := "Table 'test.users' doesn't exist"
-	require.Equal(t, "Table '?' doesn't exist", ErrorMessage(plain, config.RedactInfoLogOn))
-	require.Equal(t, "Table '‹test.users›' doesn't exist", ErrorMessage(plain, config.RedactInfoLogMarker))
-
-	require.Equal(t, "dial tcp 10.0.0.1:4000: connect: connection refused", ErrorMessage("dial tcp 10.0.0.1:4000: connect: connection refused", config.RedactInfoLogOn))
-	require.Equal(t, `value "?"`, ErrorMessage(`value "secret"`, config.RedactInfoLogOn))
-	require.Equal(t, "value '?'", ErrorMessage(`value 'a''b'`, config.RedactInfoLogOn))
-	require.Equal(t, "value '?'", ErrorMessage(`value 'a\'b'`, config.RedactInfoLogOn))
-	require.Equal(t, `value '‹a\'b›'`, ErrorMessage(`value 'a\'b'`, config.RedactInfoLogMarker))
-	require.Equal(t, "syntax error near '?' at line 1", ErrorMessage("syntax error near 'SELEC 'customer-secret'' at line 1", config.RedactInfoLogOn))
-	require.NotContains(t, ErrorMessage("syntax error near 'SELEC 'customer-secret'' at line 1", config.RedactInfoLogOn), "customer-secret")
-	nestedEscapedQuote := "syntax error near 'SELEC 'a'' customer-secret'' at line 1"
-	require.Equal(t, "syntax error near '?' at line 1", ErrorMessage(nestedEscapedQuote, config.RedactInfoLogOn))
-	require.NotContains(t, ErrorMessage(nestedEscapedQuote, config.RedactInfoLogOn), "customer-secret")
-	require.Equal(t, "syntax error near '‹SELEC 'a'' customer-secret'›' at line 1", ErrorMessage(nestedEscapedQuote, config.RedactInfoLogMarker))
-	independentQuotes := "value 'a''; value ' customer-secret'"
-	require.Equal(t, "value '?'; value '?'", ErrorMessage(independentQuotes, config.RedactInfoLogOn))
-	require.Equal(t, "value '‹a'›'; value '‹ customer-secret›'", ErrorMessage(independentQuotes, config.RedactInfoLogMarker))
-	require.Equal(t, "Can't DROP '?'; check that column/key exists", ErrorMessage("Can't DROP 'private_column'; check that column/key exists", config.RedactInfoLogOn))
-	require.Equal(t, "Can't DROP '‹private_column›'; check that column/key exists", ErrorMessage("Can't DROP 'private_column'; check that column/key exists", config.RedactInfoLogMarker))
-	require.Equal(t, "it is alice's", ErrorMessage("it is alice's", config.RedactInfoLogOn))
-	require.Equal(t, "unknown", ErrorMessage("unknown", config.RedactInfoLogType(99)))
-	require.Equal(t, "", ErrorMessage("", config.RedactInfoLogOn))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.output, ErrorMessage(test.msg, test.mode))
+		})
+	}
 }
