@@ -19,49 +19,48 @@ func BenchmarkCreateTLS(b *testing.B) {
 	}
 }
 
-func TestGetMinTLSVer(t *testing.T) {
+func TestParseMinTLSVersion(t *testing.T) {
 	tests := []struct {
 		verStr string
 		verInt uint16
-		warn   string
+		err    bool
 	}{
-		{
-			verStr: "v1.0",
-			verInt: tls.VersionTLS10,
-			warn:   "not recommended",
-		},
-		{
-			verStr: "v1.1",
-			verInt: tls.VersionTLS11,
-			warn:   "not recommended",
-		},
-		{
-			verStr: "v1.2",
-			verInt: tls.VersionTLS12,
-		},
-		{
-			verStr: "v1.3",
-			verInt: tls.VersionTLS13,
-		},
-		{
-			verStr: "unknown",
-			verInt: tls.VersionTLS12,
-			warn:   "Invalid TLS version",
-		},
-		{
-			verInt: tls.VersionTLS12,
-		},
+		{verStr: "1.0", err: true},
+		{verStr: "v1.0", err: true},
+		{verStr: "TLSv1.0", err: true},
+		{verStr: "1.1", err: true},
+		{verStr: "v1.1", err: true},
+		{verStr: "TLSv1.1", err: true},
+		{verStr: "1.2", verInt: tls.VersionTLS12},
+		{verStr: "v1.2", verInt: tls.VersionTLS12},
+		{verStr: "TLSv1.2", verInt: tls.VersionTLS12},
+		{verStr: "1.3", verInt: tls.VersionTLS13},
+		{verStr: "v1.3", verInt: tls.VersionTLS13},
+		{verStr: "TLSv1.3", verInt: tls.VersionTLS13},
+		{verStr: "unknown", err: true},
+		{verStr: "1.4", err: true},
+		{verStr: "TLSv", err: true},
+		{verStr: "tls", err: true},
+		{verStr: "v", err: true},
+		{verInt: tls.VersionTLS12},
 	}
 
 	for _, test := range tests {
-		lg, text := logger.CreateLoggerForTest(t)
-		res := GetMinTLSVer(test.verStr, lg)
-		require.Equal(t, test.verInt, res)
-		if len(test.warn) > 0 {
-			require.Contains(t, text.String(), test.warn)
-		} else {
-			require.Empty(t, text.String())
+		res, err := config.ParseMinTLSVersion(test.verStr)
+		if test.err {
+			require.ErrorIs(t, err, config.ErrInvalidConfigValue, test.verStr)
+			continue
 		}
+		require.NoError(t, err, test.verStr)
+		require.Equal(t, test.verInt, res, test.verStr)
+	}
+}
+
+func TestBuildClientTLSConfigRejectsMinTLSVersion(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	for _, ver := range []string{"TLSv", "tls", "v"} {
+		_, err := BuildClientTLSConfig(lg, config.TLSConfig{MinTLSVersion: ver})
+		require.ErrorIs(t, err, config.ErrInvalidConfigValue, ver)
 	}
 }
 

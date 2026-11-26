@@ -101,7 +101,7 @@ func TestCertServer(t *testing.T) {
 				Cert:          certPath,
 				Key:           keyPath,
 				CA:            caPath,
-				MinTLSVersion: "1.1",
+				MinTLSVersion: "1.3",
 				RSAKeySize:    1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
@@ -109,7 +109,7 @@ func TestCertServer(t *testing.T) {
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
 				require.NotNil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS13, int(c.MinVersion))
 			},
 		},
 		{
@@ -149,7 +149,7 @@ func TestCertServer(t *testing.T) {
 			TLSConfig: config.TLSConfig{
 				AutoCerts:     true,
 				CA:            caPath,
-				MinTLSVersion: "1.1",
+				MinTLSVersion: "v1.3",
 				RSAKeySize:    1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
@@ -157,7 +157,7 @@ func TestCertServer(t *testing.T) {
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
 				require.NotNil(t, c.ClientCAs)
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS13, int(c.MinVersion))
 			},
 		},
 		{
@@ -233,14 +233,14 @@ func TestCertServer(t *testing.T) {
 				Cert:          certPath,
 				Key:           keyPath,
 				CA:            caPath,
-				MinTLSVersion: "1.1",
+				MinTLSVersion: "TLSv1.3",
 				RSAKeySize:    1024,
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.NotNil(t, c.RootCAs)
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS13, int(c.MinVersion))
 			},
 		},
 	}
@@ -252,6 +252,18 @@ func TestCertServer(t *testing.T) {
 		require.NoError(t, err, "case %d", i)
 		if tc.checker != nil {
 			tc.checker(t, tcfg, ci)
+		}
+	}
+}
+
+func TestRejectMinTLSVersion(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	for _, ver := range []string{"1.0", "1.1", "v1.0", "TLSv1.1", "unknown", "TLSv", "tls", "v"} {
+		for _, server := range []bool{true, false} {
+			ci := NewCert(server)
+			ci.SetConfig(config.TLSConfig{MinTLSVersion: ver})
+			_, err := ci.Reload(lg)
+			require.ErrorIs(t, err, config.ErrInvalidConfigValue, "%s server=%v", ver, server)
 		}
 	}
 }
