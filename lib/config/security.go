@@ -70,8 +70,11 @@ func (s *Security) Check() error {
 // ParseMinTLSVersion maps a configured minimum TLS version to a crypto/tls constant.
 // An empty value selects TLS 1.2. Versions below 1.2 and unrecognized values are rejected.
 func ParseMinTLSVersion(ver string) (uint16, error) {
+	if strings.TrimSpace(ver) == "" {
+		return tls.VersionTLS12, nil
+	}
 	switch canonicalMinTLSVersion(ver) {
-	case "", "1.2":
+	case "1.2":
 		return tls.VersionTLS12, nil
 	case "1.3":
 		return tls.VersionTLS13, nil
