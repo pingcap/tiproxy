@@ -206,7 +206,7 @@ func CreateTLSConfigForTest() (serverTLSConf *tls.Config, clientTLSConf *tls.Con
 
 func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config, error) {
 	logger = logger.With(zap.String("tls", "client"))
-	minVer, err := GetMinTLSVer(cfg.MinTLSVersion)
+	minVer, err := config.ParseMinTLSVersion(cfg.MinTLSVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -245,10 +245,4 @@ func BuildClientTLSConfig(logger *zap.Logger, cfg config.TLSConfig) (*tls.Config
 	tcfg.Certificates = append(tcfg.Certificates, cert)
 
 	return tcfg, nil
-}
-
-// GetMinTLSVer parses the minimum TLS version from config.
-// Empty means TLS 1.2. Versions below 1.2 and unrecognized values return an error.
-func GetMinTLSVer(tlsVerStr string) (uint16, error) {
-	return config.ParseMinTLSVersion(tlsVerStr)
 }

@@ -142,7 +142,7 @@ func verifyCommonName(allowedCN []string, verifiedChains [][]*x509.Certificate) 
 func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	autoCerts := false
 	cfg := ci.cfg.Load()
-	minVer, err := GetMinTLSVer(cfg.MinTLSVersion)
+	minVer, err := config.ParseMinTLSVersion(cfg.MinTLSVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 
 func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	cfg := ci.cfg.Load()
-	minVer, err := GetMinTLSVer(cfg.MinTLSVersion)
+	minVer, err := config.ParseMinTLSVersion(cfg.MinTLSVersion)
 	if err != nil {
 		return nil, err
 	}
