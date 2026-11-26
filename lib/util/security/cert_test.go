@@ -258,7 +258,7 @@ func TestCertServer(t *testing.T) {
 
 func TestRejectMinTLSVersion(t *testing.T) {
 	lg, _ := logger.CreateLoggerForTest(t)
-	for _, ver := range []string{"1.0", "1.1", "v1.0", "TLSv1.1", "unknown"} {
+	for _, ver := range []string{"1.0", "1.1", "v1.0", "TLSv1.1", "unknown", "TLSv", "tls", "v"} {
 		for _, server := range []bool{true, false} {
 			ci := NewCert(server)
 			ci.SetConfig(config.TLSConfig{MinTLSVersion: ver})

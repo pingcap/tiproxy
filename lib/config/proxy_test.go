@@ -427,6 +427,12 @@ func TestProxyCheck(t *testing.T) {
 		},
 		{
 			pre: func(t *testing.T, c *Config) {
+				c.Security.ServerSQLTLS.MinTLSVersion = "TLSv"
+			},
+			err: ErrInvalidConfigValue,
+		},
+		{
+			pre: func(t *testing.T, c *Config) {
 				c.Security.ServerSQLTLS.MinTLSVersion = "1.3"
 				c.Security.ServerHTTPTLS.MinTLSVersion = "v1.2"
 				c.Security.ClusterTLS.MinTLSVersion = "TLSv1.3"

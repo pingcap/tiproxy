@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/tiproxy/lib/config"
+	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,6 +39,9 @@ func TestGetMinTLSVer(t *testing.T) {
 		{verStr: "TLSv1.3", verInt: tls.VersionTLS13},
 		{verStr: "unknown", err: true},
 		{verStr: "1.4", err: true},
+		{verStr: "TLSv", err: true},
+		{verStr: "tls", err: true},
+		{verStr: "v", err: true},
 		{verInt: tls.VersionTLS12},
 	}
 
@@ -49,6 +53,14 @@ func TestGetMinTLSVer(t *testing.T) {
 		}
 		require.NoError(t, err, test.verStr)
 		require.Equal(t, test.verInt, res, test.verStr)
+	}
+}
+
+func TestBuildClientTLSConfigRejectsMinTLSVersion(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	for _, ver := range []string{"TLSv", "tls", "v"} {
+		_, err := BuildClientTLSConfig(lg, config.TLSConfig{MinTLSVersion: ver})
+		require.ErrorIs(t, err, config.ErrInvalidConfigValue, ver)
 	}
 }
 
