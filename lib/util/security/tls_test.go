@@ -19,7 +19,7 @@ func BenchmarkCreateTLS(b *testing.B) {
 	}
 }
 
-func TestGetMinTLSVer(t *testing.T) {
+func TestParseMinTLSVersion(t *testing.T) {
 	tests := []struct {
 		verStr string
 		verInt uint16
@@ -46,7 +46,7 @@ func TestGetMinTLSVer(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		res, err := GetMinTLSVer(test.verStr)
+		res, err := config.ParseMinTLSVersion(test.verStr)
 		if test.err {
 			require.ErrorIs(t, err, config.ErrInvalidConfigValue, test.verStr)
 			continue
