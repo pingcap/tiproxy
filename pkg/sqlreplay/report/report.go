@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"go.uber.org/zap"
@@ -37,6 +38,20 @@ type ReportConfig struct {
 	StartTime     time.Time
 	TlsConfig     *tls.Config
 	flushInterval time.Duration
+	// ConfigGetter reads the current config for each flush.
+	// A nil getter, or a nil config, redacts.
+	ConfigGetter config.ConfigGetter
+}
+
+func (cfg ReportConfig) redactInfoLog() config.RedactInfoLogType {
+	if cfg.ConfigGetter == nil {
+		return config.RedactInfoLogOn
+	}
+	current := cfg.ConfigGetter.GetConfig()
+	if current == nil {
+		return config.RedactInfoLogOn
+	}
+	return current.Security.RedactInfoLog
 }
 
 func (cfg *ReportConfig) Validate() error {
@@ -121,7 +136,7 @@ func (r *report) readExceptions(ctx context.Context) {
 // exceptions are flushed even when the context is canceled, so do not pass the canceled context in.
 func (r *report) flush() {
 	for tp, m := range r.exceptions {
-		if err := r.db.InsertExceptions(r.cfg.StartTime, tp, m); err != nil {
+		if err := r.db.InsertExceptions(r.cfg.StartTime, tp, m, r.cfg.redactInfoLog()); err != nil {
 			r.lg.Error("insert exceptions failed", zap.Stringer("type", tp), zap.Int("exceptions", len(m)), zap.Error(err))
 		}
 		for k := range m {

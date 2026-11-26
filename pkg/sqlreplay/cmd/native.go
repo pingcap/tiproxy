@@ -105,26 +105,26 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 			return nil, err
 		}
 		if !strings.HasPrefix(hack.String(line), nativeCommonKeyPrefix) {
-			return nil, errors.Errorf("%s, line %d: line doesn't start with '%s': %s", filename, lineIdx, nativeCommonKeyPrefix, line)
+			return nil, errors.Errorf("%s, line %d: line doesn't start with '%s'", filename, lineIdx, nativeCommonKeyPrefix)
 		}
 		idx := strings.Index(hack.String(line), nativeCommonKeySuffix)
 		if idx < 0 {
-			return nil, errors.Errorf("%s, line %d: '%s' is not found in line: %s", filename, lineIdx, nativeCommonKeySuffix, line)
+			return nil, errors.Errorf("%s, line %d: '%s' is not found in line", filename, lineIdx, nativeCommonKeySuffix)
 		}
 		idx += len(nativeCommonKeySuffix)
 		key := hack.String(line[:idx])
 		value := hack.String(line[idx:])
 		if len(value) == 0 {
-			return nil, errors.Errorf("%s, line %d: value is empty in line: %s", filename, lineIdx, line)
+			return nil, errors.Errorf("%s, line %d: value is empty", filename, lineIdx)
 		}
 		switch key {
 		case nativeKeyStartTs:
 			if !c.StartTs.IsZero() {
-				return nil, errors.Errorf("%s, line %d: redundant Time: %s, Time was %v", filename, lineIdx, line, c.StartTs)
+				return nil, errors.Errorf("%s, line %d: redundant Time, Time was %v", filename, lineIdx, c.StartTs)
 			}
 			c.StartTs, err = time.Parse(time.RFC3339Nano, value)
 			if err != nil {
-				return nil, errors.Errorf("%s, line %d: parsing Time failed: %s", filename, lineIdx, line)
+				return nil, errors.Errorf("%s, line %d: parsing Time failed", filename, lineIdx)
 			}
 
 			if c.StartTs.Before(rw.commandStartTime) || c.StartTs.Equal(rw.commandStartTime) {
@@ -132,15 +132,15 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 			}
 		case nativeKeyConnID:
 			if c.ConnID > 0 {
-				return nil, errors.Errorf("%s, line %d: redundant Conn_ID: %s, Conn_ID was %d", filename, lineIdx, line, c.ConnID)
+				return nil, errors.Errorf("%s, line %d: redundant Conn_ID, Conn_ID was %d", filename, lineIdx, c.ConnID)
 			}
 			c.ConnID, err = strconv.ParseUint(value, 10, 64)
 			if err != nil {
-				return nil, errors.Errorf("%s, line %d: parsing Conn_ID failed: %s", filename, lineIdx, line)
+				return nil, errors.Errorf("%s, line %d: parsing Conn_ID failed", filename, lineIdx)
 			}
 		case nativeKeyType:
 			if c.Type != pnet.ComQuery {
-				return nil, errors.Errorf("%s, line %d: redundant Cmd_type: %s, Cmd_type was %v", filename, lineIdx, line, c.Type)
+				return nil, errors.Errorf("%s, line %d: redundant Cmd_type, Cmd_type was %v", filename, lineIdx, c.Type)
 			}
 			c.Type = pnet.CommandFromString(value)
 		case nativeKeySuccess:
@@ -148,19 +148,19 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 		case nativeKeyCapturedPsID:
 			id, parseErr := strconv.ParseUint(value, 10, 32)
 			if parseErr != nil {
-				return nil, errors.Errorf("%s, line %d: parsing Captured_ps_id failed: %s", filename, lineIdx, line)
+				return nil, errors.Errorf("%s, line %d: parsing Captured_ps_id failed", filename, lineIdx)
 			}
 			c.CapturedPsID = uint32(id)
 		case nativeKeyPreparedStmt:
 			stmt, unqErr := strconv.Unquote(value)
 			if unqErr != nil {
-				return nil, errors.Errorf("%s, line %d: unquoting Prepared_stmt failed: %s", filename, lineIdx, line)
+				return nil, errors.Errorf("%s, line %d: unquoting Prepared_stmt failed", filename, lineIdx)
 			}
 			c.PreparedStmt = stmt
 		case nativeKeyPayloadLen:
 			var payloadLen int
 			if payloadLen, err = strconv.Atoi(value); err != nil {
-				return nil, errors.Errorf("parsing Payload_len failed: %s", line)
+				return nil, errors.Errorf("%s, line %d: parsing Payload_len failed", filename, lineIdx)
 			}
 			c.Payload = make([]byte, payloadLen+1)
 			c.Payload[0] = c.Type.Byte()
@@ -178,7 +178,7 @@ func (rw *NativeDecoder) Decode(reader LineReader) (c *Command, err error) {
 				return nil, err
 			}
 			if data[0] != '\n' {
-				return nil, errors.Errorf("%s, line %d: expected new line, but got: %s", filename, lineIdx, line)
+				return nil, errors.Errorf("%s, line %d: expected new line", filename, lineIdx)
 			}
 
 			if skipThisCommand {

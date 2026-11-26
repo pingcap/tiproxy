@@ -1567,8 +1567,9 @@ func TestBackendStatusChange(t *testing.T) {
 				ts.mp.getEventReceiver().(*mockEventReceiver).checkEvent(ts.t, eventFail)
 				require.Equal(ts.t, backend1, ts.mp.loadBackendIO())
 				require.Eventually(ts.t, func() bool {
-					return strings.Contains(ts.mp.text.String(), ErrTargetUnhealthy.Error())
+					return strings.Contains(ts.mp.text.String(), `"redirect_err": "?"`)
 				}, time.Second, 10*time.Millisecond)
+				require.NotContains(ts.t, ts.mp.text.String(), ErrTargetUnhealthy.Error())
 				return nil
 			},
 			backend: ts.respondWithNoTxn4Backend,

@@ -170,6 +170,7 @@ func NewConfig() *Config {
 	cfg.Security.ServerSQLTLS.MinTLSVersion = "1.2"
 	cfg.Security.ServerHTTPTLS.MinTLSVersion = "1.2"
 	cfg.Security.ClusterTLS.MinTLSVersion = "1.2"
+	cfg.Security.RedactInfoLog = RedactInfoLogOn
 
 	cfg.Balance = DefaultBalance()
 

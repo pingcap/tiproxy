@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -64,9 +65,14 @@ func main() {
 	filterCommandWithRetry := rootCmd.PersistentFlags().Bool("filter-command-with-retry", false, "filter out commands that are retries according to the audit log.")
 	userAllowlist := rootCmd.PersistentFlags().StringSlice("user-allowlist", nil, "for audit log format only: USER values to replay (case-insensitive, normalized to lowercase); if set, lines whose [USER=...] is not listed are skipped (repeat flag or use comma-separated values).")
 	waitOnEOF := rootCmd.PersistentFlags().Bool("wait-on-eof", false, "wait for the next file when all the files are read.")
+	redactInfoLog := rootCmd.PersistentFlags().String("redact-info-log", "true", "redact sensitive information in traffic replay report tables: true, false, or marker")
 
 	rootCmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		// set up general managers
+		var redactLog config.RedactInfoLogType
+		if err := redactLog.UnmarshalJSON([]byte(strconv.Quote(*redactInfoLog))); err != nil {
+			return err
+		}
 		cfg := &config.Config{
 			Log: config.Log{
 				LogOnline: config.LogOnline{
@@ -79,6 +85,7 @@ func main() {
 			},
 			EnableTrafficReplay: true,
 		}
+		cfg.Security.RedactInfoLog = redactLog
 		lgMgr, lg, err := logger.NewLoggerManager(&cfg.Log)
 		if err != nil {
 			return err
@@ -101,7 +108,7 @@ func main() {
 		// create replay job manager
 		hsHandler := backend.NewStaticHandshakeHandler(*addr)
 		idMgr := id.NewIDManager()
-		r := mgrrp.NewJobManager(lg, cfg, &nopCertManager{}, idMgr, hsHandler, true)
+		r := mgrrp.NewJobManager(lg, cfgMgr, &nopCertManager{}, idMgr, hsHandler, true)
 
 		// start api server
 		mgrs := api.Managers{

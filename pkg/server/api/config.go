@@ -44,7 +44,17 @@ func (h *Server) ConfigGet(c *gin.Context) {
 	if strings.EqualFold(c.Query("format"), "json") || c.GetHeader("Accept") == "application/json" {
 		c.JSON(http.StatusOK, cfg)
 	} else {
-		c.TOML(http.StatusOK, cfg)
+		// Keep custom config types in their public TOML form instead of their integer backing values.
+		data, err := cfg.ToBytes()
+		if err != nil {
+			c.Errors = append(c.Errors, &gin.Error{
+				Type: gin.ErrorTypePrivate,
+				Err:  errors.Errorf("fail to marshal config: %+v", err),
+			})
+			c.JSON(http.StatusInternalServerError, "fail to marshal config")
+			return
+		}
+		c.Data(http.StatusOK, "application/toml; charset=utf-8", data)
 	}
 }
 

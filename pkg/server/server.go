@@ -175,7 +175,7 @@ func NewServer(ctx context.Context, sctx *sctx.Context) (srv *Server, err error)
 
 	// setup capture and replay job manager
 	{
-		srv.replay = mgrrp.NewJobManager(lg.Named("replay"), srv.configManager.GetConfig(), srv.certManager, idMgr, hsHandler, false)
+		srv.replay = mgrrp.NewJobManager(lg.Named("replay"), srv.configManager, srv.certManager, idMgr, hsHandler, false)
 	}
 
 	{

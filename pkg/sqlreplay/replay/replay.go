@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/pkg/objstore/storeapi"
-	"github.com/pingcap/tidb/pkg/parser"
 	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
@@ -34,6 +33,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/report"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/store"
+	"github.com/pingcap/tiproxy/pkg/util/redact"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
@@ -206,8 +206,9 @@ func (r *replay) Start(cfg ReplayConfig, backendTLSConfig *tls.Config, hsHandler
 	// Cancel decoding on graceful stop without shutting down execution.
 	r.decodeCtx, r.decodeCancel = context.WithCancel(childCtx)
 	if err := r.report.Start(childCtx, report.ReportConfig{
-		StartTime: r.startTime,
-		TlsConfig: r.backendTLSConfig,
+		StartTime:    r.startTime,
+		TlsConfig:    r.backendTLSConfig,
+		ConfigGetter: r.cfg.ConfigGetter,
 	}); err != nil {
 		return err
 	}
@@ -760,12 +761,12 @@ func (r *replay) recordExecInfoLoop() {
 			continue
 		}
 		var sql string
+		redactMode := r.cfg.redactInfoLog()
 		switch info.Command.Type {
 		case pnet.ComStmtExecute:
-			sql = info.Command.PreparedStmt
+			sql = redact.NormalizeSQL(info.Command.PreparedStmt, redactMode)
 		case pnet.ComQuery:
-			sql = hack.String(info.Command.Payload[1:])
-			sql = parser.Normalize(sql, "ON")
+			sql = redact.NormalizeSQL(hack.String(info.Command.Payload[1:]), redactMode)
 		}
 		if len(sql) == 0 {
 			continue

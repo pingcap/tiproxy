@@ -9,12 +9,37 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+type replayConfigGetter struct {
+	cfg *config.Config
+}
+
+func (g *replayConfigGetter) GetConfig() *config.Config {
+	return g.cfg
+}
+
+func TestReplayConfigRedactInfoLog(t *testing.T) {
+	replayCfg := ReplayConfig{}
+	require.Equal(t, config.RedactInfoLogOn, replayCfg.redactInfoLog())
+
+	getter := &replayConfigGetter{}
+	replayCfg.ConfigGetter = getter
+	require.Equal(t, config.RedactInfoLogOn, replayCfg.redactInfoLog())
+
+	getter.cfg = config.NewConfig()
+	getter.cfg.Security.RedactInfoLog = config.RedactInfoLogOff
+	require.Equal(t, config.RedactInfoLogOff, replayCfg.redactInfoLog())
+
+	getter.cfg.Security.RedactInfoLog = config.RedactInfoLogMarker
+	require.Equal(t, config.RedactInfoLogMarker, replayCfg.redactInfoLog())
+}
 
 func TestReplayConfigLogRedactsSecrets(t *testing.T) {
 	cfg := ReplayConfig{

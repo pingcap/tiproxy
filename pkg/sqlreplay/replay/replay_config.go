@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/pkg/objstore/storeapi"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/cmd"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/conn"
@@ -66,6 +67,8 @@ type ReplayConfig struct {
 	UserAllowlist []string
 	// WaitOnEOF indicates whether the replayer waits for the next file when no more files.
 	WaitOnEOF bool
+	// ConfigGetter reads the current config while report rows and exec info logs are written.
+	ConfigGetter config.ConfigGetter `json:"-"`
 	// the following fields are for testing
 	readers           []cmd.LineReader
 	report            report.Report
@@ -74,6 +77,17 @@ type ReplayConfig struct {
 	slowDownThreshold int64
 	slowDownFactor    time.Duration
 	reportLogInterval time.Duration
+}
+
+func (cfg ReplayConfig) redactInfoLog() config.RedactInfoLogType {
+	if cfg.ConfigGetter == nil {
+		return config.RedactInfoLogOn
+	}
+	current := cfg.ConfigGetter.GetConfig()
+	if current == nil {
+		return config.RedactInfoLogOn
+	}
+	return current.Security.RedactInfoLog
 }
 
 func (cfg *ReplayConfig) Validate() ([]storeapi.Storage, error) {

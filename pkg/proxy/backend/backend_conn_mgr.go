@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/tiproxy/pkg/metrics"
 	pnet "github.com/pingcap/tiproxy/pkg/proxy/net"
 	"github.com/pingcap/tiproxy/pkg/sqlreplay/capture"
+	"github.com/pingcap/tiproxy/pkg/util/redact"
 	"github.com/pingcap/tiproxy/pkg/util/waitgroup"
 	"github.com/siddontang/go/hack"
 	"go.uber.org/zap"
@@ -493,7 +494,8 @@ func (mgr *BackendConnManager) ExecuteCmd(ctx context.Context) (cmd pnet.Command
 		if !pnet.IsMySQLError(err) {
 			return
 		} else {
-			mgr.logger.Debug("got a mysql error", zap.Error(err), zap.Stringer("cmd", cmd))
+			// Always redact the error message. The values don't matter anyway.
+			mgr.logger.Debug("got a mysql error", zap.String("error", redact.ErrorMessage(err.Error(), config.RedactInfoLogOn)), zap.Stringer("cmd", cmd))
 		}
 	}
 	if err == nil {
@@ -809,8 +811,9 @@ func (mgr *BackendConnManager) notifyRedirectResult(ctx context.Context, rs *red
 	}
 	if rs.err != nil {
 		err := eventReceiver.OnRedirectFail(rs.from, rs.to, mgr)
-		mgr.logger.Warn("redirect connection failed", zap.String("from", rs.from),
-			zap.String("to", rs.to), zap.NamedError("redirect_err", rs.err), zap.NamedError("notify_err", err))
+		mgr.logger.Warn("redirect connection failed", zap.String("from", rs.from), zap.String("to", rs.to),
+			zap.String("redirect_err", redact.ErrorMessage(rs.err.Error(), config.RedactInfoLogOn)),
+			zap.NamedError("notify_err", err))
 	} else {
 		err := eventReceiver.OnRedirectSucceed(rs.from, rs.to, mgr)
 		mgr.logger.Debug("redirect connection succeeds", zap.String("from", rs.from),

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/tidb/pkg/objstore"
+	"github.com/pingcap/tiproxy/lib/config"
 	"github.com/pingcap/tiproxy/lib/util/errors"
 	"github.com/pingcap/tiproxy/lib/util/logger"
 	"github.com/pingcap/tiproxy/pkg/manager/id"
@@ -928,8 +929,11 @@ func TestGetDirForInput(t *testing.T) {
 }
 
 func TestRecordExecInfoLoop(t *testing.T) {
+	redactOff := config.RedactInfoLogOff
+	redactMarker := config.RedactInfoLogMarker
 	tests := []struct {
 		execInfo conn.ExecInfo
+		redact   *config.RedactInfoLogType
 		log      string
 	}{
 		{
@@ -994,7 +998,29 @@ func TestRecordExecInfoLoop(t *testing.T) {
 				},
 				CostTime: 9999 * time.Microsecond,
 			},
-			log: "{\"sql\":\"select \\n\\\"\\\"\",\"db\":\"\",\"cost\":\"9.999\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+			log: "{\"sql\":\"select ?\",\"db\":\"\",\"cost\":\"9.999\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:    pnet.ComQuery,
+					Payload: append([]byte{pnet.ComQuery.Byte()}, []byte("select 'query-secret'")...),
+				},
+				CostTime: time.Millisecond,
+			},
+			redact: &redactOff,
+			log:    "{\"sql\":\"select 'query-secret'\",\"db\":\"\",\"cost\":\"1.000\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
+		},
+		{
+			execInfo: conn.ExecInfo{
+				Command: &cmd.Command{
+					Type:         pnet.ComStmtExecute,
+					PreparedStmt: "select 'prepared-secret'",
+				},
+				CostTime: time.Millisecond,
+			},
+			redact: &redactMarker,
+			log:    "{\"sql\":\"select ‹prepared-secret›\",\"db\":\"\",\"cost\":\"1.000\",\"ex_time\":\"20250906 17:03:50.222\"}\n",
 		},
 		{
 			execInfo: conn.ExecInfo{
@@ -1023,6 +1049,11 @@ func TestRecordExecInfoLoop(t *testing.T) {
 		dir := t.TempDir()
 		replay.cfg = ReplayConfig{
 			OutputPath: filepath.Join(dir, "replay.log"),
+		}
+		if test.redact != nil {
+			cfg := config.NewConfig()
+			cfg.Security.RedactInfoLog = *test.redact
+			replay.cfg.ConfigGetter = &replayConfigGetter{cfg: cfg}
 		}
 		replay.execInfoCh = make(chan conn.ExecInfo, 1)
 		replay.wg.Run(replay.recordExecInfoLoop, zap.NewNop())

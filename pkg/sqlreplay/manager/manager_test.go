@@ -24,8 +24,27 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestStartReplayAppliesRedactInfoLog(t *testing.T) {
+	cfg := config.NewConfig()
+	cfg.Security.RedactInfoLog = config.RedactInfoLogMarker
+	mgr := NewJobManager(zap.NewNop(), fixedConfig(cfg), &mockCertMgr{}, nil, nil, false)
+	defer mgr.Close()
+	rep := &mockReplay{}
+	mgr.capture = &mockCapture{}
+	mgr.replay = rep
+
+	require.NoError(t, mgr.StartReplay(replay.ReplayConfig{}))
+	require.Equal(t, config.RedactInfoLogMarker, rep.cfg.ConfigGetter.GetConfig().Security.RedactInfoLog)
+	cfg.Security.RedactInfoLog = config.RedactInfoLogOff
+	require.Equal(t, config.RedactInfoLogOff, rep.cfg.ConfigGetter.GetConfig().Security.RedactInfoLog)
+
+	require.Contains(t, mgr.Stop(CancelConfig{Type: Replay}), "stopped")
+	require.NoError(t, mgr.StartReplay(replay.ReplayConfig{}))
+	require.Equal(t, config.RedactInfoLogOff, rep.cfg.ConfigGetter.GetConfig().Security.RedactInfoLog)
+}
+
 func TestStartAndStop(t *testing.T) {
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, false)
+	mgr := NewJobManager(zap.NewNop(), fixedConfig(&config.Config{}), &mockCertMgr{}, id.NewIDManager(), nil, false)
 	defer mgr.Close()
 	cpt, rep := &mockCapture{}, &mockReplay{}
 	mgr.capture, mgr.replay = cpt, rep
@@ -72,7 +91,7 @@ func TestMarshalJobHistory(t *testing.T) {
 	require.NoError(t, err)
 	endTime, err := time.Parse("2006-01-02 15:04:05", "2020-01-01 02:01:01")
 	require.NoError(t, err)
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, false)
+	mgr := NewJobManager(zap.NewNop(), fixedConfig(&config.Config{}), &mockCertMgr{}, id.NewIDManager(), nil, false)
 	mgr.jobHistory = []Job{
 		&captureJob{
 			job: job{
@@ -174,7 +193,7 @@ func TestMarshalJobHistory(t *testing.T) {
 }
 
 func TestHistoryLen(t *testing.T) {
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, nil, nil, false)
+	mgr := NewJobManager(zap.NewNop(), fixedConfig(&config.Config{}), &mockCertMgr{}, nil, nil, false)
 	defer mgr.Close()
 	cpt, rep := &mockCapture{}, &mockReplay{}
 	mgr.capture, mgr.replay = cpt, rep
@@ -189,7 +208,7 @@ func TestHistoryLen(t *testing.T) {
 }
 
 func TestAllowAddrOnlyForStandaloneService(t *testing.T) {
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, false)
+	mgr := NewJobManager(zap.NewNop(), fixedConfig(&config.Config{}), &mockCertMgr{}, id.NewIDManager(), nil, false)
 	defer mgr.Close()
 
 	err := mgr.StartReplay(replay.ReplayConfig{
@@ -197,7 +216,7 @@ func TestAllowAddrOnlyForStandaloneService(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "Addr is not allowed in replay config in a TiProxy node")
 
-	mgr2 := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, true)
+	mgr2 := NewJobManager(zap.NewNop(), fixedConfig(&config.Config{}), &mockCertMgr{}, id.NewIDManager(), nil, true)
 	defer mgr2.Close()
 	mgr2.capture, mgr2.replay = &mockCapture{}, &mockReplay{}
 
@@ -208,7 +227,7 @@ func TestAllowAddrOnlyForStandaloneService(t *testing.T) {
 }
 
 func TestAvoidConcurrentReplay(t *testing.T) {
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, true)
+	mgr := NewJobManager(zap.NewNop(), fixedConfig(&config.Config{}), &mockCertMgr{}, id.NewIDManager(), nil, true)
 	defer mgr.Close()
 	mgr.replay = &mockReplay{}
 
@@ -308,7 +327,7 @@ func startBlockingReplay(t *testing.T) (*jobManager, *silentBackend) {
 	dir := t.TempDir()
 	writeNativeLog(t, dir)
 
-	mgr := NewJobManager(zap.NewNop(), &config.Config{}, &mockCertMgr{}, id.NewIDManager(), nil, true)
+	mgr := NewJobManager(zap.NewNop(), fixedConfig(&config.Config{}), &mockCertMgr{}, id.NewIDManager(), nil, true)
 	cfg := replay.ReplayConfig{
 		Input:           dir,
 		Format:          cmd.FormatNative,

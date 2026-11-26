@@ -171,7 +171,7 @@ func (decoder *AuditLogPluginDecoder) Decode(reader LineReader) (*Command, error
 		}
 		connStr := kvs[auditPluginKeyConnID]
 		if len(connStr) == 0 {
-			return nil, errors.Errorf("%s, line %d: no connection id in line: %s", filename, lineIdx, line)
+			return nil, errors.Errorf("%s, line %d: no connection id", filename, lineIdx)
 		}
 		upstreamConnID, err := strconv.ParseUint(connStr, 10, 64)
 		if err != nil {
@@ -301,12 +301,12 @@ func parseInBracket(line string) (key, value string, idx int, err error) {
 		case '"', '\'':
 			endIdx := skipQuotes(line[idx+1:], line[idx] == '\'')
 			if endIdx == -1 {
-				return "", "", len(line), errors.Errorf("unterminated quote in line: %s", line[idx+1:])
+				return "", "", len(line), errors.New("unterminated quote in line")
 			}
 			idx += endIdx + 1
 		case '=':
 			if idx == 0 {
-				return "", "", idx, errors.Errorf("empty key in line: %s", line)
+				return "", "", idx, errors.New("empty key in line")
 			}
 			// only care about the first '='
 			if len(key) == 0 {
@@ -315,7 +315,7 @@ func parseInBracket(line string) (key, value string, idx int, err error) {
 			}
 		}
 	}
-	return "", "", len(line), errors.Errorf("unterminated bracket in line: %s", line)
+	return "", "", len(line), errors.New("unterminated bracket in line")
 }
 
 func skipQuotes(line string, singleQuote bool) (endIdx int) {
@@ -382,13 +382,13 @@ func parseSQL(value string) (string, error) {
 func parseExecuteParams(value string) ([]any, error) {
 	v, err := strconv.Unquote(value)
 	if err != nil {
-		return nil, errors.Errorf("no quotes in params: %s", value)
+		return nil, errors.New("no quotes in params")
 	}
 	if len(v) == 0 {
 		return nil, nil
 	}
 	if v[0] != '[' || v[len(v)-1] != ']' {
-		return nil, errors.Errorf("no brackets in params: %s", value)
+		return nil, errors.New("no brackets in params")
 	}
 	v = v[1 : len(v)-1]
 	if len(v) == 0 {
@@ -400,14 +400,14 @@ func parseExecuteParams(value string) ([]any, error) {
 		case '"', '\'':
 			endIdx := skipQuotes(v[idx+1:], v[idx] == '\'')
 			if endIdx == -1 {
-				return nil, errors.Errorf("unterminated quote in params: %s", v[idx+1:])
+				return nil, errors.New("unterminated quote in params")
 			}
 			// The maximum possible value of `endIdx` is len(v[idx+1:]) - 1 = len(v) - idx - 2
 			// So `v[idx : idx+endIdx+2]` will never cause out-of-bound error and it is correct
 			// to contain the first and last quotes.
 			paramEncodedStr, err := strconv.Unquote(v[idx : idx+endIdx+2])
 			if err != nil {
-				return nil, errors.Errorf("unquote param failed: %s", v[idx:idx+endIdx+2])
+				return nil, errors.New("unquote param failed")
 			}
 			param, err := parseSingleParam(paramEncodedStr)
 			idx += endIdx + 1
@@ -417,7 +417,7 @@ func parseExecuteParams(value string) ([]any, error) {
 			params = append(params, param)
 		case ',', ' ':
 		default:
-			return nil, errors.Errorf("expected char in params: %s", v[idx:])
+			return nil, errors.New("unexpected character in params")
 		}
 	}
 	return params, nil
@@ -426,7 +426,7 @@ func parseExecuteParams(value string) ([]any, error) {
 func parseSingleParam(value string) (any, error) {
 	idx := strings.IndexByte(value, ' ')
 	if idx < 0 {
-		return nil, errors.Errorf("no space in param: %s", value)
+		return nil, errors.New("no space in param")
 	}
 	tpStr := value[:idx]
 	value = value[idx+1:]
@@ -434,27 +434,47 @@ func parseSingleParam(value string) (any, error) {
 	case "KindNull":
 		return nil, nil
 	case "KindInt64":
-		return strconv.ParseInt(value, 10, 64)
+		param, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return nil, errors.New("invalid param value")
+		}
+		return param, nil
 	case "KindUint64":
-		return strconv.ParseUint(value, 10, 64)
+		param, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return nil, errors.New("invalid param value")
+		}
+		return param, nil
 	case "KindFloat32":
-		return strconv.ParseFloat(value, 32)
+		param, err := strconv.ParseFloat(value, 32)
+		if err != nil {
+			return nil, errors.New("invalid param value")
+		}
+		return param, nil
 	case "KindFloat64", "KindMysqlDecimal":
-		return strconv.ParseFloat(value, 64)
+		param, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return nil, errors.New("invalid param value")
+		}
+		return param, nil
 	case "KindString":
-		return strconv.Unquote(`"` + value + `"`)
+		param, err := strconv.Unquote(`"` + value + `"`)
+		if err != nil {
+			return nil, errors.New("invalid param value")
+		}
+		return param, nil
 	case "KindBinaryLiteral", "KindMysqlBit", "KindMysqlSet", "KindMysqlTime", "KindMysqlJSON":
 		return value, nil
 	case "KindBytes":
 		str, err := strconv.Unquote(`"` + value + `"`)
 		if err != nil {
-			return nil, err
+			return nil, errors.New("invalid param value")
 		}
 		return []byte(str), nil
 	case "KindMysqlDuration", "KindMysqlEnum", "KindInterface", "KindMinNotNull", "KindMaxValue", "KindRaw":
-		return nil, errors.Errorf("unsupported param type: %s", tpStr)
+		return nil, errors.New("unsupported param type")
 	}
-	return nil, errors.Errorf("unknown param type: %s", tpStr)
+	return nil, errors.New("unknown param type")
 }
 
 func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, startTs, endTs time.Time, connID uint64) ([]*Command, error) {
@@ -476,7 +496,7 @@ func (decoder *AuditLogPluginDecoder) parseGeneralEvent(kvs map[string]string, s
 		var err error
 		sql, err = parseSQL(kvs[auditPluginKeySQL])
 		if err != nil {
-			return nil, errors.Wrapf(err, "unquote sql failed: %s", kvs[auditPluginKeySQL])
+			return nil, errors.New("unquote sql failed")
 		}
 		if decoder.filterCommandWithRetry {
 			if retryStr, ok := kvs[auditPluginKeyRetry]; ok {

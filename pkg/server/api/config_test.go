@@ -22,7 +22,7 @@ func TestConfig(t *testing.T) {
 	doHTTP(t, http.MethodGet, "/api/admin/config", httpOpts{}, func(t *testing.T, r *http.Response) {
 		all, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		require.Contains(t, string(all), "addr = '0.0.0.0:6000'")
+		require.Contains(t, string(all), `addr = "0.0.0.0:6000"`)
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
 	doHTTP(t, http.MethodGet, "/api/admin/config?format=json", httpOpts{}, func(t *testing.T, r *http.Response) {
@@ -164,6 +164,38 @@ backend-clusters = []
 		require.Empty(t, cfg.Proxy.BackendClusters)
 		require.Equal(t, http.StatusOK, r.StatusCode)
 	})
+}
+
+func TestRedactInfoLogConfig(t *testing.T) {
+	srv, doHTTP := createServer(t)
+	require.Equal(t, config.RedactInfoLogOn, srv.mgr.CfgMgr.GetConfig().Security.RedactInfoLog)
+
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader(`security.redact-info-log = "FALSE"`)}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	require.Equal(t, config.RedactInfoLogOff, srv.mgr.CfgMgr.GetConfig().Security.RedactInfoLog)
+
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader(`security.redact-info-log = "TrUe"`)}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	require.Equal(t, config.RedactInfoLogOn, srv.mgr.CfgMgr.GetConfig().Security.RedactInfoLog)
+
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader(`security.redact-info-log = "Marker"`)}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+	require.Equal(t, config.RedactInfoLogMarker, srv.mgr.CfgMgr.GetConfig().Security.RedactInfoLog)
+
+	doHTTP(t, http.MethodGet, "/api/admin/config", httpOpts{}, func(t *testing.T, r *http.Response) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		require.Contains(t, string(body), `redact-info-log = "MARKER"`)
+		require.Equal(t, http.StatusOK, r.StatusCode)
+	})
+
+	doHTTP(t, http.MethodPut, "/api/admin/config", httpOpts{reader: strings.NewReader(`security.redact-info-log = "on"`)}, func(t *testing.T, r *http.Response) {
+		require.Equal(t, http.StatusInternalServerError, r.StatusCode)
+	})
+	require.Equal(t, config.RedactInfoLogMarker, srv.mgr.CfgMgr.GetConfig().Security.RedactInfoLog)
 }
 
 func TestConfigGetOmitsCloudSecrets(t *testing.T) {
