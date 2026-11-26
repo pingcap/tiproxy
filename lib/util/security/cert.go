@@ -140,6 +140,10 @@ func (ci *CertInfo) loadCA(pemCerts []byte) (*x509.CertPool, error) {
 func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	autoCerts := false
 	cfg := ci.cfg.Load()
+	minVer, err := config.ParseMinTLSVersion(cfg.MinTLSVersion)
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.HasCert() {
 		if cfg.AutoCerts {
 			autoCerts = true
@@ -150,14 +154,13 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:           GetMinTLSVer(cfg.MinTLSVersion, lg),
+		MinVersion:           minVer,
 		GetCertificate:       ci.getCert,
 		GetClientCertificate: ci.getClientCert,
 		VerifyConnection:     ci.verifyConnection,
 	}
 
 	var certPEM, keyPEM []byte
-	var err error
 	if autoCerts {
 		now := time.Now()
 		if time.Unix(ci.autoCertExp.Load(), 0).Before(now) {
@@ -217,6 +220,10 @@ func (ci *CertInfo) buildServerConfig(lg *zap.Logger) (*tls.Config, error) {
 
 func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	cfg := ci.cfg.Load()
+	minVer, err := config.ParseMinTLSVersion(cfg.MinTLSVersion)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.AutoCerts {
 		lg.Info("specified auto-certs in a client tls config, ignored")
 	}
@@ -226,7 +233,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 			// still enable TLS without verify server certs
 			return &tls.Config{
 				InsecureSkipVerify: true,
-				MinVersion:         GetMinTLSVer(cfg.MinTLSVersion, lg),
+				MinVersion:         minVer,
 			}, nil
 		}
 		lg.Debug("no CA to verify server connections, disable TLS")
@@ -234,7 +241,7 @@ func (ci *CertInfo) buildClientConfig(lg *zap.Logger) (*tls.Config, error) {
 	}
 
 	tcfg := &tls.Config{
-		MinVersion:           GetMinTLSVer(cfg.MinTLSVersion, lg),
+		MinVersion:           minVer,
 		GetCertificate:       ci.getCert,
 		GetClientCertificate: ci.getClientCert,
 		InsecureSkipVerify:   true,

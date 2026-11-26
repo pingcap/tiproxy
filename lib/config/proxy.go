@@ -5,6 +5,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/tls"
 	"maps"
 	"net"
 	"os"
@@ -145,7 +146,46 @@ func (s *Security) Check() error {
 			return errors.Wrapf(ErrInvalidConfigValue, "invalid %s, must be between 0 and %d", field.name, MaxRSAKeySize)
 		}
 	}
+	tlsFields := []struct {
+		name string
+		ver  string
+	}{
+		{"security.server-tls.min-tls-version", s.ServerSQLTLS.MinTLSVersion},
+		{"security.server-http-tls.min-tls-version", s.ServerHTTPTLS.MinTLSVersion},
+		{"security.cluster-tls.min-tls-version", s.ClusterTLS.MinTLSVersion},
+		{"security.sql-tls.min-tls-version", s.SQLTLS.MinTLSVersion},
+	}
+	for _, field := range tlsFields {
+		if _, err := ParseMinTLSVersion(field.ver); err != nil {
+			return errors.Wrapf(ErrInvalidConfigValue, "invalid %s %q, must be 1.2 or 1.3", field.name, field.ver)
+		}
+	}
 	return nil
+}
+
+// ParseMinTLSVersion maps a configured minimum TLS version to a crypto/tls constant.
+// An empty value selects TLS 1.2. Versions below 1.2 and unrecognized values are rejected.
+func ParseMinTLSVersion(ver string) (uint16, error) {
+	if strings.TrimSpace(ver) == "" {
+		return tls.VersionTLS12, nil
+	}
+	switch canonicalMinTLSVersion(ver) {
+	case "1.2":
+		return tls.VersionTLS12, nil
+	case "1.3":
+		return tls.VersionTLS13, nil
+	default:
+		return 0, errors.Wrapf(ErrInvalidConfigValue, "invalid min-tls-version %q, must be 1.2 or 1.3", ver)
+	}
+}
+
+// canonicalMinTLSVersion strips an optional "TLS" and "v" prefix so "1.2", "v1.2", and "TLSv1.2" match.
+func canonicalMinTLSVersion(ver string) string {
+	ver = strings.TrimSpace(ver)
+	ver = strings.ToLower(ver)
+	ver = strings.TrimPrefix(ver, "tls")
+	ver = strings.TrimPrefix(ver, "v")
+	return ver
 }
 
 type HA struct {
