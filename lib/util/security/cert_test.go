@@ -107,14 +107,19 @@ func TestCertServer(t *testing.T) {
 				Cert:          certPath,
 				Key:           keyPath,
 				CA:            caPath,
+<<<<<<< HEAD
 				MinTLSVersion: "1.1",
+=======
+				MinTLSVersion: "1.3",
+				RSAKeySize:    1024,
+>>>>>>> bd043773 (config: set the min tls version to v1.2 (#1446))
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS13, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -155,14 +160,19 @@ func TestCertServer(t *testing.T) {
 			TLSConfig: config.TLSConfig{
 				AutoCerts:     true,
 				CA:            caPath,
+<<<<<<< HEAD
 				MinTLSVersion: "1.1",
+=======
+				MinTLSVersion: "v1.3",
+				RSAKeySize:    1024,
+>>>>>>> bd043773 (config: set the min tls version to v1.2 (#1446))
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.Equal(t, tls.RequireAnyClientCert, c.ClientAuth)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS13, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -242,13 +252,18 @@ func TestCertServer(t *testing.T) {
 				Cert:          certPath,
 				Key:           keyPath,
 				CA:            caPath,
+<<<<<<< HEAD
 				MinTLSVersion: "1.1",
+=======
+				MinTLSVersion: "TLSv1.3",
+				RSAKeySize:    1024,
+>>>>>>> bd043773 (config: set the min tls version to v1.2 (#1446))
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
 				require.NotNil(t, ci.ca.Load())
 				require.NotNil(t, ci.cert.Load())
-				require.Equal(t, tls.VersionTLS11, int(c.MinVersion))
+				require.Equal(t, tls.VersionTLS13, int(c.MinVersion))
 			},
 			err: "",
 		},
@@ -267,6 +282,18 @@ func TestCertServer(t *testing.T) {
 		}
 		if tc.checker != nil {
 			tc.checker(t, tcfg, ci)
+		}
+	}
+}
+
+func TestRejectMinTLSVersion(t *testing.T) {
+	lg, _ := logger.CreateLoggerForTest(t)
+	for _, ver := range []string{"1.0", "1.1", "v1.0", "TLSv1.1", "unknown", "TLSv", "tls", "v"} {
+		for _, server := range []bool{true, false} {
+			ci := NewCert(server)
+			ci.SetConfig(config.TLSConfig{MinTLSVersion: ver})
+			_, err := ci.Reload(lg)
+			require.ErrorIs(t, err, config.ErrInvalidConfigValue, "%s server=%v", ver, server)
 		}
 	}
 }
