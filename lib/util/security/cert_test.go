@@ -107,12 +107,7 @@ func TestCertServer(t *testing.T) {
 				Cert:          certPath,
 				Key:           keyPath,
 				CA:            caPath,
-<<<<<<< HEAD
-				MinTLSVersion: "1.1",
-=======
 				MinTLSVersion: "1.3",
-				RSAKeySize:    1024,
->>>>>>> bd043773 (config: set the min tls version to v1.2 (#1446))
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -160,12 +155,7 @@ func TestCertServer(t *testing.T) {
 			TLSConfig: config.TLSConfig{
 				AutoCerts:     true,
 				CA:            caPath,
-<<<<<<< HEAD
-				MinTLSVersion: "1.1",
-=======
 				MinTLSVersion: "v1.3",
-				RSAKeySize:    1024,
->>>>>>> bd043773 (config: set the min tls version to v1.2 (#1446))
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
@@ -252,12 +242,7 @@ func TestCertServer(t *testing.T) {
 				Cert:          certPath,
 				Key:           keyPath,
 				CA:            caPath,
-<<<<<<< HEAD
-				MinTLSVersion: "1.1",
-=======
 				MinTLSVersion: "TLSv1.3",
-				RSAKeySize:    1024,
->>>>>>> bd043773 (config: set the min tls version to v1.2 (#1446))
 			},
 			checker: func(t *testing.T, c *tls.Config, ci *CertInfo) {
 				require.NotNil(t, c)
